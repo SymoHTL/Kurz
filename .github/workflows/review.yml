@@ -1,0 +1,59 @@
+name: review
+
+# pull_request_target: this file, the reviewer and its rules come from the base branch. The pull
+# request is data and is never checked out or run. Facts of this file are pinned by tools/lint_ci.py.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number (a Draft, or a pull request from outside, is reviewed this way)
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  # The required check is the commit status `review`, which only a completed review posts. This job
+  # may be skipped: a Draft and a pull request from outside get no status and stay pending.
+  review-run:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == false &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Note the start time
+        run: echo "REVIEW_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install pinned dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes -r tools/review/requirements.txt
+      - name: Install the Claude CLI, proven by running it
+        run: |
+          for attempt in 1 2 3; do
+            npm install --global --silent @anthropic-ai/claude-code@2.1.283 && claude --version && exit 0
+            sleep 10
+          done
+          echo "the Claude CLI did not install"
+          exit 1
+      - name: Review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          REVIEW_TIMEOUT_MIN: 90
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: '"$RUNNER_TEMP/venv/bin/python" tools/review/review.py'

@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 \"$CLAUDE_PROJECT_DIR/tools/tree_gate.py\" --hook",
+            "timeout": 10,
+            "statusMessage": "tree gate"
+          }
+        ]
+      }
+    ]
+  }
+}

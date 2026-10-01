@@ -1,0 +1,8 @@
+#!/bin/sh
+# This repository is public and a push cannot be taken back: refuse to publish a commit that the
+# tree gate rejects (a credential, a machine-bound string, a path the design phase does not allow).
+# Enable once per clone: git config core.hooksPath .githooks
+if command -v py >/dev/null 2>&1; then
+  exec py -3 tools/tree_gate.py --pre-push "$1"
+fi
+exec python3 tools/tree_gate.py --pre-push "$1"
