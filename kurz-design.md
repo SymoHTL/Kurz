@@ -198,7 +198,7 @@ Side effect: the chain ID doubles as a trace ID, so log lines can carry it autom
   3. If no side qualifies, the policy is per item: `skip` (default), or run on all sides with a developer-written `merge` block that is called with both results when the cluster heals.
   - Kurz can compare and replay its own state only. Effects on the outside world (an email, a payment) cannot be merged.
 - No hot code reload; it would cost runtime performance.
-- **Upgrades:** code versions never mix inside one cluster. A new version forms a new cluster and traffic switches over. State moves only where an actor says so with `upgrade`:
+- **Upgrades:** code versions never mix inside one cluster. A new version forms a new cluster and traffic switches over. Clients outside the cluster are the exception (section 13). State moves only where an actor says so with `upgrade`:
   - No `upgrade` line: the actor starts fresh in the new cluster, the same as after a crash.
   - `upgrade keep field`: the field is carried over, matched by name and type. A new field gets its default, a removed field is dropped.
   - Block form for when the shape really changed.
@@ -351,6 +351,8 @@ Agreed in a later brainstorm round. Each one is compiled into a program only whe
 actor Metrics per node { }          // one per machine:    Metrics.Count("hit")
 actor Billing per cluster { }       // one in the cluster: Billing.Charge(order)
 actor Session per int userId { }    // one per key:        Session[42].Add(item)
+actor Cart per caller { }           // one per signed-in client (see "Clients and devices")
+actor Circuit per connection { }    // one per client connection
 actor Worker { }                    // spawned by hand, the reference is passed around
 ```
 
@@ -437,9 +439,68 @@ An invalid value cannot exist. Input from outside yields `User | Invalid` automa
 - `Invalid` carries every failure (field, rule, message), not only the first, so a form can show all of them at once.
 - A validator is a pure function returning `bool`: no I/O and no actor calls. A check that needs the outside world ("email already taken") is not a type rule; it is a union case of the method.
 
-### Clients and devices as cluster members
+### Clients and devices
 
-Wanted in principle (browser through WebAssembly, microcontrollers), but it needs far more than treating them as machines: a connection layer to clients, client state, and more. Server to server is simpler than server to client. It calls for the same kind of split C# projects have (backend, shared, client), where the developer states in code, easily and securely, which actor runs where, what it may access and how connections are made. Not designed yet.
+Browsers (through WebAssembly), apps and microcontrollers take part, but not as cluster machines: server to client is harder than server to server. Simon's requirement: the developer states in code, easily and securely, which actor runs where, what it may access and how connections are made. Decided on 2026-10-01:
+
+- **Placement.** One project. `on <deployment>` after an actor's name says where it runs; an actor without it runs on the server. The compiler builds one binary per `deploy` block in `project.kz`. A deployment with `connect` is outside, a client; one without is a cluster member. Whatever both sides use, `data` types and pure functions, is compiled into both; there is no shared project. A client holds only call stubs for server actors, so server code cannot ship. The build lists what ships to each client.
+- **Two zones.** Inside is the cluster. Outside is everything that connects in: browser, app, device. The outside reaches only methods marked `open`. The server checks every incoming call against a table the compiler made, so a modified client cannot call anything else. Arguments are validated on arrival by their type constraints; the same constraints run in the client, so a rule is written once.
+- **Identity.** Inside an `open` method, `caller` says who is on the other end. Sign-in code sets it (`caller.SignIn(user.Id)`); it is kept on the server and cannot be forged. A device gets its key when it is flashed.
+  - `per caller`: one actor per signed-in identity. From outside it is addressed by its type name, and a client only ever reaches its own; inside code addresses it by key (`Cart[userId]`). Reading another user's data by changing an id is impossible by construction.
+  - `per connection`: the same, but the actor lives and dies with one connection, like a Blazor circuit.
+  - Other keyed actors stay reachable when they have `open` methods, and check `caller` themselves.
+- **Direction.** The inside never waits on the outside: from server to client only `send` is allowed, and a waiting call is a compile error, because a slow or hostile client would hold a server actor until the timeout. Device state reaches the backend through a server-side twin actor that the device reports to. What this means for file transfer is open (section 14).
+- **Offline.** A waiting call from the outside to the inside has the union case `Offline`, because a lost connection is normal there. It is handled with `else` or listed in the signature. Inside the cluster the exception rule of section 6 stays.
+- **Versions.** Clients in the field run old code for months, so "versions never mix" (section 7) cannot hold at this boundary. `kurz release web 1.4` writes a snapshot of the `open` surface into the repository. The build fails when a change breaks a supported release: a method removed, a type changed, a field removed. An added field needs a default. Support is dropped explicitly (`supports 1.5..` in the deploy block), and an older client gets `Outdated` when it connects. The wire format at the boundary carries field numbers, which is slower than inside the cluster. Simon: this needs more, because breaking changes always happen and keeping even one version compatible is hard for some teams (section 14).
+- **`secret` fields.** A `secret` field is never sent to the outside and never logged. It does not exist there: client code that touches it is a compile error. No separate type per side is needed. How this serves end-to-end encrypted apps is open (section 14).
+- Transport is the runtime's job: WebSocket for browsers, a TLS socket for devices, the Kurz binary format on both. The UI toolkit in the browser is a package, like graphics. *(assumed)*
+
+```
+// project.kz
+deploy server { }
+deploy web {
+    target wasm
+    connect "wss://shop.example.com"
+}
+deploy sensor {
+    target esp32
+    connect "tls://iot.example.com"
+    inbox 32 drop oldest
+}
+```
+
+```
+data Item(int ProductId, int Count where 1..99)
+data User(int Id, string Name, secret string PasswordHash)
+
+actor Catalog per cluster {
+    open List<Product> Search(string text) => products.Where(p => p.Name.Contains(text))
+    pub void Reindex() { ... }                   // inside only
+}
+
+actor Cart per caller {                          // server side, one per signed-in caller
+    mut items = List<Item>()
+    open void Add(Item item) { items.Add(item) }
+}
+
+actor CartView on web {                          // runs in the browser
+    void AddClicked(int productId) {
+        Cart.Add(Item(productId, 1)) else { Offline => ShowBanner("offline") }
+    }
+}
+
+actor Thermometer per caller {                   // server-side twin of one device
+    mut last = Reading(0)
+    open void Report(Reading r) { last = r }
+    pub Reading Last() => last
+}
+
+actor Probe on sensor {                          // runs on the ESP32
+    every 10s { send Thermometer.Report(ReadAdc()) }
+}
+
+temp = Thermometer[12].Last()                    // the backend asks the twin, never the device
+```
 
 ### Speed
 
@@ -449,7 +510,10 @@ Runtime speed has priority everywhere; the compiler may be heavy. One planned op
 
 - The primitive through which a supervisor, and with it `retry`, observes a child's crash.
 - What a full inbox does to a waiting call under the `drop` modes.
-- The client and device split: where actors run, trust and access rules, the connection layer. Proposed on 2026-10-01 and not yet answered: placement with `on <deployment>` on the actor; `open` on methods that may be called across the boundary; a built-in `caller` identity with `per caller` and `per connection` actors; the inside never waits on the outside; `Offline` as a union case on calls from the outside; a compiler check of the `open` surface against released client versions; `secret` fields that never leave the cluster.
+- File transfer under the direction rule of section 13. Proposed on 2026-10-01: either the rule stays pure (the client sends chunks for an upload and pulls them for a download), or it is refined so that a client's own actor (`per connection`, `per caller`) may wait on that client while shared actors reach such an actor with `send` only. Also proposed: a `Stream<T>` type that crosses actors and the boundary and is pulled by its consumer.
+- Breaking changes across the client boundary. Simon wants more than the compatibility check. Proposed on 2026-10-01: a policy per deployment (`supports current` keeps nothing compatible and tells every older client to update), shims that translate the shape of an old release (`was 1.4 ...`), and `caller.Version` for differences the compiler cannot see.
+- End-to-end encrypted apps. Proposed on 2026-10-01: `secret` means "never crosses the boundary in the clear", in either direction, also for whole types, and `Sealed<T>` is the only way across; the key exchange protocol is a package.
+- Limits per client connection (message size, messages in flight, rate), and whether messages between two actors arrive in the order they were sent. Proposed as defaults on 2026-10-01.
 - Database migrations.
 - Where the TLS cipher primitives come from in the long run.
 - Package system.
