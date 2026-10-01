@@ -124,7 +124,8 @@ same pull request.
   convention that exists today is over the tools themselves: every tool has a self-test and a red
   proof.
 - **A scheduled job that asserts the merge settings.** The assertion runs with every gates run
-  instead. The bypass list needs a token the job does not have (HAZARD #7).
+  instead. The bypass list and the auto-merge switch need a token the job does not have; the job
+  prints NOT CHECKED for both, and a local run with the owner's login checks them (HAZARD #7).
 - **The launcher, the per-window isolation, the worktree-removal script.** They belong to a
   machine that runs many sessions at once, and they live there.
 - **A token-usage block in the evidence.** Only a machine with the session logs could fill it.

@@ -65,7 +65,8 @@ def check(root, floor=FLOOR):
         ran = re.search(r"^(\d+) cases, (\d+) failed$", out, re.M)
         stats[tool]["cases"] = int(ran.group(1)) if ran else 0
         if code != 0 or not ran or int(ran.group(1)) == 0:
-            errors.append(f"{tool}: its self-test does not pass (exit {code}): {out.strip()[-300:]}")
+            failed = "; ".join(line.strip() for line in out.splitlines() if line.startswith("FAIL"))
+            errors.append(f"{tool}: its self-test does not pass (exit {code}): {failed[:300] or out.strip()[-300:]}")
         if not stats[tool]["proofs"]:
             errors.append(f"{tool}: no recorded red proof in {LEDGER}")
     for n, entry in enumerate(ledger, 1):

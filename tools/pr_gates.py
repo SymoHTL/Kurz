@@ -149,11 +149,20 @@ def run_gate(gate, argv):
     raise kit.Refused(f"unknown gate {gate!r}: title, breadth or findings")
 
 
+def fixture_threads():
+    """The review threads the forge really answered for a reviewed pull request (see
+    tools/fixtures/SOURCES.txt). [] when the file is missing or unreadable, which fails the case
+    that needs it instead of crashing the suite."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "review-threads.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
 def self_test():
-    fixtures = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
-    with open(os.path.join(fixtures, "review-threads.json"), encoding="utf-8") as f:
-        real = json.load(f)  # a real GraphQL answer; see fixtures/README in the file's "_source" key
-    threads = real["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    threads = fixture_threads()
     cases = []
 
     def check(name, errors, needle):
@@ -178,24 +187,28 @@ def self_test():
     cases.append(("the real answer holds finding threads", len(found) >= 1, f"{len(found)} of {len(threads)} threads"))
     if found:
         thread, findings = found[0]
-        path = findings[0]["file"]
-        code = path.startswith(CODE)
 
-        def variant(resolved, replies=0, login=None, association=None):
+        def variant(resolved, replies=0, login=None, association=None, path=None):
+            """The real thread, edited: its state, its replies, its author, or the file its finding names."""
             t = json.loads(json.dumps(thread))
             t["isResolved"] = resolved
             first = t["comments"]["nodes"][0]
             t["comments"]["nodes"] = [first] + [dict(first, body="because") for _ in range(replies)]
             if login is not None:
                 first["author"]["login"], first["authorAssociation"] = login, association
+            if path is not None:
+                moved = json.dumps([dict(f, file=path) for f in findings])
+                first["body"] = MARK.sub(lambda m: f"<!-- kurz-review:findings {moved} -->", first["body"])
             return [t]
 
         same, differs = (lambda p, s: False), (lambda p, s: True)
         check("unresolved finding blocks", findings_errors(variant(False), differs), "unresolved review finding")
         check("resolved and edited passes", findings_errors(variant(True), differs), None)
         check("resolved without an edit blocks", findings_errors(variant(True), same), "without changing the file")
-        outcome = findings_errors(variant(True, replies=1), same)
-        check("a reply answers a finding on code only", outcome, None if code else "without changing the file")
+        check("a reply answers a finding on tool code", findings_errors(variant(True, replies=1, path="tools/x.py"), same), None)
+        check("a reply does not answer a finding on the design record",
+              findings_errors(variant(True, replies=1, path="kurz-design.md"), same), "without changing the file")
+        check("without a reply a finding on tool code needs the edit", findings_errors(variant(True, path="tools/x.py"), same), "edit it or reply")
         check("a stranger's marker is not a finding", findings_errors(variant(False, login="someone", association="NONE"), same), None)
         check("the Actions bot's marker is a finding", findings_errors(variant(False, login="github-actions", association="NONE"), same),
               "unresolved review finding")

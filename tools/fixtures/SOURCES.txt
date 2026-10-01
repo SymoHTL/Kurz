@@ -1,0 +1,34 @@
+Where the payloads under tools/fixtures/ and tools/review/fixtures/ come from. Each file is what
+the platform really sent, re-indented and otherwise unchanged. A test may edit a loaded payload,
+and says so where it does. To replace one, capture it again; do not write it.
+
+tools/fixtures/ (GitHub, repository SymoHTL/Kurz, 2026-10-01)
+
+  branch-rules.json     gh api repos/SymoHTL/Kurz/rules/branches/main
+                        the rules active on main, with the ruleset of tools/ruleset.json applied
+  rulesets.json         gh api repos/SymoHTL/Kurz/rulesets
+  ruleset-detail.json   gh api repos/SymoHTL/Kurz/rulesets/<id>
+                        read with the owner's login. The token of a workflow job gets this answer
+                        without bypass_actors (seen in the first gates run, pull request 8).
+  repository.json       gh api repos/SymoHTL/Kurz
+                        read with the owner's login. The token of a workflow job gets this answer
+                        without allow_auto_merge (same run).
+  pull-request.json     gh api repos/SymoHTL/Kurz/pulls/8
+                        while it was a Draft, after its first push
+  check-runs.json       gh api "repos/SymoHTL/Kurz/commits/<head>/check-runs?per_page=100"
+                        the head of pull-request.json, after its first gates run had failed
+  status.json           gh api "repos/SymoHTL/Kurz/commits/<head>/status?per_page=100"
+                        the same head, before anything had posted a commit status
+  review-threads.json   gh api graphql with the query THREADS of tools/pr_gates.py, for pull
+                        request 8 after its first review
+
+tools/review/fixtures/ (Claude CLI 2.1.283, 2026-10-01; the flags are in
+knowledge/claude-cli-headless-answer.md)
+
+  cli-findings.json     an answer of the pinned model that carries one finding
+  cli-empty.json        an answer of the pinned model that carries none
+  cli-other-model.json  an answer to the same kind of call with another model id
+  cli-api-error.json    the answer for a model id that does not exist: HTTP 404, is_error true,
+                        subtype "success"
+  sample-diff.txt       git diff in a scratch repository: one file modified in two hunks, one
+                        deleted, one renamed, one added

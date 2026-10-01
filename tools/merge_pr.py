@@ -25,6 +25,8 @@ waiver lets through only what it names:
 Exit codes: 0 merged (or dry run that would merge, or settings as expected); 1 refused; 2 usage;
 3 GATE NOT RESTORED, switch the ruleset back on by hand; 4 merge state unknown, look at the pull
 request before doing anything else."""
+import contextlib
+import io
 import json
 import os
 import re
@@ -180,17 +182,19 @@ def merge(repo, number, sha, pr, waived):
     """Merge exactly `sha`. With a waiver the ruleset is off for the one call and restored on every path."""
     payload = {"sha": sha, "merge_method": "squash", "commit_title": f"{pr['title']} (#{number})", "commit_message": pr["body"] or ""}
     gate = find_ruleset(repo) if waived else None
-    code = 0
+    landed, code = False, 0
     try:
         if gate:
             send(f"repos/{repo}/rulesets/{gate}", {"enforcement": "disabled"})
         send(f"repos/{repo}/pulls/{number}/merge", payload)
+        landed = True
         print(f"merged {repo}#{number} at {sha}")
     except kit.Refused as e:
         print(f"the merge call failed: {e}")
         try:  # a write that may have landed is never reported as a plain failure
-            code = 0 if kit.gh_json(f"repos/{repo}/pulls/{number}")["merged"] else 1
-            print("read back: the pull request IS merged" if code == 0 else "read back: not merged")
+            landed = kit.gh_json(f"repos/{repo}/pulls/{number}").get("merged") is True
+            code = 0 if landed else 1
+            print("read back: the pull request IS merged" if landed else "read back: not merged")
         except kit.Refused:
             print("MERGE STATE UNKNOWN: look at the pull request before doing anything else")
             code = 4
@@ -210,7 +214,7 @@ def merge(repo, number, sha, pr, waived):
             if back != "active":
                 print("GATE NOT RESTORED: set the ruleset's enforcement back to active by hand NOW")
                 code = 3
-    if code == 0 and waived:
+    if landed and waived:  # the record follows the merge, whatever became of the gate afterwards
         record = ", ".join(f"`{name}` ({state})" for name, state in waived)
         try:
             send(f"repos/{repo}/issues/{number}/comments", {"body":
@@ -218,6 +222,26 @@ def merge(repo, number, sha, pr, waived):
         except kit.Refused as e:
             print(f"the waiver record could not be posted on the pull request: {e}")
     return code
+
+
+def thread_reasons(threads, changed_since):
+    """What the threads of a pull request hold against a merge: any unresolved thread, and any
+    review finding that was resolved without its answer (tools/pr_gates.py)."""
+    unresolved = sum(not t["isResolved"] for t in threads)
+    errors = [f"{unresolved} unresolved threads"] if unresolved else []
+    return errors + [e for e in pr_gates.findings_errors(threads, changed_since) if not e.startswith("unresolved")]
+
+
+def arguments(argv):
+    """(pull request, sha, waiver or None) of a merge call, or None when the call is not understood.
+    An --over-red whose value is missing or is not a waiver is not understood: it never falls back
+    to a plain merge."""
+    spec = argv[argv.index("--over-red") + 1] if "--over-red" in argv[:-1] else None
+    waiver = parse_waiver(spec) if spec else None
+    positional = [a for a in argv if not a.startswith("--") and a != spec]
+    if ("--over-red" in argv and not waiver) or len(positional) != 2 or not positional[0].isdigit():
+        return None
+    return int(positional[0]), positional[1], waiver
 
 
 def run(argv):
@@ -240,15 +264,11 @@ def run(argv):
         print(f"merge checks on {repo}: {len(errors)} errors, {len(notes)} NOT CHECKED")
         return 1 if errors else 0
 
-    positional = [a for a in argv if not a.startswith("--")]
-    spec = argv[argv.index("--over-red") + 1] if "--over-red" in argv else None
-    if spec:
-        positional.remove(spec)
-    waiver = parse_waiver(spec) if spec else None
-    if len(positional) != 2 or not positional[0].isdigit() or (spec and not waiver):
+    understood = arguments(argv)
+    if not understood:
         print("usage: merge_pr.py <pr> <full head sha> [--dry-run] [--over-red <pr>@<full head sha>=<check>[,<check>]]")
         return 2
-    number, sha = int(positional[0]), positional[1]
+    number, sha, waiver = understood
     pr = kit.gh_json(f"repos/{repo}/pulls/{number}")
     head, default_branch = pr["head"]["sha"], kit.gh_json(f"repos/{repo}")["default_branch"]
     runs = kit.gh_json(f"repos/{repo}/commits/{head}/check-runs?per_page=100")["check_runs"]
@@ -256,11 +276,9 @@ def run(argv):
     states = context_states(required(ruleset()), runs, statuses)
     threads = pr_gates.fetch_threads(repo, number)
     changed = lambda path, at: pr_gates.blob_at(repo, path, at) != pr_gates.blob_at(repo, path, head)
-    thread_errors = [f"{sum(not t['isResolved'] for t in threads)} unresolved threads"] if any(not t["isResolved"] for t in threads) else []
-    thread_errors += [e for e in pr_gates.findings_errors(threads, changed) if not e.startswith("unresolved")]
     behind = kit.gh_json(f"repos/{repo}/compare/{pr['base']['ref']}...{head}")["behind_by"]
 
-    verdict, reasons, waived = decide(number, sha, pr, default_branch, states, thread_errors, behind, waiver)
+    verdict, reasons, waived = decide(number, sha, pr, default_branch, states, thread_reasons(threads, changed), behind, waiver)
     print(f"{repo}#{number} at {head[:8]}: " + ", ".join(f"{c}={s}" for c, s in states.items()) + f"; {len(threads)} threads; behind by {behind}")
     for r in reasons:
         print("REFUSED:", r)
@@ -287,6 +305,13 @@ def self_test():
 
     def case(name, passed, detail=""):
         cases.append((name, bool(passed), detail))
+
+    def attempt(fn, *args):
+        """The result, or the exception as a value: a broken tool then fails its case instead of ending the suite."""
+        try:
+            return fn(*args)
+        except Exception as e:
+            return e
 
     # states, from what the forge really answered for one head
     real_states = context_states(["gates", "review"], runs, status)
@@ -321,7 +346,7 @@ def self_test():
         return decide(number, given, {**ready, **change}, "main", states, list(threads), behind, parse_waiver(waiver) if waiver else None)
 
     case("decide: all green merges", verdict()[0] == "merge", verdict())
-    case("decide: a short sha is refused", verdict(given=sha[:12])[0] == "refuse")
+    case("decide: a short sha is refused, and told why", verdict(given=sha[:12])[1] == ["need the full 40-character head sha"], verdict(given=sha[:12]))
     case("decide: a moved head is refused", verdict(given="0" * 40)[0] == "refuse")
     case("decide: a Draft is refused", verdict(draft=True)[0] == "refuse")
     case("decide: a closed pull request is refused", verdict(state="closed")[0] == "refuse")
@@ -380,16 +405,114 @@ def self_test():
     case("settings: the real repository and ruleset are clean, with nothing unchecked", settings() == ([], []), settings())
     case("settings: auto-merge allowed is an error", any("auto-merge is allowed" in e for e in settings(repo={**info, "allow_auto_merge": True})[0]))
     hidden = {k: v for k, v in info.items() if k != "allow_auto_merge"}
-    case("settings: an auto-merge setting the token cannot read is NOT CHECKED", settings(repo=hidden) == ([], [settings(repo=hidden)[1][0]])
-         and "auto-merge setting NOT CHECKED" in settings(repo=hidden)[1][0], settings(repo=hidden))
+    got = attempt(lambda: settings(repo=hidden))
+    case("settings: an auto-merge setting the token cannot read is NOT CHECKED",
+         isinstance(got, tuple) and got[0] == [] and len(got[1]) == 1 and "auto-merge setting NOT CHECKED" in got[1][0], got)
     case("settings: a disabled ruleset is an error", any("is disabled, not active" in e for e in settings(enforcement="disabled")[0]))
     case("settings: a ruleset in evaluate mode is an error", any("is evaluate, not active" in e for e in settings(enforcement="evaluate")[0]))
     actor = [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}]
     case("settings: a bypass actor is an error", any("bypass actors" in e for e in settings(bypass_actors=actor)[0]))
     blind = settings_errors(expected, info, live, listed, lambda rid: {k: v for k, v in full.items() if k != "bypass_actors"})
     case("settings: a bypass list the token cannot read is NOT CHECKED", blind[0] == [] and any("bypass list NOT CHECKED" in n for n in blind[1]), blind)
-    case("settings: no ruleset of that name is an error", any("0 rulesets are named" in e for e in settings(rulesets=[])[0]))
+    got = attempt(lambda: settings(rulesets=[]))
+    case("settings: no ruleset of that name is an error", isinstance(got, tuple) and any("0 rulesets are named" in e for e in got[0]), got)
     case("settings: two rulesets of that name is an error", any("2 rulesets are named" in e for e in settings(rulesets=listed + listed)[0]))
+
+    # the call
+    spec = f"{number}@{sha}=review"
+    case("call: a pull request and a head", attempt(arguments, [str(number), sha]) == (number, sha, None))
+    case("call: a dry run is the same call", attempt(arguments, [str(number), sha, "--dry-run"]) == (number, sha, None))
+    case("call: a waiver is parsed", attempt(arguments, [str(number), sha, "--over-red", spec]) == (number, sha, (number, sha, ["review"])))
+    case("call: a bare check name is not a waiver, and not a plain merge either", attempt(arguments, [str(number), sha, "--over-red", "review"]) is None)
+    case("call: --over-red without a value is not understood", attempt(arguments, [str(number), sha, "--over-red"]) is None)
+    case("call: a head alone is not understood", attempt(arguments, [sha]) is None)
+    case("call: a pull request alone is not understood", attempt(arguments, [str(number)]) is None)
+    case("call: a pull request that is no number is not understood", attempt(arguments, ["x", sha]) is None)
+
+    # the threads, from what the forge really answered for a reviewed pull request
+    threads = pr_gates.fixture_threads()
+    found = pr_gates.finding_threads(threads)
+    case("threads: the real answer holds a finding thread", len(found) >= 1, f"{len(found)} of {len(threads)}")
+    if found:
+        def thread(resolved, body=None):
+            t = json.loads(json.dumps(found[0][0]))
+            t["isResolved"] = resolved
+            t["comments"]["nodes"] = t["comments"]["nodes"][:1]
+            if body is not None:
+                t["comments"]["nodes"][0]["body"] = body
+            return t
+
+        same, differs = (lambda p, s: False), (lambda p, s: True)
+        case("threads: none is nothing against the merge", thread_reasons([], same) == [])
+        case("threads: a resolved and answered finding is nothing against it", thread_reasons([thread(True)], differs) == [])
+        got = thread_reasons([thread(False), thread(False)], differs)
+        case("threads: unresolved threads are counted, once", got == ["2 unresolved threads"], got)
+        got = thread_reasons([thread(False, body="a question from a person")], differs)
+        case("threads: an unresolved thread without a finding blocks too", got == ["1 unresolved threads"], got)
+        got = thread_reasons([thread(True)], same)
+        case("threads: a finding resolved without its answer blocks", len(got) == 1 and "without changing the file" in got[0], got)
+
+    # the gate-flip, against a forge that records every write and fails where it is told to
+    class Flip:
+        def __init__(self, fail=(), merged=False, restore_fails=0):
+            self.fail, self.merged, self.restore_fails = set(fail), merged, restore_fails
+            self.calls, self.enforcement, self.payload = [], "active", None
+
+        def send(self, path, payload, method="PUT"):
+            what = ({"disabled": "off", "active": "on"}[payload["enforcement"]] if "/rulesets/" in path
+                    else "merge" if path.endswith("/merge") else "record")
+            self.calls.append(what)
+            if what == "on" and self.restore_fails > 0:
+                self.restore_fails -= 1
+                raise kit.Refused("refused")
+            if what in self.fail:
+                raise kit.Refused("refused")
+            if what in ("off", "on"):
+                self.enforcement = payload["enforcement"]
+            if what == "merge":
+                self.merged, self.payload = True, payload
+            return {}
+
+        def gh_json(self, path):
+            kind = "gate-readback" if "/rulesets/" in path else "pr-readback"
+            if kind in self.fail:
+                raise kit.Refused("refused")
+            return {"enforcement": self.enforcement} if kind == "gate-readback" else {"merged": self.merged}
+
+    def flip(waived, **how):
+        fake, g = Flip(**how), globals()
+        saved = g["send"], g["find_ruleset"], kit.gh_json, time.sleep
+        g["send"], g["find_ruleset"], kit.gh_json, time.sleep = fake.send, (lambda repo: 7), fake.gh_json, (lambda seconds: None)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = merge("o/r", number, sha, ready, waived)
+        finally:
+            g["send"], g["find_ruleset"], kit.gh_json, time.sleep = saved
+        return code, fake
+
+    over = [("review", "absent")]
+    code, f = flip([])
+    case("flip: without a waiver the ruleset is never touched", (code, f.calls) == (0, ["merge"]), (code, f.calls))
+    case("flip: the merge names the exact head and squashes", bool(f.payload) and f.payload.get("sha") == sha and f.payload.get("merge_method") == "squash", f.payload)
+    code, f = flip(over)
+    case("flip: with a waiver the ruleset is off for the one merge, restored, and the waiver is recorded",
+         (code, f.calls, f.enforcement) == (0, ["off", "merge", "on", "record"], "active"), (code, f.calls, f.enforcement))
+    code, f = flip(over, fail={"merge"})
+    case("flip: a refused merge still restores the gate, and records nothing",
+         (code, f.calls, f.enforcement) == (1, ["off", "merge", "on"], "active"), (code, f.calls, f.enforcement))
+    code, f = flip(over, fail={"merge"}, merged=True)
+    case("flip: a merge call that failed but landed is a merge, and is recorded", (code, f.calls) == (0, ["off", "merge", "on", "record"]), (code, f.calls))
+    code, f = flip(over, fail={"merge", "pr-readback"})
+    case("flip: a merge whose state cannot be read is exit 4, with the gate restored", (code, f.enforcement) == (4, "active"), (code, f.enforcement))
+    code, f = flip(over, restore_fails=2)
+    case("flip: a restore that fails is tried again", (code, f.enforcement, f.calls.count("on")) == (0, "active", 3), (code, f.calls))
+    code, f = flip(over, restore_fails=3)
+    case("flip: a gate that stays off is exit 3, and the merge is still recorded",
+         (code, f.enforcement, f.calls[-1]) == (3, "disabled", "record"), (code, f.enforcement, f.calls))
+    code, f = flip(over, fail={"gate-readback"})
+    case("flip: a gate that cannot be read back counts as not restored", code == 3, code)
+    code, f = flip(over, fail={"off"})
+    case("flip: a ruleset that cannot be switched off merges nothing", (code, "merge" in f.calls, f.enforcement) == (1, False, "active"), (code, f.calls))
     return kit.report(cases)
 
 

@@ -25,6 +25,9 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 
 - A local run sees the working tree, untracked files included. CI sees commits. A file you did
   not stage is the usual reason for "green here, red there".
+- CI also sees what the gates themselves create. The first run was red on `tools/__pycache__/`,
+  which a machine-wide gitignore had hidden locally: such files are ignored in this repository's
+  own `.gitignore`, not in yours.
 - The review in CI runs the **base branch's** reviewer and rules, never the pull request's. A
   change to `tools/review/` or `.review/` reviews nothing until it is merged.
 - Numbers in `guides/quality-bar-evidence.md` are generated. Run `py -3 tools/quality_evidence.py`;
@@ -144,6 +147,6 @@ judgment is labelled `judgment step`. Never an ungated rule. Gate: review rule "
 | merge checks on `main` (ruleset; `merge-checks` asserts it on every run) | per-item approval for a merge over red (#3) |
 | every tool decision proven red (`self-tests`) | the local hooks being switched on (#4) |
 | workflow facts (`ci-config`) | wrap-up and the memory audit (#6) |
-| store shape and expiring numbers (`knowledge`) | the ruleset's bypass list, in CI (#7) |
+| store shape and expiring numbers (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | title, breadth and answered findings (`pr-*`) | code samples in the design record being right (#1) |
 | a review that completed (`review` status) | that this status satisfies the ruleset (#5, unverified) |
