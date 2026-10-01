@@ -379,6 +379,10 @@ Runtime speed has priority everywhere; the compiler may be heavy. One planned op
 
 ## 14. Open
 
+- The cycle rule against mutable trees. `mut List<Node> children` can close a cycle by itself (`a.children.Add(b)`, then `b.children.Add(a)`), so the rule of section 3, judged by types, rejects the `Node` example given there and every other mutable tree; `weak` on the back-pointer is not enough. Options raised on 2026-10-01: keep the rule strict (trees are immutable `data`, or one flat owner with `weak` or index edges), a single-owner rule where a node sits in one place and changes place with `move`, or a collector that a class opts into by keyword.
+- What `mut` covers: only the variable, as `readonly` does in C#, or everything reachable through it, with `data` and collections behaving as values.
+- How an actor reacts to a callee that crashed, timed out or is unreachable, given that there is no `catch`. `retry` and the circuit breaker need an answer.
+- How a singleton actor is declared and addressed (section 11 calls it "a named actor"), and when an idle keyed actor that is not `durable` loses its state.
 - What happens when the local storage behind a spilled inbox is full as well.
 - The client and device split: where actors run, trust and access rules, the connection layer.
 - How custom validators report what was wrong.
@@ -387,6 +391,6 @@ Runtime speed has priority everywhere; the compiler may be heavy. One planned op
 - Where the TLS cipher primitives come from in the long run.
 - Package system.
 
-## 15. Prototype in this repository
+## 15. Prototype
 
-`Program.cs` is a throwaway v0 written before this design existed: a C# compiler that emits C and builds through `zig cc`. Its syntax and semantics are not authoritative, and its backend contradicts section 2 (LLVM IR, not C). Only the name and the installed Zig toolchain carry over.
+A throwaway v0 exists outside this repository and was never committed. It was written before this design existed: a C# compiler (`Program.cs`) that emits C and builds through `zig cc`. Its syntax and semantics are not authoritative, and its backend contradicts section 2 (LLVM IR, not C). Only the name carries over.
