@@ -17,7 +17,7 @@ Status: brainstorm record, 2026-10-01. Everything under "Decided" was chosen by 
 
 - The compiler is written in C# first and rewritten in Kurz once Kurz can carry it.
 - The compiler emits LLVM IR directly. Going through C source is not wanted. LLVM as a build-time dependency is acceptable.
-- LLVM covers x86, ARM, RISC-V, WebAssembly and AVR. Of the ESP32 family, the RISC-V models (C3, C6) work with upstream LLVM. The Xtensa models (classic ESP32, S2, S3) need Espressif's LLVM fork, because the upstream Xtensa backend is still experimental (checked 2026-10-01).
+- LLVM covers x86, ARM, RISC-V, WebAssembly and AVR. Of the ESP32 family, the RISC-V models (C3, C6) work with upstream LLVM. The Xtensa models (classic ESP32, S2, S3) need Espressif's LLVM fork, because the upstream Xtensa backend is still experimental (checked 2026-10-01). The fork is acceptable where a project needs those models. *(assumed: Simon's answer to this was ambiguous)*
 - A compiled program never relies on another language, runtime or tooling. The whole standard library is written in Kurz.
 - Kurz can call C-ABI functions (graphics, audio, operating system), but nothing in the standard library needs this beyond the operating system boundary.
 - TLS follows the Rust approach: the protocol is implemented in Kurz, the cipher primitives come from an established library through the C-ABI at first.
@@ -39,6 +39,7 @@ Status: brainstorm record, 2026-10-01. Everything under "Decided" was chosen by 
 - Objects with identity that point at each other (scene graph, UI tree, general graphs) have one flat owner; the edges are `weak` or indices. Each hop through a `weak` edge pays a small liveness check.
 - A grid is a flat array and a chunked world is a map of chunk values; the rule does not touch either.
 - Known trap: a write to one large flat array while a snapshot of it is still held copies the whole array once. Large data is chunked, and the compiler can warn where a write provably copies.
+- **Raw memory.** Collections, the allocator and the scheduler are written in Kurz, so some Kurz code has to touch raw memory. That code sits in `raw` blocks (pointers, manual allocation). A `raw` block compiles only in a package that the project grants `allow raw` in `project.kz`. Any package can be granted it, the project's own code included: it is discouraged, not reserved for the standard library (Simon, 2026-10-01). The compiler's memory guarantees cover everything outside `raw` blocks, and the build lists every package that holds the grant. *(assumed: the grant is per package and written like `allow network`)*
 - Considered and dropped on 2026-10-01: a single-owner rule in which a node sits in one place and changes place with `move`, and a collector that a class opts into by keyword. The collector could return later as an opt-in keyword without breaking code.
 - Expected speed, taken from a language that uses the same technique; no Kurz measurement exists. Koka's purely functional red-black tree, updated in place this way, ran 42 million inserts within 10% of C++ `std::map` ([Perceus, MSR-TR-2020-42](https://www.microsoft.com/en-us/research/wp-content/uploads/2020/11/perceus-tr-v1.pdf)); a later paper measured it 19% faster on one CPU and about equal on another ([Frame Limited Reuse, MSR-TR-2021-30](https://www.microsoft.com/en-us/research/wp-content/uploads/2021/11/flreuse-tr.pdf)).
 
@@ -144,6 +145,7 @@ An actor is an object with private state, its own heap and an inbox. In C# terms
 - An actor handles one message at a time, so there are no locks and no data races inside it.
 - An idle actor costs no CPU and a few hundred bytes. Millions run on a handful of OS threads.
 - There is no `async`/`await`. Every call looks synchronous; the runtime parks the actor while it waits.
+- An actor parked in the middle of a call is a compiler-made state machine, built only for functions that can wait; the whole-program view knows which ones. All other code runs on the ordinary stack. *(assumed)*
 - Messages from one actor to another arrive in the order they were sent. *(assumed)*
 - A call waits for its result by default. `send` makes a call fire-and-forget: `send store.Add(user)`. *(Waiting by default is the reading of "the Elixir way" that was stated back to Simon.)*
 - What may cross between actors: values (`data`, collections, strings, numbers), immutable class instances and actor references. A mutable class instance crosses only with an explicit word at the call: `copy` (the receiver gets a deep copy) or `move` (the sender's variable is dead afterwards, nothing is copied). Two actors can never reach the same mutable object.
@@ -465,7 +467,7 @@ use json                       // may touch: nothing
 use mysql allow network        // may touch: network only
 ```
 
-- **Permissions.** Whole-program compilation knows which package opens sockets, reads files or calls C. A package that exceeds what the project granted fails to compile.
+- **Permissions.** Whole-program compilation knows which package opens sockets, reads files, calls C or contains `raw` blocks (section 3). A package that exceeds what the project granted fails to compile.
 - **Source only.** The whole-program checks (cycle rule, deadlock rule, permissions, `mock`) need the source, so closed-source binary packages of Kurz code cannot exist. *(assumed)*
 - **Home.** A git URL plus a version, pinned by content hash in a lock file. There is no central registry to run at first; later a registry comes as an index over git.
 - **Versions.** The resolver picks the lowest version that satisfies everyone, as Go does and as NuGet does for transitive packages: no surprise upgrades, and a security fix needs an explicit bump.
@@ -610,10 +612,12 @@ msg = box.Open(myKey) else { Forged => return }            // client B
 
 Runtime speed has priority everywhere; the compiler may be heavy. One planned optimization: an actor handles one message at a time, so everything allocated while handling it and not stored in actor state can be freed in one sweep at the end. Beating hand-written C in some scenarios is welcome.
 
+Goal (Simon, 2026-10-01): Kurz should not be meaningfully slower than C++ in computation and memory work, or than ASP.NET Core in web serving. This is a goal with gates, not a guarantee for every program. Safe code pays for the checks the compiler cannot remove: the index check, the counter check before a write, counter updates on shared values and the liveness check on a `weak` edge. C++ pays none of them and proves nothing. Where a measured hot path needs it, a `raw` block removes them (section 3). The numbers that turn a gate red are open (section 14).
+
 ## 14. Open
 
-- How an actor parked in the middle of a call is compiled. Proposed on 2026-10-01 and not answered: a compiler-made state machine, built only for functions that can wait.
-- How the standard library and the runtime touch raw memory. Proposed on 2026-10-01: `raw` blocks, allowed only in a package that the project grants `allow raw`.
+- The numbers behind the speed goal (section 13). Simon found the first proposal too loose (a value tree within 1.3x of C++ `std::map`, HTTP within 2x of ASP.NET Core). Proposed on 2026-10-01 and not answered: within 1.1x on both, which is parity inside measurement noise, and an idle actor at most 512 bytes; each number is a ratchet from its first measurement.
+- Details the language reference needs before it is complete: interfaces and generics, closures, enums, properties, what an exception carries, and the naming of the standard library.
 - What a full inbox does to a waiting call under the `drop` modes.
 - Over-the-air update for devices: a runtime feature or later. A device that gets `Outdated` has to be able to update itself.
 - Where the TLS cipher primitives come from in the long run.
