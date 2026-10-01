@@ -27,24 +27,54 @@ Status: brainstorm record, 2026-10-01. Everything under "Decided" was chosen by 
 
 - No lifetimes, no borrow annotations, no global garbage collector.
 - Immutable by default. Immutable data cannot form reference cycles, so compiler-inserted reference counting is enough, and most counting is optimized away at compile time.
-- Mutable state lives inside exactly one actor. Each actor has its own heap. When an actor dies its whole heap is freed at once.
-- There is **no cycle collector**. A possible reference cycle is a compile error. The developer marks the back-pointer `weak`.
+- Mutable state lives inside exactly one actor. Each actor has its own heap. When an actor dies its whole heap is freed at once. A big value that is shared between actors lives outside these heaps (section 6).
+- There is **no cycle collector**. A possible reference cycle is a compile error.
+  - The rule is judged by types, over the whole program: a class may not reach itself through strong fields when one field on that path is `mut`. Values cannot contain themselves (section 4), so the rule only ever applies to classes.
   - `weak` means "I point at this but do not keep it alive". A weak reference is nullable and becomes null when its target is freed. It is the same idea as `WeakReference<T>` in C#.
+  - Between different types, `weak` on the back-pointer is enough: `Customer` holds its orders, `Order` points back `weak`. A class that reaches itself through a strong `mut` field is rejected even with a `weak` back-pointer, because `a.children.Add(b)` followed by `b.children.Add(a)` closes a ring through the children alone.
   - Only `mut` fields can close a cycle, so with immutable-by-default the error is rare.
   - A `mut` field of interface type could hold any implementer; the compiler needs the whole program to judge it.
-  - General graphs use the pattern "one owner holds all nodes, edges are `weak` or indices".
+- A tree is a recursive `data` value. It is updated in place while nobody else holds it; when somebody holds an older version, an update copies the path from the root to the changed node. It has no parent pointers: the parent is passed down while walking.
+- Objects with identity that point at each other (scene graph, UI tree, general graphs) have one flat owner; the edges are `weak` or indices. Each hop through a `weak` edge pays a small liveness check.
+- A grid is a flat array and a chunked world is a map of chunk values; the rule does not touch either.
+- Known trap: a write to one large flat array while a snapshot of it is still held copies the whole array once. Large data is chunked, and the compiler can warn where a write provably copies.
+- Considered and dropped on 2026-10-01: a single-owner rule in which a node sits in one place and changes place with `move`, and a collector that a class opts into by keyword. The collector could return later as an opt-in keyword without breaking code.
+- Expected speed, taken from a language that uses the same technique; no Kurz measurement exists. Koka's purely functional red-black tree, updated in place this way, ran 42 million inserts within 10% of C++ `std::map` ([Perceus, MSR-TR-2020-42](https://www.microsoft.com/en-us/research/wp-content/uploads/2020/11/perceus-tr-v1.pdf)); a later paper measured it 19% faster on one CPU and about equal on another ([Frame Limited Reuse, MSR-TR-2021-30](https://www.microsoft.com/en-us/research/wp-content/uploads/2021/11/flreuse-tr.pdf)).
 
 ```
-class Node {
-    mut List<Node> children
-    mut weak Node? parent
-}
+data Tree(int Key, Tree? Left, Tree? Right)
+
+mut root = Tree(8, null, null)
+root.Insert(3)                 // a `mut` method: walks down and writes in place
+root.Key = 9
+
+class Scene { mut Map<int, Node> nodes }                          // owns every node
+class Node  { mut List<weak Node> children; mut weak Node? parent }
 ```
 
 ## 4. Types and paradigm
 
 - Static typing with inference.
 - Immutable by default; `mut` marks what may change.
+- **Values.** `data`, collections, strings and numbers are values (Simon chose this as "probably" on 2026-10-01; the cycle rule of section 3 and the `mut` parameters below were chosen afterwards and build on it):
+  - Without `mut`, nothing reachable through a variable changes. With `mut`, it changes in place.
+  - Assigning or passing a value copies it in meaning. In practice the storage is shared until one side writes, and a write happens in place when nobody else holds the value. Where the compiler cannot prove that, a counter check precedes the write.
+  - There is one family of collections, and every value can cross between actors.
+  - Assigning into a path of a `mut` variable is short for nested `with`.
+  - A method that changes its own value carries a `mut` marker and can be called only on a `mut` variable.
+  - A function changes a caller's value only through a `mut` parameter, as `ref` does in C#, and the caller writes `mut` at the call as well. Without both, a method cannot change the collection it was handed.
+  - Classes stay references with identity and change only through their own `mut` fields.
+
+```
+mut order = GetOrder(id)
+order.Customer.Address.City = "Wien"     // short for three nested `with`, done in place
+users[id].Name = name                    // the same inside a map held by an actor
+
+void Fill(List<int> xs) { xs.Add(1) }          // compile error: xs is not mut
+void Fill(mut List<int> xs) { xs.Add(1) }
+Fill(mut numbers)                              // the caller sees and allows the change
+```
+
 - `data`: immutable records, equal by content. A `data` type may inherit from another `data` type. Unions (`Circle | Square`) are available as well.
 - `class`: may have `mut` fields, single inheritance plus interfaces as in C#. Classes are the tool for big inheritance trees. A class with `mut` fields compares by identity; an immutable class compares by content. Equality is overridable, as in C#.
 - `actor`: the concurrent unit (section 6). Actors implement interfaces but do not inherit from each other.
@@ -113,8 +143,9 @@ An actor is an object with private state, its own heap and an inbox. In C# terms
 - An actor handles one message at a time, so there are no locks and no data races inside it.
 - An idle actor costs no CPU and a few hundred bytes. Millions run on a handful of OS threads.
 - There is no `async`/`await`. Every call looks synchronous; the runtime parks the actor while it waits.
-- A call waits for its result by default. A keyword makes a call fire-and-forget. *(This is the reading of "the Elixir way" that was stated back to Simon; keyword name open.)*
-- What may cross between actors: immutable `data`, immutable class instances and actor references. A mutable class instance crosses only with an explicit word at the call: `copy` (the receiver gets a deep copy) or `move` (the sender's variable is dead afterwards, nothing is copied). Two actors can never reach the same mutable object.
+- A call waits for its result by default. `send` makes a call fire-and-forget: `send store.Add(user)`. *(Waiting by default is the reading of "the Elixir way" that was stated back to Simon.)*
+- What may cross between actors: values (`data`, collections, strings, numbers), immutable class instances and actor references. A mutable class instance crosses only with an explicit word at the call: `copy` (the receiver gets a deep copy) or `move` (the sender's variable is dead afterwards, nothing is copied). Two actors can never reach the same mutable object.
+- How a value crosses on one machine is the runtime's decision and invisible in code: a small value is copied into the receiver's heap, a big one is shared by pointer. Shared data lives outside the actor heaps and is counted with counters that are safe across cores. Erlang does the same for binaries above 64 bytes.
 - Identity does not survive crossing: what arrives is a different object. Immutable classes compare by content, so this is invisible for them.
 
 ```
@@ -126,8 +157,13 @@ store.Add(move order)
 
 Switching between actors is cooperative by default: an actor gives up its core at actor calls and I/O. A runaway loop then costs one core, not the system, because other cores take over the waiting actors.
 
-- A keyword on an actor opts into stronger fairness. Both forms are keywords: compiler-inserted checks at loop ends and function entry, and timer-based preemption. Spelling is open (`preempt actor ReportBuilder { ... }` as a sketch).
+- An actor opts into stronger fairness after its name, where `per` sits as well. `yield checks`: the compiler inserts switch points at loop ends and function entry. `yield timer`: a timer interrupt switches the actor out.
 - The compiler warns about a loop inside an actor that has no switch point and no provable end.
+
+```
+actor ReportBuilder yield checks { ... }
+actor ReportBuilder yield timer { ... }
+```
 
 ### Crashes and supervision
 
@@ -138,13 +174,14 @@ Switching between actors is cooperative by default: an actor gives up its core a
 - Top-level code is the root actor. If it crashes, the process exits with an error code.
 - Calling a dead or unreachable actor raises an exception in the caller.
 - Every call has a timeout (5 seconds by default, as in Elixir), then an exception in the caller.
+- A caller cannot handle a callee's crash, timeout or unreachability. The exception kills the caller as well, and then every waiting caller up the chain; supervisors restart them. State that has to survive this is `durable` (section 13). `retry` runs its block in a child actor and watches it. Simon chose this "for now" on 2026-10-01; the alternative was an opt-in `Failed` case in the postfix `else`.
 
 ### Deadlocks
 
 Three layers, so that a hang cannot happen silently.
 
 1. **Callbacks work.** Every call carries a chain ID. An actor waiting inside a chain lets in calls that belong to the same chain. `A.Save` waits on `B.Check`, which calls `A.Load`: this runs like a nested method call. Unrelated messages still wait.
-2. **Compile error for loops of waiting calls between actor types**, analysed per method. A one-word override on the call means "different instance, I vouch". Exempt without override: a callback through a reference the caller passed in that same call.
+2. **Compile error for loops of waiting calls between actor types**, analysed per method. `vouch` on the call overrides it and means "different instance, I vouch": `vouch c.Size()`. Exempt without override: a callback through a reference the caller passed in that same call.
 3. **Instant runtime detection.** On every wait the runtime follows the wait line. If it leads back, one actor gets an exception immediately, naming both chains, and its supervisor restarts it.
 
 Across machines, layer 3 sees chain loops but not crossing chains; those fall to the timeout.
@@ -190,7 +227,7 @@ every 5min on split run {
 - Signatures in C# order, type first: `User | NotFound Get(int id) => ...`.
 - Everything is private by default: members are private to their type, top-level types and functions are private to their folder. `pub` exposes; `prot` exposes to inheriting types.
 - A folder is a namespace; there is no `namespace` line. Files in one folder see each other without imports. `use` brings in other folders and packages.
-- The project file is written in Kurz itself (`project.kz`), not in a separate format.
+- The project file is written in Kurz itself (`project.kz`), not in a separate format. It holds one `deploy` block per deployment with that deployment's switches: the inbox mode (section 13) and, by the same idea, distribution on or off and the target platform. *(assumed)*
 - String interpolation is always on: `"hello {name}"`.
 - Primary constructors, C# lambdas, C# generics.
 - Top-level statements instead of `Main`.
@@ -251,7 +288,7 @@ at 03:00 daily { }                        // calendar schedule
 
 ## 11. Dependency injection and tests
 
-- There is no container. A singleton is a named actor; wiring is constructor parameters.
+- There is no container. A singleton is an actor declared `per cluster` or `per node` and addressed by its type name (section 13). For actors spawned by hand, wiring is constructor parameters.
 - Tests swap implementations with `mock`. The swap happens at compile time and only in test builds, so no interface has to exist just for faking.
 
 ```
@@ -306,15 +343,21 @@ Formats:
 
 Agreed in a later brainstorm round. Each one is compiled into a program only when the program uses it.
 
-### Actors addressed by key
+### Actors addressed by key or by name
+
+`per` on an actor says how many of it exist and where:
 
 ```
-actor Session per int userId { ... }
-
-Session[42].Add(item)      // the runtime finds it, or creates it, on some machine
+actor Metrics per node { }          // one per machine:    Metrics.Count("hit")
+actor Billing per cluster { }       // one in the cluster: Billing.Charge(order)
+actor Session per int userId { }    // one per key:        Session[42].Add(item)
+actor Worker { }                    // spawned by hand, the reference is passed around
 ```
 
-No spawn, no lookup, no registry. The runtime places each key on a machine, puts idle actors to sleep and rebalances when machines join. For the developer this is horizontal scaling with zero code; the cost is compiler and runtime work. It needs a cluster-wide directory, and during a network split the three-step rule of section 7 applies per key.
+No spawn, no lookup, no registry. The runtime finds a keyed actor or creates it on some machine, places each key, puts idle actors to sleep and rebalances when machines join. For the developer this is horizontal scaling with zero code; the cost is compiler and runtime work. It needs a cluster-wide directory, and during a network split the three-step rule of section 7 applies per key.
+
+- A `per cluster` or `per node` actor is the singleton: no registration and no wiring, and `mock` works on it unchanged. The dependency is no longer visible in a constructor; the compiler can list who uses what.
+- A keyed actor that is not `durable` is dropped after an idle time: 10 minutes by default, overridable (`idle 10min` as a sketch). Its state is gone and the next call starts it fresh.
 
 ### Durable actors
 
@@ -330,6 +373,25 @@ Every change reaches an actor as a message, so logging messages to disk makes it
 ### Inbox overflow
 
 Waiting calls throttle themselves: the caller waits, so load cannot pile up. For everything else Simon's direction is that a full inbox spills into a storage engine local to the node or process, the same engine durable actors use, to free memory and queue work without cluttering everything else.
+
+When that storage is full as well, or the target has none, the sender gets an exception. The inbox works in different modes depending on the deployment:
+
+- `spill`: memory first, then local storage, then an exception in the sender.
+- `fail`: a fixed number of slots; when they are full, an exception in the sender.
+- `drop oldest`: when full, the oldest waiting message is discarded.
+- `drop newest`: when full, the arriving message is discarded. *(assumed: only the name was shown to Simon)*
+
+The default is set per deployment in `project.kz`, and an actor can override it after its name. *(assumed: Simon confirmed the modes; the placement was part of the same question)*
+
+```
+// project.kz
+deploy server { inbox spill }
+deploy esp32  { inbox 32 fail }
+```
+
+```
+actor Telemetry inbox 1000 drop oldest { }
+```
 
 ### Cluster simulation tests
 
@@ -362,12 +424,18 @@ Whole-program compilation knows which package opens sockets, reads files or call
 ### Constraints in types
 
 ```
-data User(int Age where 0..150, string Email where IsEmail)
+data User(int Age where 0..150, string Email where IsEmail else "not an email")
+data Range(int From, int To) where From <= To          // a rule across fields
+
+bool IsEmail(string s) => s.Contains("@")
 
 route POST "/users" (User user) => store.Add(user)
 ```
 
 An invalid value cannot exist. Input from outside yields `User | Invalid` automatically, so validation needs no code in the handler. Custom validators must be possible, as C# has them; a validator is ordinary Kurz code.
+
+- `Invalid` carries every failure (field, rule, message), not only the first, so a form can show all of them at once.
+- A validator is a pure function returning `bool`: no I/O and no actor calls. A check that needs the outside world ("email already taken") is not a type rule; it is a union case of the method.
 
 ### Clients and devices as cluster members
 
@@ -379,15 +447,10 @@ Runtime speed has priority everywhere; the compiler may be heavy. One planned op
 
 ## 14. Open
 
-- The cycle rule against mutable trees. `mut List<Node> children` can close a cycle by itself (`a.children.Add(b)`, then `b.children.Add(a)`), so the rule of section 3, judged by types, rejects the `Node` example given there and every other mutable tree; `weak` on the back-pointer is not enough. Options raised on 2026-10-01: keep the rule strict (trees are immutable `data`, or one flat owner with `weak` or index edges), a single-owner rule where a node sits in one place and changes place with `move`, or a collector that a class opts into by keyword.
-- What `mut` covers: only the variable, as `readonly` does in C#, or everything reachable through it, with `data` and collections behaving as values.
-- How an actor reacts to a callee that crashed, timed out or is unreachable, given that there is no `catch`. `retry` and the circuit breaker need an answer.
-- How a singleton actor is declared and addressed (section 11 calls it "a named actor"), and when an idle keyed actor that is not `durable` loses its state.
-- What happens when the local storage behind a spilled inbox is full as well.
-- The client and device split: where actors run, trust and access rules, the connection layer.
-- How custom validators report what was wrong.
+- The primitive through which a supervisor, and with it `retry`, observes a child's crash.
+- What a full inbox does to a waiting call under the `drop` modes.
+- The client and device split: where actors run, trust and access rules, the connection layer. Proposed on 2026-10-01 and not yet answered: placement with `on <deployment>` on the actor; `open` on methods that may be called across the boundary; a built-in `caller` identity with `per caller` and `per connection` actors; the inside never waits on the outside; `Offline` as a union case on calls from the outside; a compiler check of the `open` surface against released client versions; `secret` fields that never leave the cluster.
 - Database migrations.
-- Names: the fire-and-forget keyword, the deadlock override word, the fairness keywords.
 - Where the TLS cipher primitives come from in the long run.
 - Package system.
 
