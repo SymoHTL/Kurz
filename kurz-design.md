@@ -143,6 +143,7 @@ An actor is an object with private state, its own heap and an inbox. In C# terms
 - An actor handles one message at a time, so there are no locks and no data races inside it.
 - An idle actor costs no CPU and a few hundred bytes. Millions run on a handful of OS threads.
 - There is no `async`/`await`. Every call looks synchronous; the runtime parks the actor while it waits.
+- Messages from one actor to another arrive in the order they were sent. *(assumed)*
 - A call waits for its result by default. `send` makes a call fire-and-forget: `send store.Add(user)`. *(Waiting by default is the reading of "the Elixir way" that was stated back to Simon.)*
 - What may cross between actors: values (`data`, collections, strings, numbers), immutable class instances and actor references. A mutable class instance crosses only with an explicit word at the call: `copy` (the receiver gets a deep copy) or `move` (the sender's variable is dead afterwards, nothing is copied). Two actors can never reach the same mutable object.
 - How a value crosses on one machine is the runtime's decision and invisible in code: a small value is copied into the receiver's heap, a big one is shared by pointer. Shared data lives outside the actor heaps and is counted with counters that are safe across cores. Erlang does the same for binaries above 64 bytes.
@@ -313,9 +314,9 @@ test "survives 60 days" {
 Everything is self-written. Tiers:
 
 - **Core** (runs on microcontrollers): numbers, strings, collections, math, time.
-- **Runtime:** actors, supervisors, scheduler, timers, clustering, serialization.
+- **Runtime:** actors, supervisors, scheduler, timers, clustering, serialization, `Stream<T>`.
 - **System:** files, processes, environment, TCP/UDP, DNS.
-- **Backend:** HTTP server and client, TLS, logging, the chore keywords.
+- **Backend:** HTTP server and client, TLS, `Sealed<T>`, logging, the chore keywords.
 - **Data:** database driver and the query keyword. MySQL first; the wire driver is built last.
 - **Tooling:** test runner, formatter, editor language server. Package manager later.
 - **Not in the box:** graphics, audio, windowing. These are packages over the C-ABI.
@@ -370,7 +371,7 @@ durable actor Subscription per int userId {
 }
 ```
 
-Every change reaches an actor as a message, so logging messages to disk makes its state survive crashes, deploys and machine death. Enabled only where the `durable` keyword is used. Kurz gets its own storage engine for this, written in Kurz.
+Every change reaches an actor as a message, so logging messages to disk makes its state survive crashes and restarts. A log on the local disk does not survive the loss of the machine, which the first version of this section claimed; that needs a copy on another machine and is open (section 14). Enabled only where the `durable` keyword is used. Kurz gets its own storage engine for this, written in Kurz.
 
 ### Inbox overflow
 
@@ -449,10 +450,26 @@ Browsers (through WebAssembly), apps and microcontrollers take part, but not as 
   - `per caller`: one actor per signed-in identity. From outside it is addressed by its type name, and a client only ever reaches its own; inside code addresses it by key (`Cart[userId]`). Reading another user's data by changing an id is impossible by construction.
   - `per connection`: the same, but the actor lives and dies with one connection, like a Blazor circuit.
   - Other keyed actors stay reachable when they have `open` methods, and check `caller` themselves.
-- **Direction.** The inside never waits on the outside: from server to client only `send` is allowed, and a waiting call is a compile error, because a slow or hostile client would hold a server actor until the timeout. Device state reaches the backend through a server-side twin actor that the device reports to. What this means for file transfer is open (section 14).
+- **Direction.** Nothing shared ever waits on the outside, because a slow or hostile client would hold a server actor until the timeout.
+  - A shared actor (`per cluster`, `per node`, keyed, spawned by hand) reaches a client only with `send`; a waiting call is a compile error.
+  - A client's own actor (`per connection`, `per caller`) may wait on that client, since a stall then hurts only that client. Shared actors reach such an actor with `send` only, so nothing shared stalls behind it. The compiler tracks which actors can stall.
+  - Device state reaches the backend through a server-side twin actor that the device reports to. A `per caller` actor may also ask its device and wait.
+- **Streams.** `Stream<T>` is in the box: a sequence pulled by its consumer. It crosses actors and the boundary, and the runtime batches and paces it. It is the same idea as `IAsyncEnumerable<T>` in SignalR streaming. Big payloads travel as streams, because one message is one value in memory: a 2 GB argument cannot exist, and a hostile client could claim one.
 - **Offline.** A waiting call from the outside to the inside has the union case `Offline`, because a lost connection is normal there. It is handled with `else` or listed in the signature. Inside the cluster the exception rule of section 6 stays.
-- **Versions.** Clients in the field run old code for months, so "versions never mix" (section 7) cannot hold at this boundary. `kurz release web 1.4` writes a snapshot of the `open` surface into the repository. The build fails when a change breaks a supported release: a method removed, a type changed, a field removed. An added field needs a default. Support is dropped explicitly (`supports 1.5..` in the deploy block), and an older client gets `Outdated` when it connects. The wire format at the boundary carries field numbers, which is slower than inside the cluster. Simon: this needs more, because breaking changes always happen and keeping even one version compatible is hard for some teams (section 14).
-- **`secret` fields.** A `secret` field is never sent to the outside and never logged. It does not exist there: client code that touches it is a compile error. No separate type per side is needed. How this serves end-to-end encrypted apps is open (section 14).
+- **Versions.** Clients in the field run old code for months, so "versions never mix" (section 7) cannot hold at this boundary. Breaking changes always happen, and keeping even one version compatible is hard for some teams, so compatibility is opt-in per deployment:
+  - `supports current` is the default: nothing is kept compatible and every breaking change is free. A client of an older release gets `Outdated` when it connects; a browser tab reloads itself. The cost is that each release interrupts every connected client.
+  - `supports 2..` keeps releases from 2 on compatible, checked by the compiler. `kurz release web 1.4` writes a snapshot of the `open` surface into the repository. The build fails when a change breaks a supported release: a method removed, a type changed, a field removed, a union case the old client does not know. An added field needs a default. The compile error is not a ban on breaking; it is the list of who breaks.
+  - A breaking change stays possible while an old release is supported, through a shim that translates the old shape (`was`). The error names the missing shim, and once the old release is dropped the compiler flags the shim as dead.
+  - `caller.Version` is there for changes of meaning with the same shape. The compiler sees shape only.
+  - Only the handshake is frozen forever: connecting, `Outdated`, and where the update is.
+  - The wire format at the boundary carries field numbers, which is slower than inside the cluster.
+- **`secret`.** A secret never crosses the boundary in the clear, in either direction, and is never logged.
+  - A `secret` field in a normal type is stripped when the value crosses and does not exist on the other side: code there that touches it is a compile error. No separate type per side is needed. A secret lives on the side whose code touches it; both sides touching it is a compile error.
+  - A whole `secret data` type cannot cross at all; trying is a compile error. A private key marked this way provably never leaves the client.
+  - The only way across is `Sealed<T>`, in the box: the value is encrypted on the sending client for named recipients, and the server stores and routes bytes it cannot open. This is what end-to-end encrypted apps build on.
+  - Key exchange, several devices per user and groups are a first-party package. The cipher primitives come through the C-ABI at first, as with TLS.
+  - Limits: the server cannot validate, search or index sealed content, so constraints run on the receiving client after opening. In a browser the server delivers the client code, so a compromised server can ship code that leaks keys; a native app and a flashed device do not have that hole. Who talks to whom, when and how much stays visible.
+- Limits per client connection (message size, messages in flight, rate) are on by default and set in the `deploy` block; a client that exceeds them is disconnected. *(assumed)*
 - Transport is the runtime's job: WebSocket for browsers, a TLS socket for devices, the Kurz binary format on both. The UI toolkit in the browser is a package, like graphics. *(assumed)*
 
 ```
@@ -502,21 +519,57 @@ actor Probe on sensor {                          // runs on the ESP32
 temp = Thermometer[12].Last()                    // the backend asks the twin, never the device
 ```
 
+```
+actor Transfer per connection {                  // the client's own actor: it may wait on that client
+    open FileId Upload(string name, Stream<Bytes> content) {
+        file = Files.Create(name)
+        for chunk in content { file.Append(chunk) }
+        return file.Close()
+    }
+    open Stream<Bytes> Download(FileId id) => Files.Open(id).Chunks(256kb)
+}
+
+id = Transfer.Upload(picked.Name, picked.Chunks(256kb))            // client
+for chunk in Transfer.Download(id) { save.Append(chunk) }
+```
+
+```
+// project.kz
+deploy web { supports current }     // an old tab gets Outdated and reloads itself
+deploy app { supports 2.. }         // kept compatible, checked by the compiler
+```
+
+```
+data User(int Id, string FirstName, string LastName)
+
+was 1.4 User(int Id, string Name) {
+    up   => User(Id, Name.Before(" "), Name.After(" "))     // arriving from a 1.4 client
+    down => User(Id, "{FirstName} {LastName}")              // leaving to a 1.4 client
+}
+```
+
+```
+secret data PrivateKey(Bytes Value)                        // client only: sending it does not compile
+secret data Message(string Text)
+
+box = Sealed<Message>.For(bob.PublicKey, Message("hi"))    // client A
+send Chat[room].Post(box)                                  // the server cannot open it
+msg = box.Open(myKey) else { Forged => return }            // client B
+```
+
 ### Speed
 
 Runtime speed has priority everywhere; the compiler may be heavy. One planned optimization: an actor handles one message at a time, so everything allocated while handling it and not stored in actor state can be freed in one sweep at the end. Beating hand-written C in some scenarios is welcome.
 
 ## 14. Open
 
-- The primitive through which a supervisor, and with it `retry`, observes a child's crash.
+- The primitive through which a supervisor, and with it `retry`, observes a child's crash. Proposed on 2026-10-01: an `attempt` block that runs as a one-shot child actor and yields its value or the union case `Crashed`; policy words at `spawn` (`on crash restart`, `stop`, `escalate`, a block, with `after` and `max ... in ...`); a reference that stays valid across a restart.
+- `durable` and the loss of a machine. Proposed on 2026-10-01: a knob for local disk only, a copy on N machines before a message counts as stored, or a copy sent in the background; which one is the default.
 - What a full inbox does to a waiting call under the `drop` modes.
-- File transfer under the direction rule of section 13. Proposed on 2026-10-01: either the rule stays pure (the client sends chunks for an upload and pulls them for a download), or it is refined so that a client's own actor (`per connection`, `per caller`) may wait on that client while shared actors reach such an actor with `send` only. Also proposed: a `Stream<T>` type that crosses actors and the boundary and is pulled by its consumer.
-- Breaking changes across the client boundary. Simon wants more than the compatibility check. Proposed on 2026-10-01: a policy per deployment (`supports current` keeps nothing compatible and tells every older client to update), shims that translate the shape of an old release (`was 1.4 ...`), and `caller.Version` for differences the compiler cannot see.
-- End-to-end encrypted apps. Proposed on 2026-10-01: `secret` means "never crosses the boundary in the clear", in either direction, also for whole types, and `Sealed<T>` is the only way across; the key exchange protocol is a package.
-- Limits per client connection (message size, messages in flight, rate), and whether messages between two actors arrive in the order they were sent. Proposed as defaults on 2026-10-01.
-- Database migrations.
+- Over-the-air update for devices: a runtime feature or later. A device that gets `Outdated` has to be able to update itself.
+- Database migrations. Proposed on 2026-10-01: generated by diff and kept in the repository, with renames stated in code (`was`) and no snapshot file; applied by the new cluster once, before traffic switches; split by the compiler into steps that are safe while the old version runs and steps that wait until it is gone, which removes down scripts.
 - Where the TLS cipher primitives come from in the long run.
-- Package system.
+- Package system. Proposed on 2026-10-01: source only; a git URL with a version, pinned by hash, and no central registry at first; one version of a package per program; version numbers checked by the compiler against the `pub` surface; the lowest version that satisfies everyone; no C compiler in the toolchain.
 
 ## 15. Prototype
 
