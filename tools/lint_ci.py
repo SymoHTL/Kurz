@@ -7,7 +7,7 @@
   with no path or branch filter; exactly one job, `gates`, with no `if` (a skipped job reports
   success to a required check); read-only token; the job runs the full gate runner;
 - review.yml: pull_request_target plus a manual dispatch, so the reviewer and its rules come from
-  the base branch; the checkout never names pull-request code; no pull-request text is put into a
+  the default branch; the checkout never names pull-request code; no pull-request text is put into a
   shell line; the job's `if` is the pinned draft/outsider rule; the job timeout equals the budget
   the script is told; the Claude CLI is pinned to an exact version; only the two credential
   secrets are read; one review per pull request at a time.

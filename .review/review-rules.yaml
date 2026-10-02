@@ -52,12 +52,15 @@ sections:
     files: ["reference/*"]
     rules:
       - >-
-        A rule whose status line says "decided" without naming the design-record section it comes from,
-        or that states more than that section decided. What the reference adds on its own is "assumed"
-        or "open".
-      - A rule that two readers could implement differently - missing the order of evaluation, the type of a result, what happens at the limits (empty, zero, null, overflow, out of range), or which error is raised.
+        A rule marked "decided" or "assumed" that names no design-record section, or that states more
+        than that section says. What the record does not say is "proposed" when a case needs it and
+        "open" when it is a fork; neither may read as if it were decided.
+      - A case shown under a rule marked "open", or an open rule that does not state its options.
+      - A decided, assumed or proposed rule that two readers could implement differently - missing the order of evaluation, the type of a result, what happens at the limits (empty, zero, null, overflow, out of range), or which error is raised.
       - A rule that contradicts another rule in the diff, or a term used with two meanings.
-      - A Kurz code sample outside a corpus block. Every sample in the reference is a corpus case, so that a compiler can run it.
+      - >-
+        A Kurz code sample that is not shown under a "Case:" line that links its corpus file. Every
+        sample in the reference is a corpus case, so that a compiler can run it.
       - An example whose shown output or error does not follow from the rules beside it.
       - A compile error or exception a rule mentions without a stable identifier, or an identifier used for two different errors.
       - 'The phrase "as in C#" used for something C# itself leaves open or does differently across versions, without saying which behaviour is meant.'

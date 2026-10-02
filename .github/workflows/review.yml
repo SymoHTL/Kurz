@@ -1,6 +1,6 @@
 name: review
 
-# pull_request_target: this file, the reviewer and its rules come from the base branch. The pull
+# pull_request_target: this file, the reviewer and its rules come from the default branch. The pull
 # request is data and is never checked out or run. Facts of this file are pinned by tools/lint_ci.py.
 on:
   pull_request_target:

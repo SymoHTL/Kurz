@@ -53,7 +53,7 @@ flowchart TD
         G8["pr-findings: a review finding unresolved, or resolved
         without the edit or reply that answers it"]
     end
-    subgraph R["CI: workflow review, pull_request_target, code and rules from the base branch"]
+    subgraph R["CI: workflow review, pull_request_target, code and rules from the default branch"]
         R1["job review-run: red when the review did not complete:
         no credential, usage limit, model error, another model answered,
         oversized diff, a batch that failed or ran out of time before it converged,
@@ -64,6 +64,8 @@ flowchart TD
         Does it satisfy the ruleset's pinned app: unverified, HAZARD issue 5"]
         R3["findings: threads on the pull request; high and medium per file,
         lows in one thread; they block through thread resolution, not through the job"]
+        R4["the workflow starts at all: GitHub blocks pull_request_target in a public repository
+        unless an Actions event policy allows it. Nothing asserts the policy: HAZARD issue 10"]
     end
     subgraph M["Merge: server side and the merge tool"]
         M1["ruleset on main: pull request required, squash only, every thread resolved,

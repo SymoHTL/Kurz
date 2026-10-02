@@ -26,7 +26,8 @@ flowchart TD
     D --> E["gates job on every push and on every edit of title or description.
     Red: read the table at the end of the log, fix, push once"]
     E --> F["mark Ready once, with the description final.
-    The review runs: base branch's reviewer and rules, the diff as data"]
+    The review runs: default branch's reviewer and rules, the diff as data.
+    No run at all: GitHub's default policy blocked the event, dispatch it by hand. HAZARD issue 10"]
     F --> G{"review status on this head?"}
     G -- "pending: Draft, outside pull request or no run" --> F
     G -- "error: did not complete" --> H["read the run's last line:

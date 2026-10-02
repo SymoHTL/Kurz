@@ -50,6 +50,14 @@ What follows from it:
   stopped with nothing posted.
 - That is why a run keeps what it has (it posts what it found and stores what converged before it
   ends red), and why the log prints one line per pass.
+- Three passes at once are slower each. In the second attempt at pull request 8, later on
+  2026-10-02 (20 batches by then, three workers), the first three passes took 918, 933 and
+  1149 seconds. That run gave each batch all its passes in turn. With up to five passes a batch,
+  the 300 minutes it had could not have reached every batch, so it was stopped after those three
+  passes, again with nothing posted.
+- That is why passes run in rounds (`in_rounds` in `review.py`): every batch gets one pass before
+  any batch gets a second. A time budget of about batches times pass time divided by three buys
+  one pass over everything; a run that ends there is red (`budget`), and has read every file.
 - A change to `review.py`, `tools/kit.py`, the rules file, the title or the description drops the
   replay cache: the next round reviews every file again. Finish those before the review starts.
 - Keep a pull request small. The review bill grows with the diff, and it is paid again in every

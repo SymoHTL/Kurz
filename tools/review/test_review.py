@@ -295,6 +295,40 @@ def suite(case):
     case("converge: a pass that fails keeps what the passes before it found", (r["passes"], r["converged"], len(r["findings"])) == (1, False, 1)
          and getattr(r["error"], "kind", None) == "api", r)
     case("converge: a batch whose passes all answered carries no error", rv.converge(scripted(), [], budget())["error"] is None)
+    call = scripted([finding()], [])
+    first = rv.converge(call, [], budget(), limit=1)
+    case("converge: a call limited to one pass stops after it, unconverged", (first["passes"], first["converged"], len(call.seen)) == (1, False, 1), first)
+    second = rv.converge(call, [], budget(), first, limit=1)
+    case("converge: the next call continues where the last one stopped", (second["passes"], second["converged"], len(second["findings"])) == (2, True, 1)
+         and [f["line"] for f in call.seen[1:2] for f in f] == [3], (second, call.seen))
+    rv.converge(call, [], budget(), second, limit=1)
+    case("converge: a batch that converged gets no further pass", len(call.seen) == 2, call.seen)
+    broken = scripted(rv.ReviewError("api", "boom", 500), [])
+    failed_once = rv.converge(broken, [], budget(), limit=1)
+    rv.converge(broken, [], budget(), failed_once, limit=1)
+    case("converge: a batch that failed gets no further pass", len(broken.seen) == 1 and getattr(failed_once["error"], "kind", None) == "api", broken.seen)
+
+    # --- rounds: every batch is read once before any is read twice
+    def rounds(scripts, bud, clock=None, seconds=0):
+        """in_rounds over scripted batches with one worker: (the passes each batch had, the order of the calls)."""
+        order = []
+
+        def numbered(index, call):
+            def wrapped(already):
+                order.append(index)
+                return call(already)
+            return wrapped
+        calls = [numbered(i, scripted(*answers, clock=clock, seconds=seconds)) for i, answers in enumerate(scripts)]
+        got = attempt(rv.in_rounds, calls, [[] for _ in calls], bud, 1)
+        return ([r["passes"] for r in got] if isinstance(got, list) else repr(got)), order
+
+    had, order = rounds([[[finding(line=1)]], [], [[finding(line=2)]]], budget())
+    case("rounds: every batch has its first pass before any batch has a second", order == [0, 1, 2, 0, 1, 2] and had == [2, 2, 2], (had, order))
+    clock = Clock()
+    had, order = rounds([[[finding(line=1)]], [], [[finding(line=2)]]], rv.Budget(0, 1000, margin=300, now=clock), clock, 200)
+    case("rounds: when the time ends after the first round every batch was read once, and none never", had == [1, 1, 1], (had, order))
+    had, order = rounds([[], [[finding(line=n)] for n in range(1, 9)]], budget())
+    case("rounds: a batch that converged drops out and the others go on", had == [2, rv.MAX_PASSES] and order == [0, 1, 0, 1, 1, 1, 1], (had, order))
 
     # --- what the batches of a run add up to
     work = [[("a.md", "part 1")], [("a.md", "part 2"), ("b.md", "x")], [("c.md", "x")]]

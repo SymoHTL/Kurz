@@ -77,7 +77,8 @@ the tutorial lists:
 | "Pipelines must succeed" | Ruleset rule `required_status_checks`, each check pinned to the GitHub Actions app so that nobody else can report it. |
 | "Skipped pipelines count as successful: off" | No such switch. A job skipped by `if:` reports success, so the `gates` job has no `if:` anywhere, and the review's required check is a status that only a completed review posts (`knowledge/a-skipped-job-reports-success.md`). |
 | Draft lane as a blocking manual job | A Draft cannot be merged, and marking it Ready starts the review. In Draft the review runs on demand: `gh workflow run review.yml -f pr=N`. |
-| Rules fetched from the target branch | `pull_request_target`: workflow, reviewer and rules all come from the base branch (`knowledge/the-review-runs-the-base-branch.md`). |
+| Rules fetched from the target branch | `pull_request_target`: workflow, reviewer and rules all come from the default branch (`knowledge/the-review-runs-the-default-branch.md`). |
+| A merge-request pipeline needs no permission to start | GitHub blocks `pull_request_target` in a public repository unless an Actions event policy allows it; the default rule is in evaluate mode until 2026-11-02 (`knowledge/pull-request-target-is-blocked-by-default.md`). The policy is the owner's setting and nothing asserts it yet (HAZARD #10). Without it the review is dispatched by hand for each head. |
 | Unanchored thread for the lows | GitHub has no resolvable thread without a file, so the lows share a file-level thread on the first file that has one. A comment holds 65,536 characters, so a thread carries at most twenty findings and the rest go into further threads. |
 | No per-request override of the pipeline check | The same. The gate-flip switches the ruleset's enforcement off for one merge, restores it and reads it back. While it is off nothing on the server holds any pull request or a push to `main`; the tool's own reading of the checks is the only gate, so it counts a check run only from the app the ruleset pins. |
 | Pipeline-control literals in the title | The workflow-skip literals; a squash merge puts the title on `main`. |
@@ -95,7 +96,7 @@ file and line; a time budget counted from the job's start; a replay cache of per
 whose key covers the script, the rules, the title and the description; notes that are never
 silent and never repeated.
 
-Five things are specific to this repository:
+Six things are specific to this repository:
 
 - **The model is pinned by exact id** in `review.py`, and an answer from any other model is
   refused. **The effort is pinned next to it.** The model call gets an environment of its own:
@@ -109,6 +110,10 @@ Five things are specific to this repository:
   every pass it may have, and a file only when the forge took its findings: a thread it refuses
   costs that thread's files, not the run. The first version here posted nothing unless every batch had run, and
   let a batch that ran out of time after one pass stand as reviewed.
+- **Passes run in rounds.** Every batch gets one pass before any batch gets a second, so a run
+  that runs out of time has read every file once. The first version gave each batch all its
+  passes in turn, which on a large diff spends the budget on the first batches and never reads
+  the last ones (`knowledge/what-a-review-pass-costs.md`).
 - **The log is written line by line**, one line per pass with its duration. A pass takes minutes
   (`knowledge/what-a-review-pass-costs.md`), and a log that fills only at the end hides a run
   that will not finish.
