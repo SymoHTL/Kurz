@@ -73,6 +73,14 @@ Each line names a trap; its evidence is in the entry it links.
    memory when the forge refused the posts
    ([knowledge/a-paid-result-is-printed-before-it-is-posted.md](knowledge/a-paid-result-is-printed-before-it-is-posted.md)).
    Gate: `self-tests` (the reviewer's cases for the order, the pace and the wait).
+6. **A paid run starts on a bill that was counted, not remembered.** A review run needs the
+   owner's go-ahead for a bill that was named, and the bill is batches times passes times the
+   price of a pass, with the batches from `py -3 tools/review/review.py --pr N --plan` on the
+   head that will be reviewed. On 2026-10-02 a bill was named from the 20 batches of an earlier
+   run; the head had grown to 30, and the run was stopped at its first line
+   ([knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)).
+   Gate: `self-tests` for the plan (it calls no model and posts nothing); naming the bill and
+   waiting for the go-ahead is a `judgment step`.
 
 ## CI
 

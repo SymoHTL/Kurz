@@ -44,13 +44,14 @@ the reviewer keeps five minutes back for posting. In CI the workflow sets it to 
 `timeout-minutes` (90 on 2026-10-02, pinned equal by `ci-config`); a run outside CI takes it from
 the environment, 90 when it is not set.
 
-The three runs over pull request 8, all on 2026-10-02 and all outside CI:
+The four runs over pull request 8, all on 2026-10-02 and all outside CI:
 
 | Run | `REVIEW_TIMEOUT_MIN` | Batches | What happened |
 |---|---|---|---|
 | first | 90 (the default) | 16 | Each batch got all its passes in turn. 16 batches need at least 32 passes; with three workers that is more than the 85 minutes left for passes. Stopped by hand after 45 minutes, nothing posted. |
 | second | 300 | 20 | Three passes at once are slower each: the first three took 918, 933 and 1149 seconds. With up to five passes a batch the time could not have reached every batch. Stopped by hand after those three passes, nothing posted. |
 | third | 150 | 20 | Passes in rounds. 30 passes in 136 minutes: every batch once, ten batches twice, 379 to 1054 seconds a pass. 294 findings (20 high, 126 medium, 148 low). It ended red (`failed`): the forge refused the last posts, and 88 low findings were lost ([[a-paid-result-is-printed-before-it-is-posted]]). About 45 USD at list price, estimated from 30 passes: the run ended before it printed its cost. |
+| fourth | 240 | 30 | Limited to one pass a batch. Its bill had been named to the owner as about 30 USD, from the 20 batches of the third run; the branch had grown since, and the first line of the log said 30 batches, about 45 USD. Stopped by hand within a minute, nothing posted. The three passes that were cut off cost an estimated 0.3 USD. |
 
 What follows from it:
 
@@ -72,6 +73,12 @@ What follows from it:
   over everything; a run that ends there is red (`budget`), and the next run continues.
 - A review run is started only after the owner said go, with the expected bill named (the
   owner's decision, 2026-10-02). `judgment step`
+- The bill is counted on the head that will be reviewed, never taken from an earlier run:
+  `py -3 tools/review/review.py --pr N --plan` prints the batches a run would read and the
+  passes that is, calls no model and posts nothing; with `--passes N` it counts for that limit.
+  The bill is those passes times the price of a pass above. A go-ahead covers the bill that was
+  named: when the first line of a run names more batches than the plan did, stop the run.
+  Gate: `self-tests` for the plan; the rest is a `judgment step`.
 - Low findings do not keep a review going: a batch converges when a pass adds nothing above low,
   and lows are collected on the issue labelled `review-lows` instead of threads. They are fixed
   together, or with a push that is needed anyway (the owner's decision, 2026-10-02).

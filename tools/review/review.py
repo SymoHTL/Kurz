@@ -9,8 +9,10 @@ its low findings are collected on one issue and hold nothing.
   review.py --pr N --local            off-pipeline, with this machine's Claude login; posts an audit
                                       note instead of the status, so the merge still needs the owner
   review.py --pr N --dry-run          review and print, post nothing
-  review.py ... --passes N            with --local or --dry-run: the caller's limit for this run. A batch
-                                      gets at most N passes, where a run without it gives two to five
+  review.py --pr N --plan             a dry run that stops before its first pass: the batches a run
+                                      would read and the passes that is, so that the bill can be named
+  review.py ... --passes N            with --local, --dry-run or --plan: the caller's limit for this run. A
+                                      batch gets at most N passes, where a run without it gives two to five
   review.py --self-test               the unit suite in test_review.py
 
 Trust boundary: the pull request is data. The rules come from the default branch through the API,
@@ -727,24 +729,25 @@ def fetch_diff(pr, number):
 # --- the run ----------------------------------------------------------------------------------
 
 def arguments(argv, environ):
-    """{pr, local, dry, bootstrap, ci, bounds} of a call, or None when the call is not understood.
-    An option this script does not know is not understood: a mistyped --dry-run must not run as a
-    review that posts. Outside CI the mode has to be named. `bounds` is (the least, the most)
-    passes of a batch. `--passes N` is the caller's limit for one run: a batch gets at most N
-    passes and counts as converged when the last one it may have added nothing above low. It is
-    taken only by a run that posts no status: the status has to mean the same review on every
-    head."""
+    """{pr, local, dry, plan, bootstrap, ci, bounds} of a call, or None when the call is not
+    understood. An option this script does not know is not understood: a mistyped --dry-run must
+    not run as a review that posts. Outside CI the mode has to be named. `--plan` is a dry run
+    that stops before its first pass. `bounds` is (the least, the most) passes of a batch.
+    `--passes N` is the caller's limit for one run: a batch gets at most N passes and counts as
+    converged when the last one it may have added nothing above low. It is taken only by a run
+    that posts no status: the status has to mean the same review on every head."""
     got, rest = {}, list(argv)
     while rest:
         arg = rest.pop(0)
-        if arg in ("--local", "--dry-run") and arg not in got:
+        if arg in ("--local", "--dry-run", "--plan") and arg not in got:
             got[arg] = True
         elif arg in ("--pr", "--bootstrap-rules", "--passes") and arg not in got and rest:
             got[arg] = rest.pop(0)
         else:
             return None
     raw, ci = got.get("--pr") or environ.get("PR_NUMBER") or "", environ.get("GITHUB_ACTIONS") == "true"
-    local, dry = "--local" in got, "--dry-run" in got
+    local, plan = "--local" in got, "--plan" in got
+    dry = plan or "--dry-run" in got
     if not raw.isdigit() or (local and dry) or not (ci or local or dry):
         return None
     bounds = (MIN_PASSES, MAX_PASSES)
@@ -752,13 +755,13 @@ def arguments(argv, environ):
         if not (local or dry) or got["--passes"] not in [str(n) for n in range(1, MAX_PASSES + 1)]:
             return None
         bounds = (min(MIN_PASSES, int(got["--passes"])), int(got["--passes"]))
-    return {"pr": int(raw), "local": local, "dry": dry, "bootstrap": got.get("--bootstrap-rules"), "ci": ci, "bounds": bounds}
+    return {"pr": int(raw), "local": local, "dry": dry, "plan": plan, "bootstrap": got.get("--bootstrap-rules"), "ci": ci, "bounds": bounds}
 
 
 def review(argv):
     call = arguments(argv, os.environ)
     if not call:
-        print("usage: review.py [--pr N] [--local | --dry-run] [--passes N] [--bootstrap-rules FILE]   (outside CI, name the mode; "
+        print("usage: review.py [--pr N] [--local | --dry-run | --plan] [--passes N] [--bootstrap-rules FILE]   (outside CI, name the mode; "
               f"--passes takes 1 to {MAX_PASSES} and goes with a mode)")
         return 2
     local, dry, in_ci, bounds = call["local"], call["dry"], call["ci"], call["bounds"]
@@ -852,6 +855,12 @@ def review(argv):
               f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}")
         for path in sorted(replay):
             print(f"  replayed (unchanged since a converged review): {path}")
+        if call["plan"]:  # what a run would read, said before a pass is paid for
+            for index, batch in enumerate(work, 1):
+                print(f"  batch {index}/{len(work)}: {sum(len(text) for _, text in batch)} characters [{', '.join(sorted({p for p, _ in batch}))}]")
+            least, most = bounds[0] * len(work), bounds[1] * len(work)
+            print(f"PLAN: {len(work)} batches, {least if least == most else f'{least} to {most}'} passes; nothing was reviewed")
+            return 0
 
         suffix = fresh_suffix(diff, pr["title"], pr["body"])
 

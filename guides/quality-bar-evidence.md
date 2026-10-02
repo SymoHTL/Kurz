@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-02
-digest: 99a85c1b1cf0c88eed369a397e2b476025663b813741f2401129020cf46d4ad9
+digest: 522d2cda1d63fffbfdc497123830f5d33a98c03a11a9952488f5fc12a0d5e203
 ttl_days: 60
 metadata:
   type: reference
@@ -57,9 +57,9 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/pr_gates.py` | 48 | 43 |
 | `tools/quality_evidence.py` | 25 | 20 |
 | `tools/red_proof.py` | 28 | 25 |
-| `tools/review/review.py` | 208 | 167 |
+| `tools/review/review.py` | 211 | 171 |
 | `tools/tree_gate.py` | 77 | 47 |
-| **total** | 667 | 532 |
+| **total** | 670 | 536 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules

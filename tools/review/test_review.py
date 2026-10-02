@@ -655,8 +655,12 @@ def suite(case):
     ci_env = {"GITHUB_ACTIONS": "true", "PR_NUMBER": "7"}
     understood = lambda argv, env: rv.arguments(argv, env) or {}
     case("args: a number and a mode are a call", understood(["--pr", "7", "--local"], {}) ==
-         {"pr": 7, "local": True, "dry": False, "bootstrap": None, "ci": False, "bounds": (rv.MIN_PASSES, rv.MAX_PASSES)},
+         {"pr": 7, "local": True, "dry": False, "plan": False, "bootstrap": None, "ci": False, "bounds": (rv.MIN_PASSES, rv.MAX_PASSES)},
          understood(["--pr", "7", "--local"], {}))
+    case("args: --plan is a dry run that stops before its first pass, and does not go with --local",
+         [understood(["--pr", "7", "--plan"], {}).get(k) for k in ("dry", "plan")] == [True, True]
+         and understood(["--pr", "7", "--dry-run"], {}).get("plan") is False and rv.arguments(["--pr", "7", "--local", "--plan"], {}) is None,
+         (understood(["--pr", "7", "--plan"], {}), understood(["--pr", "7", "--dry-run"], {})))
     case("args: --passes limits a run that posts no status, and one pass is then the least and the most",
          understood(["--pr", "7", "--local", "--passes", "1"], {}).get("bounds") == (1, 1)
          and understood(["--pr", "7", "--dry-run", "--passes", "3"], {}).get("bounds") == (rv.MIN_PASSES, 3),
@@ -770,6 +774,13 @@ def suite(case):
     code, out = run_review(forge, dry, ["--pr", "1", "--dry-run"])
     case("run: a dry run reviews and posts nothing", code == 0 and not (forge.threads or forge.notes or forge.statuses) and len(dry.batches) == 8
          and "DRY RUN" in out, (code, len(forge.threads), len(forge.notes), dry.batches))
+    forge, planned = MemoryForge(), scripted_model(found)
+    code, out = run_review(forge, planned, ["--pr", "1", "--plan"])
+    case("run: a plan lists the batches and the passes they can take, calls no model and posts nothing",
+         code == 0 and planned.batches == [] and not (forge.threads or forge.notes or forge.statuses) and "  batch 4/4: " in out
+         and f"PLAN: 4 batches, {4 * rv.MIN_PASSES} to {4 * rv.MAX_PASSES} passes" in out, (code, planned.batches, len(forge.notes), out[-300:]))
+    code, out = run_review(MemoryForge(), scripted_model(found), ["--pr", "1", "--plan", "--passes", "1"])
+    case("run: a plan under --passes counts the passes of that limit", code == 0 and "PLAN: 4 batches, 4 passes" in out, (code, out[-300:]))
 
     # --- which pull request gets a status at all
     forge, unused = MemoryForge(base="feature"), scripted_model(found)
