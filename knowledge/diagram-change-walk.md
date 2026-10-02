@@ -52,7 +52,8 @@ flowchart TD
     H -- "the cause is outside the change" --> P
     H -- "the change has to change" --> B
     G -- "no review can run in CI" --> O["ask the owner, it spends the owner's seat; then
-    review.py --pr N --local: findings and an audit note, no status.
+    review.py --pr N --local: findings and an audit note, no status;
+    with --passes N a batch gets at most N passes and the note names the limit.
     The merge then needs the owner's approval for this head: judgment step, HAZARD issue 3"]
     O --> I
     G -- "success" --> I["read every thread; fix each finding in its file; then resolve; then push once.

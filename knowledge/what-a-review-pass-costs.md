@@ -59,6 +59,12 @@ What follows from it:
   the pinned model.
 - A review costs batches times passes, and a batch needs at least two passes. An ordinary pull
   request of one batch: two passes, about 3 USD, about 20 minutes.
+- A run outside CI can be cut to a bill named in advance: `--passes N` (1 to 5, with `--local`
+  or `--dry-run` only) gives a batch at most N passes, so `--passes 1` costs batches times one
+  pass. What it gives up is the second pass, the one that shows whether the first found
+  everything. Its audit note names the limit and says "converged: no" when a last allowed pass
+  found something above low. The limit is part of the replay cache's key: a run without it does
+  not replay what a limited run stored.
 - A run keeps what it has: it prints every finding, posts what it found and stores what converged
   before it ends red, and the log prints one line per pass.
 - Passes run in rounds (`in_rounds` in `review.py`): every batch gets one pass before any batch
