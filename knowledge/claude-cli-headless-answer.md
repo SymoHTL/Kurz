@@ -6,10 +6,11 @@ metadata:
 ---
 
 Probed on 2026-10-01 with Claude Code CLI 2.1.283. The raw answers are kept as fixtures under
-`tools/review/fixtures/`.
+`tools/review/fixtures/`; the two answers of the pinned model were captured again on 2026-10-02,
+when the pinned model changed.
 
-The call the reviewer makes (`tools/review/review.py`, `call_model`): prompt on stdin, working
-directory an empty temporary directory, and
+The call the reviewer makes (`tools/review/review.py`, `command` and `call_model`): prompt on
+stdin, working directory an empty temporary directory, an environment built by `model_env`, and
 
 ```
 claude -p --model <exact id> --safe-mode --tools "" --strict-mcp-config
@@ -18,9 +19,11 @@ claude -p --model <exact id> --safe-mode --tools "" --strict-mcp-config
        --system-prompt-file <file> --json-schema <schema>
 ```
 
-`--safe-mode` keeps user settings, plugins, hooks and `CLAUDE.md` files out of the call while the
-login still works. `--tools ""` removes every tool. The empty directory means there is no project
-to load.
+`--safe-mode` switches customizations off: plugins, hooks, skills, MCP servers and `CLAUDE.md`
+files, while the login still works. It does not isolate the call from the machine: model
+selection and the environment of the calling process still apply
+(`knowledge/a-headless-call-inherits-its-session.md`). `--tools ""` removes every tool. The
+empty directory means there is no project to load.
 
 What the answer looks like:
 

@@ -20,7 +20,8 @@ flowchart TD
     B --> C["commit and push.
     Gate: the pre-push hook runs the tree gate over every commit, messages included.
     Future plans: no gate, HAZARD issue 2"]
-    C --> D["open the pull request as a Draft: title without a skip literal,
+    C --> D["open the pull request as a Draft: title and description without a skip literal,
+    a credential or a machine-bound string, because they become the commit on main;
     description with Blast radius when tools change. Gates: pr-title, pr-breadth"]
     D --> E["gates job on every push and on every edit of title or description.
     Red: read the table at the end of the log, fix, push once"]
@@ -29,8 +30,13 @@ flowchart TD
     F --> G{"review status on this head?"}
     G -- "pending: Draft, outside pull request or no run" --> F
     G -- "error: did not complete" --> H["read the run's last line:
-    usage-limit: wait for the reset; credential: the owner; budget: re-run"]
+    usage-limit: wait for the reset; credential: the owner;
+    budget: re-run, what converged is replayed and the rest continues"]
     H --> F
+    G -- "no review can run in CI" --> O["ask the owner, it spends his seat; then
+    review.py --pr N --local: findings and an audit note, no status.
+    The merge needs his approval for this head"]
+    O --> I
     G -- "success" --> I["list every thread; fix each finding in its file;
     then resolve; then push once. Gate: pr-findings"]
     I --> J{"gates green and review green on the head,
@@ -39,7 +45,9 @@ flowchart TD
     J -- "yes" --> K["py -3 tools/merge_pr.py PR SHA: merges exactly that head, squash.
     Gate: the ruleset"]
     J -- "red for a cause outside the change" --> N["the owner approves this pull request and head:
-    merge_pr.py --over-red. Judgment step, HAZARD issue 3"]
+    merge_pr.py --over-red. The ruleset is off for that one merge: nothing else may merge or push meanwhile.
+    Exit 3: still off, say so at once. Exit 6: post the waiver record by hand.
+    Judgment step, HAZARD issue 3"]
     N --> L
     K --> L["delete the branch; the gates job runs on main"]
     X["a defect escapes anyway"] -.-> Y["rule with its gate in CLAUDE.md, knowledge entry,

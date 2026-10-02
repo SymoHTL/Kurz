@@ -1,8 +1,11 @@
 """Unit suite of the reviewer, run by `review.py --self-test`. The CLI answers and the diff under
 fixtures/ are real: captured from the Claude CLI and from git, not written by hand. Where a case
 needs an answer that could not be provoked (a usage limit), it edits a real answer and says so."""
+import contextlib
+import io
 import json
 import os
+import time
 
 import kit
 import review as rv
@@ -22,6 +25,14 @@ def raises(kind, fn):
     return False, "did not raise"
 
 
+def attempt(fn, *args):
+    """The result, or the exception as a value: a broken tool then fails its case instead of ending the suite."""
+    try:
+        return fn(*args)
+    except Exception as e:
+        return e
+
+
 def finding(file="a.md", line=3, severity="medium", title="t", body="b"):
     return {"file": file, "line": line, "severity": severity, "title": title, "body": body}
 
@@ -35,16 +46,99 @@ class Clock:
 
 
 def scripted(*answers, clock=None, seconds=0):
-    """A model stand-in that returns one scripted answer per pass and records what it was told."""
+    """A model stand-in that returns one scripted answer per pass and records what it was told. An
+    answer that is an exception is raised: that pass fails."""
     seen, queue = [], list(answers)
 
     def call(reported):
         seen.append(list(reported))
         if clock:
             clock.t += seconds
-        return (queue.pop(0) if queue else []), 0.01, 0
+        answer = queue.pop(0) if queue else []
+        if isinstance(answer, Exception):
+            raise answer
+        return answer, 0.01, 0
     call.seen = seen
     return call
+
+
+def batch_result(findings=(), passes=2, converged=True, error=None):
+    return {"findings": list(findings), "passes": passes, "converged": converged, "cost": 0.5, "dropped": 0, "error": error}
+
+
+class MemoryForge(rv.Forge):
+    """A forge that answers from memory and keeps what a run posted, so the next run reads it back."""
+
+    def __init__(self):
+        super().__init__("o/r", 1)
+        self.threads, self.notes, self.statuses = [], [], []
+
+    def pr(self):
+        return {"head": {"sha": "c" * 40}, "base": {"ref": "main"}, "state": "open", "title": "A title", "body": "A body",
+                "html_url": "https://example.com/o/r/pull/1"}
+
+    def me(self):
+        return "bot"
+
+    def default_branch(self):
+        return "main"
+
+    def rules(self, branch):
+        return "sections:\n  - name: all\n    always: true\n    rules: [a rule]\n"
+
+    def review_comments(self):
+        return self.threads
+
+    def issue_comments(self):
+        return self.notes
+
+    def post(self, path, payload, method="POST"):
+        comment = {"id": len(self.notes) + 1, "user": {"login": "bot"}, "body": payload.get("body")}
+        if method == "PATCH":
+            next(c for c in self.notes if str(c["id"]) == path.rsplit("/", 1)[1])["body"] = payload["body"]
+        elif path.startswith("pulls/"):
+            self.threads.append(comment)
+        elif path.startswith("issues/"):
+            self.notes.append(comment)
+        elif path.startswith("statuses/"):
+            self.statuses.append(payload["state"])
+        return {}
+
+    def marks(self, mark):
+        return [payload for _, payload in rv.marked(self.notes, "bot", mark)]
+
+
+def scripted_model(script):
+    """A stand-in for the CLI: `script` maps a path to what a batch holding that path answers, a list
+    of findings or an exception. Like the model, it does not repeat what the prompt lists as reported."""
+    def call(prompt, paths, timeout_s):
+        call.batches.append(sorted(paths))
+        answer = next((script[p] for p in sorted(paths) if p in script), [])
+        if isinstance(answer, Exception):
+            raise answer
+        return [f for f in answer if f"- {f['file']}:{f['line']} " not in prompt], 0.25, 0
+    call.batches = []
+    return call
+
+
+def run_review(forge, model, argv, ci=False, credential="", started=""):
+    """review() against a forge and a model that answer from memory: (exit code, what it printed)."""
+    env = {"GITHUB_ACTIONS": "true" if ci else "", "ANTHROPIC_API_KEY": credential, "CLAUDE_CODE_OAUTH_TOKEN": "",
+           "REVIEW_STARTED": started, "REVIEW_TIMEOUT_MIN": "", "GITHUB_RUN_ID": ""}
+    saved = {k: os.environ.get(k) for k in env}
+    originals = rv.Forge, rv.fetch_diff, rv.call_model, rv.batches, kit.repo
+    out = io.StringIO()
+    try:
+        os.environ.update(env)
+        rv.Forge, rv.fetch_diff, rv.call_model = (lambda repo, number: forge), (lambda pr, number: fixture("sample-diff.txt")), model
+        rv.batches, kit.repo = (lambda files: originals[3](files, limit=420)), (lambda: "o/r")
+        with contextlib.redirect_stdout(out):
+            code = rv.review(argv)
+    finally:
+        rv.Forge, rv.fetch_diff, rv.call_model, rv.batches, kit.repo = originals
+        for k, v in saved.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    return code, out.getvalue()
 
 
 def run():
@@ -60,6 +154,26 @@ def suite(case):
     # --- pins (first: a wrong model id makes the real answers below unreadable)
     case("pin: the model is an exact id, not an alias", bool(rv.re.fullmatch(r"claude-[a-z]+-\d+(?:-\d+)+", rv.MODEL)), rv.MODEL)
     case("pin: at least two passes, and a cap", 2 <= rv.MIN_PASSES < rv.MAX_PASSES <= 6)
+    case("pin: the effort is a level the CLI knows", rv.EFFORT in ("low", "medium", "high", "xhigh", "max"), rv.EFFORT)
+
+    # --- the model call: what it may reach, and what may reach it
+    env = rv.model_env({"PATH": "p", "GH_TOKEN": "t", "GITHUB_TOKEN": "t", "CLAUDE_CODE_EFFORT_LEVEL": "the machine's",
+                        "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "s", "CLAUDE_CODE_OAUTH_TOKEN": "o",
+                        "CLAUDE_CONFIG_DIR": "c", "ANTHROPIC_API_KEY": "k"})
+    case("call: the model gets no forge token, and keeps the rest", "GH_TOKEN" not in env and "GITHUB_TOKEN" not in env
+         and env.get("PATH") == "p", sorted(env))
+    case("call: the effort is the pinned one, whatever the machine exports", env.get("CLAUDE_CODE_EFFORT_LEVEL") == rv.EFFORT, env)
+    case("call: nothing else of a surrounding Claude session gets in", "CLAUDECODE" not in env and "CLAUDE_CODE_SESSION_ID" not in env
+         and env.get("PATH") == "p", sorted(env))
+    case("call: the login passes through", (env.get("CLAUDE_CODE_OAUTH_TOKEN"), env.get("CLAUDE_CONFIG_DIR"), env.get("ANTHROPIC_API_KEY"))
+         == ("o", "c", "k"), sorted(env))
+    cmd = rv.command("claude", "system.txt")
+    after = lambda flag: cmd[cmd.index(flag) + 1] if flag in cmd else None
+    case("call: the command names the pinned model", after("--model") == rv.MODEL, cmd)
+    case("call: the model gets no tool and no MCP server", after("--tools") == "" and "--strict-mcp-config" in cmd
+         and after("--mcp-config") == '{"mcpServers":{}}', cmd)
+    case("call: customizations are off and no session is kept", "--safe-mode" in cmd and "--no-session-persistence" in cmd, cmd)
+    case("call: the answer is JSON under the schema", after("--output-format") == "json" and json.loads(after("--json-schema") or "null") == rv.SCHEMA, cmd)
 
     # --- the diff, from a real `git diff`
     files = rv.parse_diff(fixture("sample-diff.txt"))
@@ -142,6 +256,9 @@ def suite(case):
     case("answer: text that is not JSON", *raises("bad-output", lambda: rv.parse_result("Error: something", 0, {"a.md"})))
     case("answer: JSON that is not an object", *raises("bad-output", lambda: rv.parse_result("[]", 0, {"a.md"})))
     case("answer: no structured output", *raises("bad-output", lambda: rv.parse_result(json.dumps({**ok, "structured_output": None}), 0, {"a.md"})))
+    wrapped = json.loads(fixture("cli-findings.json"))
+    wrapped["structured_output"]["findings"][0]["title"] = "a title\nover  two lines"  # edited: the real title is one line
+    case("answer: a title is made one line", rv.parse_result(json.dumps(wrapped), 0, {"a.md"})[0][0]["title"] == "a title over two lines")
     paths = {"a.md"}
     for name, bad in {"line 0": finding(line=0), "a line that is true": finding(line=True), "a line as text": finding(line="3"),
                       "an unknown severity": finding(severity="critical"), "an empty title": finding(title=" "),
@@ -170,6 +287,36 @@ def suite(case):
     call = scripted([finding(line=1)], [])
     rv.converge(call, [], budget())
     case("converge: the second pass hears the first pass's finding", [f["line"] for f in call.seen[1:2] for f in f] == [1], call.seen)
+    r = rv.converge(scripted([finding()], rv.ReviewError("api", "boom", 500)), [], budget())
+    case("converge: a pass that fails keeps what the passes before it found", (r["passes"], r["converged"], len(r["findings"])) == (1, False, 1)
+         and getattr(r["error"], "kind", None) == "api", r)
+    case("converge: a batch whose passes all answered carries no error", rv.converge(scripted(), [], budget())["error"] is None)
+
+    # --- what the batches of a run add up to
+    work = [[("a.md", "part 1")], [("a.md", "part 2"), ("b.md", "x")], [("c.md", "x")]]
+    low, high = finding(line=7, severity="low"), finding(line=7, severity="high")
+    got, capped, unconverged, incomplete = rv.settle([batch_result([low]), batch_result([high]), batch_result()], work)
+    case("settle: converged batches are a completed review", (capped, unconverged, incomplete) == ([], [], None) and len(got) == 1,
+         (got, capped, unconverged, incomplete))
+    case("settle: across batches the higher severity on a line wins", [f["severity"] for f in got] == ["high"], got)
+    got, capped, unconverged, incomplete = rv.settle(
+        [batch_result(), batch_result([finding()], passes=1, converged=False), batch_result()], work)
+    case("settle: a batch out of time leaves the review incomplete", (incomplete or ("",))[0] == "budget" and capped == [], incomplete)
+    case("settle: what an unfinished batch found is still reported", len(got) == 1, got)
+    case("settle: a file is cached only if every batch that holds it converged", unconverged == ["a.md", "b.md"], unconverged)
+    incomplete = rv.settle([batch_result(), batch_result(), batch_result(passes=0, converged=False)], work)[3]
+    case("settle: a batch that never started leaves the review incomplete", (incomplete or ("",))[0] == "budget" and "batches 3" in incomplete[1],
+         incomplete)
+    failed = batch_result([finding()], passes=1, converged=False, error=rv.ReviewError("api", "boom", 500))
+    limit = batch_result(passes=0, converged=False, error=rv.ReviewError("usage-limit", "resets at 3pm", 429))
+    got, capped, unconverged, incomplete = rv.settle([batch_result(), failed, batch_result()], work)
+    case("settle: a failed batch gives the review its reason", (incomplete or ("",))[0] == "api" and "boom" in incomplete[1] and len(got) == 1,
+         incomplete)
+    case("settle: a usage limit outranks another failure", (rv.settle([failed, limit, batch_result()], work)[3] or ("",))[0] == "usage-limit")
+    got, capped, unconverged, incomplete = rv.settle(
+        [batch_result(), batch_result(), batch_result([finding(file="c.md")], passes=rv.MAX_PASSES, converged=False)], work)
+    case("settle: a batch at the pass cap is reviewed, loudly, and not cached", (capped, unconverged, incomplete) == (["c.md"], ["c.md"], None),
+         (capped, unconverged, incomplete))
 
     # --- time budget
     clock = Clock()
@@ -264,3 +411,61 @@ def suite(case):
     case("notes: a failure is posted once per commit", rv.note_wanted(existing, "failed", sha="aaa") is None
          and rv.note_wanted(existing, "failed", sha="bbb") == {"kind": "failed", "sha": "bbb"})
     case("notes: a note of one kind does not swallow another kind", rv.note_wanted(existing, "no-convergence", sha="aaa") is not None)
+
+    # --- the call
+    ci_env = {"GITHUB_ACTIONS": "true", "PR_NUMBER": "7"}
+    understood = lambda argv, env: rv.arguments(argv, env) or {}
+    case("args: a number and a mode are a call", understood(["--pr", "7", "--local"], {}) ==
+         {"pr": 7, "local": True, "dry": False, "bootstrap": None, "ci": False}, understood(["--pr", "7", "--local"], {}))
+    case("args: in CI the number comes from the job, and no mode is needed", understood([], ci_env).get("pr") == 7 and understood([], ci_env).get("ci") is True)
+    case("args: the bootstrap rules file is read from the call", understood(["--pr", "7", "--dry-run", "--bootstrap-rules", "r.yaml"], {}).get("bootstrap") == "r.yaml")
+    case("args: outside CI a call without a mode is not understood", rv.arguments(["--pr", "7"], {}) is None)
+    case("args: a mistyped option is not understood, so it cannot post", rv.arguments(["--dryrun"], ci_env) is None and rv.arguments([], ci_env) is not None)
+    case("args: --local and --dry-run together are not understood", rv.arguments(["--pr", "7", "--local", "--dry-run"], {}) is None)
+    case("args: an option without its value is not understood", rv.arguments(["--local", "--pr"], {}) is None)
+    case("args: a pull request that is no number is not understood", attempt(rv.arguments, ["--pr", "x", "--local"], {}) is None)
+    case("args: an option given twice is not understood", rv.arguments(["--pr", "7", "--pr", "8", "--local"], {}) is None)
+
+    # --- whole runs, against a forge and a model that answer from memory. The sample diff makes
+    # four batches here: a.md in the first two, b.md and e.md in the third, new.kz in the last.
+    kinds = lambda forge: [n["kind"] for n in forge.marks(rv.NOTE_MARK)]
+    stored = lambda forge: sorted((forge.marks(rv.STATE_MARK) or [{}])[-1].get("files", {}))
+    found = {"a.md": [finding()]}
+    forge = MemoryForge()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": rv.ReviewError("usage-limit", "resets at 3pm", 429)}),
+                           ["--pr", "1", "--local"])
+    case("run: a failing batch still posts what the others found", len(forge.threads) == 1 and "`a.md` line 3" in forge.threads[0]["body"],
+         out)
+    case("run: only what converged is stored", stored(forge) == ["a.md", "b.md", "e.md"], stored(forge))
+    case("run: a usage limit ends the run red, with a failure note and no audit note", code == 3 and kinds(forge) == ["failed"]
+         and "REVIEW DID NOT COMPLETE (usage-limit)" in out, (code, kinds(forge)))
+    again = scripted_model(found)
+    code, out = run_review(forge, again, ["--pr", "1", "--local"])
+    case("run: the next run replays what was stored and reviews the rest", again.batches == [["new.kz"], ["new.kz"]] and code == 0
+         and kinds(forge) == ["failed", "off-pipeline"] and stored(forge) == ["a.md", "b.md", "e.md", "new.kz"] and len(forge.threads) == 1,
+         (again.batches, code, kinds(forge), stored(forge)))
+    case("run: a run outside CI posts no status", forge.statuses == [], forge.statuses)
+    forge = MemoryForge()
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
+    case("run: in CI a completed review posts the success status", (code, forge.statuses) == (0, ["success"]) and "REVIEW COMPLETE" in out,
+         (code, forge.statuses))
+    forge = MemoryForge()
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x", started=str(time.time() - 86400))
+    case("run: in CI a review out of time posts the error status, never success", (code, forge.statuses) == (1, ["error"])
+         and "REVIEW DID NOT COMPLETE (budget)" in out, (code, forge.statuses, out[-200:]))
+    forge, unused = MemoryForge(), scripted_model(found)
+    code, out = run_review(forge, unused, ["--pr", "1"], ci=True)
+    case("run: in CI a missing credential is an error status, and no model call", (code, forge.statuses, kinds(forge), unused.batches)
+         == (1, ["error"], ["failed"], []), (code, forge.statuses, kinds(forge), unused.batches))
+    forge = MemoryForge()
+    forge.issue_comments = lambda: None + 1  # a bug inside the run, of a kind nobody listed: a TypeError
+    try:
+        code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
+    except Exception as e:  # the crash this case is about must fail the case, not end the suite
+        code, out = None, repr(e)
+    case("run: a crash inside the run is a review that did not complete, with its status", (code, forge.statuses) == (1, ["error"])
+         and "REVIEW DID NOT COMPLETE (failed)" in out, (code, forge.statuses, out[-200:]))
+    forge, dry = MemoryForge(), scripted_model(found)
+    code, out = run_review(forge, dry, ["--pr", "1", "--dry-run"])
+    case("run: a dry run reviews and posts nothing", code == 0 and not (forge.threads or forge.notes or forge.statuses) and len(dry.batches) == 8
+         and "DRY RUN" in out, (code, len(forge.threads), len(forge.notes), dry.batches))

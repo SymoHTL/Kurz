@@ -11,8 +11,8 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 ## Build & Test
 
 - `py -3 tools/gates.py` runs every gate; `--pr N` adds the pull-request gates. CI runs the same
-  file with `python3`. Its last line counts PASS, FAIL and NOT RUN: a NOT RUN is not a pass.
-  Gate: the `gates` job.
+  file with `python3`. Its last line counts PASS, PARTLY, FAIL and NOT RUN. A NOT RUN is not a
+  pass, and neither is PARTLY: that gate named something it could not read. Gate: the `gates` job.
 - `py -3 tools/<tool>.py --self-test` runs one tool's cases. A changed decision needs a case, and
   the case needs an entry in `tools/red_proofs.json` naming the mutation that turns it red.
   Gate: `self-tests` (`tools/red_proof.py` replays every mutation).
@@ -25,9 +25,11 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 
 - A local run sees the working tree, untracked files included. CI sees commits. A file you did
   not stage is the usual reason for "green here, red there".
-- CI also sees what the gates themselves create. The first run was red on `tools/__pycache__/`,
-  which a machine-wide gitignore had hidden locally: such files are ignored in this repository's
-  own `.gitignore`, not in yours.
+- CI also sees what the gates themselves create, and runs Python the way a clean machine does.
+  The first run was red on `tools/__pycache__/` and on one red proof that read stale bytecode:
+  the machine the tools were written on never writes bytecode. Such files are ignored in this
+  repository's own `.gitignore`, and the proof replay writes none. Gate: `self-tests`
+  ([knowledge/stale-bytecode-hides-a-mutation.md](knowledge/stale-bytecode-hides-a-mutation.md)).
 - The review in CI runs the **base branch's** reviewer and rules, never the pull request's. A
   change to `tools/review/` or `.review/` reviews nothing until it is merged.
 - Numbers in `guides/quality-bar-evidence.md` are generated. Run `py -3 tools/quality_evidence.py`;
@@ -43,7 +45,8 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 2. **Every case was seen red.** The mutation is recorded and replayed on every run, so a gate
    that went soft turns the build red. Gate: `self-tests`.
 3. **Unchecked never looks clean.** A scan that is satisfied by finding nothing has a floor; a
-   failed command is a refusal; a gate that could not run prints NOT RUN and is red in CI.
+   failed command is a refusal; a gate that could not run prints NOT RUN and is red in CI; a
+   gate that could read only part says which part and ends PARTLY, never PASS.
    Gate: `self-tests` (each tool has its floor and refusal cases).
 4. **No retry of a failure.** A red gate is fixed, not re-run; a retry is for infrastructure,
    after you know why it failed. `judgment step`
@@ -56,8 +59,9 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 - `review` pending: nothing reviewed this head. A Draft and a pull request from outside are
   reviewed on demand: `gh workflow run review.yml -f pr=N`.
 - `review` red: read the run's last line, `REVIEW DID NOT COMPLETE (kind)`. `usage-limit`: wait
-  for the reset, do not re-run now. `credential`: the owner fixes the secret. `rules`,
-  `oversized`, `budget`: the line says what to do.
+  for the reset, do not re-run now. `credential`: the owner fixes the secret. `budget`: re-run
+  it; what the run found is posted and what converged is replayed, so the next run continues.
+  `rules`, `oversized`: the line says what to do.
 - A branch behind `main` fails what `main` already fixed: update the branch before debugging.
 
 ## Architecture
@@ -91,12 +95,14 @@ judgment is labelled `judgment step`. Never an ungated rule. Gate: review rule "
 
 ### A public repository
 
-- **Future plans stay out**: what gets built when, steps, milestones, schedules, the first
-  program, compiler rewrites. Not in a file, a commit message, a pull request, an issue. Simon
-  keeps them local (2026-10-01). HAZARD (no gate before the push; #2); the reviewer flags it after.
+- **Future plans stay out**: what gets built when, steps, milestones, schedules, which program
+  comes first, when the compiler is rewritten. Not in a file, a commit message, a pull request,
+  an issue. That the design holds a thing is not a plan; when it gets built is. Simon keeps the
+  plan local (2026-10-01). HAZARD (no gate before the push; #2); the reviewer flags it after.
 - **Nothing bound to a machine, a person or another workspace**: no absolute path, drive letter,
   profile directory, private address, e-mail address, or another project's internal name.
-  Gate: `tree` and the pre-push hook for the shapes; review rule "every pull request" for names.
+  Gate: `tree` and the pre-push hook for the shapes; `pr-title` for the title and the description,
+  which become the squash commit on `main`; review rule "every pull request" for names.
 - **A push cannot be taken back.** A history rewrite leaves the old commits reachable on GitHub.
   Run the gates before the push, not after. Gate: the pre-push hook; HAZARD (#4) where it is off.
 
@@ -115,7 +121,7 @@ judgment is labelled `judgment step`. Never an ungated rule. Gate: review rule "
   the knowledge store and rule files the file must change before the thread is resolved; on tool
   and workflow code a written reply also counts. Lows on tool code that are not fixed in the round
   go to an issue labelled `review-lows`. Gate: `pr-findings`.
-- **No workflow-skip literal** in a title or commit message. Gate: `pr-title`.
+- **No workflow-skip literal** in a title, a description or a commit message. Gate: `pr-title`.
 - **A change to the quality tools, or one over 15 files, says what it can break** in a "Blast
   radius" section. Gate: `pr-breadth`; the reviewer audits the section against the diff.
 - **A change to a gate, tool, hook or review rule updates the gate map and the guide** in the same

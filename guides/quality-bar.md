@@ -27,7 +27,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | 3. Detection is built while building | Each tool carries its cases; a new decision without a case and a red proof turns `self-tests` red. |
 | 4. One definition per concept | One gate runner (`tools/gates.py`) for CI and local runs; one tree gate for CI, the write-time hook and the pre-push hook; one ruleset file for the server setting, its assertion and the merge tool; one pattern list (`tools/kit.py`). |
 | 5. Facts are routed by kind | The "Knowledge" rules in `CLAUDE.md`; `knowledge/diagram-knowledge-routing.md`. |
-| 6. Unchecked must never look clean | Floors in every scan; `NOT RUN` as its own verdict; the `review` status exists only after a completed review; a failed command is a refusal (`kit.Refused`). |
+| 6. Unchecked must never look clean | Floors in every scan; `NOT RUN` as its own verdict, and `PARTLY` for a gate that could read only part of what it checks; the `review` status exists only after a completed review, and a batch that failed or ran out of time is not reviewed; a failed command is a refusal (`kit.Refused`). |
 | 7. Every decision tool proves itself | `tools/red_proof.py` runs every self-test and replays every recorded mutation from `tools/red_proofs.json` on each run. |
 
 ## Section by section
@@ -77,7 +77,7 @@ the tutorial lists:
 | Draft lane as a blocking manual job | A Draft cannot be merged, and marking it Ready starts the review. In Draft the review runs on demand: `gh workflow run review.yml -f pr=N`. |
 | Rules fetched from the target branch | `pull_request_target`: workflow, reviewer and rules all come from the base branch (`knowledge/the-review-runs-the-base-branch.md`). |
 | Unanchored thread for the lows | GitHub has no resolvable thread without a file, so the lows share one file-level thread on the first file that has one. |
-| No per-request override of the pipeline check | The same. The gate-flip switches the ruleset's enforcement off for one merge, restores it and reads it back. |
+| No per-request override of the pipeline check | The same. The gate-flip switches the ruleset's enforcement off for one merge, restores it and reads it back. While it is off nothing on the server holds any pull request or a push to `main`; the tool's own reading of the checks is the only gate, so it counts a check run only from the app the ruleset pins. |
 | Pipeline-control literals in the title | The workflow-skip literals; a squash merge puts the title on `main`. |
 | Editing title or description starts no pipeline | The gates do run on `edited`. The review does not, by design: the description is part of its cache key, and an edit would bill a full review. Re-run it by hand after an edit that matters. |
 | Trigger jobs must never be waived | There are none: `tools/lint_ci.py` refuses a job that calls another workflow. |
@@ -93,10 +93,22 @@ file and line; a time budget counted from the job's start; a replay cache of per
 whose key covers the script, the rules, the title and the description; notes that are never
 silent and never repeated.
 
-Three things are specific to this repository:
+Five things are specific to this repository:
 
 - **The model is pinned by exact id** in `review.py`, and an answer from any other model is
-  refused.
+  refused. **The effort is pinned next to it.** The model call gets an environment of its own:
+  no forge token and nothing of a Claude session that happens to run the script, because such a
+  session exports its own effort and switches
+  (`knowledge/a-headless-call-inherits-its-session.md`).
+- **A run that fails or runs out of time keeps what it has.** It posts what the finished passes
+  found, stores the files whose batches converged, and then ends red. The next run replays those
+  files and continues with the rest, so a diff that needs more than one run is reviewed across
+  them and no paid pass is thrown away. A batch counts as reviewed only when it converged or used
+  every pass it may have. The first version here posted nothing unless every batch had run, and
+  let a batch that ran out of time after one pass stand as reviewed.
+- **The log is written line by line**, one line per pass with its duration. A pass takes minutes
+  (`knowledge/what-a-review-pass-costs.md`), and a log that fills only at the end hides a run
+  that will not finish.
 - **A pull request from outside is not reviewed automatically.** The repository is public and a
   review spends the owner's Claude seat, so the job runs for the owner, members and collaborators.
   The owner dispatches the workflow for anyone else.
@@ -125,7 +137,8 @@ same pull request.
   proof.
 - **A scheduled job that asserts the merge settings.** The assertion runs with every gates run
   instead. The bypass list and the auto-merge switch need a token the job does not have; the job
-  prints NOT CHECKED for both, and a local run with the owner's login checks them (HAZARD #7).
+  prints NOT CHECKED for both and the gate ends as PARTLY, which is not red and is not counted
+  as a pass. A local run with the owner's login checks them (HAZARD #7).
 - **The launcher, the per-window isolation, the worktree-removal script.** They belong to a
   machine that runs many sessions at once, and they live there.
 - **A token-usage block in the evidence.** Only a machine with the session logs could fill it.

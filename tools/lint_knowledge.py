@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Lint for the knowledge store: knowledge/, guides/ and INDEX.md. Fails on: an INDEX link to a
-missing file, a store file no INDEX line links to, an INDEX line without a hook after its em dash,
+missing file, a store file no INDEX line links to, a path of a store file that does not exist,
+written in an entry, in CLAUDE.md or in a skill, an INDEX line without a hook after its em dash,
 an entry whose frontmatter lacks a non-empty name, description or metadata.type, a nested or
 non-.md file under knowledge/ or guides/, an entry tagged LIVING without a mermaid block or an
 "Update triggers" section, a scan that found fewer than FLOOR entries, and a guide whose numbers
@@ -28,6 +29,8 @@ VALUE = r"(?![ \t]*$)(?!(?:\"\"|''|~|null)[ \t]*$)"
 # `type:` indented under `metadata:`, with a value; other metadata keys may come first.
 META_TYPE = re.compile(r"^metadata:[ \t]*\n(?:[ \t]+\S.*\n)*?[ \t]+type:[ \t]*" + VALUE + r"\S", re.M)
 LINK = r"\]\(((?:knowledge|guides)/[^)#]+\.md)(?:#[^)]*)?\)"  # an #anchor is still a link
+# The path of a store file, as prose, rules and skills write it: in a link or in backticks.
+REFERENCE = re.compile(r"(?<![\w/.-])((?:knowledge|guides)/[A-Za-z0-9._-]+\.md)")
 
 
 def expiry(rel, fm, today):
@@ -82,6 +85,13 @@ def lint(root, floor=FLOOR, today=None):
             errors.append(f"INDEX.md: the line for {m.group(1)} has no hook after an em dash")
         if "LIVING" in tags.split():
             living.add(m.group(1))
+
+    # Who else names store files: the rules file and the skills. The index has its own rule above.
+    skills = os.path.join(root, ".claude", "skills")
+    readers = ["CLAUDE.md"] + [f".claude/skills/{d}/SKILL.md" for d in (sorted(os.listdir(skills)) if os.path.isdir(skills) else [])]
+    for rel in sorted(files) + [r for r in readers if os.path.isfile(os.path.join(root, r))]:
+        for ref in sorted(set(REFERENCE.findall(kit.read(os.path.join(root, rel)))) - files):
+            errors.append(f"{rel} names {ref}, which does not exist")
 
     names, links = set(), []
     for rel in sorted(files):
@@ -181,6 +191,16 @@ def self_test():
         # A warning must fire too, and must NOT fail the run: "warn:" checks the warnings instead.
         "dangling wikilink warns": (tree({**good, k + "w.md": ok(7) + "see [[nowhere]]\n"}), "warn:resolves to no entry"),
         "resolved wikilink is silent": (tree({**good, k + "r.md": ok(4) + "see [[e0]]\n"}), None),
+        "an entry names a store file that is not there": (tree({**good, k + "r.md": ok(4) + "see `knowledge/gone.md`\n"}),
+                                                          "knowledge/r.md names knowledge/gone.md"),
+        "the rules file names a store file that is not there": (
+            tree({**good, "CLAUDE.md": "read [it](guides/gone.md)\n"}, index=good_index), "CLAUDE.md names guides/gone.md"),
+        "a skill names a store file that is not there": (
+            tree({**good, ".claude/skills/walk/SKILL.md": "the picture is `knowledge/gone.md`\n"}, index=good_index),
+            ".claude/skills/walk/SKILL.md names knowledge/gone.md"),
+        "naming store files that exist is clean": (
+            tree({**good, k + "r.md": ok(4) + "see knowledge/e0.md\n", "CLAUDE.md": "read `knowledge/e1.md`\n",
+                  ".claude/skills/walk/SKILL.md": "and knowledge/e2.md\n"}, index=good_index + ["- [r](knowledge/r.md) — hook"]), None),
     }
     results = []
     for label, (root, needle) in cases.items():

@@ -24,6 +24,9 @@ LIVING = a diagram kept current with the system it draws.
 ## Tools
 
 - [Claude CLI headless answer](knowledge/claude-cli-headless-answer.md) TRAP — an API error still says `"subtype": "success"`. Decide on `is_error`, the exit code and `structured_output`; check `modelUsage` for the pinned model. The entry has the flags for a call with no tools.
+- [A headless call inherits its session](knowledge/a-headless-call-inherits-its-session.md) TRAP — a CLI call started inside an agent session takes that session's effort and switches from the environment, `--safe-mode` does not stop it, and `--effort` loses against the inherited variable. The reviewer builds the child's environment itself and pins the effort beside the model.
+- [What a review pass costs](knowledge/what-a-review-pass-costs.md) HARD — one pass over a 30k-character batch thinks 60k to 120k tokens and takes 10 to 14 minutes at every effort; about 1.4 to 1.8 USD on `claude-opus-5-5`, 3.5 to 4.3 on `claude-fable-5-1`, with no better findings for the price. A 16-batch pull request cannot be reviewed in one 85-minute run; keep diffs small and finish reviewer changes before the review starts.
+- [Stale bytecode hides a mutation](knowledge/stale-bytecode-hides-a-mutation.md) HARD — Python reuses a `.pyc` when the source has the same size and the same second of modification, so two equally long mutations of `tools/kit.py` ran as the first one, in CI only. The red-proof replay writes no bytecode; a harness that rewrites source and runs it again must not let the interpreter cache it.
 - [YAML plain scalar traps](knowledge/yaml-plain-scalar-traps.md) HARD — in a YAML list a colon-space turns a bullet into a mapping and a leading quote ends it early; PyYAML keeps the last of two duplicate keys silently. Quote the bullet or use `>-`.
 
 ## The quality bar

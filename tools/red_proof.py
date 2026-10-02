@@ -36,10 +36,13 @@ def tools_in(root):
 
 
 def self_test_of(root, tool):
-    """(exit code, output) of one tool's self-test, run inside `root`."""
+    """(exit code, output) of one tool's self-test, run inside `root`. No bytecode is written: Python
+    takes a cached module for current when the source has the same size and the same second of
+    modification, so two equally long mutations of a shared module read as the first one."""
     try:
         p = subprocess.run([sys.executable, os.path.join(root, tool), "--self-test"], cwd=root, capture_output=True,
-                           text=True, encoding="utf-8", errors="replace", timeout=600)
+                           text=True, encoding="utf-8", errors="replace", timeout=600,
+                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     except (OSError, subprocess.TimeoutExpired) as e:
         return 99, f"{type(e).__name__}: {e}"
     return p.returncode, p.stdout + p.stderr
@@ -147,6 +150,19 @@ def self_test():
     root = tree({"toy.py": toy}, [proof])
     check(root, floor=1)
     cases.append(("the mutated file is restored", kit.read(os.path.join(root, "tools", "toy.py")) == toy, ""))
+    # A tool that imports a module: with bytecode on, the run would leave the module's cache behind.
+    shared = toy.replace("import sys\n", "import sys\nimport helper\n").replace("add(1, 1) == 2", "helper.two() == 2")
+    root = tree({"toy.py": shared, "helper.py": "def two():\n    return 2\n"},
+                [{**proof, "file": "tools/helper.py", "anchor": "return 2", "replacement": "return 3"}])
+    inherited = os.environ.pop("PYTHONDONTWRITEBYTECODE", None)  # the machine may have switched bytecode off by itself
+    try:
+        errors, stats = check(root, floor=1)
+    finally:
+        if inherited is not None:
+            os.environ["PYTHONDONTWRITEBYTECODE"] = inherited
+    cached = [d for d, _, _ in os.walk(root) if os.path.basename(d) == "__pycache__"]
+    cases.append(("a run leaves no cached module for the next mutation to be read through",
+                  not errors and stats["tools/toy.py"]["cases"] == 1 and not cached, (errors, cached)))
     return kit.report(cases)
 
 

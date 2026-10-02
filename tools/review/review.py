@@ -35,7 +35,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import kit  # noqa: E402
 
-MODEL = "claude-fable-5-1"  # an exact id, never an alias: an alias changes the reviewer without a diff
+MODEL = "claude-opus-5-5"  # an exact id, never an alias: an alias changes the reviewer without a diff
+EFFORT = "high"  # pinned for the same reason: left alone, the call takes the effort of the machine that runs it
 RULES_PATH = ".review/review-rules.yaml"
 STATUS_CONTEXT = "review"
 BATCH_CHARS = 30_000
@@ -83,7 +84,7 @@ NOTE_MARK = re.compile(r"<!-- kurz-review:note (\{.*?\}) -->", re.S)
 
 class ReviewError(Exception):
     """The review cannot complete. kind: usage-limit, credential, cli-missing, wrong-model, api,
-    timeout, bad-output, or a plain reason."""
+    budget (out of time), bad-output, or a plain reason."""
 
     def __init__(self, kind, detail, status=None):
         super().__init__(f"{kind}: {detail}")
@@ -251,30 +252,47 @@ def parse_result(stdout, returncode, paths):
     out = d.get("structured_output")
     if not isinstance(out, dict) or not isinstance(out.get("findings"), list):
         raise ReviewError("bad-output", "the answer carries no structured findings")
-    good = [{k: f[k] for k in ("file", "line", "severity", "title", "body")} for f in out["findings"] if valid_finding(f, paths)]
+    # A title is one line: it is listed to later passes as "already reported", one finding per line.
+    good = [{**{k: f[k] for k in ("file", "line", "severity", "body")}, "title": " ".join(f["title"].split())}
+            for f in out["findings"] if valid_finding(f, paths)]
     return good, float(d.get("total_cost_usd") or 0), len(out["findings"]) - len(good)
+
+
+def model_env(environ):
+    """The environment of the model call. It carries no forge token, and nothing of a Claude session
+    that happens to run this script: such a session exports its own effort and switches, and the
+    first review here ran at the machine's effort instead of the reviewer's. The login stays."""
+    keep = ("CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR")
+    env = {k: v for k, v in environ.items()
+           if k not in ("GH_TOKEN", "GITHUB_TOKEN") and (k in keep or not k.upper().startswith("CLAUDE"))}
+    env["CLAUDE_CODE_EFFORT_LEVEL"] = EFFORT  # the one switch that beat a machine's own setting when probed
+    return env
+
+
+def command(cli, system):
+    """The model call: the pinned model, no tool, no MCP server, no customization, nothing kept."""
+    return [cli, "-p", "--model", MODEL, "--safe-mode", "--tools", "", "--strict-mcp-config",
+            "--mcp-config", '{"mcpServers":{}}', "--no-session-persistence", "--disable-slash-commands",
+            "--permission-prompts", "none", "--output-format", "json",
+            "--system-prompt-file", system, "--json-schema", json.dumps(SCHEMA)]
 
 
 def call_model(prompt, paths, timeout_s):
     cli = shutil.which("claude")
     if not cli:
         raise ReviewError("cli-missing", "the Claude CLI is not on PATH")
-    env = {k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")}  # the model needs no forge token
     with tempfile.TemporaryDirectory() as tmp:
         empty = os.path.join(tmp, "cwd")  # empty, so no CLAUDE.md and no project settings load
         os.mkdir(empty)
         system = os.path.join(tmp, "system.txt")
         with open(system, "w", encoding="utf-8") as f:
             f.write(SYSTEM)
-        cmd = [cli, "-p", "--model", MODEL, "--safe-mode", "--tools", "", "--strict-mcp-config",
-               "--mcp-config", '{"mcpServers":{}}', "--no-session-persistence", "--disable-slash-commands",
-               "--permission-prompts", "none", "--output-format", "json",
-               "--system-prompt-file", system, "--json-schema", json.dumps(SCHEMA)]
         try:
-            p = subprocess.run(cmd, input=prompt, cwd=empty, env=env, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=timeout_s)
+            p = subprocess.run(command(cli, system), input=prompt, cwd=empty, env=model_env(os.environ),
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            raise ReviewError("timeout", f"a pass did not finish in {int(timeout_s)} s") from None
+            raise ReviewError("budget", f"a pass was cut off after the {int(timeout_s)} s the time budget had left; "
+                                        f"re-run the review: what converged is replayed") from None
         except OSError as e:
             raise ReviewError("cli-missing", f"the Claude CLI did not start: {e}") from None
     return parse_result(p.stdout, p.returncode, paths)
@@ -301,12 +319,17 @@ class Budget:
 def converge(call, reported, budget):
     """Review one batch until a pass adds nothing above low: at least MIN_PASSES, at most MAX_PASSES.
     call(reported so far) -> (findings, cost, dropped). Identity of a finding is (file, line); a
-    higher severity on the same line replaces the lower one."""
+    higher severity on the same line replaces the lower one. A pass that fails ends the batch: what
+    the passes before it found is kept, next to the error."""
     known = {(f["file"], f["line"]): RANK[f["severity"]] for f in reported}
-    found, passes, cost, converged, dropped = {}, 0, 0.0, False, 0
+    found, passes, cost, converged, dropped, error = {}, 0, 0.0, False, 0, None
     while passes < MAX_PASSES and budget.fits():
         began = budget.now()
-        new, c, d = call(reported + list(found.values()))
+        try:
+            new, c, d = call(reported + list(found.values()))
+        except ReviewError as e:
+            error = e
+            break
         budget.observe(budget.now() - began)
         passes, cost, dropped = passes + 1, cost + c, dropped + d
         added_above_low = False
@@ -318,7 +341,33 @@ def converge(call, reported, budget):
         if passes >= MIN_PASSES and not added_above_low:
             converged = True
             break
-    return {"findings": list(found.values()), "passes": passes, "converged": converged, "cost": cost, "dropped": dropped}
+    return {"findings": list(found.values()), "passes": passes, "converged": converged, "cost": cost, "dropped": dropped,
+            "error": error}
+
+
+def settle(results, work):
+    """What the batches of one run add up to: (findings, paths at the pass cap, paths that did not
+    converge, why the review did not complete or None). Only a batch that converged, or that used
+    every pass it may have, counts as reviewed; one that failed or ran out of time does not, and
+    what it found before that is still reported."""
+    merged = {}
+    for r in results:
+        for f in r["findings"]:
+            k = (f["file"], f["line"])
+            if k not in merged or RANK[f["severity"]] > RANK[merged[k]["severity"]]:
+                merged[k] = f
+    unconverged = [(n, r, {p for p, _ in b}) for n, (r, b) in enumerate(zip(results, work), 1) if not r["converged"]]
+    capped = sorted({p for _, r, paths in unconverged if r["passes"] >= MAX_PASSES for p in paths})
+    failed = [r["error"] for _, r, _ in unconverged if r["error"]]
+    short = [n for n, r, _ in unconverged if not r["error"] and r["passes"] < MAX_PASSES]
+    incomplete = None
+    if failed:
+        first = next((e for e in failed if e.kind == "usage-limit"), failed[0])  # the one failure a re-run has to wait for
+        incomplete = (first.kind, f"{first.detail} ({len(failed)} of {len(results)} batches failed)")
+    elif short:
+        incomplete = ("budget", f"{len(short)} of {len(results)} batches ran out of time before they converged (batches "
+                                f"{', '.join(map(str, short))}); re-run the review: what converged is replayed, the rest continues")
+    return list(merged.values()), capped, sorted({p for _, _, paths in unconverged for p in paths}), incomplete
 
 
 # --- replay cache -----------------------------------------------------------------------------
@@ -485,15 +534,33 @@ def fetch_diff(pr, number):
 
 # --- the run ----------------------------------------------------------------------------------
 
+def arguments(argv, environ):
+    """{pr, local, dry, bootstrap, ci} of a call, or None when the call is not understood. An option
+    this script does not know is not understood: a mistyped --dry-run must not run as a review that
+    posts. Outside CI the mode has to be named."""
+    got, rest = {}, list(argv)
+    while rest:
+        arg = rest.pop(0)
+        if arg in ("--local", "--dry-run") and arg not in got:
+            got[arg] = True
+        elif arg in ("--pr", "--bootstrap-rules") and arg not in got and rest:
+            got[arg] = rest.pop(0)
+        else:
+            return None
+    raw, ci = got.get("--pr") or environ.get("PR_NUMBER") or "", environ.get("GITHUB_ACTIONS") == "true"
+    local, dry = "--local" in got, "--dry-run" in got
+    if not raw.isdigit() or (local and dry) or not (ci or local or dry):
+        return None
+    return {"pr": int(raw), "local": local, "dry": dry, "bootstrap": got.get("--bootstrap-rules"), "ci": ci}
+
+
 def review(argv):
-    local, dry = "--local" in argv, "--dry-run" in argv
-    in_ci = os.environ.get("GITHUB_ACTIONS") == "true"
-    raw = argv[argv.index("--pr") + 1] if "--pr" in argv else os.environ.get("PR_NUMBER", "")
-    if not raw.isdigit() or (not in_ci and not (local or dry)):
+    call = arguments(argv, os.environ)
+    if not call:
         print("usage: review.py [--pr N] [--local | --dry-run] [--bootstrap-rules FILE]   (outside CI, name the mode)")
         return 2
-    forge = Forge(kit.repo(), int(raw))
-    budget = Budget(float(os.environ.get("REVIEW_STARTED") or time.time()), 60 * float(os.environ.get("REVIEW_TIMEOUT_MIN") or 90))
+    local, dry, in_ci = call["local"], call["dry"], call["ci"]
+    forge = Forge(kit.repo(), call["pr"])
     head, me, notes = None, None, []
 
     def stop(kind, detail):
@@ -513,6 +580,7 @@ def review(argv):
         return 3 if kind == "usage-limit" else 1
 
     try:
+        budget = Budget(float(os.environ.get("REVIEW_STARTED") or time.time()), 60 * float(os.environ.get("REVIEW_TIMEOUT_MIN") or 90))
         pr = forge.pr()
         head, me = pr["head"]["sha"], forge.me()
         if pr["state"] != "open":
@@ -525,12 +593,11 @@ def review(argv):
         branch = forge.default_branch()
         rules_text, rules_from = forge.rules(branch), f"the default branch ({branch})"
         if rules_text is None:
-            if "--bootstrap-rules" not in argv:
+            if not call["bootstrap"]:
                 return stop("rules", f"{RULES_PATH} is not on the default branch; the first review needs --bootstrap-rules FILE")
-            rules_from = argv[argv.index("--bootstrap-rules") + 1]
-            rules_text = kit.read(rules_from)
-            rules_from = f"{rules_from} from the working tree (bootstrap: the default branch has no rules file yet)"
-        elif "--bootstrap-rules" in argv:
+            rules_text = kit.read(call["bootstrap"])
+            rules_from = f"{call['bootstrap']} from the working tree (bootstrap: the default branch has no rules file yet)"
+        elif call["bootstrap"]:
             return stop("rules", "the default branch has a rules file, so --bootstrap-rules is refused")
         sections = load_rules(rules_text)
 
@@ -570,9 +637,13 @@ def review(argv):
                 prompt = build_prompt(chosen, pr["title"], pr["body"], [f for f in already if f["file"] in paths],
                                       batch, index + 1, len(work), suffix)
                 for attempt in (1, 2):
+                    began = time.time()
                     try:
-                        return call_model(prompt, paths, max(1, int(budget.remaining())))
+                        answer = call_model(prompt, paths, max(1, int(budget.remaining())))
+                        print(f"  batch {index + 1}/{len(work)}: a pass found {len(answer[0])} in {time.time() - began:.0f} s")
+                        return answer
                     except ReviewError as e:
+                        print(f"  batch {index + 1}/{len(work)}: a pass failed after {time.time() - began:.0f} s ({e.kind})")
                         if attempt == 2 or not (e.kind == "bad-output" or e.status in RETRY_STATUS):
                             raise
                         time.sleep(20)
@@ -584,18 +655,9 @@ def review(argv):
         with concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
             results = list(pool.map(run_batch, range(len(work))))
 
-        if any(r["passes"] == 0 for r in results):
-            return stop("budget", "a batch finished zero passes inside the time budget; re-run the review")
-        merged = {}
-        for r in results:
-            for f in r["findings"]:
-                k = (f["file"], f["line"])
-                if k not in merged or RANK[f["severity"]] > RANK[merged[k]["severity"]]:
-                    merged[k] = f
-        findings = list(merged.values())
+        findings, capped, unconverged, incomplete = settle(results, work)
         count = {s: sum(f["severity"] == s for f in findings) for s in RANK}
         cost, passes = sum(r["cost"] for r in results), sum(r["passes"] for r in results)
-        stuck = sorted({p for r, b in zip(results, work) if not r["converged"] for p, _ in b})
         summary = (f"{len(findings)} new findings ({count['high']} high, {count['medium']} medium, {count['low']} low), "
                    f"{len(work)} batches, {passes} passes, ${cost:.2f}")
 
@@ -603,32 +665,36 @@ def review(argv):
             for f in findings:
                 print(f"{f['severity']:<6} {f['file']}:{f['line']} {f['title']}\n       {f['body']}")
             print(f"DRY RUN, nothing posted: {summary}")
-            return 0
+            return stop(*incomplete) if incomplete else 0
+        # What was found is posted and what converged is stored even when the run then fails: a
+        # diff that needs more than one run is reviewed across them, and no paid pass is thrown away.
         for thread in plan_posts(findings, anchors):
             print(f"  posted {len(thread['findings'])} findings at {forge.thread(head, thread)}")
-        if stuck:
+        if capped:
             wanted = note_wanted(notes, "no-convergence", sha=head)
             if wanted:
                 forge.note(f"**Automated review did not converge** on `{head[:8]}`: after {MAX_PASSES} passes it was still "
-                           f"finding defects above low in {', '.join(f'`{p}`' for p in stuck)}. Expect more findings on "
+                           f"finding defects above low in {', '.join(f'`{p}`' for p in capped)}. Expect more findings on "
                            f"the next round.\n\n{marker('note', wanted)}")
         cached = {f["path"]: block_hash(f["block"]) for f in files if f["path"] in replay}
-        cached.update({f["path"]: block_hash(f["block"]) for f in todo if f["path"] not in stuck})
+        cached.update({f["path"]: block_hash(f["block"]) for f in todo if f["path"] not in unconverged})
         forge.save_state(state_comment and state_comment["id"],
                          f"Automated review state for `{head[:8]}`: {summary}. {len(replay)} files replayed.\n\n"
                          f"{marker('state', {'v': 1, 'key': key, 'head': head, 'files': cached})}")
+        if incomplete:
+            return stop(incomplete[0], f"{incomplete[1]}. Posted so far: {summary}")
         if in_ci and not local:
             forge.status(head, "success", f"review completed: {summary}")
         else:
-            forge.note(f"**Off-pipeline review** of `{head}` by `{me}`: {summary}; converged: {'no' if stuck else 'yes'}; "
-                       f"model `{MODEL}`; rules from {rules_from}; reviewer script sha256 `{hashlib.sha256(script).hexdigest()[:16]}`. "
+            forge.note(f"**Off-pipeline review** of `{head}` by `{me}`: {summary}; converged: {'no' if capped else 'yes'}; "
+                       f"model `{MODEL}` at effort `{EFFORT}`; rules from {rules_from}; reviewer script sha256 `{hashlib.sha256(script).hexdigest()[:16]}`. "
                        f"No `review` status is posted by a run outside CI, so merging this head needs the owner's approval "
                        f"for this item.\n\n{marker('note', {'kind': 'off-pipeline', 'sha': head})}")
         print(f"REVIEW COMPLETE head={head} files={len(files)} replayed={len(replay)} {summary}")
         return 0
     except ReviewError as e:
         return stop(e.kind, e.detail)
-    except (kit.Refused, OSError, KeyError, IndexError) as e:
+    except Exception as e:  # never silent: whatever broke, this is a review that did not complete
         return stop("failed", f"{type(e).__name__}: {e}")
 
 
@@ -636,4 +702,5 @@ if __name__ == "__main__":
     if "--self-test" in sys.argv:
         import test_review
         sys.exit(test_review.run())
+    sys.stdout.reconfigure(line_buffering=True)  # a log that fills only at the end hides a run that takes an hour
     sys.exit(review(sys.argv[1:]))

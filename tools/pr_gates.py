@@ -2,8 +2,10 @@
 """Gates that read a pull request rather than the tree. Usage: pr_gates.py title|breadth|findings [--pr N]
 (the number comes from PR_NUMBER in CI).
 
-title     a workflow-skip literal in the title or in any commit message of the branch. The title
-          becomes the squash commit on main, and a skipped workflow there leaves main ungated.
+title     a workflow-skip literal in the title or in any commit message of the branch; a
+          credential-shaped or machine-bound string or a conflict marker in the title or the
+          description. Title and description become the squash commit on main: a skipped workflow
+          there leaves main ungated, and no pre-push hook ever sees that commit.
 breadth   a pull request over BREADTH_FILES files, or one that touches the quality infrastructure,
           without a non-empty "## Blast radius" section in its description.
 findings  the review policy: every finding the reviewer posted is resolved, and resolved by an
@@ -21,6 +23,7 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
+import tree_gate  # noqa: E402
 
 SKIP_LITERALS = [r"\[skip ci\]", r"\[ci skip\]", r"\[no ci\]", r"\[skip actions\]", r"\[actions skip\]",
                  r"^skip-checks:[ \t]*true[ \t]*$"]
@@ -40,11 +43,16 @@ def skip_literal(text):
     return next((p for p in SKIP_LITERALS if re.search(p, text or "", re.I | re.M)), None)
 
 
-def title_errors(title, messages):
+def title_errors(title, messages, body=""):
+    """What the title, the description and the commit messages hold against a squash merge. The
+    merge tool writes title and description into the commit on main, so they are scanned with the
+    tree gate's own patterns, like any commit a push would publish."""
     errors = [f"the title carries a workflow-skip literal ({skip_literal(title)})"] if skip_literal(title) else []
     errors += [f"a commit message carries a workflow-skip literal ({skip_literal(m)}): {m.splitlines()[0][:60]!r}"
                for m in messages if skip_literal(m)]
-    return errors
+    if skip_literal(body):
+        errors.append(f"the description carries a workflow-skip literal ({skip_literal(body)})")
+    return errors + tree_gate.check_text("the title", title or "") + tree_gate.check_text("the description", body or "")
 
 
 def breadth_errors(body, paths):
@@ -134,7 +142,8 @@ def run_gate(gate, argv):
         commits = kit.gh_pages(f"repos/{repo}/pulls/{number}/commits?per_page=100")
         if not commits:
             raise kit.Refused("the pull request lists no commits")
-        return title_errors(pr["title"], [c["commit"]["message"] for c in commits]), f"title and {len(commits)} commit messages"
+        return (title_errors(pr["title"], [c["commit"]["message"] for c in commits], pr["body"]),
+                f"title, description and {len(commits)} commit messages")
     if gate == "breadth":
         files = kit.gh_pages(f"repos/{repo}/pulls/{number}/files?per_page=100")
         if not files:
@@ -174,6 +183,11 @@ def self_test():
     check("upper-case literal in a commit message", title_errors("ok", ["x\n\n[SKIP CI]"]), "a commit message carries")
     check("skip-checks trailer", title_errors("ok", ["x\n\nskip-checks: true\n"]), "a commit message carries")
     check("the word skip alone is fine", title_errors("Skip the ci chapter", ["skip-checks: false"]), None)
+    # Built by concatenation, so this file never holds a string the tree gate would refuse.
+    check("a machine-bound string in the description", title_errors("ok", ["ok"], "see D:" + "/work/notes"), "the description: machine-bound string")
+    check("a credential shape in the title", title_errors("use ghp_" + "a" * 36, ["ok"], "ok"), "the title: credential-shaped string")
+    check("a workflow-skip literal in the description", title_errors("ok", ["ok"], "why\n\n[skip ci]"), "the description carries")
+    check("a plain description is clean", title_errors("ok", ["ok"], "## Summary\n\nWhat and why, with a link: https://github.com/a/b\n"), None)
 
     section = "## Summary\n\nx\n\n## Blast radius\n\n- the reviewer\n\n## Test plan\n"
     check("small change needs no section", breadth_errors("", ["kurz-design.md"]), None)

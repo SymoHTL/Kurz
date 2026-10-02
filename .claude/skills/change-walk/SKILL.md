@@ -26,7 +26,8 @@ systems `py -3` is `python3`.
    break the rule in one place, watch `py -3 tools/<tool>.py --self-test` print `FAIL <case>`,
    record the anchor, the replacement and the case name, and revert.
 2. `py -3 tools/gates.py`. Everything must be PASS; the pull-request gates say NOT RUN until a
-   pull request exists.
+   pull request exists. PARTLY on `merge-checks` means this login cannot read two settings, as
+   in CI; with the owner's login it is PASS.
 3. A change to a gate, tool, hook or review rule also updates `knowledge/diagram-gate-map.md` and,
    when the mapping changes, `guides/quality-bar.md`.
 
@@ -50,7 +51,14 @@ systems `py -3` is `python3`.
    - `pending`: no review ran on this head.
    - `error`: open the run and read its last line, `REVIEW DID NOT COMPLETE (<kind>)`.
      `usage-limit`: wait for the reset the message names; re-running now spends nothing and fixes
-     nothing. `credential`: only the owner can fix the secret. `budget`: re-run the job.
+     nothing. `credential`: only the owner can fix the secret. `budget`: re-run the job; what it
+     found is posted, what converged is replayed, and the next run continues with the rest.
+   - No review can run in CI (no credential yet, or the reviewer itself is what the pull request
+     adds): ask the owner first, a review spends his Claude seat
+     (`knowledge/what-a-review-pass-costs.md`). Then, in the background with the output in a
+     file: `py -3 tools/review/review.py --pr <N> --local`. It prints one line per pass, posts
+     the findings and an audit note, and no status: the merge then needs the owner's approval
+     for that pull request and head.
 4. Read every thread before fixing anything:
    `gh api graphql -f query='query { repository(owner:"OWNER", name:"REPO") { pullRequest(number: N) { reviewThreads(first: 100) { nodes { isResolved path comments(first: 1) { nodes { body } } } } } } }'`
 5. Answer each finding by editing its file. On the design record, the reference, the corpus, the
@@ -69,8 +77,10 @@ systems `py -3` is `python3`.
 4. If a required check is red or missing for a cause outside the change, stop and ask the owner.
    Only with his approval for this pull request and this head:
    `py -3 tools/merge_pr.py <N> <sha> --over-red <N>@<sha>=<check>[,<check>]`. The tool switches
-   the ruleset off for the one merge, restores it and reads it back. Exit 3 means it is still
-   off: say so at once.
+   the ruleset off for the one merge, restores it and reads it back. While it is off nothing on
+   the server holds any other pull request or a push to `main`. Exit 3 means it is still off:
+   say so at once. Exit 6 means the merge landed and the record of the waiver is missing: post
+   the line the tool printed on the pull request.
 5. Delete the branch. The `gates` job runs again on `main`.
 
 ## When something escaped

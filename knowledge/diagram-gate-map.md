@@ -28,6 +28,7 @@ flowchart TD
         G2["tree: disallowed path, credential, machine-bound string,
         conflict marker, non-UTF-8 file, fewer files than the floor"]
         G3["knowledge: broken INDEX link, entry without INDEX line, hook or frontmatter,
+        a store file named in an entry, CLAUDE.md or a skill that does not exist,
         nested entry, LIVING entry without diagram or update triggers,
         expired or future-dated numbers, fewer entries than the floor"]
         G4["ci-config: unpinned action, image or CLI; a job or step that can be skipped
@@ -36,8 +37,11 @@ flowchart TD
         G5["merge-checks: live rules on main differ from tools/ruleset.json
         or carry a parameter that file does not name,
         ruleset not active, bypass actors, auto-merge allowed.
-        What the job token cannot read prints NOT CHECKED: HAZARD issue 7"]
-        G6["pr-title: a workflow-skip literal in the title or a commit message"]
+        What the job token cannot read prints NOT CHECKED and the gate ends PARTLY,
+        not red and not a pass: HAZARD issue 7"]
+        G6["pr-title: a workflow-skip literal in the title, the description or a commit message;
+        a credential or a machine-bound string in the title or the description,
+        which become the squash commit on main"]
         G7["pr-breadth: over 15 files, or quality infrastructure touched,
         without a Blast radius section"]
         G8["pr-findings: a review finding unresolved, or resolved
@@ -46,7 +50,9 @@ flowchart TD
     subgraph R["CI: workflow review, pull_request_target, code and rules from the base branch"]
         R1["job review-run: red when the review did not complete:
         no credential, usage limit, model error, another model answered,
-        oversized diff, a batch with zero passes, a post the forge refused"]
+        oversized diff, a batch that failed or ran out of time before it converged,
+        a post the forge refused. What it found is posted and what converged
+        is stored first, so the next run continues"]
         R2["status review: success only from a completed review of this head.
         Draft, outside pull request, no run: stays pending.
         Does it satisfy the ruleset's pinned app: unverified, HAZARD issue 5"]
@@ -59,12 +65,17 @@ flowchart TD
         no force push, no deletion, nobody bypasses"]
         M2["merge_pr.py: refuses a head other than the one named, a Draft,
         a branch behind its base, armed auto-merge, an unanswered finding,
-        a required check that is not success"]
-        M3["merge_pr.py --over-red: ruleset off for one merge, restored and read back.
+        a required check that is not success from the app the ruleset pins,
+        live merge rules that differ from tools/ruleset.json,
+        a title or description the title gate refuses, an option it does not know"]
+        M3["merge_pr.py --over-red: ruleset off for one merge, restored and read back;
+        while it is off nothing on the server holds any pull request or a push to main.
+        Exit 3 when the gate stayed off, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3"]
     end
     subgraph L["Local run: tools/gates.py"]
-        L1["the same gates as CI; pull-request gates print NOT RUN without --pr"]
+        L1["the same gates as CI; pull-request gates print NOT RUN without --pr;
+        with the owner's login merge-checks reads everything and ends PASS"]
         L2["push-hook: core.hooksPath is not .githooks"]
     end
     subgraph X["Process: no mechanism"]

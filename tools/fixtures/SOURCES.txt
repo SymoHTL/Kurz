@@ -1,6 +1,7 @@
 Where the payloads under tools/fixtures/ and tools/review/fixtures/ come from. Each file is what
-the platform really sent, re-indented and otherwise unchanged. A test may edit a loaded payload,
-and says so where it does. To replace one, capture it again; do not write it.
+the platform really sent: the GitHub answers re-indented and otherwise unchanged, the CLI answers
+as printed. A test may edit a loaded payload, and says so where it does. To replace one, capture
+it again; do not write it.
 
 tools/fixtures/ (GitHub, repository SymoHTL/Kurz, 2026-10-01)
 
@@ -22,12 +23,14 @@ tools/fixtures/ (GitHub, repository SymoHTL/Kurz, 2026-10-01)
   review-threads.json   gh api graphql with the query THREADS of tools/pr_gates.py, for pull
                         request 8 after its first review
 
-tools/review/fixtures/ (Claude CLI 2.1.283, 2026-10-01; the flags are in
-knowledge/claude-cli-headless-answer.md)
+tools/review/fixtures/ (Claude CLI 2.1.283; the flags are in knowledge/claude-cli-headless-answer.md.
+These answers are kept as the CLI printed them, on one line.)
 
-  cli-findings.json     an answer of the pinned model that carries one finding
-  cli-empty.json        an answer of the pinned model that carries none
-  cli-other-model.json  an answer to the same kind of call with another model id
+  cli-findings.json     an answer of the pinned model, claude-opus-5-5, that carries one finding
+                        (2026-10-02, when the pinned model changed)
+  cli-empty.json        an answer of the pinned model that carries none (2026-10-02)
+  cli-other-model.json  an answer to the same kind of call from another model, claude-fable-5-1
+                        (2026-10-01: it was the pinned model's answer until the pin changed)
   cli-api-error.json    the answer for a model id that does not exist: HTTP 404, is_error true,
                         subtype "success"
   sample-diff.txt       git diff in a scratch repository: one file modified in two hunks, one

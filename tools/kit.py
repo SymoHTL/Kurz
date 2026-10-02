@@ -29,6 +29,9 @@ MACHINE = {
              r"@(?!example\.(?:com|org|net)\b)(?!users\.noreply\.github\.com\b)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}",
 }
 CONFLICT = re.compile(r"^(<<<<<<< |>>>>>>> )", re.M)
+# Exit code of a gate that found nothing wrong in what it could read and named what it could not
+# read. The runner shows it as PARTLY: not red, and never counted as a pass.
+PARTLY = 5
 
 
 class Refused(Exception):
