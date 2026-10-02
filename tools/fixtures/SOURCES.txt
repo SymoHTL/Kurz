@@ -3,7 +3,7 @@ the platform really sent: the GitHub answers re-indented and otherwise unchanged
 as printed. A test may edit a loaded payload, and says so where it does. To replace one, capture
 it again; do not write it.
 
-tools/fixtures/ (GitHub, repository SymoHTL/Kurz, 2026-10-01)
+tools/fixtures/ (GitHub, repository SymoHTL/Kurz; captured 2026-10-01 unless a line says otherwise)
 
   branch-rules.json     gh api repos/SymoHTL/Kurz/rules/branches/main
                         the rules active on main, with the ruleset of tools/ruleset.json applied
@@ -15,16 +15,20 @@ tools/fixtures/ (GitHub, repository SymoHTL/Kurz, 2026-10-01)
                         read with the owner's login. The token of a workflow job gets this answer
                         without allow_auto_merge (same run).
   pull-request.json     gh api repos/SymoHTL/Kurz/pulls/8
-                        while it was a Draft, after its first push
+                        while it was a Draft, after its first push. It reports "draft": true together
+                        with "mergeable_state": "blocked", and "assignee" after "auto_merge". Both are
+                        the platform's: the same call on 2026-10-02 answered with the same key order
+                        and the same two values.
   check-runs.json       gh api "repos/SymoHTL/Kurz/commits/<head>/check-runs?per_page=100"
                         the head of pull-request.json, after its first gates run had failed
   status.json           gh api "repos/SymoHTL/Kurz/commits/<head>/status?per_page=100"
                         the same head, before anything had posted a commit status
-  review-threads.json   gh api graphql with the query THREADS of tools/pr_gates.py, for pull
-                        request 8 after its first review
+  review-threads.json   gh api graphql with the query THREADS of tools/pr_gates.py, asked for the
+                        first two threads only (reviewThreads(first: 2)), for pull request 8 on
+                        2026-10-02, after the first review that posted threads
 
 tools/review/fixtures/ (Claude CLI 2.1.283; the flags are in knowledge/claude-cli-headless-answer.md.
-These answers are kept as the CLI printed them, on one line.)
+The CLI's answers are kept as the CLI printed them, on one line.)
 
   cli-findings.json     an answer of the pinned model, claude-opus-5-5, that carries one finding
                         (2026-10-02, when the pinned model changed)
@@ -33,5 +37,20 @@ These answers are kept as the CLI printed them, on one line.)
                         (2026-10-01: it was the pinned model's answer until the pin changed)
   cli-api-error.json    the answer for a model id that does not exist: HTTP 404, is_error true,
                         subtype "success"
+  cli-bad-credential.json
+                        the answer to the reviewer's own call with a login variable that holds no
+                        credential and an empty configuration directory (2026-10-02): exit code 1,
+                        HTTP 401, is_error true, subtype "success"
   sample-diff.txt       git diff in a scratch repository: one file modified in two hunks, one
                         deleted, one renamed, one added
+  quoted-diff.txt       git diff, with the options the reviewer passes, between two commits of a
+                        scratch repository whose index entries were made with `git update-index
+                        --cacheinfo` (2026-10-02; such names cannot be files on every system): a
+                        path with a double quote, paths that hold " b/", a rename with and one
+                        without a quoted side, a deleted file with a quoted path
+  line-break-path-diff.txt
+                        the same, for one added file whose name holds a line break
+  gh-rate-limit-refusal.txt
+                        what the gh CLI printed when the forge refused a comment for its secondary
+                        rate limit: one line from the log of the first review of pull request 8
+                        (2026-10-02), from "gh:" to the status

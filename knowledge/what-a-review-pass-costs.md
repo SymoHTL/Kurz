@@ -1,6 +1,6 @@
 ---
 name: what-a-review-pass-costs
-description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 10 to 14 minutes on every model and effort tried; per pass about 1.4 to 1.8 USD on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; what that means for a large pull request
+description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 18 minutes, whatever the model and effort; per pass about 1.4 to 1.8 USD at list price on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD, so a review run is started only with the owner's go-ahead
 metadata:
   type: reference
 ---
@@ -9,6 +9,7 @@ Measured on 2026-10-02 with Claude Code CLI 2.1.283, through the reviewer's own 
 (`tools/review/review.py`: `command`, `model_env`, the system prompt, the rules). Every row is one
 first pass over the same batch: 30k characters of `tools/merge_pr.py` from pull request 8, which
 with the rules and the description makes a prompt of 37.7k characters, about 16k input tokens.
+Prices are the list prices of that day.
 
 | Model | Effort | Wall time | Output tokens (thinking) | Cost (list price) | Findings |
 |---|---|---|---|---|---|
@@ -38,27 +39,39 @@ What the table says:
 - **Cost is a list price.** With a subscription seat the same tokens count against the seat's
   limits instead.
 
+The time a run has is one setting: `REVIEW_TIMEOUT_MIN`, counted from the job's start, of which
+the reviewer keeps five minutes back for posting. In CI the workflow sets it to the job's
+`timeout-minutes` (90 on 2026-10-02, pinned equal by `ci-config`); a run outside CI takes it from
+the environment, 90 when it is not set.
+
+The three runs over pull request 8, all on 2026-10-02 and all outside CI:
+
+| Run | `REVIEW_TIMEOUT_MIN` | Batches | What happened |
+|---|---|---|---|
+| first | 90 (the default) | 16 | Each batch got all its passes in turn. 16 batches need at least 32 passes; with three workers that is more than the 85 minutes left for passes. Stopped by hand after 45 minutes, nothing posted. |
+| second | 300 | 20 | Three passes at once are slower each: the first three took 918, 933 and 1149 seconds. With up to five passes a batch the time could not have reached every batch. Stopped by hand after those three passes, nothing posted. |
+| third | 150 | 20 | Passes in rounds. 30 passes in 136 minutes: every batch once, ten batches twice, 379 to 1054 seconds a pass. 294 findings (20 high, 126 medium, 148 low). It ended red (`failed`): the forge refused the last posts, and 88 low findings were lost ([[a-paid-result-is-printed-before-it-is-posted]]). About 45 USD at list price, estimated from 30 passes: the run ended before it printed its cost. |
+
 What follows from it:
 
 - The reviewer is pinned to `claude-opus-5-5` (`MODEL` in `review.py`). Changing the model means
   capturing the answers under `tools/review/fixtures/` again: the unit suite reads real answers of
   the pinned model.
 - A review costs batches times passes, and a batch needs at least two passes. An ordinary pull
-  request of one batch: two passes, about 3 USD, about 20 minutes. Pull request 8, which
-  introduced the whole quality bar, had 16 batches: at least 32 passes, about 50 USD, and with
-  three workers more than the 85 minutes one run has. Its first review ran 45 minutes and had to be
-  stopped with nothing posted.
-- That is why a run keeps what it has (it posts what it found and stores what converged before it
-  ends red), and why the log prints one line per pass.
-- Three passes at once are slower each. In the second attempt at pull request 8, later on
-  2026-10-02 (20 batches by then, three workers), the first three passes took 918, 933 and
-  1149 seconds. That run gave each batch all its passes in turn. With up to five passes a batch,
-  the 300 minutes it had could not have reached every batch, so it was stopped after those three
-  passes, again with nothing posted.
-- That is why passes run in rounds (`in_rounds` in `review.py`): every batch gets one pass before
-  any batch gets a second. A time budget of about batches times pass time divided by three buys
-  one pass over everything; a run that ends there is red (`budget`), and has read every file.
-- A change to `review.py`, `tools/kit.py`, the rules file, the title or the description drops the
-  replay cache: the next round reviews every file again. Finish those before the review starts.
-- Keep a pull request small. The review bill grows with the diff, and it is paid again in every
-  round that touches the reviewer itself.
+  request of one batch: two passes, about 3 USD, about 20 minutes.
+- A run keeps what it has: it prints every finding, posts what it found and stores what converged
+  before it ends red, and the log prints one line per pass.
+- Passes run in rounds (`in_rounds` in `review.py`): every batch gets one pass before any batch
+  gets a second. A time budget of about batches times pass time divided by three buys one pass
+  over everything; a run that ends there is red (`budget`), and the next run continues.
+- A review run is started only after the owner said go, with the expected bill named (the
+  owner's decision, 2026-10-02). `judgment step`
+- Low findings do not keep a review going: a batch converges when a pass adds nothing above low,
+  and lows are collected on the issue labelled `review-lows` instead of threads. They are fixed
+  together, or with a push that is needed anyway (the owner's decision, 2026-10-02).
+- The replay cache is keyed on the reviewer (`review.py`, `tools/kit.py`), the rules, the model,
+  the title and the description. In CI the reviewer and the rules are the default branch's, so
+  the cache drops when such a change is merged (then for every open pull request) and when the
+  title or the description is edited. In a run outside CI they are the working tree's: finish a
+  change to them before that review starts, or the next round reviews every file again.
+- Keep a pull request small. The review bill grows with the diff.

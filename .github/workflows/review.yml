@@ -1,7 +1,10 @@
 name: review
 
-# pull_request_target: this file, the reviewer and its rules come from the default branch. The pull
-# request is data and is never checked out or run. Facts of this file are pinned by tools/lint_ci.py.
+# The job runs for a pull request into the default branch, or for a dispatch on the default branch,
+# and its checkout names the default branch: the reviewer and its rules are the merged ones, and
+# the pull request is data that is never checked out or run. Facts of this file are pinned by
+# tools/lint_ci.py. A copy of this file on another branch can drop them, and a dispatch on that
+# branch runs the copy (HAZARD #11).
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -13,21 +16,25 @@ on:
 
 permissions:
   contents: read
+  issues: write  # low findings are collected on an issue
   pull-requests: write
   statuses: write
 
-concurrency:
-  group: review-${{ github.event.pull_request.number || inputs.pr }}
-  cancel-in-progress: true
-
 jobs:
-  # The required check is the commit status `review`, which only a completed review posts. This job
-  # may be skipped: a Draft and a pull request from outside get no status and stay pending.
+  # The required check is the commit status `review`, which this job posts when a review completed.
+  # The job may be skipped: a Draft and a pull request from outside get no status and stay pending.
   review-run:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.draft == false &&
+      (github.event_name == 'workflow_dispatch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+      (github.event_name == 'pull_request_target' &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch &&
+      github.event.pull_request.draft == false &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
+    # On the job, not on the workflow: a run whose job is skipped must not cancel a running review.
+    concurrency:
+      group: review-${{ github.event.pull_request.number || inputs.pr }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -35,25 +42,26 @@ jobs:
         run: echo "REVIEW_STARTED=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
           fetch-depth: 0
       - name: Install pinned dependencies
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes -r tools/review/requirements.txt
+      # Only the download is tried again: a CLI that does not start is a defect, not the network.
       - name: Install the Claude CLI, proven by running it
         run: |
           for attempt in 1 2 3; do
-            npm install --global --silent @anthropic-ai/claude-code@2.1.283 && claude --version && exit 0
+            if npm install --global --silent @anthropic-ai/claude-code@2.1.283; then break; fi
+            if [ "$attempt" = 3 ]; then echo "the Claude CLI did not install"; exit 1; fi
             sleep 10
           done
-          echo "the Claude CLI did not install"
-          exit 1
+          claude --version
       - name: Review
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
           REVIEW_TIMEOUT_MIN: 90
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: '"$RUNNER_TEMP/venv/bin/python" tools/review/review.py'

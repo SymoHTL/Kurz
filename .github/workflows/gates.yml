@@ -13,7 +13,8 @@ permissions:
 
 jobs:
   # One job, no `if`: a skipped job reports success to a required check. tools/gates.py runs every
-  # gate and is red when one fails or could not run. Facts of this file are pinned by tools/lint_ci.py.
+  # gate; its docstring is the one definition of which verdicts turn the run red. Facts of this file
+  # are pinned by tools/lint_ci.py.
   gates:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

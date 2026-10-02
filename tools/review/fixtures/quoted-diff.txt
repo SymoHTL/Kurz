@@ -1,0 +1,60 @@
+diff --git "a/docs/has \"quote\".md" "b/docs/has \"quote\".md"
+index c8b13a5..1d47194 100644
+--- "a/docs/has \"quote\".md"	
++++ "b/docs/has \"quote\".md"	
+@@ -1,7 +1,7 @@
+ line 1
+ line 2
+ line 3
+-line 4
++line 4, changed
+ line 5
+ line 6
+ line 7
+diff --git a/docs/x b/y.md b/docs/x b/y.md
+index c8b13a5..1d47194 100644
+--- a/docs/x b/y.md	
++++ b/docs/x b/y.md	
+@@ -1,7 +1,7 @@
+ line 1
+ line 2
+ line 3
+-line 4
++line 4, changed
+ line 5
+ line 6
+ line 7
+diff --git a/old b/name.md b/new b/name.md
+similarity index 100%
+rename from old b/name.md
+rename to new b/name.md
+diff --git a/gone b/file.md "b/now \"b\".md"
+similarity index 75%
+rename from gone b/file.md
+rename to "now \"b\".md"
+index c8b13a5..1d47194 100644
+--- a/gone b/file.md	
++++ "b/now \"b\".md"	
+@@ -1,7 +1,7 @@
+ line 1
+ line 2
+ line 3
+-line 4
++line 4, changed
+ line 5
+ line 6
+ line 7
+diff --git "a/was \"a\".md" "b/was \"a\".md"
+deleted file mode 100644
+index c8b13a5..0000000
+--- "a/was \"a\".md"	
++++ /dev/null
+@@ -1,8 +0,0 @@
+-line 1
+-line 2
+-line 3
+-line 4
+-line 5
+-line 6
+-line 7
+-line 8

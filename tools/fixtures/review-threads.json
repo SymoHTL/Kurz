@@ -1,0 +1,54 @@
+{
+ "data": {
+  "repository": {
+   "pullRequest": {
+    "reviewThreads": {
+     "pageInfo": {
+      "hasNextPage": true,
+      "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wMlQxNjo1MDozOVrOqGrnzA=="
+     },
+     "nodes": [
+      {
+       "id": "PRRT_kwDOU3tPGc6oaud5",
+       "isResolved": false,
+       "path": ".github/workflows/review.yml",
+       "comments": {
+        "nodes": [
+         {
+          "author": {
+           "login": "SymoHTL"
+          },
+          "authorAssociation": "OWNER",
+          "body": "**Automated review**\n\n- **high** `.github/workflows/review.yml` line 24: The `review` status is not something only a completed review can post\n\n  A commit status is matched only by context and SHA. An incomplete run already posts `review` as `error` (change-walk line 54), and anyone who can write statuses can post `success`. A same-repository pull request can edit gates.yml, which runs from the pull request, to request `statuses: write`. Unless the ruleset pins the context to an app, the owner's `gh` login that sessions use can also call the statuses API directly, so the required check can turn green with no review while this comment and the description present it as proof of one. Fix: post the status under an identity a pull request cannot use and pin that app in the ruleset, or record the gap as a HAZARD with its issue and have merge_pr.py check who posted the status against the audit note.\n\n- **high** `.github/workflows/review.yml` line 36: Reviewer and rules come from the base branch or the dispatched ref, not the default branch\n\n  Lines 3-4 and the description say that this file, the reviewer and its rules come from the default branch. In fact `pull_request_target` takes the workflow and this checkout (no `ref:`) from the pull request's base branch, and `workflow_dispatch` takes them from whatever ref it was dispatched on (`gh workflow run review.yml --ref <branch>`). So a pull request stacked on a branch that changes `tools/review/` or `.review/`, or a dispatch on such a branch, is reviewed by that branch's reviewer. That run has both Claude secrets and `statuses: write`, and its green `review` status stays on a head SHA that is the same commit when it is later proposed to main. Fix: require `github.event.pull_request.base.ref == github.event.repository.default_branch` in the `if:` (and `github.ref` on the default branch for a dispatch), pin `ref:` to the default branch here, and keep the secrets in an environment that only the default branch may use.\n\n- **medium** `.github/workflows/review.yml` line 7: An edited title or description keeps a review status it was never reviewed under\n\n  The review runs on opened, synchronize, reopened and ready_for_review, but not on edited. Its rules check the title and description for future plans, text addressing the reviewer and the Blast radius, and those two texts become the squash commit on main. After an edit, the `review` status of the unchanged head stays green, and `pr-title`, as the description lists it, only refuses credential, machine-bound and workflow-skip shapes. Fix: add `edited` when `github.event.changes.title` or `.body` is present, or record a hash of title and description in the audit note and have merge_pr.py refuse a mismatch.\n\nFix the file, then resolve this thread. A finding that looks wrong is answered by an edit that makes the misreading impossible; on tool and workflow code a written reply also counts.\n\n<!-- kurz-review:findings [{\"file\": \".github/workflows/review.yml\", \"line\": 24, \"severity\": \"high\", \"title\": \"The `review` status is not something only a completed review can post\"}, {\"file\": \".github/workflows/review.yml\", \"line\": 36, \"severity\": \"high\", \"title\": \"Reviewer and rules come from the base branch or the dispatched ref, not the default branch\"}, {\"file\": \".github/workflows/review.yml\", \"line\": 7, \"severity\": \"medium\", \"title\": \"An edited title or description keeps a review status it was never reviewed under\"}] -->",
+          "originalCommit": {
+           "oid": "720b1642e7c9f57ea9bde2419d58426868efb426"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "id": "PRRT_kwDOU3tPGc6oaufM",
+       "isResolved": false,
+       "path": ".claude/settings.json",
+       "comments": {
+        "nodes": [
+         {
+          "author": {
+           "login": "SymoHTL"
+          },
+          "authorAssociation": "OWNER",
+          "body": "**Automated review**\n\n- **medium** `.claude/settings.json` line 5: Write hook does not cover the Bash tool, contrary to the description\n\n  The matcher covers only Write, Edit and NotebookEdit. A file written through the Bash tool (a redirect, `cp`, `mv`, `git checkout`, a script) is never checked. The description says the write-time hook denies a write to any path the design phase does not allow, but only the pre-push hook and the CI tree gate catch such a file, and only later. Either add a Bash matcher that checks the command's targets, or narrow the claim in the description and the gate map and record the Bash path as a HAZARD.\n\n- **medium** `.claude/settings.json` line 9: Hook fails open on any exit other than 2 and on its 10-second timeout\n\n  Claude Code blocks a tool call only when the hook exits 2. Any other non-zero exit, and a hook cancelled at the 10-second `timeout` on line 10, let the write through. The command calls `py -3` with no fallback, so a missing launcher (exit 127) or a launcher with no Python 3 fails open. The description names only the missing launcher (#4), not the timeout. Fix: fall back to `python3` as `.githooks/pre-push` already does, turn every non-zero exit into 2, and label the timeout path as a HAZARD with its issue.\n\nFix the file, then resolve this thread. A finding that looks wrong is answered by an edit that makes the misreading impossible; on tool and workflow code a written reply also counts.\n\n<!-- kurz-review:findings [{\"file\": \".claude/settings.json\", \"line\": 5, \"severity\": \"medium\", \"title\": \"Write hook does not cover the Bash tool, contrary to the description\"}, {\"file\": \".claude/settings.json\", \"line\": 9, \"severity\": \"medium\", \"title\": \"Hook fails open on any exit other than 2 and on its 10-second timeout\"}] -->",
+          "originalCommit": {
+           "oid": "720b1642e7c9f57ea9bde2419d58426868efb426"
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

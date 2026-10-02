@@ -2,16 +2,21 @@
 """Regenerate the numbers of guides/quality-bar-evidence.md. Every number in that guide lives in a
 marked block (`<!-- generated:NAME -->` ... `<!-- /generated:NAME -->`) that this tool computes
 from the tree, from git and from the forge; the prose between the blocks carries no measurement.
-The frontmatter's `generated:` date is stamped on every run, and tools/lint_knowledge.py counts
-its `ttl_days:` down and fails once it ran out.
+The frontmatter's `generated:` date and the `digest:` of the blocks are stamped on every run.
+tools/lint_knowledge.py counts `ttl_days:` down and fails once it ran out, and fails when the
+blocks are not what the digest says: numbers somebody typed are not this tool's numbers.
 
   quality_evidence.py            recompute every block and rewrite the file
   quality_evidence.py --print    recompute and print, write nothing
 
 It refuses to write (exit 1, file untouched) when a block it computed has no marker in the file,
-when the file has a block it did not compute, when a marker is not closed, or when the file has no
-`generated:` line: otherwise some numbers would stay old while the date said they were new. The
-new text is built completely before anything is written, and written through a temp file."""
+when the file has a block it did not compute, when a marker is not closed, when the file has no
+`generated:` or no `digest:` line, or while a self-test is red: otherwise some numbers would stay
+old, or be no evidence, while the date said they were new. The new text is built completely before
+anything is written, and written through a temp file.
+
+What it counts on the forge it counts only from posts of the Actions token and of people who may
+write here (tools/pr_gates.py `trusted`): anyone can comment on a public repository."""
 import datetime
 import json
 import os
@@ -22,12 +27,12 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gates  # noqa: E402
 import kit  # noqa: E402
+import lint_knowledge  # noqa: E402
 import lint_reference  # noqa: E402
+import pr_gates  # noqa: E402
 import red_proof  # noqa: E402
 
-EVIDENCE = "guides/quality-bar-evidence.md"
-BLOCK = re.compile(r"<!-- generated:([\w-]+) -->\n(.*?)<!-- /generated:\1 -->", re.S)
-FINDINGS_MARK = re.compile(r"<!-- kurz-review:findings (\[.*?\]) -->", re.S)
+EVIDENCE, BLOCK = lint_knowledge.EVIDENCE, lint_knowledge.BLOCK
 
 
 def table(header, rows):
@@ -57,8 +62,7 @@ def block_store(root):
         between = line[line.index(")") + 1:].partition("—")[0].split()
         for tag in between or ["(untagged)"]:
             tags[tag] = tags.get(tag, 0) + 1
-    import yaml
-    sections = yaml.safe_load(kit.read(os.path.join(root, ".review/review-rules.yaml")))["sections"]
+    sections = kit.load_yaml(kit.read(os.path.join(root, ".review/review-rules.yaml")))["sections"]
     rows = [("Entries in INDEX.md", len(lines))] + [(f"tagged {tag}", n) for tag, n in sorted(tags.items())]
     rows += [("Review rule sections", len(sections)), ("Review rules", sum(len(s["rules"]) for s in sections))]
     return table(["Store", "Count"], rows)
@@ -69,13 +73,18 @@ def block_design(root):
     open_section = re.search(r"^## \d+\. Open\n(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not open_section:
         raise kit.Refused("kurz-design.md has no Open section")
+    return table(["Design record", "Count"], [
+        ("Sections", len(re.findall(r"^## \d+\. ", text, re.M))),
+        ("Statements marked *(assumed)*", len(re.findall(r"\*\(assumed", text))),
+        ("Open questions", len(re.findall(r"^- ", open_section.group(1), re.M))),
+    ])
+
+
+def block_reference(root):
     errors, counted = lint_reference.lint(root)
     if errors:
         raise kit.Refused(f"the reference lint is not green, so its counts are not evidence: {errors[0]}")
-    return table(["Design record and reference", "Count"], [
-        ("Sections of the record", len(re.findall(r"^## \d+\. ", text, re.M))),
-        ("Statements of the record marked *(assumed)*", len(re.findall(r"\*\(assumed", text))),
-        ("Entries under Open in the record", len(re.findall(r"^- ", open_section.group(1), re.M))),
+    return table(["Reference and corpus", "Count"], [
         ("Rules in the reference", counted["rules"]),
         *[(f"of them {status}", counted[status]) for status in ("decided", "assumed", "proposed", "open")],
         ("Corpus cases, none of them run", counted["cases"]),
@@ -92,12 +101,19 @@ def block_forge(root):
         comments = kit.gh_pages(f"repos/{repo}/pulls/{p['number']}/comments?per_page=100")
         notes = kit.gh_pages(f"repos/{repo}/issues/{p['number']}/comments?per_page=100")
         for c in comments + notes:
-            for raw in FINDINGS_MARK.findall(c.get("body") or ""):
-                for f in json.loads(raw):
-                    if f.get("severity") in severity:
+            if not pr_gates.trusted((c.get("user") or {}).get("login", ""), c.get("author_association")):
+                continue
+            for raw in pr_gates.MARK.findall(c.get("body") or ""):
+                try:
+                    found = json.loads(raw)
+                except ValueError:
+                    continue  # a damaged marker counts nothing; it must not stop the evidence
+                for f in found if isinstance(found, list) else []:
+                    if isinstance(f, dict) and f.get("severity") in severity:
                         severity[f["severity"]] += 1
             over_red += (c.get("body") or "").startswith("Merged over red")
-    hazards = kit.gh_pages(f"repos/{repo}/issues?state=open&labels=hazard&per_page=100")
+    # the issues endpoint lists pull requests too
+    hazards = [i for i in kit.gh_pages(f"repos/{repo}/issues?state=open&labels=hazard&per_page=100") if "pull_request" not in i]
     return table(["Forge", "Count"], [
         ("Pull requests opened", len(pulls)), ("Pull requests merged", len(merged)), ("Merged over red, with a recorded waiver", over_red),
         ("Review findings posted: high", severity["high"]), ("Review findings posted: medium", severity["medium"]),
@@ -105,7 +121,8 @@ def block_forge(root):
     ])
 
 
-BLOCKS = {"gates": block_gates, "self-tests": block_self_tests, "store": block_store, "design": block_design, "forge": block_forge}
+BLOCKS = {"gates": block_gates, "self-tests": block_self_tests, "store": block_store, "design": block_design,
+          "reference": block_reference, "forge": block_forge}
 
 
 def rewrite(text, blocks, today):
@@ -118,9 +135,11 @@ def rewrite(text, blocks, today):
         raise kit.Refused(f"computed blocks with no marker in the file: {sorted(set(blocks) - set(present))}")
     if set(present) - set(blocks):
         raise kit.Refused(f"blocks in the file that this run did not compute: {sorted(set(present) - set(blocks))}")
-    if not re.search(r"^generated:[ \t]*\S", text, re.M):
-        raise kit.Refused("the file has no generated: line to stamp")
+    for line in ("generated", "digest"):
+        if not re.search(rf"^{line}:[ \t]*\S", text, re.M):
+            raise kit.Refused(f"the file has no {line}: line to stamp")
     text = BLOCK.sub(lambda m: f"<!-- generated:{m.group(1)} -->\n{blocks[m.group(1)]}\n<!-- /generated:{m.group(1)} -->", text)
+    text = re.sub(r"^digest:.*$", f"digest: {lint_knowledge.digest(text)}", text, count=1, flags=re.M)
     return re.sub(r"^generated:.*$", f"generated: {today.isoformat()}", text, count=1, flags=re.M)
 
 
@@ -138,7 +157,7 @@ def update(path, compute, today, write=True):
 
 def self_test():
     today = datetime.date(2026, 10, 1)
-    good = ("---\nname: e\ngenerated: 2026-01-01\nttl_days: 60\n---\n\nProse before.\n\n<!-- generated:a -->\nold a\n<!-- /generated:a -->\n\n"
+    good = ("---\nname: e\ngenerated: 2026-01-01\ndigest: none\nttl_days: 60\n---\n\nProse before.\n\n<!-- generated:a -->\nold a\n<!-- /generated:a -->\n\n"
             "Prose between.\n\n<!-- generated:b -->\nold b\n<!-- /generated:b -->\n\nProse after.\n")
     blocks = {"a": "new a", "b": "new b"}
     cases = []
@@ -153,11 +172,18 @@ def self_test():
     new = rewrite(good, blocks, today)
     cases.append(("blocks are replaced", "new a" in new and "new b" in new and "old" not in new, new))
     cases.append(("the date is stamped", "generated: 2026-10-01" in new and "2026-01-01" not in new, new))
+    fm = new.split("---\n")[1]
+    cases.append(("the digest of the blocks is stamped, and the lint finds nothing against them",
+                  f"digest: {lint_knowledge.digest(new)}" in fm and lint_knowledge.generated("e", new, fm) == [], fm))
+    edited = new.replace("new a", "another a")
+    cases.append(("a block edited after the run no longer fits the digest",
+                  any("not what the digest" in e for e in lint_knowledge.generated("e", edited, fm)), lint_knowledge.generated("e", edited, fm)))
     cases.append(("the prose is untouched", all(p in new for p in ("Prose before.", "Prose between.", "Prose after.", "ttl_days: 60")), new))
     cases.append(("a second run changes nothing", rewrite(new, blocks, today) == new, ""))
     refused("a computed block without a marker", good, {**blocks, "c": "x"}, "no marker in the file")
     refused("a block in the file that was not computed", good, {"a": "x"}, "did not compute")
     refused("no generated: line", good.replace("generated: 2026-01-01\n", ""), blocks, "no generated: line")
+    refused("no digest: line", good.replace("digest: none\n", ""), blocks, "no digest: line")
     refused("a marker that is not closed", good.replace("<!-- /generated:b -->", ""), blocks, "not closed")
     refused("a block that occurs twice", good + "<!-- generated:a -->\nx\n<!-- /generated:a -->\n", blocks, "occurs twice")
 
@@ -179,6 +205,79 @@ def self_test():
                   os.listdir(os.path.dirname(path))))
     cases.append(("the real guide has a marker for every block this tool computes, and no other",
                   sorted(m.group(1) for m in BLOCK.finditer(kit.read(os.path.join(kit.ROOT, EVIDENCE)))) == sorted(BLOCKS), ""))
+
+    def got(fn, *args):
+        """What fn returned, or the exception it raised, as a value."""
+        try:
+            return fn(*args)
+        except Exception as e:
+            return e
+
+    # the blocks, against a small tree and a forge that answers what it is told to
+    root = tempfile.mkdtemp()
+    os.mkdir(os.path.join(root, ".review"))
+    for rel, body in {"INDEX.md": "- [a](knowledge/a.md) LIVING — hook\n- [b](guides/b.md) — hook\nnot an entry\n",
+                      ".review/review-rules.yaml": "sections:\n  - name: s\n    always: true\n    rules: [one, two]\n",
+                      "kurz-design.md": "## 1. Types\n\nx *(assumed)*\n\n## 2. Open\n\n- q1\n- q2\n"}.items():
+        with open(os.path.join(root, rel), "w", encoding="utf-8") as f:
+            f.write(body)
+    store = got(block_store, root)
+    cases.append(("store: entries, tags, sections and rules are counted",
+                  all(row in str(store) for row in ("| Entries in INDEX.md | 2 |", "| tagged LIVING | 1 |", "| Review rule sections | 1 |", "| Review rules | 2 |")), store))
+    design = got(block_design, root)
+    cases.append(("design: sections, assumed statements and open questions are counted",
+                  all(row in str(design) for row in ("| Sections | 2 |", "| Statements marked *(assumed)* | 1 |", "| Open questions | 2 |")), design))
+    with open(os.path.join(root, "kurz-design.md"), "w", encoding="utf-8") as f:
+        f.write("## 1. Types\n\nx\n")
+    design = got(block_design, root)
+    cases.append(("design: a record without its Open section is refused", isinstance(design, kit.Refused) and "no Open section" in str(design), repr(design)))
+
+    saved_lint = lint_reference.lint
+    try:
+        lint_reference.lint = lambda tree: (["reference/02-variables.md:3: rule V1 is decided and cites no section"], {})
+        red_reference = got(block_reference, root)
+        lint_reference.lint = lambda tree: ([], {"rules": 4, "decided": 1, "assumed": 1, "proposed": 1, "open": 1, "cases": 2, "errors": 1})
+        green_reference = got(block_reference, root)
+    finally:
+        lint_reference.lint = saved_lint
+    cases.append(("reference: counts from a red lint are refused",
+                  isinstance(red_reference, kit.Refused) and "not green" in str(red_reference), repr(red_reference)))
+    cases.append(("reference: rules by status, cases and error ids are counted",
+                  all(row in str(green_reference) for row in ("| Rules in the reference | 4 |", "| of them open | 1 |",
+                                                               "| Corpus cases, none of them run | 2 |", "| Compile-error ids | 1 |")), green_reference))
+
+    saved = red_proof.check, red_proof.copy_of_tree, kit.repo, kit.gh_pages
+    red_proof.copy_of_tree = lambda: root
+    try:
+        red_proof.check = lambda tree: (["tools/x.py: its self-test does not pass (exit 1)"], {"tools/x.py": {"cases": 3, "proofs": 1}})
+        red = got(block_self_tests, root)
+        red_proof.check = lambda tree: ([], {"tools/x.py": {"cases": 3, "proofs": 1}, "tools/y.py": {"cases": 2, "proofs": 2}})
+        green = got(block_self_tests, root)
+
+        finding = lambda severity: f'<!-- kurz-review:findings [{{"file": "a.md", "line": 1, "severity": "{severity}", "title": "t"}}] -->'
+        post = lambda login, association, body: {"user": {"login": login}, "author_association": association, "body": body}
+        answers = {
+            "pulls?": [{"number": 1, "merged_at": "2026-10-01T00:00:00Z"}, {"number": 2, "merged_at": None}],
+            "pulls/1/comments": [post("github-actions[bot]", "NONE", finding("high")), post("a-stranger", "NONE", finding("high")),
+                                 post("the-owner", "OWNER", "<!-- kurz-review:findings [not json] -->")],
+            "issues/1/comments": [post("the-owner", "OWNER", "Merged over red at `abc`."), post("a-stranger", "NONE", "Merged over red at `abc`."),
+                                  post("the-owner", "OWNER", finding("low"))],
+            "pulls/2/comments": [], "issues/2/comments": [],
+            "issues?": [{"number": 3}, {"number": 4, "pull_request": {"url": "x"}}],
+        }
+        kit.repo = lambda: "o/n"
+        kit.gh_pages = lambda path: next(rows for key, rows in answers.items() if key in path)
+        forge = got(block_forge, root)
+    finally:
+        red_proof.check, red_proof.copy_of_tree, kit.repo, kit.gh_pages = saved
+    cases.append(("self-tests: numbers from a red self-test are refused", isinstance(red, kit.Refused) and "not green" in str(red), repr(red)))
+    cases.append(("self-tests: a green run is a table with its totals", "| **total** | 5 | 3 |" in str(green), green))
+    cases.append(("forge: pull requests, merges and open hazard issues are counted, and a pull request is no issue",
+                  all(row in str(forge) for row in ("| Pull requests opened | 2 |", "| Pull requests merged | 1 |", "| Open HAZARD issues | 1 |")), forge))
+    cases.append(("forge: a finding marker counts from the Actions token and from a maintainer, not from a stranger",
+                  all(row in str(forge) for row in ("posted: high | 1 |", "posted: medium | 0 |", "posted: low | 1 |")), forge))
+    cases.append(("forge: a damaged marker counts nothing and stops nothing", isinstance(forge, str), repr(forge)))
+    cases.append(("forge: a waiver record counts from a maintainer, not from a stranger", "| Merged over red, with a recorded waiver | 1 |" in str(forge), forge))
     return kit.report(cases)
 
 

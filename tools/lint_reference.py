@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The language reference and the conformance corpus are one statement of the language, kept in
 two places: `reference/*.md` holds the rules, `corpus/**/*.kz` holds the cases. No compiler runs
-the cases yet, so this lint keeps the two from drifting apart. It checks shape, never meaning.
+the cases, so this lint keeps the two from drifting apart. It checks shape, never meaning.
 
   lint_reference.py           check
   lint_reference.py --sync    rewrite the sample under every `Case:` line from its corpus file
