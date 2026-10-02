@@ -24,6 +24,10 @@ The errors the cases expect. An id is what a corpus header names in `// expect: 
 | `semicolon` | L5 | a `;`: a statement ends where its line ends |
 | `reserved-word` | L12 | a core word, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
+| `reversed-range` | C8 | a range between literals whose end lies below its start |
+| `ambiguous-call` | F13 | a call that fits more than one function, none of them exactly |
+| `no-text` | A4 | the text of an instance of a class that declares none |
+| `block-indentation` | L13 | a line of a `"""` block that is indented less than the closing line |
 
 ### E1 (assumed, §8) One error per case, with a line
 

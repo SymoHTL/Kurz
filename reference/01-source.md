@@ -76,7 +76,7 @@ print(a); print(a + 1)
 
 ### L6 (decided, §8) Interpolation is always on
 
-Inside a string literal, `{expression}` is replaced by the text (A2, A3) of the expression's value.
+Inside a string literal, `{expression}` is replaced by the text (A2 to A4) of the expression's value.
 
 Case: [source/interpolation.kz](../corpus/source/interpolation.kz)
 ```kurz
@@ -161,8 +161,8 @@ print(half < 1.0)
 Only the core words are reserved: the words that the language itself uses as syntax, such as
 `if`, `match`, `mut`, `data` and `class`. Using one as a name is the compile error
 `reserved-word`. A user-defined keyword (record, section 9) is reserved in the files that import
-it and is an ordinary name in every other file. The list of core words closes when the chapters
-that this reference does not cover yet are written.
+it and is an ordinary name in every other file. This reference does not list the core words: the
+parts of the language outside it (00-about) have core words of their own.
 
 Case: [source/reserved-word.kz](../corpus/source/reserved-word.kz)
 ```kurz
@@ -171,23 +171,52 @@ data Job(int match)
 print(Job(1) == Job(2))
 ```
 
-### L13 (open) A string over several lines
+### L13 (decided, §8) A string over several lines
 
-How a string literal that holds line breaks is written. Options: (a) not at all: a line break in
-a string is written `\n` (L7); (b) a literal between two lines of `"""`, as C# has, from which
-the indentation of the closing line is removed; (c) an ordinary literal may run over several
-lines. Lean: (b). SQL and HTML inside a program are text over several lines, and under (c) one
-forgotten quote swallows the rest of the file.
+A string that holds line breaks is written as a raw string literal is in C# 11. It opens with
+`"""` at the end of a line and closes with `"""` on a line of its own. The text starts on the
+line after the opening and ends before the closing line; neither of those two line breaks
+belongs to it. The indentation of the closing line is removed from every line of the text. A
+line of the text that does not start with that indentation is the compile error
+`block-indentation`; an empty line is exempt. An ordinary literal ends on the line it starts on.
+What `{` and `\` mean inside the block is L15; the cases hold neither.
 
-### L14 (assumed, §4) Literals with a unit
+Case: [source/multi-line-string.kz](../corpus/source/multi-line-string.kz)
+```kurz
+text = """
+    SELECT name
+      FROM users
+    """
+print(text)
+```
+
+Case: [source/multi-line-string-indentation.kz](../corpus/source/multi-line-string-indentation.kz)
+```kurz
+text = """
+        SELECT name
+    FROM users
+        """
+print(text)
+```
+
+### L14 (decided, §4) Literals with a unit
 
 A number directly followed by a unit is a duration or a size. The list of units is fixed: `ms`,
 `s`, `min`, `h` and `days` make a duration (T13); `kb`, `mb` and `gb` make a number of bytes, an
-integer literal (L10) in steps of 1024. That the list is fixed is decided. Which units are on it
-is what the record marks as *(assumed)*.
+integer literal (L10) in steps of 1024.
 
 Case: [source/unit-literals.kz](../corpus/source/unit-literals.kz)
 ```kurz
 print(2kb)
 print(1mb)
 ```
+
+### L15 (open) What is special inside a `"""` block
+
+Whether `{expression}` is replaced (L6) and `\` starts an escape (L7) inside a `"""` block (L13).
+A raw string of C# does neither unless it is marked with `$`. Options: (a) as in every other
+literal: both keep their meaning, and a brace of JSON or CSS is written `\{`; (b) as in a raw
+string of C#: neither, so the block cannot hold a value of the program; (c) `{expression}` is
+replaced and `\` is an ordinary character, which leaves no way to write a brace. Lean: (a). The
+record says that interpolation is always on, a query over several lines needs its values, and
+one rule for every literal is the least to learn.

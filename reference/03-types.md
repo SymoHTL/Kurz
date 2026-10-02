@@ -126,7 +126,7 @@ int i = 5
 print(int(b) + i)
 ```
 
-### T20 (assumed, §4) A conversion that loses the value
+### T20 (decided, §4) A conversion that loses the value
 
 A conversion whose value does not fit the target type behaves as overflow does (T4, T5): in a
 release build the value wraps around, in a test build it raises an exception.
@@ -230,13 +230,15 @@ print(s.Chars.Count)
 print(s.Bytes.Count)
 ```
 
-### T21 (assumed, §4) `char`
+### T21 (decided, §4) `char`
 
 The element type of `.Chars` is `char`: one Unicode code point, in 32 bits. It is not the `char`
-of C#, which is one UTF-16 unit.
+of C#, which is one UTF-16 unit and cannot hold every code point. The string stays UTF-8
+whatever its `.Chars` are used for: they are decoded one at a time while the string is walked,
+and no second copy of the text is built. Four bytes are used only where a `char` is stored.
 
-No case: a `char` has neither a literal nor a text yet (A4), so a case could only count them,
-which T16 shows.
+No case: a `char` has no literal in this reference and no chosen text (A6), so a case could only
+count them, which T16 shows.
 
 ### T17 (decided, §4) Generics
 
@@ -321,12 +323,23 @@ print(1 < 2 && 2 < 3)
 print(!(1 == 1) || 3 >= 3)
 ```
 
-### T22 (open) Operators on bits
+### T22 (decided, §4) Operators on bits
 
-Whether `&`, `|`, `^`, `~`, `<<` and `>>` exist on integers with the meaning they have in C#. T18
-does not list them; hashes and wire formats need them, and so does a set of flags (D13). `|`
-already separates the cases of a union type (D9). Options: (a) the C# operators: among types `|`
-makes a union, among values it combines bits; (b) methods, `a.And(b)` and `a.ShiftLeft(3)`.
-Lean: (a). A hash is a line of such operators, which is the reason T12 gave wrapping arithmetic
-operators of its own, and the two meanings of `|` never meet, because one stands among types and
-the other among values.
+`&`, `|`, `^`, `~`, `<<` and `>>` work on the bits of integers, with the meaning and the
+precedence they have in C#. `>>` on a signed integer keeps the sign. A shift is not arithmetic
+in the sense of T4 to T6: bits that leave the type are dropped in every build, and the count of
+a shift is taken modulo the width of the type, so `1 << 33` on an `int` is `1 << 1`. `|` also
+separates the cases of a union type (D9). The two meanings never meet: one stands between types,
+the other between values.
+
+Case: [types/bit-operators.kz](../corpus/types/bit-operators.kz)
+```kurz
+print(6 & 3)
+print(6 | 3)
+print(6 ^ 3)
+print(~6)
+print(1 << 4)
+print(-16 >> 2)
+print(1 << 31)
+print(1 << 33)
+```

@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-02
-digest: 279048c62b3604d2ce377c79296048bf05b87f3dfe8300011c36210d1ef92a1e
+digest: cbb3581ed244503853e4fb5da346a7fe04a7f471f4eb23dbe80e1db648ed44fe
 ttl_days: 60
 metadata:
   type: reference
@@ -33,6 +33,7 @@ defined in its docstring.
 | `self-tests` | every run | a tool's self-test fails, ran no case or contradicts its own exit code; a tool has no self-test or no recorded red proof; a recorded mutation no longer turns its one named case red |
 | `tree` | every run | a path the design phase does not allow; a credential-shaped or machine-bound string; a merge-conflict marker; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor |
 | `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
+| `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; fewer rules or cases than the floors |
 | `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path or branch filter; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; a workflow without facts |
 | `merge-checks` | every run | the rules active on main differ from tools/ruleset.json or carry a parameter that file does not name, the ruleset is not active, it has bypass actors, or auto-merge is allowed; PARTLY where the token cannot read the last two |
 | `pr-title` | pull requests | a workflow-skip literal, a credential-shaped or machine-bound string or a conflict marker in the title, the description or a commit message of the branch: each of them can become the squash commit on main |
@@ -53,13 +54,14 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/kit.py` | 11 | 7 |
 | `tools/lint_ci.py` | 67 | 67 |
 | `tools/lint_knowledge.py` | 54 | 36 |
+| `tools/lint_reference.py` | 47 | 46 |
 | `tools/merge_pr.py` | 118 | 100 |
 | `tools/pr_gates.py` | 48 | 43 |
-| `tools/quality_evidence.py` | 25 | 20 |
+| `tools/quality_evidence.py` | 27 | 22 |
 | `tools/red_proof.py` | 28 | 25 |
 | `tools/review/review.py` | 197 | 155 |
 | `tools/tree_gate.py` | 77 | 47 |
-| **total** | 656 | 520 |
+| **total** | 705 | 568 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -67,9 +69,9 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 23 |
+| Entries in INDEX.md | 24 |
 | tagged (untagged) | 2 |
-| tagged HARD | 11 |
+| tagged HARD | 12 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 2 |
 | tagged RECIPE | 1 |
@@ -78,20 +80,35 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | Review rules | 63 |
 <!-- /generated:store -->
 
-## The design record and the reference
+## The design record
 
-A statement marked *(assumed)* was proposed and not objected to; it is not a decision yet. In the
-reference a `proposed` rule is what a case needed and the record does not say, and an `open` rule
-is a fork nobody chose: neither is a decision. The cases are counted here, not run: no compiler
-exists.
+A statement marked *(assumed)* was proposed and not objected to; it is not a decision.
 
 <!-- generated:design -->
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 15 |
-| Open questions | 5 |
+| Statements marked *(assumed)* | 30 |
+| Open questions | 6 |
 <!-- /generated:design -->
+
+## The reference and the corpus
+
+In the reference a `proposed` rule is what a case needed and the record does not say, and an
+`open` rule is a fork nobody chose: neither is a decision. The cases are counted here, not run:
+nothing in this repository executes Kurz.
+
+<!-- generated:reference -->
+| Reference and corpus | Count |
+|---|---|
+| Rules in the reference | 144 |
+| of them decided | 103 |
+| of them assumed | 31 |
+| of them proposed | 1 |
+| of them open | 9 |
+| Corpus cases, none of them run | 141 |
+| Compile-error ids | 23 |
+<!-- /generated:reference -->
 
 ## The forge
 

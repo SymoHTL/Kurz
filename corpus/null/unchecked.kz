@@ -1,5 +1,5 @@
 // expect: error nullable-unchecked at 12
-// rules: N2
+// rules: N2, N8
 
 string? Email(int id) {
     if id == 1 {

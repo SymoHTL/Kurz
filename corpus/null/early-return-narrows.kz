@@ -1,4 +1,6 @@
-// expect: error nullable-unchecked at 16
+// expect: output
+// | 13
+// | 0
 // rules: N3
 
 string? Email(int id) {
@@ -17,3 +19,4 @@ int Length(int id) {
 }
 
 print(Length(1))
+print(Length(2))

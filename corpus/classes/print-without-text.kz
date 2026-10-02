@@ -1,0 +1,7 @@
+// expect: error no-text at 7
+// rules: A4
+
+class Counter(mut int Count)
+
+c = Counter(0)
+print(c)

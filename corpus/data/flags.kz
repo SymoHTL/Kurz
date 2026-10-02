@@ -1,0 +1,10 @@
+// expect: output
+// | true
+// | false
+// rules: D13
+
+flags Access { Read, Write, Run }
+
+p = Access.Read
+print(p.Has(Access.Read))
+print(p.Has(Access.Write))

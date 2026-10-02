@@ -1,0 +1,19 @@
+// expect: output
+// | Ann
+// | 3
+// | guest 7
+// | 7
+// rules: K10
+
+class User(string Name)
+
+class Admin(int Level) : User
+
+class Guest(int Number) : User("guest {Number}")
+
+a = Admin("Ann", 3)
+print(a.Name)
+print(a.Level)
+g = Guest(7)
+print(g.Name)
+print(g.Number)

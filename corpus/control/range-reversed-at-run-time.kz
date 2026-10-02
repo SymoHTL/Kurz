@@ -1,0 +1,13 @@
+// expect: throws
+// | 1
+// | 2
+// rules: C8
+
+void Count(int n) {
+    for i in 1..n {
+        print(i)
+    }
+}
+
+Count(2)
+Count(0)

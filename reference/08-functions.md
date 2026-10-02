@@ -100,16 +100,17 @@ print(Next(1))
 ### F9 (decided, §8) Private by default
 
 A member is private to its type. A top-level type or function is private to its folder. `pub`
-exposes it; `prot` exposes a member to inheriting types.
+exposes it; `prot` exposes a member to inheriting types. The fields of a primary constructor
+are the exception (D14).
 
-No case: it takes several folders, and the corpus holds single files so far.
+No case: it takes several folders, and a case of the corpus is a single file.
 
 ### F10 (decided, §8) Folders and `use`
 
 A folder is a namespace; there is no `namespace` line. Files in one folder see each other
 without imports. `use` brings in another folder or a package.
 
-No case: it takes several files, and the corpus holds single files so far.
+No case: it takes several files, and a case of the corpus is a single file.
 
 ### F11 (decided, §4) Function types and what a lambda captures
 
@@ -184,14 +185,55 @@ Greet("Ann", "bye")
 Greet("Ann", word: "bye")
 ```
 
-### F13 (open) Which overload a call picks
+### F13 (decided, §8) Which overload a call picks
 
 A call can fit more than one function of its name: through widening (T8), when `Show(int)` and
-`Show(long)` both take a `short`; through a default value (F12), when `Show(int a)` and
-`Show(int a, int b = 0)` both take `Show(4)`; and through a literal, which takes the type that is
-expected (L10). Options: (a) the rules of C# for the better function, all of them; (b) a function
-whose parameters have exactly the types of the arguments, with no default used, wins, and any
-other call that fits more than one function is a compile error; (c) no ranking: a call that fits
-more than one function is always a compile error. Lean: (b). The C# rules fill pages and still
-surprise their readers, and an error that names the two functions that fit is cheap to fix at
-the call.
+`Show(long)` both take a `short`, and through a default value (F12), when `Show(int a)` and
+`Show(int a, int b = 0)` both take one `int`. A function whose parameters have exactly the types
+of the arguments, with no default value used, wins. Any other call that fits more than one
+function is the compile error `ambiguous-call`; a conversion (T10) at the call picks one. Which
+type a literal argument has here is F14; the cases pass variables.
+
+Case: [functions/overload-exact.kz](../corpus/functions/overload-exact.kz)
+```kurz
+void Show(int n) {
+    print("int {n}")
+}
+
+void Show(long n) {
+    print("long {n}")
+}
+
+void Show(int a, int b = 0) {
+    print("two {a} {b}")
+}
+
+int i = 4
+int j = 5
+long big = 4
+Show(i)
+Show(big)
+Show(i, j)
+```
+
+Case: [functions/overload-ambiguous.kz](../corpus/functions/overload-ambiguous.kz)
+```kurz
+void Show(int n) {
+    print("int {n}")
+}
+
+void Show(long n) {
+    print("long {n}")
+}
+
+short s = 4
+Show(s)
+```
+
+### F14 (open) A literal as an argument of an overloaded function
+
+A literal takes the type that is expected (L10), and a call of an overloaded function expects
+several. Options: (a) the literal has its own type, `int` for `4` (L10), so `Show(4)` picks
+`Show(int)` over `Show(long)`, as in C#; (b) a literal fits every type that can hold it, so
+`Show(4)` is `ambiguous-call` when `Show(int)` and `Show(long)` exist. Lean: (a). The plainest
+call there is should not need a conversion.

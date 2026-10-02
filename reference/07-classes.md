@@ -69,11 +69,13 @@ class Label(string Text)
 print(Label("x") == Label("x"))
 ```
 
-### K5 (decided, §4) Equality can be overridden
+### K5 (decided, §4) Equality by named fields
 
-As in C#.
+A class can replace the equality of K4 by naming the fields that count. Two instances are then
+equal when those fields are equal, and the hash is derived from the same fields, so the two
+cannot disagree. Nothing else overrides equality: a class brings no comparison code of its own.
 
-No case: how it is written is open (K8).
+No case: how the fields are named is open (K8).
 
 ### K6 (decided, §4) Single inheritance and interfaces
 
@@ -134,28 +136,58 @@ print(Counter.Step)
 
 Case: [classes/inherit.kz](../corpus/classes/inherit.kz)
 
-### K8 (open) How equality is overridden
+### K8 (open) How a class names the fields that count
 
-K5 says that equality can be overridden, as in C#. C# does it with `Equals(object)`,
-`GetHashCode()` and, separately, the operator `==`; Kurz has no type that every value belongs to.
-Options: (a) a method with a fixed name, `bool Equals(User other)`, and a second one for the
-hash, where the compiler checks that both are there; (b) an operator declaration as in C#,
-`static bool operator ==(User a, User b)`; (c) the class names the fields that count, and
-equality and the hash are derived from them. Lean: (c). The usual reason is an entity that is
-equal by its id; the two halves cannot disagree; and it is one line.
+K5 lets a class name the fields that count for its equality. How it names them is not chosen,
+and neither is whether a `mut` field can be one. Options: (a) a word in front of each such
+field, `class User(key int Id, mut string Name)`; (b) a clause after the head of the class,
+`class User(int Id, mut string Name) equal by Id`. Either adds core words (L12), and `key` is a
+common name for a variable. Lean: (b), which shows the whole key in one place and leaves the
+fields as they are. On `mut` fields the lean is no: an instance that sits in a map as a key
+would change its hash while it is there.
 
-### K9 (proposed) A method of a class needs no `mut` marker
+### K9 (decided, §4) A method of a class needs no `mut` marker
 
 A method of a class can assign the `mut` fields of its instance without a marker of its own, and
 can be called through every reference (K2). The marker of M5 is for values, where a change has to
-reach the variable that holds the value. The record does not say this.
+reach the variable that holds the value.
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
 
-### K10 (open) A class with a primary constructor that inherits
+### K10 (decided, §4) A class with a primary constructor that inherits
 
-How the fields of the base class reach its constructor. Options: (a) as a `data` type does (D7):
-the constructor takes the fields of the base first, `class Admin(int Level) : User`; (b) as C#
-does: the class lists every parameter and passes the base's on,
-`class Admin(string Name, int Level) : User(Name)`. Lean: (a), one form for `data` and `class`.
-The cases inherit from classes without a primary constructor until this is answered.
+There are two forms. The short one is the form of a `data` type (D7):
+`class Admin(int Level) : User`, whose constructor takes what the constructor of the base takes,
+in the same order, and then the parameters the class lists. The explicit one writes the
+arguments of the base after its name, so that they can be computed:
+`class Guest(int Number) : User("guest {Number}")`. Its constructor takes only the parameters
+the class lists, and the arguments of the base are expressions over them. Whether a parameter
+can be passed on without becoming a field of the class is K11; the case computes the argument
+from a field.
+
+Case: [classes/inherit-constructor.kz](../corpus/classes/inherit-constructor.kz)
+```kurz
+class User(string Name)
+
+class Admin(int Level) : User
+
+class Guest(int Number) : User("guest {Number}")
+
+a = Admin("Ann", 3)
+print(a.Name)
+print(a.Level)
+g = Guest(7)
+print(g.Name)
+print(g.Number)
+```
+
+### K11 (open) A parameter that is only passed to the base
+
+In the explicit form of K10 every parameter of the class is a field (K1). A class that takes a
+value only to hand it to its base, `class Admin(string Name, int Level) : User(Name)`, would
+hold `Name` twice. Options: (a) a parameter with the name and the type of a field of the base is
+that field and no new one, as in a C# record; (b) every parameter is a field, a name the base
+already has is the compile error `redeclared`, and such a class uses the short form; (c) a word
+marks a parameter that is no field. Lean: (a). It is what the explicit form is for when only
+some of the arguments are computed, and it needs no new word. The cost: a name decides whether
+a parameter is a field.

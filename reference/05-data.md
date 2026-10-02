@@ -164,7 +164,7 @@ Greet("Ann", word: "bye")
 It is the short form of a union of cases without fields (D8, D9): a `match` on it has to list
 every value (O8), and two values are equal when they are the same value. A value is not an
 integer. It has a number only where the declaration writes one; how that is written and read is
-part of D13.
+D18.
 
 Case: [data/enum.kz](../corpus/data/enum.kz)
 ```kurz
@@ -195,25 +195,29 @@ void Show(Plan p) {
 Show(Plan.Pro)
 ```
 
-### D13 (open) Flags, and the number of an `enum` value
+### D13 (decided, §4) Flags
 
-Simon wants what `[Flags]` and `HasFlag` give in C#: values that combine into a set, and a test
-whether a set holds a value. A set of flags is not one case, so a `match` cannot list it case by
-case, and D12 alone does not give it. Open with it: how the number of a value is written and
-read. Options: (a) a declaration of its own, `flags Access { Read, Write, Run }`: a value of the
-type is a set of these names, each name is one bit, numbered in order unless the declaration
-writes the number, and a set is combined and tested without the number showing; (b) the C# form,
-an attribute on an `enum` whose author numbers the bits, `[Flags] enum Access { Read = 1,
-Write = 2, Run = 4 }`, combined with `|` (T22); (c) no form in the language: `Set<Access>` over
-an `enum`, which the compiler stores as bits. Lean: (a). (b) lets a value hold a bit that has no
-name, and (c) leaves the layout of the bits, which a wire format needs, to the compiler.
+`flags Access { Read, Write, Run }` declares a type whose values are sets of the listed names.
+It gives what `[Flags]` and `HasFlag` give in C#. Each name is one bit, and the compiler numbers
+the bits in order unless the declaration writes the number (D18). A name alone, `Access.Read`,
+is the set that holds that name. `set.Has(Access.Read)` is `true` when the set holds the name. A
+set is not one case, so a `match` cannot list it case by case. How sets are combined is D17; the
+case tests a set of one name.
 
-### D14 (proposed) The fields of a primary constructor can be read from outside
+Case: [data/flags.kz](../corpus/data/flags.kz)
+```kurz
+flags Access { Read, Write, Run }
 
-A field that is declared in a primary constructor can be read wherever its type can be used, as
-the positional members of a C# record can. F9 makes a member private to its type unless it says
-`pub`; the record's samples read such fields from outside without one, and so does every case
-here. The record does not say which of the two holds.
+p = Access.Read
+print(p.Has(Access.Read))
+print(p.Has(Access.Write))
+```
+
+### D14 (decided, §8) The fields of a primary constructor can be read from outside
+
+A field that is declared in a primary constructor can be read wherever its type is visible, as
+the positional members of a C# record can. It is the exception to F9, which makes a member
+private to its type unless it says `pub`: without it every such field would carry `pub`.
 
 Case: [data/declare.kz](../corpus/data/declare.kz)
 
@@ -254,3 +258,25 @@ c.Increment()
 print(c.Count)
 print(before.Count)
 ```
+
+### D17 (open) How sets of flags are combined
+
+D13 gives a set of flags and the test `Has`. Not chosen: how two sets become one, how a name is
+taken out of a set, how the set that holds nothing is written, and what `Has` answers for a set
+of several names. Options: (a) the bit operators of C# (T22): `Access.Read | Access.Write`,
+`set & ~Access.Write`, and `Access.None`, a name that every `flags` type has; (b) methods:
+`set.With(Access.Write)`, `set.Without(Access.Write)` and `Access()`. Under both, `Has` is
+`true` when the set holds every name of its argument, as `HasFlag` is in C#. Lean: (a). It is
+what C# does with `[Flags]`, and T22 has the operators. The cost: taking a name out reads as
+arithmetic on bits.
+
+### D18 (open) The number of an `enum` value and of a flag
+
+D12 and D13 give a value a number where the declaration writes one. Not chosen: how the
+declaration writes it, which bit the first name of a `flags` type gets, how a program gets the
+number of a value, and how a number becomes a value. Options: (a) as in C#: `enum Plan { Free = 1, Pro = 2 }`, `int(Plan.Pro)` (T10) and
+`Plan(2)`, where a number that no value has raises an exception; (b) written the same in the
+declaration, and the two directions are members of the type: `Plan.Pro.Number`, and
+`Plan.From(2)` with the result `Plan | Invalid`, so that a number from outside is an outcome
+(O1). Lean: (b). A number arrives from a file, a database or the wire, where a wrong one is
+normal use, and the record keeps exceptions for what a function cannot recover from.

@@ -5,7 +5,4 @@
 for i in 3..<3 {
     print(i)
 }
-for i in 3..2 {
-    print(i)
-}
 print("done")

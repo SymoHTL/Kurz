@@ -125,7 +125,7 @@ Code that touches raw memory sits in `raw` blocks. A `raw` block compiles only i
 the project grants `allow raw`. The compiler's memory guarantees cover everything outside `raw`
 blocks. The grant is per package and written like `allow network`.
 
-No case: a grant sits in `project.kz`, and the corpus holds single files so far.
+No case: a grant sits in `project.kz`, and a case of the corpus is a single file.
 
 ### R8 (decided, §3) Fields of interface type
 

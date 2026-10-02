@@ -131,20 +131,42 @@ for x in xs {
 ### C8 (decided, §8) Ranges and counting loops
 
 `a..b` is the range of the integers from `a` to `b` with both ends included. `a..<b` leaves `b`
-out. `for i in a..<b { }` runs its block once for each number of the range, in order. A range that
-holds no number runs it zero times: `3..<3` by its definition, and `3..2` because a range whose
-end lies below its start is empty, which the record marks as *(assumed)*. The C form with three
-parts, `for (i = 0; i < n; i++)`, does not exist.
+out. `for i in a..<b { }` runs its block once for each number of the range, in order. `a..<a`
+holds no number and runs the block zero times. The C form with three parts,
+`for (i = 0; i < n; i++)`, does not exist.
+
+A range never counts down, and a range whose end lies below its start is an error, not an empty
+range. That holds for both forms: `3..2` and `3..<2` are errors, `3..<3` is not. It is the
+compile error `reversed-range` when both ends are expressions made only of literals, and an
+exception where the range is evaluated otherwise, before the first round of a loop over it.
+`for i in 1..n` therefore throws when `n` is 0; a loop that may run zero times is written with
+`..<`.
 
 Case: [control/range-empty.kz](../corpus/control/range-empty.kz)
 ```kurz
 for i in 3..<3 {
     print(i)
 }
+print("done")
+```
+
+Case: [control/range-reversed.kz](../corpus/control/range-reversed.kz)
+```kurz
 for i in 3..2 {
     print(i)
 }
-print("done")
+```
+
+Case: [control/range-reversed-at-run-time.kz](../corpus/control/range-reversed-at-run-time.kz)
+```kurz
+void Count(int n) {
+    for i in 1..n {
+        print(i)
+    }
+}
+
+Count(2)
+Count(0)
 ```
 
 Case: [control/range-inclusive.kz](../corpus/control/range-inclusive.kz)

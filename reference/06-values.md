@@ -137,7 +137,7 @@ print(numbers.Count)
 
 There is one family of collections, and every value can cross between actors.
 
-No case: actors are not covered yet; that collections are values is shown under M3.
+No case: actors are outside this reference; that collections are values is shown under M3.
 
 ### M9 (assumed, §4, §5) The collections the corpus uses
 
