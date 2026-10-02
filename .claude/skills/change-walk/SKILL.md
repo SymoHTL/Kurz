@@ -46,9 +46,11 @@ systems `py -3` is `python3`.
 
 1. Iterate in Draft. For a review on demand: `gh workflow run review.yml -f pr=<N>`.
 2. When the description is final, mark it Ready once: `gh pr ready <N>`. That starts the review.
-   It uses the reviewer and the rules of the base branch.
+   It uses the workflow, the reviewer and the rules of the default branch.
 3. Wait for the commit status `review`. `gh pr checks <N>` shows it.
-   - `pending`: no review ran on this head.
+   - `pending`: no review ran on this head. Ready, and no `review` run in the Actions list at
+     all: GitHub's default policy blocked the event
+     (`knowledge/pull-request-target-is-blocked-by-default.md`); dispatch it as in step 1.
    - `error`: open the run and read its last line, `REVIEW DID NOT COMPLETE (<kind>)`.
      `usage-limit`: wait for the reset the message names; re-running now spends nothing and fixes
      nothing. `credential`: only the owner can fix the secret. `budget`: re-run the job; what it

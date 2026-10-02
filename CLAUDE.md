@@ -30,8 +30,8 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
   the machine the tools were written on never writes bytecode. Such files are ignored in this
   repository's own `.gitignore`, and the proof replay writes none. Gate: `self-tests`
   ([knowledge/stale-bytecode-hides-a-mutation.md](knowledge/stale-bytecode-hides-a-mutation.md)).
-- The review in CI runs the **base branch's** reviewer and rules, never the pull request's. A
-  change to `tools/review/` or `.review/` reviews nothing until it is merged.
+- The review in CI runs the **default branch's** workflow, reviewer and rules, never the pull
+  request's. A change to `tools/review/` or `.review/` reviews nothing until it is merged.
 - Numbers in `guides/quality-bar-evidence.md` are generated. Run `py -3 tools/quality_evidence.py`;
   an edit by hand is overwritten and its date lies. Gate: `knowledge` (the TTL).
 - Files under `tools/**/fixtures/` are payloads the platform really sent. Capture a new one;
@@ -58,6 +58,10 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 - `gates` red: read the `=== gates` table at the end of the log and fix the first FAIL.
 - `review` pending: nothing reviewed this head. A Draft and a pull request from outside are
   reviewed on demand: `gh workflow run review.yml -f pr=N`.
+- `review` pending on a Ready pull request, and no `review` run in the Actions list at all:
+  GitHub's default policy blocked `pull_request_target`
+  ([knowledge/pull-request-target-is-blocked-by-default.md](knowledge/pull-request-target-is-blocked-by-default.md)).
+  Dispatch the review as above. The policy that allows the event is the owner's setting.
 - `review` red: read the run's last line, `REVIEW DID NOT COMPLETE (kind)`. `usage-limit`: wait
   for the reset, do not re-run now. `credential`: the owner fixes the secret. `budget`: re-run
   it; what the run found is posted and what converged is replayed, so the next run continues.
@@ -156,3 +160,4 @@ judgment is labelled `judgment step`. Never an ungated rule. Gate: review rule "
 | store shape and expiring numbers (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | title, breadth and answered findings (`pr-*`) | code samples in the design record being right (#1) |
 | a review that completed (`review` status) | that this status satisfies the ruleset (#5, unverified) |
+| the reviewer's pinned model and effort, and what a failed run keeps (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |

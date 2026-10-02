@@ -19,6 +19,7 @@ limit (retry after the reset, not now)."""
 import concurrent.futures
 import fnmatch
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -319,14 +320,24 @@ class Budget:
         self.estimate = max(self.estimate, seconds)
 
 
-def converge(call, reported, budget):
+def fresh():
+    """What is known about a batch before its first pass."""
+    return {"findings": [], "passes": 0, "converged": False, "cost": 0.0, "dropped": 0, "error": None}
+
+
+def converge(call, reported, budget, prior=None, limit=MAX_PASSES):
     """Review one batch until a pass adds nothing above low: at least MIN_PASSES, at most MAX_PASSES.
     call(reported so far) -> (findings, cost, dropped). Identity of a finding is (file, line); a
     higher severity on the same line replaces the lower one. A pass that fails ends the batch: what
-    the passes before it found is kept, next to the error."""
+    the passes before it found is kept, next to the error. `prior` is what an earlier call returned
+    for this batch and `limit` is how many passes this call may add; a batch that converged or
+    failed gets no further pass."""
     known = {(f["file"], f["line"]): RANK[f["severity"]] for f in reported}
-    found, passes, cost, converged, dropped, error = {}, 0, 0.0, False, 0, None
-    while passes < MAX_PASSES and budget.fits():
+    prior = prior or fresh()
+    found = {(f["file"], f["line"]): f for f in prior["findings"]}
+    passes, cost, converged, dropped, error = (prior[k] for k in ("passes", "cost", "converged", "dropped", "error"))
+    last = min(MAX_PASSES, passes + limit)
+    while not converged and not error and passes < last and budget.fits():
         began = budget.now()
         try:
             new, c, d = call(reported + list(found.values()))
@@ -346,6 +357,18 @@ def converge(call, reported, budget):
             break
     return {"findings": list(found.values()), "passes": passes, "converged": converged, "cost": cost, "dropped": dropped,
             "error": error}
+
+
+def in_rounds(calls, reported, budget, workers=WORKERS):
+    """The results of all batches, reviewed in rounds: every batch gets one pass before any batch
+    gets a second. When the time ends early, every batch has then been read once, instead of a few
+    read five times and the rest never. calls[i] is the model call of batch i and reported[i] what
+    earlier runs reported on its files (see converge, which gives a finished batch no further pass)."""
+    results = [fresh() for _ in calls]
+    for _ in range(MAX_PASSES):
+        with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+            results = list(pool.map(lambda i: converge(calls[i], reported[i], budget, results[i], limit=1), range(len(calls))))
+    return results
 
 
 def settle(results, work):
@@ -633,32 +656,34 @@ def review(argv):
 
         suffix = fresh_suffix(diff, pr["title"], pr["body"])
 
-        def run_batch(index):
+        def call_of(index):
             batch = work[index]
             paths = {p for p, _ in batch}
             chosen = select_rules(sections, paths)
+            number = itertools.count(1)  # a failed pass ends its batch, so this is the number of the pass
 
             def call(already):
+                name = f"batch {index + 1}/{len(work)}, pass {next(number)}"
                 prompt = build_prompt(chosen, pr["title"], pr["body"], [f for f in already if f["file"] in paths],
                                       batch, index + 1, len(work), suffix)
                 for attempt in (1, 2):
                     began = time.time()
                     try:
                         answer = call_model(prompt, paths, max(1, int(budget.remaining())))
-                        print(f"  batch {index + 1}/{len(work)}: a pass found {len(answer[0])} in {time.time() - began:.0f} s")
+                        print(f"  {name}: found {len(answer[0])} in {time.time() - began:.0f} s")
                         return answer
                     except ReviewError as e:
-                        print(f"  batch {index + 1}/{len(work)}: a pass failed after {time.time() - began:.0f} s ({e.kind})")
+                        print(f"  {name}: failed after {time.time() - began:.0f} s ({e.kind})")
                         if attempt == 2 or not (e.kind == "bad-output" or e.status in RETRY_STATUS):
                             raise
                         time.sleep(20)
-            result = converge(call, [f for f in reported if f["file"] in paths], budget)
-            print(f"  batch {index + 1}/{len(work)} [{', '.join(sorted(paths))}]: {result['passes']} passes, "
-                  f"{'converged' if result['converged'] else 'NOT converged'}, {len(result['findings'])} findings")
-            return result
+            return call
 
-        with concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
-            results = list(pool.map(run_batch, range(len(work))))
+        paths_of = [{p for p, _ in batch} for batch in work]
+        results = in_rounds([call_of(i) for i in range(len(work))], [[f for f in reported if f["file"] in paths] for paths in paths_of], budget)
+        for index, (result, paths) in enumerate(zip(results, paths_of), 1):
+            print(f"  batch {index}/{len(work)} [{', '.join(sorted(paths))}]: {result['passes']} passes, "
+                  f"{'converged' if result['converged'] else 'NOT converged'}, {len(result['findings'])} findings")
 
         findings, capped, unconverged, incomplete = settle(results, work)
         count = {s: sum(f["severity"] == s for f in findings) for s in RANK}
