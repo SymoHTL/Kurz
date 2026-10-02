@@ -10,7 +10,8 @@ Probed on 2026-10-01 with Claude Code CLI 2.1.283. The raw answers are kept as f
 when the pinned model changed.
 
 The call the reviewer makes (`tools/review/review.py`, `command` and `call_model`): prompt on
-stdin, working directory an empty temporary directory, an environment built by `model_env`, and
+stdin, working directory an empty temporary directory, an environment that `model_env` builds
+from an allow-list, and
 
 ```
 claude -p --model <exact id> --safe-mode --tools "" --strict-mcp-config
@@ -37,7 +38,16 @@ What the answer looks like:
 - `modelUsage` is keyed by the model that really answered. The reviewer refuses an answer whose
   key is not its pinned model, so a silent fallback cannot review in its place.
 
+- A wrong credential, provoked on 2026-10-02 by making the reviewer's own call with a login
+  variable that holds no credential and an empty configuration directory: exit code 1,
+  `is_error: true`, `api_error_status: 401`, `result` "Failed to authenticate. API Error: 401
+  Invalid bearer token", `modelUsage` empty, and again `subtype: "success"`. The call is refused
+  before any model runs, so it costs nothing. Kept as `cli-bad-credential.json`.
+
+The fixtures, each with its source and date, are listed in `tools/fixtures/SOURCES.txt`.
+
 **How to apply:** decide on `is_error`, the exit code and the presence of `structured_output`,
-never on `subtype`. A usage limit and a missing credential could not be provoked on purpose; the
-unit suite edits the real error payload for those two cases and says so. When the CLI version in
-`.github/workflows/review.yml` is bumped, probe again and replace the fixtures.
+never on `subtype`. A usage limit cannot be provoked on purpose; the unit suite edits the real
+error payload for that case and says so. A credential that is missing altogether is not an answer
+of the CLI here: the reviewer refuses to start in CI without the login variable. When the CLI
+version in `.github/workflows/review.yml` is bumped, probe again and replace the fixtures.

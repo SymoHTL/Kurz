@@ -8,9 +8,9 @@ metadata:
 On 2026-10-01 the first version of the "Durable actors" section of `kurz-design.md` claimed that
 a `durable` actor's state survives the loss of its machine. The mechanism it described was a
 message log on the local disk. A log on the machine's own disk does not survive the loss of
-that machine. The claim was corrected in the next design round, and it turned into a real design
-question: `durable` now has three modes (local disk, a copy on N machines before a message counts,
-a background copy), each with its cost.
+that machine. The claim was corrected in the design round of the same day, and it turned into a
+real design question: since that round (recorded 2026-10-01) `durable` has three modes (local
+disk, a copy on N machines before a message counts, a background copy), each with its cost.
 
 **Why:** "survives X" was written as a property of the feature instead of a consequence of a
 mechanism. Nobody had to ask "survives what, and how", so the gap between the promise and the
@@ -21,5 +21,5 @@ next decision is built on it.
 survives, (2) the mechanism that makes it survive, and (3) what it costs. "Cannot happen",
 "never lost", "always" and "provably" are the words to stop at. If the mechanism is not decided,
 the guarantee is not either: it goes under "Open". A wish that no mechanism can deliver is
-contradicted in the reply to Simon, not recorded. The review rule "design record" names this
+contradicted in the reply to the owner, not recorded. The review rule "design record" names this
 shape; there is no mechanical gate for it.

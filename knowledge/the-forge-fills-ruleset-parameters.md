@@ -5,7 +5,9 @@ metadata:
   type: reference
 ---
 
-Seen on 2026-10-01, when the ruleset was first created from `tools/ruleset.json`:
+Seen on 2026-10-01, when the ruleset was first created from `tools/ruleset.json` and read back
+with `gh api repos/<owner>/<name>/rules/branches/main` (the answer is kept as
+`tools/fixtures/branch-rules.json`):
 
 - The `pull_request` rule came back with two parameters the file had not sent:
   `required_reviewers: []` and `require_extra_approval_for_unattributed_changes: true`.

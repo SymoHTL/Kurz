@@ -1,6 +1,6 @@
 ---
 name: yaml-plain-scalar-traps
-description: Three YAML traps that bit while writing the review rules and the workflow lint (2026-10-01) - a colon-space turns a bullet into a mapping, a leading quote ends the scalar early, PyYAML keeps the last of two duplicate keys without a word
+description: Three YAML traps that bit while writing the review rules and the workflow lint (2026-10-01) - a colon-space turns a bullet into a mapping, a leading quote ends the scalar early, PyYAML keeps the last of two duplicate keys without a word; read YAML through kit.load_yaml, which refuses the third
 metadata:
   type: reference
 ---
@@ -17,12 +17,19 @@ All three were hit on 2026-10-01 while writing `.review/review-rules.yaml` and
    scalar at the second quote and fails to parse on what follows. Quote the whole bullet in single
    quotes.
 3. **PyYAML accepts duplicate keys and keeps the last one.** A second `contents:` under
-   `permissions:` silently replaced the first. A lint that wants to catch "the same key twice"
-   has to look at the text, not at the parsed result.
+   `permissions:` silently replaced the first, and a second `rules:` in a section of the review
+   rules would silently drop the first list: the reviewer would run with fewer rules. The parsed
+   result cannot show it, but the loader can: PyYAML hands a mapping's key nodes to
+   `construct_mapping` before it builds the dictionary.
 
 Also in the same family: YAML 1.1 reads the bare key `on` as the boolean `true`, so a parsed
 workflow has its triggers under `True`. `tools/lint_ci.py` reads both.
 
-**Gates:** `load_rules` in `tools/review/review.py` refuses a rules file in which a rule is not a
-non-empty string, and the reviewer's unit suite loads the real rules file, so trap 1 and trap 2
-turn `self-tests` red. Trap 3 has no gate: the workflow lint compares parsed values.
+**Gates** (all through `self-tests`):
+
+- Traps 1 and 2: `load_rules` in `tools/review/review.py` refuses a rules file in which a rule is
+  not a non-empty string, and the reviewer's unit suite loads the real rules file.
+- Trap 3, since 2026-10-02: `load_yaml` in `tools/kit.py` is a `SafeLoader` whose
+  `construct_mapping` refuses a key that occurs twice in one mapping. The rules loader and the
+  workflow lint both read YAML through it, each with a case (a repeated key in a section, a
+  repeated permission) and its red proof.

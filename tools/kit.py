@@ -1,9 +1,13 @@
 """Shared by every tool here: process calls that never read a failure as a pass, the GitHub CLI
-wrapper, the patterns for strings that must not be in a public tree, and the self-test reporter."""
+wrapper, the patterns for strings that must not be in a public tree, and the self-test reporter.
+`--self-test` covers the calls and the reporter; the patterns have their cases in tools/tree_gate.py."""
+import contextlib
+import io
 import json
 import os
 import re
 import subprocess
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,18 +23,29 @@ SECRETS = {
 }
 # Facts bound to one machine or one person. The repository is public, so none of them belongs in it.
 MACHINE = {
-    "drive-path": r"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?![\\/])",
-    "profile-path": r"(?<![A-Za-z0-9])/(?:[a-z]/)?Users/[A-Za-z0-9]",
-    # four dotted numbers that are not loopback; write a four-part version as v1.0.0.0
-    "ip-address": r"(?<![\w.])(?!127\.)(?!0\.0\.0\.0(?!\d))(?:\d{1,3}\.){3}\d{1,3}(?![\w.])",
+    # a drive letter and its separator, also the doubled backslash of JSON and of string literals;
+    # `x://` is left alone, it starts a URL
+    "drive-path": r"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?!/)",
+    # a user's directory: Windows seen from a POSIX shell, from WSL or from Cygwin, macOS, Linux.
+    # /home/runner is the hosted CI runner's and names nobody.
+    "profile-path": r"(?<![A-Za-z0-9])(?:(?:/(?:mnt|cygdrive))?/(?:[a-z]/)?Users/|/home/(?!runner\b))[A-Za-z0-9]",
+    # four dotted numbers that are not loopback, also at the end of a sentence; write a four-part
+    # version as v1.0.0.0
+    "ip-address": r"(?<![\w.])(?!127\.)(?!0\.0\.0\.0(?!\d))(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)",
+    # the private ranges of IPv6: unique local and link-local addresses
+    "ip6-address": r"(?i:(?<![\w:])(?:f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):[0-9a-f]{0,4}:)",
     # not the documentation domains, not the two public no-reply addresses commit trailers carry,
     # and not the user part of an SSH remote
     "email": r"(?<![A-Za-z0-9._%+-])(?!noreply@anthropic\.com\b)(?!git@github\.com:)[A-Za-z0-9._%+-]+"
              r"@(?!example\.(?:com|org|net)\b)(?!users\.noreply\.github\.com\b)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}",
 }
 CONFLICT = re.compile(r"^(<<<<<<< |>>>>>>> )", re.M)
+# What makes the forge start no workflow for a commit. On main that is a commit nothing gated.
+SKIP_LITERALS = [r"\[skip ci\]", r"\[ci skip\]", r"\[no ci\]", r"\[skip actions\]", r"\[actions skip\]",
+                 r"^skip-checks:[ \t]*true[ \t]*$"]
 # Exit code of a gate that found nothing wrong in what it could read and named what it could not
-# read. The runner shows it as PARTLY: not red, and never counted as a pass.
+# read. The runner shows it as PARTLY, never as a pass, and turns red unless the gate is listed with
+# the issue that records the unread part (PARTLY_OK in tools/gates.py).
 PARTLY = 5
 
 
@@ -38,25 +53,40 @@ class Refused(Exception):
     """A command the tool depends on failed. The caller treats it as a refusal, never as a pass."""
 
 
-def run(cmd, cwd=None, stdin=None, timeout=120):
-    """stdout of a command that exited 0. Anything else raises Refused."""
+class Unanswered(Refused):
+    """A command that ran out of time, or a write whose answer cannot be read. What it was sent to
+    do may have happened: a caller that sent a write must not report it as refused."""
+
+
+def run(cmd, cwd=None, stdin=None, timeout=120, binary=False):
+    """stdout of a command that exited 0, as text, or as the bytes it wrote when `binary`. A failed
+    command raises Refused; one that ran out of time raises Unanswered."""
+    text = {} if binary else {"text": True, "encoding": "utf-8", "errors": "replace"}
     try:
-        p = subprocess.run(cmd, cwd=cwd or ROOT, input=stdin, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as e:
+        p = subprocess.run(cmd, cwd=cwd or ROOT, input=stdin, capture_output=True, timeout=timeout, **text)
+    except subprocess.TimeoutExpired:
+        raise Unanswered(f"{cmd[0]}: no answer within {timeout} s") from None
+    except OSError as e:
         raise Refused(f"{cmd[0]}: {type(e).__name__}: {e}") from None
     if p.returncode != 0:
-        raise Refused(f"`{' '.join(cmd[:5])}` exited {p.returncode}: {(p.stderr or p.stdout).strip()[:400]}")
+        said = p.stderr or p.stdout
+        said = said.decode("utf-8", "replace") if binary else said
+        raise Refused(f"`{' '.join(cmd[:5])}` exited {p.returncode}: {said.strip()[:400]}")
     return p.stdout
+
+
+def answer(out, what, write=False):
+    """The parsed JSON of an answer. One that cannot be read is a refusal for a read. For a write it
+    is Unanswered: the command exited 0, so the write landed, and only its answer is missing."""
+    try:
+        return json.loads(out)
+    except ValueError:
+        raise (Unanswered if write else Refused)(f"{what}: answer is not JSON") from None
 
 
 def gh_json(*args, stdin=None):
     """One GitHub API answer as parsed JSON, through the gh CLI (its login locally, GH_TOKEN in CI)."""
-    out = run(["gh", "api", *args], stdin=stdin)
-    try:
-        return json.loads(out)
-    except ValueError:
-        raise Refused(f"gh api {args[0]}: answer is not JSON") from None
+    return answer(run(["gh", "api", *args], stdin=stdin), f"gh api {args[0]}", write=stdin is not None)
 
 
 def gh_pages(path):
@@ -74,9 +104,30 @@ def repo():
     return name
 
 
+def skip_literal(text):
+    """The workflow-skip literal a text carries, or None."""
+    return next((p for p in SKIP_LITERALS if re.search(p, text or "", re.I | re.M)), None)
+
+
 def read(path):
     with open(path, encoding="utf-8", newline="") as f:
         return f.read().replace("\r\n", "\n")
+
+
+def load_yaml(text):
+    """YAML as data. A key that occurs twice in one mapping is an error: the plain loader keeps the
+    last value and drops the first without a word, and a dropped rule or fact looks like none."""
+    import yaml  # PyYAML is needed only by the tools that read YAML, not by the hooks
+
+    class Strict(yaml.SafeLoader):
+        def construct_mapping(self, node, deep=False):
+            keys = [self.construct_object(key, deep=True) for key, _ in node.value]
+            twice = sorted({str(k) for k in keys if keys.count(k) > 1})
+            if twice:
+                raise yaml.constructor.ConstructorError(None, None, f"a key occurs twice: {', '.join(twice)}", node.start_mark)
+            return super().construct_mapping(node, deep)
+
+    return yaml.load(text, Loader=Strict)
 
 
 def report(cases):
@@ -91,3 +142,43 @@ def report(cases):
         failed = 1
     print(f"{len(cases)} cases, {failed} failed")
     return 1 if failed else 0
+
+
+def self_test():
+    py, cases = sys.executable, []
+
+    def got(fn):
+        """What fn returned, or the exception it raised, as a value."""
+        try:
+            return fn()
+        except Exception as e:
+            return e
+
+    out = got(lambda: run([py, "-c", "print('x')"]))
+    cases.append(("run: the output of a command that exited 0", str(out).strip() == "x", repr(out)))
+    out = got(lambda: run([py, "-c", "import sys; sys.exit(3)"]))
+    cases.append(("run: a failed command is refused", type(out) is Refused and "exited 3" in str(out), repr(out)))
+    out = got(lambda: run(["kurz-no-such-command"]))
+    cases.append(("run: a command that is not there is refused", type(out) is Refused, repr(out)))
+    out = got(lambda: run([py, "-c", "import time; time.sleep(30)"], timeout=1))
+    cases.append(("run: a command that ran out of time is unanswered, not refused", type(out) is Unanswered, repr(out)))
+    out = got(lambda: run([py, "-c", "import sys; sys.stdout.buffer.write(bytes([255, 254, 10]))"], binary=True))
+    cases.append(("run: binary output comes back as the bytes that were written", out == bytes([255, 254, 10]), repr(out)))
+    out = got(lambda: run([py, "-c", "import sys; sys.stderr.buffer.write(bytes([255])); sys.exit(1)"], binary=True))
+    cases.append(("run: a failed binary command is refused with its exit code", type(out) is Refused and "exited 1" in str(out), repr(out)))
+    cases.append(("answer: JSON is parsed", got(lambda: answer('{"a": 1}', "x")) == {"a": 1}, ""))
+    out = got(lambda: answer("", "x"))
+    cases.append(("answer: an unreadable answer to a read is refused", type(out) is Refused, repr(out)))
+    out = got(lambda: answer("<html>", "x", write=True))
+    cases.append(("answer: an unreadable answer to a write is unanswered, because the write landed", type(out) is Unanswered, repr(out)))
+    with contextlib.redirect_stdout(io.StringIO()) as said:
+        codes = (report([]), report([("a", True, "")]), report([("a", True, ""), ("b", False, "why")]))
+    cases.append(("report: no case at all is a failure, and so is one failed case", codes == (1, 0, 1), codes))
+    cases.append(("report: the summary line counts cases and failures", "2 cases, 1 failed" in said.getvalue(), said.getvalue()[-80:]))
+    return report(cases)
+
+
+if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        sys.exit(self_test())
+    sys.exit("usage: kit.py --self-test")

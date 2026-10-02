@@ -1,13 +1,16 @@
 ---
 name: pull-request-target-is-blocked-by-default
-description: Since GitHub's workflow execution protections (generally available 2026-09-17) a public repository without an Actions event policy gets a default rule that blocks pull_request_target, in evaluate mode until it is enforced on 2026-11-02; the review workflow needs an event policy that allows the event for its file, or a manual dispatch for every head
+description: Since GitHub's workflow execution protections (generally available 2026-09-17) a public repository without an Actions event policy gets a default rule that blocks pull_request_target; whether it is already enforced for this repository is unknown (read 2026-10-02), so a Ready pull request with no review run is checked for this first, and the review is dispatched on the default branch until an event policy allows the event
 metadata:
   type: reference
 ---
 
-The review workflow starts on `pull_request_target`, because that event runs the default
-branch's workflow with secrets and a token that may write, and never the pull request's code
-([[the-review-runs-the-default-branch]]). GitHub now treats that event as unsafe by default.
+The review workflow starts on `pull_request_target`, because for that event GitHub takes the
+workflow file from the default branch and gives the run secrets and a token that may write
+([[the-review-runs-the-default-branch]]). The event itself protects nothing more than that: a
+workflow that checks out or runs the pull request's head runs that code with those secrets.
+Here the safety comes from the workflow never doing so, which `ci-config` pins (the one checkout
+names the default branch). GitHub treats the event as unsafe by default.
 
 What GitHub says (changelog "Workflow execution protections in GitHub Actions generally
 available", 2026-09-17, and the docs page "Securely using pull_request_target", both read
@@ -19,25 +22,33 @@ available", 2026-09-17, and the docs page "Securely using pull_request_target", 
   repository settings, under the Actions policies) shows which runs it would have blocked.
 - On 2026-11-02 it is enforced "for affected repositories that were using the default
   `pull_request_target` policy before general availability". Neither page says what holds for a
-  repository created after general availability; this one was created on 2026-10-01.
+  repository created after general availability; this one was created on 2026-10-01. So for this
+  repository it is not known whether the rule blocks already or only evaluates.
 - To keep the event, an Actions event policy has to allow it explicitly. A policy can be scoped
   to one workflow file.
 
 What was observed here on 2026-10-02: `gh api repos/OWNER/REPO/actions/policies` answers
 `{"total_count":0,"policies":[]}`. The default rule is not listed as a policy, so this endpoint
-does not show whether it is in evaluate mode or enforced. No `pull_request_target` run has been
-attempted yet, because the default branch has no review workflow before the first merge.
+does not show whether it is in evaluate mode or enforced. No `pull_request_target` run had been
+attempted by that day, because the default branch has no review workflow before the first merge.
 
 **How to apply:**
 
-- A Ready pull request whose `review` status stays pending, with no `review` run in the Actions
-  list at all, is this before it is anything else. A job skipped by its `if:` still shows a run
-  ([[a-skipped-job-reports-success]]).
+- A Ready pull request whose `review` status stays pending is checked for this first: look for
+  a `review` run of that head in the Actions list. How a blocked event shows there is not
+  verified: neither page says it, and none was seen here by 2026-10-02. The working assumption
+  is that no run appears at all, while a job skipped by its `if:` (a Draft, a pull request from
+  outside) still shows a run ([[a-skipped-job-reports-success]]).
 - The default rule names `pull_request_target` only. By that wording a `workflow_dispatch` run
-  is not blocked, and it runs the default branch's workflow just the same:
-  `gh workflow run review.yml -f pr=N` reviews one head on demand. Not tried here yet.
+  is not blocked: `gh workflow run review.yml -f pr=N` reviews one head on demand. Not tried
+  here by 2026-10-02.
+- A dispatch runs the workflow file and the tools of the ref it is started on, and `gh workflow
+  run` takes the default branch only when `--ref` is left out. Start it on the default branch.
+  The job's `if` refuses a dispatch on any other ref, and `ci-config` pins that expression; but
+  the copy of the workflow on another branch can drop the `if`, and a dispatch on that branch
+  runs the copy with this repository's token. That is HAZARD #11.
 - The lasting fix is the owner's setting: an event policy that allows `pull_request_target` and
   `workflow_dispatch` for `.github/workflows/review.yml` only. Nothing asserts that policy
-  (HAZARD #10); once it exists, `merge-checks` can read it through the endpoint above.
+  (HAZARD #10); the endpoint above is where a check could read it.
 - Do not switch the review to `pull_request` to get around the block. That event runs the
   workflow file of the pull request itself, so a pull request could rewrite its own review.

@@ -1,20 +1,32 @@
 #!/usr/bin/env python3
 """Unit facts of the two workflows. A one-token YAML fact that nothing compiles gets a check here:
-- both: actions pinned by commit SHA, the runner image pinned, a timeout on every job, pip with
+- both: actions pinned by commit SHA, the hosted runner named by its versioned label (the forge
+  offers no digest for a hosted image), a timeout on every job, pip with
   --require-hashes, no job or step that may fail quietly (`continue-on-error`), no step-level `if`,
-  no reusable-workflow job;
-- gates.yml: runs on every pull request event that can change a verdict and on pushes to main,
-  with no path or branch filter; exactly one job, `gates`, with no `if` (a skipped job reports
-  success to a required check); read-only token; the job runs the full gate runner;
-- review.yml: pull_request_target plus a manual dispatch, so the reviewer and its rules come from
-  the default branch; the checkout never names pull-request code; no pull-request text is put into a
-  shell line; the job's `if` is the pinned draft/outsider rule; the job timeout equals the budget
-  the script is told; the Claude CLI is pinned to an exact version; only the two credential
-  secrets are read; one review per pull request at a time.
+  no reusable-workflow job, no `defaults` and no step with a shell or a working directory of its
+  own, no expression inside a `run:` value (a value reaches a script through `env:`), a secret only
+  as plain `secrets.<NAME>` in a step's `env:`, no key twice in one mapping;
+- gates.yml: runs on every push to a pull request, on every edit of its title or description, and
+  on pushes to main, with no path or branch filter; exactly one job, `gates`, with no `if` (a
+  skipped job reports success to a required check); read-only token; no secret; the last step runs
+  the full gate runner and carries nothing but its name, env and run.
+  Not covered by any trigger: a review that posts its findings and a thread that is resolved start
+  no run, so the `gates` check of a head is the verdict of the moment it ran (tools/pr_gates.py);
+- review.yml: pull_request_target plus a manual dispatch; the job's `if` is the pinned rule: a
+  dispatch on the default branch, or a pull request into the default branch that is no Draft and
+  comes from someone who may write here; the checkout names the default branch and never
+  pull-request code; one review per pull request at a time, held on the job, so a run whose job is
+  skipped cancels nothing; the job timeout equals the budget the script is told; the Claude CLI is
+  pinned to an exact version and proven by running it; the one credential secret is read; the
+  last step runs the reviewer and carries nothing but its name, env and run.
+  A copy of review.yml on another branch can drop every one of these, and a dispatch on that branch
+  runs the copy with this repository's token (HAZARD #11); the lint of that branch is its own copy.
 `--self-test` breaks each fact in the real files, one token at a time, and expects its error."""
 import os
 import re
+import shutil
 import sys
+import tempfile
 
 import yaml
 
@@ -22,24 +34,68 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
 
 WORKFLOWS = ".github/workflows"
+FILES = ["gates.yml", "review.yml"]
 PR_TYPES = {"opened", "synchronize", "reopened", "ready_for_review", "edited"}
 REVIEW_TYPES = ["opened", "synchronize", "reopened", "ready_for_review"]
-REVIEW_IF = ("github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && "
+REVIEW_IF = ("(github.event_name == 'workflow_dispatch' && "
+             "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) || "
+             "(github.event_name == 'pull_request_target' && "
+             "github.event.pull_request.base.ref == github.event.repository.default_branch && "
+             "github.event.pull_request.draft == false && "
              "contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), "
              "github.event.pull_request.author_association))")
-REVIEW_SECRETS = {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
-PR_TEXT = re.compile(r"\$\{\{[^}]*(?:github\.event\.pull_request|github\.head_ref|inputs\.)[^}]*\}\}")
+REVIEW_GROUP = "review-${{ github.event.pull_request.number || inputs.pr }}"
+REVIEW_REF = "${{ github.event.repository.default_branch }}"
+REVIEW_PR = "${{ github.event.pull_request.number || inputs.pr }}"
+REVIEW_SECRETS = {"CLAUDE_CODE_OAUTH_TOKEN"}
+STEP_KEYS = {"name", "env", "run"}  # what the step that decides may carry
 
 
 def parse(text):
-    data = yaml.safe_load(text)
+    data = kit.load_yaml(text)
     if not isinstance(data, dict) or not isinstance(data.get("jobs"), dict):
         raise ValueError("no jobs")
     on = data.get("on", data.get(True))  # YAML 1.1 reads the bare key `on` as a boolean
     return data, on if isinstance(on, dict) else {}
 
 
-def common(name, text, data):
+def unreadable(name, e):
+    return [f"{name}: cannot be read as a workflow: {type(e).__name__}: {(str(e).splitlines() or [''])[0]}"]
+
+
+def strings(node, path=()):
+    """(the keys that lead to it, the text) of every string in parsed YAML."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from strings(value, path + (str(key),))
+    elif isinstance(node, list):
+        for value in node:
+            yield from strings(value, path + ("[]",))
+    elif isinstance(node, str):
+        yield path, node
+
+
+def secret_errors(name, data, allowed):
+    """A secret may only be read as `${{ secrets.<NAME> }}`, alone, as the value of a variable in a
+    step's `env:`, and only the names in `allowed`, each of which must be read."""
+    errors, read = [], set()
+    for path, value in strings(data):
+        expressions = [value] if path and path[-1] == "if" else re.findall(r"\$\{\{(.*?)\}\}", value, re.S)
+        if not any(re.search(r"\bsecrets\b", e) for e in expressions):
+            continue
+        plain = re.fullmatch(r"\$\{\{\s*secrets\.(\w+)\s*\}\}", value)
+        in_env = len(path) == 6 and path[0] == "jobs" and path[2:5] == ("steps", "[]", "env")
+        if plain and in_env and plain.group(1) in allowed:
+            read.add(plain.group(1))
+        else:
+            errors.append(f"{name}: a secret is read at {'.'.join(path)}: only {sorted(allowed) or 'no secret'} may be read, "
+                          f"as plain `secrets.<NAME>` in a step's env")
+    if read != set(allowed):
+        errors.append(f"{name}: the secrets read must be exactly {sorted(allowed)}, found {sorted(read)}")
+    return errors
+
+
+def common(name, text, data, secrets):
     errors = []
     for used in re.findall(r"^\s*-?\s*uses:\s*(\S+)", text, re.M):
         if not re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", used):
@@ -47,6 +103,8 @@ def common(name, text, data):
     for line in text.splitlines():
         if re.search(r"\bpip\"? install\b", line) and "--require-hashes" not in line:
             errors.append(f"{name}: pip install without --require-hashes")
+    if "defaults" in data:
+        errors.append(f"{name}: the workflow sets `defaults`: a shell nobody pinned can turn every step into a no-op")
     for jid, job in data["jobs"].items():
         steps = job.get("steps") or []
         if "uses" in job:
@@ -59,7 +117,24 @@ def common(name, text, data):
             errors.append(f"{name}: job {jid} uses continue-on-error")
         if any("if" in s for s in steps):
             errors.append(f"{name}: job {jid} has a step that may be skipped (`if`)")
-    return errors
+        if "defaults" in job:
+            errors.append(f"{name}: job {jid} sets `defaults`: a shell nobody pinned can turn every step into a no-op")
+        if any("shell" in s or "working-directory" in s for s in steps):
+            errors.append(f"{name}: job {jid} has a step with its own shell or working directory")
+        if any("${{" in str(s.get("run", "")) for s in steps):
+            errors.append(f"{name}: job {jid} has a run line that interpolates an expression into the shell: pass the value through env")
+    return errors + secret_errors(name, data, secrets)
+
+
+def deciding_step(name, steps, command, what):
+    """The last step runs `command` and nothing else decides how: only name, env and run."""
+    last = steps[-1] if steps else {}
+    errors = []
+    if str(last.get("run", "")).strip() != command:
+        errors.append(f"{name}: the last step must be the {what} step, running exactly `{command}`")
+    if set(last) - STEP_KEYS:
+        errors.append(f"{name}: the {what} step may carry only name, env and run, found {sorted(set(last) - STEP_KEYS)}")
+    return errors, last
 
 
 def gates_facts(text):
@@ -67,8 +142,8 @@ def gates_facts(text):
     try:
         data, on = parse(text)
     except (yaml.YAMLError, ValueError) as e:
-        return [f"{name}: cannot be read as a workflow: {type(e).__name__}"]
-    errors = common(name, text, data)
+        return unreadable(name, e)
+    errors = common(name, text, data, set())
     if set(on) != {"pull_request", "push"}:
         errors.append(f"{name}: triggers are {sorted(map(str, on))}, expected pull_request and push")
     pr, push = on.get("pull_request") or {}, on.get("push") or {}
@@ -85,10 +160,8 @@ def gates_facts(text):
     job = data["jobs"].get("gates") or {}
     if "if" in job:
         errors.append(f"{name}: the job gates may be skipped (`if`), and a skipped job reports success")
-    steps = job.get("steps") or []
-    last = steps[-1] if steps else {}
-    if not re.fullmatch(r'"\$RUNNER_TEMP/venv/bin/python" tools/gates\.py', str(last.get("run", "")).strip()):
-        errors.append(f"{name}: the last step must be the gates step, running tools/gates.py with no flags")
+    step, last = deciding_step(name, job.get("steps") or [], '"$RUNNER_TEMP/venv/bin/python" tools/gates.py', "gates")
+    errors += step
     if (last.get("env") or {}).get("PR_NUMBER") != "${{ github.event.pull_request.number }}":
         errors.append(f"{name}: the gates step needs PR_NUMBER from the pull request event")
     return errors
@@ -99,8 +172,8 @@ def review_facts(text):
     try:
         data, on = parse(text)
     except (yaml.YAMLError, ValueError) as e:
-        return [f"{name}: cannot be read as a workflow: {type(e).__name__}"]
-    errors = common(name, text, data)
+        return unreadable(name, e)
+    errors = common(name, text, data, REVIEW_SECRETS)
     if set(on) != {"pull_request_target", "workflow_dispatch"}:
         errors.append(f"{name}: trigger must be pull_request_target plus workflow_dispatch, found {sorted(map(str, on))}")
     if (on.get("pull_request_target") or {}).get("types") != REVIEW_TYPES:
@@ -108,93 +181,146 @@ def review_facts(text):
     pr_input = (((on.get("workflow_dispatch") or {}).get("inputs") or {}).get("pr") or {})
     if pr_input.get("required") is not True:
         errors.append(f"{name}: the dispatch input pr must be required")
-    if data.get("permissions") != {"contents": "read", "pull-requests": "write", "statuses": "write"}:
-        errors.append(f"{name}: permissions must be exactly contents: read, pull-requests: write, statuses: write")
-    concurrency = data.get("concurrency") or {}
-    if concurrency.get("cancel-in-progress") is not True or "pull_request.number" not in str(concurrency.get("group")):
-        errors.append(f"{name}: concurrency must be one review per pull request, cancelling the older run")
+    if data.get("permissions") != {"contents": "read", "issues": "write", "pull-requests": "write", "statuses": "write"}:
+        errors.append(f"{name}: permissions must be exactly contents: read, issues: write, pull-requests: write, statuses: write")
     if list(data["jobs"]) != ["review-run"]:
         errors.append(f"{name}: jobs must be exactly [review-run]")
     job = data["jobs"].get("review-run") or {}
+    if "concurrency" in data:
+        errors.append(f"{name}: concurrency belongs on the job: at workflow level a run whose job is skipped cancels a running review")
+    if job.get("concurrency") != {"group": REVIEW_GROUP, "cancel-in-progress": True}:
+        errors.append(f"{name}: the job's concurrency must be one review per pull request, dispatched or not, cancelling the older run")
     if " ".join(str(job.get("if", "")).split()) != REVIEW_IF:
-        errors.append(f"{name}: the job `if` is not the pinned draft/outsider rule")
+        errors.append(f"{name}: the job `if` is not the pinned rule (default branch only, no Draft, no outsider)")
     steps = job.get("steps") or []
-    for step in steps:
-        with_ = step.get("with") or {}
-        if "actions/checkout@" in str(step.get("uses", "")):
-            if "ref" in with_ or "repository" in with_:
-                errors.append(f"{name}: the checkout names a ref: it checks out pull-request code")
-            if with_.get("persist-credentials") is not False:
-                errors.append(f"{name}: the checkout must set persist-credentials: false")
-        if PR_TEXT.search(str(step.get("run", ""))):
-            errors.append(f"{name}: a run line interpolates pull-request or dispatch text into the shell")
+    checkouts = [s.get("with") or {} for s in steps if "actions/checkout@" in str(s.get("uses", ""))]
+    for with_ in checkouts:
+        if with_.get("ref") != REVIEW_REF or "repository" in with_:
+            errors.append(f"{name}: the checkout must name the default branch and no other repository: anything else can be pull-request code")
+        if with_.get("persist-credentials") is not False:
+            errors.append(f"{name}: the checkout must set persist-credentials: false")
+    if len(checkouts) != 1:
+        errors.append(f"{name}: expected exactly one checkout, found {len(checkouts)}")
+    step, last = deciding_step(name, steps, '"$RUNNER_TEMP/venv/bin/python" tools/review/review.py', "review")
+    errors += step
+    if (last.get("env") or {}).get("PR_NUMBER") != REVIEW_PR:
+        errors.append(f"{name}: the review step needs PR_NUMBER from the pull request event or the dispatch input")
     budget = [(s.get("env") or {}).get("REVIEW_TIMEOUT_MIN") for s in steps if "REVIEW_TIMEOUT_MIN" in (s.get("env") or {})]
     if budget != [job.get("timeout-minutes")] or budget == [None]:
         errors.append(f"{name}: REVIEW_TIMEOUT_MIN must equal the job's timeout-minutes")
     installs = re.findall(r"@anthropic-ai/claude-code(\S*)", text)
-    if not installs or not all(re.fullmatch(r"@\d+\.\d+\.\d+", v) for v in installs):
+    if not installs or not all(re.fullmatch(r"@\d+\.\d+\.\d+;?", v) for v in installs):
         errors.append(f"{name}: the Claude CLI must be installed at an exact version")
-    if "claude --version" not in text:
-        errors.append(f"{name}: the Claude CLI install must be proven by running the binary")
-    secrets = set(re.findall(r"secrets\.(\w+)", text))
-    in_run = any("secrets." in str(s.get("run", "")) for s in steps)
-    if secrets != REVIEW_SECRETS or in_run:
-        errors.append(f"{name}: secret use must be exactly {sorted(REVIEW_SECRETS)}, in env only")
+    if not any(re.search(r"^\s*claude --version\s*$", str(s.get("run", "")), re.M) for s in steps):
+        errors.append(f"{name}: the Claude CLI install must be proven by running the binary, on a line of its own")
     return errors
 
 
 def lint(root):
     errors = []
+    try:
+        listed = sorted(os.listdir(os.path.join(root, WORKFLOWS)))
+    except OSError as e:
+        return [f"{WORKFLOWS} cannot be listed: {type(e).__name__}"]
     for fname, facts in (("gates.yml", gates_facts), ("review.yml", review_facts)):
         try:
             errors += facts(kit.read(os.path.join(root, WORKFLOWS, fname)))
         except OSError as e:
-            errors.append(f"{fname}: cannot be read: {e}")
-    listed = sorted(os.listdir(os.path.join(root, WORKFLOWS)))
-    if listed != ["gates.yml", "review.yml"]:
+            errors.append(f"{fname}: cannot be read: {type(e).__name__}")
+    if listed != FILES:
         errors.append(f"workflows are {listed}: a workflow without facts here is unchecked configuration")
     return errors
 
 
+PLAIN_JOB = "  extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: echo ok\n"
+START = '        run: echo "REVIEW_STARTED=$(date +%s)" >> "$GITHUB_ENV"\n'
+SECRET = "          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n"
 # (file, case, anchor that occurs exactly once, replacement, text the error must contain)
 MUTATIONS = [
     ("gates.yml", "edits no longer re-run the gates", "ready_for_review, edited]", "ready_for_review]", "pull_request types"),
     ("gates.yml", "a path filter", "    branches: [main]\n", "    branches: [main]\n    paths: ['tools/**']\n", "path filter"),
+    ("gates.yml", "another trigger", "    branches: [main]\n", "    branches: [main]\n  workflow_dispatch:\n", "triggers are"),
+    ("gates.yml", "pushes to another branch count as main", "    branches: [main]\n", "    branches: [main, next]\n", "push must be limited"),
     ("gates.yml", "the gates job can be skipped", "  gates:\n    runs-on:", "  gates:\n    if: github.actor != 'x'\n    runs-on:",
      "may be skipped"),
     ("gates.yml", "a floating runner image", "runs-on: ubuntu-24.04", "runs-on: ubuntu-latest", "runner image"),
     ("gates.yml", "an action by tag", "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7", "not pinned"),
     ("gates.yml", "pip without hashes", "--quiet --require-hashes -r", "--quiet -r", "--require-hashes"),
-    ("gates.yml", "the local flag in CI", "tools/gates.py'", "tools/gates.py --local'", "the gates step"),
-    ("gates.yml", "a swallowed failure", "tools/gates.py'", "tools/gates.py || true'", "the gates step"),
+    ("gates.yml", "the local flag in CI", "tools/gates.py'", "tools/gates.py --local'", "must be the gates step"),
+    ("gates.yml", "a swallowed failure", "tools/gates.py'", "tools/gates.py || true'", "must be the gates step"),
+    ("gates.yml", "a shell that runs nothing", "      - name: Run every gate\n", "      - name: Run every gate\n        shell: true {0}\n",
+     "own shell or working directory"),
+    ("gates.yml", "the gates step runs somewhere else", "      - name: Run every gate\n",
+     "      - name: Run every gate\n        working-directory: /tmp\n", "may carry only name, env and run"),
+    ("gates.yml", "a default shell for every step", "\njobs:\n", "\ndefaults:\n  run:\n    shell: true {0}\n\njobs:\n", "the workflow sets `defaults`"),
+    ("gates.yml", "a default shell for the job", "  gates:\n    runs-on:", "  gates:\n    defaults:\n      run:\n        shell: true {0}\n    runs-on:",
+     "job gates sets `defaults`"),
     ("gates.yml", "no timeout", "    timeout-minutes: 15\n", "", "no timeout"),
     ("gates.yml", "a write token", "pull-requests: read", "pull-requests: write", "permissions"),
     ("gates.yml", "continue-on-error", "      - name: Run every gate\n", "      - name: Run every gate\n        continue-on-error: true\n",
-     "continue-on-error"),
+     "uses continue-on-error"),
+    ("gates.yml", "a job that may fail quietly", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    continue-on-error: true\n",
+     "uses continue-on-error"),
     ("gates.yml", "a step that can be skipped", "      - name: Run every gate\n", "      - name: Run every gate\n        if: always()\n",
      "step that may be skipped"),
     ("gates.yml", "no pull request number", "          PR_NUMBER: ${{ github.event.pull_request.number }}\n", "", "PR_NUMBER"),
-    ("gates.yml", "a second job", "\njobs:\n", "\njobs:\n  extra:\n    uses: ./.github/workflows/x.yml\n", "calls another workflow"),
+    ("gates.yml", "a second job that calls a workflow", "\njobs:\n", "\njobs:\n  extra:\n    uses: ./.github/workflows/x.yml\n", "calls another workflow"),
+    ("gates.yml", "a second job of its own", "\njobs:\n", "\njobs:\n" + PLAIN_JOB, "jobs must be exactly [gates]"),
+    ("gates.yml", "the branch name in a shell line", '          python3 -m venv "$RUNNER_TEMP/venv"\n',
+     '          python3 -m venv "${{ github.head_ref }}"\n', "interpolates"),
+    ("gates.yml", "a secret in the gates job", "          GH_TOKEN: ${{ github.token }}\n",
+     "          GH_TOKEN: ${{ github.token }}\n          KEY: ${{ secrets.DEPLOY_KEY }}\n", "a secret is read"),
     ("review.yml", "the reviewer runs the pull request's own copy", "  pull_request_target:", "  pull_request:", "trigger must be"),
     ("review.yml", "no review when a Draft goes Ready", "reopened, ready_for_review]", "reopened]", "types must be exactly"),
-    ("review.yml", "Drafts are reviewed on every push", "(github.event.pull_request.draft == false &&\n      contains(",
-     "(contains(", "draft/outsider rule"),
+    ("review.yml", "Drafts are reviewed on every push", "      github.event.pull_request.draft == false &&\n", "", "pinned rule"),
     ("review.yml", "anyone's pull request spends the seat", '\'["OWNER","MEMBER","COLLABORATOR"]\'',
-     '\'["OWNER","MEMBER","COLLABORATOR","NONE"]\'', "draft/outsider rule"),
-    ("review.yml", "pull-request code is checked out", "          fetch-depth: 0\n",
-     "          fetch-depth: 0\n          ref: ${{ github.event.pull_request.head.sha }}\n", "checks out pull-request code"),
+     '\'["OWNER","MEMBER","COLLABORATOR","NONE"]\'', "pinned rule"),
+    ("review.yml", "a dispatch on any branch runs that branch's reviewer",
+     "      (github.event_name == 'workflow_dispatch' &&\n      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||\n",
+     "      github.event_name == 'workflow_dispatch' ||\n", "pinned rule"),
+    ("review.yml", "a pull request into another branch is reviewed, and its status stays on the head",
+     "      github.event.pull_request.base.ref == github.event.repository.default_branch &&\n", "", "pinned rule"),
+    ("review.yml", "pull-request code is checked out", "          ref: ${{ github.event.repository.default_branch }}\n",
+     "          ref: ${{ github.event.pull_request.head.sha }}\n", "must name the default branch"),
+    ("review.yml", "the checkout takes whatever the event points at", "          ref: ${{ github.event.repository.default_branch }}\n", "",
+     "must name the default branch"),
+    ("review.yml", "another repository is checked out", "          fetch-depth: 0\n", "          fetch-depth: 0\n          repository: someone/else\n",
+     "must name the default branch"),
     ("review.yml", "the token stays in the checkout", "persist-credentials: false", "persist-credentials: true", "persist-credentials"),
     ("review.yml", "the budget and the timeout differ", "    timeout-minutes: 90\n", "    timeout-minutes: 60\n", "REVIEW_TIMEOUT_MIN"),
     ("review.yml", "a floating Claude CLI", "claude-code@2.1.283", "claude-code@latest", "exact version"),
-    ("review.yml", "an install nobody ran", " && claude --version && exit 0", " && exit 0", "proven by running"),
+    ("review.yml", "an install nobody ran", "          claude --version\n", "", "proven by running"),
     ("review.yml", "a wider token", "  statuses: write\n", "  statuses: write\n  actions: write\n", "permissions must be exactly"),
     ("review.yml", "no status permission", "  statuses: write\n", "", "permissions"),
-    ("review.yml", "pull-request text in a shell line", '        run: echo "REVIEW_STARTED=$(date +%s)" >> "$GITHUB_ENV"\n',
+    ("review.yml", "no permission to post on the issue that collects lows", "  issues: write  # low findings are collected on an issue\n", "",
+     "permissions"),
+    ("review.yml", "pull-request text in a shell line", START,
      '        run: echo "${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"\n', "interpolates"),
-    ("review.yml", "parallel reviews of one pull request", "cancel-in-progress: true", "cancel-in-progress: false", "concurrency"),
-    ("review.yml", "another secret", "          REVIEW_TIMEOUT_MIN: 90\n",
-     "          REVIEW_TIMEOUT_MIN: 90\n          OTHER: ${{ secrets.DEPLOY_KEY }}\n", "secret use"),
+    ("review.yml", "the dispatch input in a shell line", START, '        run: echo "${{ inputs.pr }}" >> "$GITHUB_ENV"\n', "interpolates"),
+    ("review.yml", "the whole event in a shell line", START, '        run: echo "${{ toJSON(github.event) }}" >> "$GITHUB_ENV"\n', "interpolates"),
+    ("review.yml", "an env value in a shell line", START, '        run: echo "${{ env.TITLE }}" >> "$GITHUB_ENV"\n', "interpolates"),
+    ("review.yml", "parallel reviews of one pull request", "cancel-in-progress: true", "cancel-in-progress: false", "job's concurrency"),
+    ("review.yml", "dispatched reviews share one group", "      group: review-${{ github.event.pull_request.number || inputs.pr }}\n",
+     "      group: review-${{ github.event.pull_request.number }}\n", "job's concurrency"),
+    ("review.yml", "a skipped run cancels a running review", "\njobs:\n",
+     "\nconcurrency:\n  group: review-${{ github.event.pull_request.number || inputs.pr }}\n  cancel-in-progress: true\n\njobs:\n",
+     "belongs on the job"),
+    ("review.yml", "another secret", SECRET, SECRET + "          OTHER: ${{ secrets.DEPLOY_KEY }}\n", "a secret is read"),
+    ("review.yml", "every secret at once", SECRET, SECRET + "          EVERY: ${{ toJSON(secrets) }}\n", "a secret is read"),
+    ("review.yml", "a secret by index", SECRET, SECRET + "          OTHER: ${{ secrets['CLAUDE_CODE_OAUTH_TOKEN'] }}\n", "a secret is read"),
+    ("review.yml", "a secret handed to an action", "          fetch-depth: 0\n",
+     "          fetch-depth: 0\n          token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n", "a secret is read"),
+    ("review.yml", "the credential in a shell line", START, '        run: echo "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"\n', "a secret is read"),
+    ("review.yml", "no credential at all", SECRET, "", "secrets read must be exactly"),
     ("review.yml", "an optional pull request number", "        required: true\n", "        required: false\n", "must be required"),
+    ("review.yml", "the review step runs with a flag", "tools/review/review.py'", "tools/review/review.py --local'", "must be the review step"),
+    ("review.yml", "the review step does not know its pull request", "          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}\n", "",
+     "the review step needs PR_NUMBER"),
+    ("review.yml", "a second job of its own", "\njobs:\n", "\njobs:\n" + PLAIN_JOB, "jobs must be exactly [review-run]"),
+    ("review.yml", "a second checkout", "      - name: Install pinned dependencies\n",
+     "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n"
+     "          ref: ${{ github.event.repository.default_branch }}\n          persist-credentials: false\n"
+     "      - name: Install pinned dependencies\n", "exactly one checkout"),
 ]
 
 
@@ -209,6 +335,25 @@ def self_test():
         errors = facts[fname](real[fname].replace(old, new))
         cases.append((f"{fname}: {case}", any(needle in e for e in errors), errors))
     cases.append(("garbage is not a workflow", any("cannot be read" in e for e in gates_facts("jobs: [")), ""))
+    cases.append(("YAML without jobs is not a workflow", any("cannot be read" in e for e in gates_facts("on: push\n")), gates_facts("on: push\n")))
+    twice = review_facts(real["review.yml"].replace("  statuses: write\n", "  statuses: write\n  contents: write\n"))
+    cases.append(("a key that occurs twice is refused, not read as its last value", any("occurs twice" in e for e in twice), twice))
+
+    def tree(files):
+        root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(root, WORKFLOWS))
+        for fname in files:
+            with open(os.path.join(root, WORKFLOWS, fname), "w", encoding="utf-8", newline="\n") as f:
+                f.write(real.get(fname, real["gates.yml"]))
+        return root
+
+    for name, root, needle in [("lint: the two real workflows are clean", tree(FILES), None),
+                               ("lint: a third workflow is unchecked configuration", tree(FILES + ["extra.yml"]), "without facts"),
+                               ("lint: a missing workflow is an error", tree(["gates.yml"]), "review.yml: cannot be read"),
+                               ("lint: no workflows directory is an error", tempfile.mkdtemp(), "cannot be listed")]:
+        errors = lint(root)
+        cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
+        shutil.rmtree(root, ignore_errors=True)
     return kit.report(cases)
 
 
@@ -218,5 +363,5 @@ if __name__ == "__main__":
     errors = lint(kit.ROOT)
     for e in errors:
         print("ERROR:", e)
-    print(f"ci lint: 2 workflows, {len(errors)} errors")
+    print(f"ci lint: {len(FILES)} workflows, {len(errors)} errors")
     sys.exit(1 if errors else 0)

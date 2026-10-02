@@ -9,8 +9,9 @@
 A merge needs: the exact head that was looked at; an open pull request into the default branch that
 is not a Draft, not behind its base and has no auto-merge armed; every review thread resolved, and
 resolved by an edit (tools/pr_gates.py); every required check of the ruleset `success` on that head;
-merge rules on the server that are what tools/ruleset.json says; a title and a description the
-title gate accepts, because they become the commit on main.
+merge rules on the server that are what tools/ruleset.json says, every one of them read: a setting
+this token cannot read refuses the merge; a title and a description the title gate accepts, because
+this tool writes them into the commit on main.
 
 --over-red is the gate-flip: the owner approved merging THIS head with THESE checks not green. The
 ruleset is switched off for the one merge, restored on every exit path and read back. While it is
@@ -26,7 +27,13 @@ lets through only what it names:
 - a check that is still running is never waived: its result is coming and nobody has read it;
 - unresolved threads are never waived.
 A check run counts only when the app the ruleset pins reported it. A commit status is matched by
-its name alone: the answer that names its reporter was never seen here (#5).
+its name alone: the answer that names its reporter was never seen here (#5). Both required checks
+are pinned to the app every workflow run of this repository reports as, so `review` proves that a
+workflow run of this repository posted it, not which one (HAZARD #11).
+
+A write whose answer cannot be read, that ran out of time, or that ended in an answer nobody
+expected may have landed. It is never reported as refused: the state is read back, the ruleset is
+restored and read back, and the exit code says what is known.
 
 Exit codes: 0 merged (or dry run that would merge, or settings as expected); 1 refused; 2 usage;
 3 GATE NOT RESTORED, switch the ruleset back on by hand: it outranks every other code, and the
@@ -200,8 +207,19 @@ def find_ruleset(repo):
     return found[0]["id"]
 
 
+# What a call to the forge can end in besides its answer: a refusal, no answer, or an answer that
+# is not what the code expects. After a write each of them goes through the read-backs.
+ANSWER_ERRORS = (kit.Refused, LookupError, ValueError, TypeError, AttributeError)
+
+
 def send(path, payload, method="PUT"):
-    return json.loads(kit.run(["gh", "api", "-X", method, path, "--input", "-"], stdin=json.dumps(payload)) or "{}")
+    """One write to the forge, and its answer as an object. An answer that cannot be read is
+    kit.Unanswered, not a refusal: the command exited 0, so the write landed."""
+    what = f"gh api -X {method} {path}"
+    answer = kit.answer(kit.run(["gh", "api", "-X", method, path, "--input", "-"], stdin=json.dumps(payload)) or "{}", what, write=True)
+    if not isinstance(answer, dict):
+        raise kit.Unanswered(f"{what}: the answer is not an object")
+    return answer
 
 
 def merge(repo, number, sha, pr, waived):
@@ -220,17 +238,18 @@ def merge(repo, number, sha, pr, waived):
             raise kit.Refused(f"the forge answered without merged=true: {json.dumps(answer)[:200]}")
         landed = True
         print(f"merged {repo}#{number} at {sha}")
-    except kit.Refused as e:
-        print(f"{step} failed: {e}")
+    except ANSWER_ERRORS as e:
+        print(f"{step} failed: {type(e).__name__}: {e}")
         # Only an answer of the forge that says no is a refusal. A call that died on the way
         # (a timeout, a 5xx, an answer nobody could read) may still land after the read-back.
+        # A switch-off that failed sent no merge call; what became of the ruleset is read back below.
         refused = step != "the merge call" or re.search(r"\(HTTP 4\d\d\)", str(e)) is not None
         try:  # a write that may have landed is never reported as a plain failure
             landed = kit.gh_json(f"repos/{repo}/pulls/{number}").get("merged") is True
             unknown = not landed and not refused
             code = 0 if landed else 4 if unknown else 1
             print("read back: the pull request IS merged" if landed else "read back: not merged")
-        except kit.Refused as again:
+        except ANSWER_ERRORS as again:
             print(f"the read-back failed too: {again}")
             unknown, code = True, 4
         if unknown:
@@ -242,12 +261,12 @@ def merge(repo, number, sha, pr, waived):
                 try:
                     send(f"repos/{repo}/rulesets/{gate}", {"enforcement": "active"})
                     break
-                except kit.Refused as e:  # the forge's answer decides what has to be done by hand
+                except ANSWER_ERRORS as e:  # the forge's answer decides what has to be done by hand
                     print(f"restoring the gate failed (attempt {attempt} of 3): {e}")
                     time.sleep(2)
             try:
                 back = kit.gh_json(f"repos/{repo}/rulesets/{gate}").get("enforcement")
-            except kit.Refused as e:
+            except ANSWER_ERRORS as e:
                 back = f"unreadable ({e})"
             print(f"gate read back: {back}")
             if back != "active":
@@ -260,7 +279,7 @@ def merge(repo, number, sha, pr, waived):
             send(f"repos/{repo}/issues/{number}/comments", {"body":
                 f"Merged over red at `{sha}`. The caller of the merge tool stated the owner's approval for this pull request and "
                 f"this head; the tool cannot verify that (HAZARD #3). Waived on this head: {record}."}, method="POST")
-        except kit.Refused as e:  # the comment is the only trace of what was waived on which head
+        except ANSWER_ERRORS as e:  # the comment is the only trace of what was waived on which head
             print(f"THE WAIVER RECORD IS MISSING, post it on the pull request by hand: waived on {sha}: {record} ({e})")
             code = code or 6
     return code
@@ -274,13 +293,15 @@ def thread_reasons(threads, changed_since):
     return errors + [e for e in pr_gates.findings_errors(threads, changed_since) if not e.startswith("unresolved")]
 
 
-def blockers(threads, changed_since, settings, squash):
+def blockers(threads, changed_since, settings, squash, unread=()):
     """Everything besides the checks that holds a merge: the threads; merge rules that are not as
-    tools/ruleset.json defines them; and what the title gate holds against the title and the
-    description, which this tool writes into the commit on main. The required checks are read from
-    the file, so a server that differs from it means this run would verify another list than the
-    server enforces; with the ruleset off for an over-red merge nothing would correct that."""
+    tools/ruleset.json defines them, or that this token could not read (`unread`: a setting nobody
+    read is not a pass); and what the title gate holds against the title and the description, which
+    this tool writes into the commit on main. The required checks are read from the file, so a
+    server that differs from it means this run would verify another list than the server enforces;
+    with the ruleset off for an over-red merge nothing would correct that."""
     return (thread_reasons(threads, changed_since) + [f"merge checks are not as defined: {e}" for e in settings]
+            + [f"merge checks were not read in full, run the merge with a login that can read them: {n}" for n in unread]
             + [f"the squash commit would carry it: {e}" for e in squash])
 
 
@@ -342,7 +363,7 @@ def run(argv):
     changed = lambda path, at: pr_gates.blob_at(repo, path, at) != pr_gates.blob_at(repo, path, head)
     behind = kit.gh_json(f"repos/{repo}/compare/{pr['base']['ref']}...{head}")["behind_by"]
 
-    held = blockers(threads, changed, settings, pr_gates.title_errors(pr["title"], [], pr["body"]))
+    held = blockers(threads, changed, settings, pr_gates.title_errors(pr["title"], [], pr["body"]), notes)
     verdict, reasons, waived = decide(number, sha, pr, default_branch, states, held, behind, waiver)
     print(f"{repo}#{number} at {head[:8]}: " + ", ".join(f"{c}={s}" for c, s in states.items()) + f"; {len(threads)} threads; behind by {behind}")
     for n in notes:
@@ -506,6 +527,9 @@ def self_test():
     case("blockers: merge rules that differ from the definition hold the merge",
          blockers([], nothing, ["rule deletion is not active on the default branch"], []) ==
          ["merge checks are not as defined: rule deletion is not active on the default branch"] and blockers([], nothing, [], []) == [])
+    case("blockers: a setting that could not be read holds the merge",
+         blockers([], nothing, [], [], ["bypass list NOT CHECKED"]) ==
+         ["merge checks were not read in full, run the merge with a login that can read them: bypass list NOT CHECKED"])
     case("blockers: what the title gate holds against title and description holds the merge",
          blockers([], nothing, [], ["the description: machine-bound string (drive-path)"]) ==
          ["the squash commit would carry it: the description: machine-bound string (drive-path)"])
@@ -562,10 +586,25 @@ def self_test():
         got = thread_reasons([thread(True)], same)
         case("threads: a finding resolved without its answer blocks", len(got) == 1 and "without changing the file" in got[0], got)
 
+    # one write, against a gh that answers what it is told to
+    def sent(answer):
+        saved, kit.run = kit.run, (lambda cmd, **how: answer)
+        try:
+            return attempt(send, "repos/o/r/pulls/1/merge", {})
+        finally:
+            kit.run = saved
+
+    case("send: an answer is read as the object it is, and no answer as an empty one", (sent('{"merged": true}'), sent("")) == ({"merged": True}, {}))
+    got = sent("<html>502</html>")
+    case("send: an answer that is not JSON is unanswered, because the write landed", type(got) is kit.Unanswered, repr(got))
+    got = sent("[]")
+    case("send: an answer that is not an object is unanswered too", type(got) is kit.Unanswered, repr(got))
+
     # the gate-flip, against a forge that records every write and fails where it is told to
     class Flip:
-        def __init__(self, fail=(), merged=False, restore_fails=0, how="gh: not mergeable (HTTP 405)", silent=False):
+        def __init__(self, fail=(), merged=False, restore_fails=0, how="gh: not mergeable (HTTP 405)", silent=False, lands=(), error=None):
             self.fail, self.merged, self.restore_fails, self.how, self.silent = set(fail), merged, restore_fails, how, silent
+            self.lands, self.error = set(lands), error  # writes that are applied although they fail; what a failure raises
             self.calls, self.enforcement, self.payload = [], "active", None
 
         def send(self, path, payload, method="PUT"):
@@ -576,7 +615,9 @@ def self_test():
                 self.restore_fails -= 1
                 raise kit.Refused("refused")
             if what in self.fail:
-                raise kit.Refused(self.how)
+                if what in self.lands:
+                    self.enforcement = payload["enforcement"]
+                raise self.error or kit.Refused(self.how)
             if what in ("off", "on"):
                 self.enforcement = payload["enforcement"]
             if what == "merge":
@@ -587,7 +628,7 @@ def self_test():
         def gh_json(self, path):
             kind = "gate-readback" if "/rulesets/" in path else "pr-readback"
             if kind in self.fail:
-                raise kit.Refused("refused")
+                raise self.error or kit.Refused("refused")
             return {"enforcement": self.enforcement} if kind == "gate-readback" else {"merged": self.merged}
 
     def flip(waived, **how):
@@ -596,7 +637,7 @@ def self_test():
         g["send"], g["find_ruleset"], kit.gh_json, time.sleep = fake.send, (lambda repo: 7), fake.gh_json, (lambda seconds: None)
         try:
             with contextlib.redirect_stdout(io.StringIO()) as printed:
-                code = merge("o/r", number, sha, ready, waived)
+                code = attempt(merge, "o/r", number, sha, ready, waived)  # an exception that escapes is the case's result
         finally:
             g["send"], g["find_ruleset"], kit.gh_json, time.sleep = saved
         fake.out = printed.getvalue()
@@ -652,6 +693,28 @@ def self_test():
     case("flip: a read-back that fails is printed with the forge's answer", "the read-back failed too" in f.out, f.out)
     code, f = flip(over, fail={"gate-readback"})
     case("flip: a gate that cannot be read back says why", "gate read back: unreadable (" in f.out, f.out)
+    code, f = flip(over, fail={"off"}, lands={"off"}, how="gh: timeout awaiting response")
+    case("flip: a switch-off that landed and then failed is undone: nothing merged, the gate restored and read back",
+         (code, "merge" in f.calls, "on" in f.calls, f.enforcement) == (1, False, True, "active"), (code, f.calls, f.enforcement))
+    code, f = flip(over, fail={"off"}, lands={"off"}, restore_fails=3)
+    case("flip: a switch-off that landed and cannot be undone is exit 3",
+         (code, f.enforcement) == (3, "disabled") and "GATE NOT RESTORED" in f.out, (code, f.enforcement, f.out))
+    odd = ValueError("an answer nobody expected")
+    code, f = flip(over, fail={"merge"}, error=odd)
+    case("flip: a merge call that ends in an answer nobody expected is exit 4, with the gate restored",
+         (code, f.enforcement) == (4, "active") and "MERGE STATE UNKNOWN" in f.out, (code, f.enforcement, f.out))
+    code, f = flip(over, fail={"off"}, error=odd)
+    case("flip: a switch-off that ends in an answer nobody expected merges nothing and leaves the gate on",
+         (code, "merge" in f.calls, f.enforcement) == (1, False, "active"), (code, f.calls, f.enforcement))
+    code, f = flip(over, fail={"merge", "pr-readback"}, error=odd)
+    case("flip: a read-back that ends in an answer nobody expected is exit 4, not a crash", code == 4 and "the read-back failed too" in f.out, (code, f.out))
+    code, f = flip(over, fail={"gate-readback"}, error=odd)
+    case("flip: a gate read-back that ends in an answer nobody expected counts as not restored", code == 3, (code, f.out))
+    code, f = flip(over, fail={"record"}, error=odd)
+    case("flip: a record that ends in an answer nobody expected is exit 6", code == 6 and "THE WAIVER RECORD IS MISSING" in f.out, (code, f.out))
+    code, f = flip(over, fail={"on"}, error=odd)
+    case("flip: a restore that ends in an answer nobody expected is read back, and a gate that is off is exit 3",
+         (code, f.enforcement) == (3, "disabled"), (code, f.calls, f.enforcement))
     return kit.report(cases)
 
 
@@ -660,6 +723,6 @@ if __name__ == "__main__":
         sys.exit(self_test())
     try:
         sys.exit(run(sys.argv[1:]))
-    except (kit.Refused, KeyError, IndexError, ValueError) as e:
+    except ANSWER_ERRORS as e:  # before any write: merge() handles what follows one
         print(f"REFUSED: could not check: {type(e).__name__}: {e}")
         sys.exit(1)

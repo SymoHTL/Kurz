@@ -4,13 +4,20 @@ missing file, a store file no INDEX line links to, a path of a store file that d
 written in an entry, in CLAUDE.md or in a skill, an INDEX line without a hook after its em dash,
 an entry whose frontmatter lacks a non-empty name, description or metadata.type, a nested or
 non-.md file under knowledge/ or guides/, an entry tagged LIVING without a mermaid block or an
-"Update triggers" section, a scan that found fewer than FLOOR entries, and a guide whose numbers
-expired: `ttl_days:` without `generated:`, a TTL over TTL_CAP, a `generated:` date more than one
-day ahead, or a TTL that ran out. Reports without failing: [[wikilinks]] that resolve to nothing,
+"Update triggers" section, a LIVING tag that is not the bare word, a scan that found fewer than
+FLOOR entries, and a guide whose numbers expired: `ttl_days:` that is not a whole number or comes
+without `generated:`, a `generated:` that is not a date, a TTL over TTL_CAP, a `generated:` date
+more than one day ahead, or a TTL that ran out. An entry with generated blocks (the evidence
+guide) fails on an empty block, on blocks that are not what its `digest:` line says (a hand edit,
+or a page the tool never wrote), and on a missing `ttl_days:`.
+The real tree is also checked for what the rules above are satisfied without: CLAUDE.md, a skill
+file in every skill directory and at least one skill, LIVING_FLOOR living entries, and the
+evidence guide with its blocks. Reports without failing: [[wikilinks]] that resolve to nothing,
 the days every TTL has left, and a TTL in its last week. Credentials, machine-bound strings and
 conflict markers are the tree gate's job (tools/tree_gate.py), for the whole tree.
 `--self-test` plants one case per rule, plus precision cases that must stay clean."""
 import datetime
+import hashlib
 import os
 import re
 import sys
@@ -22,7 +29,10 @@ import kit  # noqa: E402
 # Every other rule is satisfied by finding nothing: a scan of the wrong tree prints "0 errors".
 # Keep the floor well below the real entry count and well above zero; raise it as the store grows.
 FLOOR = 5
+LIVING_FLOOR = 4  # the living diagrams: a rewrite of INDEX.md that drops the tag switches their rule off
 TTL_CAP = 90
+EVIDENCE = "guides/quality-bar-evidence.md"  # the entry whose numbers are generated
+BLOCK = re.compile(r"<!-- generated:([\w-]+) -->\n(.*?)<!-- /generated:\1 -->", re.S)
 STORE = ("knowledge", "guides")
 # A value that is really there: not empty, and not an empty YAML scalar ("", '', ~, null).
 VALUE = r"(?![ \t]*$)(?!(?:\"\"|''|~|null)[ \t]*$)"
@@ -57,7 +67,35 @@ def expiry(rel, fm, today):
     return errors, [f"{rel}: numbers expire in {left} days" + (": regenerate soon" if left <= 7 else "")]
 
 
-def lint(root, floor=FLOOR, today=None):
+def digest(text):
+    """What the generated blocks of an entry hold, as one hash: each block's name and text, in order."""
+    h = hashlib.sha256()
+    for m in BLOCK.finditer(text):
+        h.update(f"{m.group(1)}\n{m.group(2)}\n".encode())
+    return h.hexdigest()
+
+
+def generated(rel, body, fm):
+    """Errors for the generated blocks of one entry. tools/quality_evidence.py stamps their digest
+    beside the date, so a block that was edited by hand, or a date on a page that was never
+    generated, does not pass for the tool's output."""
+    blocks = BLOCK.findall(body)
+    if not blocks:
+        return []
+    errors = [f"{rel}: the generated block {name} is empty: nothing generated it (tools/quality_evidence.py)"
+              for name, inner in blocks if not inner.strip()]
+    stamped = re.search(r"^digest:[ \t]*([0-9a-f]{64})[ \t]*$", fm, re.M)
+    if not stamped or stamped.group(1) != digest(body):
+        errors.append(f"{rel}: the generated blocks are not what the digest: line says: edited by hand, or never written by "
+                      f"tools/quality_evidence.py")
+    if not re.search(r"^ttl_days:", fm, re.M):
+        errors.append(f"{rel}: generated numbers without ttl_days: they would never expire")
+    return errors
+
+
+def lint(root, floor=FLOOR, today=None, whole=True):
+    """(errors, warnings). `whole` also demands what only the real tree has; a self-test tree that
+    is built for one rule passes False."""
     today = today or datetime.date.today()
     errors, warnings = [], []
     index = kit.read(os.path.join(root, "INDEX.md"))
@@ -85,11 +123,22 @@ def lint(root, floor=FLOOR, today=None):
             errors.append(f"INDEX.md: the line for {m.group(1)} has no hook after an em dash")
         if "LIVING" in tags.split():
             living.add(m.group(1))
+        elif "LIVING" in tags:
+            errors.append(f"INDEX.md: the line for {m.group(1)} carries LIVING inside other characters: the tag is the bare word")
 
     # Who else names store files: the rules file and the skills. The index has its own rule above.
     skills = os.path.join(root, ".claude", "skills")
     readers = ["CLAUDE.md"] + [f".claude/skills/{d}/SKILL.md" for d in (sorted(os.listdir(skills)) if os.path.isdir(skills) else [])]
-    for rel in sorted(files) + [r for r in readers if os.path.isfile(os.path.join(root, r))]:
+    present = [r for r in readers if os.path.isfile(os.path.join(root, r))]
+    if whole:
+        errors += [f"{r} is missing: it names store files and is checked with them" for r in readers if r not in present]
+        if len(readers) < 2:
+            errors.append("no skill under .claude/skills: is this the right tree?")
+        if len(living) < LIVING_FLOOR:
+            errors.append(f"only {len(living)} entries tagged LIVING in INDEX.md, floor is {LIVING_FLOOR}")
+        if EVIDENCE not in files or not BLOCK.search(kit.read(os.path.join(root, EVIDENCE))):
+            errors.append(f"{EVIDENCE} is missing or has no generated block: the numbers of the bar would be nowhere, or would never expire")
+    for rel in sorted(files) + present:
         for ref in sorted(set(REFERENCE.findall(kit.read(os.path.join(root, rel)))) - files):
             errors.append(f"{rel} names {ref}, which does not exist")
 
@@ -107,7 +156,7 @@ def lint(root, floor=FLOOR, today=None):
         if rel in living and ("```mermaid" not in body or not re.search(r"^## Update triggers[ \t]*$", body, re.M)):
             errors.append(f"{rel}: tagged LIVING but has no mermaid block or no '## Update triggers' section")
         e, w = expiry(rel, fm, today)
-        errors, warnings = errors + e, warnings + w
+        errors, warnings = errors + e + generated(rel, body, fm), warnings + w
         links += [(rel, link) for link in re.findall(r"\[\[([^\]]+)\]\]", body)]
     warnings += [f"{rel}: [[{link}]] resolves to no entry" for rel, link in links if link not in names]
     return errors, warnings
@@ -136,6 +185,18 @@ def self_test():
     good_index = [f"- [{rel}]({rel}) — hook" for rel in good]
     k = "knowledge/"
     diagram = ok(7) + "```mermaid\nflowchart TD\n  A --> B\n```\n\n## Update triggers\n\n- a file\n"
+
+    def evidence(inner="| a | 1 |\n", stamp=None, ttl="ttl_days: 30\ngenerated: 2026-09-30\n", nested=""):
+        """A guide with one generated block, stamped with the digest of that block unless told otherwise."""
+        body = f"\n<!-- generated:a -->\n{inner}<!-- /generated:a -->\n"
+        return (f"---\nname: ev\ndescription: d\n{ttl}digest: {stamp or digest(body)}\nmetadata:\n{nested}  type: reference\n---\n" + body)
+
+    # a tree with everything the real one has: the rules file, a skill, four living diagrams, the evidence guide
+    living = {f"{k}d{n}.md": diagram.replace("name: e7", f"name: d{n}") for n in range(4)}
+    whole = {**good, **living, EVIDENCE: evidence(), "CLAUDE.md": "rules\n", ".claude/skills/walk/SKILL.md": "a skill\n"}
+    whole_index = good_index + [f"- [{rel}]({rel}) LIVING — hook" for rel in living] + [f"- [ev]({EVIDENCE}) — hook"]
+    without = lambda *gone: {rel: body for rel, body in whole.items() if rel not in gone}
+    real = {"whole": True}
     cases = {
         "clean tree passes": (tree(good), None),
         "floor catches an empty scan": (tree({}, index=[]), "floor"),
@@ -201,15 +262,39 @@ def self_test():
         "naming store files that exist is clean": (
             tree({**good, k + "r.md": ok(4) + "see knowledge/e0.md\n", "CLAUDE.md": "read `knowledge/e1.md`\n",
                   ".claude/skills/walk/SKILL.md": "and knowledge/e2.md\n"}, index=good_index + ["- [r](knowledge/r.md) — hook"]), None),
+        "generated: that is not a date": (tree({**good, "guides/g.md": ok(5, "ttl_days: 30\ngenerated: 2026-02-30\n")}), "is not a date"),
+        "a styled LIVING tag is refused, not dropped": (tree(good, index=good_index[:2] + ["- [e2](knowledge/e2.md) `LIVING` — hook"]),
+                                                        "the tag is the bare word"),
+        "generated blocks with their digest are clean": (tree({**good, "guides/g.md": evidence()}), "warn:expire in 29 days"),
+        "an empty generated block": (tree({**good, "guides/g.md": evidence(inner="")}), "generated block a is empty"),
+        "a generated block edited by hand": (tree({**good, "guides/g.md": evidence(stamp="0" * 64)}), "not what the digest"),
+        "generated numbers without ttl_days": (tree({**good, "guides/g.md": evidence(ttl="")}), "would never expire"),
+        "ttl_days nested under metadata does not count": (
+            tree({**good, "guides/g.md": evidence(ttl="", nested="  ttl_days: 30\n")}), "would never expire"),
+        "four entries are below the real floor": (tree({**good, k + "e3.md": ok(3)}), "floor is 5", {"floor": FLOOR}),
+        "whole: a tree with everything the real one has is clean": (tree(whole, index=whole_index), "warn:expire in 29 days", real),
+        "whole: without the rules file": (tree(without("CLAUDE.md"), index=whole_index), "CLAUDE.md is missing", real),
+        "whole: without a skill": (tree(without(".claude/skills/walk/SKILL.md"), index=whole_index), "no skill under", real),
+        "whole: a skill directory without its SKILL.md": (
+            tree({**whole, ".claude/skills/other/notes.md": "no skill file\n"}, index=whole_index), ".claude/skills/other/SKILL.md is missing", real),
+        "whole: three living entries are below the floor": (
+            tree(whole, index=[line.replace("d3.md) LIVING", "d3.md)") for line in whole_index]), "tagged LIVING in INDEX.md, floor is 4", real),
+        "whole: without the evidence guide": (
+            tree(without(EVIDENCE), index=whole_index[:-1]), "is missing or has no generated block", real),
+        "whole: an evidence guide without a generated block": (
+            tree({**whole, EVIDENCE: ok(9, "ttl_days: 30\ngenerated: 2026-09-30\n")}, index=whole_index), "is missing or has no generated block", real),
     }
     results = []
-    for label, (root, needle) in cases.items():
-        errors, warnings = lint(root, floor=3, today=today)
+    for label, (root, needle, *how) in cases.items():
+        errors, warnings = lint(root, **{"floor": 3, "today": today, "whole": False, **(how[0] if how else {})})
         if needle and needle.startswith("warn:"):
             hit = not errors and any(needle[5:] in w for w in warnings)
         else:
             hit = any(needle in e for e in errors) if needle else not errors and not warnings
         results.append((label, hit, f"errors={errors} warnings={warnings}"))
+    errors, _ = lint(tree(good), today=today)
+    results.append(("left to its defaults the lint demands the whole tree and the real floor",
+                    any("CLAUDE.md is missing" in e for e in errors) and any("floor is 5" in e for e in errors), errors))
     return kit.report(results)
 
 
