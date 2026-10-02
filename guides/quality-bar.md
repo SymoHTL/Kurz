@@ -140,7 +140,14 @@ What is specific to this repository:
 - **A run outside CI is an audit, not a pass.** `review.py --pr N --local` posts findings and an
   audit note with the git blob ids of the script and the rules, the model and whether it
   converged. It posts no `review` status, so a merge after it needs the owner's approval for
-  that item.
+  that item. Such a run can be limited by its caller: `--passes N` gives a batch at most N
+  passes, and with `--passes 1` every batch is read once. A batch whose last allowed pass still
+  found something above low is at its cap: the note says "converged: no" and names the limit.
+  A run that posts the status does not take the option, so no caller can make the required
+  check cheaper than two passes.
+- **The bill is counted before it is named.** `review.py --pr N --plan` prints the batches a run
+  would read and the passes that is, calls no model and posts nothing. The owner's go-ahead is
+  for a bill named from that count (`CLAUDE.md`, "Tests", rule 6).
 - **Text is checked before it is posted.** A finding, a failure message or a note that holds a
   credential shape or a machine-bound string has that part withheld; a post that still holds one
   is refused by the tool itself.

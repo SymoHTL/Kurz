@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-02
-digest: cbb3581ed244503853e4fb5da346a7fe04a7f471f4eb23dbe80e1db648ed44fe
+digest: 3bacf1fceb653219776a23801d5941abc1d07b8bf199178e5a126f9e69ccbf51
 ttl_days: 60
 metadata:
   type: reference
@@ -59,9 +59,9 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/pr_gates.py` | 48 | 43 |
 | `tools/quality_evidence.py` | 27 | 22 |
 | `tools/red_proof.py` | 28 | 25 |
-| `tools/review/review.py` | 197 | 155 |
+| `tools/review/review.py` | 211 | 171 |
 | `tools/tree_gate.py` | 77 | 47 |
-| **total** | 705 | 568 |
+| **total** | 719 | 584 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -88,7 +88,7 @@ A statement marked *(assumed)* was proposed and not objected to; it is not a dec
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 30 |
+| Statements marked *(assumed)* | 39 |
 | Open questions | 6 |
 <!-- /generated:design -->
 
@@ -101,12 +101,12 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 144 |
-| of them decided | 103 |
-| of them assumed | 31 |
-| of them proposed | 1 |
-| of them open | 9 |
-| Corpus cases, none of them run | 141 |
+| Rules in the reference | 150 |
+| of them decided | 112 |
+| of them assumed | 34 |
+| of them proposed | 0 |
+| of them open | 4 |
+| Corpus cases, none of them run | 159 |
 | Compile-error ids | 23 |
 <!-- /generated:reference -->
 

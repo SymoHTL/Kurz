@@ -9,6 +9,10 @@ its low findings are collected on one issue and hold nothing.
   review.py --pr N --local            off-pipeline, with this machine's Claude login; posts an audit
                                       note instead of the status, so the merge still needs the owner
   review.py --pr N --dry-run          review and print, post nothing
+  review.py --pr N --plan             a dry run that stops before its first pass: the batches a run
+                                      would read and the passes that is, so that the bill can be named
+  review.py ... --passes N            with --local, --dry-run or --plan: the caller's limit for this run. A
+                                      batch gets at most N passes, where a run without it gives two to five
   review.py --self-test               the unit suite in test_review.py
 
 Trust boundary: the pull request is data. The rules come from the default branch through the API,
@@ -416,8 +420,9 @@ def fresh():
     return {"findings": [], "passes": 0, "converged": False, "cost": 0.0, "dropped": 0, "error": None}
 
 
-def converge(call, reported, budget, prior=None, limit=MAX_PASSES):
-    """Review one batch until a pass adds nothing above low: at least MIN_PASSES, at most MAX_PASSES.
+def converge(call, reported, budget, prior=None, limit=MAX_PASSES, bounds=(MIN_PASSES, MAX_PASSES)):
+    """Review one batch until a pass adds nothing above low: at least bounds[0] passes, at most
+    bounds[1] (MIN_PASSES and MAX_PASSES, unless the caller limited the run: see arguments).
     call(reported so far) -> (findings, cost, dropped). A pass is told what is already reported, so
     a finding on a line that carries one from an earlier pass or run is a repeat, unless it is more
     severe: then it replaces what this run found on that line. Within one pass, every finding is
@@ -431,7 +436,8 @@ def converge(call, reported, budget, prior=None, limit=MAX_PASSES):
     for f in reported + found:
         known[(f["file"], f["line"])] = max(known.get((f["file"], f["line"]), -1), RANK[f["severity"]])
     passes, cost, converged, dropped, error = (prior[k] for k in ("passes", "cost", "converged", "dropped", "error"))
-    last = min(MAX_PASSES, passes + limit)
+    least, most = bounds
+    last = min(most, passes + limit)
     while not converged and not error and passes < last and budget.fits():
         began = budget.now()
         try:
@@ -447,29 +453,29 @@ def converge(call, reported, budget, prior=None, limit=MAX_PASSES):
         found = [f for f in found if (f["file"], f["line"]) not in replaced] + list(added.values())
         for f in added.values():
             known[(f["file"], f["line"])] = max(known.get((f["file"], f["line"]), -1), RANK[f["severity"]])
-        if passes >= MIN_PASSES and all(f["severity"] == "low" for f in added.values()):
+        if passes >= least and all(f["severity"] == "low" for f in added.values()):
             converged = True
             break
     return {"findings": found, "passes": passes, "converged": converged, "cost": cost, "dropped": dropped, "error": error}
 
 
-def in_rounds(calls, reported, budget, workers=WORKERS):
+def in_rounds(calls, reported, budget, workers=WORKERS, bounds=(MIN_PASSES, MAX_PASSES)):
     """The results of all batches, reviewed in rounds: every batch gets one pass before any batch
     gets a second. When the time ends early, every batch has then been read once, instead of a few
     read five times and the rest never. calls[i] is the model call of batch i and reported[i] what
     earlier runs reported on its files (see converge, which gives a finished batch no further pass)."""
     results = [fresh() for _ in calls]
-    for _ in range(MAX_PASSES):
+    for _ in range(MAX_PASSES):  # converge gives a batch no pass beyond its bounds
         with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-            results = list(pool.map(lambda i: converge(calls[i], reported[i], budget, results[i], limit=1), range(len(calls))))
+            results = list(pool.map(lambda i: converge(calls[i], reported[i], budget, results[i], limit=1, bounds=bounds), range(len(calls))))
     return results
 
 
-def settle(results, work):
+def settle(results, work, most=MAX_PASSES):
     """What the batches of one run add up to: (findings, paths at the pass cap, paths that did not
     converge, why the review did not complete or None). Only a batch that converged, or that used
-    every pass it may have, counts as reviewed; one that failed or ran out of time does not, and
-    what it found before that is still reported."""
+    every pass it may have (`most`), counts as reviewed; one that failed or ran out of time does
+    not, and what it found before that is still reported."""
     merged = {}  # the same finding from two batches is one; two defects on one line stay two
     for r in results:
         for f in r["findings"]:
@@ -477,9 +483,9 @@ def settle(results, work):
             if k not in merged or RANK[f["severity"]] > RANK[merged[k]["severity"]]:
                 merged[k] = f
     unconverged = [(n, r, {p for p, _ in b}) for n, (r, b) in enumerate(zip(results, work), 1) if not r["converged"]]
-    capped = sorted({p for _, r, paths in unconverged if r["passes"] >= MAX_PASSES for p in paths})
+    capped = sorted({p for _, r, paths in unconverged if r["passes"] >= most for p in paths})
     failed = [r["error"] for _, r, _ in unconverged if r["error"]]
-    short = [n for n, r, _ in unconverged if not r["error"] and r["passes"] < MAX_PASSES]
+    short = [n for n, r, _ in unconverged if not r["error"] and r["passes"] < most]
     incomplete = None
     if failed:
         first = next((e for e in failed if e.kind == "usage-limit"), failed[0])  # the one failure a re-run has to wait for
@@ -492,10 +498,12 @@ def settle(results, work):
 
 # --- replay cache -----------------------------------------------------------------------------
 
-def cache_key(script_bytes, rules_text, title, body):
-    """Covers everything but the diff that can change a verdict; any change drops the whole state."""
+def cache_key(script_bytes, rules_text, title, body, bounds=(MIN_PASSES, MAX_PASSES)):
+    """Covers everything but the diff that can change a verdict; any change drops the whole state.
+    The pass bounds are part of it: what one pass called converged is not replayed into a run
+    that asks for two."""
     h = hashlib.sha256()
-    for part in (script_bytes, rules_text.encode(), MODEL.encode(), (title or "").encode(), (body or "").encode()):
+    for part in (script_bytes, rules_text.encode(), MODEL.encode(), (title or "").encode(), (body or "").encode(), repr(tuple(bounds)).encode()):
         h.update(hashlib.sha256(part).digest())
     return h.hexdigest()
 
@@ -721,31 +729,44 @@ def fetch_diff(pr, number):
 # --- the run ----------------------------------------------------------------------------------
 
 def arguments(argv, environ):
-    """{pr, local, dry, bootstrap, ci} of a call, or None when the call is not understood. An option
-    this script does not know is not understood: a mistyped --dry-run must not run as a review that
-    posts. Outside CI the mode has to be named."""
+    """{pr, local, dry, plan, bootstrap, ci, bounds} of a call, or None when the call is not
+    understood. An option this script does not know is not understood: a mistyped --dry-run must
+    not run as a review that posts. Outside CI the mode has to be named. `--plan` is a dry run
+    that stops before its first pass. `bounds` is (the least, the most) passes of a batch.
+    `--passes N` is the caller's limit for one run: a batch gets at most N passes and counts as
+    converged when the last one it may have added nothing above low. It is taken only by a run
+    that posts no status: the status has to mean the same review on every head."""
     got, rest = {}, list(argv)
     while rest:
         arg = rest.pop(0)
-        if arg in ("--local", "--dry-run") and arg not in got:
+        if arg in ("--local", "--dry-run", "--plan") and arg not in got:
             got[arg] = True
-        elif arg in ("--pr", "--bootstrap-rules") and arg not in got and rest:
+        elif arg in ("--pr", "--bootstrap-rules", "--passes") and arg not in got and rest:
             got[arg] = rest.pop(0)
         else:
             return None
     raw, ci = got.get("--pr") or environ.get("PR_NUMBER") or "", environ.get("GITHUB_ACTIONS") == "true"
-    local, dry = "--local" in got, "--dry-run" in got
+    local, plan = "--local" in got, "--plan" in got
+    dry = plan or "--dry-run" in got
     if not raw.isdigit() or (local and dry) or not (ci or local or dry):
         return None
-    return {"pr": int(raw), "local": local, "dry": dry, "bootstrap": got.get("--bootstrap-rules"), "ci": ci}
+    bounds = (MIN_PASSES, MAX_PASSES)
+    if "--passes" in got:
+        if not (local or dry) or got["--passes"] not in [str(n) for n in range(1, MAX_PASSES + 1)]:
+            return None
+        bounds = (min(MIN_PASSES, int(got["--passes"])), int(got["--passes"]))
+    return {"pr": int(raw), "local": local, "dry": dry, "plan": plan, "bootstrap": got.get("--bootstrap-rules"), "ci": ci, "bounds": bounds}
 
 
 def review(argv):
     call = arguments(argv, os.environ)
     if not call:
-        print("usage: review.py [--pr N] [--local | --dry-run] [--bootstrap-rules FILE]   (outside CI, name the mode)")
+        print("usage: review.py [--pr N] [--local | --dry-run | --plan] [--passes N] [--bootstrap-rules FILE]   (outside CI, name the mode; "
+              f"--passes takes 1 to {MAX_PASSES} and goes with a mode)")
         return 2
-    local, dry, in_ci = call["local"], call["dry"], call["ci"]
+    local, dry, in_ci, bounds = call["local"], call["dry"], call["ci"], call["bounds"]
+    cap = f"{bounds[1]} pass{'' if bounds[1] == 1 else 'es'}"
+    limited = "" if bounds == (MIN_PASSES, MAX_PASSES) else f"; limited by the caller to {cap} a batch"
     forge = Forge(kit.repo(), call["pr"])
     head, me, notes = None, None, []
 
@@ -819,7 +840,7 @@ def review(argv):
         script = parts["review.py"] + parts["kit.py"]
         # the ids `git hash-object` gives these bytes: comparable with `git ls-tree` on the reviewed head
         blobs = ", ".join(f"{name} `{hashlib.sha1(b'blob %d' % len(data) + bytes(1) + data).hexdigest()[:12]}`" for name, data in parts.items())
-        key = cache_key(script, rules_text, pr["title"], pr["body"])
+        key = cache_key(script, rules_text, pr["title"], pr["body"], bounds)
         states = marked(issue_comments, me, STATE_MARK)
         state_comment, state = states[-1] if states else (None, None)
         replay = replayable(state, key, files)
@@ -831,9 +852,15 @@ def review(argv):
         reported = [f for c, fs in marked(review_comments + issue_comments, me, FINDINGS_MARK) for f in fs
                     if isinstance(f, dict) and f.get("severity") in RANK and isinstance(f.get("line"), int)]
         print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache, "
-              f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}")
+              f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}")
         for path in sorted(replay):
             print(f"  replayed (unchanged since a converged review): {path}")
+        if call["plan"]:  # what a run would read, said before a pass is paid for
+            for index, batch in enumerate(work, 1):
+                print(f"  batch {index}/{len(work)}: {sum(len(text) for _, text in batch)} characters [{', '.join(sorted({p for p, _ in batch}))}]")
+            least, most = bounds[0] * len(work), bounds[1] * len(work)
+            print(f"PLAN: {len(work)} batches, {least if least == most else f'{least} to {most}'} passes; nothing was reviewed")
+            return 0
 
         suffix = fresh_suffix(diff, pr["title"], pr["body"])
 
@@ -861,12 +888,13 @@ def review(argv):
             return call
 
         paths_of = [{p for p, _ in batch} for batch in work]
-        results = in_rounds([call_of(i) for i in range(len(work))], [[f for f in reported if f["file"] in paths] for paths in paths_of], budget)
+        results = in_rounds([call_of(i) for i in range(len(work))], [[f for f in reported if f["file"] in paths] for paths in paths_of], budget,
+                            bounds=bounds)
         for index, (result, paths) in enumerate(zip(results, paths_of), 1):
             print(f"  batch {index}/{len(work)} [{', '.join(sorted(paths))}]: {result['passes']} passes, "
                   f"{'converged' if result['converged'] else 'NOT converged'}, {len(result['findings'])} findings")
 
-        findings, capped, unconverged, incomplete = settle(results, work)
+        findings, capped, unconverged, incomplete = settle(results, work, bounds[1])
         count = {s: sum(f["severity"] == s for f in findings) for s in RANK}
         cost, passes = sum(r["cost"] for r in results), sum(r["passes"] for r in results)
         summary = (f"{len(findings)} new findings ({count['high']} high, {count['medium']} medium, {count['low']} low), "
@@ -899,7 +927,7 @@ def review(argv):
         if capped:
             wanted = note_wanted(notes, "no-convergence", sha=head)
             if wanted:
-                forge.note(f"**Automated review did not converge** on `{head[:8]}`: after {MAX_PASSES} passes it was still "
+                forge.note(f"**Automated review did not converge** on `{head[:8]}`: after {cap} it was still "
                            f"finding defects above low in {', '.join(f'`{p}`' for p in capped)}. Expect more findings on "
                            f"the next round.\n\n{marker('note', wanted)}")
         cached = {f["path"]: block_hash(f["block"]) for f in files if f["path"] in replay}
@@ -917,7 +945,7 @@ def review(argv):
             # A review at the pass cap completed: its findings are threads, and it says what it is.
             forge.status(head, "success", f"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: {summary}")
         else:
-            forge.note(f"**Off-pipeline review** of `{head}` by `{me}`: {summary}; converged: {'no' if capped else 'yes'}; "
+            forge.note(f"**Off-pipeline review** of `{head}` by `{me}`: {summary}; converged: {'no' if capped else 'yes'}{limited}; "
                        f"model `{MODEL}`, effort `{EFFORT}` asked for; rules from {rules_from}; "
                        f"git blob ids of what reviewed: {blobs}. "
                        f"No `review` status is posted by a run outside CI, so merging this head needs the owner's approval "

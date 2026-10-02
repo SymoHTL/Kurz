@@ -61,6 +61,9 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
 A review run spends the owner's Claude seat: about 1.5 USD and ten minutes or more per pass, at
 least two passes per batch of the diff (`knowledge/what-a-review-pass-costs.md`). Before starting
 or dispatching one, tell the owner the expected bill and wait for the go-ahead. `judgment step`
+Count the batches on the head that will be reviewed, with
+`py -3 tools/review/review.py --pr <N> --plan`, which pays nothing; never take them from an
+earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
 
 1. Iterate in Draft. A Draft, and a pull request from outside, is reviewed only on demand:
    `gh workflow run review.yml -f pr=<N>`, without `--ref`, so that it runs on the default
@@ -86,7 +89,8 @@ or dispatching one, tell the owner the expected bill and wait for the go-ahead. 
      adds): with the owner's go-ahead, in the background with the output in a file:
      `py -3 tools/review/review.py --pr <N> --local`. It prints one line per pass and every
      finding in full, posts the findings and an audit note, and no status: the merge then needs
-     the owner's approval for that pull request and head. HAZARD (#3).
+     the owner's approval for that pull request and head. HAZARD (#3). When the owner caps the
+     bill, add `--passes <N>`: a batch then gets at most N passes, and the note names the limit.
 4. Read every thread before fixing anything. Every thread, with its first comment:
    `gh api graphql --paginate -f owner=<owner> -f name=<name> -F pr=<N> -f query='query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { reviewThreads(first: 50, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { isResolved path comments(first: 1) { nodes { body } } } } } } }'`
    What is still unanswered: `py -3 tools/pr_gates.py findings --pr <N>`. Gate: `pr-findings`.

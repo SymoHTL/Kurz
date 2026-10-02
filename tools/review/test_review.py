@@ -423,9 +423,14 @@ def suite(case):
     failed_once = rv.converge(broken, [], budget(), limit=1)
     rv.converge(broken, [], budget(), failed_once, limit=1)
     case("converge: a batch that failed gets no further pass", len(broken.seen) == 1 and getattr(failed_once["error"], "kind", None) == "api", broken.seen)
+    r = rv.converge(scripted([]), [], budget(), bounds=(1, 1))
+    case("converge: where one pass is the least, a clean first pass converges", (r["passes"], r["converged"]) == (1, True), r)
+    r = rv.converge(scripted([finding()], []), [], budget(), bounds=(1, 1))
+    case("converge: where one pass is the most, a defect above low ends the batch after it, unconverged",
+         (r["passes"], r["converged"], len(r["findings"])) == (1, False, 1), r)
 
     # --- rounds: every batch is read once before any is read twice
-    def rounds(scripts, bud, clock=None, seconds=0):
+    def rounds(scripts, bud, clock=None, seconds=0, bounds=(rv.MIN_PASSES, rv.MAX_PASSES)):
         """in_rounds over scripted batches with one worker: (the passes each batch had, the order of the calls)."""
         order = []
 
@@ -435,7 +440,7 @@ def suite(case):
                 return call(already)
             return wrapped
         calls = [numbered(i, scripted(*answers, clock=clock, seconds=seconds)) for i, answers in enumerate(scripts)]
-        got = attempt(rv.in_rounds, calls, [[] for _ in calls], bud, 1)
+        got = attempt(rv.in_rounds, calls, [[] for _ in calls], bud, 1, bounds)
         return ([r["passes"] for r in got] if isinstance(got, list) else repr(got)), order
 
     had, order = rounds([[[finding(line=1)]], [], [[finding(line=2)]]], budget())
@@ -445,6 +450,8 @@ def suite(case):
     case("rounds: when the time ends after the first round every batch was read once, and none never", had == [1, 1, 1], (had, order))
     had, order = rounds([[], [[finding(line=n)] for n in range(1, 9)]], budget())
     case("rounds: a batch that converged drops out and the others go on", had == [2, rv.MAX_PASSES] and order == [0, 1, 0, 1, 1, 1, 1], (had, order))
+    had, order = rounds([[[finding(line=1)]], [], [[finding(line=2)]]], budget(), bounds=(1, 1))
+    case("rounds: a run limited to one pass reads every batch once and none twice", had == [1, 1, 1] and order == [0, 1, 2], (had, order))
 
     # --- what the batches of a run add up to
     work = [[("a.md", "part 1")], [("a.md", "part 2"), ("b.md", "x")], [("c.md", "x")]]
@@ -473,6 +480,10 @@ def suite(case):
         [batch_result(), batch_result(), batch_result([finding(file="c.md")], passes=rv.MAX_PASSES, converged=False)], work)
     case("settle: a batch at the pass cap is reviewed, loudly, and not cached", (capped, unconverged, incomplete) == (["c.md"], ["c.md"], None),
          (capped, unconverged, incomplete))
+    got, capped, unconverged, incomplete = rv.settle(
+        [batch_result(), batch_result(), batch_result([finding(file="c.md")], passes=1, converged=False)], work, 1)
+    case("settle: in a run limited to one pass, a batch that had it is at the cap and not out of time", (capped, incomplete) == (["c.md"], None),
+         (capped, incomplete))
 
     # --- time budget
     clock = Clock()
@@ -499,6 +510,8 @@ def suite(case):
                 rv.cache_key(b"script", "rules", "title2", "body"), rv.cache_key(b"script", "rules", "title", "body2"),
                 rv.cache_key(b"script", "rules", "titlebody", "")]
     case("cache: script, rules, title and description each change the key", len(set(variants + [key])) == 6)
+    case("cache: the pass bounds change the key", key != rv.cache_key(b"script", "rules", "title", "body", (1, 1))
+         and key == rv.cache_key(b"script", "rules", "title", "body", (rv.MIN_PASSES, rv.MAX_PASSES)))
     state = {"v": 1, "key": key, "files": {"a.md": rv.block_hash(by["a.md"]["block"]), "e.md": "stale"}}
     case("cache: an identical block is replayed, a changed one is not", rv.replayable(state, key, files) == {"a.md"}, rv.replayable(state, key, files))
     case("cache: another key replays nothing", rv.replayable(state, "other", files) == set())
@@ -642,7 +655,21 @@ def suite(case):
     ci_env = {"GITHUB_ACTIONS": "true", "PR_NUMBER": "7"}
     understood = lambda argv, env: rv.arguments(argv, env) or {}
     case("args: a number and a mode are a call", understood(["--pr", "7", "--local"], {}) ==
-         {"pr": 7, "local": True, "dry": False, "bootstrap": None, "ci": False}, understood(["--pr", "7", "--local"], {}))
+         {"pr": 7, "local": True, "dry": False, "plan": False, "bootstrap": None, "ci": False, "bounds": (rv.MIN_PASSES, rv.MAX_PASSES)},
+         understood(["--pr", "7", "--local"], {}))
+    case("args: --plan is a dry run that stops before its first pass, and does not go with --local",
+         [understood(["--pr", "7", "--plan"], {}).get(k) for k in ("dry", "plan")] == [True, True]
+         and understood(["--pr", "7", "--dry-run"], {}).get("plan") is False and rv.arguments(["--pr", "7", "--local", "--plan"], {}) is None,
+         (understood(["--pr", "7", "--plan"], {}), understood(["--pr", "7", "--dry-run"], {})))
+    case("args: --passes limits a run that posts no status, and one pass is then the least and the most",
+         understood(["--pr", "7", "--local", "--passes", "1"], {}).get("bounds") == (1, 1)
+         and understood(["--pr", "7", "--dry-run", "--passes", "3"], {}).get("bounds") == (rv.MIN_PASSES, 3),
+         (understood(["--pr", "7", "--local", "--passes", "1"], {}), understood(["--pr", "7", "--dry-run", "--passes", "3"], {})))
+    case("args: --passes is not understood by a run that posts the status", rv.arguments(["--passes", "1"], ci_env) is None
+         and rv.arguments([], ci_env) is not None)
+    case("args: --passes takes a whole number from 1 to the cap",
+         all(attempt(rv.arguments, ["--pr", "7", "--local", "--passes", n], {}) is None for n in ("0", "x", "1.5", "-1", str(rv.MAX_PASSES + 1)))
+         and rv.arguments(["--pr", "7", "--local", "--passes", str(rv.MAX_PASSES)], {}) is not None)
     case("args: in CI the number comes from the job, and no mode is needed", understood([], ci_env).get("pr") == 7 and understood([], ci_env).get("ci") is True)
     case("args: the bootstrap rules file is read from the call", understood(["--pr", "7", "--dry-run", "--bootstrap-rules", "r.yaml"], {}).get("bootstrap") == "r.yaml")
     case("args: outside CI a call without a mode is not understood", rv.arguments(["--pr", "7"], {}) is None)
@@ -747,6 +774,13 @@ def suite(case):
     code, out = run_review(forge, dry, ["--pr", "1", "--dry-run"])
     case("run: a dry run reviews and posts nothing", code == 0 and not (forge.threads or forge.notes or forge.statuses) and len(dry.batches) == 8
          and "DRY RUN" in out, (code, len(forge.threads), len(forge.notes), dry.batches))
+    forge, planned = MemoryForge(), scripted_model(found)
+    code, out = run_review(forge, planned, ["--pr", "1", "--plan"])
+    case("run: a plan lists the batches and the passes they can take, calls no model and posts nothing",
+         code == 0 and planned.batches == [] and not (forge.threads or forge.notes or forge.statuses) and "  batch 4/4: " in out
+         and f"PLAN: 4 batches, {4 * rv.MIN_PASSES} to {4 * rv.MAX_PASSES} passes" in out, (code, planned.batches, len(forge.notes), out[-300:]))
+    code, out = run_review(MemoryForge(), scripted_model(found), ["--pr", "1", "--plan", "--passes", "1"])
+    case("run: a plan under --passes counts the passes of that limit", code == 0 and "PLAN: 4 batches, 4 passes" in out, (code, out[-300:]))
 
     # --- which pull request gets a status at all
     forge, unused = MemoryForge(base="feature"), scripted_model(found)
@@ -771,6 +805,22 @@ def suite(case):
     case("run: a review that ends at the pass cap completes, and its status says that it did not converge",
          (code, forge.statuses, kinds(forge)) == (0, success, ["no-convergence"]) and "NOT converged on 4 files" in (forge.said or [""])[-1],
          (code, forge.statuses, forge.said, kinds(forge)))
+
+    # --- a run the caller limited to one pass a batch
+    forge, once = MemoryForge(), scripted_model(found)
+    code, out = run_review(forge, once, ["--pr", "1", "--local", "--passes", "1"])
+    audit = next((n["body"] for n in forge.notes if "Off-pipeline review" in n["body"]), "")
+    case("run: a run limited to one pass reads every batch once and completes at its cap",
+         (code, len(once.batches), kinds(forge)) == (0, 4, ["no-convergence", "off-pipeline"]) and stored(forge) == ["b.md", "e.md", "new.kz"],
+         (code, once.batches, kinds(forge), stored(forge), out[-300:]))
+    case("run: the notes of a limited run name the limit", "converged: no; limited by the caller to 1 pass a batch" in audit
+         and any("after 1 pass it was still" in n["body"] for n in forge.notes), [n["body"][:160] for n in forge.notes])
+    forge = MemoryForge()
+    run_review(forge, scripted_model({}), ["--pr", "1", "--local", "--passes", "1"])
+    full = scripted_model({})
+    code, out = run_review(forge, full, ["--pr", "1", "--local"])
+    case("run: what a one-pass run stored is not replayed by a run without the limit",
+         stored(forge) == ["a.md", "b.md", "e.md", "new.kz"] and len(full.batches) == 8 and "0 replayed" in out, (stored(forge), full.batches, out[:300]))
 
     # --- what the audit note of a run off the pipeline says
     forge = MemoryForge()
