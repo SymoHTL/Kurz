@@ -1,0 +1,27 @@
+// expect: output
+// | 6
+// | 2
+// | 12
+// rules: L4
+
+int Add(int a, int b) =>
+    a + b
+
+total = 1 +
+    2 +
+    3
+print(total)
+
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+count = xs
+    .Where(x => x > 1)
+    .Count
+print(count)
+
+print(Add(
+    total,
+    total
+))

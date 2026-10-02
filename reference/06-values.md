@@ -18,8 +18,8 @@ print(b.Count)
 ### M2 (decided, §4) Without `mut`, nothing changes
 
 Without `mut`, nothing reachable through a variable changes. With `mut`, it changes in place.
-The record says this about values; whether it also binds a class instance that is reached
-through the variable is K2.
+This is about values. It does not bind a class instance that is reached through the variable
+(K2).
 
 Case: [values/mut-method-on-immutable.kz](../corpus/values/mut-method-on-immutable.kz)
 ```kurz
@@ -56,17 +56,31 @@ print(before.Home.City)
 
 ### M5 (decided, §4) Methods that change their own value
 
-A method that changes the value it is called on carries a `mut` marker. Calling it on a value
+A method that changes the value it is called on carries a `mut` marker (M6). Calling it on a value
 that is not reachable through a `mut` variable is the compile error `mut-required`.
 
 Case: [values/mut-method-on-immutable.kz](../corpus/values/mut-method-on-immutable.kz)
 
-### M6 (open) Where the `mut` marker of a method is written
+### M6 (decided, §4) Where the `mut` marker of a method is written
 
-The record says such a method "carries a `mut` marker" and shows no declaration. Options:
-(a) in front of the return type, `mut void Add(T item)`; (b) after the parameter list,
-`void Add(T item) mut`. Lean: (a): `mut` is in front everywhere else (variables, fields,
-parameters).
+In front of the return type: `mut void Add(T item)`. `mut` stands in front everywhere else as
+well: of a variable, a field and a parameter.
+
+Case: [values/mut-method.kz](../corpus/values/mut-method.kz)
+```kurz
+data Counter(int Count) {
+    pub mut void Increment() {
+        Count = Count + 1
+    }
+}
+
+mut c = Counter(0)
+before = c
+c.Increment()
+c.Increment()
+print(c.Count)
+print(before.Count)
+```
 
 ### M7 (decided, §4) `mut` parameters
 
@@ -125,7 +139,7 @@ There is one family of collections, and every value can cross between actors.
 
 No case: actors are not covered yet; that collections are values is shown under M3.
 
-### M9 (proposed, §4, §5) The collections the corpus uses
+### M9 (assumed, §4, §5) The collections the corpus uses
 
 `List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method; `Count` is the number
 of items; `list[i]` is the item at position `i`, counted from 0; `Where(test)` is the list of

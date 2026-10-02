@@ -1,0 +1,8 @@
+// expect: throws
+// | before
+// rules: O7
+
+data ConfigMissing(string Path)
+
+print("before")
+throw ConfigMissing("app.json")

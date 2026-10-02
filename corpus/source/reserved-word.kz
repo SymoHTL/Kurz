@@ -1,0 +1,5 @@
+// expect: error reserved-word at 4
+// rules: L12
+
+data = 5
+print(data)

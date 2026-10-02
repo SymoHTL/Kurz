@@ -1,0 +1,19 @@
+// expect: error nullable-unchecked at 16
+// rules: N3
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+int Length(int id) {
+    email = Email(id)
+    if email == null {
+        return 0
+    }
+    return email.Bytes.Count
+}
+
+print(Length(1))

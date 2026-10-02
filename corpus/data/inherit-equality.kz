@@ -1,0 +1,12 @@
+// expect: output
+// | true
+// | false
+// rules: D15
+
+data User(int Id, string Name)
+data Admin(int Level) : User
+
+bool Same(User a, User b) => a == b
+
+print(Same(Admin(1, "Ann", 3), Admin(1, "Ann", 3)))
+print(Same(Admin(1, "Ann", 3), User(1, "Ann")))

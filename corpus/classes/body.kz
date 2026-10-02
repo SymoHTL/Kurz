@@ -1,0 +1,21 @@
+// expect: output
+// | 4
+// | 2
+// rules: K7, K9
+
+class Counter {
+    mut int count = 0
+    pub static int Step = 2
+
+    pub void Add() {
+        count = count + Step
+    }
+
+    pub int Value() => count
+}
+
+c = Counter()
+c.Add()
+c.Add()
+print(c.Value())
+print(Counter.Step)

@@ -1,0 +1,13 @@
+// expect: error reference-cycle at 8
+// rules: R8
+
+interface Shape {
+    int Area()
+}
+
+class Group(mut List<Shape> Parts) : Shape {
+    pub int Area() => Parts.Count
+}
+
+g = Group(List<Shape>())
+print(g.Area())

@@ -1,0 +1,7 @@
+// expect: throws
+// build: test
+// rules: T20
+
+byte Low(int n) => byte(n)
+
+print(Low(300))

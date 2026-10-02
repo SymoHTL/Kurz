@@ -1,0 +1,7 @@
+// expect: error match-not-exhaustive at 5
+// rules: C9
+
+n = 3
+match n {
+    0 => print("zero")
+}

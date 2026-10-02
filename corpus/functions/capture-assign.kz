@@ -1,0 +1,12 @@
+// expect: error capture-assign at 8
+// rules: F11
+
+mut total = 0
+mut xs = List<int>()
+xs.Add(1)
+big = xs.Where(x => {
+    total = total + x
+    return x > 0
+})
+print(big.Count)
+print(total)

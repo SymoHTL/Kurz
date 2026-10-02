@@ -1,0 +1,18 @@
+// expect: output
+// | free
+// | pro
+// | false
+// rules: D12
+
+enum Plan { Free, Pro }
+
+void Show(Plan p) {
+    match p {
+        Plan.Free => print("free")
+        Plan.Pro => print("pro")
+    }
+}
+
+Show(Plan.Free)
+Show(Plan.Pro)
+print(Plan.Free == Plan.Pro)

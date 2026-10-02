@@ -1,0 +1,15 @@
+// expect: output
+// | zero
+// | one
+// | many
+// rules: C9
+
+string Name(int n) => match n {
+    0 => "zero"
+    1 => "one"
+    else => "many"
+}
+
+print(Name(0))
+print(Name(1))
+print(Name(7))

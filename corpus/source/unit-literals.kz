@@ -1,0 +1,7 @@
+// expect: output
+// | 2048
+// | 1048576
+// rules: L14
+
+print(2kb)
+print(1mb)

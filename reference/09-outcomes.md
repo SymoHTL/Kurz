@@ -216,20 +216,39 @@ ends the program with an error code. What was printed before stays printed.
 
 Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 
-### O7 (open) What an exception carries, and `throw` outside an `else` arm
+### O7 (decided, §5) What `throw` takes
 
-The record shows `throw` only as an arm of `else`, with nothing after it, and reads a `Reason`
-from a crashed child (section 6). It lists what an exception carries as a missing detail
-(section 14). Options: (a) `throw` takes a text, `throw "no config"`, and the runtime adds the
-place and the chain id; (b) `throw` takes a `data` value, so a supervisor can `match` on it;
-(c) both: a value, with text as the short form. Lean: (c). A supervisor's `on crash` block
-(section 6) decides by what it is given, and a text alone forces it to parse.
+`throw` takes a value or a text: `throw ConfigMissing(path)`, or `throw "no config"` as the short
+form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
+alone (O5). The record marks as *(assumed)* that the runtime adds the place and the chain id to
+what was thrown.
 
-### O8 (proposed) `match` covers every case
+Case: [outcomes/throw-text.kz](../corpus/outcomes/throw-text.kz)
+```kurz
+void Check(int n) {
+    if n < 0 {
+        throw "negative"
+    }
+}
 
-A `match` on a union lists every case of the union. A missing case is the compile error
-`match-not-exhaustive`, reported at the `match`. The record does not say this; without it, a new
-case in a signature would pass silently through every `match` that was written before.
+print("before")
+Check(-1)
+print("after")
+```
+
+Case: [outcomes/throw-value.kz](../corpus/outcomes/throw-value.kz)
+```kurz
+data ConfigMissing(string Path)
+
+print("before")
+throw ConfigMissing("app.json")
+```
+
+### O8 (decided, §5) `match` covers every case
+
+A `match` on a union lists every case of the union, or ends in an `else` arm (C9). A missing case
+is the compile error `match-not-exhaustive`, reported at the `match`. Without this, a new case in
+a signature would pass silently through every `match` that was written before.
 
 Case: [outcomes/match-not-exhaustive.kz](../corpus/outcomes/match-not-exhaustive.kz)
 ```kurz
@@ -247,7 +266,7 @@ match Find(2) {
 }
 ```
 
-### O9 (proposed) Top-level code has no caller
+### O9 (decided, §5) Top-level code has no caller
 
 Top-level code has no signature to list a case in, so a call there has to handle every case that
 is not success. Letting one propagate is the compile error `unlisted-case`.
@@ -267,8 +286,26 @@ value = Find(2)
 print(value)
 ```
 
-### O10 (open) A success case without a value
+### O10 (decided, §5) A success case without a value
 
-Whether `void` can be the first case, `void | NotFound Remove(int id)`. Options: (a) yes, the
-call is then a statement; (b) no, such a function returns a `data` type without fields. Lean:
-(a); the alternative invents an `Ok` type in every project.
+`void` can be the success case: `void | NotFound Remove(int id)`. The call is then a statement,
+and its other cases propagate or are handled as those of any call (O2, O5).
+
+Case: [outcomes/void-success.kz](../corpus/outcomes/void-success.kz)
+```kurz
+data NotFound
+
+void | NotFound Remove(int id) {
+    if id != 1 {
+        return NotFound
+    }
+    print("removed")
+}
+
+Remove(1) else {
+    NotFound => print("none")
+}
+Remove(2) else {
+    NotFound => print("none")
+}
+```

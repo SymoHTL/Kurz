@@ -1,0 +1,13 @@
+// expect: output
+// | 1
+// | Ann
+// rules: R5
+
+class Person(string Name)
+class Club(mut List<weak Person?> Members)
+
+p = Person("Ann")
+c = Club(List<weak Person?>())
+c.Members.Add(p)
+print(c.Members.Count)
+print(c.Members[0]?.Name ?? "gone")

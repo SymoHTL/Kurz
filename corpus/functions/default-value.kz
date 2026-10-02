@@ -1,0 +1,13 @@
+// expect: output
+// | hello Ann
+// | bye Ann
+// | bye Ann
+// rules: F12, D11
+
+void Greet(string name, string word = "hello") {
+    print("{word} {name}")
+}
+
+Greet("Ann")
+Greet("Ann", "bye")
+Greet("Ann", word: "bye")

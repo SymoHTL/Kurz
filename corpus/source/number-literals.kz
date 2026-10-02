@@ -1,0 +1,14 @@
+// expect: output
+// | 255
+// | 5
+// | 1000000
+// | 4000000000
+// | true
+// rules: L11
+
+print(0xFF)
+print(0b101)
+print(1_000_000)
+print(4_000_000_000L)
+half = 0.5
+print(half < 1.0)

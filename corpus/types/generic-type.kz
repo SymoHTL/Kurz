@@ -1,0 +1,10 @@
+// expect: output
+// | 1
+// | one
+// rules: T19
+
+data Pair<A, B>(A First, B Second)
+
+p = Pair<int, string>(1, "one")
+print(p.First)
+print(p.Second)

@@ -1,0 +1,17 @@
+// expect: output
+// | 1
+// | Ann
+// | 3
+// | Ann
+// rules: D6, D7
+
+data User(int Id, string Name)
+data Admin(int Level) : User
+
+string NameOf(User u) => u.Name
+
+a = Admin(1, "Ann", 3)
+print(a.Id)
+print(a.Name)
+print(a.Level)
+print(NameOf(a))

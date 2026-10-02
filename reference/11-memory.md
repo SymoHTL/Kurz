@@ -85,13 +85,22 @@ n = Node(List<Node>(), null)
 print(n.Children.Count)
 ```
 
-### R5 (open) Is the `?` written on a `weak` type
+### R5 (decided, §3) The `?` of a `weak` type is always written
 
-A weak reference is always nullable. The record's one sample writes it both ways:
-`List<weak Node>` and `weak Node? parent`. Options: (a) `weak T` is nullable by itself and `?`
-is not written; (b) `?` is always written, `weak T?`. Lean: (b), so that every nullable type in
-a program shows its `?`. The corpus writes `weak T?` and uses no `weak` inside a collection until
-this is answered.
+A weak reference is always nullable, and its type always shows it: `weak Node?`, also inside a
+collection, `List<weak Node?>`.
+
+Case: [memory/weak-in-list.kz](../corpus/memory/weak-in-list.kz)
+```kurz
+class Person(string Name)
+class Club(mut List<weak Person?> Members)
+
+p = Person("Ann")
+c = Club(List<weak Person?>())
+c.Members.Add(p)
+print(c.Members.Count)
+print(c.Members[0]?.Name ?? "gone")
+```
 
 ### R6 (decided, §3) A tree is a recursive `data` value
 
@@ -114,8 +123,7 @@ print(before.Left?.Key ?? 0)
 
 Code that touches raw memory sits in `raw` blocks. A `raw` block compiles only in a package that
 the project grants `allow raw`. The compiler's memory guarantees cover everything outside `raw`
-blocks. That the grant is per package and written like `allow network` is *(assumed)* in the
-record.
+blocks. The grant is per package and written like `allow network`.
 
 No case: a grant sits in `project.kz`, and the corpus holds single files so far.
 
@@ -124,4 +132,33 @@ No case: a grant sits in `project.kz`, and the corpus holds single files so far.
 A `mut` field of interface type can hold any implementer, so R2 is judged with the whole program
 in view.
 
-No case: how an interface is written is open (K7).
+Case: [memory/cycle-through-interface.kz](../corpus/memory/cycle-through-interface.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Group(mut List<Shape> Parts) : Shape {
+    pub int Area() => Parts.Count
+}
+
+g = Group(List<Shape>())
+print(g.Area())
+```
+
+Case: [memory/interface-field.kz](../corpus/memory/interface-field.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+class Canvas(mut List<Shape> Parts)
+
+c = Canvas(List<Shape>())
+c.Parts.Add(Square(3))
+print(c.Parts[0].Area())
+```

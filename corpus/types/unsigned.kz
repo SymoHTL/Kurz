@@ -1,0 +1,12 @@
+// expect: output
+// | 4000000000
+// | 18446744073709551615
+// | -100
+// rules: T3
+
+uint big = 4000000000
+ulong most = 18446744073709551615
+sbyte low = -100
+print(big)
+print(most)
+print(low)

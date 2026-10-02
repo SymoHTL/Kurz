@@ -1,0 +1,20 @@
+// expect: output
+// | removed
+// | none
+// rules: O10
+
+data NotFound
+
+void | NotFound Remove(int id) {
+    if id != 1 {
+        return NotFound
+    }
+    print("removed")
+}
+
+Remove(1) else {
+    NotFound => print("none")
+}
+Remove(2) else {
+    NotFound => print("none")
+}

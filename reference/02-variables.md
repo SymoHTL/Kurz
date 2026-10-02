@@ -33,7 +33,7 @@ print(x)
 print(s)
 ```
 
-### V4 (proposed, §4) `mut` with a written type
+### V4 (assumed, §4) `mut` with a written type
 
 `mut` comes first: `mut int x = 5`. A primary constructor in section 4 of the record puts it
 there (`mut int Age`).
@@ -57,7 +57,7 @@ y = 2
 print(x)
 ```
 
-### V6 (proposed) What "used" means
+### V6 (decided, §8) What "used" means
 
 A variable is used when it is read at least once. Being assigned again does not count.
 
@@ -79,7 +79,7 @@ print(x)
 x = 2
 ```
 
-### V8 (proposed) Declaration or assignment
+### V8 (decided, §8) Declaration or assignment
 
 `name = expression` assigns when a variable of that name is visible, and declares one when none
 is. A variable therefore cannot hide another one: inside a block, the same line is an assignment
@@ -94,7 +94,7 @@ if x > 0 {
 print(x)
 ```
 
-### V9 (proposed) A written type always declares
+### V9 (assumed, §8) A written type always declares
 
 `int x = 5` is a declaration. When a variable named `x` is already visible, it is the compile
 error `redeclared`.
@@ -106,7 +106,7 @@ int x = 2
 print(x)
 ```
 
-### V10 (proposed) Scope
+### V10 (assumed, §8) Scope
 
 A variable is visible from its declaration to the end of the block that holds the declaration,
 as in C#. A name that is not visible is the compile error `unknown-name`.
@@ -121,14 +121,18 @@ if x > 0 {
 print(y)
 ```
 
-### V11 (proposed) Every declaration has a value
+### V11 (assumed, §8) Every declaration has a value
 
 There is no way to declare a variable without giving it a value.
 
 No case: there is no syntax to write one with.
 
-### V12 (open) `mut` that is never needed
+### V12 (decided, §8) `mut` that is never needed
 
-A variable declared `mut` and never assigned again. Options: (a) nothing; (b) a warning; (c) a
-compile error, like the unused variable. Lean: (b): it is noise, not a bug, and an error would
-get in the way while a function is half written.
+A variable that is declared `mut` and that nothing changes is a warning, not an error. Changing
+it is assigning it again, assigning into it through a path (M4), calling a `mut` method on it
+(M5) or passing it as a `mut` argument (M7). An unneeded `mut` is noise, not a bug, and an error
+would get in the way while a function is half written.
+
+No case: a warning changes neither what a program prints nor whether it compiles, and a corpus
+header cannot expect one.

@@ -15,8 +15,9 @@ print(x)
 
 ### T2 (decided, §4) Number types
 
-`byte`, `short`, `int` (32 bits), `long` (64 bits), `float`, `double` and `decimal`, with the
-sizes these names have in C#.
+The integer types are `sbyte`, `byte`, `short`, `ushort`, `int` (32 bits), `uint`, `long`
+(64 bits) and `ulong`. The others are `float`, `double` and `decimal`. Each has the size its name
+has in C#.
 
 Case: [types/long.kz](../corpus/types/long.kz)
 ```kurz
@@ -24,12 +25,20 @@ long big = 2147483647
 print(big + 1)
 ```
 
-### T3 (open) The other number types of C#
+### T3 (decided, §4) Signed and unsigned
 
-The record lists seven names. C# also has `sbyte`, `ushort`, `uint`, `ulong` and `char`. The
-record forbids mixing signed with unsigned, and of the seven only `byte` is unsigned. Options:
-(a) the seven names are the whole set; (b) the C# set. Lean: (b), because hashes, sizes and wire
-formats need unsigned 32 and 64 bits.
+`sbyte`, `short`, `int` and `long` are signed. `byte`, `ushort`, `uint` and `ulong` are unsigned.
+Together they are the integer types of C#.
+
+Case: [types/unsigned.kz](../corpus/types/unsigned.kz)
+```kurz
+uint big = 4000000000
+ulong most = 18446744073709551615
+sbyte low = -100
+print(big)
+print(most)
+print(low)
+```
 
 ### T4 (decided, §4) Overflow wraps in a release build
 
@@ -66,8 +75,8 @@ print(x)
 
 ### T7 (decided, §4) No implicit narrowing
 
-Putting a value of a wider integer type into a narrower one without saying so is the compile
-error `narrowing`.
+Putting a value of a wider integer type into a narrower one without a conversion (T10) is the
+compile error `narrowing`.
 
 Case: [types/narrowing.kz](../corpus/types/narrowing.kz)
 ```kurz
@@ -76,7 +85,7 @@ int small = big
 print(small)
 ```
 
-### T8 (proposed) Implicit widening
+### T8 (assumed, §4) Implicit widening
 
 A value of a narrower integer type becomes a wider one of the same signedness without a word, as
 in C#.
@@ -90,7 +99,8 @@ print(big)
 
 ### T9 (decided, §4) No mixing of signed and unsigned
 
-An operation between a signed and an unsigned integer is the compile error `sign-mix`.
+An operation between a signed and an unsigned integer is the compile error `sign-mix`. A
+conversion (T10) puts both on one side.
 
 Case: [types/sign-mix.kz](../corpus/types/sign-mix.kz)
 ```kurz
@@ -99,30 +109,76 @@ int i = 5
 print(b + i)
 ```
 
-### T10 (open) How a conversion is written
+### T10 (decided, §4) A conversion is written as a call of the type
 
-T7 and T9 need a way to convert on purpose. Options: (a) a cast, `(int)value`, as in C#; (b) the
-type name as a function, `int(value)`; (c) a method, `value.ToInt()`. Also open: whether a
-conversion that loses the value throws, wraps or follows the build as overflow does (T4, T5).
-Lean: (b), shortest and no new bracket form; and it follows the build, like any overflow.
+`int(value)` converts a number to an `int`. The name of every number type can be used this way.
+It is how a value is put into a narrower type (T7) and how a signed and an unsigned value meet
+(T9).
+
+Case: [types/conversion.kz](../corpus/types/conversion.kz)
+```kurz
+long big = 5
+int small = int(big)
+print(small)
+
+byte b = 200
+int i = 5
+print(int(b) + i)
+```
+
+### T20 (assumed, §4) A conversion that loses the value
+
+A conversion whose value does not fit the target type behaves as overflow does (T4, T5): in a
+release build the value wraps around, in a test build it raises an exception.
+
+Case: [types/conversion-release.kz](../corpus/types/conversion-release.kz)
+```kurz
+byte Low(int n) => byte(n)
+
+print(Low(300))
+```
+
+Case: [types/conversion-test.kz](../corpus/types/conversion-test.kz)
+```kurz
+byte Low(int n) => byte(n)
+
+print(Low(300))
+```
 
 ### T11 (decided, §4) Wrapping on purpose
 
-An explicit wrapping operator exists for intended cases such as hashes. It wraps in every build.
+Explicit wrapping operators (T12) exist for intended cases such as hashes. They wrap in every
+build.
 
-No case: the operator has no spelling yet (T12).
+Case: [types/wrapping.kz](../corpus/types/wrapping.kz)
+```kurz
+int Next(int n) => n +% 1
+int Twice(int n) => n *% 2
+int Lower(int n) => n -% 2147483647
 
-### T12 (open) The spelling of the wrapping operator
+print(Next(2147483647))
+print(Twice(2147483647))
+print(Lower(-2))
+```
 
-Options: (a) operators of their own, `+%`, `-%`, `*%`, as Zig has; (b) a block, `wrapping { }`,
-inside which arithmetic wraps; (c) methods, `a.WrappingAdd(b)`. Lean: (a): a hash function is a
-line of operators, and a block or a method call doubles its length.
+### T12 (decided, §4) The wrapping operators
+
+`+%`, `-%` and `*%` add, subtract and multiply as `+`, `-` and `*` do, and wrap around when the
+result leaves the range of its type.
+
+Case: [types/wrapping.kz](../corpus/types/wrapping.kz)
 
 ### T13 (decided, §4) Durations and timestamps
 
-Durations and timestamps are 64-bit types of their own and never raw integers.
+Durations and timestamps are 64-bit types of their own and never raw integers: one of them where
+an integer is required is the compile error `type-mismatch`. A duration is written with a unit
+(L14).
 
-No case: their literals have no spelling yet (L11).
+Case: [types/duration-not-integer.kz](../corpus/types/duration-not-integer.kz)
+```kurz
+int seconds = 30s
+print(seconds)
+```
 
 ### T14 (assumed, §4) Out of range and division by zero
 
@@ -161,12 +217,26 @@ s = "abc"
 print(s[0])
 ```
 
-### T16 (open) What `.Chars` yields
+### T16 (decided, §4) What `.Chars` yields
 
-Options: (a) Unicode scalar values, one per code point; (b) grapheme clusters, what a reader
-calls a character; (c) both, under two names. Also open: the name of the element type. Lean:
-(a) for `.Chars`, with graphemes as a library function, because a grapheme table changes with
-every Unicode version and does not belong on a microcontroller.
+`.Chars` yields the Unicode code points of the string, one element for each code point. It
+yields neither UTF-16 units, as a C# string does, nor what a reader calls a character: grapheme
+clusters are left to a library.
+
+Case: [types/string-chars.kz](../corpus/types/string-chars.kz)
+```kurz
+s = "aä😀"
+print(s.Chars.Count)
+print(s.Bytes.Count)
+```
+
+### T21 (assumed, §4) `char`
+
+The element type of `.Chars` is `char`: one Unicode code point, in 32 bits. It is not the `char`
+of C#, which is one UTF-16 unit.
+
+No case: a `char` has neither a literal nor a text yet (A4), so a case could only count them,
+which T16 shows.
 
 ### T17 (decided, §4) Generics
 
@@ -181,18 +251,62 @@ print(xs.Count)
 print(xs[1])
 ```
 
-### T19 (open) Declaring generic types and functions
+### T19 (decided, §4) Declaring generic functions and types
 
-T17 covers using a generic type. How one is declared is a missing detail of the record
-(section 14): the list of type parameters, and how a parameter is limited to types that can do
-something. C# writes the limit as `where T : IComparable<T>`. In Kurz `where` already starts a
-constraint on a value (`int Age where 0..150`, record section 13), so the word would mean two
-things. Options: (a) the C# form, with the two uses of `where` told apart by what follows;
-(b) the limit inside the brackets, `T Max<T: Comparable>(T a, T b)`; (c) no limits: the body of a
-generic function may only do what every type can. Lean: (b): one meaning per word, and the limit
-stands where the parameter is declared.
+A generic function or type lists its type parameters between `<` and `>` after its name. A type
+parameter is limited to the types that implement an interface by naming the interface after a
+colon: `T Max<T: Comparable>(T a, T b)`. `where` keeps its one meaning, the constraint on a value
+(record, section 13). A use names the type arguments, or leaves them to be inferred where C#
+infers them. An argument whose type does not meet the limit is the compile error `type-mismatch`.
 
-### T18 (proposed) Operators
+Case: [types/generic-function.kz](../corpus/types/generic-function.kz)
+```kurz
+T First<T>(List<T> items) => items[0]
+
+mut xs = List<int>()
+xs.Add(4)
+mut names = List<string>()
+names.Add("ok")
+print(First(xs))
+print(First(names))
+```
+
+Case: [types/generic-type.kz](../corpus/types/generic-type.kz)
+```kurz
+data Pair<A, B>(A First, B Second)
+
+p = Pair<int, string>(1, "one")
+print(p.First)
+print(p.Second)
+```
+
+Case: [types/generic-limit.kz](../corpus/types/generic-limit.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+print(AreaOf(Square(3)))
+```
+
+Case: [types/generic-limit-unmet.kz](../corpus/types/generic-limit-unmet.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+print(AreaOf(5))
+```
+
+### T18 (assumed, §4) Operators
 
 `+ - * / %` on numbers, `== != < <= > >=` for comparison, and `&& || !` on `bool`, with the
 meaning and the precedence they have in C#. Integer division drops the fraction, toward zero.
@@ -206,3 +320,13 @@ print(7 % 3)
 print(1 < 2 && 2 < 3)
 print(!(1 == 1) || 3 >= 3)
 ```
+
+### T22 (open) Operators on bits
+
+Whether `&`, `|`, `^`, `~`, `<<` and `>>` exist on integers with the meaning they have in C#. T18
+does not list them; hashes and wire formats need them, and so does a set of flags (D13). `|`
+already separates the cases of a union type (D9). Options: (a) the C# operators: among types `|`
+makes a union, among values it combines bits; (b) methods, `a.And(b)` and `a.ShiftLeft(3)`.
+Lean: (a). A hash is a line of such operators, which is the reason T12 gave wrapping arithmetic
+operators of its own, and the two meanings of `|` never meet, because one stands among types and
+the other among values.

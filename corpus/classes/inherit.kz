@@ -1,0 +1,24 @@
+// expect: output
+// | Rex
+// | quiet
+// rules: K6, K7
+
+interface Named {
+    string Name()
+}
+
+class Animal {
+    pub string Sound() => "quiet"
+}
+
+class Dog : Animal, Named {
+    pub string Name() => "Rex"
+}
+
+void Describe(Named n) {
+    print(n.Name())
+}
+
+d = Dog()
+Describe(d)
+print(d.Sound())

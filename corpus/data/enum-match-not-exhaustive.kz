@@ -1,0 +1,12 @@
+// expect: error match-not-exhaustive at 7
+// rules: D12
+
+enum Plan { Free, Pro }
+
+void Show(Plan p) {
+    match p {
+        Plan.Free => print("free")
+    }
+}
+
+Show(Plan.Pro)

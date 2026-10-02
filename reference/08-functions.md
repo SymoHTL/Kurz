@@ -18,7 +18,7 @@ print(Add(2, 3))
 
 Case: [functions/expression-body.kz](../corpus/functions/expression-body.kz)
 
-### F3 (proposed) Block body and `return`
+### F3 (assumed, §8) Block body and `return`
 
 A body between braces holds statements. `return expression` ends the function with that result,
 as in C#.
@@ -35,7 +35,7 @@ int Max(int a, int b) {
 print(Max(2, 3))
 ```
 
-### F4 (proposed) `void`
+### F4 (assumed, §8) `void`
 
 A function that has no result is declared with `void`, as in C# and in the record's samples.
 
@@ -58,7 +58,7 @@ print("first")
 print("second")
 ```
 
-### F6 (proposed) Use before declaration
+### F6 (assumed, §8) Use before declaration
 
 A function or a type can be used above the line that declares it, as in C#.
 
@@ -82,7 +82,7 @@ xs.Add(3)
 print(xs.Where(x => x > 1).Count)
 ```
 
-### F8 (proposed, §4) Parameters are immutable
+### F8 (assumed, §4) Parameters are immutable
 
 Inside a function a parameter is an immutable variable, unless it is marked `mut` (M7).
 Assigning to it is the compile error `assign-immutable`.
@@ -111,18 +111,87 @@ without imports. `use` brings in another folder or a package.
 
 No case: it takes several files, and the corpus holds single files so far.
 
-### F11 (open) Function types and closures
+### F11 (decided, §4) Function types and what a lambda captures
 
-How the type of a function value is written, and what a lambda may do with the variables around
-it. The record lists closures as a missing detail (section 14). Options for the type:
-(a) `Func<int, bool>` as in C#; (b) an arrow, `(int) => bool`. For captures: (c) a lambda reads
-the variables around it and cannot assign them; (d) it can assign a `mut` variable, which then
-has to outlive it. Lean: (b) and (c). (d) makes a `mut` variable shared between the lambda and
-its function, and section 4 of the record gives every other change a visible `mut` at the call.
+The type of a function value is written with an arrow: the parameter types between brackets,
+`=>`, and the result type, as in `(int) => bool`. A lambda reads the variables around it and
+cannot assign them: assigning one is the compile error `capture-assign`.
 
-### F12 (open) Overloads, default values, named arguments
+Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
+```kurz
+int Apply((int) => int f, int n) => f(n)
 
-Whether two functions may share a name when their parameters differ, and whether a parameter can
-have a default value (see D11 for named arguments). Lean: defaults yes, overloads no: a default
-covers most overloads with less code, and without overloads a name means one function for the
-reader and for `mock`.
+print(Apply(x => x + 1, 4))
+print(Apply(x => x * x, 4))
+```
+
+Case: [functions/capture-read.kz](../corpus/functions/capture-read.kz)
+```kurz
+limit = 1
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+print(xs.Where(x => x > limit).Count)
+```
+
+Case: [functions/capture-assign.kz](../corpus/functions/capture-assign.kz)
+```kurz
+mut total = 0
+mut xs = List<int>()
+xs.Add(1)
+big = xs.Where(x => {
+    total = total + x
+    return x > 0
+})
+print(big.Count)
+print(total)
+```
+
+### F12 (decided, §8) Overloads, default values, named arguments
+
+Functions may share a name when their parameters differ. A parameter can have a default value,
+and an argument can be passed by name (D11). Which function a call picks when more than one fits
+is F13.
+
+Case: [functions/overload.kz](../corpus/functions/overload.kz)
+```kurz
+void Show(int n) {
+    print("int {n}")
+}
+
+void Show(string s) {
+    print("text {s}")
+}
+
+void Show(int a, int b) {
+    print("pair {a} {b}")
+}
+
+Show(4)
+Show("four")
+Show(4, 5)
+```
+
+Case: [functions/default-value.kz](../corpus/functions/default-value.kz)
+```kurz
+void Greet(string name, string word = "hello") {
+    print("{word} {name}")
+}
+
+Greet("Ann")
+Greet("Ann", "bye")
+Greet("Ann", word: "bye")
+```
+
+### F13 (open) Which overload a call picks
+
+A call can fit more than one function of its name: through widening (T8), when `Show(int)` and
+`Show(long)` both take a `short`; through a default value (F12), when `Show(int a)` and
+`Show(int a, int b = 0)` both take `Show(4)`; and through a literal, which takes the type that is
+expected (L10). Options: (a) the rules of C# for the better function, all of them; (b) a function
+whose parameters have exactly the types of the arguments, with no default used, wins, and any
+other call that fits more than one function is a compile error; (c) no ranking: a call that fits
+more than one function is always a compile error. Lean: (b). The C# rules fill pages and still
+surprise their readers, and an error that names the two functions that fit is cheap to fix at
+the call.

@@ -19,7 +19,7 @@ x = 7
 if x > 5 print(x)
 ```
 
-### C2 (proposed) `else`
+### C2 (assumed, §8) `else`
 
 `else` and `else if` follow the closing brace on the same line, with the meaning they have in C#.
 
@@ -40,7 +40,7 @@ print(Sign(-5))
 print(Sign(0))
 ```
 
-### C3 (proposed) A condition is a `bool`
+### C3 (assumed, §8) A condition is a `bool`
 
 A condition has the type `bool`. Any other type is the compile error `type-mismatch`, as in C#:
 a number or a nullable value is not a condition.
@@ -57,7 +57,7 @@ if x {
 
 `match value { Case name => ... }` runs the arm whose case the value is. An arm names a case
 type, optionally followed by a name for the value as that type. O8 says which arms have to be
-there.
+there, and C9 what else an arm can test.
 
 Case: [data/union.kz](../corpus/data/union.kz)
 ```kurz
@@ -75,7 +75,7 @@ Describe(Circle(2))
 Describe(Square(3))
 ```
 
-### C5 (proposed) `while`
+### C5 (assumed, §8) `while`
 
 `while condition { }` repeats its block as long as the condition holds, as in C# without the
 parentheses.
@@ -91,7 +91,7 @@ while i <= 3 {
 print(sum)
 ```
 
-### C6 (proposed, §13) `for ... in`
+### C6 (assumed, §8, §13) `for ... in`
 
 `for name in collection { }` runs its block once for each item, in order. The record's stream
 sample uses this form.
@@ -106,7 +106,7 @@ for x in xs {
 }
 ```
 
-### C7 (proposed) `break` and `continue`
+### C7 (assumed, §8) `break` and `continue`
 
 Inside a loop, `break` leaves the loop and `continue` goes on with the next round, as in C#.
 
@@ -128,19 +128,54 @@ for x in xs {
 }
 ```
 
-### C8 (open) Counting loops and ranges
+### C8 (decided, §8) Ranges and counting loops
 
-How a loop over numbers is written, and what `a..b` means. The record writes ranges in two places
-(`where 0..150`, `supports 2..`), and the first reads as including both ends. In C# a range
-excludes its end. Options: (a) `a..b` includes both ends everywhere; (b) `a..b` excludes the end,
-as in C#, and a constraint is written with the last allowed value plus one; (c) two spellings:
-`a..b` includes both ends and `a..<b` excludes the end, as in Kotlin and Swift. Also open:
-whether the C form `for (i = 0; i < n; i++)` exists. Lean: (c), and no C form: a constraint such
-as `0..150` reads as it is spoken, and a loop over positions is `for i in 0..<items.Count`.
+`a..b` is the range of the integers from `a` to `b` with both ends included. `a..<b` leaves `b`
+out. `for i in a..<b { }` runs its block once for each number of the range, in order. The C form
+with three parts, `for (i = 0; i < n; i++)`, does not exist.
 
-### C9 (open) Patterns in `match`
+Case: [control/range-inclusive.kz](../corpus/control/range-inclusive.kz)
+```kurz
+for i in 1..3 {
+    print(i)
+}
+```
 
-Whether an arm can test more than the case type: a literal (`0 => ...`), a field
-(`User { Age: 0 } => ...`), a condition (`User u when u.Age > 17 => ...`), or a default arm.
-Whether `match` can be an expression that yields a value. Lean: literals, a default arm written
-`else`, and `match` as an expression; field patterns only when something needs them.
+Case: [control/range-exclusive.kz](../corpus/control/range-exclusive.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(4)
+xs.Add(5)
+for i in 0..<xs.Count {
+    print(xs[i])
+}
+```
+
+### C9 (decided, §5) What else an arm can test, and `match` as an expression
+
+An arm can name a literal, which matches a value equal to it, and the last arm can be `else`,
+which matches whatever no arm before it matched. A `match` over literals that does not list
+every value of its type needs the `else` arm (O8). `match` can be used as an expression: its
+value is the value of the arm that ran. There are no patterns over fields and no conditions on
+an arm until something needs them.
+
+Case: [control/match-literal.kz](../corpus/control/match-literal.kz)
+```kurz
+string Name(int n) => match n {
+    0 => "zero"
+    1 => "one"
+    else => "many"
+}
+
+print(Name(0))
+print(Name(1))
+print(Name(7))
+```
+
+Case: [control/match-literal-no-else.kz](../corpus/control/match-literal-no-else.kz)
+```kurz
+n = 3
+match n {
+    0 => print("zero")
+}
+```

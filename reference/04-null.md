@@ -35,12 +35,12 @@ email = Email(1)
 print(email.Bytes.Count)
 ```
 
-### N3 (proposed) What a check is
+### N3 (decided, §4) What a check is
 
-Inside the block of `if name != null { }`, the variable `name` has the type `T`. The record says
-the check is enforced and does not say which forms count; this is the smallest one. Whether a
-test that leaves early (`if name == null { return }`) and a path such as `user.Email` narrow as
-well is part of this rule and equally unconfirmed.
+Inside the block of `if name != null { }`, the variable `name` has the type `T`. No other form
+narrows. After a test that leaves early, `if name == null { return }`, the variable is still
+nullable, and so is a path such as `user.Email` inside a check of that path. `??` (N4), `?.` (N5)
+and a variable of its own for the path cover those.
 
 Case: [null/checked.kz](../corpus/null/checked.kz)
 ```kurz
@@ -55,6 +55,26 @@ email = Email(1)
 if email != null {
     print(email.Bytes.Count)
 }
+```
+
+Case: [null/early-return-does-not-narrow.kz](../corpus/null/early-return-does-not-narrow.kz)
+```kurz
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+int Length(int id) {
+    email = Email(id)
+    if email == null {
+        return 0
+    }
+    return email.Bytes.Count
+}
+
+print(Length(1))
 ```
 
 ### N4 (decided, §4) `??`
@@ -81,7 +101,7 @@ print(Email(1)?.Bytes.Count ?? 0)
 print(Email(2)?.Bytes.Count ?? 0)
 ```
 
-### N6 (proposed) `null` needs a nullable type
+### N6 (assumed, §4) `null` needs a nullable type
 
 `null` is a value of nullable types only. Giving it to a type without `?` is the compile error
 `type-mismatch`.

@@ -25,14 +25,12 @@ u.Name = "Bea"
 print(u.Name)
 ```
 
-### K2 (proposed, §4) A `mut` field changes through any reference
+### K2 (decided, §4) A `mut` field changes through any reference
 
 A `mut` field of a class instance can be assigned through every reference to the instance,
 whether the variable that holds the reference is `mut` or not. The variable holds a reference,
-and the reference does not change. The record says classes "change only through their own `mut`
-fields"; it does not say whether the variable has to be `mut` too. The other reading would
-require `mut` on the variable, and could still not promise that the instance stays the same,
-because another reference to it can exist.
+and the reference does not change. Requiring `mut` on the variable could not promise that the
+instance stays the same either, because another reference to it can exist.
 
 Case: [classes/mut-field.kz](../corpus/classes/mut-field.kz)
 
@@ -75,19 +73,89 @@ print(Label("x") == Label("x"))
 
 As in C#.
 
-No case: how members are written in a class body is open (K7).
+No case: how it is written is open (K8).
 
 ### K6 (decided, §4) Single inheritance and interfaces
 
 A class inherits from at most one class and implements any number of interfaces, as in C#.
 
-No case: how either is written is open (K7).
+Case: [classes/inherit.kz](../corpus/classes/inherit.kz)
+```kurz
+interface Named {
+    string Name()
+}
 
-### K7 (open) The body of a class, inheritance and interfaces
+class Animal {
+    pub string Sound() => "quiet"
+}
 
-The record's samples show fields and methods between braces and nothing else. Open: how a class
-names its base class and its interfaces; how an interface is declared; constructors besides the
-primary one; properties; members that belong to the type (`User.Guest` in section 5 of the
-record); how equality is overridden. The record lists interfaces and properties as missing
-details (section 14). Lean: C# forms throughout, with fields written `Type name` and methods as
-functions (chapter 8), and no property syntax until something needs it.
+class Dog : Animal, Named {
+    pub string Name() => "Rex"
+}
+
+void Describe(Named n) {
+    print(n.Name())
+}
+
+d = Dog()
+Describe(d)
+print(d.Sound())
+```
+
+### K7 (decided, §4) The body of a class
+
+Class bodies follow C#. A class names its base class and its interfaces after `:`, the base
+class first. An interface is declared with `interface` and lists the signatures of its methods;
+they are visible wherever the interface is, and a method that implements one is `pub`. Between
+the braces of a class, a field is written `Type name`, with `mut` in front when it can be
+assigned and its first value after `=`, and a method is written as a function (chapter 8).
+Further constructors, `static` members and `override` are written as in C#. There is no property
+syntax until something needs it.
+
+Case: [classes/body.kz](../corpus/classes/body.kz)
+```kurz
+class Counter {
+    mut int count = 0
+    pub static int Step = 2
+
+    pub void Add() {
+        count = count + Step
+    }
+
+    pub int Value() => count
+}
+
+c = Counter()
+c.Add()
+c.Add()
+print(c.Value())
+print(Counter.Step)
+```
+
+Case: [classes/inherit.kz](../corpus/classes/inherit.kz)
+
+### K8 (open) How equality is overridden
+
+K5 says that equality can be overridden, as in C#. C# does it with `Equals(object)`,
+`GetHashCode()` and, separately, the operator `==`; Kurz has no type that every value belongs to.
+Options: (a) a method with a fixed name, `bool Equals(User other)`, and a second one for the
+hash, where the compiler checks that both are there; (b) an operator declaration as in C#,
+`static bool operator ==(User a, User b)`; (c) the class names the fields that count, and
+equality and the hash are derived from them. Lean: (c). The usual reason is an entity that is
+equal by its id; the two halves cannot disagree; and it is one line.
+
+### K9 (proposed) A method of a class needs no `mut` marker
+
+A method of a class can assign the `mut` fields of its instance without a marker of its own, and
+can be called through every reference (K2). The marker of M5 is for values, where a change has to
+reach the variable that holds the value. The record does not say this.
+
+Case: [classes/body.kz](../corpus/classes/body.kz)
+
+### K10 (open) A class with a primary constructor that inherits
+
+How the fields of the base class reach its constructor. Options: (a) as a `data` type does (D7):
+the constructor takes the fields of the base first, `class Admin(int Level) : User`; (b) as C#
+does: the class lists every parameter and passes the base's on,
+`class Admin(string Name, int Level) : User(Name)`. Lean: (a), one form for `data` and `class`.
+The cases inherit from classes without a primary constructor until this is answered.

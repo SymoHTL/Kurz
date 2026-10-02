@@ -17,7 +17,7 @@ print(a)
 print(a + 1)
 ```
 
-### L3 (proposed) Comments
+### L3 (assumed, §8) Comments
 
 `//` starts a comment that runs to the end of the line. Every sample in the record uses it.
 
@@ -28,30 +28,55 @@ a = 1    // also after code
 print(a)
 ```
 
-### L4 (open) A statement that continues on the next line
+### L4 (decided, §8) A statement that continues on the next line
 
-L2 needs an exception for long statements. Options: (a) a statement continues while a bracket is
-open, and when the line ends in a binary operator, a comma or `=>`; (b) as (a), and a line that
-starts with `.` continues the line before, so that a chain of calls can be broken before the dot;
-(c) no continuation outside brackets. Lean: (b), because chains of calls are the common long
-statement and C# breaks them before the dot.
+L2 has three exceptions. A statement continues on the next line while a `(` or a `[` is open;
+when its line ends in a binary operator, a comma or `=>`; and when the next line starts with `.`,
+so that a chain of calls can be broken before the dot. Nothing else continues a statement. A
+block between braces holds statements of its own, each on its line, also when the block stands
+inside an open bracket, as the body of a lambda does. The record marks as *(assumed)* that the
+`=` of an assignment counts as a binary operator here.
 
-The record's samples only break lines inside brackets and after `{`.
+Case: [source/continuation.kz](../corpus/source/continuation.kz)
+```kurz
+int Add(int a, int b) =>
+    a + b
 
-### L5 (open) Several statements on one line
+total = 1 +
+    2 +
+    3
+print(total)
 
-Section 8 of the record says there are no semicolons. Two of its samples use `;` to put several
-statements, or several fields, on one line (section 3: the `Node` class; section 13: the
-`Trial` method). Options: (a) no separator exists and those samples are rewritten; (b) `;` is
-allowed between statements on one line and nowhere else. Lean: (a), because one way to end a
-statement is less to explain, and a formatter would split the line anyway.
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+count = xs
+    .Where(x => x > 1)
+    .Count
+print(count)
 
-Until this is answered the corpus writes one statement per line and puts every block on lines of
-its own.
+print(Add(
+    total,
+    total
+))
+```
+
+### L5 (decided, §8) No `;`
+
+There is no `;`: not at the end of a line and not between two statements. A `;` outside a string
+and a comment is the compile error `semicolon`. A line holds one statement, and a block that is
+written on one line holds at most one.
+
+Case: [source/semicolon.kz](../corpus/source/semicolon.kz)
+```kurz
+a = 1
+print(a); print(a + 1)
+```
 
 ### L6 (decided, §8) Interpolation is always on
 
-Inside a string literal, `{expression}` is replaced by the text (A2) of the expression's value.
+Inside a string literal, `{expression}` is replaced by the text (A2, A3) of the expression's value.
 
 Case: [source/interpolation.kz](../corpus/source/interpolation.kz)
 ```kurz
@@ -62,7 +87,7 @@ print("{count} items")
 print("next {count + 1}")
 ```
 
-### L7 (proposed) Escapes
+### L7 (assumed, §8) Escapes
 
 Inside a string literal, `\n`, `\t`, `\"` and `\\` mean what they mean in C#, and `\{` is a brace
 that does not start an interpolation. A `}` outside an interpolation is an ordinary character.
@@ -73,7 +98,7 @@ print("a \{b}")
 print("say \"hi\"")
 ```
 
-### L8 (proposed) `true` and `false`
+### L8 (assumed, §8) `true` and `false`
 
 `true` and `false` are the two values of the type `bool`. `null` is covered by N1.
 
@@ -85,7 +110,7 @@ print(yes)
 print(no)
 ```
 
-### L9 (proposed) Names
+### L9 (assumed, §8) Names
 
 A name starts with a letter or `_` and continues with letters, digits and `_`, as in C#. Upper
 and lower case are different.
@@ -99,11 +124,10 @@ _count2 = 7
 print(_count2)
 ```
 
-### L10 (proposed) Integer literals
+### L10 (assumed, §4) The type of an integer literal
 
-An integer literal is written in decimal digits. It has the type `int`, or `long` when its value
-does not fit an `int`. Where a type is written or expected, the literal takes that type if its
-value fits, as a constant does in C#.
+An integer literal has the type `int`, or `long` when its value does not fit an `int`. Where a type is written or expected, the literal takes that type if its
+value fits, as a constant does in C#. How a literal is written is L11.
 
 Case: [source/integer-literal.kz](../corpus/source/integer-literal.kz)
 ```kurz
@@ -115,18 +139,54 @@ print(big)
 print(huge)
 ```
 
-### L11 (open) Other literals
+### L11 (decided, §4) Number literals
 
-How these are written: numbers with a fraction and their type; hexadecimal and binary digits;
-digit separators; durations and sizes, which the record's samples write as `5min`, `30s`,
-`60days` and `256kb` without listing the units; strings over several lines. Lean: C# forms for
-the numbers, and a fixed list of unit suffixes that the record names once.
+Number literals are written as in C#: decimal digits; hexadecimal digits after `0x` and binary
+digits after `0b`; `_` between digits, which changes nothing; a fraction after a `.`, which makes
+the literal a `double`; and the suffixes of C# (`L`, `U`, `UL`, `f`, `d`, `m`) with the meaning
+they have there.
 
-### L12 (open) Reserved words
+Case: [source/number-literals.kz](../corpus/source/number-literals.kz)
+```kurz
+print(0xFF)
+print(0b101)
+print(1_000_000)
+print(4_000_000_000L)
+half = 0.5
+print(half < 1.0)
+```
 
-Which words cannot be used as names. Section 9 of the record lets a user-defined keyword start
-with its own word, so the set is not fixed by the compiler alone. Options: (a) only the core
-words are reserved, and a user keyword is reserved in the files that import it; (b) a keyword
-is recognised by its position at the start of a statement, and stays usable as a name elsewhere.
-Lean: (a), because the editor rule of section 9 ("a file names the keywords it uses") already
-gives the list per file.
+### L12 (decided, §8) Reserved words
+
+Only the core words are reserved: the words that the language itself uses as syntax, such as
+`if`, `match`, `mut`, `data` and `class`. Using one as a name is the compile error
+`reserved-word`. A user-defined keyword (record, section 9) is reserved in the files that import
+it and is an ordinary name in every other file. The list of core words closes when the chapters
+that this reference does not cover yet are written.
+
+Case: [source/reserved-word.kz](../corpus/source/reserved-word.kz)
+```kurz
+data = 5
+print(data)
+```
+
+### L13 (open) A string over several lines
+
+How a string literal that holds line breaks is written. Options: (a) not at all: a line break in
+a string is written `\n` (L7); (b) a literal between two lines of `"""`, as C# has, from which
+the indentation of the closing line is removed; (c) an ordinary literal may run over several
+lines. Lean: (b). SQL and HTML inside a program are text over several lines, and under (c) one
+forgotten quote swallows the rest of the file.
+
+### L14 (assumed, §4) Literals with a unit
+
+A number directly followed by a unit is a duration or a size. The list of units is fixed: `ms`,
+`s`, `min`, `h` and `days` make a duration (T13); `kb`, `mb` and `gb` make a number of bytes, an
+integer literal (L10) in steps of 1024. That the list is fixed is decided. Which units are on it
+is what the record marks as *(assumed)*.
+
+Case: [source/unit-literals.kz](../corpus/source/unit-literals.kz)
+```kurz
+print(2kb)
+print(1mb)
+```

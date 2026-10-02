@@ -14,7 +14,7 @@ print(u.Id)
 print(u.Name)
 ```
 
-### D2 (proposed) Making a value
+### D2 (assumed, §4) Making a value
 
 A value is made by the type's name followed by the arguments in order. There is no `new`; every
 sample in the record is written this way.
@@ -65,16 +65,30 @@ print(b.Id)
 
 ### D6 (decided, §4) A `data` type may inherit from another
 
-No case: how inheritance is written is open (D7).
+A value of the derived type can be used wherever the base type is required.
 
-### D7 (open) How `data` inheritance is written
+Case: [data/inherit.kz](../corpus/data/inherit.kz)
+```kurz
+data User(int Id, string Name)
+data Admin(int Level) : User
 
-Options: (a) `data Admin(int Level) : User`, the base's fields come first in the constructor;
-(b) as C# records, `data Admin(int Id, string Name, int Level) : User(Id, Name)`. Also open:
-whether a value of the derived type equals a value of the base type with the same fields.
-Lean: (a), the shorter one, and never equal across types.
+string NameOf(User u) => u.Name
 
-### D8 (proposed, §5) A `data` type without fields
+a = Admin(1, "Ann", 3)
+print(a.Id)
+print(a.Name)
+print(a.Level)
+print(NameOf(a))
+```
+
+### D7 (decided, §4) How `data` inheritance is written
+
+`data Admin(int Level) : User` declares a `data` type that inherits from `User`. Its constructor
+takes the fields of the base first, then its own.
+
+Case: [data/inherit.kz](../corpus/data/inherit.kz)
+
+### D8 (assumed, §4, §5) A `data` type without fields
 
 `data Name` declares a type with exactly one value, written as the bare name. The record's
 outcome samples use such types as cases (`NotFound`).
@@ -115,20 +129,128 @@ There is no `struct` keyword.
 
 No case: it changes speed and layout, not what a program prints.
 
-### D11 (open) Fields with defaults, arguments by name
+### D11 (decided, §8) Default values and arguments by name
 
-Whether a field can have a default value, and whether a constructor or a function can be called
-with named arguments. The record needs a default for a field that is added to an `open` type
-(section 13) and does not say how it is written. Lean: C# forms, `int Count = 1` in the
-declaration and `Item(ProductId: 7)` at the call.
+A field or a parameter can have a default value, written after its name: `int Count = 1`. An
+argument can be passed by name: `Item(ProductId: 7)`. Both work as in C#: arguments without a
+name fill the parameters in order, arguments by name follow them in any order, and a parameter
+that has a default can be left out.
 
-### D12 (open) Enums
+Case: [data/default-and-named.kz](../corpus/data/default-and-named.kz)
+```kurz
+data Item(int ProductId, int Count = 1)
 
-A type with a fixed set of named values. The record lists enums as a missing detail (section 14),
-and its durable-actor sample writes `Plan.Free` and `Plan.Pro` without declaring `Plan`
-(section 13). Options: (a) `enum Plan { Free, Pro }` as in C#, where each value is a number
-underneath; (b) no enum: a union of `data` types without fields (D8), which `match` already
-covers (O8), and which needs a way to give a union a name; (c) `enum` as the short form of (b):
-its values are cases, a `match` has to list every one, and a value has a number only where one is
-written. Lean: (c). A number is needed at the edges only, in a database column or a wire format,
-and a value that is silently also an integer is the C# trap of `(Plan)7`.
+a = Item(7)
+b = Item(Count: 5, ProductId: 7)
+print(a.Count)
+print(b.Count)
+print(b.ProductId)
+```
+
+Case: [functions/default-value.kz](../corpus/functions/default-value.kz)
+```kurz
+void Greet(string name, string word = "hello") {
+    print("{word} {name}")
+}
+
+Greet("Ann")
+Greet("Ann", "bye")
+Greet("Ann", word: "bye")
+```
+
+### D12 (decided, §4) `enum`
+
+`enum Plan { Free, Pro }` declares a type with a fixed set of named values, written `Plan.Free`.
+It is the short form of a union of cases without fields (D8, D9): a `match` on it has to list
+every value (O8), and two values are equal when they are the same value. A value is not an
+integer. It has a number only where the declaration writes one; how that is written and read is
+part of D13.
+
+Case: [data/enum.kz](../corpus/data/enum.kz)
+```kurz
+enum Plan { Free, Pro }
+
+void Show(Plan p) {
+    match p {
+        Plan.Free => print("free")
+        Plan.Pro => print("pro")
+    }
+}
+
+Show(Plan.Free)
+Show(Plan.Pro)
+print(Plan.Free == Plan.Pro)
+```
+
+Case: [data/enum-match-not-exhaustive.kz](../corpus/data/enum-match-not-exhaustive.kz)
+```kurz
+enum Plan { Free, Pro }
+
+void Show(Plan p) {
+    match p {
+        Plan.Free => print("free")
+    }
+}
+
+Show(Plan.Pro)
+```
+
+### D13 (open) Flags, and the number of an `enum` value
+
+Simon wants what `[Flags]` and `HasFlag` give in C#: values that combine into a set, and a test
+whether a set holds a value. A set of flags is not one case, so a `match` cannot list it case by
+case, and D12 alone does not give it. Open with it: how the number of a value is written and
+read. Options: (a) a declaration of its own, `flags Access { Read, Write, Run }`: a value of the
+type is a set of these names, each name is one bit, numbered in order unless the declaration
+writes the number, and a set is combined and tested without the number showing; (b) the C# form,
+an attribute on an `enum` whose author numbers the bits, `[Flags] enum Access { Read = 1,
+Write = 2, Run = 4 }`, combined with `|` (T22); (c) no form in the language: `Set<Access>` over
+an `enum`, which the compiler stores as bits. Lean: (a). (b) lets a value hold a bit that has no
+name, and (c) leaves the layout of the bits, which a wire format needs, to the compiler.
+
+### D14 (proposed) The fields of a primary constructor can be read from outside
+
+A field that is declared in a primary constructor can be read wherever its type can be used, as
+the positional members of a C# record can. F9 makes a member private to its type unless it says
+`pub`; the record's samples read such fields from outside without one, and so does every case
+here. The record does not say which of the two holds.
+
+Case: [data/declare.kz](../corpus/data/declare.kz)
+
+### D15 (assumed, §4) Never equal across types
+
+A value of a derived `data` type never equals a value of its base type, whatever their fields
+hold. Two values of the derived type are equal when all their fields are, those of the base
+included (D3).
+
+Case: [data/inherit-equality.kz](../corpus/data/inherit-equality.kz)
+```kurz
+data User(int Id, string Name)
+data Admin(int Level) : User
+
+bool Same(User a, User b) => a == b
+
+print(Same(Admin(1, "Ann", 3), Admin(1, "Ann", 3)))
+print(Same(Admin(1, "Ann", 3), User(1, "Ann")))
+```
+
+### D16 (assumed, §4) The body of a `data` type
+
+A `data` type takes its methods between braces after its constructor, in the form of a class body
+(K7).
+
+Case: [values/mut-method.kz](../corpus/values/mut-method.kz)
+```kurz
+data Counter(int Count) {
+    pub mut void Increment() {
+        Count = Count + 1
+    }
+}
+
+mut c = Counter(0)
+before = c
+c.Increment()
+c.Increment()
+print(c.Count)
+print(before.Count)
+```

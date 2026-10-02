@@ -1,0 +1,9 @@
+// expect: output
+// | 5
+// | 16
+// rules: F11
+
+int Apply((int) => int f, int n) => f(n)
+
+print(Apply(x => x + 1, 4))
+print(Apply(x => x * x, 4))

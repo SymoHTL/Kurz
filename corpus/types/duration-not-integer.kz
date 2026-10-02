@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 4
+// rules: T13
+
+int seconds = 30s
+print(seconds)

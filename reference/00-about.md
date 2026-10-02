@@ -52,7 +52,7 @@ by reading it against the rules, and by the review.
 
 ## What every case relies on
 
-### A1 (proposed) `print`
+### A1 (assumed, §8) `print`
 
 `print(value)` writes the text of the value and a line break to standard output. The corpus needs
 one way to show a result, and the record's samples use this word. The naming of the standard
@@ -60,7 +60,7 @@ library is open (record, section 14), so the word can change.
 
 No case: every case that expects output shows it.
 
-### A2 (proposed) The text of a value
+### A2 (assumed, §8) The text of a value
 
 The text of an integer is its decimal digits, with a leading `-` when negative. The text of a
 string is the string. The text of a `bool` is `true` or `false`. The same text is used inside an
@@ -68,10 +68,30 @@ interpolated string (L6).
 
 No case: every case that expects output shows it.
 
-### A3 (open) The text of other values
+### A3 (decided, §8) The text of a `data` value
 
-What `print` and interpolation produce for `null`, for a `data` value, a class instance, a
-collection, a `float`, `double` or `decimal`. Options: (a) no text at all, so that printing one is
-a compile error until the type says how; (b) a fixed form derived from the type, as C# records
-have; (c) text only for the built-in types. Lean: (b) for `data` and collections, because a
-language whose selling point is short code should print a record without a helper.
+The text of a `data` value is derived from its type, in the manner of C# records: the name of the
+type, then ` { `, then its fields in the order of their declaration, each as `Name = text` and
+with `, ` between them, then ` }`. The text of a field is the text of its value.
+
+Case: [data/print.kz](../corpus/data/print.kz)
+```kurz
+data User(int Id, string Name)
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")
+```
+
+### A4 (open) The text of the other values
+
+A collection has a text that is derived from its type, as a `data` value has (record, section 8).
+What it looks like is not chosen, and C# gives no model: a C# list prints the name of its type.
+Also not chosen: the text of `null`, of a class instance, of a `float`, `double` or `decimal`, of
+a `char`, of an `enum` value, of a duration, and of a `data` value without fields (C# prints
+`Empty { }`; D8 writes the value as the bare name). Options: (a) every value has a derived text:
+`[1, 2, 3]` for a list, the name for an `enum` value and for a `data` value without fields, `null`
+for null, the shortest digits that read back as the same number for a `double`, and the form of A3
+for a class instance; (b) as (a), except that a class instance has no text unless its class
+declares one, and printing one without is a compile error. Lean: (b). A class instance can reach
+itself through a `weak` reference, so a derived text would need a rule for where to stop.

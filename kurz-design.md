@@ -1,6 +1,6 @@
 # Kurz language design
 
-Status: brainstorm record, 2026-10-01. Everything under "Decided" was chosen by Simon during the session. Anything marked *assumed* was proposed and not objected to, but never explicitly confirmed. Keyword spellings in code samples are illustrative unless listed in the syntax section.
+Status: brainstorm record, 2026-10-01 and 2026-10-02. Everything under "Decided" was chosen by Simon during the session. Anything marked *assumed* was proposed and not objected to, but never explicitly confirmed. On 2026-10-02 Simon accepted, as one batch, the details the language reference had filled in to write its cases: the six that the question named are recorded as decided, the rest as *assumed*. Keyword spellings in code samples are illustrative unless listed in the syntax section.
 
 ## 1. Identity and goals
 
@@ -17,7 +17,7 @@ Status: brainstorm record, 2026-10-01. Everything under "Decided" was chosen by 
 
 - The compiler is written in C# first and rewritten in Kurz once Kurz can carry it.
 - The compiler emits LLVM IR directly. Going through C source is not wanted. LLVM as a build-time dependency is acceptable.
-- LLVM covers x86, ARM, RISC-V, WebAssembly and AVR. Of the ESP32 family, the RISC-V models (C3, C6) work with upstream LLVM. The Xtensa models (classic ESP32, S2, S3) need Espressif's LLVM fork, because the upstream Xtensa backend is still experimental (checked 2026-10-01). The fork is acceptable where a project needs those models. *(assumed: Simon's answer to this was ambiguous)*
+- LLVM covers x86, ARM, RISC-V, WebAssembly and AVR. Of the ESP32 family, the RISC-V models (C3, C6) work with upstream LLVM. The Xtensa models (classic ESP32, S2, S3) need Espressif's LLVM fork, because the upstream Xtensa backend is still experimental (checked 2026-10-01). The fork is acceptable where a project needs those models (confirmed by Simon on 2026-10-02).
 - A compiled program never relies on another language, runtime or tooling. The whole standard library is written in Kurz.
 - Kurz can call C-ABI functions (graphics, audio, operating system), but nothing in the standard library needs this beyond the operating system boundary.
 - TLS follows the Rust approach: the protocol is implemented in Kurz, the cipher primitives come from an established library through the C-ABI at first.
@@ -31,7 +31,7 @@ Status: brainstorm record, 2026-10-01. Everything under "Decided" was chosen by 
 - Mutable state lives inside exactly one actor. Each actor has its own heap. When an actor dies its whole heap is freed at once. A big value that is shared between actors lives outside these heaps (section 6).
 - There is **no cycle collector**. A possible reference cycle is a compile error.
   - The rule is judged by types, over the whole program: a class may not reach itself through strong fields when one field on that path is `mut`. Values cannot contain themselves (section 4), so the rule only ever applies to classes.
-  - `weak` means "I point at this but do not keep it alive". A weak reference is nullable and becomes null when its target is freed. It is the same idea as `WeakReference<T>` in C#.
+  - `weak` means "I point at this but do not keep it alive". A weak reference is nullable and becomes null when its target is freed. It is the same idea as `WeakReference<T>` in C#. A weak type always shows its `?`: `weak Node?` (Simon, 2026-10-02).
   - Between different types, `weak` on the back-pointer is enough: `Customer` holds its orders, `Order` points back `weak`. A class that reaches itself through a strong `mut` field is rejected even with a `weak` back-pointer, because `a.children.Add(b)` followed by `b.children.Add(a)` closes a ring through the children alone.
   - Only `mut` fields can close a cycle, so with immutable-by-default the error is rare.
   - A `mut` field of interface type could hold any implementer; the compiler needs the whole program to judge it.
@@ -39,7 +39,7 @@ Status: brainstorm record, 2026-10-01. Everything under "Decided" was chosen by 
 - Objects with identity that point at each other (scene graph, UI tree, general graphs) have one flat owner; the edges are `weak` or indices. Each hop through a `weak` edge pays a small liveness check.
 - A grid is a flat array and a chunked world is a map of chunk values; the rule does not touch either.
 - Known trap: a write to one large flat array while a snapshot of it is still held copies the whole array once. Large data is chunked, and the compiler can warn where a write provably copies.
-- **Raw memory.** Collections, the allocator and the scheduler are written in Kurz, so some Kurz code has to touch raw memory. That code sits in `raw` blocks (pointers, manual allocation). A `raw` block compiles only in a package that the project grants `allow raw` in `project.kz`. Any package can be granted it, the project's own code included: it is discouraged, not reserved for the standard library (Simon, 2026-10-01). The compiler's memory guarantees cover everything outside `raw` blocks, and the build lists every package that holds the grant. *(assumed: the grant is per package and written like `allow network`)*
+- **Raw memory.** Collections, the allocator and the scheduler are written in Kurz, so some Kurz code has to touch raw memory. That code sits in `raw` blocks (pointers, manual allocation). A `raw` block compiles only in a package that the project grants `allow raw` in `project.kz`. Any package can be granted it, the project's own code included: it is discouraged, not reserved for the standard library (Simon, 2026-10-01). The compiler's memory guarantees cover everything outside `raw` blocks, and the build lists every package that holds the grant. The grant is per package and written like `allow network` (confirmed by Simon on 2026-10-02).
 - Considered and dropped on 2026-10-01: a single-owner rule in which a node sits in one place and changes place with `move`, and a collector that a class opts into by keyword. The collector could return later as an opt-in keyword without breaking code.
 - Expected speed, taken from a language that uses the same technique; no Kurz measurement exists. Koka's purely functional red-black tree, updated in place this way, ran 42 million inserts within 10% of C++ `std::map` ([Perceus, MSR-TR-2020-42](https://www.microsoft.com/en-us/research/wp-content/uploads/2020/11/perceus-tr-v1.pdf)); a later paper measured it 19% faster on one CPU and about equal on another ([Frame Limited Reuse, MSR-TR-2021-30](https://www.microsoft.com/en-us/research/wp-content/uploads/2021/11/flreuse-tr.pdf)).
 
@@ -50,8 +50,11 @@ mut root = Tree(8, null, null)
 root.Insert(3)                 // a `mut` method: walks down and writes in place
 root.Key = 9
 
-class Scene { mut Map<int, Node> nodes }                          // owns every node
-class Node  { mut List<weak Node> children; mut weak Node? parent }
+class Scene { mut Map<int, Node> nodes }      // owns every node
+class Node {
+    mut List<weak Node?> children
+    mut weak Node? parent
+}
 ```
 
 ## 4. Types and paradigm
@@ -81,16 +84,31 @@ Fill(mut numbers)                              // the caller sees and allows the
 - `class`: may have `mut` fields, single inheritance plus interfaces as in C#. Classes are the tool for big inheritance trees. A class with `mut` fields compares by identity; an immutable class compares by content. Equality is overridable, as in C#.
 - `actor`: the concurrent unit (section 6). Actors implement interfaces but do not inherit from each other.
 - Small `data` values are compiled as plain values without reference counts, automatically; there is no separate `struct` keyword. *(assumed)*
-- Numbers use C# names and sizes: `byte`, `short`, `int` (32-bit), `long` (64-bit), `float`, `double`, `decimal`.
+- Numbers use C# names and sizes. The integer types are the full C# set, signed and unsigned: `sbyte`, `byte`, `short`, `ushort`, `int` (32-bit), `uint`, `long` (64-bit), `ulong` (Simon, 2026-10-02; the first list had `byte`, `short`, `int` and `long` only). The others are `float`, `double` and `decimal`.
 - Integer overflow wraps silently in release builds. Around that:
   - Compile errors for constant expressions that overflow, implicit narrowing (`long` into `int`) and mixing signed with unsigned.
   - Durations and timestamps are their own 64-bit types, never raw integers. This removes the bug class where an uptime counter overflows after weeks of running.
-  - Test builds throw on overflow instead of wrapping. An explicit wrapping operator exists for intended cases such as hashes.
+  - Test builds throw on overflow instead of wrapping. An explicit wrapping operator exists for intended cases such as hashes: `+%`, `-%` and `*%`, which wrap in every build (Simon, 2026-10-02).
   - Tests can fast-forward virtual time (section 11).
-- Strings are UTF-8 and immutable; there is no flag to change the encoding. Indexing goes through `.Bytes` or `.Chars`. Conversion happens at the edges (for example `text.ToUtf16()` for Windows APIs).
+- Around numbers, from round 7 (2026-10-02):
+  - Number literals are written as in C#: decimal digits, `0x` and `0b` digits, `_` between digits, a fraction for a `double`, and the C# suffixes.
+  - An integer literal is an `int`, or a `long` when its value does not fit; where a type is written or expected it takes that type if the value fits. *(assumed)*
+  - A narrower integer becomes a wider one of the same signedness without a word. *(assumed)*
+  - A conversion on purpose is the type's name used as a function: `int(value)`. A conversion that loses the value behaves as overflow does: it wraps in a release build and throws in a test build. *(assumed: the second sentence; Simon chose the spelling)*
+  - `+ - * / %`, the comparisons and `&& || !` have the meaning and the precedence they have in C#. Integer division drops the fraction, toward zero. *(assumed)*
+  - A duration or a size is a number with a unit from a fixed list: `5min`, `30s`, `256kb`. *(assumed: the list, which is `ms`, `s`, `min`, `h` and `days` for a duration and `kb`, `mb` and `gb` for a number of bytes in steps of 1024; Simon confirmed that the list is fixed)*
+- Strings are UTF-8 and immutable; there is no flag to change the encoding. Indexing goes through `.Bytes` or `.Chars`. `.Chars` yields Unicode code points, one element per code point; graphemes are left to a library (Simon, 2026-10-02). Its element type is `char`: one code point in 32 bits, not the UTF-16 unit of C#. *(assumed: the element type; Simon chose code points and the full C# set of number types, and a 16-bit `char` cannot hold a code point)* Conversion happens at the edges (for example `text.ToUtf16()` for Windows APIs).
 - Array index out of range and division by zero raise exceptions. *(assumed)*
-- Null exists and is enforced: `T?` is short for `T | null`. Using a nullable value without a check is a compile error. `?.` and `??` work as in C#.
+- Null exists and is enforced: `T?` is short for `T | null`. Using a nullable value without a check is a compile error. `?.` and `??` work as in C#. The check that counts is `if name != null { ... }`: inside the block the variable is not nullable, and no other form narrows (Simon, 2026-10-02). `null` is a value of nullable types only. *(assumed: the last sentence)*
 - Generics as in C# (`Map<int, User>`), lambdas as in C# (`x => x * 2`), primary constructors (`class User(string Name, mut int Age)`).
+- A type parameter is limited inside the brackets: `T Max<T: Comparable>(T a, T b)`. `where` keeps its one meaning, the constraint on a value (section 13). (Simon, 2026-10-02)
+- The type of a function is written with an arrow: `(int) => bool`. A lambda reads the variables around it and cannot assign them. (Simon, 2026-10-02)
+- Class bodies follow C# (Simon, 2026-10-02): a class names its base class and its interfaces after `:`, an interface is declared with `interface`, and further constructors, `static` members and `override` are written as there. A field is written `Type name`, a method like a function. There is no property syntax until something needs it. A method that changes its own value carries `mut` in front of its return type: `mut void Add(T item)`. A `data` type takes its methods in a body of the same form. *(assumed: the last sentence)*
+- A `mut` field of a class instance can be assigned through every reference to the instance, whether the variable that holds the reference is `mut` or not: the variable holds a reference, and the reference does not change. (Simon, 2026-10-02)
+- `data` inheritance is written `data Admin(int Level) : User`; the fields of the base come first in the constructor (Simon, 2026-10-02). A value of the derived type never equals a value of the base type. *(assumed: the last sentence)*
+- `enum Plan { Free, Pro }` is the short form of a union of cases without fields: its values (`Plan.Free`) are cases, a `match` has to list every one, and a value has a number only where one is written. Simon also wants what `[Flags]` and `HasFlag` give in C#: values that combine into a set, and a test for membership. A set of flags is not one case, so it cannot be matched case by case and is a form of its own; how it is written is open (section 14). (Simon, 2026-10-02)
+- A value is made by the type's name and the arguments in order; there is no `new`. A `data` type without fields has exactly one value, written as the bare name. `mut` comes before a written type: `mut int x = 5`. A parameter is immutable inside its function unless it is marked `mut`. *(assumed: all four)*
+- The samples use these collection members: `List<T>()`, `Add`, `Count`, an index counted from 0, `Where`; `Map<K, V>()`, `map[key] = value`, and `map[key]`, which yields the value or `null`. *(assumed; the naming of the standard library stays open, section 14)*
 
 ## 5. Outcomes and errors
 
@@ -102,6 +120,10 @@ The language enforces the C# `OneOf<>` pattern: every method declares every outc
 - To keep all cases instead of propagating, either `match` the call directly or give the variable an explicit union type.
 - A postfix `else` block handles selected cases; unlisted ones still propagate. An arm can recover with a value, transform and return another case, or `throw`.
 - **Exceptions** are only for situations the called method truly cannot recover from. There is no `catch`. An exception kills the actor it happens in (section 6).
+- **`match` lists every case** of the union; a missing case is a compile error. A default arm is written `else`. An arm can also test a literal, and `match` can be used as an expression that yields the value of the arm that ran. There are no patterns over fields until something needs them. (Simon, 2026-10-02)
+- **Top-level code has no caller**, so a call there has to handle every case that is not success; letting one propagate is a compile error. (Simon, 2026-10-02)
+- **`throw` takes a value or a text**: `throw ConfigMissing(path)` or, as the short form, `throw "no config"` (Simon, 2026-10-02). It is a statement and can stand wherever one can. The bare `throw` of an `else` arm stays. What a supervisor reads as the `Reason` of a crashed child (section 6) is that value. The runtime adds the place and the chain ID. *(assumed: the last sentence)*
+- **The success case may be `void`**: `void | NotFound Remove(int id)`; the call is then a statement. (Simon, 2026-10-02)
 
 ```
 data User(int Id, string Name, string? Email)
@@ -250,6 +272,17 @@ every 5min on split run {
 - String interpolation is always on: `"hello {name}"`.
 - Primary constructors, C# lambdas, C# generics.
 - Top-level statements instead of `Main`.
+- A statement continues on the next line while a `(` or a `[` is open, when its line ends in a binary operator, a comma or `=>`, and when the next line starts with `.`. Nothing else continues it. There is no `;`: not at the end of a line and not between two statements. (Simon, 2026-10-02) The `=` of an assignment counts as a binary operator here. *(assumed)*
+- `name = expression` assigns when a variable of that name is visible and declares one when none is, so a variable cannot hide another one. A variable counts as used when it is read at least once; being assigned again does not count. A `mut` variable that nothing changes is a warning, not an error. (Simon, 2026-10-02)
+- A written type always declares; when the name is already visible that is a compile error. A variable is visible from its declaration to the end of its block, and every declaration has a value. *(assumed)*
+- `a..b` is a range that includes both ends, `a..<b` leaves the end out. A loop over numbers is `for i in 0..<n`; the C form with three parts does not exist. (Simon, 2026-10-02)
+- `else` and `else if` follow the closing brace on its line; a condition is a `bool`; `while condition { }`, `for name in collection { }`, `break` and `continue` mean what they mean in C#. *(assumed)*
+- A function body is an expression after `=>` or a block with `return`; a function without a result is declared `void`; a function or a type can be used above its declaration. *(assumed)*
+- Functions may share a name when their parameters differ, a parameter or a field may have a default value (`int Count = 1`), and an argument may be passed by name (`Item(ProductId: 7)`). Simon chose overloads on 2026-10-02 against the proposal to leave them out. Which function a call picks when several fit is open (section 14).
+- `//` starts a comment that runs to the end of its line. In a string `\n`, `\t`, `\"` and `\\` mean what they mean in C#, and `\{` is a brace that starts no interpolation. `true` and `false` are the values of `bool`. A name starts with a letter or `_` and goes on with letters, digits and `_`; upper and lower case differ. *(assumed)*
+- Only the core words are reserved. A user-defined keyword (section 9) is reserved in the files that import it. (Simon, 2026-10-02)
+- A compile error is identified by a word, such as `unused-variable`. Tests of the compiler pin the id and the line of an error, never its message (Simon, 2026-10-02). An error is reported on the line that holds the offending construct: the declaration for an unused variable, the first class declaration on the path for a possible cycle. *(assumed: the last sentence)*
+- `print(value)` writes the text of a value and a line break. The text of an integer is its decimal digits, of a string the string, of a `bool` `true` or `false`. *(assumed; the name belongs to the standard library, whose naming is open)* A `data` value has a text derived from its type, in the manner of C# records: `User { Id = 1, Name = Ann }`. A collection has a derived text as well; what it looks like is open (section 14). (Simon, 2026-10-02)
 
 ## 9. Keywords that transform code
 
@@ -400,7 +433,11 @@ No spawn, no lookup, no registry. The runtime finds a keyed actor or creates it 
 ```
 durable actor Subscription per int userId {
     mut plan = Plan.Free
-    pub void Trial() { plan = Plan.Pro; wait 30days; plan = Plan.Free }
+    pub void Trial() {
+        plan = Plan.Pro
+        wait 30days
+        plan = Plan.Free
+    }
 }
 ```
 
@@ -612,12 +649,12 @@ msg = box.Open(myKey) else { Forged => return }            // client B
 
 Runtime speed has priority everywhere; the compiler may be heavy. One planned optimization: an actor handles one message at a time, so everything allocated while handling it and not stored in actor state can be freed in one sweep at the end. Beating hand-written C in some scenarios is welcome.
 
-Goal (Simon, 2026-10-01): Kurz should not be meaningfully slower than C++ in computation and memory work, or than ASP.NET Core in web serving. This is a goal with gates, not a guarantee for every program. Safe code pays for the checks the compiler cannot remove: the index check, the counter check before a write, counter updates on shared values and the liveness check on a `weak` edge. C++ pays none of them and proves nothing. Where a measured hot path needs it, a `raw` block removes them (section 3). The numbers that turn a gate red are open (section 14).
+Goal (Simon, 2026-10-01): Kurz should not be meaningfully slower than C++ in computation and memory work, or than ASP.NET Core in web serving. This is a goal with gates, not a guarantee for every program. Safe code pays for the checks the compiler cannot remove: the index check, the counter check before a write, counter updates on shared values and the liveness check on a `weak` edge. C++ pays none of them and proves nothing. Where a measured hot path needs it, a `raw` block removes them (section 3). The numbers that turn a gate red (Simon, 2026-10-02, accepted for now): a value tree within 1.1x of C++ `std::map`, HTTP serving within 1.1x of ASP.NET Core, and an idle actor at most 512 bytes. Each number is a ratchet from its first measurement: it may only get tighter. Simon wants the numbers looked at again against measurements (section 14).
 
 ## 14. Open
 
-- The numbers behind the speed goal (section 13). Simon found the first proposal too loose (a value tree within 1.3x of C++ `std::map`, HTTP within 2x of ASP.NET Core). Proposed on 2026-10-01 and not answered: within 1.1x on both, which is parity inside measurement noise, and an idle actor at most 512 bytes; each number is a ratchet from its first measurement.
-- What the language reference could not take from this record. Each fork it met is a rule marked `open` there, and each thing it had to fill in so that a case could be written is marked `proposed`; both are answered by their id ([reference/00-about.md](reference/00-about.md)). Interfaces and properties (K7), declaring generics (T19), closures (F11), enums (D12) and what an exception carries (O7) are among them.
+- Whether the numbers behind the speed goal (section 13) hold up against measurements. Simon found a first proposal too loose (within 1.3x and 2x) and accepted the present ones on 2026-10-02 with the words that they need further evaluation.
+- What the language reference could not take from this record. Each fork it met is a rule marked `open` there, and each thing it had to fill in so that a case could be written is marked `proposed`; both are answered by their id ([reference/00-about.md](reference/00-about.md)). After round 7 the forks are: how flags are written (D13), which overload a call picks (F13), the text of the values that are not `data` (A4), operators on bits (T22), strings over several lines (L13), how equality is overridden (K8) and how a class with a primary constructor inherits (K10). Two rules are `proposed`: that the fields of a primary constructor can be read from outside (D14), and that a method of a class needs no `mut` marker (K9).
 - The naming of the standard library.
 - What a full inbox does to a waiting call under the `drop` modes.
 - Over-the-air update for devices: a runtime feature or later. A device that gets `Outdated` has to be able to update itself.

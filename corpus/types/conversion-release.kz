@@ -1,0 +1,8 @@
+// expect: output
+// | 44
+// build: release
+// rules: T20
+
+byte Low(int n) => byte(n)
+
+print(Low(300))
