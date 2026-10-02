@@ -251,7 +251,10 @@ An assignment replaces what is known about a variable, as in C#. Assigning a val
 not nullable narrows the variable from that line on. Assigning a nullable value to a narrowed
 `mut` variable is allowed and makes it nullable again from that line on, so a use after it needs
 a new check (N2). That is what lets a loop walk a chain: `node = node.Next` assigns a nullable
-value to the variable the loop has just checked.
+value to the variable the loop has just checked. The record marks as *(assumed)* what else
+counts as such an assignment: handing the variable to a `mut` parameter (M7), as `ref` does in
+C#, and a call of a `mut` method (M5) on a value that a narrowed path runs through. The cases
+assign.
 
 Case: [null/while-narrows.kz](../corpus/null/while-narrows.kz)
 
@@ -298,8 +301,8 @@ Case: [null/unchecked.kz](../corpus/null/unchecked.kz)
 ### N9 (open) A narrowed path that something else can change
 
 N3 narrows a path of fields. A path whose every step is a field of a `data` value, or a field
-that is not `mut`, changes only through an assignment the function itself makes. Two kinds of
-path can change behind it: one through a `mut` field of a class instance, which a call can
+that is not `mut`, changes only through what the function itself does to it (N7). Two kinds of
+path can change behind its back: one through a `mut` field of a class instance, which a call can
 assign through another reference (K2), and one through a `weak` reference, whose target a call
 or an assignment can free (R3). C# keeps such a path narrowed across the call, which its
 analysis can afford because it only warns. Options: (a) the narrowing of such a path ends at the
