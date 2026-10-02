@@ -166,8 +166,9 @@ that this reference does not cover yet are written.
 
 Case: [source/reserved-word.kz](../corpus/source/reserved-word.kz)
 ```kurz
-data = 5
-print(data)
+data Job(int match)
+
+print(Job(1) == Job(2))
 ```
 
 ### L13 (open) A string over several lines

@@ -1,5 +1,6 @@
 // expect: error reserved-word at 4
 // rules: L12
 
-data = 5
-print(data)
+data Job(int match)
+
+print(Job(1) == Job(2))

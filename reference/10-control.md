@@ -131,8 +131,21 @@ for x in xs {
 ### C8 (decided, §8) Ranges and counting loops
 
 `a..b` is the range of the integers from `a` to `b` with both ends included. `a..<b` leaves `b`
-out. `for i in a..<b { }` runs its block once for each number of the range, in order. The C form
-with three parts, `for (i = 0; i < n; i++)`, does not exist.
+out. `for i in a..<b { }` runs its block once for each number of the range, in order. A range that
+holds no number runs it zero times: `3..<3` by its definition, and `3..2` because a range whose
+end lies below its start is empty, which the record marks as *(assumed)*. The C form with three
+parts, `for (i = 0; i < n; i++)`, does not exist.
+
+Case: [control/range-empty.kz](../corpus/control/range-empty.kz)
+```kurz
+for i in 3..<3 {
+    print(i)
+}
+for i in 3..2 {
+    print(i)
+}
+print("done")
+```
 
 Case: [control/range-inclusive.kz](../corpus/control/range-inclusive.kz)
 ```kurz
