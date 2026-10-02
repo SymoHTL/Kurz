@@ -14,7 +14,7 @@ The errors the cases expect. An id is what a corpus header names in `// expect: 
 | `narrowing` | T7 | a wider integer type put into a narrower one without a conversion |
 | `sign-mix` | T9 | an operation between a signed and an unsigned integer |
 | `string-index` | T15 | an index applied to a string instead of to `.Bytes` or `.Chars` |
-| `nullable-unchecked` | N2, N3 | a nullable value used without a check |
+| `nullable-unchecked` | N2, N3, N7 | a nullable value used without a check |
 | `mut-required` | M5, M7 | a change through something that is not `mut` |
 | `mut-at-call` | M7 | an argument for a `mut` parameter without `mut` in front of it |
 | `unlisted-case` | O3, O9 | a case that would leave a function whose return type does not list it |

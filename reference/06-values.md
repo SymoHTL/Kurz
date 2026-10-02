@@ -163,3 +163,13 @@ ages["Ann"] = 31
 print(ages["Ann"] ?? 0)
 print(ages["Bea"] ?? 0)
 ```
+
+### M10 (open) The order of a map's entries
+
+M9 gives a map its entries, and A6 gives them a text. Not chosen: in which order a map yields
+its entries to a `for` loop (C6) and shows them. Options: (a) the order in which the keys were
+first set; (b) the order of the keys, smallest first, which needs keys that can be compared;
+(c) no order a program may rely on, as for a `Dictionary` in C#. Lean: (a). A text that a test
+can pin and a person can read against the code is worth the memory. The cost: every entry
+carries its place, and taking an entry out is more work. Under (c) two runs of one program can
+print the same map differently.

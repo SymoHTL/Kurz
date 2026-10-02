@@ -199,7 +199,7 @@ Show(Plan.Pro)
 
 `flags Access { Read, Write, Run }` declares a type whose values are sets of the listed names.
 It gives what `[Flags]` and `HasFlag` give in C#. Each name is one bit, and the compiler numbers
-the bits in order unless the declaration writes the number (D18). A name alone, `Access.Read`,
+the bits in order unless the declaration writes the number (D19). A name alone, `Access.Read`,
 is the set that holds that name. `set.Has(Access.Read)` is `true` when the set holds the name. A
 set is not one case, so a `match` cannot list it case by case. How sets are combined is D17; the
 case tests a set of one name.
@@ -259,24 +259,80 @@ print(c.Count)
 print(before.Count)
 ```
 
-### D17 (open) How sets of flags are combined
+### D17 (decided, §4) How sets of flags are combined
 
-D13 gives a set of flags and the test `Has`. Not chosen: how two sets become one, how a name is
-taken out of a set, how the set that holds nothing is written, and what `Has` answers for a set
-of several names. Options: (a) the bit operators of C# (T22): `Access.Read | Access.Write`,
-`set & ~Access.Write`, and `Access.None`, a name that every `flags` type has; (b) methods:
-`set.With(Access.Write)`, `set.Without(Access.Write)` and `Access()`. Under both, `Has` is
-`true` when the set holds every name of its argument, as `HasFlag` is in C#. Lean: (a). It is
-what C# does with `[Flags]`, and T22 has the operators. The cost: taking a name out reads as
-arithmetic on bits.
+Sets of flags (D13) are combined with the bit operators, as in C# (T22). `a | b` holds the names
+of both sets, `a & b` the names they share, and `a ^ b` the names that exactly one of them
+holds. `set & ~Access.Write` takes a name out. Every `flags` type has the name `None` for the
+set that holds nothing. `set.Has(other)` is `true` when the set holds every name of `other`, as
+`HasFlag` is in C#. The record marks as *(assumed)* what `~set` is on its own: the names of the
+type that the set does not hold. The case uses `~` only under `&`, where that reading and the
+bits of C# give the same set.
 
-### D18 (open) The number of an `enum` value and of a flag
+Case: [data/flags-combine.kz](../corpus/data/flags-combine.kz)
+```kurz
+flags Access { Read, Write, Run }
 
-D12 and D13 give a value a number where the declaration writes one. Not chosen: how the
-declaration writes it, which bit the first name of a `flags` type gets, how a program gets the
-number of a value, and how a number becomes a value. Options: (a) as in C#: `enum Plan { Free = 1, Pro = 2 }`, `int(Plan.Pro)` (T10) and
-`Plan(2)`, where a number that no value has raises an exception; (b) written the same in the
-declaration, and the two directions are members of the type: `Plan.Pro.Number`, and
-`Plan.From(2)` with the result `Plan | Invalid`, so that a number from outside is an outcome
-(O1). Lean: (b). A number arrives from a file, a database or the wire, where a wrong one is
-normal use, and the record keeps exceptions for what a function cannot recover from.
+p = Access.Read | Access.Write
+print(p.Has(Access.Read))
+print(p.Has(Access.Run))
+print(p.Has(Access.Read | Access.Write))
+print(p.Has(Access.Read | Access.Run))
+q = p & ~Access.Write
+print(q.Has(Access.Write))
+print(q.Has(Access.Read))
+print(Access.None.Has(Access.Read))
+r = p ^ Access.Read
+print(r.Has(Access.Write))
+print(r.Has(Access.Read))
+```
+
+### D18 (decided, §4) The number of an `enum` value
+
+A declaration writes the number of a value after `=`: `enum Plan { Free = 1, Pro = 2 }`. The two
+directions are members of the type. `Plan.Pro.Number` is the number of a value. `Plan.From(2)`
+is the value of a number, and its result is `Plan | Invalid`: a number that no value has is an
+outcome (O1), not an exception. The record marks as *(assumed)* that a declaration writes a
+number for every value or for none, that the number is an `int`, and that `Invalid` is the type
+that input from outside yields (record, section 13). The case declares no `Invalid` for that
+reason.
+
+Case: [data/enum-number.kz](../corpus/data/enum-number.kz)
+```kurz
+enum Plan { Free = 1, Pro = 2 }
+
+print(Plan.Pro.Number)
+match Plan.From(1) {
+    Plan p => print(p)
+    Invalid => print("invalid")
+}
+match Plan.From(7) {
+    Plan p => print(p)
+    Invalid => print("invalid")
+}
+```
+
+### D19 (assumed, §4) The number of a set of flags
+
+The number of a set of flags is written and read as the number of an `enum` value is (D18). A
+declaration can write the number of each name, which is the value of its bit, as in C#:
+`flags Access { Read = 1, Write = 2, Run = 4 }`. Without written numbers the names get 1, 2, 4
+and so on, in their order. `set.Number` is the sum of the numbers the set holds.
+`Access.From(5)` is the set with that number, and `Invalid` when the number has a bit that no
+name has.
+
+Case: [data/flags-number.kz](../corpus/data/flags-number.kz)
+```kurz
+flags Access { Read, Write, Run }
+
+p = Access.Read | Access.Run
+print(p.Number)
+match Access.From(3) {
+    Access a => print(a.Has(Access.Write))
+    Invalid => print("invalid")
+}
+match Access.From(8) {
+    Access a => print(a.Has(Access.Write))
+    Invalid => print("invalid")
+}
+```

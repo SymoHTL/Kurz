@@ -1,0 +1,14 @@
+// expect: output
+// | 1
+// | 2
+// | done
+// rules: N3, N7
+
+data Node(int Value, Node? Next)
+
+mut Node? node = Node(1, Node(2, null))
+while node != null {
+    print(node.Value)
+    node = node.Next
+}
+print("done")

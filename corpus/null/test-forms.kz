@@ -1,0 +1,21 @@
+// expect: output
+// | Ann
+// | Ann
+// rules: N3
+
+data User(string Name, string? Email)
+
+User? Find(int id) {
+    if id == 1 {
+        return User("Ann", "a@example.com")
+    }
+    return null
+}
+
+u = Find(1)
+if u?.Email != null {
+    print(u.Name)
+}
+if !(u == null) {
+    print(u.Name)
+}

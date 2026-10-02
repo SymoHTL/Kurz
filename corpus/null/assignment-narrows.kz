@@ -1,0 +1,14 @@
+// expect: output
+// | 13
+// rules: N7
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+mut email = Email(2)
+email = "b@example.com"
+print(email.Bytes.Count)

@@ -75,7 +75,18 @@ A class can replace the equality of K4 by naming the fields that count. Two inst
 equal when those fields are equal, and the hash is derived from the same fields, so the two
 cannot disagree. Nothing else overrides equality: a class brings no comparison code of its own.
 
-No case: how the fields are named is open (K8).
+Case: [classes/equality-named.kz](../corpus/classes/equality-named.kz)
+```kurz
+class User(int Id, mut string Name) equal by Id
+
+a = User(1, "Ann")
+b = User(1, "Bea")
+c = User(2, "Ann")
+print(a == b)
+print(a == c)
+b.Name = "Ann"
+print(a == b)
+```
 
 ### K6 (decided, §4) Single inheritance and interfaces
 
@@ -136,15 +147,28 @@ print(Counter.Step)
 
 Case: [classes/inherit.kz](../corpus/classes/inherit.kz)
 
-### K8 (open) How a class names the fields that count
+### K8 (decided, §4) How a class names the fields that count
 
-K5 lets a class name the fields that count for its equality. How it names them is not chosen,
-and neither is whether a `mut` field can be one. Options: (a) a word in front of each such
-field, `class User(key int Id, mut string Name)`; (b) a clause after the head of the class,
-`class User(int Id, mut string Name) equal by Id`. Either adds core words (L12), and `key` is a
-common name for a variable. Lean: (b), which shows the whole key in one place and leaves the
-fields as they are. On `mut` fields the lean is no: an instance that sits in a map as a key
-would change its hash while it is there.
+The fields that count (K5) are named in a clause after the head of the class:
+`class User(int Id, mut string Name) equal by Id`. `equal` and `by` are core words (L12). A
+`mut` field can be named in the clause. The record states the cost: when such a field is
+assigned, the hash of the instance changes, so an instance that is a key of a map at that moment
+is no longer found under it, and nothing reports that. A class without the clause compares as K4
+says. The record marks as *(assumed)* the reading of the owner's answer on `mut` fields that
+this rule takes.
+
+Case: [classes/equality-named.kz](../corpus/classes/equality-named.kz)
+
+Case: [classes/equality-named-mut.kz](../corpus/classes/equality-named-mut.kz)
+```kurz
+class Tag(mut string Name) equal by Name
+
+x = Tag("a")
+y = Tag("a")
+print(x == y)
+y.Name = "b"
+print(x == y)
+```
 
 ### K9 (decided, §4) A method of a class needs no `mut` marker
 
@@ -181,13 +205,20 @@ print(g.Name)
 print(g.Number)
 ```
 
-### K11 (open) A parameter that is only passed to the base
+### K11 (decided, §4) A parameter that is passed on to the base
 
-In the explicit form of K10 every parameter of the class is a field (K1). A class that takes a
-value only to hand it to its base, `class Admin(string Name, int Level) : User(Name)`, would
-hold `Name` twice. Options: (a) a parameter with the name and the type of a field of the base is
-that field and no new one, as in a C# record; (b) every parameter is a field, a name the base
-already has is the compile error `redeclared`, and such a class uses the short form; (c) a word
-marks a parameter that is no field. Lean: (a). It is what the explicit form is for when only
-some of the arguments are computed, and it needs no new word. The cost: a name decides whether
-a parameter is a field.
+In the explicit form of K10, a parameter that has the name and the type of a field of the base
+is that field and no new one, as in a C# record:
+`class Admin(string Name, int Level) : User(Name)` holds `Name` once. Every other parameter is a
+field of the class (K1). The cost: a name decides whether a parameter is a field.
+
+Case: [classes/inherit-pass-on.kz](../corpus/classes/inherit-pass-on.kz)
+```kurz
+class User(string Name)
+
+class Admin(string Name, int Level) : User(Name)
+
+a = Admin("Ann", 3)
+print(a.Name)
+print(a.Level)
+```

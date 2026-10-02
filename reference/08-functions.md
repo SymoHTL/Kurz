@@ -230,10 +230,35 @@ short s = 4
 Show(s)
 ```
 
-### F14 (open) A literal as an argument of an overloaded function
+### F14 (decided, §8) A literal as an argument of an overloaded function
 
-A literal takes the type that is expected (L10), and a call of an overloaded function expects
-several. Options: (a) the literal has its own type, `int` for `4` (L10), so `Show(4)` picks
-`Show(int)` over `Show(long)`, as in C#; (b) a literal fits every type that can hold it, so
-`Show(4)` is `ambiguous-call` when `Show(int)` and `Show(long)` exist. Lean: (a). The plainest
-call there is should not need a conversion.
+For the pick of an overload (F13), a literal argument has the type it has on its own (L10, L11):
+`int` for `4`, `long` for `4000000000` and for `4L`. So `Show(4)` picks `Show(int)` over
+`Show(long)`, as in C#.
+
+Case: [functions/overload-literal.kz](../corpus/functions/overload-literal.kz)
+```kurz
+void Show(int n) {
+    print("int {n}")
+}
+
+void Show(long n) {
+    print("long {n}")
+}
+
+Show(4)
+Show(4000000000)
+Show(4L)
+```
+
+### F15 (open) A `mut` variable that a lambda reads
+
+F11 lets a lambda read the variables around it and not assign them. Not chosen: whether a lambda
+that reads a `mut` variable sees what its function assigns to the variable after the lambda was
+made. Options: (a) the lambda takes the value the variable has when the lambda is made, as an
+assignment does (M3), so what a check has shown about the variable there (N3) holds inside the
+lambda; (b) as in C#: the lambda reads the variable itself and sees every later assignment, and
+a `mut` variable that was narrowed around the lambda is nullable again inside it. Lean: (a). A
+lambda cannot assign the variable anyway, values are copied in meaning everywhere else, and the
+variable does not have to outlive its function. The cost: a lambda that is called later does not
+see a newer value, which a C# developer expects it to.

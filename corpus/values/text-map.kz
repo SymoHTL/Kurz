@@ -1,0 +1,7 @@
+// expect: output
+// | [Ann: 31]
+// rules: A6
+
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+print(ages)

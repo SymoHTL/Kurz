@@ -130,25 +130,66 @@ c = Counter(0)
 print(c)
 ```
 
-### A5 (open) How a class declares its text
+### A5 (decided, §8) How a class declares its text
 
-A4 gives a class instance a text only when its class declares one. How a class does that is not
-chosen. Options: (a) a method with a fixed name and no parameters,
-`pub string Text() => "counter {Count}"`, whose result is the text; (b) the class names the
-fields that show, and the text is derived from them in the form of A3. Lean: (a). A text is free
-where equality (K5) is not: nothing else has to agree with it, and a class often shows something
-that is no field. Also not chosen: what a list or a `data` value shows when it holds an instance
-of a class that declares no text.
+A class declares its text with a method named `Text` that takes no parameters and returns a
+`string`, as `ToString()` does in C#: `pub string Text() => "counter {Count}"`. `print` and an
+interpolated string (L6) use its result as the text of the instance. The record holds, as
+*(assumed)*, how the compiler keeps that cheap: it changes how the text is built and not what it
+is, so no case shows it.
 
-### A6 (open) The values without a chosen text
+Case: [classes/text.kz](../corpus/classes/text.kz)
+```kurz
+class Counter(mut int Count) {
+    pub string Text() => "counter {Count}"
+}
 
-A4 gives every value but a class instance a derived text and says what five kinds show. It
-leaves out what a map, a `float`, a `decimal`, a `char`, a duration and a set of flags (D13)
-show. Options for a map: (a) its entries between `[` and `]`, each as `key: value`, in the
-manner of a list; (b) its entries between `{` and `}`, each as `key = value`, in the manner of
-A3. Lean: (a). A map is a collection, and `=` between a key and its value reads as an
-assignment. For the others one form each is proposed: a `float` shows what a `double` shows, a
-`decimal` the digits it holds, a `char` its character, a duration its value in the units of L14
-(`1h 30min`), and a set of flags its names with ` | ` between them. A `double` without a
-fraction, one that needs an exponent and one that is no number show what C# prints for them
-(`1`, `1E+21`, `NaN`).
+c = Counter(3)
+print(c)
+print("got {c}")
+```
+
+### A6 (decided, §8) The text of a map
+
+A map shows its entries between `[` and `]`, each as `key: value` and with `, ` between them, in
+the manner of a list: `[Ann: 31, Bea: 28]`. The record marks as *(assumed)* that a map without
+entries shows `[]`. In which order the entries show is M10; the case holds one entry.
+
+Case: [values/text-map.kz](../corpus/values/text-map.kz)
+```kurz
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+print(ages)
+```
+
+### A7 (open) A value that holds an instance without a text
+
+A4 makes the text of a list and of a `data` value out of the texts of what they hold, and gives
+an instance of a class a text only when its class declares one (A5). Not chosen: what
+`print(users)` does when `users` is a list of instances of a class that declares none, and the
+same for a `data` value with such a field. Options: (a) the compile error `no-text`, as for the
+instance itself: the type of the items is known where the list is printed; (b) such an item
+shows the name of its class. Lean: (a). It is the same rule one level down, and a text that says
+nothing about the instance hides that a declaration is missing. The cost: a `data` type with
+such a field cannot be printed either.
+
+### A8 (assumed, §8) The text of the remaining values
+
+A `float` shows what a `double` shows (A4). A `decimal` shows the digits it holds. A `char` shows
+its character. A duration shows its value in the units of L14: `1h 30min`. A set of flags (D13)
+shows its names with ` | ` between them. A `double` without a fraction, one that needs an
+exponent and one that is no number show what C# prints for them: `1`, `1E+21`, `NaN`.
+
+Case: [values/text-more.kz](../corpus/values/text-more.kz)
+```kurz
+flags Access { Read, Write, Run }
+
+print(1.0)
+print(0.5f)
+print(1.50m)
+print(90min)
+print(Access.Read | Access.Write)
+for c in "ab".Chars {
+    print(c)
+}
+```

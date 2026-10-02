@@ -211,12 +211,19 @@ print(2kb)
 print(1mb)
 ```
 
-### L15 (open) What is special inside a `"""` block
+### L15 (decided, §8) What is special inside a `"""` block
 
-Whether `{expression}` is replaced (L6) and `\` starts an escape (L7) inside a `"""` block (L13).
-A raw string of C# does neither unless it is marked with `$`. Options: (a) as in every other
-literal: both keep their meaning, and a brace of JSON or CSS is written `\{`; (b) as in a raw
-string of C#: neither, so the block cannot hold a value of the program; (c) `{expression}` is
-replaced and `\` is an ordinary character, which leaves no way to write a brace. Lean: (a). The
-record says that interpolation is always on, a query over several lines needs its values, and
-one rule for every literal is the least to learn.
+Inside a `"""` block (L13), `{expression}` is replaced (L6) and `\` starts an escape (L7), as in
+every other literal. A brace that starts no interpolation is written `\{`. This is where the
+block leaves the raw string of C#, which does neither unless it is marked with `$`. A `"` inside
+the block is an ordinary character, as it is there, and needs no `\`.
+
+Case: [source/multi-line-string-interpolation.kz](../corpus/source/multi-line-string-interpolation.kz)
+```kurz
+table = "users"
+text = """
+    \{ "table": "{table}" }
+    a\\b
+    """
+print(text)
+```

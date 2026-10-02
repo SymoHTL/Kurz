@@ -237,8 +237,22 @@ of C#, which is one UTF-16 unit and cannot hold every code point. The string sta
 whatever its `.Chars` are used for: they are decoded one at a time while the string is walked,
 and no second copy of the text is built. Four bytes are used only where a `char` is stored.
 
-No case: a `char` has no literal in this reference and no chosen text (A6), so a case could only
-count them, which T16 shows.
+A `char` has no literal in this reference. The case walks the `.Chars` of a string and prints
+each one (A8).
+
+Case: [values/text-more.kz](../corpus/values/text-more.kz)
+```kurz
+flags Access { Read, Write, Run }
+
+print(1.0)
+print(0.5f)
+print(1.50m)
+print(90min)
+print(Access.Read | Access.Write)
+for c in "ab".Chars {
+    print(c)
+}
+```
 
 ### T17 (decided, §4) Generics
 

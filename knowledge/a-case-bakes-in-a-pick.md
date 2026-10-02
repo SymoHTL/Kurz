@@ -17,9 +17,9 @@ are no semicolons, one sample wrote a `weak` type with `?` and without, a range 
 The owner answered all of them the same day, in one round. Writing the cases for those answers
 met seven new forks (how a set of flags is written, which overload a call picks, how a class
 with a primary constructor inherits) and needed two more rules the record does not state. The
-answers to those nine met nine forks again and one more unstated rule. It repeats with every
-batch of cases, and each fork is narrower than the answer it came from: after "a class names the
-fields that count" the fork is how it names them.
+answers to those nine met nine forks again and one more unstated rule, and the answers to those
+met four. It repeats with every batch of cases, and each fork is narrower than the answer it
+came from: after "a class names the fields that count" the fork is how it names them.
 
 **Why:** a case is concrete. `for x in xs { }` in a file that "must print 4 and 5" decides the
 spelling of the loop, the scope of `x` and the order of iteration, whether anybody chose them or
@@ -43,6 +43,11 @@ not. Once sixty cases use it, it is the language. The v0 compiler failed the sam
 - An answer decides what its option said and nothing next to it. "A `"""` block, as in C#" does
   not say whether `{` interpolates inside. The rule becomes `decided` for the part that was
   chosen, its case is written around the rest, and the rest is a new `open` rule.
+- An answer by reference ("everything C# does") is decided for what carries over. Where the
+  other language leans on something this one does not have, that part is contradicted in the
+  reply and becomes an `open` rule with its options. C# keeps a null check on `user.Email` valid
+  across a call that can assign the field, because its analysis only warns; here an unchecked
+  use is an error, so that part of "full C#" is rule N9, open.
 - The cases for an answer are written around the forks they meet, as the first ones were. The
   new forks are questions for the next round, not picks to fold into this one.
 - When writing a sample for the record, expect the same thing: a sample decides more than the

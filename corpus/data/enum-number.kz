@@ -1,0 +1,17 @@
+// expect: output
+// | 2
+// | Free
+// | invalid
+// rules: D18
+
+enum Plan { Free = 1, Pro = 2 }
+
+print(Plan.Pro.Number)
+match Plan.From(1) {
+    Plan p => print(p)
+    Invalid => print("invalid")
+}
+match Plan.From(7) {
+    Plan p => print(p)
+    Invalid => print("invalid")
+}

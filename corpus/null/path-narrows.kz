@@ -1,4 +1,5 @@
-// expect: error nullable-unchecked at 8
+// expect: output
+// | 13
 // rules: N3
 
 data User(string Name, string? Email)
