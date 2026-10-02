@@ -1,0 +1,9 @@
+// expect: output
+// | 4
+// | ok
+// rules: V3
+
+int x = 4
+string s = "ok"
+print(x)
+print(s)

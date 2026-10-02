@@ -1,0 +1,10 @@
+// expect: output
+// | 1
+// | Ann
+// rules: D1, D2
+
+data User(int Id, string Name)
+
+u = User(1, "Ann")
+print(u.Id)
+print(u.Name)

@@ -130,7 +130,7 @@ match store.Get(id) {
 
 // handle selected cases
 user = store.Get(id) else { NotFound => User.Guest }                       // recover
-user = store.Get(id) else { NotFound n => return Invalid("no user {id}") } // transform
+user = store.Get(id) else { NotFound => return Invalid }                   // transform
 user = store.Get(id) else { NotFound => throw }                            // cannot happen here
 ```
 
@@ -617,7 +617,8 @@ Goal (Simon, 2026-10-01): Kurz should not be meaningfully slower than C++ in com
 ## 14. Open
 
 - The numbers behind the speed goal (section 13). Simon found the first proposal too loose (a value tree within 1.3x of C++ `std::map`, HTTP within 2x of ASP.NET Core). Proposed on 2026-10-01 and not answered: within 1.1x on both, which is parity inside measurement noise, and an idle actor at most 512 bytes; each number is a ratchet from its first measurement.
-- Details the language reference needs before it is complete: interfaces and generics, closures, enums, properties, what an exception carries, and the naming of the standard library.
+- What the language reference could not take from this record. Each fork it met is a rule marked `open` there, and each thing it had to fill in so that a case could be written is marked `proposed`; both are answered by their id ([reference/00-about.md](reference/00-about.md)). Interfaces and properties (K7), declaring generics (T19), closures (F11), enums (D12) and what an exception carries (O7) are among them.
+- The naming of the standard library.
 - What a full inbox does to a waiting call under the `drop` modes.
 - Over-the-air update for devices: a runtime feature or later. A device that gets `Outdated` has to be able to update itself.
 - Where the TLS cipher primitives come from in the long run.

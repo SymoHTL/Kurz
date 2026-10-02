@@ -1,0 +1,7 @@
+// expect: output
+// | 5
+// rules: T8
+
+int small = 5
+long big = small
+print(big)

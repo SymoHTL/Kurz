@@ -1,0 +1,7 @@
+// expect: error reference-cycle at 4
+// rules: R2
+
+class Node(mut List<Node> Children)
+
+n = Node(List<Node>())
+print(n.Children.Count)

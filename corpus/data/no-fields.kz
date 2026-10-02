@@ -1,0 +1,8 @@
+// expect: output
+// | true
+// rules: D8
+
+data Empty
+
+e = Empty
+print(e == Empty)

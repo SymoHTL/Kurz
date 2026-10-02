@@ -1,0 +1,12 @@
+// expect: error nullable-unchecked at 12
+// rules: N2
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+email = Email(1)
+print(email.Bytes.Count)

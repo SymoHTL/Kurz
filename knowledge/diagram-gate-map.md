@@ -31,6 +31,12 @@ flowchart TD
         a store file named in an entry, CLAUDE.md or a skill that does not exist,
         nested entry, LIVING entry without diagram or update triggers,
         expired or future-dated numbers, fewer entries than the floor"]
+        G9["reference: a rule without id, status or the record section it cites;
+        a decided, assumed or proposed rule with neither a case nor a reason;
+        a case on an open rule; a sample that differs from its corpus file;
+        a corpus header that cannot be read or names an unknown rule;
+        an error id the error table does not list, or lists for other rules;
+        fewer rules or cases than the floors"]
         G4["ci-config: unpinned action, image or CLI; a job or step that can be skipped
         or may fail quietly; path filter; wider token; pull-request code or text
         reaching the review job; a workflow without facts"]
@@ -80,7 +86,8 @@ flowchart TD
     end
     subgraph X["Process: no mechanism"]
         X1["a decision is recorded only after the owner chose it: review rule, judgment step"]
-        X2["samples in the design record are right: nothing runs them, HAZARD issue 1"]
+        X2["samples in the design record and expectations in the corpus are right:
+        nothing runs them, HAZARD issue 1"]
         X3["wrap-up: lessons promoted, private memory audited: HAZARD issue 6"]
         X4["one push per review round: judgment step"]
     end
@@ -95,5 +102,6 @@ flowchart TD
 - `tools/tree_gate.py`, `.claude/settings.json`, `.githooks/pre-push` change: W1, P1, G2.
 - `.github/workflows/review.yml` or `tools/review/review.py` changes: the subgraph R.
 - `tools/ruleset.json` or `tools/merge_pr.py` changes: the subgraph M and G5.
+- `tools/lint_reference.py` changes, or something starts to run the corpus: G9 and X2.
 - A HAZARD issue closes or opens: the node that names it, and the table at the end of `CLAUDE.md`.
 - A rule in `CLAUDE.md` gains or loses its gate: the node of that gate, or the subgraph X.

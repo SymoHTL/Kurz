@@ -1,0 +1,10 @@
+// expect: output
+// | 3
+// | 7
+// rules: L9
+
+total = 1
+Total = 2
+print(total + Total)
+_count2 = 7
+print(_count2)

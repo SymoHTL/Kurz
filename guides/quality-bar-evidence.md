@@ -36,9 +36,12 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 <!-- /generated:store -->
 
-## The design record
+## The design record and the reference
 
-A statement marked *(assumed)* was proposed and not objected to; it is not a decision yet.
+A statement marked *(assumed)* was proposed and not objected to; it is not a decision yet. In the
+reference a `proposed` rule is what a case needed and the record does not say, and an `open` rule
+is a fork nobody chose: neither is a decision. The cases are counted here, not run: no compiler
+exists.
 
 <!-- generated:design -->
 <!-- /generated:design -->

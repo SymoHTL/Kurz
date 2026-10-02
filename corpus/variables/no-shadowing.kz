@@ -1,0 +1,8 @@
+// expect: error assign-immutable at 6
+// rules: V8
+
+x = 1
+if x > 0 {
+    x = 2
+}
+print(x)

@@ -1,0 +1,15 @@
+// expect: output
+// | 7
+// | 3
+// | -3
+// | 1
+// | true
+// | true
+// rules: T18
+
+print(1 + 2 * 3)
+print(7 / 2)
+print(-7 / 2)
+print(7 % 3)
+print(1 < 2 && 2 < 3)
+print(!(1 == 1) || 3 >= 3)

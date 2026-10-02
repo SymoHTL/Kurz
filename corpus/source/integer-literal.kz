@@ -1,0 +1,12 @@
+// expect: output
+// | 200
+// | 5
+// | 4000000000
+// rules: L10
+
+byte b = 200
+long big = 5
+huge = 4000000000
+print(b)
+print(big)
+print(huge)

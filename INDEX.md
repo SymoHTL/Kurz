@@ -8,10 +8,11 @@ LIVING = a diagram kept current with the system it draws.
 ## Design work
 
 - [Design before build](knowledge/design-before-build.md) POSTMORTEM HARD — a v0 compiler was built before the big choices were asked and every pick in it was void (2026-10-01). In the design phase the tree gate refuses any path that is not design record, reference, corpus, knowledge or quality tooling, at write time, before a push and in CI.
-- [Samples obey the rules beside them](knowledge/samples-obey-the-rules-beside-them.md) HARD — the cycle-rule section showed a class that its own rule rejects. Nothing runs a sample, so read each one against every rule in its section; samples in the design record stay unchecked (HAZARD #1).
+- [Samples obey the rules beside them](knowledge/samples-obey-the-rules-beside-them.md) HARD — the cycle-rule section showed a class that its own rule rejects. Nothing runs a sample, so read each one against every rule in its section; samples in the design record and expectations in the corpus stay unrun (HAZARD #1).
 - [A guarantee needs its mechanism](knowledge/guarantee-needs-its-mechanism.md) HARD — "durable state survives machine loss" was claimed for a log on that machine's own disk. Write a guarantee as: the failure it survives, the mechanism, the cost; without a mechanism it goes under Open.
 - [Reading a paper for evidence](knowledge/reading-a-paper-for-evidence.md) RECIPE — cite a figure only after reading its sentence in the source: extract the PDF with pypdf (set PYTHONIOENCODING=utf-8 on a Windows console), record the workload, machine and baseline, link the paper.
-- [Design change playbook](knowledge/diagram-design-change-playbook.md) LIVING — before, while and after writing a change to the design record: the owner chose it, each statement has one status, guarantees carry mechanism and cost, samples read against their rules, cross-references and Open updated in the same change.
+- [A case bakes in a pick](knowledge/a-case-bakes-in-a-pick.md) TRAP — writing the first conformance cases needed 33 rules the design record never states (`print`, block bodies, scope, what "used" means) and met 24 forks. A rule the record does not carry is `proposed` or `open` in the reference, never `decided`; the lint refuses a case on an open rule.
+- [Design change playbook](knowledge/diagram-design-change-playbook.md) LIVING — before, while and after writing a change to the design record: the owner chose it, each statement has one status, guarantees carry mechanism and cost, samples read against their rules, cross-references and Open updated in the same change, and the reference rules that cite the changed sections follow in the same pull request.
 
 ## Publishing and the forge
 

@@ -1,0 +1,12 @@
+// expect: output
+// | 3
+// | 0
+// rules: R6
+
+data Tree(int Key, Tree? Left, Tree? Right)
+
+mut root = Tree(8, null, null)
+before = root
+root.Left = Tree(3, null, null)
+print(root.Left?.Key ?? 0)
+print(before.Left?.Key ?? 0)

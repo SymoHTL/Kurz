@@ -1,0 +1,23 @@
+// expect: output
+// | 10
+// | 0
+// rules: O5
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int OrZero(int id) {
+    value = Find(id) else {
+        NotFound => 0
+    }
+    return value
+}
+
+print(OrZero(1))
+print(OrZero(2))

@@ -1,0 +1,9 @@
+// expect: output
+// | 1
+// rules: K1, K2
+
+class Counter(mut int Count)
+
+c = Counter(0)
+c.Count = c.Count + 1
+print(c.Count)

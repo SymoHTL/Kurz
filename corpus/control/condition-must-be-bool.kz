@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 5
+// rules: C3
+
+x = 1
+if x {
+    print("yes")
+}

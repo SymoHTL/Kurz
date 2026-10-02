@@ -1,0 +1,7 @@
+// expect: output
+// | a {b}
+// | say "hi"
+// rules: L7
+
+print("a \{b}")
+print("say \"hi\"")

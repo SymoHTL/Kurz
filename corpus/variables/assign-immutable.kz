@@ -1,0 +1,6 @@
+// expect: error assign-immutable at 6
+// rules: V7
+
+x = 1
+print(x)
+x = 2

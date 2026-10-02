@@ -1,0 +1,27 @@
+// expect: output
+// | 20
+// | none
+// rules: O1, O2
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int | NotFound Twice(int id) {
+    value = Find(id)
+    return value * 2
+}
+
+match Twice(1) {
+    int n => print(n)
+    NotFound => print("none")
+}
+match Twice(2) {
+    int n => print(n)
+    NotFound => print("none")
+}

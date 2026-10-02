@@ -1,0 +1,6 @@
+// expect: output
+// | 2147483648
+// rules: T2
+
+long big = 2147483647
+print(big + 1)

@@ -52,6 +52,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Agent operations (isolation, notes file, owner queue, worktrees) | Machine-level, outside this repository. Nothing here depends on it. |
 | Living diagrams | Four entries tagged LIVING in `INDEX.md`; the lint requires each to have a diagram and its update triggers. |
 | Living guides | This guide and the evidence guide; the tree gate keeps both portable, the lint expires the numbers. |
+| Not in the tutorial: the product is a language definition | `reference/` (rules with an id and a status), `corpus/` (one case per file) and `tools/lint_reference.py` (gate `reference`), which keeps the two consistent. Nothing runs a case yet (HAZARD #1). |
 
 ## Gates
 
@@ -59,7 +60,8 @@ The list of gates has one definition, `GATES` in `tools/gates.py`. It is printed
 each gate red, in the evidence guide; the picture is `knowledge/diagram-gate-map.md`. Of the jobs
 the tutorial lists:
 
-- **Exist here:** the knowledge lint, the secret scan (part of the tree gate, on top of GitHub's
+- **Exist here:** the knowledge lint, the reference lint (this repository's own: the tutorial has
+  no such job), the secret scan (part of the tree gate, on top of GitHub's
   own secret scanning and push protection), title hygiene, the breadth gate, the review, the
   reviewer's own unit suite (run with every other self-test), and the verdict idea, which here is
   the runner itself: one job that is red unless every gate reported a pass.
@@ -143,6 +145,9 @@ same pull request.
 - **The launcher, the per-window isolation, the worktree-removal script.** They belong to a
   machine that runs many sessions at once, and they live there.
 - **A token-usage block in the evidence.** Only a machine with the session logs could fill it.
+- **Running the corpus.** No compiler exists. The reference lint checks the shape of a case and
+  that the reference shows it unchanged; whether an expected output or error is right is decided
+  by reading and by the review (HAZARD #1).
 
 ## Changing the bar
 

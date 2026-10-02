@@ -32,6 +32,11 @@ GATES = [
      "an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, "
      "in CLAUDE.md or in a skill that does not exist; a nested entry; a LIVING "
      "entry without diagram or update triggers; expired or future-dated numbers in a guide; fewer entries than the floor"),
+    ("reference", ["tools/lint_reference.py"], "always",
+     "a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with "
+     "neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a corpus header that "
+     "cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; "
+     "fewer rules or cases than the floors"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an unpinned action, image or CLI; a job or step that can be skipped or may fail quietly; "
      "a path filter; a wider token; pull-request code or text reaching the review job; a workflow without facts"),

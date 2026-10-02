@@ -1,0 +1,274 @@
+# 9. Outcomes and errors
+
+Every function declares every outcome that can happen under normal use.
+
+### O1 (decided, §5) The return type is a union, and its first case is success
+
+A function that can end in more than one way returns a union. The first case is the success
+case. A function returns a case by returning a value of it.
+
+Case: [outcomes/unwrap.kz](../corpus/outcomes/unwrap.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int | NotFound Twice(int id) {
+    value = Find(id)
+    return value * 2
+}
+
+match Twice(1) {
+    int n => print(n)
+    NotFound => print("none")
+}
+match Twice(2) {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
+### O2 (decided, §5) The unwrap rule
+
+Calling such a function yields the success value directly. Every other case leaves the calling
+function at that point and becomes its result.
+
+Case: [outcomes/unwrap.kz](../corpus/outcomes/unwrap.kz)
+
+### O3 (decided, §5) Honest signatures
+
+A case that can leave a function this way has to be listed in that function's own return type.
+Otherwise the call is the compile error `unlisted-case`.
+
+Case: [outcomes/unlisted-case.kz](../corpus/outcomes/unlisted-case.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int Twice(int id) {
+    value = Find(id)
+    return value * 2
+}
+
+print(Twice(1))
+```
+
+### O4 (decided, §5) Keeping all cases
+
+A call is not unwrapped when it is the subject of a `match`, or when its result goes into a
+variable with a written union type.
+
+Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+match Find(2) {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/keep-explicit-type.kz](../corpus/outcomes/keep-explicit-type.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int | NotFound result = Find(1)
+match result {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
+### O5 (decided, §5) Postfix `else`
+
+`call else { Case => ... }` handles the listed cases at the call. A case that is not listed
+still propagates (O2, O3). An arm either recovers with a value, which takes the place of the
+success value; or returns another case from the calling function; or throws.
+
+Case: [outcomes/else-recover.kz](../corpus/outcomes/else-recover.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int OrZero(int id) {
+    value = Find(id) else {
+        NotFound => 0
+    }
+    return value
+}
+
+print(OrZero(1))
+print(OrZero(2))
+```
+
+Case: [outcomes/else-transform.kz](../corpus/outcomes/else-transform.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+data Missing(int Id)
+
+int | Missing Need(int id) {
+    value = Find(id) else {
+        NotFound => return Missing(id)
+    }
+    return value
+}
+
+match Need(2) {
+    int n => print(n)
+    Missing m => print("missing {m.Id}")
+}
+```
+
+Case: [outcomes/else-partial.kz](../corpus/outcomes/else-partial.kz)
+```kurz
+data NotFound
+data Invalid
+
+int | NotFound | Invalid Find(int id) {
+    if id < 0 {
+        return Invalid
+    }
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int | Invalid OrZero(int id) {
+    value = Find(id) else {
+        NotFound => 0
+    }
+    return value
+}
+
+match OrZero(2) {
+    int n => print(n)
+    Invalid => print("invalid")
+}
+match OrZero(-1) {
+    int n => print(n)
+    Invalid => print("invalid")
+}
+```
+
+Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+print("before")
+value = Find(2) else {
+    NotFound => throw
+}
+print(value)
+```
+
+### O6 (decided, §5, §6) Exceptions
+
+An exception is for a situation the function cannot recover from. There is no `catch`. An
+exception ends the actor it happens in; top-level code is the root actor, so an exception there
+ends the program with an error code. What was printed before stays printed.
+
+Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
+
+### O7 (open) What an exception carries, and `throw` outside an `else` arm
+
+The record shows `throw` only as an arm of `else`, with nothing after it, and reads a `Reason`
+from a crashed child (section 6). It lists what an exception carries as a missing detail
+(section 14). Options: (a) `throw` takes a text, `throw "no config"`, and the runtime adds the
+place and the chain id; (b) `throw` takes a `data` value, so a supervisor can `match` on it;
+(c) both: a value, with text as the short form. Lean: (c). A supervisor's `on crash` block
+(section 6) decides by what it is given, and a text alone forces it to parse.
+
+### O8 (proposed) `match` covers every case
+
+A `match` on a union lists every case of the union. A missing case is the compile error
+`match-not-exhaustive`, reported at the `match`. The record does not say this; without it, a new
+case in a signature would pass silently through every `match` that was written before.
+
+Case: [outcomes/match-not-exhaustive.kz](../corpus/outcomes/match-not-exhaustive.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+match Find(2) {
+    int n => print(n)
+}
+```
+
+### O9 (proposed) Top-level code has no caller
+
+Top-level code has no signature to list a case in, so a call there has to handle every case that
+is not success. Letting one propagate is the compile error `unlisted-case`.
+
+Case: [outcomes/top-level-unlisted.kz](../corpus/outcomes/top-level-unlisted.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+value = Find(2)
+print(value)
+```
+
+### O10 (open) A success case without a value
+
+Whether `void` can be the first case, `void | NotFound Remove(int id)`. Options: (a) yes, the
+call is then a statement; (b) no, such a function returns a `data` type without fields. Lean:
+(a); the alternative invents an `Ok` type in every project.

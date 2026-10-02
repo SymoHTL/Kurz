@@ -1,0 +1,7 @@
+// expect: throws
+// build: test
+// rules: T5
+
+mut int x = 2147483647
+x = x + 1
+print(x)

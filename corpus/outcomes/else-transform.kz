@@ -1,0 +1,26 @@
+// expect: output
+// | missing 2
+// rules: O5
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+data Missing(int Id)
+
+int | Missing Need(int id) {
+    value = Find(id) else {
+        NotFound => return Missing(id)
+    }
+    return value
+}
+
+match Need(2) {
+    int n => print(n)
+    Missing m => print("missing {m.Id}")
+}

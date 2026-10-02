@@ -1,0 +1,7 @@
+// expect: output
+// | first
+// | second
+// rules: F5
+
+print("first")
+print("second")

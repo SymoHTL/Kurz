@@ -1,0 +1,11 @@
+// expect: output
+// | 2
+// | 1
+// rules: M1, M3
+
+mut a = List<int>()
+a.Add(1)
+b = a
+a.Add(2)
+print(a.Count)
+print(b.Count)

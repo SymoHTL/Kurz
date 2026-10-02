@@ -1,0 +1,9 @@
+// expect: output
+// | 1
+// rules: R2
+
+class Link(int Value, Link? Next)
+
+a = Link(1, null)
+b = Link(2, a)
+print(b.Next?.Value ?? 0)

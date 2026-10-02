@@ -22,6 +22,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gates  # noqa: E402
 import kit  # noqa: E402
+import lint_reference  # noqa: E402
 import red_proof  # noqa: E402
 
 EVIDENCE = "guides/quality-bar-evidence.md"
@@ -68,10 +69,17 @@ def block_design(root):
     open_section = re.search(r"^## \d+\. Open\n(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not open_section:
         raise kit.Refused("kurz-design.md has no Open section")
-    return table(["Design record", "Count"], [
-        ("Sections", len(re.findall(r"^## \d+\. ", text, re.M))),
-        ("Statements marked *(assumed)*", len(re.findall(r"\*\(assumed", text))),
-        ("Open questions", len(re.findall(r"^- ", open_section.group(1), re.M))),
+    errors, counted = lint_reference.lint(root)
+    if errors:
+        raise kit.Refused(f"the reference lint is not green, so its counts are not evidence: {errors[0]}")
+    return table(["Design record and reference", "Count"], [
+        ("Sections of the record", len(re.findall(r"^## \d+\. ", text, re.M))),
+        ("Statements of the record marked *(assumed)*", len(re.findall(r"\*\(assumed", text))),
+        ("Entries under Open in the record", len(re.findall(r"^- ", open_section.group(1), re.M))),
+        ("Rules in the reference", counted["rules"]),
+        *[(f"of them {status}", counted[status]) for status in ("decided", "assumed", "proposed", "open")],
+        ("Corpus cases, none of them run", counted["cases"]),
+        ("Compile-error ids", counted["errors"]),
     ])
 
 

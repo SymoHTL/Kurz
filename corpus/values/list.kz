@@ -1,0 +1,10 @@
+// expect: output
+// | 2
+// | 5
+// rules: M9, T17
+
+mut xs = List<int>()
+xs.Add(4)
+xs.Add(5)
+print(xs.Count)
+print(xs[1])

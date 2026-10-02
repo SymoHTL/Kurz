@@ -1,0 +1,7 @@
+// expect: error reference-cycle at 4
+// rules: R4
+
+class Node(mut List<Node> Children, mut weak Node? Parent)
+
+n = Node(List<Node>(), null)
+print(n.Children.Count)

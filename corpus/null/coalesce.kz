@@ -1,0 +1,14 @@
+// expect: output
+// | a@example.com
+// | none
+// rules: N1, N4
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+print(Email(1) ?? "none")
+print(Email(2) ?? "none")

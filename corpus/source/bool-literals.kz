@@ -1,0 +1,9 @@
+// expect: output
+// | true
+// | false
+// rules: L8
+
+yes = true
+no = false
+print(yes)
+print(no)

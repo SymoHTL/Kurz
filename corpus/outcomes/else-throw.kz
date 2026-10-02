@@ -1,0 +1,18 @@
+// expect: throws
+// | before
+// rules: O5, O6
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+print("before")
+value = Find(2) else {
+    NotFound => throw
+}
+print(value)

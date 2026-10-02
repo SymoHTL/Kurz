@@ -1,0 +1,12 @@
+// expect: output
+// | 3
+// rules: F3
+
+int Max(int a, int b) {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+print(Max(2, 3))

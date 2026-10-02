@@ -1,0 +1,7 @@
+// expect: output
+// | 8
+// rules: F6
+
+print(Double(4))
+
+int Double(int n) => n * 2

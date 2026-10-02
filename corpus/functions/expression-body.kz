@@ -1,0 +1,7 @@
+// expect: output
+// | 5
+// rules: F1, F2
+
+int Add(int a, int b) => a + b
+
+print(Add(2, 3))

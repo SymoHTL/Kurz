@@ -11,7 +11,9 @@ description: >-
 
 ## 1. Ask
 
-1. Read the sections of `kurz-design.md` that the topic touches, and section "Open".
+1. Read the sections of `kurz-design.md` that the topic touches, section "Open", and the rules of
+   `reference/` on the topic that are marked `open` or `proposed`. A question about one of them
+   names its id, so that Simon can answer "C8 c".
 2. Write numbered questions. Each one has: the question in one line; two to four options; what
    each option costs (at run time, in the compiler, for the developer); a stated lean with its
    reason. Simon answers by number.
@@ -36,6 +38,11 @@ description: >-
    their source.
 6. Future plans are not design. What gets built when stays out of the record, the pull request
    and the commit message.
+7. Then the reference, in the same pull request: each rule the round answered gets its new status
+   and the section it now cites; a rule that became `decided` gets its cases (a `.kz` file under
+   `corpus/`, a `Case:` line under the rule, then `py -3 tools/lint_reference.py --sync`), and a
+   new compile error gets its row in `reference/12-errors.md`. A `proposed` rule Simon did not
+   object to stays `proposed` until the record says it, as *(assumed)* or decided.
 
 ## 3. Land
 

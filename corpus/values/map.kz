@@ -1,0 +1,9 @@
+// expect: output
+// | 31
+// | 0
+// rules: M9
+
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+print(ages["Ann"] ?? 0)
+print(ages["Bea"] ?? 0)

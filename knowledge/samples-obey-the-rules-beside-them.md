@@ -20,8 +20,10 @@ the sample as the truth because it is concrete.
 
 - Read every sample against each rule stated in the same section before it goes in: mutability,
   the cycle rule, the null rule, honest signatures, visibility.
-- In the reference, a Kurz sample is a corpus case, so that a compiler can run it. That is a rule
-  of the reference and has its own lint once the reference lands.
+- In the reference, every Kurz sample is a corpus case, shown under a `Case:` line.
+  `tools/lint_reference.py` (gate `reference`) refuses any other sample and any sample that
+  differs from its file. Nothing runs a case until a compiler exists, so its expectation is read
+  against the rules it names in the same way (HAZARD #1).
 - In `kurz-design.md` samples stay illustrative and unchecked. That is HAZARD #1: nothing executes
   them until a compiler exists. The review rule "design record" carries the defect shape, but the
   reviewer sees only the diff, so it can judge a sample only against rules in the same diff.

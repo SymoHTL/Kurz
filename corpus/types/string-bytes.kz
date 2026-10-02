@@ -1,0 +1,8 @@
+// expect: output
+// | 3
+// | 97
+// rules: T15
+
+s = "aä"
+print(s.Bytes.Count)
+print(s.Bytes[0])

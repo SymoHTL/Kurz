@@ -1,0 +1,5 @@
+// expect: error unused-variable at 4
+// rules: V6
+
+mut x = 1
+x = 2

@@ -1,0 +1,5 @@
+// expect: error string-index at 5
+// rules: T15
+
+s = "abc"
+print(s[0])

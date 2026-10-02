@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 4
+// rules: N6
+
+string name = null
+print(name)

@@ -1,0 +1,11 @@
+// expect: output
+// | hello Kurz
+// | 3 items
+// | next 4
+// rules: L6
+
+name = "Kurz"
+count = 3
+print("hello {name}")
+print("{count} items")
+print("next {count + 1}")
