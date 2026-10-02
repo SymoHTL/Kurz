@@ -76,7 +76,7 @@ the tutorial lists:
 | "Skipped pipelines count as successful: off" | No such switch. A job skipped by `if:` reports success, so the `gates` job has no `if:` anywhere, and the review's required check is a status that only a completed review posts (`knowledge/a-skipped-job-reports-success.md`). |
 | Draft lane as a blocking manual job | A Draft cannot be merged, and marking it Ready starts the review. In Draft the review runs on demand: `gh workflow run review.yml -f pr=N`. |
 | Rules fetched from the target branch | `pull_request_target`: workflow, reviewer and rules all come from the base branch (`knowledge/the-review-runs-the-base-branch.md`). |
-| Unanchored thread for the lows | GitHub has no resolvable thread without a file, so the lows share one file-level thread on the first file that has one. |
+| Unanchored thread for the lows | GitHub has no resolvable thread without a file, so the lows share a file-level thread on the first file that has one. A comment holds 65,536 characters, so a thread carries at most twenty findings and the rest go into further threads. |
 | No per-request override of the pipeline check | The same. The gate-flip switches the ruleset's enforcement off for one merge, restores it and reads it back. While it is off nothing on the server holds any pull request or a push to `main`; the tool's own reading of the checks is the only gate, so it counts a check run only from the app the ruleset pins. |
 | Pipeline-control literals in the title | The workflow-skip literals; a squash merge puts the title on `main`. |
 | Editing title or description starts no pipeline | The gates do run on `edited`. The review does not, by design: the description is part of its cache key, and an edit would bill a full review. Re-run it by hand after an edit that matters. |
@@ -104,7 +104,8 @@ Five things are specific to this repository:
   found, stores the files whose batches converged, and then ends red. The next run replays those
   files and continues with the rest, so a diff that needs more than one run is reviewed across
   them and no paid pass is thrown away. A batch counts as reviewed only when it converged or used
-  every pass it may have. The first version here posted nothing unless every batch had run, and
+  every pass it may have, and a file only when the forge took its findings: a thread it refuses
+  costs that thread's files, not the run. The first version here posted nothing unless every batch had run, and
   let a batch that ran out of time after one pass stand as reviewed.
 - **The log is written line by line**, one line per pass with its duration. A pass takes minutes
   (`knowledge/what-a-review-pass-costs.md`), and a log that fills only at the end hides a run

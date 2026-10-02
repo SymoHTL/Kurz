@@ -43,6 +43,9 @@ BATCH_CHARS = 30_000
 MAX_DIFF_CHARS = 1_200_000  # beyond this the pull request is split, not reviewed in part
 MIN_PASSES, MAX_PASSES = 2, 5
 WORKERS = 3
+# A comment on the forge holds 65,536 characters. A thread carries at most this many findings, a
+# title this many characters and a body that many, so a rendered thread stays well below it.
+THREAD_FINDINGS, TITLE_CHARS, BODY_CHARS = 20, 200, 2000
 POST_MARGIN_S = 300  # kept back from the job timeout for posting
 DEFAULT_PASS_S = 300  # a pass is assumed to take this long until one was measured
 RANK = {"low": 0, "medium": 1, "high": 2}
@@ -253,7 +256,7 @@ def parse_result(stdout, returncode, paths):
     if not isinstance(out, dict) or not isinstance(out.get("findings"), list):
         raise ReviewError("bad-output", "the answer carries no structured findings")
     # A title is one line: it is listed to later passes as "already reported", one finding per line.
-    good = [{**{k: f[k] for k in ("file", "line", "severity", "body")}, "title": " ".join(f["title"].split())}
+    good = [{**{k: f[k] for k in ("file", "line", "severity", "body")}, "title": " ".join(f["title"].split())[:TITLE_CHARS]}
             for f in out["findings"] if valid_finding(f, paths)]
     return good, float(d.get("total_cost_usd") or 0), len(out["findings"]) - len(good)
 
@@ -410,18 +413,20 @@ def marked(comments, me, mark):
 
 def plan_posts(findings, anchors):
     """One thread per file for its high and medium findings, anchored on the most severe line with
-    the other lines and the file itself as fallbacks; one thread for all lows. `None` = the file."""
+    the other lines and the file itself as fallbacks; one thread for all lows. `None` = the file.
+    More than THREAD_FINDINGS findings are spread over several threads: a comment has a size
+    limit, and a thread the forge refuses is a thread of findings nobody reads."""
+    parts = lambda fs: [fs[n:n + THREAD_FINDINGS] for n in range(0, len(fs), THREAD_FINDINGS)]
     threads, by_file = [], {}
     for f in findings:
         if f["severity"] != "low":
             by_file.setdefault(f["file"], []).append(f)
     for path, fs in by_file.items():
-        fs = sorted(fs, key=lambda f: (-RANK[f["severity"]], f["line"]))
-        lines = list(dict.fromkeys(f["line"] for f in fs if f["line"] in anchors.get(path, ())))
-        threads.append({"path": path, "lines": lines + [None], "findings": fs, "lows": False})
-    lows = [f for f in findings if f["severity"] == "low"]
-    if lows:
-        threads.append({"path": lows[0]["file"], "lines": [None], "findings": lows, "lows": True})
+        for part in parts(sorted(fs, key=lambda f: (-RANK[f["severity"]], f["line"]))):
+            lines = list(dict.fromkeys(f["line"] for f in part if f["line"] in anchors.get(path, ())))
+            threads.append({"path": path, "lines": lines + [None], "findings": part, "lows": False})
+    for part in parts([f for f in findings if f["severity"] == "low"]):
+        threads.append({"path": part[0]["file"], "lines": [None], "findings": part, "lows": True})
     return threads
 
 
@@ -432,7 +437,7 @@ def marker(name, payload):
 
 def render(thread):
     # The model's words are shown, never trusted: a marker opened inside a title or body must not read back as state.
-    shown = lambda text: text.replace("<!--", "&lt;!--")
+    shown = lambda text: (text if len(text) <= BODY_CHARS else text[:BODY_CHARS] + " [cut here: the text was longer]").replace("<!--", "&lt;!--")
     lines = ["**Automated review: low findings, all files**" if thread["lows"] else "**Automated review**", ""]
     for f in thread["findings"]:
         lines += [f"- **{f['severity']}** `{f['file']}` line {f['line']}: {shown(f['title'])}", "", indent(shown(f["body"]), "  "), ""]
@@ -668,8 +673,13 @@ def review(argv):
             return stop(*incomplete) if incomplete else 0
         # What was found is posted and what converged is stored even when the run then fails: a
         # diff that needs more than one run is reviewed across them, and no paid pass is thrown away.
+        unposted = set()
         for thread in plan_posts(findings, anchors):
-            print(f"  posted {len(thread['findings'])} findings at {forge.thread(head, thread)}")
+            try:
+                print(f"  posted {len(thread['findings'])} findings at {forge.thread(head, thread)}")
+            except kit.Refused as e:  # these files are not stored as reviewed: the next run finds the findings again
+                unposted |= {f["file"] for f in thread["findings"]}
+                print(f"  NOT POSTED: {len(thread['findings'])} findings on {thread['path']}: {e}")
         if capped:
             wanted = note_wanted(notes, "no-convergence", sha=head)
             if wanted:
@@ -677,10 +687,13 @@ def review(argv):
                            f"finding defects above low in {', '.join(f'`{p}`' for p in capped)}. Expect more findings on "
                            f"the next round.\n\n{marker('note', wanted)}")
         cached = {f["path"]: block_hash(f["block"]) for f in files if f["path"] in replay}
-        cached.update({f["path"]: block_hash(f["block"]) for f in todo if f["path"] not in unconverged})
+        cached.update({f["path"]: block_hash(f["block"]) for f in todo if f["path"] not in unconverged and f["path"] not in unposted})
         forge.save_state(state_comment and state_comment["id"],
                          f"Automated review state for `{head[:8]}`: {summary}. {len(replay)} files replayed.\n\n"
                          f"{marker('state', {'v': 1, 'key': key, 'head': head, 'files': cached})}")
+        if unposted:
+            return stop("failed", f"the forge refused the findings on {', '.join(sorted(unposted))}; those files are not stored as "
+                                  f"reviewed, so the next run reports them again. Found: {summary}")
         if incomplete:
             return stop(incomplete[0], f"{incomplete[1]}. Posted so far: {summary}")
         if in_ci and not local:

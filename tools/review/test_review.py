@@ -71,7 +71,7 @@ class MemoryForge(rv.Forge):
 
     def __init__(self):
         super().__init__("o/r", 1)
-        self.threads, self.notes, self.statuses = [], [], []
+        self.threads, self.notes, self.statuses, self.refuse_findings = [], [], [], False
 
     def pr(self):
         return {"head": {"sha": "c" * 40}, "base": {"ref": "main"}, "state": "open", "title": "A title", "body": "A body",
@@ -93,6 +93,8 @@ class MemoryForge(rv.Forge):
         return self.notes
 
     def post(self, path, payload, method="POST"):
+        if self.refuse_findings and "kurz-review:findings" in (payload.get("body") or ""):
+            raise kit.Refused("422")
         comment = {"id": len(self.notes) + 1, "user": {"login": "bot"}, "body": payload.get("body")}
         if method == "PATCH":
             next(c for c in self.notes if str(c["id"]) == path.rsplit("/", 1)[1])["body"] = payload["body"]
@@ -259,6 +261,8 @@ def suite(case):
     wrapped = json.loads(fixture("cli-findings.json"))
     wrapped["structured_output"]["findings"][0]["title"] = "a title\nover  two lines"  # edited: the real title is one line
     case("answer: a title is made one line", rv.parse_result(json.dumps(wrapped), 0, {"a.md"})[0][0]["title"] == "a title over two lines")
+    wrapped["structured_output"]["findings"][0]["title"] = "t" * (rv.TITLE_CHARS + 50)
+    case("answer: a title longer than the limit is cut", len(rv.parse_result(json.dumps(wrapped), 0, {"a.md"})[0][0]["title"]) == rv.TITLE_CHARS)
     paths = {"a.md"}
     for name, bad in {"line 0": finding(line=0), "a line that is true": finding(line=True), "a line as text": finding(line="3"),
                       "an unknown severity": finding(severity="critical"), "an empty title": finding(title=" "),
@@ -378,6 +382,14 @@ def suite(case):
     case("plan: a line the diff does not show is never an anchor", 50 not in plan[0]["lines"] and len(plan[0]["findings"]) == 3)
     case("plan: every low is in the one low thread", [f["file"] for f in plan[1]["findings"]] == ["b.md", "a.md"] and plan[1]["lines"] == [None])
     case("plan: no findings, no threads", rv.plan_posts([], anchors) == [])
+    many = [finding(line=n) for n in range(1, rv.THREAD_FINDINGS + 4)] + [finding(line=n, severity="low") for n in range(1, 2 * rv.THREAD_FINDINGS + 2)]
+    sizes = [(t["lows"], len(t["findings"])) for t in rv.plan_posts(many, {"a.md": set(range(1, 100))})]
+    case("plan: more findings than a thread holds are spread over several, and none is lost",
+         sizes == [(False, rv.THREAD_FINDINGS), (False, 3), (True, rv.THREAD_FINDINGS), (True, rv.THREAD_FINDINGS), (True, 1)], sizes)
+    long = rv.render({"lows": False, "findings": [finding(title="t", body="x" * (rv.BODY_CHARS + 500))]})
+    case("posted: a body longer than the limit is cut, and says so", "x" * rv.BODY_CHARS + " [cut here" in long and "x" * (rv.BODY_CHARS + 1) not in long, len(long))
+    full = rv.render({"lows": True, "findings": [finding(line=n, title="t" * rv.TITLE_CHARS, body="b" * rv.BODY_CHARS) for n in range(rv.THREAD_FINDINGS)]})
+    case("posted: the largest thread the reviewer can render fits a comment", len(full) < 65_536 and len(full) > rv.THREAD_FINDINGS * rv.BODY_CHARS, len(full))
 
     class Fake(rv.Forge):
         def __init__(self, refuse):
@@ -465,6 +477,13 @@ def suite(case):
         code, out = None, repr(e)
     case("run: a crash inside the run is a review that did not complete, with its status", (code, forge.statuses) == (1, ["error"])
          and "REVIEW DID NOT COMPLETE (failed)" in out, (code, forge.statuses, out[-200:]))
+    forge = MemoryForge()
+    forge.refuse_findings = True
+    code, out = run_review(forge, scripted_model({**found, "new.kz": [finding(file="new.kz", line=1, severity="low")]}), ["--pr", "1"],
+                           ci=True, credential="x")
+    case("run: findings the forge refuses end the run red, and their files are not stored as reviewed",
+         (code, forge.statuses, forge.threads, stored(forge)) == (1, ["error"], [], ["b.md", "e.md"]) and "NOT POSTED" in out,
+         (code, forge.statuses, len(forge.threads), stored(forge)))
     forge, dry = MemoryForge(), scripted_model(found)
     code, out = run_review(forge, dry, ["--pr", "1", "--dry-run"])
     case("run: a dry run reviews and posts nothing", code == 0 and not (forge.threads or forge.notes or forge.statuses) and len(dry.batches) == 8
