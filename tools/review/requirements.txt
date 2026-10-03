@@ -1,0 +1,4 @@
+# Installed with --require-hashes by both workflows. The hash is the CPython 3.12 manylinux x86_64
+# wheel, which is what the ubuntu-24.04 runner picks; any other platform fails loudly.
+PyYAML==6.0.3 \
+    --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc

@@ -1,0 +1,4 @@
+# Every text file is stored with LF line endings and checked out with LF on every system. This
+# reaches the corpus: an expectation is compared byte for byte, so expectations are LF-only, and a
+# case cannot expect a carriage-return byte until its path is marked `-text` here.
+* text=auto eol=lf

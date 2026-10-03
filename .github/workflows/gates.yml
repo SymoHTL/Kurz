@@ -1,0 +1,33 @@
+name: gates
+
+# No path filter: a guide's TTL runs out with no file changing, and every change is gated.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # One job, no `if`: a skipped job reports success to a required check. tools/gates.py runs every
+  # gate; its docstring is the one definition of which verdicts turn the run red. Facts of this file
+  # are pinned by tools/lint_ci.py.
+  gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes -r tools/review/requirements.txt
+      - name: Run every gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: '"$RUNNER_TEMP/venv/bin/python" tools/gates.py'

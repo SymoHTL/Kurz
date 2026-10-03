@@ -1,0 +1,54 @@
+diff --git a/a.md b/a.md
+index f5c7aba..fceb9df 100644
+--- a/a.md
++++ b/a.md
+@@ -1,5 +1,5 @@
+ line 1 of the first file
+-line 2 of the first file
++line 2, changed
+ line 3 of the first file
+ line 4 of the first file
+ line 5 of the first file
+@@ -15,6 +15,7 @@ line 14 of the first file
+ line 15 of the first file
+ line 16 of the first file
+ line 17 of the first file
+-line 18 of the first file
++line 18, changed
++line 18b, added
+ line 19 of the first file
+ line 20 of the first file
+diff --git a/b.md b/b.md
+deleted file mode 100644
+index fedc263..0000000
+--- a/b.md
++++ /dev/null
+@@ -1,3 +0,0 @@
+-gone 1
+-gone 2
+-gone 3
+diff --git a/c.md b/e.md
+similarity index 80%
+rename from c.md
+rename to e.md
+index 6f2f979..49cc219 100644
+--- a/c.md
++++ b/e.md
+@@ -1,7 +1,7 @@
+ kept line 1
+ kept line 2
+ kept line 3
+-kept line 4
++kept line 4, edited
+ kept line 5
+ kept line 6
+ kept line 7
+diff --git a/new.kz b/new.kz
+new file mode 100644
+index 0000000..757268e
+--- /dev/null
++++ b/new.kz
+@@ -0,0 +1,3 @@
++x = 1
++mut y = 2
++print(x + y)
