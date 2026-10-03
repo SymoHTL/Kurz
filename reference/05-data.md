@@ -44,7 +44,7 @@ Case: [data/immutable.kz](../corpus/data/immutable.kz)
 ```kurz
 data Point(int X, int Y)
 
-p = Point(1, 2)
+p = Point(1, 2)    // the variable decides: through `mut p` the same line compiles (field-through-mut.kz)
 p.X = 3
 print(p.X)
 ```
