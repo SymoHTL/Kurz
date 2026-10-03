@@ -1,0 +1,8 @@
+// expect: error no-text at 8
+// rules: A7
+
+class Counter(mut int Count)
+
+mut xs = List<Counter>()
+xs.Add(Counter(1))
+print(xs)

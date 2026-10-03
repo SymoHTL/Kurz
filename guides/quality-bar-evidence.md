@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-02
-digest: 3bacf1fceb653219776a23801d5941abc1d07b8bf199178e5a126f9e69ccbf51
+generated: 2026-10-03
+digest: 298e03fdd6bc229a9f011861edd053a2e346a6141bd13dfa299adcd8f2fcfc53
 ttl_days: 60
 metadata:
   type: reference
@@ -88,7 +88,7 @@ A statement marked *(assumed)* was proposed and not objected to; it is not a dec
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 39 |
+| Statements marked *(assumed)* | 38 |
 | Open questions | 6 |
 <!-- /generated:design -->
 
@@ -102,11 +102,11 @@ nothing in this repository executes Kurz.
 | Reference and corpus | Count |
 |---|---|
 | Rules in the reference | 150 |
-| of them decided | 112 |
-| of them assumed | 34 |
+| of them decided | 117 |
+| of them assumed | 33 |
 | of them proposed | 0 |
-| of them open | 4 |
-| Corpus cases, none of them run | 159 |
+| of them open | 0 |
+| Corpus cases, none of them run | 166 |
 | Compile-error ids | 23 |
 <!-- /generated:reference -->
 

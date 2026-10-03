@@ -14,7 +14,7 @@ The errors the cases expect. An id is what a corpus header names in `// expect: 
 | `narrowing` | T7 | a wider integer type put into a narrower one without a conversion |
 | `sign-mix` | T9 | an operation between a signed and an unsigned integer |
 | `string-index` | T15 | an index applied to a string instead of to `.Bytes` or `.Chars` |
-| `nullable-unchecked` | N2, N3, N7 | a nullable value used without a check |
+| `nullable-unchecked` | N2, N3, N7, N9 | a nullable value used without a check |
 | `mut-required` | M5, M7 | a change through something that is not `mut` |
 | `mut-at-call` | M7 | an argument for a `mut` parameter without `mut` in front of it |
 | `unlisted-case` | O3, O9 | a case that would leave a function whose return type does not list it |
@@ -26,7 +26,7 @@ The errors the cases expect. An id is what a corpus header names in `// expect: 
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
 | `reversed-range` | C8 | a range between literals whose end lies below its start |
 | `ambiguous-call` | F13 | a call that fits more than one function, none of them exactly |
-| `no-text` | A4 | the text of an instance of a class that declares none |
+| `no-text` | A4, A7 | the text of an instance of a class that declares none, or of a value that holds one |
 | `block-indentation` | L13 | a line of a `"""` block that is indented less than the closing line |
 
 ### E1 (assumed, §8) One error per case, with a line

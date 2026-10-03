@@ -251,14 +251,36 @@ Show(4000000000)
 Show(4L)
 ```
 
-### F15 (open) A `mut` variable that a lambda reads
+### F15 (decided, §4) A `mut` variable that a lambda reads
 
-F11 lets a lambda read the variables around it and not assign them. Not chosen: whether a lambda
-that reads a `mut` variable sees what its function assigns to the variable after the lambda was
-made. Options: (a) the lambda takes the value the variable has when the lambda is made, as an
-assignment does (M3), so what a check has shown about the variable there (N3) holds inside the
-lambda; (b) as in C#: the lambda reads the variable itself and sees every later assignment, and
-a `mut` variable that was narrowed around the lambda is nullable again inside it. Lean: (a). A
-lambda cannot assign the variable anyway, values are copied in meaning everywhere else, and the
-variable does not have to outlive its function. The cost: a lambda that is called later does not
-see a newer value, which a C# developer expects it to.
+A lambda takes the value each variable it reads (F11) has when the lambda is made, as an
+assignment does (M3). What its function assigns to a `mut` variable after that is not seen
+inside the lambda, and what a check had shown about the variable at that point (N3) holds inside
+it. This is not what C# does: there the lambda reads the variable itself and sees every later
+assignment.
+
+Case: [functions/capture-value.kz](../corpus/functions/capture-value.kz)
+```kurz
+mut n = 1
+first = () => n
+n = 2
+print(first())
+print(n)
+```
+
+Case: [null/lambda-keeps-narrowing.kz](../corpus/null/lambda-keeps-narrowing.kz)
+```kurz
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+mut email = Email(1)
+if email != null {
+    length = () => email.Bytes.Count
+    email = Email(2)
+    print(length())
+}
+```

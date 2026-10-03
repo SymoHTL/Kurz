@@ -69,6 +69,18 @@ p = Adopt()
 print(p.Keeper?.Name ?? "gone")
 ```
 
+Case: [memory/weak-narrowed.kz](../corpus/memory/weak-narrowed.kz)
+```kurz
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+o = Owner("Ann")
+p = Pet(o)
+if p.Keeper != null {
+    print(p.Keeper.Name)
+}
+```
+
 ### R4 (decided, §3) Where `weak` is enough
 
 Between different types, `weak` on the back-pointer is enough. A class that reaches itself

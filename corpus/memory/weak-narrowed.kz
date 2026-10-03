@@ -1,0 +1,12 @@
+// expect: output
+// | Ann
+// rules: N9, R3
+
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+o = Owner("Ann")
+p = Pet(o)
+if p.Keeper != null {
+    print(p.Keeper.Name)
+}

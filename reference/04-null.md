@@ -53,9 +53,9 @@ record marks that list as *(assumed)*. Everywhere else the variable is nullable,
 
 A path of fields such as `u.Email` is narrowed as a variable is. An index (`map[key]`) and the
 result of a call are not, as in C#: they take `??` (N4), `?.` (N5) or a variable of their own.
-What happens to a narrowed path that a call or an assignment can change is N9, and what a lambda
-knows about a variable around it is F15. The cases stay clear of both: the path they narrow runs
-through a field of a `data` value, and no lambda reads a variable they narrow.
+A path that a call or an assignment can change behind the function's back is narrowed for a
+shorter stretch (N9). Inside a lambda, what was known about a variable where the lambda was
+made holds, because the lambda takes the value the variable has there (F15).
 
 Case: [null/checked.kz](../corpus/null/checked.kz)
 ```kurz
@@ -210,6 +210,23 @@ if email != null {
 print(email.Bytes.Count)
 ```
 
+Case: [null/lambda-keeps-narrowing.kz](../corpus/null/lambda-keeps-narrowing.kz)
+```kurz
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+mut email = Email(1)
+if email != null {
+    length = () => email.Bytes.Count
+    email = Email(2)
+    print(length())
+}
+```
+
 ### N4 (decided, §4) `??`
 
 `a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#.
@@ -289,7 +306,7 @@ if email != null {
 }
 ```
 
-### N8 (assumed, §4) A nullable result is not unwrapped
+### N8 (decided, §4) A nullable result is not unwrapped
 
 `T?` is the union `T | null` (N1), and the unwrap rule (O2) is about unions. It does not apply
 here: a call of a function that returns `T?` yields a nullable value, which N2 to N5 handle, and
@@ -298,17 +315,52 @@ result of a call, and the cases of this chapter that call `Email` rely on it.
 
 Case: [null/unchecked.kz](../corpus/null/unchecked.kz)
 
-### N9 (open) A narrowed path that something else can change
+### N9 (decided, §4) A narrowed path that something else can change
 
 N3 narrows a path of fields. A path whose every step is a field of a `data` value, or a field
 that is not `mut`, changes only through what the function itself does to it (N7). Two kinds of
 path can change behind its back: one through a `mut` field of a class instance, which a call can
 assign through another reference (K2), and one through a `weak` reference, whose target a call
-or an assignment can free (R3). C# keeps such a path narrowed across the call, which its
-analysis can afford because it only warns. Options: (a) the narrowing of such a path ends at the
-next call and at the next assignment, so a second use after a call takes a variable of its own;
-(b) such a path is never narrowed, and every use takes a variable of its own, `?.` or `??`;
-(c) as in C#: the path stays narrowed, and a use where the value has become null in between
-raises an exception when the program runs. Lean: (a). It keeps N2 without a check at run time
-and accepts the common shape, a test directly followed by the use. The cost: an error that
-depends on a call between the test and the use.
+or an assignment can free (R3). Such a path stays narrowed only up to the next call and the next
+assignment, in the order the program runs them: a test directly followed by the use is fine, and
+a second use after a call takes a variable of its own. `print` is a call like any other. C# keeps
+such a path narrowed across the call, which its analysis can afford because it only warns; here
+an unchecked use is an error (N2), so the narrowing ends where the promise would end.
+
+Case: [null/narrowed-field.kz](../corpus/null/narrowed-field.kz)
+```kurz
+class Account(mut string? Email)
+
+a = Account("a@example.com")
+if a.Email != null {
+    print(a.Email.Bytes.Count)
+}
+```
+
+Case: [null/narrowed-field-after-call.kz](../corpus/null/narrowed-field-after-call.kz)
+```kurz
+class Account(mut string? Email)
+
+void Clear(Account a) {
+    a.Email = null
+}
+
+a = Account("a@example.com")
+if a.Email != null {
+    print(a.Email.Bytes.Count)
+    Clear(a)
+    print(a.Email.Bytes.Count)
+}
+```
+
+Case: [memory/weak-narrowed.kz](../corpus/memory/weak-narrowed.kz)
+```kurz
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+o = Owner("Ann")
+p = Pet(o)
+if p.Keeper != null {
+    print(p.Keeper.Name)
+}
+```

@@ -162,16 +162,31 @@ ages["Ann"] = 31
 print(ages)
 ```
 
-### A7 (open) A value that holds an instance without a text
+### A7 (decided, §8) A value that holds an instance without a text
 
 A4 makes the text of a list and of a `data` value out of the texts of what they hold, and gives
-an instance of a class a text only when its class declares one (A5). Not chosen: what
-`print(users)` does when `users` is a list of instances of a class that declares none, and the
-same for a `data` value with such a field. Options: (a) the compile error `no-text`, as for the
-instance itself: the type of the items is known where the list is printed; (b) such an item
-shows the name of its class. Lean: (a). It is the same rule one level down, and a text that says
-nothing about the instance hides that a declaration is missing. The cost: a `data` type with
-such a field cannot be printed either.
+an instance of a class a text only when its class declares one (A5). A list whose items are
+instances of a class that declares none has no text either, and neither has a `data` value with
+such a field: printing one, or putting it into an interpolated string (L6), is the compile error
+`no-text`, as for the instance itself. The type of what is held is known where it is printed.
+
+Case: [classes/print-list-without-text.kz](../corpus/classes/print-list-without-text.kz)
+```kurz
+class Counter(mut int Count)
+
+mut xs = List<Counter>()
+xs.Add(Counter(1))
+print(xs)
+```
+
+Case: [classes/print-data-without-text.kz](../corpus/classes/print-data-without-text.kz)
+```kurz
+class Counter(mut int Count)
+data Box(Counter Item)
+
+b = Box(Counter(1))
+print(b)
+```
 
 ### A8 (assumed, §8) The text of the remaining values
 
