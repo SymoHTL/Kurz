@@ -1,0 +1,6 @@
+// expect: error reversed-range at 4
+// rules: C8
+
+for i in 3..2 {
+    print(i)
+}

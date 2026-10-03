@@ -1,0 +1,18 @@
+// expect: error unlisted-case at 14
+// rules: O3
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int Twice(int id) {
+    value = Find(id)
+    return value * 2
+}
+
+print(Twice(1))

@@ -1,0 +1,12 @@
+// expect: output
+// | 5
+// | 205
+// rules: T10
+
+long big = 5
+int small = int(big)
+print(small)
+
+byte b = 200
+int i = 5
+print(int(b) + i)

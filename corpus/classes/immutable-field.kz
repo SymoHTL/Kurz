@@ -1,0 +1,9 @@
+// expect: error assign-immutable at 8
+// rules: K1
+
+class User(string Name, mut int Age)
+
+u = User("Ann", 31)
+u.Age = 32
+u.Name = "Bea"
+print(u.Name)

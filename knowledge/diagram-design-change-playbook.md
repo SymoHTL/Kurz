@@ -21,8 +21,8 @@ flowchart TD
     subgraph B["Before writing"]
         B1["the owner chose it? Otherwise it is a question, not a decision:
         ask it as a numbered question with options, costs and a lean. Judgment step"]
-        B2["read the sections the change touches and every section that refers to them.
-        Judgment step"]
+        B2["read the sections the change touches, every section that refers to them
+        and the reference rules that cite them. Judgment step"]
         B3["a wish that cannot hold is contradicted in the reply, not recorded.
         Judgment step"]
     end
@@ -46,6 +46,10 @@ flowchart TD
         Judgment step; the review rule sees it only when Open is in the diff"]
         A3["what the change makes untrue elsewhere is fixed in the same pull request.
         Judgment step"]
+        A5["the reference follows in the same pull request: the status and the section
+        of each rule the change answers, its cases, the error table.
+        Gate: reference for the shape; that a rule says no more than its section
+        is review rule reference"]
         A4["the gates, the pull request, the review: every gate of diagram-change-walk.
         The description traces each decided item to the owner's answer.
         Gate: review rule design record"]
@@ -63,3 +67,5 @@ flowchart TD
 - A HAZARD issue that a node names (1, 2) closes or opens: that node.
 - A sample or a guarantee becomes checkable by a tool: the node moves from HAZARD or judgment
   step to its gate.
+- The statuses or the format of the reference change (`reference/00-about.md`,
+  `tools/lint_reference.py`): node A5.

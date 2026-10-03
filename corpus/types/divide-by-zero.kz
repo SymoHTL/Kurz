@@ -1,0 +1,8 @@
+// expect: throws
+// | 5
+// rules: T14
+
+int Divide(int a, int b) => a / b
+
+print(Divide(10, 2))
+print(Divide(10, 0))

@@ -1,0 +1,15 @@
+// expect: output
+// | true
+// | false
+// | true
+// rules: K5, K8
+
+class User(int Id, mut string Name) equal by Id
+
+a = User(1, "Ann")
+b = User(1, "Bea")
+c = User(2, "Ann")
+print(a == b)
+print(a == c)
+b.Name = "Ann"
+print(a == b)

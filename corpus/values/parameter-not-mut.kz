@@ -1,0 +1,10 @@
+// expect: error mut-required at 5
+// rules: M7
+
+void Fill(List<int> xs) {
+    xs.Add(1)
+}
+
+numbers = List<int>()
+Fill(numbers)
+print(numbers.Count)

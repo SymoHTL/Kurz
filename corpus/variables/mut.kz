@@ -1,0 +1,7 @@
+// expect: output
+// | 9
+// rules: V2
+
+mut x = 4
+x = x + 5
+print(x)

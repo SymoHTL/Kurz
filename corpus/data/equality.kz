@@ -1,0 +1,9 @@
+// expect: output
+// | true
+// | false
+// rules: D3
+
+data Point(int X, int Y)
+
+print(Point(1, 2) == Point(1, 2))
+print(Point(1, 2) == Point(2, 1))

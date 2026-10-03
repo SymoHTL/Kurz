@@ -1,0 +1,6 @@
+// expect: error mut-required at 5
+// rules: M2, M5
+
+xs = List<int>()
+xs.Add(1)
+print(xs.Count)

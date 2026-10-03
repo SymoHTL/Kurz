@@ -1,0 +1,15 @@
+// expect: error match-not-exhaustive at 13
+// rules: O8
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+match Find(2) {
+    int n => print(n)
+}

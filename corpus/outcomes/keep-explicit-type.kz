@@ -1,0 +1,18 @@
+// expect: output
+// | 10
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int | NotFound result = Find(1)
+match result {
+    int n => print(n)
+    NotFound => print("none")
+}

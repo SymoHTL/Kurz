@@ -15,11 +15,12 @@ conversation. What was asked and answered in chat can only be a judgment step.
 
 ## 1. Ask
 
-1. Read the sections of `kurz-design.md` that the topic touches, and section "Open".
-   `judgment step`
+1. Read the sections of `kurz-design.md` that the topic touches, section "Open", and the rules of
+   `reference/` on the topic that are marked `open` or `proposed`. A question about one of them
+   names its id, so that the owner can answer "C8 c". `judgment step`
 2. Write numbered questions. Each one has: the question in one line; two to four options; what
    each option costs (at run time, in the compiler, for the developer); a stated lean with its
-   reason. The owner answers by number. `judgment step`
+   reason. The owner answers by number, or by the rule id when the question names one. `judgment step`
 3. Kurz is designed in the spirit of C#: explain a new concept through its C# equivalent.
    `judgment step`
 4. A wish that cannot hold - a cost assumed away, a guarantee no system can give - is contradicted
@@ -45,6 +46,13 @@ conversation. What was asked and answered in chat can only be a judgment step.
    their source. Each of its nodes names its own gate.
 6. Future plans are not design. What gets built when stays out of the record, the pull request,
    the branch name and the commit message. HAZARD (#2).
+7. Then the reference, in the same pull request: each rule the round answered gets its new status
+   and the section it cites; a rule that became `decided` gets its cases (a `.kz` file under
+   `corpus/`, a `Case:` line under the rule, then `py -3 tools/lint_reference.py --sync`), and a
+   new compile error gets its row in `reference/12-errors.md`. A `proposed` rule the owner did
+   not object to stays `proposed` until the record says it, as *(assumed)* or decided.
+   Gate: `reference` for the shape; that a rule says no more than its section is review rule
+   "reference".
 
 ## 3. Land
 

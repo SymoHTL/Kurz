@@ -1,0 +1,8 @@
+// expect: error reference-cycle at 4
+// rules: R2
+
+class Customer(string Name, mut List<Order> Orders)
+class Order(int Id, Customer Owner)
+
+c = Customer("Ann", List<Order>())
+print(c.Name)

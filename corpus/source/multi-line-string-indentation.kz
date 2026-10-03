@@ -1,0 +1,8 @@
+// expect: error block-indentation at 6
+// rules: L13
+
+text = """
+        SELECT name
+    FROM users
+        """
+print(text)

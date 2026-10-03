@@ -1,0 +1,9 @@
+// expect: error assign-immutable at 5
+// rules: F8
+
+int Next(int n) {
+    n = n + 1
+    return n
+}
+
+print(Next(1))

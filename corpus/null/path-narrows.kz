@@ -1,0 +1,10 @@
+// expect: output
+// | 13
+// rules: N3
+
+data User(string Name, string? Email)
+
+u = User("Ann", "a@example.com")
+if u.Email != null {
+    print(u.Email.Bytes.Count)
+}

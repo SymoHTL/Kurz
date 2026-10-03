@@ -1,0 +1,11 @@
+// expect: output
+// | 1
+// | 2
+// rules: C7
+
+for i in 1..5 {
+    match i {
+        3 => break
+        else => print(i)
+    }
+}

@@ -1,0 +1,9 @@
+// expect: output
+// | 3
+// rules: D4
+
+data Point(int X, int Y)
+
+mut p = Point(1, 2)
+p.X = 3
+print(p.X)

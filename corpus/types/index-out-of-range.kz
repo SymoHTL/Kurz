@@ -1,0 +1,5 @@
+// expect: throws
+// rules: T14
+
+xs = List<int>()
+print(xs[0])

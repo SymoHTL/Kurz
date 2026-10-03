@@ -1,0 +1,8 @@
+// expect: error no-text at 8
+// rules: A7
+
+class Counter(mut int Count)
+data Box(Counter Item)
+
+b = Box(Counter(1))
+print(b)

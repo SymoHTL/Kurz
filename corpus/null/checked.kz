@@ -1,0 +1,15 @@
+// expect: output
+// | 13
+// rules: N3
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+email = Email(1)
+if email != null {
+    print(email.Bytes.Count)
+}

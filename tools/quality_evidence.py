@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gates  # noqa: E402
 import kit  # noqa: E402
 import lint_knowledge  # noqa: E402
+import lint_reference  # noqa: E402
 import pr_gates  # noqa: E402
 import red_proof  # noqa: E402
 
@@ -79,6 +80,18 @@ def block_design(root):
     ])
 
 
+def block_reference(root):
+    errors, counted = lint_reference.lint(root)
+    if errors:
+        raise kit.Refused(f"the reference lint is not green, so its counts are not evidence: {errors[0]}")
+    return table(["Reference and corpus", "Count"], [
+        ("Rules in the reference", counted["rules"]),
+        *[(f"of them {status}", counted[status]) for status in ("decided", "assumed", "proposed", "open")],
+        ("Corpus cases, none of them run", counted["cases"]),
+        ("Compile-error ids", counted["errors"]),
+    ])
+
+
 def block_forge(root):
     repo = kit.repo()
     pulls = kit.gh_pages(f"repos/{repo}/pulls?state=all&per_page=100")
@@ -111,7 +124,8 @@ def block_forge(root):
     ])
 
 
-BLOCKS = {"gates": block_gates, "self-tests": block_self_tests, "store": block_store, "design": block_design, "forge": block_forge}
+BLOCKS = {"gates": block_gates, "self-tests": block_self_tests, "store": block_store, "design": block_design,
+          "reference": block_reference, "forge": block_forge}
 
 
 def rewrite(text, blocks, today):
@@ -224,6 +238,22 @@ def self_test():
         f.write("## 1. Types\n\nx\n")
     design = got(block_design, root)
     cases.append(("design: a record without its Open section is refused", isinstance(design, kit.Refused) and "no Open section" in str(design), repr(design)))
+
+    saved_lint = lint_reference.lint
+    try:
+        lint_reference.lint = lambda tree: (["reference/02-variables.md:3: rule V1 is decided and cites no section"], {})
+        red_reference = got(block_reference, root)
+        # every count its own value, so that a row that reads the wrong key cannot pass
+        lint_reference.lint = lambda tree: ([], {"rules": 11, "decided": 5, "assumed": 3, "proposed": 2, "open": 1, "cases": 13, "errors": 7})
+        green_reference = got(block_reference, root)
+    finally:
+        lint_reference.lint = saved_lint
+    cases.append(("reference: counts from a red lint are refused",
+                  isinstance(red_reference, kit.Refused) and "not green" in str(red_reference), repr(red_reference)))
+    rows = ("| Rules in the reference | 11 |", "| of them decided | 5 |", "| of them assumed | 3 |", "| of them proposed | 2 |",
+            "| of them open | 1 |", "| Corpus cases, none of them run | 13 |", "| Compile-error ids | 7 |")
+    cases.append(("reference: rules by status, cases and error ids are counted, each row from its own key",
+                  all(row in str(green_reference) for row in rows) and str(green_reference).count("|") == 9 * 3, green_reference))
 
     saved = red_proof.check, red_proof.copy_of_tree, kit.repo, kit.gh_pages
     red_proof.copy_of_tree = lambda: root

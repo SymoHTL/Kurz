@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 5
+// rules: T1
+
+mut x = 1
+x = "one"
+print(x)

@@ -1,0 +1,7 @@
+// expect: output
+// | 1
+// rules: L3
+
+// a comment takes the rest of its line
+a = 1    // also after code
+print(a)

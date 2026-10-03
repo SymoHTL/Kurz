@@ -1,0 +1,29 @@
+// expect: output
+// | [1, 2, 3]
+// | Pro
+// | Empty
+// | null
+// | 0.5
+// | 0.30000000000000004
+// rules: A4
+
+data Empty
+enum Plan { Free, Pro }
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+print(xs)
+print(Plan.Pro)
+print(Empty)
+print(Email(2))
+print(0.5)
+print(0.1 + 0.2)

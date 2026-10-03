@@ -40,6 +40,11 @@ GATES = [
      "in CLAUDE.md or in a skill that does not exist; a nested entry; a LIVING entry without diagram or update triggers; "
      "expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; "
      "fewer entries or living diagrams than their floors"),
+    ("reference", ["tools/lint_reference.py"], "always",
+     "a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with "
+     "neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a corpus header that "
+     "cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; "
+     "fewer rules or cases than the floors"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "
      "a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path or branch filter; a wider token; "

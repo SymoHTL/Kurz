@@ -1,0 +1,13 @@
+// expect: output
+// | 4
+// | ok
+// rules: T19
+
+T First<T>(List<T> items) => items[0]
+
+mut xs = List<int>()
+xs.Add(4)
+mut names = List<string>()
+names.Add("ok")
+print(First(xs))
+print(First(names))

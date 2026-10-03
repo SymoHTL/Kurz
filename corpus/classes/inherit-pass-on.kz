@@ -1,0 +1,12 @@
+// expect: output
+// | Ann
+// | 3
+// rules: K11
+
+class User(string Name)
+
+class Admin(string Name, int Level) : User(Name)
+
+a = Admin("Ann", 3)
+print(a.Name)
+print(a.Level)

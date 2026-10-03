@@ -1,0 +1,5 @@
+// expect: error break-outside-loop at 5
+// rules: C7
+
+print(1)
+break

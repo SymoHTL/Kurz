@@ -1,0 +1,13 @@
+// expect: output
+// | Wien
+// | Graz
+// rules: M4
+
+data Address(string City)
+data Customer(string Name, Address Home)
+
+mut c = Customer("Ann", Address("Graz"))
+before = c
+c.Home.City = "Wien"
+print(c.Home.City)
+print(before.Home.City)

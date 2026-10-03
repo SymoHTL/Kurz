@@ -1,0 +1,6 @@
+// expect: error equal-by-unknown at 4
+// rules: K15
+
+class Key(int Id) equal by Code
+
+print(Key(1) == Key(1))

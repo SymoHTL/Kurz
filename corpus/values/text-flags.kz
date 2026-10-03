@@ -1,0 +1,9 @@
+// expect: output
+// | Read | Write
+// | None
+// rules: A13
+
+flags Access { Read, Write, Run }
+
+print(Access.Write | Access.Read)
+print(Access.None)

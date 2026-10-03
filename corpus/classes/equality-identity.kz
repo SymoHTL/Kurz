@@ -1,0 +1,11 @@
+// expect: output
+// | false
+// | true
+// rules: K4
+
+class Counter(mut int Count)
+
+a = Counter(1)
+b = Counter(1)
+print(a == b)
+print(a == a)

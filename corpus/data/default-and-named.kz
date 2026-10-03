@@ -1,0 +1,13 @@
+// expect: output
+// | 1
+// | 5
+// | 7
+// rules: D11
+
+data Item(int ProductId, int Count = 1)
+
+a = Item(7)
+b = Item(Count: 5, ProductId: 7)
+print(a.Count)
+print(b.Count)
+print(b.ProductId)

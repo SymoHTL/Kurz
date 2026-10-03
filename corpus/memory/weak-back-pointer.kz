@@ -1,0 +1,12 @@
+// expect: output
+// | 1
+// | Ann
+// rules: R3, R4
+
+class Customer(string Name, mut List<Order> Orders)
+class Order(int Id, weak Customer? Owner)
+
+c = Customer("Ann", List<Order>())
+c.Orders.Add(Order(1, c))
+print(c.Orders.Count)
+print(c.Orders[0].Owner?.Name ?? "gone")

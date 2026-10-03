@@ -1,0 +1,13 @@
+// expect: throws
+// | before
+// rules: O7
+
+void Check(int n) {
+    if n < 0 {
+        throw "negative"
+    }
+}
+
+print("before")
+Check(-1)
+print("after")

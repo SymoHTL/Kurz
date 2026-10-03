@@ -1,0 +1,12 @@
+// expect: output
+// | 1E+15
+// | 100000000000000
+// | -0
+// | Infinity
+// rules: A14
+
+double z = 0.0
+print(1e15)
+print(1e14)
+print(-0.0)
+print(1.0 / z)

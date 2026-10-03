@@ -1,0 +1,9 @@
+// expect: output
+// | 6
+// | 2147483648
+// rules: L17
+
+uint u = 5
+print(u + 1)
+long big = 2147483647 + 1
+print(big)

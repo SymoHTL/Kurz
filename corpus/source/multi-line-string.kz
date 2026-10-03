@@ -1,0 +1,10 @@
+// expect: output
+// | SELECT name
+// |   FROM users
+// rules: L13
+
+text = """
+    SELECT name
+      FROM users
+    """
+print(text)

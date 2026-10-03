@@ -1,0 +1,5 @@
+// expect: error constant-overflow at 4
+// rules: T6
+
+x = 2147483647 + 1
+print(x)

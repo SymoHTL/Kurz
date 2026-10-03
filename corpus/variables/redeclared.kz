@@ -1,0 +1,6 @@
+// expect: error redeclared at 5
+// rules: V9
+
+x = 1
+int x = 2
+print(x)

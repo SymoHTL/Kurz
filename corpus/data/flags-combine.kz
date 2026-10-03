@@ -1,0 +1,26 @@
+// expect: output
+// | true
+// | false
+// | true
+// | false
+// | false
+// | true
+// | false
+// | true
+// | false
+// rules: D17
+
+flags Access { Read, Write, Run }
+
+p = Access.Read | Access.Write
+print(p.Has(Access.Read))
+print(p.Has(Access.Run))
+print(p.Has(Access.Read | Access.Write))
+print(p.Has(Access.Read | Access.Run))
+q = p & ~Access.Write
+print(q.Has(Access.Write))
+print(q.Has(Access.Read))
+print(Access.None.Has(Access.Read))
+r = p ^ Access.Read
+print(r.Has(Access.Write))
+print(r.Has(Access.Read))

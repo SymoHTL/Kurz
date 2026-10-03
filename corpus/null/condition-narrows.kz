@@ -1,0 +1,20 @@
+// expect: output
+// | long
+// | empty
+// rules: N3
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+email = Email(1)
+if email != null && email.Bytes.Count > 5 {
+    print("long")
+}
+other = Email(2)
+if other == null || other.Bytes.Count == 0 {
+    print("empty")
+}

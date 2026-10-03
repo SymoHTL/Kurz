@@ -1,0 +1,10 @@
+// expect: output
+// | User { Id = 1, Name = Ann }
+// | got User { Id = 1, Name = Ann }
+// rules: A3
+
+data User(int Id, string Name)
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")

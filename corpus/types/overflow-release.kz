@@ -1,0 +1,8 @@
+// expect: output
+// | -2147483648
+// build: release
+// rules: T4
+
+mut int x = 2147483647
+x = x + 1
+print(x)

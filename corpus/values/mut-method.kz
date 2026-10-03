@@ -1,0 +1,17 @@
+// expect: output
+// | 2
+// | 0
+// rules: M6, D16
+
+data Counter(int Count) {
+    pub mut void Increment() {
+        Count = Count + 1
+    }
+}
+
+mut c = Counter(0)
+before = c
+c.Increment()
+c.Increment()
+print(c.Count)
+print(before.Count)

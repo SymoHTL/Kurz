@@ -1,0 +1,16 @@
+// expect: error nullable-unchecked at 15
+// rules: N7
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+mut email = Email(1)
+if email != null {
+    print(email.Bytes.Count)
+    email = Email(2)
+    print(email.Bytes.Count)
+}

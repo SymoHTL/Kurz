@@ -1,0 +1,14 @@
+// expect: output
+// | gone
+// rules: R3
+
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+Pet Adopt() {
+    o = Owner("Ann")
+    return Pet(o)
+}
+
+p = Adopt()
+print(p.Keeper?.Name ?? "gone")

@@ -1,0 +1,10 @@
+// expect: output
+// | 1
+// | 2
+// rules: F15
+
+mut n = 1
+first = () => n
+n = 2
+print(first())
+print(n)

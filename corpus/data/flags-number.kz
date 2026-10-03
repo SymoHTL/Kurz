@@ -1,0 +1,18 @@
+// expect: output
+// | 5
+// | true
+// | invalid
+// rules: D19
+
+flags Access { Read, Write, Run }
+
+p = Access.Read | Access.Run
+print(p.Number)
+match Access.From(3) {
+    Access a => print(a.Has(Access.Write))
+    Invalid => print("invalid")
+}
+match Access.From(8) {
+    Access a => print(a.Has(Access.Write))
+    Invalid => print("invalid")
+}

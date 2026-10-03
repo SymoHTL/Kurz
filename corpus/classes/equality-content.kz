@@ -1,0 +1,7 @@
+// expect: output
+// | true
+// rules: K4
+
+class Label(string Text)
+
+print(Label("x") == Label("x"))

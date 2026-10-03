@@ -1,0 +1,6 @@
+// expect: error argument-mismatch at 6
+// rules: D11
+
+data Item(int ProductId, int Count = 1)
+
+print(Item(7, ProductId: 8).Count)

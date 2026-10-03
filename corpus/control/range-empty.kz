@@ -1,0 +1,8 @@
+// expect: output
+// | done
+// rules: C8
+
+for i in 3..<3 {
+    print(i)
+}
+print("done")

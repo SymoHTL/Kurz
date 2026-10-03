@@ -1,0 +1,7 @@
+// expect: output
+// | 5
+// rules: V4
+
+mut int x = 4
+x = 5
+print(x)

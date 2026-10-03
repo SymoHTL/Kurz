@@ -1,0 +1,17 @@
+// expect: output
+// | int 4
+// | long 4000000000
+// | long 4
+// rules: F14
+
+void Show(int n) {
+    print("int {n}")
+}
+
+void Show(long n) {
+    print("long {n}")
+}
+
+Show(4)
+Show(4000000000)
+Show(4L)

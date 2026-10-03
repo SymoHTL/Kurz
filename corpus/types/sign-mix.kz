@@ -1,0 +1,6 @@
+// expect: error sign-mix at 6
+// rules: T9
+
+byte b = 200
+int i = 5
+print(b + i)

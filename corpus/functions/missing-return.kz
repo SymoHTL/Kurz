@@ -1,0 +1,10 @@
+// expect: error missing-return at 4
+// rules: F3
+
+int Sign(int n) {
+    if n < 0 {
+        return -1
+    }
+}
+
+print(Sign(3))

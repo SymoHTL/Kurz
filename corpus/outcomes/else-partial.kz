@@ -1,0 +1,33 @@
+// expect: output
+// | 0
+// | invalid
+// rules: O5
+
+data NotFound
+data Invalid
+
+int | NotFound | Invalid Find(int id) {
+    if id < 0 {
+        return Invalid
+    }
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int | Invalid OrZero(int id) {
+    value = Find(id) else {
+        NotFound => 0
+    }
+    return value
+}
+
+match OrZero(2) {
+    int n => print(n)
+    Invalid => print("invalid")
+}
+match OrZero(-1) {
+    int n => print(n)
+    Invalid => print("invalid")
+}

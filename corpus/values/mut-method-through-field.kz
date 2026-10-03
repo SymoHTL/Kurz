@@ -1,0 +1,9 @@
+// expect: output
+// | 1
+// rules: M5
+
+class Node(string Name, mut List<string> Children)
+
+node = Node("root", List<string>())
+node.Children.Add("leaf")
+print(node.Children.Count)

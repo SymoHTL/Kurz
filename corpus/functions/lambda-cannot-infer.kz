@@ -1,0 +1,5 @@
+// expect: error cannot-infer at 4
+// rules: F7
+
+f = x => x * 2
+print(f(2))

@@ -1,0 +1,11 @@
+// expect: output
+// | { "table": "users" }
+// | a\b
+// rules: L15
+
+table = "users"
+text = """
+    \{ "table": "{table}" }
+    a\\b
+    """
+print(text)

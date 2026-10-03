@@ -25,7 +25,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
 
-FLOOR = 10  # the tools this tree holds; a self-test case keeps it at that number
+FLOOR = 11  # the tools this tree holds; a self-test case keeps it at that number
 LEDGER = "tools/red_proofs.json"
 MAIN = re.compile(r"""__name__\s*==\s*["']__main__["']""")
 SELF_TEST = re.compile(r"""["']--self-test["']""")

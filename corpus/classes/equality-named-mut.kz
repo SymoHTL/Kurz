@@ -1,0 +1,12 @@
+// expect: output
+// | true
+// | false
+// rules: K12
+
+class Tag(mut string Name) equal by Name
+
+x = Tag("a")
+y = Tag("a")
+print(x == y)
+y.Name = "b"
+print(x == y)

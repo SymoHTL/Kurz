@@ -1,0 +1,11 @@
+// expect: output
+// | 6
+// rules: C5
+
+mut i = 1
+mut sum = 0
+while i <= 3 {
+    sum = sum + i
+    i = i + 1
+}
+print(sum)

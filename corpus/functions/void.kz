@@ -1,0 +1,9 @@
+// expect: output
+// | hello Ann
+// rules: F4
+
+void Greet(string name) {
+    print("hello {name}")
+}
+
+Greet("Ann")

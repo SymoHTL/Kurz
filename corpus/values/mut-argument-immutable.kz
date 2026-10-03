@@ -1,0 +1,10 @@
+// expect: error mut-required at 9
+// rules: M7
+
+void Fill(mut List<int> xs) {
+    xs.Add(1)
+}
+
+numbers = List<int>()
+Fill(mut numbers)
+print(numbers.Count)

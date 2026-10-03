@@ -1,0 +1,11 @@
+// expect: output
+// | 4
+// | 5
+// rules: C8
+
+mut xs = List<int>()
+xs.Add(4)
+xs.Add(5)
+for i in 0..<xs.Count {
+    print(xs[i])
+}

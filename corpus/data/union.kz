@@ -1,0 +1,17 @@
+// expect: output
+// | circle 2
+// | square 3
+// rules: D9, C4
+
+data Circle(int Radius)
+data Square(int Side)
+
+void Describe(Circle | Square shape) {
+    match shape {
+        Circle c => print("circle {c.Radius}")
+        Square s => print("square {s.Side}")
+    }
+}
+
+Describe(Circle(2))
+Describe(Square(3))

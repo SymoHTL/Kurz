@@ -1,0 +1,12 @@
+// expect: output
+// | counter 3
+// | got counter 3
+// rules: A5
+
+class Counter(mut int Count) {
+    pub string Text() => "counter {Count}"
+}
+
+c = Counter(3)
+print(c)
+print("got {c}")

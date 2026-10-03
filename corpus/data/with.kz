@@ -1,0 +1,13 @@
+// expect: output
+// | Ann
+// | Bea
+// | 1
+// rules: D5
+
+data User(int Id, string Name)
+
+a = User(1, "Ann")
+b = a with { Name = "Bea" }
+print(a.Name)
+print(b.Name)
+print(b.Id)

@@ -1,0 +1,10 @@
+// expect: output
+// | 5
+// rules: K3
+
+class Counter(mut int Count)
+
+a = Counter(0)
+b = a
+a.Count = 5
+print(b.Count)

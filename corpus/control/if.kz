@@ -1,0 +1,8 @@
+// expect: output
+// | big
+// rules: C1
+
+x = 7
+if x > 5 {
+    print("big")
+}

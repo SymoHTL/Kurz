@@ -1,0 +1,5 @@
+// expect: error braces-required at 5
+// rules: C1
+
+x = 7
+if x > 5 print(x)

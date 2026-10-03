@@ -52,6 +52,12 @@ flowchart TD
         expired or future-dated numbers, a TTL over 90 days; a generated block that is empty, or a page
         whose digest is stale: a number, the generated date or the TTL edited by hand
         (a recomputed digest passes: HAZARD issue 18); fewer entries than the floor"]
+        G9["reference: a rule without id, status or the record section it cites;
+        a decided, assumed or proposed rule with neither a case nor a reason;
+        a case on an open rule; a sample that differs from its corpus file;
+        a corpus header that cannot be read or names an unknown rule;
+        an error id the error table does not list, or lists for other rules;
+        fewer rules or cases than the floors"]
         G4["ci-config: a pinned fact of a workflow changed. Both: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but a
@@ -135,7 +141,8 @@ flowchart TD
         X1["a statement is recorded as decided only after the owner chose it; a proposal nobody
         objected to is recorded as assumed; a question nobody answered goes under Open: judgment step.
         The shape of the record is node R5, rule design record"]
-        X2["samples in the design record are right: nothing runs them, HAZARD issue 1"]
+        X2["samples in the design record and expectations in the corpus are right:
+        nothing runs them, HAZARD issue 1"]
         X3["wrap-up: lessons promoted out of private memory: HAZARD issue 6"]
         X4["one push per review round: judgment step"]
     end
@@ -152,6 +159,7 @@ flowchart TD
 - `tools/tree_gate.py`, `.claude/settings.json` (the hook command), `.githooks/pre-push` change:
   W1, P1, G2.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
+- `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8.
 - `.github/workflows/review.yml`, `tools/review/review.py` or `.review/review-rules.yaml`
   changes: the subgraph R.

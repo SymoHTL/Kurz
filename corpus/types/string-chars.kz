@@ -1,0 +1,8 @@
+// expect: output
+// | 3
+// | 7
+// rules: T15, T16
+
+s = "aä😀"
+print(s.Chars.Count)
+print(s.Bytes.Count)

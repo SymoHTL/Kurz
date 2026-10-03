@@ -1,0 +1,21 @@
+// expect: output
+// | int 4
+// | text four
+// | pair 4 5
+// rules: F12
+
+void Show(int n) {
+    print("int {n}")
+}
+
+void Show(string s) {
+    print("text {s}")
+}
+
+void Show(int a, int b) {
+    print("pair {a} {b}")
+}
+
+Show(4)
+Show("four")
+Show(4, 5)

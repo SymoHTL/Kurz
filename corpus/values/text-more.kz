@@ -1,0 +1,20 @@
+// expect: output
+// | 1
+// | 0.5
+// | 1.50
+// | 1h 30min
+// | Read | Write
+// | a
+// | b
+// rules: A8, T21
+
+flags Access { Read, Write, Run }
+
+print(1.0)
+print(0.5f)
+print(1.50m)
+print(90min)
+print(Access.Read | Access.Write)
+for c in "ab".Chars {
+    print(c)
+}

@@ -1,7 +1,8 @@
 # CLAUDE.md — Kurz
 
 Kurz is a programming language in its design phase. This repository is **public**. It holds the
-design record, a knowledge store and the quality tools that gate them. Nothing here compiles Kurz.
+design record, the language reference with its conformance corpus, a knowledge store and the
+quality tools that gate them. Nothing here compiles Kurz, and nothing runs the corpus.
 
 Load [INDEX.md](INDEX.md) first and open an entry when its hook matches the task. Long procedures
 are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, review, merge) and
@@ -22,6 +23,9 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
   the case needs an entry in `tools/red_proofs.json` naming the mutation that turns it red.
   Gate: `self-tests` replays every recorded mutation and fails when one no longer turns its named
   case red. A decision that has no case is invisible to it: review rule "tools".
+- `py -3 tools/lint_reference.py --sync` rewrites every sample in `reference/` from its corpus
+  file. Change the `.kz` file, then sync: a sample edited by hand is red until it is overwritten.
+  Gate: `reference`.
 - Once per clone: `git config core.hooksPath .githooks`. Without it a push skips the tree gate.
   Gate: `push-hook`, in local runs only, where it is red until that line was run; HAZARD (#4) on
   a clone where nobody runs the gates.
@@ -87,6 +91,10 @@ Each line names a trap; its evidence is in the entry it links.
    at its first line ([knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)).
    Gate: `self-tests` for the plan (it calls no model and posts nothing); naming the bill and
    waiting for the go-ahead is a `judgment step`.
+7. **An expectation nobody runs is not a proof.** Nothing runs `corpus/`. The lint checks the
+   shape of a case; whether its expected output or error is right is decided by reading it
+   against the rules it names ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
+   HAZARD (#1); review rule "corpus" carries the defect shapes.
 
 ## CI
 
@@ -127,7 +135,9 @@ Each line names a trap; its evidence is in the entry it links.
 
 ## Architecture
 
-`kurz-design.md` records what the owner decided. `knowledge/` and `guides/` hold what a later
+`kurz-design.md` records what the owner decided. `reference/` states the same design rule by
+rule, each rule with an id and a status, and `corpus/` holds its cases: one small program per
+file, with what it prints or the error it raises. `knowledge/` and `guides/` hold what a later
 session must know; `INDEX.md` is their index. `tools/` holds the gates (one runner, `gates.py`),
 the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
 `.github/workflows/` runs both. The map of every gate is
@@ -167,6 +177,23 @@ Gate: review rule "rules for sessions".
   not recorded as decided. `judgment step`
 - Retired on 2026-10-01: "after every design round, commit the record and push it to `main`".
   Nothing is pushed to `main` any more; a round's record takes the same walk as every change.
+
+### The reference and the corpus
+
+- **The reference adds nothing to the design.** A rule is `decided` or `assumed` only with the
+  section of `kurz-design.md` it comes from. What the record does not say is `proposed` when a
+  case has to stand on it, and `open` when it is a fork. Neither is a decision; a design round
+  asks about them by id. Gate: `reference` for the cited section; that a rule says no more than
+  its section is review rule "reference".
+- **An answer reaches the record first.** A rule becomes `decided` in the pull request that
+  writes the owner's choice into `kurz-design.md`, never before. Gate: `reference` (a decided
+  rule cites a section that exists); the order is a `judgment step`.
+- **Every Kurz sample in the reference is a corpus case**, shown under a `Case:` line that links
+  its file. Gate: `reference`.
+- **No case stands on an open rule**: it would bake in a pick nobody made. A rule that can have
+  no case says why in a `No case:` line. Gate: `reference`.
+- **An error a case expects has an id in the error table** (`reference/12-errors.md`), and the
+  table names the rules that raise it. Gate: `reference`.
 
 ### A public repository
 
@@ -260,7 +287,8 @@ Gate: review rule "rules for sessions".
 | every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout (#4) |
 | workflow facts (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
-| title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | code samples in the design record being right (#1) |
+| the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
+| title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps (`self-tests`) | that the `review` status satisfies the ruleset (#5, unverified), and that it came from a completed review (#11) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | | the author and committer address a push publishes (#12) |

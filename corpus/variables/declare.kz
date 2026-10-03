@@ -1,0 +1,6 @@
+// expect: output
+// | 9
+// rules: V1
+
+x = 4
+print(x + 5)

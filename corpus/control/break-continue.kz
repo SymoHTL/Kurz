@@ -1,0 +1,19 @@
+// expect: output
+// | 1
+// | 3
+// rules: C7
+
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+xs.Add(4)
+for x in xs {
+    if x == 2 {
+        continue
+    }
+    if x == 4 {
+        break
+    }
+    print(x)
+}

@@ -1,0 +1,6 @@
+// expect: error narrowing-conversion at 5
+// rules: T7
+
+long big = 5
+int small = big
+print(small)
