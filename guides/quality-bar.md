@@ -35,7 +35,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | `CLAUDE.md`: rules with gates | [CLAUDE.md](../CLAUDE.md). |
 | Knowledge store, index, lint with floor and self-test | `knowledge/`, `INDEX.md`, `tools/lint_knowledge.py` (gate `knowledge`). |
 | Routing and the memory audit | Rules in `CLAUDE.md`. No audit tool is part of this repository, and nothing here forces the wrap-up (HAZARD #6). |
-| Zero findings on the store | `tools/pr_gates.py findings` (gate `pr-findings`): a finding on anything but tool, workflow and hook code is answered only by changing the file. |
+| Zero findings on the store | Zero findings above low: `tools/pr_gates.py findings` (gate `pr-findings`) reads the review threads, and a thread on anything but tool, workflow and hook code is answered only by changing the file. A low finding opens no thread and holds no merge (below), so a low on a knowledge entry or a guide can reach `main` and is fixed later. |
 | Skills | `.claude/skills/change-walk` and `.claude/skills/design-round`. |
 | Hooks for shapes that already cost | One: writing code in the design phase, which happened on 2026-10-01. `.claude/settings.json` calls `tools/tree_gate.py --hook` for the Write and Edit tools of a session. It does not hold a write made through a shell command, or a hook the harness cut off at its timeout (HAZARD #4). The pre-push hook is the same gate before a push, in a clone that switched it on (HAZARD #4 where it is off). Only the CI gate `tree` always runs, and it runs after the push has published. |
 | The tools law | `tools/red_proof.py` and `tools/red_proofs.json` (gate `self-tests`). |
@@ -90,8 +90,8 @@ on, and the tree gate does not rely on them.
 | Rules fetched from the target branch | `pull_request_target`: workflow, reviewer and rules all come from the default branch (`knowledge/the-review-runs-the-default-branch.md`). A pull request into another branch is not reviewed in CI. |
 | A merge-request pipeline needs no permission to start | GitHub's default policy blocks `pull_request_target` in a public repository unless an Actions event policy allows it. Whether the rule already blocks here or only evaluates was not known on 2026-10-02 (`knowledge/pull-request-target-is-blocked-by-default.md`). The policy is the owner's setting and nothing asserts it (HAZARD #10). Without it the review is dispatched by hand for each head. |
 | Unanchored thread for the lows | Lows are not threads here (the owner's decision, 2026-10-02). The reviewer collects them as comments on the one open issue labelled `review-lows`, and leaves a note on the pull request that lists them, so that a later run does not report them again. They hold no merge; they are fixed together, or with a push that is needed anyway. |
-| The size of a thread | A thread carries at most twenty findings, each with its title cut at 200 and its text at 2,000 characters, and further findings go into further threads. The forge's limit for one comment is taken as 65,536 characters, and a self-test case renders the largest thread the reviewer can produce and checks that it stays below. That number is not in the forge's REST reference (looked for on 2026-10-02) and was not provoked here. |
-| No per-request override of the pipeline check | GitHub has one: an actor on a ruleset's bypass list, set to "For pull requests only", can merge a pull request over unmet rules while the ruleset stays on for everything else (GitHub docs, "Creating rulesets for a repository", read 2026-10-02). It is not used here. A bypass is a standing permission of a role, which every session holding the owner's token would have for every pull request, and it leaves no record of what was waived; the rule here is an approval per pull request and head. So the bypass list is kept empty and `merge-checks` asserts that. The gate-flip instead switches the ruleset's enforcement off for one merge, restores it and reads it back. Its price: while it is off nothing on the server holds any pull request or a push to `main`. |
+| The size of a thread | A thread carries at most twenty findings, each with its title cut at 200 and its text at 2,000 characters, and further findings go into further threads. The forge's limit for one comment is taken as 65,536 characters. Rendering widens a text (a marker opened in a body is escaped, a quote or a character outside ASCII in a title is escaped in the marker's JSON), so a thread, a comment on the lows issue and a note of lows are each measured as rendered, and split until every part fits; self-test cases render findings made of such characters and check every part. The number itself is not in the forge's REST reference (looked for on 2026-10-02) and was not provoked here. |
+| No per-request override of the pipeline check | GitHub has one: an actor on a ruleset's bypass list, set to "For pull requests only", can merge a pull request over unmet rules while the ruleset stays on for everything else (GitHub docs, "Creating rulesets for a repository", read 2026-10-02). It is not used here. A bypass is a standing permission of a role, which every session holding the owner's token would have for every pull request; the forge records each bypass in the repository's rule insights (GitHub docs, "Managing rulesets for a repository", read 2026-10-03), but as an act of that role, tied to no approval of one pull request and head, which is the rule here. So the bypass list is kept empty. Only a local `merge-checks` run with the owner's login asserts that: the job token in CI cannot read the list, prints NOT CHECKED and ends PARTLY (HAZARD #7), so an actor added to the list turns no CI run red. The gate-flip instead switches the ruleset's enforcement off for one merge, restores it and reads it back. Its price: while it is off nothing on the server holds any pull request or a push to `main`. |
 | Pipeline-control literals in the title | The workflow-skip literals. The merge tool writes the title and the description into the squash commit; a merge by the button takes the commit messages. `pr-title` refuses a literal in all three. |
 | Editing title or description starts no pipeline | The gates do run on `edited`. The review does not: the description is part of its cache key, and every edit would cost a full review. So after an edit the `review` status still stands, on text the review never read. Dispatching the review again after an edit that changes what the text says is an instruction, not a gate (HAZARD #13). |
 | Trigger jobs must never be waived | There are none: `tools/lint_ci.py` refuses a job that calls another workflow. |
@@ -129,9 +129,11 @@ What is specific to this repository:
   gave each batch all its passes in turn, which on a large diff spends the budget on the first
   batches and never reads the last ones (`knowledge/what-a-review-pass-costs.md`).
 - **A finding is in the log before it is posted, and posts are paced.** Every finding is printed
-  in full, with what the passes cost, before the first post; posts go out a second apart and
-  wait on the forge's rate-limit refusal
-  (`knowledge/a-paid-result-is-printed-before-it-is-posted.md`).
+  in full, with what the passes cost, before the first post; the log takes every character
+  (UTF-8, whatever the console's code page), and what is printed is already the withheld text of
+  the next bullet, so the public Actions log shows no more than a post would; posts go out a
+  second apart and wait on the forge's rate-limit refusal, and once the waits are spent the
+  posting stops (`knowledge/a-paid-result-is-printed-before-it-is-posted.md`).
 - **The log is written line by line**, one line per pass with its duration. A pass takes minutes,
   and a log that fills only at the end hides a run that will not finish.
 - **A pull request from outside is not reviewed automatically.** The repository is public and a
@@ -148,9 +150,11 @@ What is specific to this repository:
 - **The bill is counted before it is named.** `review.py --pr N --plan` prints the batches a run
   would read and the passes that is, calls no model and posts nothing. The owner's go-ahead is
   for a bill named from that count (`CLAUDE.md`, "Tests", rule 6).
-- **Text is checked before it is posted.** A finding, a failure message or a note that holds a
-  credential shape or a machine-bound string has that part withheld; a post that still holds one
-  is refused by the tool itself.
+- **Text is checked when it is read, before it is printed or posted.** A finding's title and
+  body are withheld where they hold a credential shape or a machine-bound string as the model's
+  answer is parsed (`public` in `review.py`), so the log and the posts show the same text; a
+  failure message is withheld the same way; a post that still holds one is refused by the tool
+  itself.
 
 The credential is one repository secret, `CLAUDE_CODE_OAUTH_TOKEN`. Without it the job is red: a
 review that cannot run must never look like a review that found nothing.

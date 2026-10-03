@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""The one way a pull request reaches main, and the check that the server-side merge rules are on.
+"""The one allowed way a pull request reaches main, and the check that the server-side merge rules
+are on. The merge button stays open to anyone who may write: it gets the ruleset's checks and
+skips what only this tool adds (HAZARD #14).
 
   merge_pr.py <pr> <full head sha> [--dry-run]
   merge_pr.py <pr> <full head sha> --over-red <pr>@<full head sha>=<check>[,<check>]
@@ -26,10 +28,11 @@ lets through only what it names:
   print as a waiver;
 - a check that is still running is never waived: its result is coming and nobody has read it;
 - unresolved threads are never waived.
-A check run counts only when the app the ruleset pins reported it. A commit status is matched by
-its name alone: the answer that names its reporter was never seen here (#5). Both required checks
-are pinned to the app every workflow run of this repository reports as, so `review` proves that a
-workflow run of this repository posted it, not which one (HAZARD #11).
+A check run counts only when the app the ruleset pins reported it, and a commit status only when
+its creator is the login that app posts as (the Actions bot); whether the ruleset itself reads a
+status that way was never seen here (#5). Both required checks are pinned to the app every
+workflow run of this repository reports as, so `review` proves that a workflow run of this
+repository posted it, not which one (HAZARD #11).
 
 A write whose answer cannot be read, that ran out of time, or that ended in an answer nobody
 expected may have landed. It is never reported as refused: the state is read back, the ruleset is
@@ -70,11 +73,18 @@ def required(rules):
     return {}
 
 
+# A commit status names its creator, not an app. The one app a context is pinned to here is GitHub
+# Actions, whose workflow runs post statuses as this login; a status from any other creator does
+# not satisfy a pinned context, whatever its name says.
+STATUS_POSTERS = {15368: "github-actions[bot]"}
+
+
 def context_states(contexts, check_runs, statuses):
     """{context: success | failed | skipped | running | absent} on one head. A context that both a
     check run and a commit status report must be green in both. The newest check run of a name
-    counts, and only one from the app pinned for that context: with the ruleset off, this reading
-    is all that holds a check nobody waived."""
+    counts, and only one from the app pinned for that context; a status counts only from the login
+    that app posts as (STATUS_POSTERS): with the ruleset off, this reading is all that holds a
+    check nobody waived."""
     states = {}
     for ctx, app in contexts.items():
         seen = []
@@ -84,7 +94,7 @@ def context_states(contexts, check_runs, statuses):
             seen.append("running" if run["status"] != "completed" else
                         {"success": "success", "skipped": "skipped"}.get(run["conclusion"], "failed"))
         for s in statuses:
-            if s["context"] == ctx:
+            if s["context"] == ctx and (app is None or (s.get("creator") or {}).get("login") == STATUS_POSTERS.get(app)):
                 seen.append({"success": "success", "pending": "running"}.get(s["state"], "failed"))
         states[ctx] = next((s for s in ("running", "failed", "skipped") if s in seen), "success" if seen else "absent")
     return states
@@ -213,12 +223,11 @@ ANSWER_ERRORS = (kit.Refused, LookupError, ValueError, TypeError, AttributeError
 
 
 def send(path, payload, method="PUT"):
-    """One write to the forge, and its answer as an object. An answer that cannot be read is
-    kit.Unanswered, not a refusal: the command exited 0, so the write landed."""
-    what = f"gh api -X {method} {path}"
-    answer = kit.answer(kit.run(["gh", "api", "-X", method, path, "--input", "-"], stdin=json.dumps(payload)) or "{}", what, write=True)
+    """One write to the forge, and its answer as an object. An answer that cannot be read, and a
+    5xx, is kit.Unanswered, not a refusal: the write may have landed (kit.gh_send)."""
+    answer = kit.gh_send(method, path, payload)
     if not isinstance(answer, dict):
-        raise kit.Unanswered(f"{what}: the answer is not an object")
+        raise kit.Unanswered(f"gh api -X {method} {path}: the answer is not an object")
     return answer
 
 
@@ -245,10 +254,15 @@ def merge(repo, number, sha, pr, waived):
         # A switch-off that failed sent no merge call; what became of the ruleset is read back below.
         refused = step != "the merge call" or re.search(r"\(HTTP 4\d\d\)", str(e)) is not None
         try:  # a write that may have landed is never reported as a plain failure
-            landed = kit.gh_json(f"repos/{repo}/pulls/{number}").get("merged") is True
-            unknown = not landed and not refused
+            pull = kit.gh_json(f"repos/{repo}/pulls/{number}")
+            merged, at = pull.get("merged") is True, (pull.get("head") or {}).get("sha")
+            # the call named this head, so a merge at another head is somebody else's, not this one
+            landed = merged and at == sha
+            unknown = not merged and not refused
             code = 0 if landed else 4 if unknown else 1
-            print("read back: the pull request IS merged" if landed else "read back: not merged")
+            print("read back: the pull request IS merged" if landed
+                  else f"read back: the pull request is merged at another head ({at}): not this merge, nothing is waived" if merged
+                  else "read back: not merged")
         except ANSWER_ERRORS as again:
             print(f"the read-back failed too: {again}")
             unknown, code = True, 4
@@ -275,13 +289,25 @@ def merge(repo, number, sha, pr, waived):
     if unknown and waived:
         print(f"If the merge landed, its waiver record is owed. Post on the pull request: waived on {sha}: {record}")
     if landed and waived:  # the record follows the merge, whatever became of the gate afterwards
+        body = (f"Merged over red at `{sha}`. The caller of the merge tool stated the owner's approval for this pull request and "
+                f"this head; the tool cannot verify that (HAZARD #3). Waived on this head: {record}.")
         try:
-            send(f"repos/{repo}/issues/{number}/comments", {"body":
-                f"Merged over red at `{sha}`. The caller of the merge tool stated the owner's approval for this pull request and "
-                f"this head; the tool cannot verify that (HAZARD #3). Waived on this head: {record}."}, method="POST")
+            send(f"repos/{repo}/issues/{number}/comments", {"body": body}, method="POST")
         except ANSWER_ERRORS as e:  # the comment is the only trace of what was waived on which head
-            print(f"THE WAIVER RECORD IS MISSING, post it on the pull request by hand: waived on {sha}: {record} ({e})")
-            code = code or 6
+            print(f"posting the waiver record failed: {e}")
+            try:  # a write that may have landed is read back before it is called missing: posted twice is a record nobody trusts
+                posted = any((c.get("body") or "") == body for c in kit.gh_pages(f"repos/{repo}/issues/{number}/comments?per_page=100"))
+            except ANSWER_ERRORS as again:
+                print(f"the record's read-back failed too: {again}")
+                print(f"THE WAIVER RECORD MAY BE MISSING: look at the pull request, and only if it is not there post by hand: "
+                      f"waived on {sha}: {record}")
+                code = code or 6
+            else:
+                if posted:
+                    print("read back: the waiver record IS on the pull request")
+                else:
+                    print(f"THE WAIVER RECORD IS MISSING (read back: not on the pull request), post it by hand: waived on {sha}: {record}")
+                    code = code or 6
     return code
 
 
@@ -421,11 +447,16 @@ def self_test():
     rerun = context_states(G, [dict(newer, status="completed", conclusion="success"), dict(run0, status="completed", conclusion="failure")], [])
     case("states: a green re-run after a failure is green, whatever the order of the list", rerun["gates"] == "success", rerun)
     case("states: a check nobody reported is absent", context_states(R, runs, [])["review"] == "absent")
-    one = lambda state: [{"context": "review", "state": state}]
+    one = lambda state, login="github-actions[bot]": [{"context": "review", "state": state, "creator": {"login": login}}]
     case("states: a success status", context_states(R, [], one("success"))["review"] == "success")
+    case("states: a status of the pinned context from another creator than the Actions bot does not count",
+         (context_states(R, [], one("success", "someone"))["review"], context_states(R, [], [{"context": "review", "state": "success"}])["review"])
+         == ("absent", "absent"))
+    case("states: a context nobody pinned takes a status from any creator", context_states({"review": None}, [], one("success", "someone"))["review"] == "success")
     case("states: a pending status is running", context_states(R, [], one("pending"))["review"] == "running")
     case("states: an error status is a failure", context_states(R, [], one("error"))["review"] == "failed")
-    both = context_states(G, [dict(run0, status="completed", conclusion="success")], [{"context": "gates", "state": "failure"}])
+    both = context_states(G, [dict(run0, status="completed", conclusion="success")],
+                          [{"context": "gates", "state": "failure", "creator": {"login": "github-actions[bot]"}}])
     case("states: a check and a status of one name must both pass", both["gates"] == "failed", both)
     passed = dict(run0, status="completed", conclusion="success")
     stranger = dict(passed, app={**run0["app"], "id": pin + 1})
@@ -588,13 +619,19 @@ def self_test():
 
     # one write, against a gh that answers what it is told to
     def sent(answer):
-        saved, kit.run = kit.run, (lambda cmd, **how: answer)
+        def run(cmd, **how):
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        saved, kit.run = kit.run, run
         try:
             return attempt(send, "repos/o/r/pulls/1/merge", {})
         finally:
             kit.run = saved
 
     case("send: an answer is read as the object it is, and no answer as an empty one", (sent('{"merged": true}'), sent("")) == ({"merged": True}, {}))
+    got = sent(kit.Refused("`gh api -X PUT repos/o/r/pulls/1/merge` exited 1: gh: Service Unavailable (HTTP 503)"))
+    case("send: a 5xx is unanswered, not refused: the merge may have landed, and is read back", type(got) is kit.Unanswered, repr(got))
     got = sent("<html>502</html>")
     case("send: an answer that is not JSON is unanswered, because the write landed", type(got) is kit.Unanswered, repr(got))
     got = sent("[]")
@@ -602,10 +639,12 @@ def self_test():
 
     # the gate-flip, against a forge that records every write and fails where it is told to
     class Flip:
-        def __init__(self, fail=(), merged=False, restore_fails=0, how="gh: not mergeable (HTTP 405)", silent=False, lands=(), error=None):
+        def __init__(self, fail=(), merged=False, restore_fails=0, how="gh: not mergeable (HTTP 405)", silent=False, lands=(), error=None,
+                     merged_head=None):
             self.fail, self.merged, self.restore_fails, self.how, self.silent = set(fail), merged, restore_fails, how, silent
             self.lands, self.error = set(lands), error  # writes that are applied although they fail; what a failure raises
-            self.calls, self.enforcement, self.payload = [], "active", None
+            self.merged_head = merged_head or sha  # the head the pull request is merged at, when it is
+            self.calls, self.reads, self.enforcement, self.payload, self.records = [], [], "active", None, []
 
         def send(self, path, payload, method="PUT"):
             what = ({"disabled": "off", "active": "on"}[payload["enforcement"]] if "/rulesets/" in path
@@ -613,11 +652,17 @@ def self_test():
             self.calls.append(what)
             if what == "on" and self.restore_fails > 0:
                 self.restore_fails -= 1
+                if "on" in self.lands:
+                    self.enforcement = "active"
                 raise kit.Refused("refused")
             if what in self.fail:
-                if what in self.lands:
+                if what in self.lands and what in ("off", "on"):
                     self.enforcement = payload["enforcement"]
+                if what in self.lands and what == "record":
+                    self.records.append(payload["body"])
                 raise self.error or kit.Refused(self.how)
+            if what == "record":
+                self.records.append(payload["body"])
             if what in ("off", "on"):
                 self.enforcement = payload["enforcement"]
             if what == "merge":
@@ -627,19 +672,27 @@ def self_test():
 
         def gh_json(self, path):
             kind = "gate-readback" if "/rulesets/" in path else "pr-readback"
+            self.reads.append(kind)
             if kind in self.fail:
                 raise self.error or kit.Refused("refused")
-            return {"enforcement": self.enforcement} if kind == "gate-readback" else {"merged": self.merged}
+            return {"enforcement": self.enforcement} if kind == "gate-readback" else {"merged": self.merged, "head": {"sha": self.merged_head}}
+
+        def gh_pages(self, path):
+            self.reads.append("record-readback")
+            if "record-readback" in self.fail:
+                raise self.error or kit.Refused("refused")
+            return [{"body": body} for body in self.records]
 
     def flip(waived, **how):
         fake, g = Flip(**how), globals()
-        saved = g["send"], g["find_ruleset"], kit.gh_json, time.sleep
-        g["send"], g["find_ruleset"], kit.gh_json, time.sleep = fake.send, (lambda repo: 7), fake.gh_json, (lambda seconds: None)
+        saved = g["send"], g["find_ruleset"], kit.gh_json, kit.gh_pages, time.sleep
+        g["send"], g["find_ruleset"], kit.gh_json, kit.gh_pages, time.sleep = (fake.send, (lambda repo: 7), fake.gh_json, fake.gh_pages,
+                                                                              (lambda seconds: None))
         try:
             with contextlib.redirect_stdout(io.StringIO()) as printed:
                 code = attempt(merge, "o/r", number, sha, ready, waived)  # an exception that escapes is the case's result
         finally:
-            g["send"], g["find_ruleset"], kit.gh_json, time.sleep = saved
+            g["send"], g["find_ruleset"], kit.gh_json, kit.gh_pages, time.sleep = saved
         fake.out = printed.getvalue()
         return code, fake
 
@@ -647,6 +700,9 @@ def self_test():
     code, f = flip([])
     case("flip: without a waiver the ruleset is never touched", (code, f.calls) == (0, ["merge"]), (code, f.calls))
     case("flip: the merge names the exact head and squashes", bool(f.payload) and f.payload.get("sha") == sha and f.payload.get("merge_method") == "squash", f.payload)
+    case("flip: the squash commit carries the pull request's title and description, which the title gate read",
+         bool(f.payload) and f.payload.get("commit_title") == f"{ready['title']} (#{number})" and f.payload.get("commit_message") == (ready["body"] or ""),
+         f.payload)
     code, f = flip(over)
     case("flip: with a waiver the ruleset is off for the one merge, restored, and the waiver is recorded",
          (code, f.calls, f.enforcement) == (0, ["off", "merge", "on", "record"], "active"), (code, f.calls, f.enforcement))
@@ -655,6 +711,12 @@ def self_test():
          (code, f.calls, f.enforcement) == (1, ["off", "merge", "on"], "active"), (code, f.calls, f.enforcement))
     code, f = flip(over, fail={"merge"}, merged=True)
     case("flip: a merge call that failed but landed is a merge, and is recorded", (code, f.calls) == (0, ["off", "merge", "on", "record"]), (code, f.calls))
+    code, f = flip(over, fail={"merge"}, merged=True, merged_head="e" * 40)
+    case("flip: a pull request merged at another head is somebody else's merge: refused, and nothing is recorded as waived",
+         (code, "record" in f.calls) == (1, False) and "another head" in f.out, (code, f.calls, f.out))
+    code, f = flip(over, fail={"merge"}, merged=True, merged_head="e" * 40, how="gh: timeout awaiting response")
+    case("flip: a merge call that died, with the pull request merged at another head, is not this merge",
+         (code, "record" in f.calls) == (1, False) and "MERGE STATE UNKNOWN" not in f.out, (code, f.calls, f.out))
     code, f = flip(over, fail={"merge", "pr-readback"})
     case("flip: a merge whose state cannot be read is exit 4, with the gate restored", (code, f.enforcement) == (4, "active"), (code, f.enforcement))
     code, f = flip(over, restore_fails=2)
@@ -680,6 +742,16 @@ def self_test():
          (code, f.calls[-1], f.merged) == (6, "record", True) and "`review` (absent)" in f.out, (code, f.calls, f.out))
     code, f = flip(over, fail={"record"}, restore_fails=3)
     case("flip: a gate that stays off outranks a missing record", code == 3 and "THE WAIVER RECORD IS MISSING" in f.out, (code, f.out))
+    code, f = flip(over, fail={"record"}, lands={"record"}, how="gh: timeout awaiting response")
+    case("flip: a record whose write died but landed is read back, found, and not called missing",
+         code == 0 and "the waiver record IS on the pull request" in f.out and "MISSING" not in f.out and f.reads.count("record-readback") == 1,
+         (code, f.reads, f.out))
+    code, f = flip(over, fail={"record", "record-readback"}, how="gh: timeout awaiting response")
+    case("flip: a record whose write died and cannot be read back may be posted: exit 6 says to look before posting again",
+         code == 6 and "MAY BE MISSING" in f.out and "IS MISSING" not in f.out, (code, f.out))
+    code, f = flip(over, restore_fails=3, lands={"on"})
+    case("flip: a restore that failed three times but landed is read back as active: the gate is on, exit 0",
+         (code, f.enforcement) == (0, "active") and "GATE NOT RESTORED" not in f.out and "gate-readback" in f.reads, (code, f.reads, f.out))
     code, f = flip([], fail={"merge"}, how="gh: timeout awaiting response")
     case("flip: a merge call that died without an answer is exit 4, not a refusal", code == 4 and "MERGE STATE UNKNOWN" in f.out, (code, f.out))
     code, f = flip([], fail={"merge"})

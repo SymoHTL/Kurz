@@ -15,8 +15,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRETS = {
     "gitlab-token": r"glpat-[A-Za-z0-9_\-]{10,}",
     "github-token": r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{22,})",
-    # anchored on the left: kebab names such as "task-tracking-..." contain "sk-"
-    "api-key": r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{20,}",
+    # anchored on the left: kebab names such as "task-tracking-..." contain "sk-". The letter of a
+    # \n, \t or \r escape is no anchor: in JSON and in string literals a value begins a line after one.
+    "api-key": r"(?:(?<![A-Za-z0-9])|(?<=\\[ntr]))sk-[A-Za-z0-9_\-]{20,}",
     "aws-key": r"AKIA[A-Z0-9]{12,}",
     "private-key": r"BEGIN [A-Z ]*PRIVATE KEY",
     "bearer": r"Bearer [A-Za-z0-9_\-\.]{25,}",
@@ -28,10 +29,10 @@ MACHINE = {
     "drive-path": r"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?!/)",
     # a user's directory: Windows seen from a POSIX shell, from WSL or from Cygwin, macOS, Linux.
     # /home/runner is the hosted CI runner's and names nobody.
-    "profile-path": r"(?<![A-Za-z0-9])(?:(?:/(?:mnt|cygdrive))?/(?:[a-z]/)?Users/|/home/(?!runner\b))[A-Za-z0-9]",
+    "profile-path": r"(?:(?<![A-Za-z0-9])|(?<=\\[ntr]))(?:(?:/(?:mnt|cygdrive))?/(?:[a-z]/)?Users/|/home/(?!runner\b))[A-Za-z0-9]",
     # four dotted numbers that are not loopback, also at the end of a sentence; write a four-part
     # version as v1.0.0.0
-    "ip-address": r"(?<![\w.])(?!127\.)(?!0\.0\.0\.0(?!\d))(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)",
+    "ip-address": r"(?:(?<![\w.])|(?<=\\[ntr]))(?!127\.)(?!0\.0\.0\.0(?!\d))(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)",
     # the private ranges of IPv6: unique local and link-local addresses
     "ip6-address": r"(?i:(?<![\w:])(?:f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):[0-9a-f]{0,4}:)",
     # not the documentation domains, not the two public no-reply addresses commit trailers carry,
@@ -84,9 +85,29 @@ def answer(out, what, write=False):
         raise (Unanswered if write else Refused)(f"{what}: answer is not JSON") from None
 
 
+WRITE_FLAGS = {"-X", "--method", "-f", "--raw-field", "-F", "--field", "--input"}  # what makes a gh api call a write
+GATEWAY = re.compile(r"\(HTTP 50[234]\)")  # the forge's answer when it may have carried the write out, and gh exits 1
+
+
 def gh_json(*args, stdin=None):
-    """One GitHub API answer as parsed JSON, through the gh CLI (its login locally, GH_TOKEN in CI)."""
-    return answer(run(["gh", "api", *args], stdin=stdin), f"gh api {args[0]}", write=stdin is not None)
+    """One GitHub API answer as parsed JSON, through the gh CLI (its login locally, GH_TOKEN in CI).
+    A call that carries a body, names a method or sets a field is a write: an answer to it that
+    cannot be read is Unanswered, not Refused (answer)."""
+    return answer(run(["gh", "api", *args], stdin=stdin), f"gh api {args[0]}", write=stdin is not None or any(a in WRITE_FLAGS for a in args))
+
+
+def gh_send(method, path, payload):
+    """One write to the forge, as parsed JSON; an empty answer (204) is {}. A 502, 503 or 504 is
+    Unanswered: the forge may have carried the write out, so a caller must not send it again before
+    reading back. Every other refusal is the caller's."""
+    what = f"gh api -X {method} {path}"
+    try:
+        out = run(["gh", "api", "-X", method, path, "--input", "-"], stdin=json.dumps(payload))
+    except Refused as e:
+        if GATEWAY.search(str(e)):
+            raise Unanswered(f"{what}: {e}") from None
+        raise
+    return answer(out or "{}", what, write=True)
 
 
 def gh_pages(path):
@@ -171,6 +192,38 @@ def self_test():
     cases.append(("answer: an unreadable answer to a read is refused", type(out) is Refused, repr(out)))
     out = got(lambda: answer("<html>", "x", write=True))
     cases.append(("answer: an unreadable answer to a write is unanswered, because the write landed", type(out) is Unanswered, repr(out)))
+    said_by_run = {}
+
+    def stub(answer_or_error):
+        """run() replaced by what the forge is to answer, recording the command."""
+        def fake(cmd, cwd=None, stdin=None, timeout=120, binary=False):
+            said_by_run["cmd"] = cmd
+            if isinstance(answer_or_error, Exception):
+                raise answer_or_error
+            return answer_or_error
+        return fake
+    real_run = globals()["run"]
+    try:
+        globals()["run"] = stub(Refused("`gh api -X POST repos/o/r/issues/1/comments` exited 1: gh: Bad Gateway (HTTP 502)"))
+        out = got(lambda: gh_send("POST", "repos/o/r/issues/1/comments", {"body": "x"}))
+        cases.append(("gh_send: a 5xx answer to a write is unanswered, not refused: the forge may have carried it out",
+                      type(out) is Unanswered and "502" in str(out), repr(out)))
+        globals()["run"] = stub(Refused("`gh api -X POST repos/o/r/issues/1/comments` exited 1: gh: Validation Failed (HTTP 422)"))
+        out = got(lambda: gh_send("POST", "repos/o/r/issues/1/comments", {"body": "x"}))
+        cases.append(("gh_send: a 4xx answer to a write is refused", type(out) is Refused and "422" in str(out), repr(out)))
+        globals()["run"] = stub("")
+        out = got(lambda: gh_send("DELETE", "repos/o/r/issues/comments/1", {}))
+        cases.append(("gh_send: an empty answer to a write landed, and is {}", out == {} and said_by_run["cmd"][:4] == ["gh", "api", "-X", "DELETE"],
+                      (repr(out), said_by_run.get("cmd"))))
+        globals()["run"] = stub("<html>")
+        out = got(lambda: gh_json("-X", "POST", "repos/o/r/issues"))
+        cases.append(("gh_json: a call that names a method is a write, so its unreadable answer is unanswered", type(out) is Unanswered, repr(out)))
+        out = got(lambda: gh_json("repos/o/r/issues", "-f", "title=x"))
+        cases.append(("gh_json: a call that sets a field is a write", type(out) is Unanswered, repr(out)))
+        out = got(lambda: gh_json("repos/o/r/issues"))
+        cases.append(("gh_json: a call with neither is a read, so its unreadable answer is refused", type(out) is Refused, repr(out)))
+    finally:
+        globals()["run"] = real_run
     with contextlib.redirect_stdout(io.StringIO()) as said:
         codes = (report([]), report([("a", True, "")]), report([("a", True, ""), ("b", False, "why")]))
     cases.append(("report: no case at all is a failure, and so is one failed case", codes == (1, 0, 1), codes))

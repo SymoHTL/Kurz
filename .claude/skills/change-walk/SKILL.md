@@ -58,7 +58,7 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
 
 ## 3. Review
 
-A review run spends the owner's Claude seat: about 1.5 USD and ten minutes or more per pass, at
+A review run spends the owner's Claude seat: about 1.4 to 1.8 USD and 6 to 18 minutes per pass (`knowledge/what-a-review-pass-costs.md`), at
 least two passes per batch of the diff (`knowledge/what-a-review-pass-costs.md`). Before starting
 or dispatching one, tell the owner the expected bill and wait for the go-ahead. `judgment step`
 Count the batches on the head that will be reviewed, with

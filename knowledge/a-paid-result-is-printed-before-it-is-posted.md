@@ -1,6 +1,6 @@
 ---
 name: a-paid-result-is-printed-before-it-is-posted
-description: Postmortem of 2026-10-02 - the first full review posted 40 comments in a row, GitHub's secondary rate limit refused the rest, and 88 findings that existed only in memory were lost with about 45 USD of passes behind them; a result that cost money is written to the log in full before the first post, and posts are paced one second apart with a wait on that refusal
+description: Postmortems of 2026-10-02 and 2026-10-03 - the first full review posted 40 comments in a row, GitHub's secondary rate limit refused the rest, and 88 findings that existed only in memory were lost with about 45 USD of passes behind them; a result that cost money is written to the log in full before the first post, and posts are paced one second apart with a wait on that refusal
 metadata:
   type: feedback
 ---
@@ -34,10 +34,23 @@ the only copy of their result was held back until a write to a rate-limited serv
 
 - Every finding is printed to the log in full, followed by a `FOUND:` line with the counts and
   the cost, before the first post. Whatever becomes of the posting, the log holds the result.
+- The log takes every character. On 2026-10-03 the second full review of the same pull request
+  ran its 30 passes, printed 235 of its 237 findings and died on the 236th: it quoted an arrow,
+  the output was redirected to a file, and on Windows a redirected stdout takes the console's code
+  page (cp1252), which has no arrow. The exception ended the run before the first post; the two
+  findings after it, and the posting of all of them, were lost. The print is the one copy of a
+  paid result, so it must not be able to fail on its content: the reviewer sets its stdout to
+  UTF-8 with `backslashreplace` before anything else (`sys.stdout.reconfigure`). An interactive
+  console was never the problem: since Python 3.6 it writes Unicode; a pipe or a file is.
 - Posts go out at least one second apart (`PACE_S`).
 - A post that the forge refuses with that message waits and is sent again: 60 seconds, then 120
   (`RATE_WAITS`), spent once per run so that the waits fit into the time kept back for posting.
-  A write that got no answer is never sent again: it may have landed.
+  A write that got no answer is never sent again: it may have landed. Once both waits are spent
+  and the forge refuses again, the posting stops: every further write would go into the limit and
+  lengthen the block; the rest is counted as not posted.
+- A finding above low that no anchor takes lands as a plain note without a marker, and counts as
+  not posted: a note is not a thread, nothing holds the merge for it, and the next run posts it
+  again.
 - A post that still fails is printed as `NOT POSTED` with the file, line and title of each
   finding. Its files are not stored as reviewed, so the next run reviews them again, and the run
   ends red (`failed`).

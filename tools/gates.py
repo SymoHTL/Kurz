@@ -69,12 +69,17 @@ PARTLY_OK = {"merge-checks": 7}
 
 
 def context(argv, env):
-    """What applies in this run: {"ci": bool, "pr": a number, "N/A" or None (unknown)}."""
+    """What applies in this run: {"ci": bool, "pr": a number, "N/A" or None (unknown)}. A `--pr`
+    without its number is refused, not read as no pull request: pr_gates.py refuses the same."""
     ci = env.get("GITHUB_ACTIONS") == "true"
     if "--pr" in argv:
-        pr = (argv[argv.index("--pr") + 1:] or [None])[0]
+        pr = (argv[argv.index("--pr") + 1:] or [""])[0]
+        if not pr.isdigit():
+            raise kit.Refused("--pr needs the number of the pull request")
     elif ci:
-        pr = "N/A" if env.get("GITHUB_EVENT_NAME") == "push" else env.get("PR_NUMBER") or None
+        # only a push to main has no pull request to look at; a push elsewhere is a run nobody asked for
+        on_main = env.get("GITHUB_EVENT_NAME") == "push" and env.get("GITHUB_REF") == "refs/heads/main"
+        pr = "N/A" if on_main else env.get("PR_NUMBER") or None
     else:
         pr = None
     return {"ci": ci, "pr": pr}
@@ -171,10 +176,16 @@ def self_test():
     case("local gates run locally", with_local, local, {"l": 1}, 1)
     ctx = context(["--pr", "12"], {})
     cases.append(("context: --pr names the pull request", ctx == {"ci": False, "pr": "12"}, ctx))
-    ctx = context(["--pr"], {})
-    cases.append(("context: --pr without a number is no pull request", ctx == {"ci": False, "pr": None}, ctx))
-    ctx = context([], {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "push", "PR_NUMBER": ""})
-    cases.append(("context: a push has no pull request", ctx == {"ci": True, "pr": "N/A"}, ctx))
+    for argv in (["--pr"], ["--pr", "seven"]):
+        try:
+            context(argv, {})
+            cases.append((f"context: {' '.join(argv)} is refused, not read as no pull request", False, "no exception"))
+        except kit.Refused as e:
+            cases.append((f"context: {' '.join(argv)} is refused, not read as no pull request", "needs the number" in str(e), str(e)))
+    ctx = context([], {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main", "PR_NUMBER": ""})
+    cases.append(("context: a push to main has no pull request", ctx == {"ci": True, "pr": "N/A"}, ctx))
+    ctx = context([], {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/next", "PR_NUMBER": ""})
+    cases.append(("context: a push to another branch is unknown, not N/A: its pull-request gates are NOT RUN", ctx == {"ci": True, "pr": None}, ctx))
     ctx = context([], {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request", "PR_NUMBER": "3"})
     cases.append(("context: a pull request event carries its number", ctx == {"ci": True, "pr": "3"}, ctx))
     ctx = context([], {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request", "PR_NUMBER": ""})
@@ -200,7 +211,10 @@ if __name__ == "__main__":
         sys.exit(self_test())
     if "--check-push-hook" in sys.argv:
         sys.exit(push_hook())
-    ctx = context(sys.argv, os.environ)
+    try:
+        ctx = context(sys.argv, os.environ)
+    except kit.Refused as e:
+        sys.exit(f"gates could not start: {e}")
     verdicts, count, code = run_all(GATES, ctx, runner)
     print("\n=== gates")
     for name, verdict in verdicts:

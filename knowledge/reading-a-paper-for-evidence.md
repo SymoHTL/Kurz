@@ -12,8 +12,10 @@ that states it was read in the source itself. How that was done on 2026-10-01:
 1. Download the PDF. A page fetcher that converts pages to text cannot read a binary PDF.
 2. Extract the text with `pypdf` (`PdfReader(path).pages[n].extract_text()`), page by page. An
    agent's built-in PDF reader may depend on a renderer that is not installed.
-3. On a Windows console set `PYTHONIOENCODING=utf-8` before printing: the default code page
-   cannot encode the ligatures and symbols in a paper, and the run dies on the first one.
+3. On Windows set `PYTHONIOENCODING=utf-8` before printing into a pipe or a file (an agent's
+   shell does that): a redirected stdout takes the console's code page, which cannot encode the
+   ligatures and symbols in a paper, and the run dies on the first one. An interactive console
+   writes Unicode since Python 3.6 and does not need it.
 4. Search the extracted text for the figure and read the sentences around it. Record the figure
    together with what it was measured on: the workload and its size, the machine, and what it is
    compared with.

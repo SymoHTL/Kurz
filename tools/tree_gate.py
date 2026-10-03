@@ -129,7 +129,8 @@ def check_commit(sha, cwd=None):
     errors = check_text(f"{sha[:8]} (message)", message)
     if kit.skip_literal(message):
         errors.append(f"{sha[:8]} (message): workflow-skip literal: the forge would start no workflow for this commit")
-    names = kit.run(["git", "show", "--format=", "--name-only", "--diff-filter=ACMR", "-z", sha], cwd=cwd).split("\0")
+    # every path but a deletion: a file turned into a link (T) carries its target as content, and is scanned like the rest
+    names = kit.run(["git", "show", "--format=", "--name-only", "--diff-filter=d", "-z", sha], cwd=cwd).split("\0")
     for path in filter(None, names):
         blob = kit.run(["git", "show", f"{sha}:{path}"], cwd=cwd, binary=True)  # as stored: decoding it here would hide a file that is not UTF-8
         errors += [f"{sha[:8]} {e}" for e in check_file(path, blob)]
@@ -174,7 +175,10 @@ def self_test():
               ("a Cygwin profile path", "profile-path", "/cygdrive/c/" + "Users/someone"),
               ("a Linux home directory", "profile-path", "/home/" + "someone/notes"),
               ("an address that ends a sentence", "ip-address", "it answered on 10.1." + "2.3."),
-              ("a link-local IPv6 address", "ip6-address", "fe80" + "::1")]
+              ("a link-local IPv6 address", "ip6-address", "fe80" + "::1"),
+              # a value that begins a line in JSON or a string literal follows the letter of an escape
+              ("a home directory after a newline escape", "profile-path", '"log": "ok' + "\\n/home/" + 'someone/x"'),
+              ("an address after a tab escape", "ip-address", '"ok' + "\\t10.1." + '2.3"')]
     cases = []
 
     def expect(name, files, needle, floor=FLOOR):
@@ -204,6 +208,8 @@ def self_test():
         cases.append((f"allowed path: {path}", check_path(path) is None, check_path(path)))
     for label, value in secrets.items():  # one plant per pattern; the error must name that pattern
         expect(f"secret: {label}", {**ok_files, "guides/g.md": value.encode()}, f"credential-shaped string ({label})")
+    hits = check_text("x", '"out": "done' + "\\nsk-" + "a" * 24 + '"')
+    cases.append(("secret: an api key after a newline escape", hits == ["x: credential-shaped string (api-key)"], hits))
     for label, value in machine.items():
         expect(f"machine-bound: {label}", {**ok_files, "guides/g.md": value.encode()}, f"machine-bound string ({label})")
     for name, label, value in shapes:
@@ -248,15 +254,26 @@ def self_test():
         git("commit", "--quiet", "-m", message)
         return git("rev-parse", "HEAD")
 
+    def link(path, target):
+        """Turn a tracked file into a symbolic link to `target`, in the index alone: the file system need not allow links."""
+        with open(os.path.join(repo, "target.txt"), "wb") as f:
+            f.write(target.encode())
+        blob = git("hash-object", "-w", "target.txt")
+        os.remove(os.path.join(repo, "target.txt"))
+        git("update-index", "--add", "--cacheinfo", f"120000,{blob},{path}")
+        git("commit", "--quiet", "-m", "a link")
+        return git("rev-parse", "HEAD")
+
     built = got(lambda: (git("init", "--quiet"),
                          commit("first", {"knowledge/a.md": b"fact\n"}),
                          commit("see D:" + "/work/notes", {"knowledge/b.md": b"fact\n"}),
                          commit("a compiler", {"src/Lexer.cs": b"class L {}\n"}),
                          commit("a binary", {"knowledge/c.md": b"\xff\xfe\x00"}),
                          commit("a deletion", delete="knowledge/a.md"),
-                         commit("quiet\n\n[skip " + "ci]", {"knowledge/d.md": b"fact\n"})))
+                         commit("quiet\n\n[skip " + "ci]", {"knowledge/d.md": b"fact\n"}),
+                         link("knowledge/d.md", "D:" + "/work/notes")))
     if isinstance(built, tuple):
-        _, clean, message, lexer, binary, deletion, quiet = built
+        _, clean, message, lexer, binary, deletion, quiet, linked = built
         of = lambda sha: got(lambda: check_commit(sha, cwd=repo))
         has = lambda errors, needle: isinstance(errors, list) and any(needle in e for e in errors)
         cases.append(("pre-push: a clean commit passes", of(clean) == [], of(clean)))
@@ -267,6 +284,8 @@ def self_test():
         cases.append(("pre-push: a deleted file is not scanned", of(deletion) == [], of(deletion)))
         cases.append(("pre-push: a workflow-skip literal in a commit message is refused",
                       has(of(quiet), "(message): workflow-skip literal"), of(quiet)))
+        cases.append(("pre-push: a file turned into a link is scanned, and its target is the content",
+                      has(of(linked), "knowledge/d.md: machine-bound string (drive-path)"), of(linked)))
         git("update-ref", "refs/remotes/origin/main", clean)
         git("update-ref", "refs/remotes/other/main", deletion)
         line = f"refs/heads/main {deletion} refs/heads/main {clean}"

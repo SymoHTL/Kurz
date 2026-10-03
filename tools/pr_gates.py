@@ -31,7 +31,8 @@ import kit  # noqa: E402
 import tree_gate  # noqa: E402
 
 BREADTH_FILES = 15
-INFRA = ("tools/", ".github/", ".review/", ".claude/", ".githooks/")
+INFRA = ("tools/", ".github/", ".review/", ".claude/", ".githooks/")  # directories the quality bar lives in
+INFRA_FILES = ("CLAUDE.md", ".gitattributes")  # what every session, or every checkout, obeys
 CODE = ("tools/", ".github/", ".githooks/")  # a written rationale can answer a finding here
 MARKER = "<!-- kurz-review:"  # every post of the reviewer carries one
 MARK = re.compile(r"<!-- kurz-review:findings (\[.*?\]) -->", re.S)
@@ -76,7 +77,7 @@ def breadth_errors(body, paths):
     why = []
     if len(paths) > BREADTH_FILES:
         why.append(f"{len(paths)} files, over {BREADTH_FILES}")
-    infra = sorted({p.split("/")[0] + "/" for p in paths if p.startswith(INFRA)})
+    infra = sorted({p.split("/")[0] + "/" for p in paths if p.startswith(INFRA)} | {p for p in paths if p in INFRA_FILES})
     if infra:
         why.append(f"touches {', '.join(infra)}")
     section = re.search(r"^## Blast radius[ \t]*\n(.*?)(?=^## |\Z)", lf(body), re.M | re.S)
@@ -171,13 +172,16 @@ def run_gate(gate, repo, number, get=None, pages=None):
         commits = pages(f"repos/{repo}/pulls/{number}/commits?per_page=100")
         if not commits:
             raise kit.Refused("the pull request lists no commits")
+        if len(commits) != pr.get("commits"):  # the forge lists at most 250: a longer branch has messages nobody read
+            raise kit.Refused(f"the pull request has {pr.get('commits')} commits and the forge listed {len(commits)}: not every message was read")
         return (title_errors(pr["title"], [c["commit"]["message"] for c in commits], pr["body"]),
                 f"title, description and {len(commits)} commit messages")
     if gate == "breadth":
         files = pages(f"repos/{repo}/pulls/{number}/files?per_page=100")
         if not files:
             raise kit.Refused("the pull request lists no files")
-        return breadth_errors(pr["body"], [f["filename"] for f in files]), f"{len(files)} files"
+        # a renamed file counts where it came from too: moving one out of the infrastructure touches it
+        return breadth_errors(pr["body"], [p for f in files for p in (f["filename"], f.get("previous_filename")) if p]), f"{len(files)} files"
     if gate == "findings":
         head = pr["head"]["sha"]
         threads = fetch_threads(repo, number, get)
@@ -233,6 +237,9 @@ def self_test():
 
     section = "## Summary\n\nx\n\n## Blast radius\n\n- the reviewer\n\n## Test plan\n"
     check("small change needs no section", breadth_errors("", ["kurz-design.md"]), None)
+    check("the rules file is infrastructure: every session obeys it", breadth_errors("", ["CLAUDE.md"]), "touches CLAUDE.md")
+    check("the attributes file is infrastructure: every checkout obeys it", breadth_errors("", [".gitattributes"]), "touches .gitattributes")
+    check("a file whose name starts like the rules file is not it", breadth_errors("", ["CLAUDE.md.bak"]), None)
     check("infrastructure without the section", breadth_errors("## Summary\nx", ["tools/kit.py"]), "Blast radius")
     check("infrastructure with the section", breadth_errors(section, ["tools/kit.py", ".github/workflows/gates.yml"]), None)
     check("the section is found in a description saved with CRLF", breadth_errors(section.replace("\n", "\r\n"), ["tools/kit.py"]), None)
@@ -302,7 +309,32 @@ def self_test():
     out = got(lambda: blob_at("o/n", "a.md", "c404", forge(failing=kit.Refused("`gh api repos/o/n/contents/a.md?ref=c404` exited 1: HTTP 502"))))
     cases.append(("blob: a refusal that only holds the digits 404 stays a refusal", type(out) is kit.Refused, repr(out)))
 
-    pr = {"title": "ok", "body": "", "head": {"sha": "h"}}
+    if found:
+        # the forge answers the threads on two pages; the finding on the first names the design record, resolved
+        # without a reply, so only the blob ids at its commit and at the head decide it; the second page is unresolved
+        pages_of = {None: variant(True, path="kurz-design.md"), "c1": variant(False)}
+
+        def paged(blob):
+            """A forge whose `get` answers the pull request, two pages of threads, and `blob(ref)` for a file."""
+            def get(*args):
+                if args[0] == "graphql":
+                    after = next((a[len("after="):] for a in args if a.startswith("after=")), None)
+                    page = {"nodes": pages_of[after], "pageInfo": {"hasNextPage": after is None, "endCursor": "c1"}}
+                    return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
+                if "/contents/" in args[0]:
+                    return {"sha": blob(args[0].split("?ref=")[1])}
+                return {"title": "ok", "body": "", "head": {"sha": "h"}, "commits": 1}
+            return get
+
+        out = got(lambda: run_gate("findings", "o/n", 1, paged(lambda ref: "blob@" + ref)))
+        cases.append(("findings: both pages of threads are read, and a blob that differs between the finding's commit and the head is the edit",
+                      type(out) is tuple and [e[:28] for e in out[0]] == ["unresolved review finding on"] and out[1].startswith("2 threads, 2 with"),
+                      repr(out)))
+        out = got(lambda: run_gate("findings", "o/n", 1, paged(lambda ref: "blob")))
+        cases.append(("findings: the same blob at the finding's commit and at the head is no edit",
+                      type(out) is tuple and len(out[0]) == 2 and any("without changing the file" in e for e in out[0]), repr(out)))
+
+    pr = {"title": "ok", "body": "", "head": {"sha": "h"}, "commits": 1}
     commit, changed = {"commit": {"message": "x\n\n[skip ci]"}}, {"filename": "tools/kit.py"}
     listed = lambda commits, files: (lambda path: list(commits) if "/commits" in path else list(files))
     out = got(lambda: run_gate("title", "o/n", 1, lambda path: pr, listed([], [changed])))
@@ -310,8 +342,15 @@ def self_test():
     out = got(lambda: run_gate("title", "o/n", 1, lambda path: pr, listed([commit], [])))
     cases.append(("title: the messages of the commits the pull request lists are read",
                   type(out) is tuple and any("a commit message carries" in e for e in out[0]) and "1 commit messages" in out[1], repr(out)))
+    out = got(lambda: run_gate("title", "o/n", 1, lambda path: {**pr, "commits": 251}, listed([commit], [])))
+    cases.append(("title: a pull request with more commits than the forge listed is refused, not passed on the ones read",
+                  type(out) is kit.Refused and "251 commits" in str(out) and "listed 1" in str(out), repr(out)))
     out = got(lambda: run_gate("breadth", "o/n", 1, lambda path: pr, listed([commit], [])))
     cases.append(("breadth: a pull request that lists no files is refused", type(out) is kit.Refused and "no files" in str(out), repr(out)))
+    moved = {"filename": "knowledge/walk.md", "previous_filename": ".claude/skills/change-walk/SKILL.md", "status": "renamed"}
+    out = got(lambda: run_gate("breadth", "o/n", 1, lambda path: pr, listed([], [moved])))
+    cases.append(("breadth: a file moved out of the infrastructure touches it, so the section is needed",
+                  type(out) is tuple and any(".claude/" in e for e in out[0]), repr(out)))
     out = got(lambda: run_gate("breadth", "o/n", 1, lambda path: pr, listed([], [changed])))
     cases.append(("breadth: the files the pull request lists are read",
                   type(out) is tuple and any("Blast radius" in e for e in out[0]) and out[1] == "1 files", repr(out)))

@@ -62,6 +62,7 @@ WORKERS = 3
 # it, not provoked here. A thread carries at most this many findings, a title this many characters
 # and a body that many, so a rendered thread stays well below it.
 THREAD_FINDINGS, TITLE_CHARS, BODY_CHARS = 20, 200, 2000
+COMMENT_CHARS = 65_536  # the forge's limit on a comment body; what is posted is sized against it, rendered
 # Low findings open no thread. They are collected on the open issue with this label, and the pull
 # request gets a note that lists them without their bodies: this many fit one comment.
 LOWS_LABEL, NOTE_FINDINGS = "review-lows", 150
@@ -122,9 +123,9 @@ class ReviewError(Exception):
     """The review cannot complete. kind: usage-limit, credential, cli-missing, wrong-model, api,
     budget (out of time), bad-output, bad-diff (a diff this script cannot read), or a plain reason."""
 
-    def __init__(self, kind, detail, status=None):
+    def __init__(self, kind, detail, status=None, cost=0.0):
         super().__init__(f"{kind}: {detail}")
-        self.kind, self.detail, self.status = kind, detail, status
+        self.kind, self.detail, self.status, self.cost = kind, detail, status, cost  # cost: what the failed call was billed
 
 
 def public(text):
@@ -181,9 +182,11 @@ def parse_diff(diff):
     cannot be read raises: a file that drops out of the review without a word is a file nobody
     reviewed."""
     files = []
+    if diff.strip() and "\ndiff --git " not in "\n" + diff:
+        raise ReviewError("bad-diff", f"the text is not a diff: {diff[:120]!r}")  # an error text on stdout, or a cut-off answer
     for block in re.split(r"(?m)^(?=diff --git )", diff):
         if not block.startswith("diff --git "):
-            continue  # what precedes the first block; the run refuses a diff that yields no file at all
+            continue  # what precedes the first block
         paths = header_paths(block)
         if not paths:
             raise ReviewError("bad-diff", f"a diff block has a header this script cannot read: {block.splitlines()[0][:120]!r}")
@@ -277,7 +280,8 @@ def build_prompt(sections, title, body, reported, batch, index, total, suffix, c
     """`changed` is every file of the pull request as "path (status)": a batch shows a part of the
     diff, and a rule about what the diff does not hold can only be judged against the whole list."""
     rules = "\n\n".join(f"## {s['name']}\n" + "\n".join(f"- {r}" for r in s["rules"]) for s in sections)
-    already = "\n".join(f"- {f['file']}:{f['line']} [{f['severity']}] {f['title']}" for f in reported) or "(nothing yet)"
+    already = "\n".join(f"- {f['file']}:{f['line']}{' (line of an earlier head)' if f.get('stale') else ''} [{f['severity']}] {f['title']}"
+                        for f in reported) or "(nothing yet)"
     diff = "\n\n".join(text for _, text in batch)
     listing = "\n".join(f"    {line}" for line in changed) or "    (not given)"
     return f"""Review one batch of a pull request diff against the rules below.
@@ -347,7 +351,7 @@ def parse_result(stdout, returncode, paths):
         raise ReviewError("wrong-model", f"the answer came from {sorted(d.get('modelUsage') or {})}, not from {MODEL}")
     out = d.get("structured_output")
     if not isinstance(out, dict) or not isinstance(out.get("findings"), list):
-        raise ReviewError("bad-output", "the answer carries no structured findings")
+        raise ReviewError("bad-output", "the answer carries no structured findings", cost=float(d.get("total_cost_usd") or 0))
     # A title is one line: it is listed to later passes as "already reported", one finding per line.
     # What the model wrote is posted on a public pull request: see `public`.
     good = [{**{k: f[k] for k in ("file", "line", "severity")}, "body": public(f["body"]),
@@ -417,7 +421,7 @@ class Budget:
 
 def fresh():
     """What is known about a batch before its first pass."""
-    return {"findings": [], "passes": 0, "converged": False, "cost": 0.0, "dropped": 0, "error": None}
+    return {"findings": [], "passes": 0, "converged": False, "cost": 0.0, "dropped": 0, "repeats": 0, "error": None}
 
 
 def converge(call, reported, budget, prior=None, limit=MAX_PASSES, bounds=(MIN_PASSES, MAX_PASSES)):
@@ -425,17 +429,20 @@ def converge(call, reported, budget, prior=None, limit=MAX_PASSES, bounds=(MIN_P
     bounds[1] (MIN_PASSES and MAX_PASSES, unless the caller limited the run: see arguments).
     call(reported so far) -> (findings, cost, dropped). A pass is told what is already reported, so
     a finding on a line that carries one from an earlier pass or run is a repeat, unless it is more
-    severe: then it replaces what this run found on that line. Within one pass, every finding is
-    kept: two defects on one line are two findings, told apart by their titles. A pass that fails
-    ends the batch: what the passes before it found is kept, next to the error. `prior` is what an
+    severe: then it replaces the finding of that title on that line, and stands next to the others.
+    Two defects on one line are two findings, told apart by their titles. A reported finding marked
+    `stale` was posted on an earlier head, where its line number came from: it is told to the model
+    and matches nothing. What the filter sets aside is counted in `repeats`. A pass that fails ends
+    the batch: what the passes before it found is kept, next to the error. `prior` is what an
     earlier call returned for this batch and `limit` is how many passes this call may add; a batch
     that converged or failed gets no further pass."""
     prior = prior or fresh()
     found = list(prior["findings"])
     known = {}  # (file, line) -> the highest severity reported there before the pass that is running
     for f in reported + found:
-        known[(f["file"], f["line"])] = max(known.get((f["file"], f["line"]), -1), RANK[f["severity"]])
-    passes, cost, converged, dropped, error = (prior[k] for k in ("passes", "cost", "converged", "dropped", "error"))
+        if not f.get("stale"):
+            known[(f["file"], f["line"])] = max(known.get((f["file"], f["line"]), -1), RANK[f["severity"]])
+    passes, cost, converged, dropped, repeats, error = (prior[k] for k in ("passes", "cost", "converged", "dropped", "repeats", "error"))
     least, most = bounds
     last = min(most, passes + limit)
     while not converged and not error and passes < last and budget.fits():
@@ -445,18 +452,21 @@ def converge(call, reported, budget, prior=None, limit=MAX_PASSES, bounds=(MIN_P
         except ReviewError as e:
             error = e
             break
+        except Exception as e:  # an answer the parser did not expect: this batch's error, not the run's crash
+            error = ReviewError("bad-output", f"{type(e).__name__}: {e}")
+            break
         budget.observe(budget.now() - began)
         passes, cost, dropped = passes + 1, cost + c, dropped + d
         added = {(f["file"], f["line"], f["title"]): f for f in sorted(new, key=lambda f: RANK[f["severity"]])
                  if RANK[f["severity"]] > known.get((f["file"], f["line"]), -1)}
-        replaced = {key[:2] for key in added}
-        found = [f for f in found if (f["file"], f["line"]) not in replaced] + list(added.values())
+        repeats += len(new) - len(added)
+        found = [f for f in found if (f["file"], f["line"], f["title"]) not in added] + list(added.values())
         for f in added.values():
             known[(f["file"], f["line"])] = max(known.get((f["file"], f["line"]), -1), RANK[f["severity"]])
         if passes >= least and all(f["severity"] == "low" for f in added.values()):
             converged = True
             break
-    return {"findings": found, "passes": passes, "converged": converged, "cost": cost, "dropped": dropped, "error": error}
+    return {"findings": found, "passes": passes, "converged": converged, "cost": cost, "dropped": dropped, "repeats": repeats, "error": error}
 
 
 def in_rounds(calls, reported, budget, workers=WORKERS, bounds=(MIN_PASSES, MAX_PASSES)):
@@ -536,25 +546,42 @@ def marked(comments, me, mark):
     return out
 
 
-def in_parts(findings, size=THREAD_FINDINGS):
-    return [findings[n:n + size] for n in range(0, len(findings), size)]
+def in_parts(findings, rendered, size=THREAD_FINDINGS):
+    """Parts of at most `size` findings whose text, `rendered(part)`, fits a comment. Rendering widens
+    a text (a marker opened in a title, a quote or a non-ASCII character in the marker's JSON), so the
+    count alone bounds nothing: the part is measured as it will be posted. A finding that fits no
+    comment alone still gets its own part, so that the forge's refusal names it."""
+    parts = []
+    for f in findings:
+        if parts and len(parts[-1]) < size and len(rendered(parts[-1] + [f])) <= COMMENT_CHARS:
+            parts[-1].append(f)
+        else:
+            parts.append([f])
+    return parts
 
 
-def plan_posts(findings, anchors):
+def plan_posts(findings, anchors, head=None):
     """One thread per file for its high and medium findings, anchored on the most severe line with
     the other lines and the file itself as fallbacks. `None` = the file. More than THREAD_FINDINGS
-    findings are spread over several threads: a comment has a size limit, and a thread the forge
-    refuses is a thread of findings nobody reads. A low finding gets no thread: a thread holds the
-    merge until it is resolved, and lows are collected on an issue instead (Forge.lows)."""
+    findings, or more text than a comment holds once rendered for `head`, are spread over several
+    threads: a thread the forge refuses is a thread of findings nobody reads. A low finding gets no
+    thread: a thread holds the merge until it is resolved, and lows are collected on an issue
+    instead (Forge.lows)."""
     threads, by_file = [], {}
     for f in findings:
         if f["severity"] != "low":
             by_file.setdefault(f["file"], []).append(f)
     for path, fs in by_file.items():
-        for part in in_parts(sorted(fs, key=lambda f: (-RANK[f["severity"]], f["line"]))):
+        for part in in_parts(sorted(fs, key=lambda f: (-RANK[f["severity"]], f["line"])), lambda part: render({"findings": part}, head)):
             lines = list(dict.fromkeys(f["line"] for f in part if f["line"] in anchors.get(path, ())))
             threads.append({"path": path, "lines": lines + [None], "findings": part})
     return threads
+
+
+def harmless(text):
+    """Shown text with no marker in it: a path, a title, a body or a failure detail that holds
+    `<!--` must not read back as this script's state (marked). Only marker() emits one."""
+    return text.replace("<!--", "&lt;!--")
 
 
 def marker(name, payload):
@@ -562,26 +589,33 @@ def marker(name, payload):
     return f"<!-- kurz-review:{name} {safe} -->"
 
 
-def listed(findings):
-    """The marker a later run reads back as "already reported"."""
-    return marker("findings", [{k: f[k] for k in ("file", "line", "severity", "title")} for f in findings])
+def listed(findings, head=None):
+    """The marker a later run reads back as "already reported", with the head whose line numbers
+    the findings carry: on another head they are stale (converge)."""
+    return marker("findings", [{**{k: f[k] for k in ("file", "line", "severity", "title")}, **({"sha": head} if head else {})}
+                               for f in findings])
 
 
-def render(thread):
+def render(thread, head=None, as_thread=True):
     """The comment for one thread. With `lows` = (pull request, head) it is the comment on the issue
     that collects low findings: it names where they come from and carries no marker, because a
-    run reads back only what is on its pull request."""
+    run reads back only what is on its pull request. `as_thread` False is the plain note a thread
+    falls back to when the forge takes no anchor: it says that nothing holds the merge for it, and
+    carries no marker either, so that the next run posts these findings again, as a thread."""
     # The model's words are shown, never trusted: a marker opened inside a title or body must not read back as state.
-    shown = lambda text: (text if len(text) <= BODY_CHARS else text[:BODY_CHARS] + " [cut here: the text was longer]").replace("<!--", "&lt;!--")
+    shown = lambda text: harmless(text if len(text) <= BODY_CHARS else text[:BODY_CHARS] + " [cut here: the text was longer]")
     lows = thread.get("lows")
     lines = [f"**Automated review: low findings of pull request #{lows[0]} at `{lows[1][:8]}`**" if lows else "**Automated review**", ""]
     for f in thread["findings"]:
-        lines += [f"- **{f['severity']}** `{f['file']}` line {f['line']}: {shown(f['title'])}", "", indent(shown(f["body"]), "  "), ""]
+        lines += [f"- **{f['severity']}** `{shown(f['file'])}` line {f['line']}: {shown(f['title'])}", "", indent(shown(f["body"]), "  "), ""]
     if lows:
         lines += ["Collected here to be fixed together. They do not hold the pull request; a push to it that is needed anyway fixes them too."]
+    elif not as_thread:
+        lines += ["The forge took no anchor for these findings, so this is a plain note, not a thread: nothing holds the "
+                  "merge for it. The run that posted it did not complete, and the next run posts these findings again."]
     else:
         lines += ["Fix the file, then resolve this thread. A finding that looks wrong is answered by an edit that makes "
-                  "the misreading impossible; on tool and workflow code a written reply also counts.", "", listed(thread["findings"])]
+                  "the misreading impossible; on tool and workflow code a written reply also counts.", "", listed(thread["findings"], head)]
     return "\n".join(lines)
 
 
@@ -599,10 +633,9 @@ class Forge:
         self.last_write, self.waits = None, list(RATE_WAITS)
 
     def send(self, path, payload, method):
-        """One write as the forge takes it. An answer that cannot be read is kit.Unanswered: the
-        command exited 0, so the write landed."""
-        out = kit.run(["gh", "api", "-X", method, f"repos/{self.repo}/{path}", "--input", "-"], stdin=json.dumps(payload))
-        return kit.answer(out, f"gh api -X {method} {path}", write=True)
+        """One write as the forge takes it. An answer that cannot be read, and a 5xx, is
+        kit.Unanswered: the write may have landed (kit.gh_send)."""
+        return kit.gh_send(method, f"repos/{self.repo}/{path}", payload)
 
     def post(self, path, payload, method="POST"):
         """One paced write. A text that holds what `public` replaces is a bug in this script, and is
@@ -659,10 +692,11 @@ class Forge:
         return kit.gh_pages(f"repos/{self.repo}/issues/{self.number}/comments?per_page=100")
 
     def thread(self, head, thread):
-        """Post one thread on its first anchor the forge accepts; a plain note is the last resort.
+        """Post one thread on its first anchor the forge accepts; a plain note is the last resort, and
+        the caller counts it as not posted: it is not a thread, so no check holds the merge for it.
         Returns where it landed. A refusal of the plain note raises, and so does a write that got no
         readable answer: it may have landed, and trying the next anchor would post it twice."""
-        body = render(thread)
+        body = render(thread, head)
         for line in thread["lines"]:
             payload = {"body": body, "commit_id": head, "path": thread["path"]}
             payload.update({"line": line, "side": "RIGHT"} if line else {"subject_type": "file"})
@@ -671,9 +705,11 @@ class Forge:
                 return f"{thread['path']}:{line or 'file'}"
             except kit.Unanswered:
                 raise
-            except kit.Refused:
+            except kit.Refused as e:
+                if "(HTTP 422)" not in str(e):
+                    raise  # a 5xx or a lost connection may have landed the comment: posting it elsewhere would double it
                 continue  # this anchor is not one the forge takes: the next one, then the file, then a note
-        self.note(body)
+        self.note(render(thread, head, as_thread=False))
         return "plain note"
 
     def note(self, body):
@@ -693,11 +729,13 @@ class Forge:
             "title": "Low findings of the automated review", "labels": [LOWS_LABEL],
             "body": "The automated review collects its low findings here instead of opening a thread for each. They are fixed "
                     "together. Close this issue when they are: the next review that finds a low opens a new one."})["number"]
-        for part in in_parts(findings):
-            self.post(f"issues/{issue}/comments", {"body": render({"findings": part, "lows": (self.number, head)})})
-        for part in in_parts(findings, NOTE_FINDINGS):
-            self.note(f"**Automated review**: {len(part)} low findings on `{head[:8]}` are collected in #{issue}. They do not hold "
-                      f"this pull request; a push that is needed anyway fixes them too.\n\n{listed(part)}")
+        collected = lambda part: render({"findings": part, "lows": (self.number, head)})
+        noted = lambda part: (f"**Automated review**: {len(part)} low findings on `{head[:8]}` are collected in #{issue}. They do not "
+                              f"hold this pull request; a push that is needed anyway fixes them too.\n\n{listed(part, head)}")
+        for part in in_parts(findings, collected):
+            self.post(f"issues/{issue}/comments", {"body": collected(part)})
+        for part in in_parts(findings, noted, NOTE_FINDINGS):
+            self.note(noted(part))
         return issue
 
     def save_state(self, comment_id, body):
@@ -750,6 +788,8 @@ def arguments(argv, environ):
     dry = plan or "--dry-run" in got
     if not raw.isdigit() or (local and dry) or not (ci or local or dry):
         return None
+    if "--bootstrap-rules" in got and not (local or dry):
+        return None  # a run that posts the status vouches for the default branch's rules, not for a file's
     bounds = (MIN_PASSES, MAX_PASSES)
     if "--passes" in got:
         if not (local or dry) or got["--passes"] not in [str(n) for n in range(1, MAX_PASSES + 1)]:
@@ -759,6 +799,10 @@ def arguments(argv, environ):
 
 
 def review(argv):
+    if hasattr(sys.stdout, "reconfigure"):
+        # A log redirected to a file takes the console's code page on Windows, and a finding that quotes a
+        # character outside it would end the run while it prints: the one place where a paid result is kept.
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     call = arguments(argv, os.environ)
     if not call:
         print("usage: review.py [--pr N] [--local | --dry-run | --plan] [--passes N] [--bootstrap-rules FILE]   (outside CI, name the mode; "
@@ -774,7 +818,7 @@ def review(argv):
         """Say that the review did not complete, here and on the pull request, and return the exit
         code. Each write is tried once and whatever it raises is printed, never raised: a failure
         to report a failure must not start the reporting again."""
-        detail = public(detail)
+        detail = harmless(public(detail))
         print(f"REVIEW DID NOT COMPLETE ({kind}): {detail}")
         if kind == "usage-limit":
             print("A usage limit is not a crash: retry after the reset the message names, not now.")
@@ -849,8 +893,8 @@ def review(argv):
         unread = {f["path"] for f in files} - replay - {p for batch in work for p, _ in batch}
         if unread:
             return stop("failed", f"{len(unread)} files of the diff are in no batch and in no replay: {', '.join(sorted(unread))[:300]}")
-        reported = [f for c, fs in marked(review_comments + issue_comments, me, FINDINGS_MARK) for f in fs
-                    if isinstance(f, dict) and f.get("severity") in RANK and isinstance(f.get("line"), int)]
+        reported = [{**f, "stale": f.get("sha") != head} for c, fs in marked(review_comments + issue_comments, me, FINDINGS_MARK)
+                    for f in fs if isinstance(f, dict) and f.get("severity") in RANK and isinstance(f.get("line"), int)]
         print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache, "
               f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}")
         for path in sorted(replay):
@@ -859,7 +903,8 @@ def review(argv):
             for index, batch in enumerate(work, 1):
                 print(f"  batch {index}/{len(work)}: {sum(len(text) for _, text in batch)} characters [{', '.join(sorted({p for p, _ in batch}))}]")
             least, most = bounds[0] * len(work), bounds[1] * len(work)
-            print(f"PLAN: {len(work)} batches, {least if least == most else f'{least} to {most}'} passes; nothing was reviewed")
+            print(f"PLAN: {len(work)} batches, {least if least == most else f'{least} to {most}'} passes; nothing was reviewed. "
+                  f"A pass whose answer could not be read is called once more and billed twice.")
             return 0
 
         suffix = fresh_suffix(diff, pr["title"], pr["body"])
@@ -874,16 +919,19 @@ def review(argv):
                 name = f"batch {index + 1}/{len(work)}, pass {next(number)}"
                 prompt = build_prompt(chosen, pr["title"], pr["body"], [f for f in already if f["file"] in paths],
                                       batch, index + 1, len(work), suffix, changed)
+                billed = 0.0  # what a failed first attempt cost: the pass it stands in for carries it
                 for attempt in (1, 2):
                     began = time.time()
                     try:
-                        answer = call_model(prompt, paths, max(1, int(budget.remaining())))
-                        print(f"  {name}: found {len(answer[0])} in {time.time() - began:.0f} s")
-                        return answer
+                        findings, cost, dropped = call_model(prompt, paths, max(1, int(budget.remaining())))
+                        print(f"  {name}: found {len(findings)} in {time.time() - began:.0f} s" + (f" (after a retried call, ${billed:.2f})" if billed else ""))
+                        return findings, cost + billed, dropped
                     except ReviewError as e:
                         print(f"  {name}: failed after {time.time() - began:.0f} s ({e.kind})")
                         if attempt == 2 or not (e.kind == "bad-output" or e.status in RETRY_STATUS):
+                            e.cost += billed
                             raise
+                        billed += e.cost
                         time.sleep(20)
             return call
 
@@ -892,7 +940,8 @@ def review(argv):
                             bounds=bounds)
         for index, (result, paths) in enumerate(zip(results, paths_of), 1):
             print(f"  batch {index}/{len(work)} [{', '.join(sorted(paths))}]: {result['passes']} passes, "
-                  f"{'converged' if result['converged'] else 'NOT converged'}, {len(result['findings'])} findings")
+                  f"{'converged' if result['converged'] else 'NOT converged'}, {len(result['findings'])} findings"
+                  + (f", {result['repeats']} repeats set aside" if result["repeats"] else ""))
 
         findings, capped, unconverged, incomplete = settle(results, work, bounds[1])
         count = {s: sum(f["severity"] == s for f in findings) for s in RANK}
@@ -912,11 +961,18 @@ def review(argv):
         # diff that needs more than one run is reviewed across them.
         unposted, lost = set(), 0
         lows = [f for f in findings if f["severity"] == "low"]
-        posts = [(thread["findings"], lambda thread=thread: forge.thread(head, thread)) for thread in plan_posts(findings, anchors)]
+        posts = [(thread["findings"], lambda thread=thread: forge.thread(head, thread)) for thread in plan_posts(findings, anchors, head)]
         posts += [(lows, lambda: f"issue {forge.lows(head, lows)}")] if lows else []
-        for posted, post in posts:
+        for n, (posted, post) in enumerate(posts):
             try:
-                print(f"  posted {len(posted)} findings at {post()}")
+                where = post()
+                print(f"  posted {len(posted)} findings at {where}")
+                if where == "plain note":
+                    # not a thread: no check holds the merge for these findings, and the note carries no marker,
+                    # so the next run posts them again; the run ends red like one whose posts were refused
+                    unposted |= {f["file"] for f in posted}
+                    lost += len(posted)
+                    print("  NOT POSTED as a thread (a plain note holds no merge): " + "; ".join(f"{f['file']}:{f['line']} {f['title']}" for f in posted))
             except kit.Refused as e:
                 # ponytail: an unposted finding lives only in this log, printed in full above. Its file
                 # is not stored as reviewed, so the next run reviews it again; carrying the findings in
@@ -924,6 +980,13 @@ def review(argv):
                 unposted |= {f["file"] for f in posted}
                 lost += len(posted)
                 print(f"  NOT POSTED ({public(str(e))[:200]}): " + "; ".join(f"{f['file']}:{f['line']} {f['title']}" for f in posted))
+                if RATE_LIMIT.search(str(e)) and not forge.waits:
+                    # every wait is spent: each further write would go into the limit and lengthen the block
+                    rest = [f for later, _ in posts[n + 1:] for f in later]
+                    unposted |= {f["file"] for f in rest}
+                    lost += len(rest)
+                    print(f"  POSTING STOPPED: the forge's rate limit refused a write and no wait is left; {len(rest)} more findings not posted")
+                    break
         if capped:
             wanted = note_wanted(notes, "no-convergence", sha=head)
             if wanted:
@@ -936,8 +999,8 @@ def review(argv):
                          f"Automated review state for `{head[:8]}`: {summary}. {len(replay)} files replayed.\n\n"
                          f"{marker('state', {'v': 1, 'key': key, 'head': head, 'files': cached})}")
         if unposted:
-            return stop("failed", f"{lost} findings on {', '.join(sorted(unposted))} could not be posted. Their text is in the log of "
-                                  f"this run and nowhere else; those files are not stored as reviewed, so the next run reviews them "
+            return stop("failed", f"{lost} findings on {', '.join(sorted(unposted))} could not be posted as threads. Their text is in "
+                                  f"the log of this run; those files are not stored as reviewed, so the next run reviews them "
                                   f"again. Found: {summary}")
         if incomplete:
             return stop(incomplete[0], f"{incomplete[1]}. Posted so far: {summary}")

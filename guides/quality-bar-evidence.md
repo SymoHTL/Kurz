@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-03
-digest: 298e03fdd6bc229a9f011861edd053a2e346a6141bd13dfa299adcd8f2fcfc53
+digest: dfee818485cd0855abbd53f98572c851aed954eee89988c3aa76a1864994e66f
 ttl_days: 60
 metadata:
   type: reference
@@ -12,15 +12,21 @@ metadata:
 
 Every number on this page sits in a generated block. `tools/quality_evidence.py` recomputes the
 blocks from the tree, from git and from the forge and stamps two lines above: the date, and a
-digest of the blocks. The knowledge lint fails on a block that is empty, on blocks that are not
-what the digest says (a number typed by hand, or a page the tool never wrote), and once the days
-of the TTL ran out. The prose between the blocks carries no measurement. What the bar consists
+digest of the blocks, the date and the TTL. The knowledge lint fails on a block that is empty, on a
+page whose digest is stale (a number typed by hand, a date moved by hand, a longer TTL), and once
+the days of the TTL ran out. The digest is a plain hash that every clone recomputes the same way:
+it catches the edit that leaves it stale, not one that recomputes it with the tool's own code
+(HAZARD #18). The prose between the blocks carries no measurement. What the bar consists
 of, and why, is in [quality-bar.md](quality-bar.md).
 
-When the TTL runs out, the gate `knowledge` is red on every open pull request and on `main`,
-whatever the change touches, until a pull request brings a regenerated page. Regenerating it
-needs a tree whose self-tests are green, because the tool refuses to count from a red one, and a
-login that can read the forge.
+When the TTL runs out, the gate `knowledge` is red from the first run after that day, on every
+pull request that gets one and on `main`, whatever the change touches, until a pull request brings
+a regenerated page; a head gated green before that day keeps its green check until something runs
+the job again, because the workflow has no schedule. Regenerating it
+needs a tree whose self-tests are green, because the tool refuses to count from a red one, a
+login that can read the forge, and the shapes the tool parses: a `## N. Open` heading in
+`kurz-design.md`, the index lines of `INDEX.md` and the `sections` of `.review/review-rules.yaml`.
+A design round that renames the Open section makes the tool refuse until its pattern follows.
 
 ## The gates
 
@@ -50,18 +56,18 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:self-tests -->
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
-| `tools/gates.py` | 31 | 20 |
-| `tools/kit.py` | 11 | 7 |
-| `tools/lint_ci.py` | 67 | 67 |
-| `tools/lint_knowledge.py` | 54 | 36 |
+| `tools/gates.py` | 33 | 23 |
+| `tools/kit.py` | 17 | 13 |
+| `tools/lint_ci.py` | 82 | 82 |
+| `tools/lint_knowledge.py` | 61 | 44 |
 | `tools/lint_reference.py` | 47 | 46 |
-| `tools/merge_pr.py` | 118 | 100 |
-| `tools/pr_gates.py` | 48 | 43 |
-| `tools/quality_evidence.py` | 27 | 22 |
-| `tools/red_proof.py` | 28 | 25 |
-| `tools/review/review.py` | 211 | 171 |
-| `tools/tree_gate.py` | 77 | 47 |
-| **total** | 719 | 584 |
+| `tools/merge_pr.py` | 127 | 109 |
+| `tools/pr_gates.py` | 55 | 50 |
+| `tools/quality_evidence.py` | 28 | 23 |
+| `tools/red_proof.py` | 29 | 26 |
+| `tools/review/review.py` | 235 | 201 |
+| `tools/tree_gate.py` | 81 | 51 |
+| **total** | 795 | 668 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
