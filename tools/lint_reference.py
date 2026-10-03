@@ -213,10 +213,11 @@ def sync(root):
             case = parse_case(files[m.group(2)])[0] if m and m.group(2) in files else None
             if not case:
                 continue
-            if n < len(lines) and lines[n] == "```kurz":  # drop the old sample
-                if "```" not in lines[n + 1:]:
+            if n < len(lines) and lines[n] == "```kurz":  # drop the old sample: it ends at the next fence, which must close it
+                close = next((i for i in range(n + 1, len(lines)) if lines[i].startswith("```")), None)
+                if close is None or lines[close] != "```":
                     raise kit.Refused(f"{chapter}:{n + 1}: this sample is never closed; nothing was rewritten")
-                n = lines.index("```", n + 1) + 1
+                n = close + 1
             if m.group(2) not in shown:  # in one chapter only the first Case line of a file carries the sample
                 out += ["```kurz", *case["body"].rstrip("\n").split("\n"), "```"]
             shown.add(m.group(2))
@@ -289,6 +290,8 @@ def self_test():
         "an error id that is not in the table": (tree(edit(assign, "error assign-immutable at", "error assign-twice at")), "not in the error table"),
         "an error line outside the file": (tree(edit(assign, "at 6", "at 60")), "outside the file"),
         "an error line in the header": (tree(edit(assign, "at 6", "at 2")), "outside the file, empty or in the header"),
+        "an error line on the blank line after the header": (tree(edit(assign, "at 6", "at 3")), "outside the file, empty or in the header"),
+        "an error line just past the end of the file": (tree(edit(assign, "at 6", "at 7")), "outside the file, empty or in the header"),
         "an error id no case expects": (tree(edit(ref, "| `assign-immutable` | V2 | a second assignment |",
                                                "| `assign-immutable` | V2 | a second assignment |\n| `unused-variable` | V1 | never read |")), "no corpus case expects"),
         "an error row with an unknown rule": (tree(edit(ref, "| V2 | a second", "| V9 | a second")), "names rule V9"),
@@ -343,6 +346,11 @@ def self_test():
     before, refusal = kit.read(os.path.join(unclosed, ref)), attempt(sync, unclosed)
     cases.append(("--sync refuses a sample that is never closed, and writes nothing",
                   isinstance(refusal, kit.Refused) and kit.read(os.path.join(unclosed, ref)) == before, repr(refusal)))
+    # the first sample is never closed and a later block is: the later fence must not be taken as the end of the first
+    followed = tree(edit(ref, "x = 4\nprint(x + 5)\n```\n\n### V2", "x = 4\nprint(x + 5)\n\n### V2"))
+    before, refusal = kit.read(os.path.join(followed, ref)), attempt(sync, followed)
+    cases.append(("--sync refuses an unclosed sample that a later sample follows, and drops nothing between them",
+                  isinstance(refusal, kit.Refused) and kit.read(os.path.join(followed, ref)) == before, (repr(refusal), errors_of(followed))))
     return kit.report(cases)
 
 

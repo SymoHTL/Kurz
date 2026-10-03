@@ -1,6 +1,6 @@
 // expect: output
 // | 13
-// rules: N7
+// rules: N3, N7
 
 string? Email(int id) {
     if id == 1 {

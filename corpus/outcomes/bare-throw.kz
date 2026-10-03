@@ -1,0 +1,8 @@
+// expect: error throw-needs-value at 5
+// rules: O7
+
+void Fail() {
+    throw
+}
+
+Fail()

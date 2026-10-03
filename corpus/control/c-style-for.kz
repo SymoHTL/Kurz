@@ -1,0 +1,6 @@
+// expect: error syntax at 4
+// rules: E4
+
+for (i = 0; i < 3; i++) {
+    print(i)
+}

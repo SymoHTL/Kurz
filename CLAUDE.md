@@ -93,7 +93,8 @@ Each line names a trap; its evidence is in the entry it links.
    waiting for the go-ahead is a `judgment step`.
 7. **An expectation nobody runs is not a proof.** Nothing runs `corpus/`. The lint checks the
    shape of a case; whether its expected output or error is right is decided by reading it
-   against the rules it names. HAZARD (#1); review rule "corpus" carries the defect shapes.
+   against the rules it names ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
+   HAZARD (#1); review rule "corpus" carries the defect shapes.
 
 ## CI
 

@@ -34,8 +34,10 @@ not. Once sixty cases use it, it is the language. The v0 compiler failed the sam
   with its options and a lean.
 - No case on an open rule. `tools/lint_reference.py` (gate `reference`) refuses one, and refuses
   a case that names an open rule in its header.
-- Where a case would need an open rule, write the case around it and say so in the rule. The
-  corpus puts one statement per line and writes `weak T?` for that reason.
+- Where a case would need an open rule, write the case around it and say so in the rule. On
+  2026-10-02, while L4 (statements over several lines) and the spelling of `weak` were open forks,
+  the corpus put one statement per line and wrote `weak T?` for that reason; round 7 decided L4
+  the next day and the corpus took continuation lines and `"""` blocks after it.
 - A design round asks about `proposed` and `open` rules by id. A `proposed` rule that the owner
   does not object to is still not decided: it goes into the record as *(assumed)* first. When a
   batch is accepted with one word, only the rules the question named are decided; the ones that

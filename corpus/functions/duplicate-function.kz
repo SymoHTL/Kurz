@@ -1,0 +1,12 @@
+// expect: error duplicate-function at 8
+// rules: F12
+
+void Fill(List<int> xs) {
+    print(xs.Count)
+}
+
+void Fill(mut List<int> xs) {
+    xs.Add(1)
+}
+
+Fill(List<int>())

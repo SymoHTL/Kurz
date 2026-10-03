@@ -1,0 +1,7 @@
+// expect: error weak-value at 5
+// rules: R5
+
+data Point(int X, int Y)
+class Mark(weak Point? At)
+
+print(Mark(null).At == null)

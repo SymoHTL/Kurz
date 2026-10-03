@@ -1,0 +1,13 @@
+// expect: error not-visible at 13
+// rules: F9
+
+class Counter {
+    mut int count = 0
+
+    void Add() {
+        count = count + 1
+    }
+}
+
+c = Counter()
+c.Add()

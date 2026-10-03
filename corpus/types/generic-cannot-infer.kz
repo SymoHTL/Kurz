@@ -1,0 +1,8 @@
+// expect: error cannot-infer at 8
+// rules: T27
+
+T Pick<T>(T a, T b) => a
+
+byte b = 1
+int i = 2
+print(Pick(b, i))

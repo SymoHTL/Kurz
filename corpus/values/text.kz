@@ -5,7 +5,6 @@
 // | null
 // | 0.5
 // | 0.30000000000000004
-// | plan Free
 // rules: A4
 
 data Empty
@@ -28,4 +27,3 @@ print(Empty)
 print(Email(2))
 print(0.5)
 print(0.1 + 0.2)
-print("plan {Plan.Free}")

@@ -93,7 +93,11 @@ print(sum)
 
 ### C6 (assumed, §8, §13) `for ... in`
 
-`for name in collection { }` runs its block once for each item, in order. The record's stream
+`for name in collection { }` runs its block once for each item: in order for a list and a range
+(C8), and in the order of the map's storage for a map (M10), where an item is an entry with a
+`Key` and a `Value` *(proposed: the names)*. The loop runs over the collection as it was when the
+loop started: the collection is a value (M1), and a change to the variable inside the block is a
+change to the variable, not to what the loop walks *(proposed reading of M3)*. The record's stream
 sample uses this form.
 
 Case: [control/for-in.kz](../corpus/control/for-in.kz)
@@ -108,7 +112,27 @@ for x in xs {
 
 ### C7 (assumed, §8) `break` and `continue`
 
-Inside a loop, `break` leaves the loop and `continue` goes on with the next round, as in C#.
+Inside a loop, `break` leaves the loop and `continue` goes on with the next round. Inside a
+`match` arm (C4) they still mean the loop around the `match`, unlike C#, where `break` leaves a
+`switch`: an arm ends where its statement ends and needs no `break`. Inside a lambda (F7) there is
+no loop around them: `break` or `continue` there, or outside every loop, is the compile error
+`break-outside-loop`. *(proposed)*
+
+Case: [control/break-in-match.kz](../corpus/control/break-in-match.kz)
+```kurz
+for i in 1..5 {
+    match i {
+        3 => break
+        else => print(i)
+    }
+}
+```
+
+Case: [control/break-outside-loop.kz](../corpus/control/break-outside-loop.kz)
+```kurz
+print(1)
+break
+```
 
 Case: [control/break-continue.kz](../corpus/control/break-continue.kz)
 ```kurz
@@ -138,9 +162,10 @@ holds no number and runs the block zero times. The C form with three parts,
 A range never counts down, and a range whose end lies below its start is an error, not an empty
 range. That holds for both forms: `3..2` and `3..<2` are errors, `3..<3` is not. It is the
 compile error `reversed-range` when both ends are expressions made only of literals, and an
-exception where the range is evaluated otherwise, before the first round of a loop over it.
-`for i in 1..n` therefore throws when `n` is 0; a loop that may run zero times is written with
-`..<`.
+exception where the range is evaluated otherwise, before the first round of a loop over it; the
+exception has no id yet (E3). `for i in 1..n` therefore throws when `n` is 0; a loop that may run
+zero times is written with `..<`. The C form with three parts is the compile error `syntax`, as is
+every other text no rule gives a meaning (E4).
 
 Case: [control/range-empty.kz](../corpus/control/range-empty.kz)
 ```kurz
@@ -191,8 +216,11 @@ for i in 0..<xs.Count {
 An arm can name a literal, which matches a value equal to it, and the last arm can be `else`,
 which matches whatever no arm before it matched. A `match` over literals that does not list
 every value of its type needs the `else` arm (O8). `match` can be used as an expression: its
-value is the value of the arm that ran. There are no patterns over fields and no conditions on
-an arm until something needs them.
+value is the value of the arm that ran, and its type is the type the arms share; where a type is
+written or expected, each arm's value has to fit it (T1), and where none is, the arms have to
+have one type, or the `match` is the compile error `type-mismatch`, as a C# switch expression
+without a natural type is. *(proposed: against a union of the arms' types, which no other
+expression forms on its own)* An arm has no patterns over fields and no conditions.
 
 Case: [control/match-literal.kz](../corpus/control/match-literal.kz)
 ```kurz

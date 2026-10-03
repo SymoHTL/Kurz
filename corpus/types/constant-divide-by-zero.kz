@@ -1,0 +1,4 @@
+// expect: error constant-divide-by-zero at 4
+// rules: T25
+
+print(10 / 0)

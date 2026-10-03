@@ -1,0 +1,9 @@
+// expect: output
+// | true
+// | false
+// rules: K15
+
+class Key(int Id, string Kind, mut int Hits) equal by Id, Kind
+
+print(Key(1, "a", 0) == Key(1, "a", 5))
+print(Key(1, "a", 0) == Key(1, "b", 0))

@@ -21,7 +21,10 @@ Case: [functions/expression-body.kz](../corpus/functions/expression-body.kz)
 ### F3 (assumed, §8) Block body and `return`
 
 A body between braces holds statements. `return expression` ends the function with that result,
-as in C#.
+as in C#. As there, a function with a result whose end can be reached without a `return`, and a
+bare `return` in such a function, are the compile error `missing-return`; `return` with a value in
+a `void` function (F4), and a value of another type than the result, are `type-mismatch`.
+*(proposed: C#'s rules with Kurz's ids)*
 
 Case: [functions/block-body.kz](../corpus/functions/block-body.kz)
 ```kurz
@@ -33,6 +36,17 @@ int Max(int a, int b) {
 }
 
 print(Max(2, 3))
+```
+
+Case: [functions/missing-return.kz](../corpus/functions/missing-return.kz)
+```kurz
+int Sign(int n) {
+    if n < 0 {
+        return -1
+    }
+}
+
+print(Sign(3))
 ```
 
 ### F4 (assumed, §8) `void`
@@ -51,6 +65,10 @@ Greet("Ann")
 ### F5 (decided, §8) Top-level statements
 
 There is no `Main`. Statements at the top level of a file run in order when the program starts.
+One file of a program has them; a second file with top-level statements is a compile error, as in
+C#, because nothing says in which order two files would run. *(proposed)* Its id is not in the
+error table: a case of the corpus is a single file, so no case can expect it, and the table lists
+only ids the corpus pins (E2).
 
 Case: [functions/top-level.kz](../corpus/functions/top-level.kz)
 ```kurz
@@ -71,7 +89,19 @@ int Double(int n) => n * 2
 
 ### F7 (decided, §4, §8) Lambdas
 
-A lambda is written as in C#: `x => x * 2`.
+A lambda is written as in C#: `x => x * 2`. A lambda has a type of its own, written as F11
+writes function types, when its parameters are typed and its body has a type: `() => n` with an
+`int` `n` is a `() => int`, so `first = () => n` declares a variable of that type (V1); where a
+type is written or expected (a parameter of F11's type, a typed variable), the lambda takes it and
+its parameters need no types. A lambda whose parameters have no type and no type to take, as `f =
+x => x * 2`, is the compile error `cannot-infer` (T27). This is what C# 10 does with a lambda's
+natural type, written down because C# before 10 had none. *(proposed)*
+
+Case: [functions/lambda-cannot-infer.kz](../corpus/functions/lambda-cannot-infer.kz)
+```kurz
+f = x => x * 2
+print(f(2))
+```
 
 Case: [functions/lambda.kz](../corpus/functions/lambda.kz)
 ```kurz
@@ -101,9 +131,25 @@ print(Next(1))
 
 A member is private to its type. A top-level type or function is private to its folder. `pub`
 exposes it; `prot` exposes a member to inheriting types. The fields of a primary constructor
-are the exception (D14).
+are the exception (D14). Using a member that is not visible from where it is used is the compile
+error `not-visible` *(proposed id)*.
 
-No case: it takes several folders, and a case of the corpus is a single file.
+Case: [classes/private-member.kz](../corpus/classes/private-member.kz)
+```kurz
+class Counter {
+    mut int count = 0
+
+    void Add() {
+        count = count + 1
+    }
+}
+
+c = Counter()
+c.Add()
+```
+
+No case shows the folder part: it takes several folders, and a case of the corpus is a single
+file.
 
 ### F10 (decided, §8) Folders and `use`
 
@@ -116,7 +162,11 @@ No case: it takes several files, and a case of the corpus is a single file.
 
 The type of a function value is written with an arrow: the parameter types between brackets,
 `=>`, and the result type, as in `(int) => bool`. A lambda reads the variables around it and
-cannot assign them: assigning one is the compile error `capture-assign`.
+cannot assign them: assigning one is the compile error `capture-assign`. So is every change of a
+captured variable: an assignment into a path from it (M4), a `mut` method called on it or on a
+path from it (M5), and passing it as a `mut` argument (M7); the lambda holds a copy (F15), and a
+change to the copy would be lost or, through a class instance on the path, would not be a change
+of the copy at all. *(proposed: the record speaks of assigning)*
 
 Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
 ```kurz
@@ -151,9 +201,25 @@ print(total)
 
 ### F12 (decided, §8) Overloads, default values, named arguments
 
-Functions may share a name when their parameters differ. A parameter can have a default value,
-and an argument can be passed by name (D11). Which function a call picks when more than one fits
-is F13.
+Functions may share a name when their parameters differ: in their number, or in the type of a
+parameter at the same place. Names, default values and the `mut` marker (M7) make no difference,
+so `Fill(List<int>)` next to `Fill(mut List<int>)` is the compile error `duplicate-function`, and a
+call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of the other. A
+parameter can have a default value, and an argument can be passed by name (D11). Which function a
+call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)*
+
+Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
+```kurz
+void Fill(List<int> xs) {
+    print(xs.Count)
+}
+
+void Fill(mut List<int> xs) {
+    xs.Add(1)
+}
+
+Fill(List<int>())
+```
 
 Case: [functions/overload.kz](../corpus/functions/overload.kz)
 ```kurz
@@ -190,8 +256,10 @@ Greet("Ann", word: "bye")
 A call can fit more than one function of its name: through widening (T8), when `Show(int)` and
 `Show(long)` both take a `short`, and through a default value (F12), when `Show(int a)` and
 `Show(int a, int b = 0)` both take one `int`. A function whose parameters have exactly the types
-of the arguments, with no default value used, wins. Any other call that fits more than one
-function is the compile error `ambiguous-call`; a conversion (T10) at the call picks one. Which
+of the arguments, with no default value used, wins. When a generic function (T19) and a function
+without type parameters both fit exactly, the one without type parameters wins, as in C#: `Show<T>(T
+x)` and `Show(int n)` are not ambiguous for an `int` *(proposed)*. Any other call that fits more than
+one function is the compile error `ambiguous-call`; a conversion (T10) at the call picks one. Which
 type a literal argument has here is F14; the cases pass variables.
 
 Case: [functions/overload-exact.kz](../corpus/functions/overload-exact.kz)
@@ -234,7 +302,10 @@ Show(s)
 
 For the pick of an overload (F13), a literal argument has the type it has on its own (L10, L11):
 `int` for `4`, `long` for `4000000000` and for `4L`. So `Show(4)` picks `Show(int)` over
-`Show(long)`, as in C#.
+`Show(long)`, as in C#. Its own type also decides which functions fit at all: `Show(4)` with
+`Show(short)` and `Show(long)` fits `Show(long)` only, through widening, and picks it; the literal
+does not take `short` here, although `short s = 4` lets it (L10), because the pick would otherwise
+depend on the value of the literal. This differs from C#, which picks `Show(short)`. *(proposed)*
 
 Case: [functions/overload-literal.kz](../corpus/functions/overload-literal.kz)
 ```kurz
@@ -257,7 +328,8 @@ A lambda takes the value each variable it reads (F11) has when the lambda is mad
 assignment does (M3). What its function assigns to a `mut` variable after that is not seen
 inside the lambda, and what a check had shown about the variable at that point (N3) holds inside
 it. This is not what C# does: there the lambda reads the variable itself and sees every later
-assignment.
+assignment. What a function declared at the top level (F5) sees of a top-level `mut` variable is
+F16.
 
 Case: [functions/capture-value.kz](../corpus/functions/capture-value.kz)
 ```kurz
@@ -284,3 +356,22 @@ if email != null {
     print(length())
 }
 ```
+
+### F16 (open) A top-level function that reads a top-level variable
+
+F15 settles what a lambda reads. A function declared at the top level (F5) that reads a `mut`
+variable of the top level has no rule: whether it may read it at all, whether it sees the value at
+the call (as a C# local function does) or the value at its declaration (as a lambda does here),
+and what it sees when F6 lets it be called above the variable's line. The options:
+
+- (a) A top-level function reads no top-level variable: what it needs comes through its
+  parameters. Cost: a counter or a table of the program is passed into every function, or made a
+  field of a class.
+- (b) It reads the variable itself and sees the value at the call, as a C# local function does;
+  a call above the variable's line is the compile error `unknown-name` (V10). Cost: two kinds of
+  function see captured variables differently (F15).
+- (c) As a lambda: the value at the function's declaration. Cost: a function declared above the
+  variable sees nothing of it, which F6 makes easy to write.
+
+The lean is (a): it keeps F15's one rule for capture, and a top-level program that needs shared
+state has classes for it.

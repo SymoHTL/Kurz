@@ -1,0 +1,6 @@
+// expect: error raw-not-allowed at 4
+// rules: R7
+
+raw {
+    print(1)
+}

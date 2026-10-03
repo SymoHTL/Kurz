@@ -1,0 +1,4 @@
+// expect: error constant-overflow at 4
+// rules: L10
+
+print(99999999999999999999)

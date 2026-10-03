@@ -108,7 +108,11 @@ match result {
 
 `call else { Case => ... }` handles the listed cases at the call. A case that is not listed
 still propagates (O2, O3). An arm either recovers with a value, which takes the place of the
-success value; or returns another case from the calling function; or throws.
+success value; or returns another case from the calling function; or throws. When the success
+case is `void` (O10) there is no value to recover with, and an arm is a statement, or a block of
+statements between braces, after which the program goes on after the call; `print("none")` in
+O10's case is such an arm. A block of statements is allowed in every arm; its last statement is
+what the arm does. *(proposed: the record shows one statement per arm)*
 
 Case: [outcomes/else-recover.kz](../corpus/outcomes/else-recover.kz)
 ```kurz
@@ -220,8 +224,20 @@ Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 
 `throw` takes a value or a text: `throw ConfigMissing(path)`, or `throw "no config"` as the short
 form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
-alone (O5). The record marks as *(assumed)* that the runtime adds the place and the chain id to
-what was thrown.
+alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
+`NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
+`throw-needs-value`: there is no value it could mean. *(proposed)* The record marks as
+*(assumed)* that the runtime adds the place and the chain id to what was thrown. What type the
+thrown value has when a supervisor reads it is open in the record (section 14).
+
+Case: [outcomes/bare-throw.kz](../corpus/outcomes/bare-throw.kz)
+```kurz
+void Fail() {
+    throw
+}
+
+Fail()
+```
 
 Case: [outcomes/throw-text.kz](../corpus/outcomes/throw-text.kz)
 ```kurz

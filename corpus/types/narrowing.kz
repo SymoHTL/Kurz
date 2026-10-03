@@ -1,4 +1,4 @@
-// expect: error narrowing at 5
+// expect: error narrowing-conversion at 5
 // rules: T7
 
 long big = 5

@@ -243,15 +243,17 @@ def self_test():
     try:
         lint_reference.lint = lambda tree: (["reference/02-variables.md:3: rule V1 is decided and cites no section"], {})
         red_reference = got(block_reference, root)
-        lint_reference.lint = lambda tree: ([], {"rules": 4, "decided": 1, "assumed": 1, "proposed": 1, "open": 1, "cases": 2, "errors": 1})
+        # every count its own value, so that a row that reads the wrong key cannot pass
+        lint_reference.lint = lambda tree: ([], {"rules": 11, "decided": 5, "assumed": 3, "proposed": 2, "open": 1, "cases": 13, "errors": 7})
         green_reference = got(block_reference, root)
     finally:
         lint_reference.lint = saved_lint
     cases.append(("reference: counts from a red lint are refused",
                   isinstance(red_reference, kit.Refused) and "not green" in str(red_reference), repr(red_reference)))
-    cases.append(("reference: rules by status, cases and error ids are counted",
-                  all(row in str(green_reference) for row in ("| Rules in the reference | 4 |", "| of them open | 1 |",
-                                                               "| Corpus cases, none of them run | 2 |", "| Compile-error ids | 1 |")), green_reference))
+    rows = ("| Rules in the reference | 11 |", "| of them decided | 5 |", "| of them assumed | 3 |", "| of them proposed | 2 |",
+            "| of them open | 1 |", "| Corpus cases, none of them run | 13 |", "| Compile-error ids | 7 |")
+    cases.append(("reference: rules by status, cases and error ids are counted, each row from its own key",
+                  all(row in str(green_reference) for row in rows) and str(green_reference).count("|") == 9 * 3, green_reference))
 
     saved = red_proof.check, red_proof.copy_of_tree, kit.repo, kit.gh_pages
     red_proof.copy_of_tree = lambda: root

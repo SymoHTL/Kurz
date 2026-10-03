@@ -1,0 +1,8 @@
+// expect: throws
+// | 1
+// rules: T25
+
+int Rest(int a, int b) => a % b
+
+print(Rest(10, 3))
+print(Rest(10, 0))

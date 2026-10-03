@@ -2,8 +2,9 @@
 
 ### D1 (decided, §4, §8) `data`
 
-`data Name(Type Field, ...)` declares an immutable record. The list in brackets is its primary
-constructor and its fields. A field is read with a dot.
+`data Name(Type Field, ...)` declares a record that is a value (M1): it changes only through a
+`mut` variable that holds it (D4, M4). The list in brackets is its primary constructor and its
+fields. A field is read with a dot.
 
 Case: [data/declare.kz](../corpus/data/declare.kz)
 ```kurz
@@ -36,13 +37,23 @@ print(Point(1, 2) == Point(2, 1))
 ### D4 (decided, §4) Immutable
 
 A field of a `data` value that is held in an immutable variable cannot be assigned: the compile
-error `assign-immutable`. Through a `mut` variable it can (M4).
+error `assign-immutable`. Through a `mut` variable it can (M4). The variable decides, not the
+field: the two cases make the same assignment, and only the variable differs.
 
 Case: [data/immutable.kz](../corpus/data/immutable.kz)
 ```kurz
 data Point(int X, int Y)
 
 p = Point(1, 2)
+p.X = 3
+print(p.X)
+```
+
+Case: [data/field-through-mut.kz](../corpus/data/field-through-mut.kz)
+```kurz
+data Point(int X, int Y)
+
+mut p = Point(1, 2)
 p.X = 3
 print(p.X)
 ```
@@ -132,9 +143,13 @@ No case: it changes speed and layout, not what a program prints.
 ### D11 (decided, §8) Default values and arguments by name
 
 A field or a parameter can have a default value, written after its name: `int Count = 1`. An
-argument can be passed by name: `Item(ProductId: 7)`. Both work as in C#: arguments without a
-name fill the parameters in order, arguments by name follow them in any order, and a parameter
-that has a default can be left out.
+argument can be passed by name: `Item(ProductId: 7)`. Both work as in C# before version 7.2:
+arguments without a name fill the parameters in order, arguments by name follow them in any
+order, a named argument never stands before an unnamed one, and a parameter that has a default
+can be left out. *(the version is a proposed reading: C# 7.2 also lets a named argument in its own
+position precede unnamed ones)* A name that matches no parameter, a parameter that gets two
+arguments, and a parameter without a default that gets none are the compile error
+`argument-mismatch` *(proposed)*.
 
 Case: [data/default-and-named.kz](../corpus/data/default-and-named.kz)
 ```kurz
@@ -156,6 +171,13 @@ void Greet(string name, string word = "hello") {
 Greet("Ann")
 Greet("Ann", "bye")
 Greet("Ann", word: "bye")
+```
+
+Case: [data/argument-twice.kz](../corpus/data/argument-twice.kz)
+```kurz
+data Item(int ProductId, int Count = 1)
+
+print(Item(7, ProductId: 8).Count)
 ```
 
 ### D12 (decided, §4) `enum`
@@ -217,7 +239,11 @@ print(p.Has(Access.Write))
 
 A field that is declared in a primary constructor can be read wherever its type is visible, as
 the positional members of a C# record can. It is the exception to F9, which makes a member
-private to its type unless it says `pub`: without it every such field would carry `pub`.
+private to its type unless it says `pub`: without it every such field would carry `pub`. Whether
+it can be assigned from outside its type is not a question of privacy but of M4, D4 and K2, which
+hold from inside and from outside alike: a `mut` field of a class instance through every
+reference, a field of a `data` value through a `mut` variable, and nothing else. The case under
+N9 that assigns `a.Email = null` from a top-level function relies on this. *(proposed reading)*
 
 Case: [data/declare.kz](../corpus/data/declare.kz)
 
@@ -294,8 +320,9 @@ directions are members of the type. `Plan.Pro.Number` is the number of a value. 
 is the value of a number, and its result is `Plan | Invalid`: a number that no value has is an
 outcome (O1), not an exception. The record marks as *(assumed)* that a declaration writes a
 number for every value or for none, that the number is an `int`, and that `Invalid` is the type
-that input from outside yields (record, section 13). The case declares no `Invalid` for that
-reason.
+that input from outside yields (record, section 13); it is a `data` type without fields (D8), so an
+arm names it bare, and the reference does not declare it because the standard library will. The
+case declares no `Invalid` for that reason. What a declaration that breaks the shape gets is D20.
 
 Case: [data/enum-number.kz](../corpus/data/enum-number.kz)
 ```kurz
@@ -303,13 +330,28 @@ enum Plan { Free = 1, Pro = 2 }
 
 print(Plan.Pro.Number)
 match Plan.From(1) {
-    Plan p => print(p)
+    Plan p => print(p == Plan.Free)
     Invalid => print("invalid")
 }
 match Plan.From(7) {
-    Plan p => print(p)
+    Plan p => print(p == Plan.Free)
     Invalid => print("invalid")
 }
+```
+
+### D20 (proposed) Numbers that do not fit the shape of D18
+
+A declaration that writes the same number for two values, one that writes a number for some values
+and not for all, and a use of `.Number` or `From` on an `enum` whose declaration writes no number
+are the compile error `enum-number`. The alternative, C#'s, lets two values share a number and
+makes them equal, which gives `From` a value nobody can predict; the error keeps D12's "a value has
+a number only where one is written" simple.
+
+Case: [data/enum-number-twice.kz](../corpus/data/enum-number-twice.kz)
+```kurz
+enum Plan { Free = 1, Pro = 1 }
+
+print(Plan.Pro.Number)
 ```
 
 ### D19 (assumed, §4) The number of a set of flags
@@ -319,7 +361,17 @@ declaration can write the number of each name, which is the value of its bit, as
 `flags Access { Read = 1, Write = 2, Run = 4 }`. Without written numbers the names get 1, 2, 4
 and so on, in their order. `set.Number` is the sum of the numbers the set holds.
 `Access.From(5)` is the set with that number, and `Invalid` when the number has a bit that no
-name has.
+name has. A number written for a name that is not one bit (`0`, `3`), a bit written for two
+names, a declaration with more names than the `int` has bits (31 names, the sign bit excluded),
+and a name `None`, which D17 gives every flags type, are the compile error `flags-number`.
+*(proposed)*
+
+Case: [data/flags-not-one-bit.kz](../corpus/data/flags-not-one-bit.kz)
+```kurz
+flags Access { Read = 1, Write = 3 }
+
+print(Access.Write.Number)
+```
 
 Case: [data/flags-number.kz](../corpus/data/flags-number.kz)
 ```kurz

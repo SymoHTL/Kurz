@@ -1,0 +1,6 @@
+// expect: error weak-not-nullable at 4
+// rules: R5
+
+class Node(string Name, weak Node Parent)
+
+print(Node("root", null).Name)

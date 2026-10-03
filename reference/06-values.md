@@ -40,7 +40,10 @@ Case: [values/copy-on-assign.kz](../corpus/values/copy-on-assign.kz)
 
 Assigning to a field at the end of a path that starts at a `mut` variable changes that variable's
 value. It is short for nested `with` (D5). On an immutable variable it is the compile error
-`assign-immutable` (D4).
+`assign-immutable` (D4). A class instance on the path starts the path anew: from a `mut` field of
+the instance on, the rest of the path is as if it started at a `mut` variable, whatever holds the
+instance (K2), and a field of the instance that is not `mut` ends the path as an immutable variable
+would (K1). *(proposed reading of K2 for paths)*
 
 Case: [values/path-assign.kz](../corpus/values/path-assign.kz)
 ```kurz
@@ -57,9 +60,21 @@ print(before.Home.City)
 ### M5 (decided, §4) Methods that change their own value
 
 A method that changes the value it is called on carries a `mut` marker (M6). Calling it on a value
-that is not reachable through a `mut` variable is the compile error `mut-required`.
+that is not reachable through a `mut` variable is the compile error `mut-required`. A value held
+in a `mut` field of a class instance is reachable through that field from every reference to the
+instance (K2, M4), so `node.Children.Add(x)` compiles for an immutable `node` whose class declares
+`mut List<Node> Children`. *(proposed reading of K2 for paths)*
 
 Case: [values/mut-method-on-immutable.kz](../corpus/values/mut-method-on-immutable.kz)
+
+Case: [values/mut-method-through-field.kz](../corpus/values/mut-method-through-field.kz)
+```kurz
+class Node(string Name, mut List<string> Children)
+
+node = Node("root", List<string>())
+node.Children.Add("leaf")
+print(node.Children.Count)
+```
 
 ### M6 (decided, §4) Where the `mut` marker of a method is written
 
@@ -84,10 +99,19 @@ print(before.Count)
 
 ### M7 (decided, §4) `mut` parameters
 
-A function changes a value of its caller only through a parameter marked `mut`, and the caller
-writes `mut` in front of the argument as well. Changing a parameter that is not `mut`, or passing
-an immutable variable as `mut`, is the compile error `mut-required`. Leaving `mut` out at the
-call is the compile error `mut-at-call`.
+A function changes a value of its caller through a parameter marked `mut`, and the caller
+writes `mut` in front of the argument as well; the other way is a `mut` method (M5), whose receiver
+is the value it changes. Calling a `mut` method (M5) on a parameter that is
+not `mut`, or passing an immutable variable as `mut`, is the compile error `mut-required`;
+assigning to such a parameter is F8's `assign-immutable`, as assigning to any immutable variable
+is. Leaving `mut` out at the call is the compile error `mut-at-call`. What may stand after `mut` at
+a call is a `mut` variable or a path from one, through fields of `data` values, to the value that
+is passed (`Fill(mut c.Items)`), or a `mut` field of a class instance (M4); a call result or a
+literal cannot stand there, and `mut` in front of an argument whose parameter is not `mut` is
+`mut-at-call` as well. Passing one variable twice as `mut` (`Swap(mut a, mut a)`), or a variable
+and a path into it, is `mut-at-call` too: each `mut` parameter is the only way its value changes
+while the function runs (M3). *(proposed: the forms after `mut`, and the two further uses of
+`mut-at-call`)*
 
 Case: [values/mut-parameter.kz](../corpus/values/mut-parameter.kz)
 ```kurz
@@ -167,8 +191,9 @@ print(ages["Bea"] ?? 0)
 ### M10 (decided, §4) The order of a map's entries
 
 A map has no order a program may rely on. A `for` loop over it (C6) and its text (A6) yield the
-entries in the order of the map's storage, which can differ between runs and versions, as for a
-`Dictionary` in C#. Two runs of one program can print the same map differently.
+entries in the order of the map's storage, which can differ between runs and versions, as the
+documentation of C#'s `Dictionary` leaves its order undefined. Two runs of one program can print
+the same map differently.
 
 No case: no order can be expected, so a case can show a map of one entry only, which the case of
 A6 does.

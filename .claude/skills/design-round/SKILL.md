@@ -20,7 +20,7 @@ conversation. What was asked and answered in chat can only be a judgment step.
    names its id, so that the owner can answer "C8 c". `judgment step`
 2. Write numbered questions. Each one has: the question in one line; two to four options; what
    each option costs (at run time, in the compiler, for the developer); a stated lean with its
-   reason. The owner answers by number. `judgment step`
+   reason. The owner answers by number, or by the rule id when the question names one. `judgment step`
 3. Kurz is designed in the spirit of C#: explain a new concept through its C# equivalent.
    `judgment step`
 4. A wish that cannot hold - a cost assumed away, a guarantee no system can give - is contradicted

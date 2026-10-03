@@ -1,7 +1,7 @@
 // expect: output
 // | true
 // | false
-// rules: K8
+// rules: K12
 
 class Tag(mut string Name) equal by Name
 

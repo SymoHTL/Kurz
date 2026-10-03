@@ -1,0 +1,11 @@
+// expect: output
+// | 1s 500ms
+// | 0ms
+// | -1h 30min
+// | 1h
+// rules: A12
+
+print(1500ms)
+print(0ms)
+print(-90min)
+print(3600s)

@@ -72,7 +72,8 @@ No case: every case that expects output shows it.
 
 The text of a `data` value is derived from its type, in the manner of C# records: the name of the
 type, then ` { `, then its fields in the order of their declaration, each as `Name = text` and
-with `, ` between them, then ` }`. The text of a field is the text of its value.
+with `, ` between them, then ` }`. The text of a field is the text of its value. A `data` value
+without fields (D8) has no braces: it shows its name alone, as A4 says.
 
 Case: [data/print.kz](../corpus/data/print.kz)
 ```kurz
@@ -95,7 +96,9 @@ shortest digits that read back as the same number: `0.5`, and `0.300000000000000
 A class instance is the exception. It has a text only when its class declares one (A5). Printing
 an instance of a class that declares none, or putting one into an interpolated string (L6), is
 the compile error `no-text`. An instance can reach itself through a `weak` reference, so a
-derived text would need a rule for where to stop.
+derived text would need a rule for where to stop. The case shows one line for each sentence of
+the first paragraph: a list, an `enum` value, a `data` value without fields, null and two
+`double`s; the texts of A3 and of the class cases have cases of their own.
 
 Case: [values/text.kz](../corpus/values/text.kz)
 ```kurz
@@ -119,7 +122,6 @@ print(Empty)
 print(Email(2))
 print(0.5)
 print(0.1 + 0.2)
-print("plan {Plan.Free}")
 ```
 
 Case: [classes/print-without-text.kz](../corpus/classes/print-without-text.kz)
@@ -136,7 +138,8 @@ A class declares its text with a method named `Text` that takes no parameters an
 `string`, as `ToString()` does in C#: `pub string Text() => "counter {Count}"`. `print` and an
 interpolated string (L6) use its result as the text of the instance. The record holds, as
 *(assumed)*, how the compiler keeps that cheap: it changes how the text is built and not what it
-is, so no case shows it.
+is, so no case shows it. Whether a `Text()` of the base class, or one without `pub`, gives a class
+its text is A9; what is printed through an interface or a type parameter is A10.
 
 Case: [classes/text.kz](../corpus/classes/text.kz)
 ```kurz
@@ -148,6 +151,38 @@ c = Counter(3)
 print(c)
 print("got {c}")
 ```
+
+### A9 (open) An inherited or a private `Text()`
+
+A4 gives an instance a text "only when its class declares one". With inheritance (K10) and members
+that are private by default (F9), three things are unsaid: whether `print(admin)` is `no-text`
+when only the base `User` declares `Text()`; whether a `User` variable that holds an `Admin` shows
+the text of `Admin`; and whether a `Text()` without `pub` counts. The options:
+
+- (a) As `ToString()` in C#: `Text()` is inherited, the run-time class picks it (`override` as in
+  K7), and a `Text()` without `pub` is the compile error `not-visible` where the text is used
+  outside the class, because `print` is such a use. Cost: whether a class has a text depends on
+  its base, and a base-typed value may print more than its static type says.
+- (b) Only a `pub Text()` declared in the class itself counts; the base's is not inherited, and a
+  private one is `no-text` at the print. Cost: every class of a hierarchy repeats the method.
+
+The lean is (a).
+
+### A10 (open) Printing through an interface or a type parameter
+
+A7 argues from "the type of what is held is known where it is printed". For a value whose static
+type is an interface (K6) or a type parameter (T19), the class behind it is not known at the
+`print`. The options:
+
+- (a) `print(x)` with an interface type compiles when the interface declares `string Text()` and
+  is `no-text` otherwise; with a type parameter it compiles when the parameter is limited (T19) to
+  an interface that declares it, and is `no-text` otherwise. Cost: a generic function that prints
+  its argument needs the limit; the standard library would declare one interface for it.
+- (b) The check runs for each instantiation of a generic function, so `print(x)` compiles for a
+  `Show<T>` called with `int` and fails for one called with a class without text. Cost: an error
+  at a call site for a line inside another function, and interfaces still need (a).
+
+The lean is (a).
 
 ### A6 (decided, §8) The text of a map
 
@@ -164,7 +199,7 @@ print(ages)
 
 ### A7 (decided, §8) A value that holds an instance without a text
 
-A4 makes the text of a list and of a `data` value out of the texts of what they hold, and gives
+A3 and A4 make the text of a `data` value and of a list out of the texts of what they hold, and gives
 an instance of a class a text only when its class declares one (A5). A list whose items are
 instances of a class that declares none has no text either, and neither has a `data` value with
 such a field: printing one, or putting it into an interpolated string (L6), is the compile error
@@ -190,10 +225,12 @@ print(b)
 
 ### A8 (assumed, §8) The text of the remaining values
 
-A `float` shows what a `double` shows (A4). A `decimal` shows the digits it holds. A `char` shows
-its character. A duration shows its value in the units of L14: `1h 30min`. A set of flags (D13)
-shows its names with ` | ` between them. A `double` without a fraction, one that needs an
-exponent and one that is no number show what C# prints for them: `1`, `1E+21`, `NaN`.
+A `float` shows what a `double` shows (A4), in the sense of A11. A `decimal` shows the digits it
+holds. A `char` shows its character. A duration shows its value in the units of L14: `1h 30min`,
+split as A12 says. A set of flags (D13) shows its names with ` | ` between them, in the order of
+A13. A `double` without a fraction, one that needs an exponent and one that is no number show what
+C# prints for them: `1`, `1E+21`, `NaN`; which C# that is, and what the other special values show,
+is A14.
 
 Case: [values/text-more.kz](../corpus/values/text-more.kz)
 ```kurz
@@ -207,4 +244,61 @@ print(Access.Read | Access.Write)
 for c in "ab".Chars {
     print(c)
 }
+```
+
+### A11 (proposed) The text of a `float`
+
+A `float` shows the shortest digits that read back as the same `float`, not the digits of the
+`double` it would widen to: `0.1f` shows `0.1`, as C# prints it, and not `0.10000000149011612`.
+
+Case: [values/text-float.kz](../corpus/values/text-float.kz)
+```kurz
+print(0.1f)
+print(2.5f)
+```
+
+### A12 (proposed) The text of a duration
+
+A duration shows its value split into the units of L14 from the largest down, each unit at most
+once and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and a
+value below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A negative
+duration shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`.
+
+Case: [values/text-duration.kz](../corpus/values/text-duration.kz)
+```kurz
+print(1500ms)
+print(0ms)
+print(-90min)
+print(3600s)
+```
+
+### A13 (proposed) The text of a set of flags
+
+The names show in the order of their declaration, whatever the order in which the set was
+combined, and the empty set (D17) shows `None`: `Access.Write | Access.Read` shows
+`Read | Write`.
+
+Case: [values/text-flags.kz](../corpus/values/text-flags.kz)
+```kurz
+flags Access { Read, Write, Run }
+
+print(Access.Write | Access.Read)
+print(Access.None)
+```
+
+### A14 (proposed) Which C# a `double` prints like
+
+"What C# prints" is what .NET Core 3.0 and later print with the invariant culture, which is the
+shortest digits that read back as the same number (A4), with `.` as the separator: an exponent
+form from `1E+15` up and below `1E-05`, `-0` for a negative zero, `Infinity` and `-Infinity` for
+the infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0`
+for a negative zero, a `∞` sign, a `,`), and none of that is meant.
+
+Case: [values/text-double-special.kz](../corpus/values/text-double-special.kz)
+```kurz
+double z = 0.0
+print(1e15)
+print(1e14)
+print(-0.0)
+print(1.0 / z)
 ```

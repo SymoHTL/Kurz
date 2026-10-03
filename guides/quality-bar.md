@@ -49,7 +49,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | CI triage | The "CI" section of `CLAUDE.md`. |
 | Agent operations (isolation, notes file, owner queue, worktrees) | Outside this repository. Nothing here depends on it. |
 | Living diagrams | Four entries tagged LIVING in `INDEX.md`; the lint requires each to have a diagram and its update triggers, and at least four of them to exist. |
-| Living guides | This guide and the evidence guide. The tree gate keeps both portable. The evidence guide's numbers are generated, carry a digest that a hand edit breaks, and expire: when the TTL runs out, `knowledge` is red on every pull request and on `main`, whatever the change touches, until a pull request regenerates the page with `py -3 tools/quality_evidence.py`. That tool refuses while a self-test is red and needs a login that can read the forge. |
+| Living guides | This guide and the evidence guide. The tree gate keeps both portable. The evidence guide's numbers are generated, carry a digest that a hand edit breaks, and expire: when the TTL runs out, `knowledge` is red on every pull request and on `main`, whatever the change touches, until a pull request regenerates the page with `py -3 tools/quality_evidence.py`. That tool refuses while a self-test or the reference lint is red and needs a login that can read the forge; so once the TTL has run out, a red reference blocks the only way back to green until it is fixed. |
 | Not in the method: the product is a language definition | `reference/` (rules with an id and a status), `corpus/` (one case per file) and `tools/lint_reference.py` (gate `reference`), which keeps the two consistent in shape. Nothing runs a case (HAZARD #1). |
 
 ## Gates
@@ -66,8 +66,7 @@ the end of the log shows PARTLY, never PASS. A run in which no gate ran is red.
 The gates, with what turns each one red, are printed in the evidence guide's generated block;
 the picture is `knowledge/diagram-gate-map.md`. Of the jobs the method lists:
 
-- **Exist here:** the knowledge lint, the reference lint (this repository's own: the method has
-  no such job), the secret scan (part of the tree gate), title hygiene, the breadth gate, the
+- **Exist here:** the knowledge lint, the secret scan (part of the tree gate), title hygiene, the breadth gate, the
   review, the reviewer's own unit suite (run with every other self-test), and the verdict idea,
   which here is the runner itself.
 - **Have nothing to check:** compile, unit, end-to-end, UI quality, migration drift, coverage,
