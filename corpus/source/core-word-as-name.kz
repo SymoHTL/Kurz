@@ -1,0 +1,5 @@
+// expect: error reserved-word at 4
+// rules: L18
+
+equal = 1
+print(equal)

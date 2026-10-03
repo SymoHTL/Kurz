@@ -1,0 +1,10 @@
+// expect: output
+// | 3
+// | 3
+// rules: V13
+
+int Three(int ignored) => 3
+
+for i in 0..<2 {
+    print(Three(1))
+}

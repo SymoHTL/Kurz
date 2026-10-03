@@ -1,0 +1,13 @@
+// expect: output
+// | 0
+// | 5
+// rules: K14
+
+class Counter(int Start) {
+    pub Counter() : this(0) { }
+
+    pub int Value() => Start
+}
+
+print(Counter().Value())
+print(Counter(5).Value())

@@ -162,8 +162,8 @@ holds no number and runs the block zero times. The C form with three parts,
 A range never counts down, and a range whose end lies below its start is an error, not an empty
 range. That holds for both forms: `3..2` and `3..<2` are errors, `3..<3` is not. It is the
 compile error `reversed-range` when both ends are expressions made only of literals, and an
-exception where the range is evaluated otherwise, before the first round of a loop over it; the
-exception has no id yet (E3). `for i in 1..n` therefore throws when `n` is 0; a loop that may run
+exception `reversed-range-at-run-time` where the range is evaluated otherwise, before the first
+round of a loop over it (E3). `for i in 1..n` therefore throws when `n` is 0; a loop that may run
 zero times is written with `..<`. The C form with three parts is the compile error `syntax`, as is
 every other text no rule gives a meaning (E4).
 

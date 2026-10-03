@@ -1,0 +1,13 @@
+// expect: error static-state at 5
+// rules: K18
+
+class Counter {
+    pub static mut int Total = 0
+
+    pub void Add() {
+        Total = Total + 1
+    }
+}
+
+Counter().Add()
+print(Counter.Total)

@@ -91,8 +91,7 @@ print("next {count + 1}")
 
 Inside a string literal, `\n`, `\t`, `\"` and `\\` mean what they mean in C#, and `\{` is a brace
 that does not start an interpolation. A `}` outside an interpolation is an ordinary character.
-Whether these five are all the escapes there are, and what a backslash before any other character
-is, nobody has chosen: L16.
+The other escapes of C#, and a backslash before any other character, are L16.
 
 Case: [source/escapes.kz](../corpus/source/escapes.kz)
 ```kurz
@@ -100,18 +99,23 @@ print("a \{b}")
 print("say \"hi\"")
 ```
 
-### L16 (open) The other escapes
+### L16 (decided, §8) The other escapes
 
-C# has more escapes than L7 lists (`\r`, `\0`, `\a`, `\b`, `\f`, `\v`, `\uXXXX`, `\xH`), and a
-backslash before any other character (`\}`, `\q`) is a compile error there. The options:
+The other escapes of C# mean what they mean there: `\'`, `\0`, `\a`, `\b`, `\f`, `\r`, `\v`,
+`\u` followed by four hex digits, `\U` followed by eight and `\x` followed by one to four. A
+backslash before any other character (`\}`, `\q`) is the compile error `unknown-escape`, as it
+is in C#. The owner chose this on 2026-10-03, against L7's five alone, which would have put `\r`
+and `\0` into the library; the cost is one more thing a lexer has to carry.
 
-- (a) L7's five are complete, and a backslash before any other character is the compile error
-  `unknown-escape`. Cost: `\r` and `\0` have to be written as `{'\r'}`-like expressions or taken
-  from the library.
-- (b) The whole set of C#, with the same compile error for the rest. Cost: the escapes a C#
-  developer knows, and one more thing a lexer has to carry.
+Case: [source/escapes-of-c-sharp.kz](../corpus/source/escapes-of-c-sharp.kz)
+```kurz
+print("\u0041\x42|\U00000043")
+```
 
-The lean is (b): the owner's background is C#, and nothing in the record argues against it.
+Case: [source/unknown-escape.kz](../corpus/source/unknown-escape.kz)
+```kurz
+print("a\q")
+```
 
 ### L8 (assumed, §8) `true` and `false`
 
@@ -202,8 +206,7 @@ print(half < 1.0)
 Only the core words are reserved: the words that the language itself uses as syntax, such as
 `if`, `match`, `mut`, `data` and `class`. Using one as a name is the compile error
 `reserved-word`. A user-defined keyword (record, section 9) is reserved in the files that import
-it and is an ordinary name in every other file. Which words are the core words is L18: until it
-is answered, a compiler can only be sure about the words this reference uses as syntax.
+it and is an ordinary name in every other file. The core words are listed in L18.
 
 Case: [source/reserved-word.kz](../corpus/source/reserved-word.kz)
 ```kurz
@@ -212,22 +215,23 @@ data Job(int match)
 print(Job(1) == Job(2))
 ```
 
-### L18 (open) The list of core words
+### L18 (decided, §8) The list of core words
 
-L12 reserves "the core words" and names five of them. Two compilers that each pick their own list
-accept different programs. The options:
+The core words are the words this reference uses as syntax, and the list is closed here: `if`,
+`else`, `match`, `for`, `in`, `while`, `break`, `continue`, `return`, `throw`, `mut`, `data`,
+`class`, `interface`, `enum`, `flags`, `with`, `equal`, `by`, `pub`, `prot`, `static`, `this`,
+`virtual`, `override`, `weak`, `raw`, `use`, `void`, `true`, `false` and `null`, plus the words
+the parts outside this reference add, each listed where that part is specified. The owner chose
+this on 2026-10-03, against the keywords of C#, which would take `goto`, `unsafe` and `checked`
+from programs for nothing; the cost is that the list has to be kept. The names of the built-in
+types (`int`, `string`, ...) are not core words. *(assumed: the question put that outside its
+options; in C# they are keywords)*
 
-- (a) The list is the words this reference uses as syntax, closed here: `if`, `else`, `match`,
-  `for`, `in`, `while`, `break`, `continue`, `return`, `throw`, `mut`, `data`, `class`,
-  `interface`, `enum`, `flags`, `with`, `pub`, `prot`, `static`, `override`, `weak`, `raw`,
-  `use`, `void`, `true`, `false` and `null`, plus the words the parts outside this reference
-  add, each listed where that part is specified. Cost: the list has to be kept.
-- (b) The keywords of C#, whether Kurz uses them or not. Cost: words Kurz never uses (`goto`,
-  `unsafe`, `checked`) are taken from programs for nothing.
-
-The lean is (a). The names of the built-in types (`int`, `string`, ...) are not reserved under
-either option, as in C# they are contextual in all but name; whether they should be is part of
-the same answer.
+Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
+```kurz
+equal = 1
+print(equal)
+```
 
 ### L13 (decided, §8) A string over several lines
 

@@ -1,0 +1,11 @@
+// expect: output
+// | true
+// | false
+// rules: K13
+
+class User(int Id, mut string Name) equal by Id
+class Admin(int Level) : User
+class Root(int Level) : User equal by Level
+
+print(Admin(1, "Ann", 2) == Admin(1, "Bea", 3))
+print(Root(1, "Ann", 2) == Root(1, "Ann", 3))

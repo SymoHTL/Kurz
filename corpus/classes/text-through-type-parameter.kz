@@ -1,0 +1,8 @@
+// expect: error no-text at 5
+// rules: A10
+
+void Show<T>(T item) {
+    print(item)
+}
+
+Show(1)

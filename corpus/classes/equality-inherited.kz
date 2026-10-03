@@ -1,0 +1,16 @@
+// expect: output
+// | false
+// | true
+// | false
+// rules: K13
+
+class User(string Name)
+class Admin(int Level) : User
+class Box(mut int Count)
+class Tagged(string Tag) : Box
+
+bool Same(User a, User b) => a == b
+
+print(Same(Admin("Ann", 1), User("Ann")))
+print(Admin("Ann", 1) == Admin("Ann", 1))
+print(Tagged(0, "a") == Tagged(0, "a"))

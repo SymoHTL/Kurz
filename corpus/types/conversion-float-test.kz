@@ -1,0 +1,6 @@
+// expect: throws overflow at 6
+// build: test
+// rules: T26
+
+double big = 100000000000000000000.0
+print(int(big))

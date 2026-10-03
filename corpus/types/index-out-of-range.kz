@@ -1,4 +1,4 @@
-// expect: throws
+// expect: throws index-out-of-range at 5
 // rules: T14
 
 xs = List<int>()

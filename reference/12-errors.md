@@ -1,25 +1,26 @@
-# 12. Compile errors
+# 12. Errors
 
-The errors the cases expect. An id is what a corpus header names in `// expect: error <id> at
-<line>`. The exceptions a program can raise when it runs have no ids yet: E3.
+The errors the cases expect. An id is what a corpus header names: `// expect: error <id> at
+<line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
+raises when it runs (E3). The two tables share one namespace of ids.
 
 | id | rules | meaning |
 |---|---|---|
 | `unused-variable` | V5, V6 | a variable that is never read |
-| `assign-immutable` | V7, V8, D4, K1, F8 | an assignment to a variable or a parameter that is not `mut`, into a path that starts at one (M4: for a `data` value the variable at the root decides, so `root.Left = x` through a `mut` variable is allowed), or to a field of a class instance that is not `mut` |
+| `assign-immutable` | V7, V8, D4, K1, F8, K14 | an assignment to a variable or a parameter that is not `mut`, into a path that starts at one (M4: for a `data` value the variable at the root decides, so `root.Left = x` through a `mut` variable is allowed), or to a field of a class instance that is not `mut` |
 | `redeclared` | V9 | a declaration, in any of its forms, of a name that is already visible |
 | `argument-mismatch` | D11 | a call with an argument whose name no parameter has, two arguments for one parameter, or none for a parameter without a default |
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or `.Number` and `From` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
-| `unknown-name` | V10 | a name that is not visible at this place |
+| `unknown-name` | V10, F16 | a name that is not visible at this place, a top-level variable inside a top-level function included |
 | `type-mismatch` | T1, T13, T19, N6, C3 | a value of one type where another type is required |
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
-| `not-visible` | F9 | a member, type or function used where it is not visible |
+| `not-visible` | F9, A9 | a member, type or function used where it is not visible; `print` of an instance whose `Text()` is not `pub` is such a use |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
 | `constant-overflow` | T6, L10 | an expression of literals whose result leaves the range of its type, or a literal that fits no integer type |
 | `constant-divide-by-zero` | T25 | a division or remainder of literals by the literal `0` |
-| `narrowing-conversion` | T7 | a wider integer type put into a narrower one without a conversion |
-| `sign-mix` | T9 | an operation between a signed and an unsigned integer |
+| `narrowing-conversion` | T7, T28 | a wider integer type put into a narrower one without a conversion, the `int` of a promoted operation included |
+| `sign-mix` | T9, T23 | an operation between a signed and an unsigned integer that no widening joins, or a signed value put where an unsigned type is required |
 | `string-index` | T15 | an index applied to a string instead of to `.Bytes` or `.Chars` |
 | `nullable-unchecked` | N2, N3, N7, N9 | a nullable value used without a check |
 | `mut-required` | M5, M7 | a `mut` method called on, or a `mut` argument taken from, something that is not `mut` |
@@ -27,23 +28,40 @@ The errors the cases expect. An id is what a corpus header names in `// expect: 
 | `unlisted-case` | O3, O9 | a case that would leave a function whose return type does not list it |
 | `match-not-exhaustive` | O8, C9, D12 | a `match` that lists neither every case nor an `else` arm |
 | `braces-required` | C1 | a statement where a block between braces is required |
-| `reference-cycle` | R2, R4, R8 | a class that can reach itself through strong fields, one of them `mut` |
+| `reference-cycle` | R2, R4, R8, R9 | a class that can reach itself through strong fields, one of them `mut` |
 | `weak-not-nullable` | R5 | a `weak` type written without its `?` |
 | `weak-value` | R5 | `weak` in front of a type whose values are not instances of a class |
 | `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file |
 | `semicolon` | L5 | a `;`: a statement ends where its line ends |
-| `reserved-word` | L12 | a core word, or a keyword the file imports, used as a name |
+| `reserved-word` | L12, L18 | a core word, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
 | `reversed-range` | C8 | a range between literals whose end lies below its start |
 | `ambiguous-call` | F13 | a call that fits more than one function, none of them exactly |
 | `cannot-infer` | T27, F7 | a call of a generic function whose type arguments are neither written nor inferable from its arguments |
 | `equal-by-unknown` | K15 | an `equal by` clause that names something that is not a field of the class |
 | `base-field-clash` | K17 | a parameter with a base field's name and another type, or with its name and type while the base receives something else |
-| `no-text` | A4, A7 | the text of an instance of a class that declares none, or of a value that holds one |
+| `no-text` | A4, A7, A10 | the text of an instance of a class that declares none, of a value that holds one, or of a value whose interface or type parameter declares none |
 | `block-indentation` | L13 | a line of a `"""` block that is indented less than the closing line |
 | `throw-needs-value` | O7 | a bare `throw` anywhere but in an arm of `else` |
 | `break-outside-loop` | C7 | `break` or `continue` with no loop around it, a lambda's body included |
+| `unknown-escape` | L16 | a backslash before a character that starts no escape |
+| `static-state` | K18 | a `static mut` field, or a static field whose type is or holds a class |
+| `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |
 | `syntax` | E4 | text that no rule gives a meaning: the C `for` with three parts, `else` on a line of its own, an arm after `else`, a call with a `void` success used as a value |
+
+## Run-time errors
+
+The exceptions a program can raise, as the header of a case names them. The line is the one that
+holds the construct that raised: the `throw`, the arithmetic, the index, the call of the type, or
+the range of the loop.
+
+| id | rules | meaning |
+|---|---|---|
+| `thrown` | O5, O6, O7 | a `throw` statement of the program ran |
+| `overflow` | T5, T20, T26 | arithmetic that left the range of its type, or a conversion that lost its value, in a test build |
+| `divide-by-zero` | T14, T25 | an integer division or remainder by zero |
+| `index-out-of-range` | T14 | an index outside the collection |
+| `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |
 
 ### E1 (assumed, §8) One error per case, with a line
 
@@ -61,23 +79,18 @@ an error and never its message, which stays free to improve.
 
 No case: every case that expects an error names its id and its line.
 
-### E3 (open) How a case names the exception it expects
+### E3 (decided, §5, §8) How a case names the exception it expects
 
-`// expect: throws` says only that the program ends with an exception. A case for a reversed range
-(C8), an overflow in a test build (T5), a conversion that loses its value (T20) or an index out of
-range (T14) therefore passes with any exception thrown from any line, and the eight such cases
-cannot tell a right compiler from a wrong one. The options:
+A case that ends with an exception names it: `// expect: throws <id> at <line>`, with the id from
+the run-time table above and the line counted as for a compile error. The lint checks both as it
+checks a compile error's. So a case for a reversed range (C8), an overflow in a test build (T5), a
+conversion that loses its value (T20) or an index out of range (T14) passes only with that
+exception from that line, and a `throw` of the program is `thrown` at the line of the `throw`.
+The program's exit code is pinned with it (O6). The owner chose this on 2026-10-03, against a
+header that says only that something is thrown; the cost is a word the runtime carries in every
+exception.
 
-- (a) Run-time errors get ids of their own in a second table of this chapter (`overflow`,
-  `divide-by-zero`, `index-out-of-range`, `reversed-range`, `conversion-overflow`), the header
-  becomes `// expect: throws <id> at <line>` with the line counted as for a compile error, and
-  the lint checks the id and the line as it does for compile errors. The exit code of a program
-  that ends with an exception (O6) is pinned with it. Cost: the lint and its cases change, and
-  every id is one more word the runtime has to carry in its exceptions.
-- (b) As now: the cases say that something is thrown, and the reviewer reads whether it is the
-  right thing. Cost: the weakness above stays.
-
-The lean is (a).
+No case: every case that expects an exception names its id and its line.
 
 ### E4 (proposed) One id for text no rule gives a meaning
 

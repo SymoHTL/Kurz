@@ -1,0 +1,7 @@
+// expect: error narrowing-conversion at 6
+// rules: T28
+
+byte a = 200
+byte b = 100
+byte c = a + b
+print(c)

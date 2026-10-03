@@ -1,0 +1,5 @@
+// expect: output
+// | AB|C
+// rules: L16
+
+print("\u0041\x42|\U00000043")

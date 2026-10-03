@@ -1,0 +1,15 @@
+// expect: error assign-immutable at 9
+// rules: K14
+
+class Point {
+    int x
+
+    pub Point(int value) {
+        x = value
+        x = value + 1
+    }
+
+    pub int X() => x
+}
+
+print(Point(1).X())

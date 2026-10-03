@@ -1,0 +1,9 @@
+// expect: error unknown-name at 6
+// rules: F16
+
+mut count = 0
+
+int Next() => count + 1
+
+count = Next()
+print(count)

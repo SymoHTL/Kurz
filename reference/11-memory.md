@@ -13,7 +13,7 @@ Judged by types, over the whole program: a class may not reach itself through st
 one field on that path is `mut`. That is the compile error `reference-cycle`. A path without a
 `mut` field is allowed, because immutable data cannot form a cycle. A field of function type
 (F11) is a strong field whose type names no class, yet the lambda it holds can capture any
-instance: how such a field counts is R9.
+instance: R9 says how it counts.
 
 Case: [memory/cycle-self.kz](../corpus/memory/cycle-self.kz)
 ```kurz
@@ -41,25 +41,25 @@ b = Link(2, a)
 print(b.Next?.Value ?? 0)
 ```
 
-### R9 (open) Fields of function type in the cycle rule
+### R9 (decided, §3) Fields of function type in the cycle rule
 
-`class Button(string Name, mut () => void OnClick)` with `b.OnClick = () => print(b.Name)` closes
-the ring b, OnClick, the lambda, b, and no field type on that path names `Button`, so R2 as
-written accepts the program and the ring leaks, although R7 promises the memory guarantees for
-everything outside `raw`. The options:
+A `mut` field of function type counts as a field that can reach every class whose instance a
+lambda in the program captures, as R8 treats a field of interface type: with
+`class Button(string Name, mut () => void OnClick)` and a `b.OnClick = () => print(b.Name)`
+anywhere in the program, `Button` reaches itself, and the class is `reference-cycle`. The owner
+chose this on 2026-10-03, against a weak capture inside stored lambdas, which would need a rule
+for what a gone capture reads as and a check at every use, and against forbidding such a capture;
+the cost is that such fields become rare, and that an event handler is written as an interface
+(R8) or receives its button as a parameter.
 
-- (a) A `mut` field of function type counts as a field that can reach every class whose instance
-  a lambda in the program captures, as R8 treats a field of interface type: the ring above is
-  `reference-cycle`, and a `mut` function field in a class that any lambda anywhere can capture
-  is one as well. Cost: such fields become rare, and an event handler is written as an interface
-  (R8) or through a `weak` capture the record does not have yet.
-- (b) A lambda stored in a field captures class instances weakly, so the ring never forms; a
-  captured instance can be gone when the lambda runs, and the lambda sees `null` for it. Cost: a
-  rule for what a captured `weak` reference reads as, and a check at every use.
-- (c) A lambda may not capture a class instance at all when it is stored in a field. Cost: the
-  handler above has to receive the button as a parameter.
+Case: [memory/cycle-through-function-field.kz](../corpus/memory/cycle-through-function-field.kz)
+```kurz
+class Button(string Name, mut () => void OnClick)
 
-The lean is (a): it is R8's rule applied once more, and nothing new has to be invented.
+b = Button("ok", () => print("clicked"))
+b.OnClick = () => print(b.Name)
+b.OnClick()
+```
 
 ### R3 (decided, §3) `weak`
 

@@ -1,0 +1,6 @@
+// expect: error sign-mix at 5
+// rules: T23
+
+int i = 5
+uint u = i
+print(u)

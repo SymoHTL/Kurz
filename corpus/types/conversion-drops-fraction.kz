@@ -1,0 +1,7 @@
+// expect: output
+// | 2
+// | -2
+// rules: T26
+
+print(int(2.5))
+print(int(-2.5))

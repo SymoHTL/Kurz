@@ -328,8 +328,7 @@ A lambda takes the value each variable it reads (F11) has when the lambda is mad
 assignment does (M3). What its function assigns to a `mut` variable after that is not seen
 inside the lambda, and what a check had shown about the variable at that point (N3) holds inside
 it. This is not what C# does: there the lambda reads the variable itself and sees every later
-assignment. What a function declared at the top level (F5) sees of a top-level `mut` variable is
-F16.
+assignment. A function declared at the top level (F5) reads no top-level variable (F16).
 
 Case: [functions/capture-value.kz](../corpus/functions/capture-value.kz)
 ```kurz
@@ -357,21 +356,23 @@ if email != null {
 }
 ```
 
-### F16 (open) A top-level function that reads a top-level variable
+### F16 (decided, §4) A top-level function that reads a top-level variable
 
-F15 settles what a lambda reads. A function declared at the top level (F5) that reads a `mut`
-variable of the top level has no rule: whether it may read it at all, whether it sees the value at
-the call (as a C# local function does) or the value at its declaration (as a lambda does here),
-and what it sees when F6 lets it be called above the variable's line. The options:
+A function declared at the top level (F5) reads no top-level variable: what it needs comes
+through its parameters, and a top-level variable's name in its body is `unknown-name` (V10), as
+if the variable were declared in another block. The owner chose this on 2026-10-03, against
+reading the variable at the call as a C# local function does, which would have given two kinds of
+function two views of a captured variable (F15), and against taking the value at the function's
+declaration as a lambda does, which a function declared above the variable (F6) could never see;
+the cost is that a counter or a table of the program is passed into every function, or made a
+field of a class.
 
-- (a) A top-level function reads no top-level variable: what it needs comes through its
-  parameters. Cost: a counter or a table of the program is passed into every function, or made a
-  field of a class.
-- (b) It reads the variable itself and sees the value at the call, as a C# local function does;
-  a call above the variable's line is the compile error `unknown-name` (V10). Cost: two kinds of
-  function see captured variables differently (F15).
-- (c) As a lambda: the value at the function's declaration. Cost: a function declared above the
-  variable sees nothing of it, which F6 makes easy to write.
+Case: [functions/top-level-function-reads-no-variable.kz](../corpus/functions/top-level-function-reads-no-variable.kz)
+```kurz
+mut count = 0
 
-The lean is (a): it keeps F15's one rule for capture, and a top-level program that needs shared
-state has classes for it.
+int Next() => count + 1
+
+count = Next()
+print(count)
+```
