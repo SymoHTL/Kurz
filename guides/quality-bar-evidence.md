@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-03
-digest: a7404572aeab3159b1ec49d4d72d2b1ddfc9ee4caaba49fc30d7806209c8edfc
+digest: 743d1e9493317c79b596e001590c0a141e7a68e1992bd43e537c3f57d45ad561
 ttl_days: 60
 metadata:
   type: reference
@@ -60,14 +60,14 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/kit.py` | 17 | 13 |
 | `tools/lint_ci.py` | 82 | 82 |
 | `tools/lint_knowledge.py` | 61 | 44 |
-| `tools/lint_reference.py` | 56 | 57 |
+| `tools/lint_reference.py` | 56 | 58 |
 | `tools/merge_pr.py` | 127 | 109 |
 | `tools/pr_gates.py` | 55 | 50 |
-| `tools/quality_evidence.py` | 28 | 26 |
+| `tools/quality_evidence.py` | 28 | 27 |
 | `tools/red_proof.py` | 29 | 26 |
 | `tools/review/review.py` | 235 | 201 |
 | `tools/tree_gate.py` | 81 | 51 |
-| **total** | 804 | 682 |
+| **total** | 804 | 684 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -94,8 +94,8 @@ A statement marked *(assumed)* was proposed and not objected to; it is not a dec
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 46 |
-| Open questions | 7 |
+| Statements marked *(assumed)* | 47 |
+| Open questions | 8 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -107,13 +107,14 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 179 |
+| Rules in the reference | 180 |
 | of them decided | 134 |
 | of them assumed | 33 |
 | of them proposed | 11 |
-| of them open | 1 |
-| Corpus cases, none of them run | 219 |
-| Compile-error ids | 47 |
+| of them open | 2 |
+| Corpus cases, none of them run | 225 |
+| Compile-error ids | 44 |
+| Run-time error ids | 5 |
 <!-- /generated:reference -->
 
 ## The forge
@@ -124,11 +125,11 @@ counted from the record that the merge tool posts.
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened | 2 |
-| Pull requests merged | 1 |
-| Merged over red, with a recorded waiver | 1 |
-| Review findings posted: high | 29 |
-| Review findings posted: medium | 300 |
-| Review findings posted: low | 258 |
+| Pull requests opened | 3 |
+| Pull requests merged | 2 |
+| Merged over red, with a recorded waiver | 2 |
+| Review findings posted: high | 32 |
+| Review findings posted: medium | 343 |
+| Review findings posted: low | 286 |
 | Open HAZARD issues | 12 |
 <!-- /generated:forge -->

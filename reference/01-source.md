@@ -101,15 +101,23 @@ print("say \"hi\"")
 
 ### L16 (decided, §8) The other escapes
 
-The other escapes of C# mean what they mean there: `\'`, `\0`, `\a`, `\b`, `\f`, `\r`, `\v`,
-`\u` followed by four hex digits, `\U` followed by eight and `\x` followed by one to four. A
-backslash before any other character (`\}`, `\q`) is the compile error `unknown-escape`, as it
-is in C#. The owner chose this on 2026-10-03, against L7's five alone, which would have put `\r`
-and `\0` into the library; the cost is one more thing a lexer has to carry.
+The other escapes of C# 12 mean what they mean there: `\'`, `\0`, `\a`, `\b`, `\f`, `\r`,
+`\v`, `\u` followed by four hex digits, `\U` followed by eight that name a code point up to
+U+10FFFF, and `\x` followed by one to four. A backslash before any other character (`\}`, `\q`),
+or before a `u`, `U` or `x` that is not followed by the digits it takes (`\u12`, `\xg`,
+`\U00110000`), is the compile error `unknown-escape`, as each is in C# 12. The owner chose this
+on 2026-10-03, against L7's five alone, which would have put `\r` and `\0` into the library; the
+cost is one more thing a lexer has to carry. *(assumed: the version; the `\e` that C# 13 added is
+`unknown-escape` under it)*
 
 Case: [source/escapes-of-c-sharp.kz](../corpus/source/escapes-of-c-sharp.kz)
 ```kurz
 print("\u0041\x42|\U00000043")
+```
+
+Case: [source/escape-too-short.kz](../corpus/source/escape-too-short.kz)
+```kurz
+print("\u12")
 ```
 
 Case: [source/unknown-escape.kz](../corpus/source/unknown-escape.kz)
@@ -223,15 +231,32 @@ The core words are the words this reference uses as syntax, and the list is clos
 `virtual`, `override`, `weak`, `raw`, `use`, `void`, `true`, `false` and `null`, plus the words
 the parts outside this reference add, each listed where that part is specified. The owner chose
 this on 2026-10-03, against the keywords of C#, which would take `goto`, `unsafe` and `checked`
-from programs for nothing; the cost is that the list has to be kept. The names of the built-in
-types (`int`, `string`, ...) are not core words. *(assumed: the question put that outside its
-options; in C# they are keywords)*
+from programs for nothing; the cost is that the list has to be kept. Four words were not in the
+list the owner saw: `equal` and `by` are core words by K8 (the owner, 2026-10-02), `this` is the
+call of the primary constructor (K14) and `virtual` the marker of K7, both *(proposed)* there, and
+so here. Whether the names of the built-in types are core words as well is L19.
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
 equal = 1
 print(equal)
 ```
+
+### L19 (open) The names of the built-in types as names
+
+L18 leaves the names of the built-in types (`int`, `string`, `bool`, ...) off the list, so
+`long = 1`, a parameter named `int` and `class string` pass L12, and nothing says what `long(x)`
+(T10) means where a value named `long` is in scope. In C# the names are keywords. The question
+stood beside L18's in the round that decided it and rested on a wrong claim about C#, so it is
+asked again. The options:
+
+- (a) The names are core words: using one as a name is `reserved-word`. Cost: L18's list grows by
+  the type names, and nothing can be called `string`.
+- (b) The names are ordinary names that the language binds to its types: a declaration of the
+  same name hides the type in its block, and `long(x)` there calls what `long` names. Cost: two
+  readings of `long(x)` in one program, and the type is out of reach where it is hidden.
+
+The lean is (a): nothing is gained by hiding `int`, and the error is cheap to give.
 
 ### L13 (decided, §8) A string over several lines
 

@@ -4,23 +4,25 @@ The errors the cases expect. An id is what a corpus header names: `// expect: er
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
 raises when it runs (E3). The two tables share one namespace of ids.
 
+## Compile errors
+
 | id | rules | meaning |
 |---|---|---|
-| `unused-variable` | V5, V6 | a variable that is never read |
-| `assign-immutable` | V7, V8, D4, K1, F8, K14 | an assignment to a variable or a parameter that is not `mut`, into a path that starts at one (M4: for a `data` value the variable at the root decides, so `root.Left = x` through a `mut` variable is allowed), or to a field of a class instance that is not `mut` |
+| `unused-variable` | V5, V6 | a variable that is never read; a parameter and a loop variable are no variables for this (V13) |
+| `assign-immutable` | V7, V8, D4, K1, F8, K14 | an assignment to a variable or a parameter that is not `mut`, into a path that starts at one (M4: for a `data` value the variable at the root decides, so `root.Left = x` through a `mut` variable is allowed), or to a field of a class instance that is not `mut`; inside a constructor a field without `mut` is assigned once (K14), and a second time is this error |
 | `redeclared` | V9 | a declaration, in any of its forms, of a name that is already visible |
 | `argument-mismatch` | D11 | a call with an argument whose name no parameter has, two arguments for one parameter, or none for a parameter without a default |
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or `.Number` and `From` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
-| `unknown-name` | V10, F16 | a name that is not visible at this place, a top-level variable inside a top-level function included |
+| `unknown-name` | V10, F16 | a name that is not visible at this place, a top-level variable read inside a top-level function included |
 | `type-mismatch` | T1, T13, T19, N6, C3 | a value of one type where another type is required |
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
 | `not-visible` | F9, A9 | a member, type or function used where it is not visible; `print` of an instance whose `Text()` is not `pub` is such a use |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
 | `constant-overflow` | T6, L10 | an expression of literals whose result leaves the range of its type, or a literal that fits no integer type |
 | `constant-divide-by-zero` | T25 | a division or remainder of literals by the literal `0` |
-| `narrowing-conversion` | T7, T28 | a wider integer type put into a narrower one without a conversion, the `int` of a promoted operation included |
-| `sign-mix` | T9, T23 | an operation between a signed and an unsigned integer that no widening joins, or a signed value put where an unsigned type is required |
+| `narrowing-conversion` | T7, T28 | a wider integer type put into a narrower one without a conversion, whatever the signedness, the `int` of a promoted operation included |
+| `sign-mix` | T9, T23 | an operation between a signed and an unsigned integer that C# joins through `long` or refuses (`uint` or `ulong` with a signed type), or a value put where a type of the other signedness and at least its width is required, into which it does not widen |
 | `string-index` | T15 | an index applied to a string instead of to `.Bytes` or `.Chars` |
 | `nullable-unchecked` | N2, N3, N7, N9 | a nullable value used without a check |
 | `mut-required` | M5, M7 | a `mut` method called on, or a `mut` argument taken from, something that is not `mut` |
@@ -40,13 +42,15 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `cannot-infer` | T27, F7 | a call of a generic function whose type arguments are neither written nor inferable from its arguments |
 | `equal-by-unknown` | K15 | an `equal by` clause that names something that is not a field of the class |
 | `base-field-clash` | K17 | a parameter with a base field's name and another type, or with its name and type while the base receives something else |
-| `no-text` | A4, A7, A10 | the text of an instance of a class that declares none, of a value that holds one, or of a value whose interface or type parameter declares none |
+| `no-text` | A4, A7, A10 | the text of an instance of a class that neither declares nor inherits a `Text()` (A9), of a value that holds one, or of a value whose interface or type parameter declares none |
 | `block-indentation` | L13 | a line of a `"""` block that is indented less than the closing line |
 | `throw-needs-value` | O7 | a bare `throw` anywhere but in an arm of `else` |
 | `break-outside-loop` | C7 | `break` or `continue` with no loop around it, a lambda's body included |
-| `unknown-escape` | L16 | a backslash before a character that starts no escape |
+| `unknown-escape` | L16 | a backslash before a character that starts no escape, or before `u`, `U` or `x` without the digits it takes |
 | `static-state` | K18 | a `static mut` field, or a static field whose type is or holds a class |
 | `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |
+| `constructor-must-chain` | K14 | a further constructor of a class with a primary constructor that does not call it |
+| `field-unassigned` | K14 | a field without `mut` and without `=` that a constructor leaves unassigned on a path or reads first, or such a field in a class with a primary constructor |
 | `syntax` | E4 | text that no rule gives a meaning: the C `for` with three parts, `else` on a line of its own, an arm after `else`, a call with a `void` success used as a value |
 
 ## Run-time errors
@@ -62,6 +66,8 @@ the range of the loop.
 | `divide-by-zero` | T14, T25 | an integer division or remainder by zero |
 | `index-out-of-range` | T14 | an index outside the collection |
 | `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |
+
+## The rules of this chapter
 
 ### E1 (assumed, §8) One error per case, with a line
 
@@ -85,7 +91,9 @@ A case that ends with an exception names it: `// expect: throws <id> at <line>`,
 the run-time table above and the line counted as for a compile error. The lint checks both as it
 checks a compile error's. So a case for a reversed range (C8), an overflow in a test build (T5), a
 conversion that loses its value (T20) or an index out of range (T14) passes only with that
-exception from that line, and a `throw` of the program is `thrown` at the line of the `throw`.
+exception from that line, and a `throw` of the program is `thrown` at the line of the `throw`
+that raised; the bare `throw` of an `else` arm (O5) is such a `throw`, and nothing is raised a
+second time, because nothing catches.
 The program's exit code is pinned with it (O6). The owner chose this on 2026-10-03, against a
 header that says only that something is thrown; the cost is a word the runtime carries in every
 exception.

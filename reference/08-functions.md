@@ -359,8 +359,9 @@ if email != null {
 ### F16 (decided, §4) A top-level function that reads a top-level variable
 
 A function declared at the top level (F5) reads no top-level variable: what it needs comes
-through its parameters, and a top-level variable's name in its body is `unknown-name` (V10), as
-if the variable were declared in another block. The owner chose this on 2026-10-03, against
+through its parameters, and a top-level variable's name read in its body is `unknown-name`
+(V10), as if the variable were declared in another block; on the left of `=` the name declares a
+local (V8), which V5 reports unless the body reads it. *(proposed: the left side)* The owner chose this on 2026-10-03, against
 reading the variable at the call as a C# local function does, which would have given two kinds of
 function two views of a captured variable (F15), and against taking the value at the function's
 declaration as a lambda does, which a function declared above the variable (F6) could never see;

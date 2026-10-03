@@ -1,0 +1,10 @@
+// expect: error constructor-must-chain at 5
+// rules: K14
+
+class Counter(int Start) {
+    pub Counter() { }
+
+    pub int Value() => Start
+}
+
+print(Counter().Value())

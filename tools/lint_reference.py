@@ -190,17 +190,18 @@ def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
             if not (1 <= case["line"] <= len(body_at)) or not body_at[case["line"] - 1].strip() or body_at[case["line"] - 1].startswith("// "):
                 errors.append(f"corpus/{path}: the error line {case['line']} is outside the file, empty or in the header")
     raised = {(c["error"], r) for c in parsed.values() if c and c["expect"] in ("error", "throws") for r in c["rules"]}
-    for eid, (where, of_rules, _) in error_ids.items():
+    for eid, (where, of_rules, kind) in error_ids.items():
         errors += [f"{where}: error {eid} names rule {r}, which the reference does not have" for r in of_rules if r not in rules]
         if eid not in {e for e, _ in raised}:
-            errors.append(f"{where}: no corpus case expects error {eid}")
+            errors.append(f"{where}: no corpus case {'throws' if kind == 'throws' else 'expects error'} {eid}")
         else:
             errors += [f"{where}: error {eid} lists rule {r}, and no case that names {r} expects it"
                        for r in of_rules if r in rules and (eid, r) not in raised]
     if len(rules) < rules_floor or len(files) < cases_floor:
         errors.append(f"only {len(rules)} rules and {len(files)} cases found, floors are {rules_floor} and {cases_floor}: is this the right tree?")
     count = {s: sum(v == s for v in rules.values()) for s in ("decided", "assumed", "proposed", "open")}
-    return errors, {"rules": len(rules), "cases": len(files), "errors": len(error_ids), **count}
+    kinds = [kind for *_, kind in error_ids.values()]
+    return errors, {"rules": len(rules), "cases": len(files), "errors": kinds.count("error"), "runtime": kinds.count("throws"), **count}
 
 
 def sync(root):
@@ -241,7 +242,7 @@ def self_test():
     record = "# Design\n\n## 1. Goals\n\n- fast\n\n## 4. Types\n\n- numbers\n- small values *(assumed)*\n"
     case = "// expect: output\n// | 9\n// rules: V1\n\nx = 4\nprint(x + 5)\n"
     bad = "// expect: error assign-immutable at 6\n// rules: V2\n\nx = 4\nprint(x)\nx = 5\n"
-    thrown = "// expect: throws overflow at 5\n// | 1\n// rules: V5\n\nprint(1)\nprint(2147483647 + x)\n"
+    thrown = "// expect: throws overflow at 6\n// | 1\n// rules: V5\n\nprint(1)\nprint(2147483647 + x)\n"
     chapter = ("# Variables\n\n### V1 (decided, §4) Declaration\n\nA name.\n\nCase: [vars/declare.kz](../corpus/vars/declare.kz)\n"
                "```kurz\nx = 4\nprint(x + 5)\n```\n\n### V2 (assumed, §4) Assignment\n\nNo second assignment.\n\n"
                "Case: [vars/assign.kz](../corpus/vars/assign.kz)\n```kurz\nx = 4\nprint(x)\nx = 5\n```\n\n"
@@ -300,17 +301,17 @@ def self_test():
         "an error id that is not in the table": (tree(edit(assign, "error assign-immutable at", "error assign-twice at")), "not in the error table"),
         "an error line outside the file": (tree(edit(assign, "at 6", "at 60")), "outside the file"),
         "an error line in the header": (tree(edit(assign, "at 6", "at 2")), "outside the file, empty or in the header"),
-        "a throws header without an id and a line": (tree(edit(overflow, "throws overflow at 5", "throws")), "the first line is not"),
-        "a throws id that is not in the run-time table": (tree(edit(overflow, "throws overflow at 5", "throws boom at 5")),
+        "a throws header without an id and a line": (tree(edit(overflow, "throws overflow at 6", "throws")), "the first line is not"),
+        "a throws id that is not in the run-time table": (tree(edit(overflow, "throws overflow at 6", "throws boom at 6")),
                                                           "run-time error boom, which is not in the run-time error table"),
-        "a throws id taken from the compile-error table": (tree(edit(overflow, "throws overflow at 5", "throws assign-immutable at 5")),
+        "a throws id taken from the compile-error table": (tree(edit(overflow, "throws overflow at 6", "throws assign-immutable at 6")),
                                                            "not in the run-time error table"),
         "an error id taken from the run-time table": (tree(edit(assign, "error assign-immutable at 6", "error overflow at 6")),
                                                       "error overflow, which is not in the error table"),
-        "a throws line in the header": (tree(edit(overflow, "at 5", "at 1")), "outside the file, empty or in the header"),
+        "a throws line in the header": (tree(edit(overflow, "at 6", "at 1")), "outside the file, empty or in the header"),
         "a run-time row that no case expects": (tree(edit(ref, "| `overflow` | V5 | arithmetic left its type |\n",
                                                           "| `overflow` | V5 | arithmetic left its type |\n| `divide-by-zero` | V5 | by zero |\n")),
-                                                "no corpus case expects error divide-by-zero"),
+                                                "no corpus case throws divide-by-zero"),
         "an error line on the blank line after the header": (tree(edit(assign, "at 6", "at 3")), "outside the file, empty or in the header"),
         "an error line just past the end of the file": (tree(edit(assign, "at 6", "at 7")), "outside the file, empty or in the header"),
         "an error id no case expects": (tree(edit(ref, "| `assign-immutable` | V2 | a second assignment |",
@@ -343,7 +344,7 @@ def self_test():
         errors = errors_of(root)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
     counted = attempt(lambda: lint(tree(), 4, 2)[1])
-    want = {"rules": 5, "cases": 3, "errors": 2, "decided": 2, "assumed": 1, "proposed": 1, "open": 1}
+    want = {"rules": 5, "cases": 3, "errors": 1, "runtime": 1, "decided": 2, "assumed": 1, "proposed": 1, "open": 1}
     cases.append(("rules, cases and statuses are counted", counted == want, counted))
     with_output = header("// expect: output\n// | a\n// | b\n// build: test\n// rules: V1, V2\n\nprint(1)\n")
     cases.append(("a header with output lines and a build is read", isinstance(with_output, dict) and with_output["rules"] == ["V1", "V2"], with_output))
@@ -392,5 +393,6 @@ if __name__ == "__main__":
     for e in errors:
         print("ERROR:", e)
     print(f"reference lint: {counted['rules']} rules ({counted['decided']} decided, {counted['assumed']} assumed, {counted['proposed']} proposed, "
-          f"{counted['open']} open), {counted['cases']} cases, {counted['errors']} error ids, {len(errors)} errors")
+          f"{counted['open']} open), {counted['cases']} cases, {counted['errors']} compile-error ids, "
+          f"{counted['runtime']} run-time error ids, {len(errors)} errors")
     sys.exit(1 if errors else 0)

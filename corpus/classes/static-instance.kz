@@ -1,10 +1,10 @@
 // expect: error static-state at 7
 // rules: K18
 
-class Counter(mut int Count)
+class Counter(int Count)
 
 class Registry {
-    pub static Counter Hits = Counter(0)
+    pub static Counter Zero = Counter(0)
 }
 
-print(Registry.Hits.Count)
+print(Registry.Zero.Count)

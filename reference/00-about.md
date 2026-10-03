@@ -158,7 +158,7 @@ print("got {c}")
 `ToString()` is in C#: `print(admin)` has a text when only the base `User` declares `Text()`, and
 a `User` variable that holds an `Admin` shows the text of `Admin` where `Admin` overrides it (K7).
 A `Text()` without `pub` is the compile error `not-visible` where the text is used outside the
-class, and `print` is such a use. The owner chose this on 2026-10-03, against counting only a
+class, and `print` is such a use; inside the class it is usable, as any private member is. The owner chose this on 2026-10-03, against counting only a
 `pub Text()` the class itself declares, which would have made every class of a hierarchy repeat
 the method; the cost is that whether a class has a text depends on its base, and that a
 base-typed value may print more than its static type says.
@@ -196,7 +196,9 @@ print(Counter(1))
 `print(x)` with a value whose static type is an interface (K6) compiles when the interface
 declares `string Text()`, and is `no-text` otherwise; with a type parameter (T19) it compiles when
 the parameter is limited to an interface that declares it, and is `no-text` otherwise, whatever
-the call passes. The owner chose this on 2026-10-03, against a check for each instantiation of a
+the call passes. A type meets such a limit when it has a text: every value with a derived text
+(A3, A4, A8, A11 to A14) and a class that declares or inherits a `pub Text()` (A5, A9), without
+naming the interface. *(proposed: which types meet the limit)* The owner chose this on 2026-10-03, against a check for each instantiation of a
 generic function, which would have reported an error at a call site for a line inside another
 function; the cost is that a generic function that prints its argument needs the limit, and that
 the standard library would declare one interface for it.

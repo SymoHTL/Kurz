@@ -43,14 +43,21 @@ print(b.Next?.Value ?? 0)
 
 ### R9 (decided, §3) Fields of function type in the cycle rule
 
-A `mut` field of function type counts as a field that can reach every class whose instance a
-lambda in the program captures, as R8 treats a field of interface type: with
+A field of function type, `mut` or not, counts as a field that can reach every class whose
+instance a lambda in the program captures, as R8 treats a field of interface type; R2's `mut`
+field can be the function field or any other field on the path. With
 `class Button(string Name, mut () => void OnClick)` and a `b.OnClick = () => print(b.Name)`
-anywhere in the program, `Button` reaches itself, and the class is `reference-cycle`. The owner
-chose this on 2026-10-03, against a weak capture inside stored lambdas, which would need a rule
-for what a gone capture reads as and a check at every use, and against forbidding such a capture;
-the cost is that such fields become rare, and that an event handler is written as an interface
-(R8) or receives its button as a parameter.
+anywhere in the program, `Button` reaches itself, and the class is `reference-cycle`; with
+`class Holder(mut Button? B)` and an immutable `() => void` field of `Button` whose lambda reads a
+`Holder`, the ring runs through the immutable field and `Holder`'s `mut` one, and the first class
+on the path is the error. The owner chose this on 2026-10-03, against a weak capture inside
+stored lambdas, which would need a rule for what a gone capture reads as and a check at every
+use, and against forbidding such a capture. *(assumed: that a field without `mut` counts, which
+the second ring needs)* The cost is not local: once a class has a field of function type, any
+lambda anywhere in the program that captures an instance of that class, or of a class that holds
+one, makes it an error, and the lambda can sit in another file. An event handler escapes the
+error only in a program in which no lambda captures the button's class: through an interface
+(R8), whose class must not hold the button, or by receiving the button as a parameter.
 
 Case: [memory/cycle-through-function-field.kz](../corpus/memory/cycle-through-function-field.kz)
 ```kurz
@@ -58,6 +65,25 @@ class Button(string Name, mut () => void OnClick)
 
 b = Button("ok", () => print("clicked"))
 b.OnClick = () => print(b.Name)
+b.OnClick()
+```
+
+Case: [memory/cycle-through-immutable-function-field.kz](../corpus/memory/cycle-through-immutable-function-field.kz)
+```kurz
+class Holder(mut Button? B)
+class Button(string Name, () => void OnClick)
+
+h = Holder(null)
+b = Button("ok", () => print(h.B?.Name ?? ""))
+h.B = b
+b.OnClick()
+```
+
+Case: [memory/function-field-no-capture.kz](../corpus/memory/function-field-no-capture.kz)
+```kurz
+class Button(string Name, mut () => void OnClick)
+
+b = Button("ok", () => print("clicked"))
 b.OnClick()
 ```
 

@@ -1,0 +1,10 @@
+// expect: error reference-cycle at 4
+// rules: R9
+
+class Holder(mut Button? B)
+class Button(string Name, () => void OnClick)
+
+h = Holder(null)
+b = Button("ok", () => print(h.B?.Name ?? ""))
+h.B = b
+b.OnClick()

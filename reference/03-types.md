@@ -100,14 +100,21 @@ print(big)
 
 ### T23 (decided, §4) Widening across signedness and into floating-point
 
-As in C#: an unsigned type widens into a signed type that holds all its values, so `byte` and
-`ushort` become `int` and `uint` becomes `long` without a word, and every integer type becomes
-`float`, `double` or `decimal` without a word. A signed type never becomes unsigned without a
-word: `uint u = i` with an `int` is the compile error `sign-mix`, and so is every other value put
-where a type of the other signedness is required and does not widen into it. The owner chose this
-on 2026-10-03, against widening within one signedness only, under which `int x = b` needs
-`int(b)`; the cost is that `b + i` with a `byte` and an `int` is an `int` and not T9's error, so
-T9's case changed with it.
+As in C#: an unsigned type widens into every signed type that holds all its values, so `byte`
+becomes `short`, `int` and `long`, `ushort` becomes `int` and `long`, and `uint` becomes `long`,
+each without a word, and every integer type becomes `float`, `double` or `decimal` without a
+word. Where `float` or `double` does not hold every value of the source (`float` above 2^24,
+`double` above 2^53) the value is rounded to the nearest one the type holds, as in C#, and that
+rounding is no loss in the sense of T20: `float f = n` rounds silently where `float(n)` is the
+same conversion written out, and neither throws. A signed type never becomes unsigned without a
+word. A value put where a type of the other signedness is required, into which it does not widen,
+is the compile error `sign-mix` when the required type is at least as wide (`uint u = i`,
+`int i = u`); when it is narrower the error is `narrowing-conversion` (T7), whatever the
+signedness, so `byte c = a + b` with the `int` of T28 is T7's error. The owner chose this on
+2026-10-03, against widening within one signedness only, under which `int x = b` needs `int(b)`;
+the cost is that `b + i` with a `byte` and an `int` is an `int` and not T9's error, so T9's case
+changed with it. *(assumed: the rounding, which "as in C#" implies, and which of the two ids a
+value gets when both would fit)*
 
 Case: [types/widening-across-sign.kz](../corpus/types/widening-across-sign.kz)
 ```kurz
@@ -127,13 +134,17 @@ print(u)
 
 ### T9 (decided, §4) No mixing of signed and unsigned
 
-An operation between a signed and an unsigned integer is the compile error `sign-mix`, unless one
-operand's type widens into the other's (T23): `b + i` with a `byte` and an `int` is an `int`, and
-`u + i` with a `uint` and an `int` is the error, where C# would compute a `long`. *(assumed: the
-meeting point of the two rules; the record has both)* A conversion (T10) puts both on one side.
+An operation between a signed and an unsigned integer finds its common type as C# does (T18,
+T28): operands narrower than `int` are promoted to `int` first, so `sb + b` with an `sbyte` and a
+`byte` is an `int`, and `u + b` with a `uint` and a `byte` is a `uint`, as there. Where C# joins
+the two through `long`, or refuses them, Kurz reports the compile error `sign-mix`: that is `uint`
+with a signed type (`u + i`, a `long` in C#) and `ulong` with a signed type (an error in C# too).
+*(proposed: the meeting point of T23 and this rule; the owner's answer to T23 covered `b + i`, and
+the record has both rules)* A conversion (T10) puts both on one side.
 
 Case: [types/sign-mix.kz](../corpus/types/sign-mix.kz)
 ```kurz
+// C# computes a long here; T9 keeps the error
 uint u = 200
 int i = 5
 print(u + i)
@@ -158,11 +169,11 @@ print(int(b) + i)
 
 ### T20 (decided, §4) A conversion that loses the value
 
-A conversion whose value does not fit the target type behaves as overflow does (T4, T5): in a
-release build the value wraps around, in a test build it raises the exception `overflow` (E3).
-The cases below have an integer source. What a `double`, `float` or `decimal`
-source does is T26: whether a dropped fraction counts as losing the value, and what wraps around
-when the source is out of range, an infinity or NaN.
+A conversion from an integer source whose value does not fit the target type behaves as overflow
+does (T4, T5): in a release build the value wraps around, in a test build it raises the exception
+`overflow` (E3). The cases below have an integer source. A `double`, `float` or `decimal` source
+is T26: a dropped fraction is no loss, and a value that does not fit saturates instead of
+wrapping. An integer into `float` or `double` is rounded and is no loss (T23).
 
 Case: [types/conversion-release.kz](../corpus/types/conversion-release.kz)
 ```kurz
@@ -180,14 +191,20 @@ print(Low(300))
 
 ### T26 (decided, §4) A conversion from a floating-point or `decimal` source
 
-Dropping a fraction is not losing the value: `int(2.5)` is `2`, toward zero, as in C#. A value
-outside the target's range, an infinity and NaN lose the value: a test build throws `overflow`
-(T5, E3); a release build gives the target's largest or smallest value for an out-of-range value
-and an infinity, and `0` for NaN, as C# does since .NET Core 3.0. So an integer source wraps
-(T20) and a floating-point source saturates. The owner chose this on 2026-10-03, against wrapping
-the integer part modulo the target's width, which means nothing to anyone and costs a modulo on
-every such conversion, and against counting a dropped fraction as a loss, which would have put a
-rounding call on every conversion.
+Into an integer type, dropping a fraction is not losing the value: `int(2.5)` is `2`, toward
+zero, as in C#. A value outside the target's range, an infinity and NaN lose the value: a test
+build throws `overflow` (T5, E3); a release build gives the target's largest or smallest value for
+an out-of-range value and an infinity, and `0` for NaN. The saturation is Kurz's own definition:
+C# leaves the result unspecified, .NET saturates on every platform since .NET 9, and for a
+`decimal` source C# throws in every build. So an integer source wraps (T20) and a floating-point
+or `decimal` source saturates. The owner chose this on 2026-10-03, against wrapping the integer
+part modulo the target's width, which means nothing to anyone and costs a modulo on every such
+conversion, and against counting a dropped fraction as a loss, which would have put a rounding
+call on every conversion. Into `float` or `double` the IEEE 754 rules of C# hold: `float(d)`
+rounds a `double`, becomes an infinity beyond the range, and keeps NaN and an infinity as they
+are; nothing of that is a loss. Into `decimal`, which has neither, an infinity, NaN and a value
+beyond its range lose the value as an integer target does, and rounding is no loss. *(assumed: the
+targets other than integers, which the question did not name)*
 
 Case: [types/conversion-drops-fraction.kz](../corpus/types/conversion-drops-fraction.kz)
 ```kurz
@@ -249,8 +266,8 @@ print(seconds)
 ### T24 (decided, §4) The names and the resolution of durations and timestamps
 
 The two types are `duration` and `timestamp`, in lower case like the other built-in types, and
-one step of their 64 bits is one nanosecond: a `duration` holds about 292 years, a `timestamp`
-the years 1678 to 2262. The owner chose this on 2026-10-03, against `Duration` and `Timestamp`
+one step of their 64 bits is one nanosecond: a `duration` holds about 292 years, a `timestamp`,
+counted from 1970-01-01 *(assumed: the zero point)*, the years 1677 to 2262. The owner chose this on 2026-10-03, against `Duration` and `Timestamp`
 like the types of the library, against a step of one millisecond, which holds 292 million years
 and nothing below a millisecond, and against .NET's tick of 100 nanoseconds. The ranges are wide
 enough for a device and a server, and a nanosecond is what the clocks of the operating systems
@@ -268,8 +285,8 @@ Show(90min)
 ### T29 (open) A wider variant of `duration` and `timestamp`
 
 The owner asked for a "bigger" variant when choosing the nanosecond step (T24): a `duration` of
-64 bits ends at about 292 years, and a `timestamp` before the year 1678 and after 2262, which a
-calendar or an archive can reach. The options:
+64 bits ends at about 292 years, and a `timestamp` before 1677 and after 2262, which a calendar
+or an archive can reach. The options:
 
 - (a) A second pair of types with 128 bits and the same step, named by a prefix the way `long`
   stands beside `int`; a conversion from the narrow pair is exact, one into it is T20's loss.
@@ -489,19 +506,25 @@ print(!(1 == 1) || 3 >= 3)
 ### T28 (decided, §4) Arithmetic and shifts on types narrower than `int`
 
 An operand of type `sbyte`, `byte`, `short` or `ushort` is promoted to `int` before `+ - * / %`,
-`~`, `<<` and `>>`, as in C#: `a + b` on two `byte`s is an `int`, `print(a + b)` prints `300` for
-200 and 100, and `byte c = a + b` is `narrowing-conversion` (T7). A shift on such an operand has
-the width 32, and a negative count is masked as in C#, so `1 << -1` is `1 << 31`. The owner chose
-this on 2026-10-03, against computing in the operands' type, under which a program ported from C#
-computes other values without a word; the cost is that `byte c = a + b` needs `byte(a + b)`, and
-that the wrap of T4 never happens at 8 or 16 bits.
+unary `-`, `~`, `& | ^`, `<<`, `>>` and the comparisons, as in C#: `a + b` on two `byte`s is an
+`int`, `print(a + b)` prints `300` for 200 and 100, `a & b` is an `int`, and `byte c = a + b` is
+`narrowing-conversion` (T7). A shift on such an operand has the width 32, and a negative count is
+masked as in C#, so `1 << -1` is `1 << 31`. The owner chose this on 2026-10-03, against computing
+in the operands' type, under which a program ported from C# computes other values without a word;
+the cost is that `byte c = a + b` needs `byte(a + b)`, and that the wrap of T4 never happens at 8
+or 16 bits, while `ushort * ushort` is computed in a signed `int` and can overflow it. The
+wrapping operators `+%`, `-%` and `*%` (T12) do not promote: they compute in the wider of their
+operand types and wrap there, so that an 8-bit checksum is `a +% b` on two `byte`s, where a
+promoted `+%` would need a mask on every narrow checksum. *(proposed: C# has no such operators)*
 
 Case: [types/promotion.kz](../corpus/types/promotion.kz)
 ```kurz
 byte a = 200
 byte b = 100
 print(a + b)
-print(a >> 7)
+print(a << 1)
+print(1 << 32)
+print(1 << -1)
 ```
 
 Case: [types/promotion-narrows.kz](../corpus/types/promotion-narrows.kz)
@@ -533,3 +556,5 @@ print(-16 >> 2)
 print(1 << 31)
 print(1 << 33)
 ```
+
+Case: [types/promotion.kz](../corpus/types/promotion.kz)

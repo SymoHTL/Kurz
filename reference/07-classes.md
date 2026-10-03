@@ -75,11 +75,12 @@ print(Label("x") == Label("x"))
 What D15 says for `data` holds for classes: instances of different classes are never equal,
 whatever their fields hold. The fields of the base count as fields of the class for K4, so one
 `mut` field anywhere in the chain means identity. The `equal by` clause (K8) of the base is
-inherited until the derived class writes its own. The owner chose this on 2026-10-03, against
-C#'s record equality, which compares the run-time types and every field with a clause that
-replaces the base's, and against equality by the fields of the static type, under which `a == b`
-and `b == a` can differ; the cost is that a base-typed collection cannot find an instance by a
-base-typed key.
+inherited, and a clause of the derived class adds its fields to the base's: `Root` below compares
+by `Id` and `Level`. The owner chose this on 2026-10-03 as the option whose contrast was a derived
+clause "replacing instead of extending" the base's; against C#'s record equality, which compares
+the run-time types and every field with a replacing clause, and against equality by the fields of
+the static type, under which `a == b` and `b == a` can differ; the cost is that a base-typed
+collection cannot find an instance by a base-typed key.
 
 Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
 ```kurz
@@ -103,6 +104,7 @@ class Root(int Level) : User equal by Level
 
 print(Admin(1, "Ann", 2) == Admin(1, "Bea", 3))
 print(Root(1, "Ann", 2) == Root(1, "Ann", 3))
+print(Root(1, "Ann", 2) == Root(2, "Bea", 2))
 ```
 
 ### K5 (decided, §4) Equality by named fields
@@ -187,12 +189,16 @@ Case: [classes/inherit.kz](../corpus/classes/inherit.kz)
 
 ### K18 (decided, §4, §6) What a `static` field may hold
 
-A `static` field exists once per process, as in C#, so it holds an immutable value only: `static
-mut`, and a static field whose type is a class, are the compile error `static-state`, because
-either would be mutable state that every actor reaches, against the record's section 6. The owner
-chose this on 2026-10-03, against one copy per actor. A value whose type holds a class instance,
-such as a `List<Button>`, is refused the same way: its instances live in one actor's heap.
-*(assumed: this reading of "immutable values")*
+A `static` field exists once for the program, so it holds an immutable value only: `static
+mut`, and a static field whose type is or holds a class, are the compile error `static-state`. A
+`mut` field would be state that every actor reaches, against the record's section 6; a class
+instance, mutable or not, lives in one actor's heap, which no other actor reaches into, and so
+does one inside a `List<Button>`. The owner chose this on 2026-10-03, against one copy per actor.
+*(assumed: that the heap is the reason for an immutable class and for a value that holds one, and
+that a static field of a generic class exists once per type argument, as in C#)* K7's case shows
+a static field that is allowed.
+
+Case: [classes/body.kz](../corpus/classes/body.kz)
 
 Case: [classes/static-mut.kz](../corpus/classes/static-mut.kz)
 ```kurz
@@ -210,13 +216,13 @@ print(Counter.Total)
 
 Case: [classes/static-instance.kz](../corpus/classes/static-instance.kz)
 ```kurz
-class Counter(mut int Count)
+class Counter(int Count)
 
 class Registry {
-    pub static Counter Hits = Counter(0)
+    pub static Counter Zero = Counter(0)
 }
 
-print(Registry.Hits.Count)
+print(Registry.Zero.Count)
 ```
 
 ### K14 (decided, §4) Further constructors and fields without `mut`
@@ -225,12 +231,19 @@ A constructor, and only a constructor, may assign each field without `mut` once,
 ends, as C# lets a constructor set a `readonly` field; a second assignment there is
 `assign-immutable` like one anywhere else. A further constructor of a class with a primary
 constructor calls the primary one first, with `: this(...)` as C# 12 requires, and a class
-without a primary constructor has C#'s constructors. A field without `mut` and without `=` in the
-body gets its value from a constructor. *(proposed: K7 shows a field with its value only)* A
-constructor is private without `pub`, as every member is (F9). *(proposed)* The owner chose this
-on 2026-10-03, against a class with a primary constructor having no further constructor, which
-would have made a second way to build an instance a static method or a second class; the cost is
-the flow analysis that proves "once, before the end".
+without a primary constructor has C#'s constructors. The owner chose this on 2026-10-03, against
+a class with a primary constructor having no further constructor, which would have made a second
+way to build an instance a static method or a second class; the cost is the flow analysis that
+proves "once, before the end". What the answer did not reach, *(proposed)* as a whole: the once is
+per instance, stricter than C#, which allows any number of assignments. A field that the primary
+constructor or an `=` in the body (K7) sets is assigned by no constructor; a field without `mut`
+and without `=` is assigned exactly once on every path of every constructor that does not chain,
+and a constructor that leaves it unassigned on a path, or reads it first, is the compile error
+`field-unassigned`, as is such a field in a class with a primary constructor, which a call of
+that constructor would leave unset. The call of the primary one is direct; a further constructor
+without it is `constructor-must-chain`. A constructor written in the body is private without
+`pub`, as every member is (F9); the primary constructor, and the empty constructor of a class
+without one, are visible wherever the class is.
 
 Case: [classes/further-constructor.kz](../corpus/classes/further-constructor.kz)
 ```kurz
@@ -258,6 +271,34 @@ class Point {
 }
 
 print(Point(1).X())
+```
+
+Case: [classes/constructor-must-chain.kz](../corpus/classes/constructor-must-chain.kz)
+```kurz
+class Counter(int Start) {
+    pub Counter() { }
+
+    pub int Value() => Start
+}
+
+print(Counter().Value())
+```
+
+Case: [classes/field-unassigned.kz](../corpus/classes/field-unassigned.kz)
+```kurz
+class Point {
+    int x
+
+    pub Point(bool set) {
+        if set {
+            x = 1
+        }
+    }
+
+    pub int X() => x
+}
+
+print(Point(true).X())
 ```
 
 ### K8 (decided, §4) How a class names the fields that count
@@ -367,6 +408,17 @@ class Dog(string Name) : Animal
 
 d = Dog("Rex")
 print(d.Sound())
+```
+
+Case: [classes/inherit-default-keeps-place.kz](../corpus/classes/inherit-default-keeps-place.kz)
+```kurz
+class User(string Name = "guest")
+
+class Admin(int Level) : User
+
+a = Admin(Level: 3)
+print(a.Name)
+print(a.Level)
 ```
 
 ### K11 (decided, §4) A parameter that is passed on to the base

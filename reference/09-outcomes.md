@@ -232,8 +232,14 @@ alone (O5): a bare `throw` there throws the case value that reached the arm, so 
 *(assumed)* that the runtime adds the place and the chain id to what was thrown. When a
 supervisor reads it as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
-that carries the text and the place, and against limiting `throw` to `data` values and text); the
-supervisors themselves are outside this reference.
+that carries the text and the place, and against limiting `throw` to `data` values and text). The
+run-time errors of chapter 12 are values of one `data` type of the runtime, a member of every
+such union in every build; the place and the chain id are fields of the `Crashed` case beside
+`Reason`; a thrown class instance is moved out of the dying child's heap into the supervisor's
+with everything it reaches. *(proposed: the three, as the record marks them)* The supervisors
+themselves are outside this reference. The bare `throw` of an `else` arm is the `throw` that
+raised (E3): it throws the case value that reached the arm, and nothing is raised a second time,
+because nothing catches.
 
 Case: [outcomes/bare-throw.kz](../corpus/outcomes/bare-throw.kz)
 ```kurz
