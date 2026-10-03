@@ -1,0 +1,4 @@
+// expect: error unknown-escape at 4
+// rules: L16
+
+print("\u12")

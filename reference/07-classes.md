@@ -50,8 +50,8 @@ print(b.Count)
 
 ### K4 (decided, §4) Equality
 
-A class with `mut` fields compares by identity. A class without them compares by content. How
-this works across inheritance (K6, K10) is K13.
+A class with `mut` fields compares by identity. A class without them compares by content. Across
+inheritance (K6, K10) K13 holds.
 
 Case: [classes/equality-identity.kz](../corpus/classes/equality-identity.kz)
 ```kurz
@@ -70,25 +70,42 @@ class Label(string Text)
 print(Label("x") == Label("x"))
 ```
 
-### K13 (open) Equality across inheritance
+### K13 (decided, §4) Equality across inheritance
 
-K4 and K5 speak of one class. With inheritance three things are unsaid: whether the `mut` fields
-of the base count when K4 decides between identity and content; whether an instance of a derived
-class can equal an instance of its base or of a sibling (`Dog() == Animal()` with K6's classes,
-`Admin("Ann", 3) == User("Ann")` with K10's); and whether a derived class inherits the `equal by`
-clause of its base. The options:
+What D15 says for `data` holds for classes: instances of different classes are never equal,
+whatever their fields hold. The fields of the base count as fields of the class for K4, so one
+`mut` field anywhere in the chain means identity. The `equal by` clause (K8) of the base is
+inherited, and a clause of the derived class adds its fields to the base's: `Root` below compares
+by `Id` and `Level`. The owner chose this on 2026-10-03 as the option whose contrast was a derived
+clause "replacing instead of extending" the base's; against C#'s record equality, which compares
+the run-time types and every field with a replacing clause, and against equality by the fields of
+the static type, under which `a == b` and `b == a` can differ; the cost is that a base-typed
+collection cannot find an instance by a base-typed key.
 
-- (a) What D15 says for `data`: instances of different classes are never equal, whatever their
-  fields hold; the fields of the base count as fields of the class for K4, so one `mut` field
-  anywhere in the chain means identity; the clause of the base is inherited until the derived
-  class writes its own. Cost: a base-typed collection cannot find an instance by a base-typed key.
-- (b) What C# records do: equality compares the run-time types and every field, which is (a)
-  with the clause of the derived class replacing instead of extending the base's. Cost: the same,
-  with one more rule for the clause.
-- (c) Equality by the fields the static type has, so an `Admin` held as a `User` equals a `User`
-  with the same `Name`. Cost: `a == b` and `b == a` can differ when the static types differ.
+Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
+```kurz
+class User(string Name)
+class Admin(int Level) : User
+class Box(mut int Count)
+class Tagged(string Tag) : Box
 
-The lean is (a), which the `data` case data/inherit-equality.kz already pins for values.
+bool Same(User a, User b) => a == b
+
+print(Same(Admin("Ann", 1), User("Ann")))
+print(Admin("Ann", 1) == Admin("Ann", 1))
+print(Tagged(0, "a") == Tagged(0, "a"))
+```
+
+Case: [classes/equality-clause-inherited.kz](../corpus/classes/equality-clause-inherited.kz)
+```kurz
+class User(int Id, mut string Name) equal by Id
+class Admin(int Level) : User
+class Root(int Level) : User equal by Level
+
+print(Admin(1, "Ann", 2) == Admin(1, "Bea", 3))
+print(Root(1, "Ann", 2) == Root(1, "Ann", 3))
+print(Root(1, "Ann", 2) == Root(2, "Bea", 2))
+```
 
 ### K5 (decided, §4) Equality by named fields
 
@@ -144,10 +161,9 @@ they are visible wherever the interface is, and a method that implements one is 
 the braces of a class, a field is written `Type name`, with `mut` in front when it can be
 assigned and its first value after `=`, and a method is written as a function (chapter 8).
 Further constructors, `static` members and `override` are written as in C#. What a further
-constructor may do to a field without `mut`, and whether it has to call the primary one, is K14.
-What a `static` field may hold is open in the record (section 14): a `static mut` field, or a
-static field that holds a class instance, would be state that every actor shares, against section
-6. There is no property syntax until something needs it.
+constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
+method that a derived class overrides is marked `virtual` in the base, as in C#. *(proposed:
+`override` as there needs it)* There is no property syntax until something needs it.
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
 ```kurz
@@ -171,23 +187,119 @@ print(Counter.Step)
 
 Case: [classes/inherit.kz](../corpus/classes/inherit.kz)
 
-### K14 (open) Further constructors and fields without `mut`
+### K18 (decided, §4, §6) What a `static` field may hold
 
-K1 makes assigning a field without `mut` the compile error `assign-immutable`, with no exception
-for a constructor, and K7 takes further constructors from C#, where a constructor is exactly the
-place that sets a read-only field. Which C# is meant is unsaid as well: before C# 12 a class had
-no primary constructor, and since C# 12 every further constructor of a class that has one must
-chain to it with `this(...)`. The options:
+A `static` field exists once for the program, so it holds an immutable value only: `static
+mut`, and a static field whose type is or holds a class, are the compile error `static-state`. A
+`mut` field would be state that every actor reaches, against the record's section 6; a class
+instance, mutable or not, lives in one actor's heap, which no other actor reaches into, and so
+does one inside a `List<Button>`. The owner chose this on 2026-10-03, against one copy per actor.
+*(assumed: that the heap is the reason for an immutable class and for a value that holds one, and
+that a static field of a generic class exists once per type argument, as in C#)* K7's case shows
+a static field that is allowed.
 
-- (a) A constructor, and only a constructor, may assign each field without `mut` once, before its
-  body ends, as C# does for `readonly`; a further constructor of a class with a primary
-  constructor calls the primary one first, as C# 12 requires, and a class without one has C#'s
-  constructors. Cost: the flow analysis that proves "once, before the end".
-- (b) A class with a primary constructor has no further constructor; a field without `mut` gets
-  its value from the primary constructor or from its `=` in the body (K7) and nowhere else. Cost:
-  a second way to build an instance is a static method or a second class.
+Case: [classes/body.kz](../corpus/classes/body.kz)
 
-The lean is (a).
+Case: [classes/static-mut.kz](../corpus/classes/static-mut.kz)
+```kurz
+class Counter {
+    pub static mut int Total = 0
+
+    pub void Add() {
+        Total = Total + 1
+    }
+}
+
+Counter().Add()
+print(Counter.Total)
+```
+
+Case: [classes/static-instance.kz](../corpus/classes/static-instance.kz)
+```kurz
+class Counter(int Count)
+
+class Registry {
+    pub static Counter Zero = Counter(0)
+}
+
+print(Registry.Zero.Count)
+```
+
+### K14 (decided, §4) Further constructors and fields without `mut`
+
+A constructor, and only a constructor, may assign each field without `mut` once, before its body
+ends, as C# lets a constructor set a `readonly` field; a second assignment there is
+`assign-immutable` like one anywhere else. A further constructor of a class with a primary
+constructor calls the primary one first, with `: this(...)` as C# 12 requires, and a class
+without a primary constructor has C#'s constructors. The owner chose this on 2026-10-03, against
+a class with a primary constructor having no further constructor, which would have made a second
+way to build an instance a static method or a second class; the cost is the flow analysis that
+proves "once, before the end". What the answer did not reach, *(proposed)* as a whole: the once is
+per instance, stricter than C#, which allows any number of assignments. A field that the primary
+constructor or an `=` in the body (K7) sets is assigned by no constructor; a field without `mut`
+and without `=` is assigned exactly once on every path of every constructor that does not chain,
+and a constructor that leaves it unassigned on a path, or reads it first, is the compile error
+`field-unassigned`, as is such a field in a class with a primary constructor, which a call of
+that constructor would leave unset. The call of the primary one is direct; a further constructor
+without it is `constructor-must-chain`. A constructor written in the body is private without
+`pub`, as every member is (F9); the primary constructor, and the empty constructor of a class
+without one, are visible wherever the class is.
+
+Case: [classes/further-constructor.kz](../corpus/classes/further-constructor.kz)
+```kurz
+class Counter(int Start) {
+    pub Counter() : this(0) { }
+
+    pub int Value() => Start
+}
+
+print(Counter().Value())
+print(Counter(5).Value())
+```
+
+Case: [classes/constructor-assigns-twice.kz](../corpus/classes/constructor-assigns-twice.kz)
+```kurz
+class Point {
+    int x
+
+    pub Point(int value) {
+        x = value
+        x = value + 1
+    }
+
+    pub int X() => x
+}
+
+print(Point(1).X())
+```
+
+Case: [classes/constructor-must-chain.kz](../corpus/classes/constructor-must-chain.kz)
+```kurz
+class Counter(int Start) {
+    pub Counter() { }
+
+    pub int Value() => Start
+}
+
+print(Counter().Value())
+```
+
+Case: [classes/field-unassigned.kz](../corpus/classes/field-unassigned.kz)
+```kurz
+class Point {
+    int x
+
+    pub Point(bool set) {
+        if set {
+            x = 1
+        }
+    }
+
+    pub int X() => x
+}
+
+print(Point(true).X())
+```
 
 ### K8 (decided, §4) How a class names the fields that count
 
@@ -257,7 +369,7 @@ arguments of the base after its name, so that they can be computed:
 the class lists, and the arguments of the base are expressions over them. Whether a parameter
 can be passed on without becoming a field of the class is K11; the case computes the argument
 from a field. What the short form follows when the base has further constructors or none, and
-what a listed parameter with a base field's name is in that form, is K16.
+what a listed parameter with a base field's name is in that form, K16 says.
 
 Case: [classes/inherit-constructor.kz](../corpus/classes/inherit-constructor.kz)
 ```kurz
@@ -275,24 +387,39 @@ print(g.Name)
 print(g.Number)
 ```
 
-### K16 (open) The short form against a base with other constructors
+### K16 (decided, §4) The short form against a base with other constructors
 
-The short form of K10 takes "what the constructor of the base takes", which assumes a base with
-exactly one constructor. K7 allows further constructors, and a base without a primary constructor
-(K6's `Animal`) has only those, or the empty one. Unsaid as well: a listed parameter that repeats
-the name of a base field (`class Admin(string Name) : User`), and a base parameter with a default
-value followed by the class's own parameters. The options:
+The short form of K10 follows the primary constructor of the base, and is the compile error
+`no-primary-constructor` when the base has none (K6's `Animal`), whatever further constructors
+it has. A listed parameter with a base field's name and type is that field, as K11 says for the
+explicit form, and with another type it is K17's error. The defaults of the base keep their
+place, so the class's own parameters come after them, and a call that leaves one out names the
+rest (D11). The owner chose this on 2026-10-03, against taking the empty constructor when the
+base has no primary one, which would have given one form two readings; the cost is that such a
+base forces the explicit form.
 
-- (a) The short form follows the primary constructor of the base and is the compile error
-  `no-primary-constructor` when the base has none; a listed parameter with a base field's name
-  and type is that field, as K11 says for the explicit form, and with another type it is K17's
-  error; the defaults of the base keep their place, so the class's own parameters come after
-  them and a call that leaves one out names the rest (D11). Cost: a base without a primary
-  constructor forces the explicit form.
-- (b) The short form takes the empty constructor when the base has no primary one, and a repeated
-  name is `redeclared`. Cost: two readings of one form.
+Case: [classes/inherit-no-primary-constructor.kz](../corpus/classes/inherit-no-primary-constructor.kz)
+```kurz
+class Animal {
+    pub string Sound() => "quiet"
+}
 
-The lean is (a).
+class Dog(string Name) : Animal
+
+d = Dog("Rex")
+print(d.Sound())
+```
+
+Case: [classes/inherit-default-keeps-place.kz](../corpus/classes/inherit-default-keeps-place.kz)
+```kurz
+class User(string Name = "guest")
+
+class Admin(int Level) : User
+
+a = Admin(Level: 3)
+print(a.Name)
+print(a.Level)
+```
 
 ### K11 (decided, §4) A parameter that is passed on to the base
 

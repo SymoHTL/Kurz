@@ -1,4 +1,4 @@
-// expect: throws
+// expect: throws overflow at 5
 // build: test
 // rules: T20
 

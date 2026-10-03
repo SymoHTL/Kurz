@@ -1,0 +1,12 @@
+// expect: output
+// | 2147483647
+// | -2147483648
+// | 0
+// build: release
+// rules: T26
+
+double big = 100000000000000000000.0
+double zero = 0.0
+print(int(big))
+print(int(-big))
+print(int(zero / zero))

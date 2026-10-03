@@ -1,4 +1,4 @@
-// expect: throws
+// expect: throws reversed-range-at-run-time at 7
 // | 1
 // | 2
 // rules: C8

@@ -1,6 +1,7 @@
-// expect: error sign-mix at 6
+// expect: error sign-mix at 7
 // rules: T9
 
-byte b = 200
+// C# computes a long here; T9 keeps the error
+uint u = 200
 int i = 5
-print(b + i)
+print(u + i)

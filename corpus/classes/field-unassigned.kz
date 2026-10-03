@@ -1,0 +1,16 @@
+// expect: error field-unassigned at 7
+// rules: K14
+
+class Point {
+    int x
+
+    pub Point(bool set) {
+        if set {
+            x = 1
+        }
+    }
+
+    pub int X() => x
+}
+
+print(Point(true).X())

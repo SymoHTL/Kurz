@@ -1,0 +1,10 @@
+// expect: error static-state at 7
+// rules: K18
+
+class Counter(int Count)
+
+class Registry {
+    pub static Counter Zero = Counter(0)
+}
+
+print(Registry.Zero.Count)

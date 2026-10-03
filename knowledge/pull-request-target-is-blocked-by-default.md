@@ -1,6 +1,6 @@
 ---
 name: pull-request-target-is-blocked-by-default
-description: Since GitHub's workflow execution protections (generally available 2026-09-17) a public repository without an Actions event policy gets a default rule that blocks pull_request_target; whether it is already enforced for this repository is unknown (read 2026-10-02), so a Ready pull request with no review run is checked for this first, and the review is dispatched on the default branch until an event policy allows the event
+description: Since GitHub's workflow execution protections (generally available 2026-09-17) a public repository without an Actions event policy gets a default rule that blocks pull_request_target; since 2026-10-03 the owner's policy allows pull_request_target and workflow_dispatch for the review workflow (a restrict_action_events rule, both events, since the list is closed; a policy with no rules has no visible effect); a Ready pull request with no review run is still checked for this first, and the review is dispatched on the default branch when the event did not fire
 metadata:
   type: reference
 ---
@@ -47,8 +47,17 @@ attempted by that day, because the default branch has no review workflow before 
   The job's `if` refuses a dispatch on any other ref, and `ci-config` pins that expression; but
   the copy of the workflow on another branch can drop the `if`, and a dispatch on that branch
   runs the copy with this repository's token. That is HAZARD #11.
-- The lasting fix is the owner's setting: an event policy that allows `pull_request_target` and
-  `workflow_dispatch` for `.github/workflows/review.yml` only. Nothing asserts that policy
-  (HAZARD #10); the endpoint above is where a check could read it.
+- The lasting fix is the owner's setting, in place since 2026-10-03: a repository Actions policy
+  with `enforcement: active`, scoped by `conditions.workflow_path.include` to
+  `.github/workflows/review.yml`, holding one rule of type `restrict_action_events` whose
+  `parameters.allowed_events` lists `pull_request_target` and `workflow_dispatch`. Both events,
+  because the rule is a closed list: a list that names only `pull_request_target` blocks the
+  on-demand review, and one that names only `workflow_dispatch` blocks the event the policy was
+  made for. A policy with an empty `rules` array has no visible effect: on 2026-10-03 the empty
+  policy was in place when a pull request was marked Ready, and the `pull_request_target` run
+  started as before, so it neither blocked the event nor, as far as can be seen, lifted the
+  default; only a `restrict_action_events` rule that lists an event allows it. The policy is read
+  with `GET /repos/{owner}/{repo}/actions/policies/{id}` and replaced whole with `PUT` on the
+  same path (`name` and `enforcement` are required). Nothing asserts the policy (HAZARD #10).
 - Do not switch the review to `pull_request` to get around the block. That event runs the
   workflow file of the pull request itself, so a pull request could rewrite its own review.

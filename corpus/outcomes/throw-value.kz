@@ -1,4 +1,4 @@
-// expect: throws
+// expect: throws thrown at 8
 // | before
 // rules: O7
 

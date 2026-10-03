@@ -1,0 +1,10 @@
+// expect: output
+// | 205
+// | 2.5
+// rules: T23
+
+byte b = 200
+int i = 5
+print(b + i)
+double d = i
+print(d / 2)

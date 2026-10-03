@@ -1,0 +1,11 @@
+// expect: error no-primary-constructor at 8
+// rules: K16
+
+class Animal {
+    pub string Sound() => "quiet"
+}
+
+class Dog(string Name) : Animal
+
+d = Dog("Rex")
+print(d.Sound())

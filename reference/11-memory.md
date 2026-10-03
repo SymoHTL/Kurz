@@ -13,7 +13,7 @@ Judged by types, over the whole program: a class may not reach itself through st
 one field on that path is `mut`. That is the compile error `reference-cycle`. A path without a
 `mut` field is allowed, because immutable data cannot form a cycle. A field of function type
 (F11) is a strong field whose type names no class, yet the lambda it holds can capture any
-instance: how such a field counts is R9.
+instance: R9 says how it counts.
 
 Case: [memory/cycle-self.kz](../corpus/memory/cycle-self.kz)
 ```kurz
@@ -41,25 +41,51 @@ b = Link(2, a)
 print(b.Next?.Value ?? 0)
 ```
 
-### R9 (open) Fields of function type in the cycle rule
+### R9 (decided, §3) Fields of function type in the cycle rule
 
-`class Button(string Name, mut () => void OnClick)` with `b.OnClick = () => print(b.Name)` closes
-the ring b, OnClick, the lambda, b, and no field type on that path names `Button`, so R2 as
-written accepts the program and the ring leaks, although R7 promises the memory guarantees for
-everything outside `raw`. The options:
+A field of function type, `mut` or not, counts as a field that can reach every class whose
+instance a lambda in the program captures, as R8 treats a field of interface type; R2's `mut`
+field can be the function field or any other field on the path. With
+`class Button(string Name, mut () => void OnClick)` and a `b.OnClick = () => print(b.Name)`
+anywhere in the program, `Button` reaches itself, and the class is `reference-cycle`; with
+`class Holder(mut Button? B)` and an immutable `() => void` field of `Button` whose lambda reads a
+`Holder`, the ring runs through the immutable field and `Holder`'s `mut` one, and the first class
+on the path is the error. The owner chose this on 2026-10-03, against a weak capture inside
+stored lambdas, which would need a rule for what a gone capture reads as and a check at every
+use, and against forbidding such a capture. *(assumed: that a field without `mut` counts, which
+the second ring needs)* The cost is not local: once a class has a field of function type, any
+lambda anywhere in the program that captures an instance of that class, or of a class that holds
+one, makes it an error, and the lambda can sit in another file. An event handler escapes the
+error only in a program in which no lambda captures the button's class: through an interface
+(R8), whose class must not hold the button, or by receiving the button as a parameter.
 
-- (a) A `mut` field of function type counts as a field that can reach every class whose instance
-  a lambda in the program captures, as R8 treats a field of interface type: the ring above is
-  `reference-cycle`, and a `mut` function field in a class that any lambda anywhere can capture
-  is one as well. Cost: such fields become rare, and an event handler is written as an interface
-  (R8) or through a `weak` capture the record does not have yet.
-- (b) A lambda stored in a field captures class instances weakly, so the ring never forms; a
-  captured instance can be gone when the lambda runs, and the lambda sees `null` for it. Cost: a
-  rule for what a captured `weak` reference reads as, and a check at every use.
-- (c) A lambda may not capture a class instance at all when it is stored in a field. Cost: the
-  handler above has to receive the button as a parameter.
+Case: [memory/cycle-through-function-field.kz](../corpus/memory/cycle-through-function-field.kz)
+```kurz
+class Button(string Name, mut () => void OnClick)
 
-The lean is (a): it is R8's rule applied once more, and nothing new has to be invented.
+b = Button("ok", () => print("clicked"))
+b.OnClick = () => print(b.Name)
+b.OnClick()
+```
+
+Case: [memory/cycle-through-immutable-function-field.kz](../corpus/memory/cycle-through-immutable-function-field.kz)
+```kurz
+class Holder(mut Button? B)
+class Button(string Name, () => void OnClick)
+
+h = Holder(null)
+b = Button("ok", () => print(h.B?.Name ?? ""))
+h.B = b
+b.OnClick()
+```
+
+Case: [memory/function-field-no-capture.kz](../corpus/memory/function-field-no-capture.kz)
+```kurz
+class Button(string Name, mut () => void OnClick)
+
+b = Button("ok", () => print("clicked"))
+b.OnClick()
+```
 
 ### R3 (decided, §3) `weak`
 

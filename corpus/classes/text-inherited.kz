@@ -1,0 +1,22 @@
+// expect: output
+// | user Ann
+// | admin Ann 3
+// | user Cid
+// | admin Bea 1
+// rules: A9
+
+class User(string Name) {
+    pub virtual string Text() => "user {Name}"
+}
+
+class Admin(int Level) : User {
+    pub override string Text() => "admin {Name} {Level}"
+}
+
+class Guest(int Number) : User
+
+User u = Admin("Bea", 1)
+print(User("Ann"))
+print(Admin("Ann", 3))
+print(Guest("Cid", 7))
+print(u)

@@ -1,0 +1,9 @@
+// expect: output
+// | 1h 30min
+// rules: T24
+
+void Show(duration d) {
+    print(d)
+}
+
+Show(90min)

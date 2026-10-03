@@ -1,0 +1,8 @@
+// expect: error reference-cycle at 4
+// rules: R9
+
+class Button(string Name, mut () => void OnClick)
+
+b = Button("ok", () => print("clicked"))
+b.OnClick = () => print(b.Name)
+b.OnClick()

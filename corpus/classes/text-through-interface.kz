@@ -1,0 +1,17 @@
+// expect: output
+// | dot
+// rules: A10
+
+interface Shape {
+    string Text()
+}
+
+class Dot : Shape {
+    pub string Text() => "dot"
+}
+
+void Show(Shape s) {
+    print(s)
+}
+
+Show(Dot())

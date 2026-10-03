@@ -40,13 +40,13 @@ starts with a header and an empty line; the rest is the program.
 // expect: error assign-immutable at 6    it does not compile: this error, reported on this line of the file
 // rules: V7
 
-// expect: throws                     it compiles, prints these lines, then ends with an exception
+// expect: throws overflow at 7       it compiles, prints these lines, then this exception ends it on this line
 // | before
 // build: test                        optional: the case holds for this kind of build only (test or release)
 // rules: T5
 ```
 
-No compiler exists, so nothing runs these files. `tools/lint_reference.py` keeps the
+The ids of both kinds are listed in chapter 12. No compiler exists, so nothing runs these files. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.
 
@@ -138,8 +138,8 @@ A class declares its text with a method named `Text` that takes no parameters an
 `string`, as `ToString()` does in C#: `pub string Text() => "counter {Count}"`. `print` and an
 interpolated string (L6) use its result as the text of the instance. The record holds, as
 *(assumed)*, how the compiler keeps that cheap: it changes how the text is built and not what it
-is, so no case shows it. Whether a `Text()` of the base class, or one without `pub`, gives a class
-its text is A9; what is printed through an interface or a type parameter is A10.
+is, so no case shows it. A `Text()` of the base class counts, one without `pub` does not (A9); an
+interface or a type parameter has a text through an interface that declares it (A10).
 
 Case: [classes/text.kz](../corpus/classes/text.kz)
 ```kurz
@@ -152,37 +152,82 @@ print(c)
 print("got {c}")
 ```
 
-### A9 (open) An inherited or a private `Text()`
+### A9 (decided, §8) An inherited or a private `Text()`
 
-A4 gives an instance a text "only when its class declares one". With inheritance (K10) and members
-that are private by default (F9), three things are unsaid: whether `print(admin)` is `no-text`
-when only the base `User` declares `Text()`; whether a `User` variable that holds an `Admin` shows
-the text of `Admin`; and whether a `Text()` without `pub` counts. The options:
+`Text()` is inherited, and the class of the instance picks it when the program runs, as
+`ToString()` is in C#: `print(admin)` has a text when only the base `User` declares `Text()`, and
+a `User` variable that holds an `Admin` shows the text of `Admin` where `Admin` overrides it (K7).
+A `Text()` without `pub` is the compile error `not-visible` where the text is used outside the
+class, and `print` is such a use; inside the class it is usable, as any private member is. The owner chose this on 2026-10-03, against counting only a
+`pub Text()` the class itself declares, which would have made every class of a hierarchy repeat
+the method; the cost is that whether a class has a text depends on its base, and that a
+base-typed value may print more than its static type says.
 
-- (a) As `ToString()` in C#: `Text()` is inherited, the run-time class picks it (`override` as in
-  K7), and a `Text()` without `pub` is the compile error `not-visible` where the text is used
-  outside the class, because `print` is such a use. Cost: whether a class has a text depends on
-  its base, and a base-typed value may print more than its static type says.
-- (b) Only a `pub Text()` declared in the class itself counts; the base's is not inherited, and a
-  private one is `no-text` at the print. Cost: every class of a hierarchy repeats the method.
+Case: [classes/text-inherited.kz](../corpus/classes/text-inherited.kz)
+```kurz
+class User(string Name) {
+    pub virtual string Text() => "user {Name}"
+}
 
-The lean is (a).
+class Admin(int Level) : User {
+    pub override string Text() => "admin {Name} {Level}"
+}
 
-### A10 (open) Printing through an interface or a type parameter
+class Guest(int Number) : User
 
-A7 argues from "the type of what is held is known where it is printed". For a value whose static
-type is an interface (K6) or a type parameter (T19), the class behind it is not known at the
-`print`. The options:
+User u = Admin("Bea", 1)
+print(User("Ann"))
+print(Admin("Ann", 3))
+print(Guest("Cid", 7))
+print(u)
+```
 
-- (a) `print(x)` with an interface type compiles when the interface declares `string Text()` and
-  is `no-text` otherwise; with a type parameter it compiles when the parameter is limited (T19) to
-  an interface that declares it, and is `no-text` otherwise. Cost: a generic function that prints
-  its argument needs the limit; the standard library would declare one interface for it.
-- (b) The check runs for each instantiation of a generic function, so `print(x)` compiles for a
-  `Show<T>` called with `int` and fails for one called with a class without text. Cost: an error
-  at a call site for a line inside another function, and interfaces still need (a).
+Case: [classes/text-private.kz](../corpus/classes/text-private.kz)
+```kurz
+class Counter(int Count) {
+    string Text() => "counter {Count}"
+}
 
-The lean is (a).
+print(Counter(1))
+```
+
+### A10 (decided, §8) Printing through an interface or a type parameter
+
+`print(x)` with a value whose static type is an interface (K6) compiles when the interface
+declares `string Text()`, and is `no-text` otherwise; with a type parameter (T19) it compiles when
+the parameter is limited to an interface that declares it, and is `no-text` otherwise, whatever
+the call passes. A type meets such a limit when it has a text: every value with a derived text
+(A3, A4, A8, A11 to A14) and a class that declares or inherits a `pub Text()` (A5, A9), without
+naming the interface. *(proposed: which types meet the limit)* The owner chose this on 2026-10-03, against a check for each instantiation of a
+generic function, which would have reported an error at a call site for a line inside another
+function; the cost is that a generic function that prints its argument needs the limit, and that
+the standard library would declare one interface for it.
+
+Case: [classes/text-through-interface.kz](../corpus/classes/text-through-interface.kz)
+```kurz
+interface Shape {
+    string Text()
+}
+
+class Dot : Shape {
+    pub string Text() => "dot"
+}
+
+void Show(Shape s) {
+    print(s)
+}
+
+Show(Dot())
+```
+
+Case: [classes/text-through-type-parameter.kz](../corpus/classes/text-through-type-parameter.kz)
+```kurz
+void Show<T>(T item) {
+    print(item)
+}
+
+Show(1)
+```
 
 ### A6 (decided, §8) The text of a map
 

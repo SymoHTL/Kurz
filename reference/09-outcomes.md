@@ -216,7 +216,9 @@ print(value)
 
 An exception is for a situation the function cannot recover from. There is no `catch`. An
 exception ends the actor it happens in; top-level code is the root actor, so an exception there
-ends the program with an error code. What was printed before stays printed.
+ends the program with the exit code 1 *(the number is proposed; the record pins "an error code")*.
+What was printed before stays printed. A case names the exception it expects (E3); a `throw` of
+the program is the run-time error `thrown`.
 
 Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 
@@ -227,8 +229,17 @@ form. It is a statement and can stand wherever one can. As an arm of `else` it c
 alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
 `throw-needs-value`: there is no value it could mean. *(proposed)* The record marks as
-*(assumed)* that the runtime adds the place and the chain id to what was thrown. What type the
-thrown value has when a supervisor reads it is open in the record (section 14).
+*(assumed)* that the runtime adds the place and the chain id to what was thrown. When a
+supervisor reads it as the `Reason` of a crashed child, its type is the union of everything the
+child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
+that carries the text and the place, and against limiting `throw` to `data` values and text). The
+run-time errors of chapter 12 are values of one `data` type of the runtime, a member of every
+such union in every build; the place and the chain id are fields of the `Crashed` case beside
+`Reason`; a thrown class instance is moved out of the dying child's heap into the supervisor's
+with everything it reaches. *(proposed: the three, as the record marks them)* The supervisors
+themselves are outside this reference. The bare `throw` of an `else` arm is the `throw` that
+raised (E3): it throws the case value that reached the arm, and nothing is raised a second time,
+because nothing catches.
 
 Case: [outcomes/bare-throw.kz](../corpus/outcomes/bare-throw.kz)
 ```kurz

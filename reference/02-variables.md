@@ -63,8 +63,8 @@ A variable is used when it is read at least once. Being assigned again does not 
 a `mut` method on the variable (M5), an assignment into a path that starts at it (M4) and passing
 it as a `mut` argument (M7) read it as well as change it: `mut xs = List<int>()` followed only by
 `xs.Add(1)` is not `unused-variable`, because the add reads the list it adds to. *(this reading is
-proposed: the record speaks of reading only)* Whether a parameter and the variable of a `for`
-loop fall under V5 at all is V13.
+proposed: the record speaks of reading only)* A parameter and the variable of a `for` loop do not
+fall under V5 (V13).
 
 Case: [variables/unused-written.kz](../corpus/variables/unused-written.kz)
 ```kurz
@@ -72,18 +72,22 @@ mut x = 1
 x = 2
 ```
 
-### V13 (open) Unused parameters and loop variables
+### V13 (decided, §8) Unused parameters and loop variables
 
-V5 makes an unused variable an error and names variables only. A parameter that a function never
-reads, and the variable of a `for ... in` loop (C6) whose body never reads it, are the same
-shape; C# makes neither an error. The options:
+A parameter that its function never reads, and the variable of a `for ... in` loop (C6) whose
+body never reads it, are no error, as in C#. The owner chose this on 2026-10-03, with the words
+that the compiler just optimizes it, against making both `unused-variable` like a variable, which
+would have needed a name for a value that is meant to be ignored; so a function that has to match
+a type (F11) can ignore a parameter.
 
-- (a) Both are `unused-variable`, like a variable. Cost: a function that has to match a type
-  (F11) cannot ignore a parameter; `_` as the name of an ignored parameter or loop variable would
-  have to be allowed, and nothing in the record has it.
-- (b) Neither is an error; a loop that only counts is written over a range (C8) anyway.
+Case: [variables/unused-parameter.kz](../corpus/variables/unused-parameter.kz)
+```kurz
+int Three(int ignored) => 3
 
-The lean is (b), until the record has a name for a value that is meant to be ignored.
+for i in 0..<2 {
+    print(Three(1))
+}
+```
 
 ### V7 (decided, §4, §8) No second assignment without `mut`
 
