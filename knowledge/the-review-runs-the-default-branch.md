@@ -51,12 +51,16 @@ What it does not give:
   the file itself: a branch can carry a copy of the workflow without it, and a dispatch on that
   branch runs the copy, with its own reviewer, this repository's secrets and a token that may
   post statuses.
-- The ruleset accepts the `review` status from the app that every workflow run of this
-  repository reports as. A workflow that a branch adds, with `statuses: write`, can post
-  `review` = success on its own head. So the status proves that a workflow run of this
-  repository posted it, not that a review completed.
-- Both gaps are HAZARD #11. What holds them is that a change to a workflow or to the reviewer is
-  itself a pull request that the merged reviewer reads, and that only people who may write here
-  can push a branch or dispatch. Closing it needs an identity that a pull request's own
+- The ruleset pins `review` to the app that every workflow run of this repository reports as
+  (`tools/fixtures/branch-rules.json` shows the pin); whether a commit status satisfies that pin
+  has not been seen on the platform: HAZARD #5. A workflow that a branch adds, with
+  `statuses: write`, can post `review` = success on any head the statuses API is given, its own
+  or another pull request's. So the status proves that a workflow run of this repository posted
+  it, not that a review completed.
+- Both gaps are HAZARD #11. The one thing that holds them is that only people who may write here
+  can push a branch or dispatch a workflow. That the merged reviewer reads a workflow change holds
+  nothing: a branch that never becomes a pull request can still run its copy, and a status on a
+  pull request's own head is green the moment it is pushed, before any thread exists, so the
+  button can merge before the first pass ends. Closing it needs an identity that a pull request's own
   workflows cannot use (a dedicated app, or an environment only the default branch may use),
   which is the owner's choice.

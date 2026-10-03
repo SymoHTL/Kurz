@@ -49,6 +49,7 @@ REVIEW_REF = "${{ github.event.repository.default_branch }}"
 REVIEW_PR = "${{ github.event.pull_request.number || inputs.pr }}"
 REVIEW_SECRETS = {"CLAUDE_CODE_OAUTH_TOKEN"}
 STEP_KEYS = {"name", "env", "run"}  # what the step that decides may carry
+START_LINE = 'echo "REVIEW_STARTED=$(date +%s)" >> "$GITHUB_ENV"'  # the one write to GITHUB_ENV
 
 
 def parse(text):
@@ -80,8 +81,9 @@ def secret_errors(name, data, allowed):
     step's `env:`, and only the names in `allowed`, each of which must be read."""
     errors, read = [], set()
     for path, value in strings(data):
-        expressions = [value] if path and path[-1] == "if" else re.findall(r"\$\{\{(.*?)\}\}", value, re.S)
-        if not any(re.search(r"\bsecrets\b", e) for e in expressions):
+        # the whole value, not what a non-greedy match of `}}` leaves: a literal `}}` inside the expression
+        # hides nothing, and the forge resolves context names case-insensitively
+        if not ((path and path[-1] == "if") or "${{" in value) or not re.search(r"\bsecrets\b", value, re.I):
             continue
         plain = re.fullmatch(r"\$\{\{\s*secrets\.(\w+)\s*\}\}", value)
         in_env = len(path) == 6 and path[0] == "jobs" and path[2:5] == ("steps", "[]", "env")
@@ -97,18 +99,32 @@ def secret_errors(name, data, allowed):
 
 def common(name, text, data, secrets):
     errors = []
-    for used in re.findall(r"^\s*-?\s*uses:\s*(\S+)", text, re.M):
+    # the parsed steps, not the text: a flow-style step or a quoted key is a step too
+    for used in [str(s["uses"]) for job in data["jobs"].values() for s in (job.get("steps") or []) if "uses" in s]:
         if not re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", used):
             errors.append(f"{name}: action not pinned by commit SHA: {used}")
     for line in text.splitlines():
-        if re.search(r"\bpip\"? install\b", line) and "--require-hashes" not in line:
+        # every spelling of an install: pip, pip3, pip3.12, pipx, python -m pip, with options before `install`
+        if re.search(r"\bpip(?:3(?:\.\d+)?|x)?\"?(?:\s+-\S+)*\s+install\b", line) and "--require-hashes" not in line:
             errors.append(f"{name}: pip install without --require-hashes")
     if "defaults" in data:
         errors.append(f"{name}: the workflow sets `defaults`: a shell nobody pinned can turn every step into a no-op")
+    if "env" in data:
+        errors.append(f"{name}: the workflow sets `env`: a variable the deciding step inherits from there is read by no fact")
     for jid, job in data["jobs"].items():
         steps = job.get("steps") or []
         if "uses" in job:
             errors.append(f"{name}: job {jid} calls another workflow; a waiver could not tell what it covers")
+        if "permissions" in job:
+            errors.append(f"{name}: job {jid} sets its own permissions, which replace the workflow's grant that the facts read")
+        if "env" in job:
+            errors.append(f"{name}: job {jid} sets `env`: a variable the deciding step inherits from there is read by no fact")
+        for run in (str(s.get("run", "")) for s in steps):
+            # the shell of a later step sources what an earlier one wrote there: only the pinned start line may
+            if re.search(r"GITHUB_(?:ENV|PATH)", run) and run.strip() != START_LINE:
+                errors.append(f"{name}: job {jid} has a step that writes GITHUB_ENV or GITHUB_PATH: only the start-time line may")
+            if re.search(r"\b(?:git\s+(?:checkout|fetch|pull|switch)|gh\s+pr\s+checkout)\b", run):
+                errors.append(f"{name}: job {jid} has a step that checks out or fetches by hand: that can be pull-request code")
         if job.get("runs-on") != "ubuntu-24.04":
             errors.append(f"{name}: job {jid} runner image is not pinned to ubuntu-24.04")
         if "timeout-minutes" not in job:
@@ -126,14 +142,17 @@ def common(name, text, data, secrets):
     return errors + secret_errors(name, data, secrets)
 
 
-def deciding_step(name, steps, command, what):
-    """The last step runs `command` and nothing else decides how: only name, env and run."""
+def deciding_step(name, steps, command, what, env_keys):
+    """The last step runs `command` and nothing else decides how: only name, env and run, and the
+    env carries exactly `env_keys` (a BASH_ENV or a PYTHONSTARTUP there would run before it)."""
     last = steps[-1] if steps else {}
     errors = []
     if str(last.get("run", "")).strip() != command:
         errors.append(f"{name}: the last step must be the {what} step, running exactly `{command}`")
     if set(last) - STEP_KEYS:
         errors.append(f"{name}: the {what} step may carry only name, env and run, found {sorted(set(last) - STEP_KEYS)}")
+    if set(last.get("env") or {}) != env_keys:
+        errors.append(f"{name}: the {what} step's env must be exactly {sorted(env_keys)}, found {sorted(last.get('env') or {})}")
     return errors, last
 
 
@@ -160,7 +179,7 @@ def gates_facts(text):
     job = data["jobs"].get("gates") or {}
     if "if" in job:
         errors.append(f"{name}: the job gates may be skipped (`if`), and a skipped job reports success")
-    step, last = deciding_step(name, job.get("steps") or [], '"$RUNNER_TEMP/venv/bin/python" tools/gates.py', "gates")
+    step, last = deciding_step(name, job.get("steps") or [], '"$RUNNER_TEMP/venv/bin/python" tools/gates.py', "gates", {"GH_TOKEN", "PR_NUMBER"})
     errors += step
     if (last.get("env") or {}).get("PR_NUMBER") != "${{ github.event.pull_request.number }}":
         errors.append(f"{name}: the gates step needs PR_NUMBER from the pull request event")
@@ -201,13 +220,16 @@ def review_facts(text):
             errors.append(f"{name}: the checkout must set persist-credentials: false")
     if len(checkouts) != 1:
         errors.append(f"{name}: expected exactly one checkout, found {len(checkouts)}")
-    step, last = deciding_step(name, steps, '"$RUNNER_TEMP/venv/bin/python" tools/review/review.py', "review")
+    step, last = deciding_step(name, steps, '"$RUNNER_TEMP/venv/bin/python" tools/review/review.py', "review",
+                               {"GH_TOKEN", "PR_NUMBER", "REVIEW_TIMEOUT_MIN", "CLAUDE_CODE_OAUTH_TOKEN"})
     errors += step
     if (last.get("env") or {}).get("PR_NUMBER") != REVIEW_PR:
         errors.append(f"{name}: the review step needs PR_NUMBER from the pull request event or the dispatch input")
-    budget = [(s.get("env") or {}).get("REVIEW_TIMEOUT_MIN") for s in steps if "REVIEW_TIMEOUT_MIN" in (s.get("env") or {})]
-    if budget != [job.get("timeout-minutes")] or budget == [None]:
-        errors.append(f"{name}: REVIEW_TIMEOUT_MIN must equal the job's timeout-minutes")
+    # the budget the script is told is the review step's own, and the job's timeout is that number
+    if (last.get("env") or {}).get("REVIEW_TIMEOUT_MIN") != job.get("timeout-minutes") or job.get("timeout-minutes") is None:
+        errors.append(f"{name}: REVIEW_TIMEOUT_MIN on the review step must equal the job's timeout-minutes")
+    if not steps or str(steps[0].get("run", "")).strip() != START_LINE:
+        errors.append(f"{name}: the first step must note the start time, exactly `{START_LINE}`: the deadline counts from it")
     installs = re.findall(r"@anthropic-ai/claude-code(\S*)", text)
     if not installs or not all(re.fullmatch(r"@\d+\.\d+\.\d+;?", v) for v in installs):
         errors.append(f"{name}: the Claude CLI must be installed at an exact version")
@@ -245,7 +267,27 @@ MUTATIONS = [
      "may be skipped"),
     ("gates.yml", "a floating runner image", "runs-on: ubuntu-24.04", "runs-on: ubuntu-latest", "runner image"),
     ("gates.yml", "an action by tag", "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7", "not pinned"),
+    ("gates.yml", "a flow-style step whose action is not pinned", "      - name: Install pinned dependencies\n",
+     "      - {uses: actions/setup-node@v4}\n      - name: Install pinned dependencies\n", "not pinned"),
     ("gates.yml", "pip without hashes", "--quiet --require-hashes -r", "--quiet -r", "--require-hashes"),
+    ("gates.yml", "pip3 without hashes", '          python3 -m venv "$RUNNER_TEMP/venv"\n',
+     '          python3 -m venv "$RUNNER_TEMP/venv"\n          pip3 install pyyaml\n', "--require-hashes"),
+    ("gates.yml", "pip with an option before install, without hashes", '          python3 -m venv "$RUNNER_TEMP/venv"\n',
+     '          python3 -m venv "$RUNNER_TEMP/venv"\n          pip -q install pyyaml\n', "--require-hashes"),
+    ("gates.yml", "pipx without hashes", '          python3 -m venv "$RUNNER_TEMP/venv"\n',
+     '          python3 -m venv "$RUNNER_TEMP/venv"\n          pipx install pyyaml\n', "--require-hashes"),
+    ("gates.yml", "a job-level permissions grant", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    permissions: write-all\n",
+     "sets its own permissions"),
+    ("gates.yml", "a job-level env", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    env:\n      BASH_ENV: x\n", "sets `env`"),
+    ("gates.yml", "a workflow-level env", "\njobs:\n", "\nenv:\n  BASH_ENV: x\n\njobs:\n", "the workflow sets `env`"),
+    ("gates.yml", "a shell file sourced before the gates step", "          GH_TOKEN: ${{ github.token }}\n",
+     "          GH_TOKEN: ${{ github.token }}\n          BASH_ENV: x\n", "env must be exactly"),
+    ("gates.yml", "a step that writes GITHUB_ENV", '          python3 -m venv "$RUNNER_TEMP/venv"\n',
+     '          python3 -m venv "$RUNNER_TEMP/venv"\n          echo "BASH_ENV=x" >> "$GITHUB_ENV"\n', "writes GITHUB_ENV"),
+    ("gates.yml", "a secret read as Secrets", "          GH_TOKEN: ${{ github.token }}\n",
+     "          GH_TOKEN: ${{ github.token }}\n          KEY: ${{ Secrets.DEPLOY_KEY }}\n", "a secret is read"),
+    ("gates.yml", "a secret behind a literal }}", "          GH_TOKEN: ${{ github.token }}\n",
+     "          GH_TOKEN: ${{ github.token }}\n          KEY: \"${{ format('}}', secrets.DEPLOY_KEY) }}\"\n", "a secret is read"),
     ("gates.yml", "the local flag in CI", "tools/gates.py'", "tools/gates.py --local'", "must be the gates step"),
     ("gates.yml", "a swallowed failure", "tools/gates.py'", "tools/gates.py || true'", "must be the gates step"),
     ("gates.yml", "a shell that runs nothing", "      - name: Run every gate\n", "      - name: Run every gate\n        shell: true {0}\n",
@@ -263,7 +305,7 @@ MUTATIONS = [
      "uses continue-on-error"),
     ("gates.yml", "a step that can be skipped", "      - name: Run every gate\n", "      - name: Run every gate\n        if: always()\n",
      "step that may be skipped"),
-    ("gates.yml", "no pull request number", "          PR_NUMBER: ${{ github.event.pull_request.number }}\n", "", "PR_NUMBER"),
+    ("gates.yml", "no pull request number", "          PR_NUMBER: ${{ github.event.pull_request.number }}\n", "", "needs PR_NUMBER"),
     ("gates.yml", "a second job that calls a workflow", "\njobs:\n", "\njobs:\n  extra:\n    uses: ./.github/workflows/x.yml\n", "calls another workflow"),
     ("gates.yml", "a second job of its own", "\njobs:\n", "\njobs:\n" + PLAIN_JOB, "jobs must be exactly [gates]"),
     ("gates.yml", "the branch name in a shell line", '          python3 -m venv "$RUNNER_TEMP/venv"\n',
@@ -288,6 +330,12 @@ MUTATIONS = [
      "must name the default branch"),
     ("review.yml", "the token stays in the checkout", "persist-credentials: false", "persist-credentials: true", "persist-credentials"),
     ("review.yml", "the budget and the timeout differ", "    timeout-minutes: 90\n", "    timeout-minutes: 60\n", "REVIEW_TIMEOUT_MIN"),
+    ("review.yml", "the budget on another step than the review step", "          REVIEW_TIMEOUT_MIN: 90\n", "", "REVIEW_TIMEOUT_MIN on the review step"),
+    ("review.yml", "no start time to count the deadline from", START, "        run: echo started\n", "must note the start time"),
+    ("review.yml", "a checkout by hand", START, START + '      - run: git fetch origin "$HEAD" && git checkout FETCH_HEAD\n',
+     "checks out or fetches by hand"),
+    ("review.yml", "a pull request checked out through gh", START, START + '      - run: gh pr checkout "$PR_NUMBER"\n',
+     "checks out or fetches by hand"),
     ("review.yml", "a floating Claude CLI", "claude-code@2.1.283", "claude-code@latest", "exact version"),
     ("review.yml", "an install nobody ran", "          claude --version\n", "", "proven by running"),
     ("review.yml", "a wider token", "  statuses: write\n", "  statuses: write\n  actions: write\n", "permissions must be exactly"),

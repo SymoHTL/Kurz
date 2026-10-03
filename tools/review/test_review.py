@@ -1,12 +1,14 @@
 """Unit suite of the reviewer, run by `review.py --self-test`. The CLI answers, the diffs and the
 forge's refusal under fixtures/ are real: captured from the Claude CLI, from git and from the log
 of a run, not written by hand. Where a case needs an answer that could not be provoked (a usage
-limit), it edits a real answer and says so."""
+limit, an exit code without its error flag, an answer without findings, an overlong title), it
+edits a real answer and marks the edit with a comment that says what the real one carries."""
 import contextlib
 import hashlib
 import io
 import json
 import os
+import sys
 import tempfile
 import time
 import types
@@ -25,6 +27,20 @@ MAIL = "owner" + "@" + "mailbox.dev"
 
 def fixture(name):
     return kit.read(os.path.join(FIX, name))
+
+
+def captured_pr():
+    """The pull-request payload the forge really answered (tools/fixtures/SOURCES.txt), so that a field
+    the reviewer reads is one the real payload carries. {} when it cannot be read: the case "fixture: the
+    captured pull request" then fails instead of the whole suite crashing."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures", "pull-request.json")
+    try:
+        return json.loads(kit.read(path))
+    except (OSError, ValueError, kit.Refused):
+        return {}
+
+
+PR = captured_pr()
 
 
 def raises(kind, fn):
@@ -89,11 +105,12 @@ class MemoryForge(rv.Forge):
         self.threads, self.notes, self.statuses, self.said, self.asked, self.refuse_findings = [], [], [], [], [], False
         self.base, self.heads = base, list(heads)
         self.issues, self.opened, self.collected = [], [], []  # open lows issues, issues this run opened, (issue, comment) pairs
+        self.first_write = None  # how long the log was when the first write reached the wire
 
     def pr(self):
+        # the captured payload, with the head and the base of this case; its state is open, like the real one's
         head = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
-        return {"head": {"sha": head}, "base": {"ref": self.base}, "state": "open", "title": "A title", "body": "A body",
-                "html_url": "https://example.com/o/r/pull/1"}
+        return {**PR, "head": {**PR.get("head", {}), "sha": head}, "base": {**PR.get("base", {}), "ref": self.base}}
 
     def me(self):
         return "bot"
@@ -116,7 +133,9 @@ class MemoryForge(rv.Forge):
 
     def send(self, path, payload, method):
         body = payload.get("body") or ""
-        if self.refuse_findings and ("kurz-review:findings" in body or "low findings of pull request" in body):
+        if self.first_write is None and hasattr(sys.stdout, "getvalue"):
+            self.first_write = len(sys.stdout.getvalue())
+        if self.refuse_findings and (("kurz-review:findings" in body and path.startswith("pulls/")) or "low findings of pull request" in body):
             raise kit.Refused("`gh api` exited 1: gh: Validation Failed (HTTP 422)")
         comment = {"id": len(self.notes) + 1, "user": {"login": "bot"}, "body": payload.get("body")}
         if method == "PATCH":
@@ -153,14 +172,25 @@ def scripted_model(script):
     return call
 
 
-def run_review(forge, model, argv, ci=False, credential="", started="", diff=None):
+def verbatim_model(script):
+    """A stand-in that answers what it is scripted to answer, whatever the prompt lists as reported:
+    the model does repeat a finding in other words, and the reviewer has to set the repeat aside."""
+    def call(prompt, paths, timeout_s):
+        call.batches.append(sorted(paths))
+        return next((script[p] for p in sorted(paths) if p in script), []), 0.25, 0
+    call.batches = []
+    return call
+
+
+def run_review(forge, model, argv, ci=False, credential="", started="", diff=None, log=None):
     """review() against a forge and a model that answer from memory: (exit code, what it printed).
+    `log` is the stream it prints to, a text buffer unless the case hands it one that encodes.
     review() must not raise: when it does the code is None, so the case fails and the suite goes on."""
     env = {"GITHUB_ACTIONS": "true" if ci else "", "CLAUDE_CODE_OAUTH_TOKEN": credential,
            "REVIEW_STARTED": started, "REVIEW_TIMEOUT_MIN": "", "GITHUB_RUN_ID": ""}
     saved = {k: os.environ.get(k) for k in env}
     originals = rv.Forge, rv.fetch_diff, rv.call_model, rv.batches, kit.repo
-    out = io.StringIO()
+    out = io.StringIO() if log is None else log
     try:
         os.environ.update(env)
         rv.Forge, rv.call_model = (lambda repo, number: forge), model
@@ -176,7 +206,10 @@ def run_review(forge, model, argv, ci=False, credential="", started="", diff=Non
         rv.Forge, rv.fetch_diff, rv.call_model, rv.batches, kit.repo = originals
         for k, v in saved.items():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
-    return code, out.getvalue()
+    if isinstance(out, io.StringIO):
+        return code, out.getvalue()
+    out.flush()
+    return code, out.buffer.getvalue().decode("utf-8", "replace")
 
 
 def run():
@@ -189,6 +222,8 @@ def run():
 
 
 def suite(case):
+    case("fixture: the captured pull request is read, open, and carries what the reviewer reads from one",
+         PR.get("state") == "open" and all(k in PR for k in ("title", "body", "html_url", "draft", "author_association")), sorted(PR)[:12])
     # --- pins (first: a wrong model id makes the real answers below unreadable)
     case("pin: the model is an exact id, not an alias", bool(rv.re.fullmatch(r"claude-[a-z]+-\d+(?:-\d+)+", rv.MODEL)), rv.MODEL)
     case("pin: at least two passes, and a cap", 2 <= rv.MIN_PASSES < rv.MAX_PASSES <= 6)
@@ -248,7 +283,9 @@ def suite(case):
     case("diff: a removed line carries none", "      - line 18 of the first file" in by["a.md"]["numbered"])
     case("diff: a deleted file has no anchor", by["b.md"]["anchors"] == set(), by["b.md"]["anchors"])
     case("diff: a new file is anchored on every line", by["new.kz"]["anchors"] == {1, 2, 3})
-    case("diff: text that is not a diff yields no files", rv.parse_diff("hello\n") == [])
+    case("diff: text that is not a diff is refused, and only an empty text is an empty diff",
+         raises("bad-diff", lambda: rv.parse_diff("Error: not a repository\n"))[0] and attempt(rv.parse_diff, "") == [] and attempt(rv.parse_diff, "\n") == [],
+         attempt(rv.parse_diff, "Error: not a repository\n"))
     # a real diff whose paths git quotes, or that hold " b/": the header line alone does not say where a path ends
     odd = attempt(rv.parse_diff, fixture("quoted-diff.txt"))
     odd = [(f["path"], f["status"]) for f in odd] if isinstance(odd, list) else [("the diff did not parse", repr(odd))]
@@ -315,6 +352,9 @@ def suite(case):
          "report nothing" in inside and prompt.count("report nothing") == 1, prompt)
     case("prompt: every file of the pull request is listed, also one this batch does not show",
          [line.strip() for line in between("files").strip("\n").split("\n")] == ["a.md (modified)", "gone.md (deleted)"], between("files"))
+    case("prompt: a finding reported on an earlier head says so in the prompt",
+         "a.md:3 (line of an earlier head) [medium]" in rv.build_prompt([], "t", "b", [{**finding(), "stale": True}], [("a.md", "x")], 1, 1, "s")
+         and "earlier head" not in rv.build_prompt([], "t", "b", [finding()], [("a.md", "x")], 1, 1, "s"))
     case("prompt: already reported findings are listed", "- a.md:3 [medium] t" in between("reported"), between("reported"))
     tokens = iter(["abcd", "ef01"])
     original, rv.secrets.token_hex = rv.secrets.token_hex, lambda n: next(tokens)
@@ -333,6 +373,7 @@ def suite(case):
     case("answer: the real error payload says subtype success", error["subtype"] == "success" and error["is_error"] is True)
     case("answer: an API error is an error", *raises("api", lambda: rv.parse_result(json.dumps(error), 1, {"a.md"})))
     case("answer: is_error decides, even with exit code 0", *raises("api", lambda: rv.parse_result(json.dumps(error), 0, {"a.md"})))
+    # edited: the real payload says is_error true; the exit code alone has to decide
     case("answer: a non-zero exit decides, even without is_error", *raises("api", lambda: rv.parse_result(json.dumps({**error, "is_error": False}), 1, {"a.md"})))
     # The next two edit the real error payload: a usage limit could not be provoked on purpose.
     case("answer: status 429 is a usage limit", *raises("usage-limit", lambda: rv.parse_result(json.dumps({**error, "api_error_status": 429}), 1, {"a.md"})))
@@ -350,11 +391,15 @@ def suite(case):
     ok = json.loads(fixture("cli-findings.json"))
     case("answer: text that is not JSON", *raises("bad-output", lambda: rv.parse_result("Error: something", 0, {"a.md"})))
     case("answer: JSON that is not an object", *raises("bad-output", lambda: rv.parse_result("[]", 0, {"a.md"})))
+    # edited: the real answer carries its findings under structured_output; one without them has to be refused
     case("answer: no structured output", *raises("bad-output", lambda: rv.parse_result(json.dumps({**ok, "structured_output": None}), 0, {"a.md"})))
+    billed = attempt(rv.parse_result, json.dumps({**ok, "structured_output": None}), 0, {"a.md"})
+    case("answer: a bad answer that was billed carries its cost, so the retry can count it",
+         getattr(billed, "cost", None) == float(ok["total_cost_usd"]) and billed.cost > 0, repr(billed))
     wrapped = json.loads(fixture("cli-findings.json"))
     wrapped["structured_output"]["findings"][0]["title"] = "a title\nover  two lines"  # edited: the real title is one line
     case("answer: a title is made one line", rv.parse_result(json.dumps(wrapped), 0, {"a.md"})[0][0]["title"] == "a title over two lines")
-    wrapped["structured_output"]["findings"][0]["title"] = "t" * (rv.TITLE_CHARS + 50)
+    wrapped["structured_output"]["findings"][0]["title"] = "t" * (rv.TITLE_CHARS + 50)  # edited: the real title is short
     case("answer: a title longer than the limit is cut", len(rv.parse_result(json.dumps(wrapped), 0, {"a.md"})[0][0]["title"]) == rv.TITLE_CHARS)
     wrapped["structured_output"]["findings"][0].update(title=f"written in {DRIVE}", body=f"first line\nthe login is {MAIL}")  # edited: the real finding names neither
     kept = attempt(lambda: rv.parse_result(json.dumps(wrapped), 0, {"a.md"})[0][0])
@@ -399,7 +444,18 @@ def suite(case):
     case("converge: the same line again in a later pass, and no more severe, is a repeat",
          ([f["title"] for f in r["findings"]], r["passes"], r["converged"]) == (["one defect"], 2, True), r)
     r = rv.converge(scripted([finding(severity="high"), finding(severity="low")], []), [], budget())
-    case("converge: one finding twice in a pass is kept once, at its higher severity", [f["severity"] for f in r["findings"]] == ["high"], r)
+    reverse = rv.converge(scripted([finding(severity="low"), finding(severity="high")], []), [], budget())
+    case("converge: one finding twice in a pass is kept once, at its higher severity, whichever came first",
+         [f["severity"] for f in r["findings"]] == ["high"] and [f["severity"] for f in reverse["findings"]] == ["high"], (r, reverse))
+    r = rv.converge(scripted([finding(title="X")], [finding(title="Y", severity="high")], []), [], budget())
+    case("converge: a more severe finding replaces only the finding of its title, the other defect on that line stays",
+         sorted((f["title"], f["severity"]) for f in r["findings"]) == [("X", "medium"), ("Y", "high")], r)
+    r = rv.converge(scripted([finding(title="new")], []), [{**finding(title="old"), "stale": True}], budget())
+    stale = r
+    r = rv.converge(scripted([finding(title="new")], []), [{**finding(title="old"), "stale": False}], budget())
+    case("converge: a finding reported on an earlier head matches nothing; on this head the same line is a repeat",
+         [f["title"] for f in stale["findings"]] == ["new"] and r["findings"] == [], (stale, r))
+    case("converge: a repeat is counted, not lost", (stale["repeats"], r["repeats"]) == (0, 1), (stale["repeats"], r["repeats"]))
     call = scripted([finding()], [])
     r = rv.converge(call, [finding()], budget())
     case("converge: what was already reported is not found again", r["findings"] == [] and r["converged"], r)
@@ -410,6 +466,10 @@ def suite(case):
     r = rv.converge(scripted([finding()], rv.ReviewError("api", "boom", 500)), [], budget())
     case("converge: a pass that fails keeps what the passes before it found", (r["passes"], r["converged"], len(r["findings"])) == (1, False, 1)
          and getattr(r["error"], "kind", None) == "api", r)
+    r = attempt(rv.converge, scripted([finding()], TypeError("a list where a string was expected")), [], budget())
+    case("converge: a pass that raises anything else is this batch's bad-output error, and what it found before is kept",
+         isinstance(r, dict) and (r["passes"], len(r["findings"]), getattr(r["error"], "kind", None)) == (1, 1, "bad-output")
+         and "TypeError" in str(r["error"]), r)
     case("converge: a batch whose passes all answered carries no error", rv.converge(scripted(), [], budget())["error"] is None)
     call = scripted([finding()], [])
     first = rv.converge(call, [], budget(), limit=1)
@@ -459,7 +519,9 @@ def suite(case):
     got, capped, unconverged, incomplete = rv.settle([batch_result([low]), batch_result([high]), batch_result()], work)
     case("settle: converged batches are a completed review", (capped, unconverged, incomplete) == ([], [], None) and len(got) == 1,
          (got, capped, unconverged, incomplete))
-    case("settle: across batches the higher severity on a line wins", [f["severity"] for f in got] == ["high"], got)
+    reverse = rv.settle([batch_result([high]), batch_result([low]), batch_result()], work)[0]
+    case("settle: across batches the higher severity on a line wins, whichever batch came first",
+         [f["severity"] for f in got] == ["high"] and [f["severity"] for f in reverse] == ["high"], (got, reverse))
     two = rv.settle([batch_result([finding(line=7, title="one defect")]), batch_result([finding(line=7, title="another defect")]), batch_result()], work)[0]
     case("settle: two defects on one line, from two batches, stay two", len(two) == 2, two)
     got, capped, unconverged, incomplete = rv.settle(
@@ -512,8 +574,9 @@ def suite(case):
     case("cache: script, rules, title and description each change the key", len(set(variants + [key])) == 6)
     case("cache: the pass bounds change the key", key != rv.cache_key(b"script", "rules", "title", "body", (1, 1))
          and key == rv.cache_key(b"script", "rules", "title", "body", (rv.MIN_PASSES, rv.MAX_PASSES)))
-    state = {"v": 1, "key": key, "files": {"a.md": rv.block_hash(by["a.md"]["block"]), "e.md": "stale"}}
-    case("cache: an identical block is replayed, a changed one is not", rv.replayable(state, key, files) == {"a.md"}, rv.replayable(state, key, files))
+    state = {"v": 1, "key": key, "files": {"a.md": rv.block_hash(by["a.md"]["block"]), "e.md": rv.block_hash(by["e.md"]["block"] + " ")}}
+    case("cache: an identical block is replayed, one that changed by a character is not", rv.replayable(state, key, files) == {"a.md"},
+         rv.replayable(state, key, files))
     case("cache: another key replays nothing", rv.replayable(state, "other", files) == set())
     for name, bad in {"no state": None, "another version": {**state, "v": 2}, "files that are no map": {**state, "files": []},
                       "a list": [state]}.items():
@@ -552,25 +615,44 @@ def suite(case):
     case("plan: more findings than a thread holds are spread over several, and none is lost", sizes == [rv.THREAD_FINDINGS, 3], sizes)
     long = rv.render({"findings": [finding(title="t", body="x" * (rv.BODY_CHARS + 500))]})
     case("posted: a body longer than the limit is cut, and says so", "x" * rv.BODY_CHARS + " [cut here" in long and "x" * (rv.BODY_CHARS + 1) not in long, len(long))
-    full = rv.render({"findings": [finding(line=n, title="t" * rv.TITLE_CHARS, body="b" * rv.BODY_CHARS) for n in range(rv.THREAD_FINDINGS)]})
-    case("posted: the largest thread the reviewer can render fits a comment", len(full) < 65_536 and len(full) > rv.THREAD_FINDINGS * rv.BODY_CHARS, len(full))
-    widest = rv.listed([finding(file="f" * 100, line=n, severity="low", title="t" * rv.TITLE_CHARS) for n in range(rv.NOTE_FINDINGS)])
-    case("posted: the largest note of low findings fits a comment", 40_000 < len(widest) < 60_000, len(widest))
+    plain = [finding(line=n, title="t" * rv.TITLE_CHARS, body="b" * rv.BODY_CHARS) for n in range(1, rv.THREAD_FINDINGS + 1)]
+    sized = lambda part: rv.render({"findings": part}, HEAD)
+    case("posted: a thread of plain findings at the count cap is one part, and fits a comment",
+         len(rv.in_parts(plain, sized)) == 1 and rv.THREAD_FINDINGS * rv.BODY_CHARS < len(sized(plain)) <= rv.COMMENT_CHARS, len(sized(plain)))
+    # what render widens: a marker opened in a path or a body (escaped where shown), a quote and a character outside
+    # ASCII in a title (escaped in the marker's JSON; the smiley is two \u escapes there)
+    wide = [finding(line=n, file="<!--" * 25, title="\U0001F600\"" * (rv.TITLE_CHARS // 2), body="<!--" * (rv.BODY_CHARS // 4))
+            for n in range(1, rv.THREAD_FINDINGS + 1)]
+    parts = rv.in_parts(wide, sized)
+    case("posted: findings that render wide are spread over parts that each fit a comment, none lost, in order",
+         len(sized(wide)) > rv.COMMENT_CHARS and len(parts) > 1 and all(len(sized(p)) <= rv.COMMENT_CHARS for p in parts)
+         and [f["line"] for p in parts for f in p] == list(range(1, rv.THREAD_FINDINGS + 1)), (len(sized(wide)), [len(p) for p in parts]))
+    threads = rv.plan_posts(wide, {wide[0]["file"]: set(range(1, 100))}, HEAD)
+    case("plan: the threads are sized as they are rendered for the head", len(threads) == len(parts)
+         and all(len(rv.render(t, HEAD)) <= rv.COMMENT_CHARS for t in threads), [len(t["findings"]) for t in threads])
+    forge = MemoryForge()
+    attempt(forge.lows, HEAD, [dict(f, severity="low", line=n) for n in range(1, rv.NOTE_FINDINGS + 1) for f in [wide[0]]])
+    case("posted: the comments on the lows issue and the notes that list them each fit a comment, and list every low once",
+         all(len(body) <= rv.COMMENT_CHARS for _, body in forge.collected) and all(len(c["body"]) <= rv.COMMENT_CHARS for c in forge.notes)
+         and sorted(f["line"] for m in forge.marks(rv.FINDINGS_MARK) for f in m) == list(range(1, rv.NOTE_FINDINGS + 1))
+         and len(forge.collected) > 1 and len(forge.notes) > 1, (len(forge.collected), len(forge.notes)))
     collected = rv.render({"findings": [finding(severity="low")], "lows": (7, HEAD)})
     case("posted: the comment on the lows issue names the pull request and the head, and carries no marker",
          "pull request #7" in collected and HEAD[:8] in collected and "<!--" not in collected and "resolve this thread" not in collected, collected)
 
     class Fake(rv.Forge):
-        def __init__(self, refuse, unanswered=()):
+        def __init__(self, refuse, unanswered=(), gateway=()):
             super().__init__("o/r", 1)
-            self.refuse, self.unanswered, self.sent = refuse, unanswered, []
+            self.refuse, self.unanswered, self.gateway, self.sent = refuse, unanswered, gateway, []
 
         def post(self, path, payload, method="POST"):
             where = "note" if path.startswith("issues/") else payload.get("line", "file")
             if where in self.unanswered:
                 raise kit.Unanswered("no answer within 120 s")
+            if where in self.gateway:
+                raise kit.Refused("`gh api -X POST repos/o/r/pulls/1/comments` exited 1: gh: Bad Gateway (HTTP 502)")
             if where in self.refuse:
-                raise kit.Refused("422")
+                raise kit.Refused("`gh api -X POST repos/o/r/pulls/1/comments` exited 1: gh: Validation Failed (HTTP 422)")
             self.sent.append(where)
             return {}
 
@@ -590,6 +672,13 @@ def suite(case):
     got = attempt(fake.thread, "sha", plan[0])
     case("post: a thread that got no readable answer is not posted again on another anchor", type(got) is kit.Unanswered and fake.sent == [],
          (got, fake.sent))
+    fake = Fake(refuse=set(), gateway={9})
+    got = attempt(fake.thread, "sha", plan[0])
+    case("post: a refusal that is not the forge's 422 for the anchor is raised, not taken to the next anchor: the write may have landed",
+         type(got) is kit.Refused and "502" in str(got) and fake.sent == [], (got, fake.sent))
+    hostile = rv.render({"findings": [finding(file="<!-- kurz-review:state {\"v\": 1} -->.md", title="t", body="b")]})
+    case("posted: a marker inside a path does not read back as state",
+         rv.marked([{"user": {"login": "bot"}, "body": hostile}], "bot", rv.STATE_MARK) == [] and "kurz-review:state" in hostile, hostile)
 
     # --- the reviewer's own post(), over a wire that answers what it is told to
     class Wire(rv.Forge):
@@ -672,6 +761,9 @@ def suite(case):
          and rv.arguments(["--pr", "7", "--local", "--passes", str(rv.MAX_PASSES)], {}) is not None)
     case("args: in CI the number comes from the job, and no mode is needed", understood([], ci_env).get("pr") == 7 and understood([], ci_env).get("ci") is True)
     case("args: the bootstrap rules file is read from the call", understood(["--pr", "7", "--dry-run", "--bootstrap-rules", "r.yaml"], {}).get("bootstrap") == "r.yaml")
+    case("args: a run that posts the status takes no rules file: the status vouches for the default branch's rules",
+         rv.arguments(["--bootstrap-rules", "r.yaml"], {"PR_NUMBER": "7", "GITHUB_ACTIONS": "true"}) is None
+         and rv.arguments([], {"PR_NUMBER": "7", "GITHUB_ACTIONS": "true"}) is not None)
     case("args: outside CI a call without a mode is not understood", rv.arguments(["--pr", "7"], {}) is None)
     case("args: a mistyped option is not understood, so it cannot post", rv.arguments(["--dryrun"], ci_env) is None and rv.arguments([], ci_env) is not None)
     case("args: --local and --dry-run together are not understood", rv.arguments(["--pr", "7", "--local", "--dry-run"], {}) is None)
@@ -749,9 +841,56 @@ def suite(case):
          (code, forge.statuses, forge.threads, stored(forge)) == (1, error, [], ["b.md", "e.md"]) and "NOT POSTED" in out,
          (code, forge.statuses, len(forge.threads), stored(forge)))
     case("run: every finding is in the log in full, with what the passes cost, before the first post is tried",
-         0 <= out.find("the low finding, in full") < out.find("FOUND: 2 new findings") < out.find("NOT POSTED") and "$" in out[out.find("FOUND: "):].split("\n")[0],
-         out[-700:])
+         0 <= out.find("the low finding, in full") < out.find("FOUND: 2 new findings") < forge.first_write
+         and 0 <= out.find("medium a.md:3 t") < forge.first_write and "$" in out[out.find("FOUND: "):].split("\n")[0], (forge.first_write, out[-700:]))
     case("run: a finding that was not posted is named in the log, by file, line and title", "new.kz:1 t" in out[max(0, out.find("NOT POSTED")):], out[-700:])
+    forge = MemoryForge()
+    forge.refuse_findings = True
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
+    plain = [n["body"] for n in forge.notes if "plain note, not a thread" in n["body"]]
+    case("run: a finding above low that lands as a plain note ends the run red: no thread holds the merge for it",
+         (code, forge.statuses, forge.threads, len(plain)) == (1, error, [], 1) and "NOT POSTED as a thread" in out
+         and "`a.md` line 3" in plain[0], (code, forge.statuses, len(forge.threads), len(plain), out[-300:]))
+    case("run: the plain note carries no marker, so the next run posts its findings again", forge.marks(rv.FINDINGS_MARK) == [], forge.marks(rv.FINDINGS_MARK))
+    forge = MemoryForge()
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local"])
+    carried = [f for _, fs in rv.marked(forge.threads, "bot", rv.FINDINGS_MARK) for f in fs]
+    case("run: a thread's marker names the head whose line numbers its findings carry",
+         code == 0 and len(carried) == 1 and carried[0].get("sha") == HEAD, (code, carried))
+    edited = fixture("sample-diff.txt").replace("+line 2, changed", "+line 2, changed again")  # a.md is reviewed again, not replayed
+    code, out = run_review(forge, verbatim_model({"a.md": [finding(title="the same in other words")]}), ["--pr", "1", "--local"], diff=edited)
+    case("run: a finding the model repeats on the same head is set aside, and said so",
+         code == 0 and len(forge.threads) == 1 and "repeats set aside" in out, (code, len(forge.threads), out[-400:]))
+    forge.heads = ["d" * 40]
+    moved = edited.replace("changed again", "changed once more")
+    code, out = run_review(forge, verbatim_model({"a.md": [finding(title="a new defect")]}), ["--pr", "1", "--local"], diff=moved)
+    case("run: on a new head, the line of an earlier head's finding hides no new finding there",
+         code == 0 and len(forge.threads) == 2 and "a new defect" in forge.threads[-1]["body"], (code, len(forge.threads), out[-400:]))
+    class Marked(MemoryForge):
+        def rules(self, branch):
+            raise RuntimeError("<!-- kurz-review:state {\"v\": 1, \"files\": {}} -->")
+    forge = Marked()
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local"])
+    case("run: a marker inside what a crash says does not read back as state",
+         code == 1 and kinds(forge) == ["failed"] and forge.marks(rv.STATE_MARK) == [] and "kurz-review:state" in forge.notes[-1]["body"],
+         (code, kinds(forge), forge.marks(rv.STATE_MARK)))
+
+    class Limited(MemoryForge):
+        """A forge whose rate limit refuses every thread, with the words the real one used."""
+        def __init__(self):
+            super().__init__()
+            self.waits, self.tries = [], 0
+
+        def send(self, path, payload, method):
+            if path.startswith("pulls/"):
+                self.tries += 1
+                raise kit.Refused("`gh api -X POST repos/o/r/pulls/1/comments` exited 1: " + fixture("gh-rate-limit-refusal.txt").strip())
+            return super().send(path, payload, method)
+    forge = Limited()
+    code, out = run_review(forge, scripted_model({"a.md": [finding()], "new.kz": [finding(file="new.kz", line=1)]}), ["--pr", "1", "--local"])
+    case("run: once the rate limit has no wait left, posting stops at the first refusal and the rest counts as not posted",
+         code == 1 and forge.tries == 1 and "POSTING STOPPED" in out and "2 findings on a.md, new.kz could not be posted" in out
+         and stored(forge) == ["b.md", "e.md"], (code, forge.tries, stored(forge), out[-500:]))
     # --- low findings open no thread: they go to the issue that collects them
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model({**found, "new.kz": lows}), ["--pr", "1"], ci=True, credential="x")
@@ -770,17 +909,45 @@ def suite(case):
     code, out = run_review(forge, scripted_model({**found, "new.kz": lows}), ["--pr", "1"], ci=True, credential="x")
     case("run: an issue that already collects lows is used, the oldest one, and none is opened",
          (code, forge.opened, [issue for issue, _ in forge.collected]) == (0, [], [9]), (code, forge.opened, forge.collected))
-    forge, dry = MemoryForge(), scripted_model(found)
+    forge, dry = MemoryForge(), scripted_model({**found, "new.kz": lows})
     code, out = run_review(forge, dry, ["--pr", "1", "--dry-run"])
-    case("run: a dry run reviews and posts nothing", code == 0 and not (forge.threads or forge.notes or forge.statuses) and len(dry.batches) == 8
-         and "DRY RUN" in out, (code, len(forge.threads), len(forge.notes), dry.batches))
+    case("run: a dry run reviews and posts nothing, no thread, no note, no issue for the lows",
+         code == 0 and not (forge.threads or forge.notes or forge.statuses or forge.collected or forge.opened) and len(dry.batches) == 8
+         and "DRY RUN" in out, (code, len(forge.threads), len(forge.notes), forge.collected, forge.opened, dry.batches))
     forge, planned = MemoryForge(), scripted_model(found)
     code, out = run_review(forge, planned, ["--pr", "1", "--plan"])
     case("run: a plan lists the batches and the passes they can take, calls no model and posts nothing",
-         code == 0 and planned.batches == [] and not (forge.threads or forge.notes or forge.statuses) and "  batch 4/4: " in out
+         code == 0 and planned.batches == [] and not (forge.threads or forge.notes or forge.statuses or forge.opened) and "  batch 4/4: " in out
          and f"PLAN: 4 batches, {4 * rv.MIN_PASSES} to {4 * rv.MAX_PASSES} passes" in out, (code, planned.batches, len(forge.notes), out[-300:]))
     code, out = run_review(MemoryForge(), scripted_model(found), ["--pr", "1", "--plan", "--passes", "1"])
     case("run: a plan under --passes counts the passes of that limit", code == 0 and "PLAN: 4 batches, 4 passes" in out, (code, out[-300:]))
+
+    # --- a call whose answer could not be read is tried once more: both calls were billed
+    class Flaky:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, prompt, paths, timeout_s):
+            self.calls += 1
+            if self.calls == 1:
+                raise rv.ReviewError("bad-output", "the answer carries no structured findings", cost=0.5)
+            return [], 0.25, 0
+    flaky, saved_sleep = Flaky(), rv.time.sleep
+    rv.time.sleep = lambda seconds: None
+    try:
+        code, out = run_review(MemoryForge(), flaky, ["--pr", "1", "--dry-run"])
+    finally:
+        rv.time.sleep = saved_sleep
+    case("run: a call answered badly is tried once more, and the pass carries both bills",
+         code == 0 and flaky.calls == 9 and "(after a retried call, $0.50)" in out and "8 passes, $2.50" in out, (code, flaky.calls, out[-400:]))
+    case("plan: the plan says that a retried call is billed too", "billed twice" in run_review(MemoryForge(), scripted_model(found), ["--pr", "1", "--plan"])[1])
+
+    # --- the log keeps every character a finding quotes: on 2026-10-03 a run of 30 paid passes ended on an arrow
+    arrow = {"a.md": [finding(body="the text reads 'a ← b'")]}
+    code, out = run_review(MemoryForge(), scripted_model(arrow), ["--pr", "1", "--dry-run"],
+                           log=io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))  # a redirected stdout on Windows
+    case("run: a finding that quotes a character outside the log's code page is printed, and the run goes on",
+         code == 0 and "a ← b" in out and "FOUND: 1 new findings" in out, (code, out[-300:]))
 
     # --- which pull request gets a status at all
     forge, unused = MemoryForge(base="feature"), scripted_model(found)
@@ -794,17 +961,27 @@ def suite(case):
          code == 0 and forge.asked == ["trunk"] and kinds(forge) == ["off-pipeline"] and forge.statuses == [], (code, forge.asked, kinds(forge)))
     forge, unused = MemoryForge(), scripted_model(found)
     code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x", diff="not a diff\n")
-    case("run: a diff that holds no file is a review that did not complete", (code, forge.statuses, unused.batches) == (1, error, [])
+    case("run: text that is no diff is a review that did not complete, as bad-diff", (code, forge.statuses, unused.batches) == (1, error, [])
+         and "REVIEW DID NOT COMPLETE (bad-diff)" in out, (code, forge.statuses, unused.batches, out[-200:]))
+    forge, unused = MemoryForge(), scripted_model(found)
+    code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x", diff="")
+    case("run: an empty diff is a review that did not complete, as empty", (code, forge.statuses, unused.batches) == (1, error, [])
          and "REVIEW DID NOT COMPLETE (empty)" in out, (code, forge.statuses, unused.batches, out[-200:]))
 
     def restless(prompt, paths, timeout_s):
         """A model that finds a new defect on every pass: one line further for each finding it is told of."""
+        restless.calls += 1
         return [finding(file=sorted(paths)[0], line=prompt.count("\n- "))], 0.25, 0
+    restless.calls = 0
     forge = MemoryForge()
     code, out = run_review(forge, restless, ["--pr", "1"], ci=True, credential="x")
     case("run: a review that ends at the pass cap completes, and its status says that it did not converge",
          (code, forge.statuses, kinds(forge)) == (0, success, ["no-convergence"]) and "NOT converged on 4 files" in (forge.said or [""])[-1],
          (code, forge.statuses, forge.said, kinds(forge)))
+    planned = run_review(MemoryForge(), scripted_model({}), ["--pr", "1", "--plan"])[1]
+    most = int(rv.re.search(r"PLAN: 4 batches, \d+ to (\d+) passes", planned).group(1))
+    case("run: the plan's upper bound is the number of calls a run that never converges makes", restless.calls == most and most == 4 * rv.MAX_PASSES,
+         (restless.calls, most))
 
     # --- a run the caller limited to one pass a batch
     forge, once = MemoryForge(), scripted_model(found)
@@ -816,11 +993,13 @@ def suite(case):
     case("run: the notes of a limited run name the limit", "converged: no; limited by the caller to 1 pass a batch" in audit
          and any("after 1 pass it was still" in n["body"] for n in forge.notes), [n["body"][:160] for n in forge.notes])
     forge = MemoryForge()
-    run_review(forge, scripted_model({}), ["--pr", "1", "--local", "--passes", "1"])
+    first, _ = run_review(forge, scripted_model({}), ["--pr", "1", "--local", "--passes", "1"])
+    stored_once = stored(forge)
     full = scripted_model({})
     code, out = run_review(forge, full, ["--pr", "1", "--local"])
     case("run: what a one-pass run stored is not replayed by a run without the limit",
-         stored(forge) == ["a.md", "b.md", "e.md", "new.kz"] and len(full.batches) == 8 and "0 replayed" in out, (stored(forge), full.batches, out[:300]))
+         (first, stored_once, code) == (0, ["a.md", "b.md", "e.md", "new.kz"], 0) and stored(forge) == stored_once and len(full.batches) == 8
+         and "0 replayed" in out, (first, stored_once, code, stored(forge), full.batches, out[:300]))
 
     # --- what the audit note of a run off the pipeline says
     forge = MemoryForge()

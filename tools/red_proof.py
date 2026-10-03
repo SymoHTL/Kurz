@@ -168,6 +168,8 @@ def self_test():
             '        print("ok  " if more else "FAIL", "adds twice")\n'
             '        print(f"2 cases, {2 - ok - more} failed")\n'
             '        sys.exit(0 if ok and more else 1)\n')
+    # kit.report prints a failed case as `FAIL <name> <detail>`: this toy does the same
+    detailed = pair.replace('print("ok  " if ok else "FAIL", "adds")', 'print("ok   adds" if ok else f"FAIL adds got {add(1, 1)}")')
     quiet = toy.replace('        print(f"1 cases, {0 if ok else 1} failed")\n', "")
     lying = toy.replace("== 2", "== 3").replace("sys.exit(0 if ok else 1)", "sys.exit(0)")
     late = toy.replace('        print(f"1 cases, {0 if ok else 1} failed")\n',
@@ -203,6 +205,7 @@ def self_test():
         "the last summary line is the one that counts": (tree({"toy.py": late}, [proof]), "counts 1 failed cases and exits 0"),
         "a proof whose file cannot be read": (tree({"toy.py": toy}, [proof, {**proof, "file": "tools/gone.py"}]), "tools/gone.py cannot be read"),
         "an expect that is the name of one case names it, although another case holds the text": (tree({"toy.py": pair}, [proof]), None),
+        "a FAIL line that carries a detail after the name is that case's": (tree({"toy.py": detailed}, [proof]), None),
         "an expect that fits two cases names none": (tree({"toy.py": pair}, [{**proof, "expect": "add"}]), "names 2 cases"),
         "an empty expect names no case": (tree({"toy.py": toy}, [{**proof, "expect": ""}]), "names 0 cases"),
         "a proof for a case that is already red proves nothing":

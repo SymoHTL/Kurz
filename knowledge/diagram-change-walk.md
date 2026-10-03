@@ -32,8 +32,10 @@ flowchart TD
     A Blast radius section when the change is over 15 files or touches the quality infrastructure:
     tools, workflows, review rules, session rules, hooks. Gates: pr-title, pr-breadth"]
     D --> E["gates job on every push and on every edit of title or description.
-    Red when a gate of the gate map's subgraph G fails, is broken or did not run:
-    read the table at the end of the log, fix the first row that is not PASS, push once.
+    Red as the docstring of tools/gates.py defines it: a gate FAIL, BROKEN or NOT RUN,
+    or PARTLY on a gate not listed there (merge-checks is listed, and N/A is normal).
+    Read the table at the end of the log and fix the first row that turned the run red:
+    pr-title and pr-breadth by editing the title or the description, the rest by one push.
     No run at all on a head: a merge conflict, or a skip literal in the head commit"]
     E --> F["mark Ready once, with the description final.
     The review is the default branch's workflow, reviewer and rules, with the diff as data.
@@ -58,6 +60,8 @@ flowchart TD
     The merge then needs the owner's approval for this head: judgment step, HAZARD issue 3"]
     O --> I
     G -- "success" --> I["read every thread; fix each finding in its file; then resolve; then push once.
+    On tool and workflow code a finding that does not hold, or that a HAZARD issue records,
+    is answered by a reply that says so: judgment step. On every other file only the edit counts.
     Low findings are collected on the issue labelled review-lows: they are fixed together,
     or with a push that is needed anyway. Gate: pr-findings"]
     I --> J{"gates green and review green on the head,

@@ -6,7 +6,10 @@ metadata:
 ---
 
 Measured on 2026-10-02 with Claude Code CLI 2.1.283, through the reviewer's own call
-(`tools/review/review.py`: `command`, `model_env`, the system prompt, the rules). Every row is one
+(`tools/review/review.py`: `command`, `model_env`, the system prompt, the rules). The call's
+environment is the reviewer's allow-list, not the session's, so the effort of a row is the one the
+CLI was given (a call that inherits a session's environment ignores `--effort`:
+[a-headless-call-inherits-its-session](a-headless-call-inherits-its-session.md)). Every row is one
 first pass over the same batch: 30k characters of `tools/merge_pr.py` from pull request 8, which
 with the rules and the description makes a prompt of 37.7k characters, about 16k input tokens.
 Prices are the list prices of that day.
@@ -72,7 +75,10 @@ What follows from it:
   gets a second. A time budget of about batches times pass time divided by three buys one pass
   over everything; a run that ends there is red (`budget`), and the next run continues.
 - A review run is started only after the owner said go, with the expected bill named (the
-  owner's decision, 2026-10-02). `judgment step`
+  owner's decision, 2026-10-02). The runs a session starts are: a run off the pipeline
+  (`--local`), a dispatch (`gh workflow run review.yml`), and the run the forge starts by itself
+  when the session marks a pull request Ready or pushes to a Ready one; the go-ahead comes before
+  each of those actions. `judgment step`
 - The bill is counted on the head that will be reviewed, never taken from an earlier run:
   `py -3 tools/review/review.py --pr N --plan` prints the batches a run would read and the
   passes that is, calls no model and posts nothing; with `--passes N` it counts for that limit.
@@ -83,8 +89,11 @@ What follows from it:
   and lows are collected on the issue labelled `review-lows` instead of threads. They are fixed
   together, or with a push that is needed anyway (the owner's decision, 2026-10-02).
 - The replay cache is keyed on the reviewer (`review.py`, `tools/kit.py`), the rules, the model,
-  the title and the description. In CI the reviewer and the rules are the default branch's, so
-  the cache drops when such a change is merged (then for every open pull request) and when the
-  title or the description is edited. In a run outside CI they are the working tree's: finish a
-  change to them before that review starts, or the next round reviews every file again.
+  the pass limit, the title and the description. In CI the reviewer and the rules are the default
+  branch's, so the cache drops when such a change is merged (then for every open pull request) and
+  when the title or the description is edited. In a run outside CI the reviewer's code is the
+  working tree's, while the rules are still read from the default branch
+  ([the-review-runs-the-default-branch](the-review-runs-the-default-branch.md)): finish a change
+  to the code before that review starts, or the next round reviews every file again; a local edit
+  of the rules reaches no review until it is merged.
 - Keep a pull request small. The review bill grows with the diff.

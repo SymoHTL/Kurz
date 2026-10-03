@@ -25,10 +25,12 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 - Once per clone: `git config core.hooksPath .githooks`. Without it a push skips the tree gate.
   Gate: `push-hook`, in local runs only, where it is red until that line was run; HAZARD (#4) on
   a clone where nobody runs the gates.
-- What the CI jobs depend on: PyYAML, pinned with its hash in `tools/review/requirements.txt`, and
-  in the review job the Claude CLI, pinned to an exact version in `.github/workflows/review.yml`.
-  The runner is named by its versioned label: the forge offers no digest for a hosted image, and
-  the tools need nothing of it beyond a Python 3 and, for the CLI, its Node.
+- What the CI jobs depend on: PyYAML, pinned with the hash of one wheel in
+  `tools/review/requirements.txt` (the CPython 3.12 x86_64 wheel the image has: another Python
+  fails the install, loudly), and in the review job the Claude CLI, pinned to an exact version in
+  `.github/workflows/review.yml`. The runner is named by its versioned label: the forge offers no
+  digest for a hosted image. Of the image the tools use python3, node (for the CLI), gh (every
+  forge call) and git, none of them pinned: HAZARD (#15).
   Gate: `ci-config` (pip with `--require-hashes`, the CLI's exact version, the runner label).
 
 ### Before debugging the diff: stale output and phantom results
@@ -68,31 +70,45 @@ Each line names a trap; its evidence is in the entry it links.
    after you know why it failed. One case is no retry: a review that stopped on `budget` is
    continued by running it again, because what converged is replayed. `judgment step`
 5. **A paid result is in the log before it is posted.** A tool whose result cost money or time
-   prints it in full before the first write that can be refused, paces its posts to the forge and
-   waits on a rate-limit refusal. On 2026-10-02 a review lost 88 findings that existed only in
-   memory when the forge refused the posts
-   ([knowledge/a-paid-result-is-printed-before-it-is-posted.md](knowledge/a-paid-result-is-printed-before-it-is-posted.md)).
-   Gate: `self-tests` (the reviewer's cases for the order, the pace and the wait).
-6. **A paid run starts on a bill that was counted, not remembered.** A review run needs the
-   owner's go-ahead for a bill that was named, and the bill is batches times passes times the
-   price of a pass, with the batches from `py -3 tools/review/review.py --pr N --plan` on the
-   head that will be reviewed. On 2026-10-02 a bill was named from the 20 batches of an earlier
-   run; the head had grown to 30, and the run was stopped at its first line
-   ([knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)).
+   prints it in full, in an encoding that cannot fail on a character, before the first write that
+   can be refused; it paces its posts to the forge and waits on a rate-limit refusal. On 2026-10-02
+   a review lost 88 findings that existed only in memory when the forge refused the posts; on
+   2026-10-03 a run of 30 paid passes ended while printing, on an arrow the log's code page did
+   not hold ([knowledge/a-paid-result-is-printed-before-it-is-posted.md](knowledge/a-paid-result-is-printed-before-it-is-posted.md)).
+   Gate: `self-tests` (the reviewer's cases for the order, the encoding, the pace and the wait).
+6. **A paid run starts on a bill that was counted, not remembered.** Every review run a session
+   starts spends the owner's seat: a run off the pipeline, a dispatch
+   (`gh workflow run review.yml`), and the run the forge starts by itself when a session marks a
+   pull request Ready or pushes to a Ready one. Each needs the owner's go-ahead for a bill that was
+   named, and the bill is batches times passes times the price of a pass, with the batches from
+   `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
+   takes every pass up to the cap, so its bill is the plan's upper bound. On 2026-10-02 a bill was
+   named from the 20 batches of an earlier run; the head had grown to 30, and the run was stopped
+   at its first line ([knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)).
    Gate: `self-tests` for the plan (it calls no model and posts nothing); naming the bill and
    waiting for the go-ahead is a `judgment step`.
 
 ## CI
 
 - Two required checks on a pull request into `main`: the job `gates`, and the commit status
-  `review`. Gate: the ruleset, asserted by `merge-checks`.
+  `review`, both `success` on a head that is up to date with `main`. A merge into `main` therefore
+  puts every other open pull request behind: its branch takes `main`, the new head gets a new
+  `gates` run and needs a new `review` status, which only another review run posts.
+  Gate: the ruleset, asserted by `merge-checks`.
+- The `gates` job runs the pull request's own copy of the gates: a change that weakens a gate is
+  judged by the weakened gate. HAZARD (#16); the reviewer, which runs the default branch's rules,
+  flags a weakened gate without its reason.
 - The status `review` is posted by a review run: `success` when a review completed, `error` when
-  the run ended as `REVIEW DID NOT COMPLETE`. Without a run the check stays pending. Nothing
-  proves that a status of this name came from a completed review: every workflow run of the
-  repository, and everyone who may write statuses, can post it. HAZARD (#11). Whether the pinned
-  check accepts this status at all has not been seen: HAZARD (#5).
-- `gates` red: read the `=== gates` table at the end of the log and fix the first row that is
-  FAIL, BROKEN or NOT RUN, or PARTLY on a gate that is not listed. `judgment step`
+  the run ended as `REVIEW DID NOT COMPLETE`. Without a run the check stays pending. A review that
+  stopped at the pass cap with defects above low still open completed, and posts `success` with
+  "NOT converged" in its description: HAZARD (#17). Nothing proves that a status of this name came
+  from a completed review: every workflow run of the repository, and everyone who may write
+  statuses, can post it. HAZARD (#11). Whether the pinned check accepts this status at all has not
+  been seen: HAZARD (#5).
+- `gates` red: read the `=== gates` table at the end of the log and fix the first row that turned
+  the run red: FAIL, BROKEN or NOT RUN, or PARTLY on a gate that is not listed (the docstring of
+  `tools/gates.py` is the one definition). A red `pr-title` or `pr-breadth` is fixed by editing
+  the title or the description, which runs the job again; the others by a push. `judgment step`
 - `review` pending: nothing reviewed this head. A Draft and a pull request from outside are
   reviewed on demand: `gh workflow run review.yml -f pr=N`. `judgment step`
 - `review` pending on a Ready pull request, and no `review` run in the Actions list at all:
@@ -123,7 +139,9 @@ the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
 
 A rule lands together with the test, lint or job that goes red when someone breaks it, named at
 the end of the rule. If no gate can be built it is a HAZARD, labelled with the number of its
-issue. Human judgment is labelled `judgment step`. Never an ungated rule.
+issue. Human judgment is labelled `judgment step`. Never an ungated rule. A rule whose gate is a
+review rule is held only for a breach the reviewer rates above low: a low finding opens no
+thread and holds no merge (below), so such a gate is a `judgment step` for the lows.
 Gate: review rule "rules for sessions".
 
 ### The design record
@@ -133,6 +151,10 @@ Gate: review rule "rules for sessions".
   traced to the owner's choice in the pull request's description. Gate: review rule "design
   record". That the owner did choose it, and that a question from the conversation reached "Open"
   in the turn it came up: `judgment step`.
+- **A code sample in the record obeys every rule beside it.** Nothing runs a sample; each one is
+  read against the rules of its section before it goes in
+  ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
+  HAZARD (#1); the review rule "design record" flags the shapes it can see in one batch.
 - **Design phase means brainstorming, not building.** No compiler, runtime or library code until
   the owner says build. On 2026-10-01 a v0 compiler was built after asking only for a name and a
   toolchain; every pick in it was void. Gate: `tree` (CI), the pre-push hook, and the write-time
@@ -189,8 +211,10 @@ Gate: review rule "rules for sessions".
 - **Low findings open no thread and hold no merge** (the owner's decision, 2026-10-02). The
   reviewer collects them on the open issue labelled `review-lows`, where they are fixed together.
   A push that is needed anyway fixes the lows of its pull request too. A pull request needs no
-  further round once a round reports nothing above low. Gate: `self-tests` for where the reviewer
-  posts them; that they get fixed is a `judgment step`.
+  further round once a round reports nothing above low; a head that then takes `main` is a new
+  head without a `review` status, and the run that posts one is a paid round like any other
+  (Tests, item 6). Gate: `self-tests` for where the reviewer posts them; that they get fixed is a
+  `judgment step`.
 - **No workflow-skip literal** in a title, a description or a commit message. Gate: `pr-title`,
   and the pre-push hook for commit messages. `pr-title` cannot report a literal in the head
   commit of a pull request: that head gets no `gates` run at all.
@@ -211,10 +235,12 @@ Gate: review rule "rules for sessions".
   issues. A fact bound to one machine or one person: private agent memory, never here.
   Gate: `knowledge` for the store's shape; routing itself is a `judgment step`.
 - **A postmortem lands as a rule here with its gate, a knowledge entry and its `INDEX.md` line**,
-  in one pull request, never as a private note. Gate: review rule "every pull request" (a lesson
-  the description names and no changed file can record).
+  in one pull request, never as a private note. Gate: review rule "every pull request" for a
+  lesson the description names and no changed file can record; that the rule, the entry and the
+  index line all three landed is a `judgment step`.
 - **Wrap-up:** before a task's final message, promote every lesson that lives only in private
-  memory into `knowledge/` and delete the private copy. HAZARD (#6).
+  memory into `knowledge/` and delete the private copy; a fact bound to one machine or one person
+  is not a lesson and stays private, as the routing above says. HAZARD (#6).
 - **The third time you hand-write the same check, it becomes a tool** with a self-test and a
   knowledge entry, in the same session. `judgment step`
 
@@ -225,7 +251,7 @@ Gate: review rule "rules for sessions".
 - Never in repository markdown: task lists, handoff notes, backlogs, status, plans.
   Gate: review rule "rules for sessions" for operational state; plans: HAZARD (#2).
 
-## What is enforced here (checked 2026-10-02)
+## What is enforced here (checked 2026-10-03)
 
 | Enforced by a mechanism | Only by instruction (HAZARD) |
 |---|---|
@@ -240,3 +266,7 @@ Gate: review rule "rules for sessions".
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
 | | a merge by the button, which skips what only the merge tool does (#14) |
+| | the image's python3, node, gh and git, which no workflow pins (#15) |
+| | the gates job judging a pull request with the pull request's own gates (#16) |
+| | a review that stopped at the pass cap posting `success` (#17) |
+| | the evidence digest, which a recomputed hash passes (#18) |

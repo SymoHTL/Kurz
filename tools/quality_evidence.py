@@ -85,6 +85,9 @@ def block_forge(root):
     merged = [p for p in pulls if p.get("merged_at")]
     severity, over_red = {"high": 0, "medium": 0, "low": 0}, 0
     for p in pulls:
+        # Threads hold the findings above low. The lows live on the issue that collects them, but the
+        # reviewer leaves a note on the pull request listing them with the same marker (Forge.lows),
+        # so the issue itself is not read here.
         comments = kit.gh_pages(f"repos/{repo}/pulls/{p['number']}/comments?per_page=100")
         notes = kit.gh_pages(f"repos/{repo}/issues/{p['number']}/comments?per_page=100")
         for c in comments + notes:
@@ -125,8 +128,8 @@ def rewrite(text, blocks, today):
         if not re.search(rf"^{line}:[ \t]*\S", text, re.M):
             raise kit.Refused(f"the file has no {line}: line to stamp")
     text = BLOCK.sub(lambda m: f"<!-- generated:{m.group(1)} -->\n{blocks[m.group(1)]}\n<!-- /generated:{m.group(1)} -->", text)
-    text = re.sub(r"^digest:.*$", f"digest: {lint_knowledge.digest(text)}", text, count=1, flags=re.M)
-    return re.sub(r"^generated:.*$", f"generated: {today.isoformat()}", text, count=1, flags=re.M)
+    text = re.sub(r"^generated:.*$", f"generated: {today.isoformat()}", text, count=1, flags=re.M)
+    return re.sub(r"^digest:.*$", f"digest: {lint_knowledge.digest(text)}", text, count=1, flags=re.M)  # last: the digest covers the date
 
 
 def update(path, compute, today, write=True):
@@ -164,6 +167,10 @@ def self_test():
     edited = new.replace("new a", "another a")
     cases.append(("a block edited after the run no longer fits the digest",
                   any("not what the digest" in e for e in lint_knowledge.generated("e", edited, fm)), lint_knowledge.generated("e", edited, fm)))
+    moved = new.replace("generated: 2026-10-01", "generated: 2026-10-20")
+    moved_fm = moved.split("---\n")[1]
+    cases.append(("a date moved after the run no longer fits the digest",
+                  any("not what the digest" in e for e in lint_knowledge.generated("e", moved, moved_fm)), lint_knowledge.generated("e", moved, moved_fm)))
     cases.append(("the prose is untouched", all(p in new for p in ("Prose before.", "Prose between.", "Prose after.", "ttl_days: 60")), new))
     cases.append(("a second run changes nothing", rewrite(new, blocks, today) == new, ""))
     refused("a computed block without a marker", good, {**blocks, "c": "x"}, "no marker in the file")

@@ -37,9 +37,12 @@ history. The ruleset holds only `main`, and the old history has no pre-push hook
   gate over every commit about to be published, its message included (enable it once per clone
   with `git config core.hooksPath .githooks`; where it is off, HAZARD #4). It knows shapes
   (credentials, machine-bound strings, workflow-skip literals, disallowed paths), not meaning,
-  and it does not read the author or the committer: HAZARD #12. GitHub's account settings "keep
-  my email addresses private" and "block command line pushes that expose my email" are the
-  owner's way to close that.
+  and it does not read the author or the committer: HAZARD #12. GitHub's account settings narrow
+  it but do not close it (GitHub docs "Blocking command line pushes that expose your personal
+  email address", read 2026-10-03): "keep my email addresses private" changes only the address
+  GitHub itself writes into web commits, and "block command line pushes that expose my email"
+  rejects a push whose head commit's author address is one of the account's own; the committer
+  field, earlier commits of the push, names, and any address not on the account still go out.
 - The title, the description and every comment of a pull request or an issue are public the
   moment they are submitted, and no check runs before that. `pr-title` reads the title, the
   description and the commit messages afterwards. Write them as carefully as a file.

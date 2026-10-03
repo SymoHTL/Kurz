@@ -68,8 +68,13 @@ def expiry(rel, fm, today):
 
 
 def digest(text):
-    """What the generated blocks of an entry hold, as one hash: each block's name and text, in order."""
+    """What the generated blocks of an entry hold, as one hash: each block's name and text, in order,
+    after the `generated:` date and the `ttl_days:` that time them. A date moved by hand, or a
+    longer TTL, then fails the digest like an edited number would."""
     h = hashlib.sha256()
+    for key in ("generated", "ttl_days"):
+        m = re.search(rf"^{key}:[ \t]*(\S*)", text, re.M)
+        h.update(f"{key}:{m.group(1) if m else ''}\n".encode())
     for m in BLOCK.finditer(text):
         h.update(f"{m.group(1)}\n{m.group(2)}\n".encode())
     return h.hexdigest()
@@ -126,13 +131,14 @@ def lint(root, floor=FLOOR, today=None, whole=True):
         elif "LIVING" in tags:
             errors.append(f"INDEX.md: the line for {m.group(1)} carries LIVING inside other characters: the tag is the bare word")
 
-    # Who else names store files: the rules file and the skills. The index has its own rule above.
+    # Who else names store files: the rules file, the review rules and the skills. The index has its own rule above.
     skills = os.path.join(root, ".claude", "skills")
-    readers = ["CLAUDE.md"] + [f".claude/skills/{d}/SKILL.md" for d in (sorted(os.listdir(skills)) if os.path.isdir(skills) else [])]
+    skill_files = [f".claude/skills/{d}/SKILL.md" for d in (sorted(os.listdir(skills)) if os.path.isdir(skills) else [])]
+    readers = ["CLAUDE.md", ".review/review-rules.yaml"] + skill_files
     present = [r for r in readers if os.path.isfile(os.path.join(root, r))]
     if whole:
         errors += [f"{r} is missing: it names store files and is checked with them" for r in readers if r not in present]
-        if len(readers) < 2:
+        if not skill_files:
             errors.append("no skill under .claude/skills: is this the right tree?")
         if len(living) < LIVING_FLOOR:
             errors.append(f"only {len(living)} entries tagged LIVING in INDEX.md, floor is {LIVING_FLOOR}")
@@ -187,13 +193,15 @@ def self_test():
     diagram = ok(7) + "```mermaid\nflowchart TD\n  A --> B\n```\n\n## Update triggers\n\n- a file\n"
 
     def evidence(inner="| a | 1 |\n", stamp=None, ttl="ttl_days: 30\ngenerated: 2026-09-30\n", nested=""):
-        """A guide with one generated block, stamped with the digest of that block unless told otherwise."""
+        """A guide with one generated block, stamped with the digest of the page unless told otherwise."""
         body = f"\n<!-- generated:a -->\n{inner}<!-- /generated:a -->\n"
-        return (f"---\nname: ev\ndescription: d\n{ttl}digest: {stamp or digest(body)}\nmetadata:\n{nested}  type: reference\n---\n" + body)
+        page = lambda d: f"---\nname: ev\ndescription: d\n{ttl}digest: {d}\nmetadata:\n{nested}  type: reference\n---\n" + body
+        return page(stamp or digest(page("0" * 64)))
 
     # a tree with everything the real one has: the rules file, a skill, four living diagrams, the evidence guide
     living = {f"{k}d{n}.md": diagram.replace("name: e7", f"name: d{n}") for n in range(4)}
-    whole = {**good, **living, EVIDENCE: evidence(), "CLAUDE.md": "rules\n", ".claude/skills/walk/SKILL.md": "a skill\n"}
+    whole = {**good, **living, EVIDENCE: evidence(), "CLAUDE.md": "rules\n", ".claude/skills/walk/SKILL.md": "a skill\n",
+             ".review/review-rules.yaml": "review rules\n"}
     whole_index = good_index + [f"- [{rel}]({rel}) LIVING — hook" for rel in living] + [f"- [ev]({EVIDENCE}) — hook"]
     without = lambda *gone: {rel: body for rel, body in whole.items() if rel not in gone}
     real = {"whole": True}
@@ -231,6 +239,9 @@ def self_test():
         "LIVING without update triggers": (
             tree({**good, k + "l.md": ok(7) + "```mermaid\nflowchart TD\n```\n"},
                  index=good_index + ["- [l](knowledge/l.md) LIVING — hook"]), "tagged LIVING"),
+        "LIVING with update triggers but no diagram": (
+            tree({**good, k + "l.md": diagram.replace("```mermaid\nflowchart TD\n  A --> B\n```\n", "")},
+                 index=good_index + ["- [l](knowledge/l.md) LIVING — hook"]), "tagged LIVING"),
         "LIVING with both is clean": (tree({**good, k + "l.md": diagram},
                                            index=good_index + ["- [l](knowledge/l.md) LIVING — hook"]), None),
         "the word LIVING in a hook is not the tag": (tree(good, index=good_index[:2] + [
@@ -238,7 +249,8 @@ def self_test():
         "ttl without generated": (tree({**good, "guides/g.md": ok(5, "ttl_days: 30\n")}), "without a generated"),
         "ttl that is not a number": (tree({**good, "guides/g.md": ok(5, "ttl_days: soon\ngenerated: 2026-10-01\n")}),
                                      "not a whole number"),
-        "ttl over the cap": (tree({**good, "guides/g.md": ok(5, "ttl_days: 365\ngenerated: 2026-10-01\n")}), "over the cap"),
+        "ttl over the cap": (tree({**good, "guides/g.md": ok(5, "ttl_days: 91\ngenerated: 2026-10-01\n")}), "over the cap of 90"),
+        "ttl at the cap is clean": (tree({**good, "guides/g.md": ok(5, "ttl_days: 90\ngenerated: 2026-10-01\n")}), "warn:expire in 90 days"),
         "generated in the future": (tree({**good, "guides/g.md": ok(5, "ttl_days: 30\ngenerated: 2026-10-03\n")}),
                                     "in the future"),
         "one day ahead is clock slack": (tree({**good, "guides/g.md": ok(5, "ttl_days: 30\ngenerated: 2026-10-02\n")}),
@@ -268,12 +280,23 @@ def self_test():
         "generated blocks with their digest are clean": (tree({**good, "guides/g.md": evidence()}), "warn:expire in 29 days"),
         "an empty generated block": (tree({**good, "guides/g.md": evidence(inner="")}), "generated block a is empty"),
         "a generated block edited by hand": (tree({**good, "guides/g.md": evidence(stamp="0" * 64)}), "not what the digest"),
+        "a number edited under a valid stamp": (
+            tree({**good, "guides/g.md": evidence().replace("| a | 1 |", "| a | 2 |")}), "not what the digest"),
+        "a generated date moved by hand under a valid stamp": (
+            tree({**good, "guides/g.md": evidence().replace("generated: 2026-09-30", "generated: 2026-10-01")}), "not what the digest"),
+        "a ttl raised by hand under a valid stamp": (
+            tree({**good, "guides/g.md": evidence().replace("ttl_days: 30", "ttl_days: 60")}), "not what the digest"),
         "generated numbers without ttl_days": (tree({**good, "guides/g.md": evidence(ttl="")}), "would never expire"),
         "ttl_days nested under metadata does not count": (
             tree({**good, "guides/g.md": evidence(ttl="", nested="  ttl_days: 30\n")}), "would never expire"),
         "four entries are below the real floor": (tree({**good, k + "e3.md": ok(3)}), "floor is 5", {"floor": FLOOR}),
         "whole: a tree with everything the real one has is clean": (tree(whole, index=whole_index), "warn:expire in 29 days", real),
         "whole: without the rules file": (tree(without("CLAUDE.md"), index=whole_index), "CLAUDE.md is missing", real),
+        "whole: without the review rules": (
+            tree(without(".review/review-rules.yaml"), index=whole_index), ".review/review-rules.yaml is missing", real),
+        "whole: the review rules name a store file that is not there": (
+            tree({**whole, ".review/review-rules.yaml": "read knowledge/gone.md\n"}, index=whole_index),
+            ".review/review-rules.yaml names knowledge/gone.md", real),
         "whole: without a skill": (tree(without(".claude/skills/walk/SKILL.md"), index=whole_index), "no skill under", real),
         "whole: a skill directory without its SKILL.md": (
             tree({**whole, ".claude/skills/other/notes.md": "no skill file\n"}, index=whole_index), ".claude/skills/other/SKILL.md is missing", real),

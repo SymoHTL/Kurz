@@ -19,9 +19,9 @@ flowchart TD
     Never this repository. Gates: tree gate and pre-push hook for the shapes;
     future plans: HAZARD issue 2"]
     Q0 -- "no" --> Q1{"what kind?"}
-    Q1 -- "a design decision the owner made" --> DR["kurz-design.md.
-    Proposed and not objected to: marked assumed. Unanswered: under Open.
-    Whether the owner chose it: judgment step. The shape of the record: review rule design record"]
+    Q1 -- "a statement about the design" --> DR["kurz-design.md.
+    Chosen by the owner: decided. Proposed and not objected to: marked assumed. Unanswered: under Open.
+    Which of the three it is: judgment step. The shape of the record: review rule design record"]
     Q1 -- "a rule someone would otherwise break" --> CL["CLAUDE.md, ending in its gate,
     a HAZARD with its issue, or judgment step.
     Gate: review rule rules for sessions"]
