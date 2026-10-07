@@ -246,15 +246,18 @@ print(equal)
 
 The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, `bool`, `string`, `char`,
-`duration`, `timestamp`, `longduration` and `longtimestamp` (T29). Using one as a name is
-`reserved-word` (L12), as it is in C#, where they are keywords. The owner chose this on
-2026-10-04, against ordinary names that a declaration hides in its block, under which `long(x)`
-(T10) would have two readings in one program; the cost is that nothing can be called `string`.
+`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names and
+follow them while they are proposed there. Using one as a name is `reserved-word` (L12), as it
+is in C# for the first fourteen, which are keywords there; the four time types C# does not
+reserve. The owner chose this on 2026-10-04, against ordinary names that a declaration hides in
+its block, under which `long(x)` (T10) would have two readings in one program; the cost is that
+nothing can be called `string`, and that a ported program with a local called `duration` or
+`timestamp` has to rename it.
 
 Case: [source/type-name-as-name.kz](../corpus/source/type-name-as-name.kz)
 ```kurz
 int = 1
-print(int)
+print(1)
 ```
 
 ### L13 (decided, §8) A string over several lines

@@ -197,8 +197,12 @@ print(Counter(1))
 declares `string Text()`, and is `no-text` otherwise; with a type parameter (T19) it compiles when
 the parameter is limited to an interface that declares it, and is `no-text` otherwise, whatever
 the call passes. A type meets such a limit when it has a text: every value with a derived text
-(A3, A4, A8, A11 to A14) and a class that declares or inherits a `pub Text()` (A5, A9), without
-naming the interface (the owner, 2026-10-04, against an interface a class has to name). The owner
+(A3, A4, A8, A11 to A14), a class that declares or inherits a `pub Text()` (A5, A9), and a value
+whose interface or type parameter has a text by the sentence before, without naming the interface
+(the owner, 2026-10-04, against an interface a class has to name). *(proposed: the match holds
+only for an interface whose only member is `string Text()`, the one the standard library declares;
+an interface that declares more is met by naming it, because a type that has a text does not have
+its other members)* The owner
 chose the rule on 2026-10-03, against a check for each instantiation of a generic function, which
 would have reported an error at a call site for a line inside another function; the cost is that
 a generic function that prints its argument needs the limit, and that the standard library would

@@ -48,8 +48,8 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `break-outside-loop` | C7 | `break` or `continue` with no loop around it, a lambda's body included |
 | `unknown-escape` | L16 | a backslash before a character that starts no escape, or before `u`, `U` or `x` without the digits it takes |
 | `static-state` | K18 | a `static mut` field, or a static field whose type is or holds a class |
-| `override-without-virtual` | K7 | `override` on a method the base class does not mark `virtual` |
-| `hides-member` | K7 | a method of a derived class with a base method's name and parameters, without `override` |
+| `override-without-virtual` | K7 | `override` on a method that no base class declares, or that the nearest base class declaring it marks neither `virtual` nor `override` |
+| `hides-member` | K7 | a method of a derived class with the name and the parameter types, in order, of a base method it can see, without `override` |
 | `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |
 | `constructor-must-chain` | K14 | a further constructor of a class with a primary constructor that does not call it |
 | `field-unassigned` | K14 | a field without `mut` and without `=` that a constructor leaves unassigned on a path or reads first, or such a field in a class with a primary constructor |

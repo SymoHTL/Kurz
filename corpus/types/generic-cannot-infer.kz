@@ -3,6 +3,6 @@
 
 T Pick<T>(T a, T b) => a
 
-byte b = 1
+byte small = 1
 int i = 2
-print(Pick(b, i))
+print(Pick(small, i))

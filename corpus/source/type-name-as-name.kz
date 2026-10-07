@@ -2,4 +2,4 @@
 // rules: L19
 
 int = 1
-print(int)
+print(1)

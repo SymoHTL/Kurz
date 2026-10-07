@@ -1,0 +1,9 @@
+// expect: error redeclared at 6
+// rules: F16
+
+mut count = 0
+
+int Next(int count) => count + 1
+
+count = Next(count)
+print(count)

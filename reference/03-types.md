@@ -135,10 +135,12 @@ print(u)
 ### T9 (decided, §4) No mixing of signed and unsigned
 
 An operation between a signed and an unsigned integer finds its common type as C# does (T18,
-T28): operands narrower than `int` are promoted to `int` first, so `sb + b` with an `sbyte` and a
-`byte` is an `int`, and `u + b` with a `uint` and a `byte` is a `uint`, as there. Where C# joins
-the two through `long`, or refuses them, Kurz reports the compile error `sign-mix`: that is `uint`
-with a signed type (`u + i`, a `long` in C#) and `ulong` with a signed type (an error in C# too).
+T28): two operands narrower than `int` are promoted to `int`, so `sb + b` with an `sbyte` and a
+`byte` is an `int`, and a narrow operand beside a `uint` or a `ulong` takes that type, so `u + b`
+with a `uint` and a `byte` is a `uint`, as there. Where C# joins the two through `long`, or
+refuses them, Kurz reports the compile error `sign-mix`: that is `uint` with a signed type
+(`u + i`, a `long` in C#) and `ulong` with a signed type (an error in C# too). The error is judged
+on the two operand types as written, before the promotion of T28.
 The owner chose this on 2026-10-04, against C#'s `long` for `uint` with `int`; the cost is that a
 ported program writes `long(u) + i`. A conversion (T10) puts both on one side.
 
@@ -250,20 +252,12 @@ result leaves the range of its type.
 
 Case: [types/wrapping.kz](../corpus/types/wrapping.kz)
 
-Case: [types/wrapping-narrow.kz](../corpus/types/wrapping-narrow.kz)
-```kurz
-byte a = 200
-byte b = 100
-print(a +% b)
-print(a + b)
-```
-
 ### T13 (decided, §4) Durations and timestamps
 
-Durations and timestamps are 64-bit types of their own and never raw integers: one of them where
-an integer is required is the compile error `type-mismatch`. A duration is written with a unit
-(L14). The names of the two types, which a parameter or a field needs, and what one step of
-their 64 bits is are T24.
+Durations and timestamps are types of their own and never raw integers, `duration` and
+`timestamp` with 64 bits (T24) and `longduration` and `longtimestamp` with 128 (T29): one of them
+where an integer is required is the compile error `type-mismatch`. A duration is written with a
+unit (L14). What one step of their bits is, and what the wide pair is for, are T24 and T29.
 
 Case: [types/duration-not-integer.kz](../corpus/types/duration-not-integer.kz)
 ```kurz
@@ -296,10 +290,17 @@ Beside the 64-bit pair of T24 stand `longduration` and `longtimestamp`: 128 bits
 step of one nanosecond, for a calendar or an archive that reaches before 1677 or after 2262. A
 `duration` widens into a `longduration` and a `timestamp` into a `longtimestamp` without a word
 (T8), a conversion the other way is written out and checked as T20 says, and the texts are A12's.
-The owner chose this on 2026-10-04, against a 64-bit pair with a millisecond step, in which
-nothing below a millisecond exists, and against a type of the library, which has no literal
-(L14); the cost is 128-bit arithmetic and a second name for every operation on time in the
-library. *(proposed: the names, which stand to the narrow pair as `long` stands to `int`)*
+What T13 says of the narrow pair holds for the wide one, and an operation between the two pairs
+widens the narrow operand and has the wide type, as `i + l` has `long` (T8), so that
+`longtimestamp - timestamp` is a `longduration`. *(assumed: the mixed operations; proposed on
+2026-10-07, when the review found the hole)* The owner chose this on 2026-10-04, against a 64-bit
+pair with a millisecond step, in which nothing below a millisecond exists, and against a type of
+the library, which has no literal (L14); the cost is 128-bit arithmetic and a second name for
+every operation on time in the library. *(proposed: the names, which stand to the narrow pair as
+`long` stands to `int`; and the type of a literal, which follows the integer literal of L10: a
+duration literal is a `duration`, or a `longduration` when its value does not fit one, and where
+a type is written or expected it takes that type if the value fits, so that a literal beyond both
+ranges is `constant-overflow` (T6))*
 
 Case: [types/longduration-parameter.kz](../corpus/types/longduration-parameter.kz)
 ```kurz
@@ -307,8 +308,8 @@ void Show(longduration d) {
     print(d)
 }
 
-duration d = 90min
-Show(d)
+duration span = 90min
+Show(span)
 ```
 
 ### T14 (assumed, §4) Out of range and division by zero
@@ -493,9 +494,9 @@ Case: [types/generic-cannot-infer.kz](../corpus/types/generic-cannot-infer.kz)
 ```kurz
 T Pick<T>(T a, T b) => a
 
-byte b = 1
+byte small = 1
 int i = 2
-print(Pick(b, i))
+print(Pick(small, i))
 ```
 
 ### T18 (assumed, §4) Operators
@@ -520,7 +521,9 @@ An operand of type `sbyte`, `byte`, `short` or `ushort` is promoted to `int` bef
 unary `-`, `~`, `& | ^`, `<<`, `>>` and the comparisons, as in C#: `a + b` on two `byte`s is an
 `int`, `print(a + b)` prints `300` for 200 and 100, `a & b` is an `int`, and `byte c = a + b` is
 `narrowing-conversion` (T7). A shift on such an operand has the width 32, and a negative count is
-masked as in C#, so `1 << -1` is `1 << 31`. The owner chose this on 2026-10-03, against computing
+masked as in C#, so `1 << -1` is `1 << 31`. Where the other operand is a `uint`, a `long` or a
+`ulong`, the narrow operand takes that type instead of `int`, as C#'s binary numeric promotion does
+(T9). The owner chose this on 2026-10-03, against computing
 in the operands' type, under which a program ported from C# computes other values without a word;
 the cost is that `byte c = a + b` needs `byte(a + b)`, and that the wrap of T4 never happens at 8
 or 16 bits, while `ushort * ushort` is computed in a signed `int` and can overflow it. The
@@ -528,8 +531,17 @@ wrapping operators `+%`, `-%` and `*%` (T12) do not promote: they compute in the
 operand types and wrap there, so that an 8-bit checksum is `a +% b` on two `byte`s, where a
 promoted `+%` would need a mask on every narrow checksum (the owner, 2026-10-04, against promoting
 them; C# has no such operators). The cost: `a + b` and `a +% b` differ in type.
+*(proposed: operands of different signedness are `sign-mix` (T9) whatever their widths, because no wider type holds both, and a literal operand takes
+the other operand's type, so that `sum +% 1` on a `byte` computes in `byte`)*
 
 Case: [types/wrapping-narrow.kz](../corpus/types/wrapping-narrow.kz)
+```kurz
+byte a = 200
+byte b = 100
+ushort c = 65500
+print(a +% b)
+print(c +% a)
+```
 
 Case: [types/promotion.kz](../corpus/types/promotion.kz)
 ```kurz

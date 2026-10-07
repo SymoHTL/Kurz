@@ -163,12 +163,22 @@ assigned and its first value after `=`, and a method is written as a function (c
 Further constructors, `static` members and `override` are written as in C#. What a further
 constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
 method that a derived class overrides is marked `virtual` in the base and `override` in the
-derived class, as in C#: `override` on a method the base does not mark `virtual` is the compile
-error `override-without-virtual`, and a method of a derived class with the name and the
-parameters of a base method, without `override`, is `hides-member`, where C# hides it with a
-warning (the owner, 2026-10-04, against every method being overridable without a marker, which
-would differ from C# and make the compiler prove where a call is not virtual). There is no
-property syntax until something needs it.
+derived class, as in C#: `override` on a method that the nearest base class declaring it marks
+neither `virtual` nor `override` is the compile error `override-without-virtual`, and a method of
+a derived class with the name and the parameters of a base method, without `override`, is
+`hides-member`, where C# hides it with a warning and offers `new`, which has no counterpart here
+(the owner, 2026-10-04, against every method being overridable without a marker, which would
+differ from C# and make the compiler prove where a call is not virtual). As in C#, an `override`
+can be overridden again further down, the whole chain of bases is searched for the method, the
+parameters are compared by type and order and not by name (D11), a base method the derived class
+cannot see (F9) is hidden by nothing, and a method of an interface the class implements (K6) is
+no base method and takes no `override`. *(assumed: the last three readings, and that `override`
+with no base method at all is `override-without-virtual` as well; proposed on 2026-10-07, when
+the review found the holes)* The cost of an error where C# warns: adding a method to a base class
+breaks every derived class, in every package, that already has a method of that name and those
+parameters. *(proposed: there is no `sealed`, so every override can be overridden again; and an
+override has the return type of the method it overrides, where C# 9 allows a more derived class
+type)* There is no property syntax until something needs it.
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
 ```kurz
@@ -266,13 +276,16 @@ without a primary constructor has C#'s constructors. The owner chose this on 202
 a class with a primary constructor having no further constructor, which would have made a second
 way to build an instance a static method or a second class; the cost is the flow analysis that
 proves "once, before the end". The rest the owner decided on 2026-10-04, against C#'s rules, under
-which a constructor assigns any number of times and an unassigned field gets a default value,
-which Kurz has nowhere else: the once is per instance. A field that the primary
+which a constructor assigns any number of times and an unassigned field gets the type's zero
+value, `default(T)`, which Kurz has nowhere else: the once is per instance. A field that the primary
 constructor or an `=` in the body (K7) sets is assigned by no constructor; a field without `mut`
 and without `=` is assigned exactly once on every path of every constructor that does not chain,
 and a constructor that leaves it unassigned on a path, or reads it first, is the compile error
 `field-unassigned`, as is such a field in a class with a primary constructor, which a call of
-that constructor would leave unset. The call of the primary one is direct; a further constructor
+that constructor would leave unset. *(proposed: a `mut` field without `=` is assigned on every path
+of such a constructor as well, any number of times, and left unassigned on a path it is
+`field-unassigned` too, because Kurz has no zero value it could hold)* The call of the primary one
+is direct; a further constructor
 without it is `constructor-must-chain`. A constructor written in the body is private without
 `pub`, as every member is (F9); the primary constructor, and the empty constructor of a class
 without one, are visible wherever the class is.

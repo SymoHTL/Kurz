@@ -6,5 +6,5 @@ void Show(longduration d) {
     print(d)
 }
 
-duration d = 90min
-Show(d)
+duration span = 90min
+Show(span)

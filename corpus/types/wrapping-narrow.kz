@@ -1,9 +1,10 @@
 // expect: output
 // | 44
-// | 300
-// rules: T28, T12
+// | 164
+// rules: T28
 
 byte a = 200
 byte b = 100
+ushort c = 65500
 print(a +% b)
-print(a + b)
+print(c +% a)

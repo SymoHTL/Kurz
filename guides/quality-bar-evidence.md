@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-07
-digest: 8bc261adb5a7f485c54e34b0749176e8e837f882531ffa9c611d9676787c74b9
+digest: 402bb94c70debeabe9b511290a143f02771a978fd682c2492a27a8f41a55733c
 ttl_days: 60
 metadata:
   type: reference
@@ -112,7 +112,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 33 |
 | of them proposed | 11 |
 | of them open | 0 |
-| Corpus cases, none of them run | 231 |
+| Corpus cases, none of them run | 232 |
 | Compile-error ids | 46 |
 | Run-time error ids | 5 |
 <!-- /generated:reference -->
@@ -125,11 +125,11 @@ counted from the record that the merge tool posts.
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened | 3 |
+| Pull requests opened | 4 |
 | Pull requests merged | 3 |
 | Merged over red, with a recorded waiver | 3 |
-| Review findings posted: high | 32 |
-| Review findings posted: medium | 343 |
-| Review findings posted: low | 286 |
+| Review findings posted: high | 34 |
+| Review findings posted: medium | 365 |
+| Review findings posted: low | 300 |
 | Open HAZARD issues | 12 |
 <!-- /generated:forge -->
