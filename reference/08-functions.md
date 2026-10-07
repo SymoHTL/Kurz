@@ -360,8 +360,17 @@ if email != null {
 
 A function declared at the top level (F5) reads no top-level variable: what it needs comes
 through its parameters, and a top-level variable's name read in its body is `unknown-name`
-(V10), as if the variable were declared in another block; on the left of `=` the name declares a
-local (V8), which V5 reports unless the body reads it. *(proposed: the left side)* The owner chose this on 2026-10-03, against
+(V10), as if the variable were declared in another block. The name stays reserved inside the
+function: on the left of `=`, or in any other declaration there, it is `redeclared` (V9), so a
+function meant to reset the program's counter does not declare a local instead (the owner,
+2026-10-04, against a local that `unused-variable` (V5) reports unless the body reads it
+afterwards, and that compiles when it does; the cost is that the function cannot reuse the name,
+and that a top-level variable added later turns every top-level function that already declares
+that name into a compile error). *(proposed: a parameter of the function, a parameter of a lambda
+inside it and a loop variable are declarations in this sense and `redeclared` too, and every
+variable declared outside a function reserves its name, whether it is declared above or below the
+function (F6) and at any depth of the top-level code)* The owner chose the rule on 2026-10-03,
+against
 reading the variable at the call as a C# local function does, which would have given two kinds of
 function two views of a captured variable (F15), and against taking the value at the function's
 declaration as a lambda does, which a function declared above the variable (F6) could never see;
@@ -375,5 +384,27 @@ mut count = 0
 int Next() => count + 1
 
 count = Next()
+print(count)
+```
+
+Case: [functions/top-level-name-reserved.kz](../corpus/functions/top-level-name-reserved.kz)
+```kurz
+mut count = 0
+
+void Reset() {
+    count = 0
+}
+
+Reset()
+print(count)
+```
+
+Case: [functions/top-level-name-as-parameter.kz](../corpus/functions/top-level-name-as-parameter.kz)
+```kurz
+mut count = 0
+
+int Next(int count) => count + 1
+
+count = Next(count)
 print(count)
 ```

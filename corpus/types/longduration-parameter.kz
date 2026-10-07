@@ -1,0 +1,10 @@
+// expect: output
+// | 1h 30min
+// rules: T29
+
+void Show(longduration d) {
+    print(d)
+}
+
+duration span = 90min
+Show(span)

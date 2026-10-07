@@ -1,0 +1,12 @@
+// expect: error override-without-virtual at 9
+// rules: K7
+
+class Animal {
+    pub string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    pub override string Sound() => "woof"
+}
+
+print(Dog().Sound())

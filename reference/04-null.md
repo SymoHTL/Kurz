@@ -371,11 +371,11 @@ void Clear(Account a) {
     a.Email = null
 }
 
-a = Account("a@example.com")
-if a.Email != null {
-    print(a.Email.Bytes.Count)
-    Clear(a)
-    print(a.Email.Bytes.Count)
+acc = Account("a@example.com")
+if acc.Email != null {
+    print(acc.Email.Bytes.Count)
+    Clear(acc)
+    print(acc.Email.Bytes.Count)
 }
 ```
 

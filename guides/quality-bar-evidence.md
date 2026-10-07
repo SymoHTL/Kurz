@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-03
-digest: 743d1e9493317c79b596e001590c0a141e7a68e1992bd43e537c3f57d45ad561
+generated: 2026-10-07
+digest: 402bb94c70debeabe9b511290a143f02771a978fd682c2492a27a8f41a55733c
 ttl_days: 60
 metadata:
   type: reference
@@ -95,7 +95,7 @@ A statement marked *(assumed)* was proposed and not objected to; it is not a dec
 |---|---|
 | Sections | 15 |
 | Statements marked *(assumed)* | 47 |
-| Open questions | 8 |
+| Open questions | 6 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -108,12 +108,12 @@ nothing in this repository executes Kurz.
 | Reference and corpus | Count |
 |---|---|
 | Rules in the reference | 180 |
-| of them decided | 134 |
+| of them decided | 136 |
 | of them assumed | 33 |
 | of them proposed | 11 |
-| of them open | 2 |
-| Corpus cases, none of them run | 225 |
-| Compile-error ids | 44 |
+| of them open | 0 |
+| Corpus cases, none of them run | 232 |
+| Compile-error ids | 46 |
 | Run-time error ids | 5 |
 <!-- /generated:reference -->
 
@@ -125,11 +125,11 @@ counted from the record that the merge tool posts.
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened | 3 |
-| Pull requests merged | 2 |
-| Merged over red, with a recorded waiver | 2 |
-| Review findings posted: high | 32 |
-| Review findings posted: medium | 343 |
-| Review findings posted: low | 286 |
+| Pull requests opened | 4 |
+| Pull requests merged | 3 |
+| Merged over red, with a recorded waiver | 3 |
+| Review findings posted: high | 34 |
+| Review findings posted: medium | 365 |
+| Review findings posted: low | 300 |
 | Open HAZARD issues | 12 |
 <!-- /generated:forge -->

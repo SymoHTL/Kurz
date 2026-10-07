@@ -1,0 +1,11 @@
+// expect: error redeclared at 7
+// rules: F16
+
+mut count = 0
+
+void Reset() {
+    count = 0
+}
+
+Reset()
+print(count)

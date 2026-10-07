@@ -10,7 +10,7 @@ raises when it runs (E3). The two tables share one namespace of ids.
 |---|---|---|
 | `unused-variable` | V5, V6 | a variable that is never read; a parameter and a loop variable are no variables for this (V13) |
 | `assign-immutable` | V7, V8, D4, K1, F8, K14 | an assignment to a variable or a parameter that is not `mut`, into a path that starts at one (M4: for a `data` value the variable at the root decides, so `root.Left = x` through a `mut` variable is allowed), or to a field of a class instance that is not `mut`; inside a constructor a field without `mut` is assigned once (K14), and a second time is this error |
-| `redeclared` | V9 | a declaration, in any of its forms, of a name that is already visible |
+| `redeclared` | V9, F16 | a declaration, in any of its forms, of a name that is already visible, or of a top-level variable's name inside a top-level function |
 | `argument-mismatch` | D11 | a call with an argument whose name no parameter has, two arguments for one parameter, or none for a parameter without a default |
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or `.Number` and `From` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
@@ -35,7 +35,7 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `weak-value` | R5 | `weak` in front of a type whose values are not instances of a class |
 | `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file |
 | `semicolon` | L5 | a `;`: a statement ends where its line ends |
-| `reserved-word` | L12, L18 | a core word, or a keyword the file imports, used as a name |
+| `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
 | `reversed-range` | C8 | a range between literals whose end lies below its start |
 | `ambiguous-call` | F13 | a call that fits more than one function, none of them exactly |
@@ -48,6 +48,8 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `break-outside-loop` | C7 | `break` or `continue` with no loop around it, a lambda's body included |
 | `unknown-escape` | L16 | a backslash before a character that starts no escape, or before `u`, `U` or `x` without the digits it takes |
 | `static-state` | K18 | a `static mut` field, or a static field whose type is or holds a class |
+| `override-without-virtual` | K7 | `override` on a method that no base class declares, or that the nearest base class declaring it marks neither `virtual` nor `override` |
+| `hides-member` | K7 | a method of a derived class with the name and the parameter types, in order, of a base method it can see, without `override` |
 | `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |
 | `constructor-must-chain` | K14 | a further constructor of a class with a primary constructor that does not call it |
 | `field-unassigned` | K14 | a field without `mut` and without `=` that a constructor leaves unassigned on a path or reads first, or such a field in a class with a primary constructor |
