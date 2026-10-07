@@ -159,14 +159,16 @@ def resolve_plan(threads, changed_since):
         if findings is not None and sha and paths and all(changed_since(p, sha) for p in paths):
             resolve.append((t, paths))
         else:
-            why = "no finding of the reviewer" if not findings else "its commit is gone" if not sha else "the file did not change"
+            why = ("no finding of the reviewer" if findings is None else "the reviewer's post names no file" if not findings
+                   else "its commit is gone" if not sha else "the file did not change")
             left.append((t, paths, why))
     return resolve, left
 
 
 def resolve_threads(repo, number, go, get=None):
-    """Prints the plan, then carries it out when `go`, one write a second: (resolved, left open).
-    An answer that does not say resolved is a refusal; what was resolved before it stays so."""
+    """Prints what is left open with its reason, then each answered thread as it is resolved (with
+    `go`, one write a second) or would be: (resolved, left open). An answer that does not say
+    resolved is a refusal; what was resolved before it stays so."""
     get = get or kit.gh_json
     head = get(f"repos/{repo}/pulls/{number}")["head"]["sha"]
     threads = fetch_threads(repo, number, get)
@@ -409,7 +411,8 @@ def self_test():
         empty = variant(False)
         empty[0]["comments"]["nodes"][0]["body"] = MARKER + "findings [] -->"
         plan = resolve_plan(empty, differs)
-        cases.append(("resolve: a reviewer post that names no file is left open", counts(plan) == [0, 1], repr(plan)))
+        cases.append(("resolve: a reviewer post that names no file is left open",
+                      counts(plan) == [0, 1] and plan[1][0][2] == "the reviewer's post names no file", repr(plan)))
 
         def resolving(blob, says=True):
             """A forge for resolve_threads: the pull request, one page with the real thread unresolved,
@@ -488,7 +491,12 @@ if __name__ == "__main__":
     try:
         number = pr_number(sys.argv)
         if gate == "resolve":
-            resolved, left = resolve_threads(kit.repo(), number, "--go" in sys.argv)
+            try:
+                resolved, left = resolve_threads(kit.repo(), number, "--go" in sys.argv)
+            except (kit.Refused, kit.Unanswered, KeyError, TypeError) as e:
+                print(f"ERROR: resolve stopped: {type(e).__name__}: {e}. The threads printed as resolved above stay resolved; "
+                      f"run the plan again for the rest")
+                sys.exit(1)
             print(f"resolve: {resolved} threads {'resolved' if '--go' in sys.argv else 'to resolve (plan only: add --go)'}, {left} left open")
             sys.exit(0)
         errors, scanned = run_gate(gate, kit.repo(), number)

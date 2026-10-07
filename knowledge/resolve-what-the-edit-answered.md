@@ -17,14 +17,17 @@ hand was a script per pull request, twice, before the third-time rule made it th
    `would resolve <files> (<thread id>)` or `left open: <files>: <why>`, where why is "no finding
    of the reviewer" (a person's thread, or a reviewer post that names no file), "its commit is
    gone" (the finding's commit is not on the forge) or "the file did not change".
-2. Answer what is left open first: an edit, or on tool code a reply in the thread; a person's
-   thread is theirs to resolve.
+2. Answer what is left open first: an edit, or on tool code a reply in the thread, after which
+   that thread is resolved by hand, since the tool resolves edits only; a person's thread is
+   theirs to resolve.
 3. `py -3 tools/pr_gates.py resolve --pr <N> --go` resolves the plan, a second between writes. An
    answer that does not say resolved is a refusal (exit 1): what was resolved before it stays so,
    and the plan run shows what is left.
-4. The gate `pr-findings` ran at the push, before the threads were resolved: a Ready event or a
-   description edit runs the gates again, and the merge tool reads the threads again at the merge.
+4. The gate `pr-findings` ran at the push, before the threads were resolved; a description edit
+   runs the gates again without a review, and the merge tool reads the threads again at the merge.
+   The walk that needs no re-run: mark the pull request Draft before the push, resolve, then Ready,
+   so the one review and the gates run on the head with its threads resolved.
 
-Gate: `self-tests` (the plan's six cases and the write's four, with their mutations in
+Gate: `self-tests` (ten cases, the plan's six and the write's four, each named by a mutation in
 `tools/red_proofs.json`). Which threads need a reply, and resolving a person's thread, are a
 `judgment step`.

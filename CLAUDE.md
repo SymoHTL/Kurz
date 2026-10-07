@@ -128,8 +128,8 @@ Each line names a trap; its evidence is in the entry it links.
   statuses, can post it. HAZARD (#11). The pinned check accepts this status: seen once, on
   2026-10-07, when pull request 22 was mergeable on it alone and merged with no waiver through the
   fixed copy of the merge tool on the branch that carried the fix (#5, closed); nothing re-checks
-  the platform on that. The tool reads the status from the list of statuses, the one endpoint that
-  names the creator ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
+  the platform on that. The tool reads the status from the list of statuses, an endpoint that names
+  the creator, which the combined status does not ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
   Gate: `self-tests` for the tool's read of the captured status; the platform's acceptance is a
   fact seen, not a gate.
 - `gates` red: read the `=== gates` table at the end of the log and fix the first row that turned
@@ -254,13 +254,15 @@ Gate: review rule "rules for sessions".
   as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
   HAZARD (#3): the session holds the owner's token, so the permission classifier and this rule
   are the only guards on the approval.
-- **One push per review round.** Read every thread, fix everything, push once. Never push to
-  cancel a running review; a push to a Ready pull request does cancel it. `judgment step`
+- **One push per review round.** Read every thread, fix everything, push once, then resolve the
+  threads the push answered. Never push to cancel a running review; a push to a Ready pull
+  request does cancel it. `judgment step`
 - **A finding above low is a thread, and a thread is answered by an edit.** On the design
   record, the reference, the corpus, the knowledge store and rule files the file must change
   before the thread is resolved; on tool and workflow code a written reply also counts. After
-  the fix push, `py -3 tools/pr_gates.py resolve --pr N --go` resolves the threads whose files all
-  changed and leaves the rest open with the reason
+  the fix push, `py -3 tools/pr_gates.py resolve --pr N --go` resolves the reviewer's threads whose
+  files all changed since the finding's commit and leaves the rest open with the reason; a thread
+  answered by a reply is resolved by hand
   ([knowledge/resolve-what-the-edit-answered.md](knowledge/resolve-what-the-edit-answered.md)).
   Gate: `pr-findings`.
 - **Low findings open no thread and hold no merge** (the owner's decision, 2026-10-02). The
@@ -317,7 +319,7 @@ Gate: review rule "rules for sessions".
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
-| the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11) |
+| the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |

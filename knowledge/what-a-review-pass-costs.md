@@ -63,9 +63,10 @@ What follows from it:
   the pinned model.
 - A review costs batches times passes, and a batch needs at least two passes. An ordinary pull
   request of one batch: two passes, about 3 USD off the pipeline and about 0.5 USD in CI, about
-  20 minutes. In CI a pass reported 0.19 to 0.26 USD on 2026-10-07 (four runs: 1.94 USD for 10
-  passes, 1.42 for 6, 1.04 for 4, 1.85 for 7); off the pipeline a pass reported 1.34 USD the same
-  day. Why the two places report prices this far apart was not established.
+  20 minutes. In CI a pass reported 0.19 to 0.26 USD on 2026-10-07 (five runs: 1.94 USD for 10
+  passes, 1.42 for 6, 1.04 for 4, 1.85 for 7, 2.47 for 10); off the pipeline a pass on the pinned
+  model reported 1.34 USD the same day, just under the range above. Why the two places report
+  prices this far apart was not established.
 - A run outside CI can be cut to a bill named in advance: `--passes N` (1 to 5, with `--local`
   or `--dry-run` only) gives a batch at most N passes, so `--passes 1` costs batches times one
   pass. What it gives up is the second pass, the one that shows whether the first found
@@ -81,7 +82,8 @@ What follows from it:
   itself when the session marks a pull request Ready or pushes to a Ready one, starts without a
   question to the owner. The question before every run, the owner's decision of 2026-10-02 after
   the first bills, was retired by the owner on 2026-10-07: it had stalled every round for a run
-  that costs one to two USD in CI (the prices above). The bill is counted before the run and
+  that costs one to three USD in CI (the runs above; the plan's upper bound at the pass cap is a
+  few USD). The bill is counted before the run and
   named in the report after it. A run off
   the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go
   to the bill named. `judgment step`

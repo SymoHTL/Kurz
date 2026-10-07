@@ -108,7 +108,8 @@ def context_states(contexts, check_runs, statuses):
             run = max(runs, key=lambda r: r["id"])
             seen.append("running" if run["status"] != "completed" else
                         {"success": "success", "skipped": "skipped"}.get(run["conclusion"], "failed"))
-        posts = [s for s in statuses if s["context"] == ctx and (app is None or (s.get("creator") or {}).get("login") == STATUS_POSTERS.get(app))]
+        poster = STATUS_POSTERS.get(app)  # None: no pinned app, or a pinned app whose login this tool does not know
+        posts = [s for s in statuses if s["context"] == ctx and (app is None or (poster is not None and (s.get("creator") or {}).get("login") == poster))]
         if posts:
             post = max(posts, key=lambda s: s["id"])
             seen.append({"success": "success", "pending": "running"}.get(post["state"], "failed"))
@@ -492,6 +493,9 @@ def self_test():
          (context_states(R, [], one("success", "someone"))["review"], context_states(R, [], [{"context": "review", "state": "success", "id": 1}])["review"])
          == ("absent", "absent"))
     case("states: a context nobody pinned takes a status from any creator", context_states({"review": None}, [], one("success", "someone"))["review"] == "success")
+    case("states: a context pinned to an app whose poster this tool does not know takes no status, with or without a creator",
+         (context_states({"review": 999}, [], one("success"))["review"], context_states({"review": 999}, [], [{"context": "review", "state": "success", "id": 1}])["review"])
+         == ("absent", "absent"))
     case("states: a pending status is running", context_states(R, [], one("pending"))["review"] == "running")
     case("states: an error status is a failure", context_states(R, [], one("error"))["review"] == "failed")
     both = context_states(G, [dict(run0, status="completed", conclusion="success")],

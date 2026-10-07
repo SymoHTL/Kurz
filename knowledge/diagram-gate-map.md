@@ -85,8 +85,9 @@ flowchart TD
         (tools, workflows, review rules, skills, hooks, CLAUDE.md, .gitattributes; a file moved out of it counts),
         without a Blast radius section"]
         G8["pr-findings: a review thread unresolved, or resolved without the edit that answers it;
-        on tool, workflow and hook code a written reply also answers. The tool's resolve command
-        resolves the threads whose files all changed and leaves the rest open with the reason.
+        on tool, workflow and hook code a written reply also answers. The tool's resolve command resolves
+        the reviewer's threads whose files all changed since the finding's commit, and leaves the rest open
+        with the reason (self-tests).
         Its verdict is the one of the moment the job ran: resolving a thread starts no run"]
     end
     subgraph R["CI: workflow review, pull_request_target and dispatch"]
