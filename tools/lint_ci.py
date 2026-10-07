@@ -13,8 +13,9 @@
   Not covered by any trigger: a review that posts its findings and a thread that is resolved start
   no run, so the `gates` check of a head is the verdict of the moment it ran (tools/pr_gates.py);
 - review.yml: pull_request_target plus a manual dispatch; the job's `if` is the pinned rule: a
-  dispatch on the default branch, or a pull request into the default branch that is no Draft and
-  comes from someone who may write here; the checkout names the default branch and never
+  dispatch on the default branch, or a pull request into the default branch that is no Draft,
+  carries no `reviewed-off-pipeline` label (its review ran off the pipeline) and comes from
+  someone who may write here; the checkout names the default branch and never
   pull-request code; one review per pull request at a time, held on the job, so a run whose job is
   skipped cancels nothing; the job timeout equals the budget the script is told; the Claude CLI is
   pinned to an exact version and proven by running it; the one credential secret is read; the
@@ -42,6 +43,7 @@ REVIEW_IF = ("(github.event_name == 'workflow_dispatch' && "
              "(github.event_name == 'pull_request_target' && "
              "github.event.pull_request.base.ref == github.event.repository.default_branch && "
              "github.event.pull_request.draft == false && "
+             "!contains(github.event.pull_request.labels.*.name, 'reviewed-off-pipeline') && "
              "contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), "
              "github.event.pull_request.author_association))")
 REVIEW_GROUP = "review-${{ github.event.pull_request.number || inputs.pr }}"
@@ -210,7 +212,7 @@ def review_facts(text):
     if job.get("concurrency") != {"group": REVIEW_GROUP, "cancel-in-progress": True}:
         errors.append(f"{name}: the job's concurrency must be one review per pull request, dispatched or not, cancelling the older run")
     if " ".join(str(job.get("if", "")).split()) != REVIEW_IF:
-        errors.append(f"{name}: the job `if` is not the pinned rule (default branch only, no Draft, no outsider)")
+        errors.append(f"{name}: the job `if` is not the pinned rule (default branch only, no Draft, no outsider, no reviewed-off-pipeline label)")
     steps = job.get("steps") or []
     checkouts = [s.get("with") or {} for s in steps if "actions/checkout@" in str(s.get("uses", ""))]
     for with_ in checkouts:
@@ -315,6 +317,8 @@ MUTATIONS = [
     ("review.yml", "the reviewer runs the pull request's own copy", "  pull_request_target:", "  pull_request:", "trigger must be"),
     ("review.yml", "no review when a Draft goes Ready", "reopened, ready_for_review]", "reopened]", "types must be exactly"),
     ("review.yml", "Drafts are reviewed on every push", "      github.event.pull_request.draft == false &&\n", "", "pinned rule"),
+    ("review.yml", "a pull request reviewed off the pipeline is reviewed again on Ready",
+     "      !contains(github.event.pull_request.labels.*.name, 'reviewed-off-pipeline') &&\n", "", "pinned rule"),
     ("review.yml", "anyone's pull request spends the seat", '\'["OWNER","MEMBER","COLLABORATOR"]\'',
      '\'["OWNER","MEMBER","COLLABORATOR","NONE"]\'', "pinned rule"),
     ("review.yml", "a dispatch on any branch runs that branch's reviewer",

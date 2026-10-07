@@ -106,6 +106,7 @@ class MemoryForge(rv.Forge):
         self.base, self.heads = base, list(heads)
         self.issues, self.opened, self.collected = [], [], []  # open lows issues, issues this run opened, (issue, comment) pairs
         self.first_write = None  # how long the log was when the first write reached the wire
+        self.labels = []  # labels this run put on the pull request
 
     def pr(self):
         # the captured payload, with the head and the base of this case; its state is open, like the real one's
@@ -148,6 +149,8 @@ class MemoryForge(rv.Forge):
             self.threads.append(comment)
         elif path == f"issues/{self.number}/comments":
             self.notes.append(comment)
+        elif path == f"issues/{self.number}/labels":
+            self.labels.extend(payload["labels"])
         elif path.startswith("issues/"):
             self.collected.append((int(path.split("/")[1]), body))
         elif path.startswith("statuses/"):
@@ -790,11 +793,15 @@ def suite(case):
          and kinds(forge) == ["failed", "off-pipeline"] and stored(forge) == ["a.md", "b.md", "e.md", "new.kz"] and len(forge.threads) == 1,
          (again.batches, code, kinds(forge), stored(forge)))
     case("run: a run outside CI posts no status", forge.statuses == [], forge.statuses)
+    case("run: a completed run outside CI labels the pull request, so that Ready starts no paid run", forge.labels == [rv.LOCAL_LABEL], forge.labels)
+    case("run: the label the reviewer adds is the one the workflow's job reads",
+         f"'{rv.LOCAL_LABEL}'" in kit.read(os.path.join(FIX, "..", "..", "..", ".github", "workflows", "review.yml")), rv.LOCAL_LABEL)
     success, error = [(HEAD, "review", "success")], [(HEAD, "review", "error")]
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
     case("run: in CI a completed review posts the success status", (code, forge.statuses) == (0, success) and "REVIEW COMPLETE" in out,
          (code, forge.statuses))
+    case("run: in CI the pull request gets no label", forge.labels == [], forge.labels)
     case("run: the rules are asked from the default branch", forge.asked == ["trunk"], forge.asked)
     forge = MemoryForge(heads=(HEAD, "d" * 40))
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")

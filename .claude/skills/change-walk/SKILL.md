@@ -71,7 +71,10 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    workflow on another branch can drop it: HAZARD (#11).
 2. When the description is final, mark it Ready once: `gh pr ready <N>`. Where the forge starts
    the workflow, that starts the review, with the workflow, the reviewer and the rules of the
-   default branch. Whether it starts is the event policy: HAZARD (#10). An edit of the title or
+   default branch, unless the pull request carries the label `reviewed-off-pipeline`, which a
+   completed off-pipeline review adds (step 3). Never mark Ready meaning to cancel the run: a run
+   that started is a bill, cancelled or not (`knowledge/a-cancel-does-not-beat-the-runner.md`).
+   Whether it starts is the event policy: HAZARD (#10). An edit of the title or
    the description after the review is text the review never read: HAZARD (#13).
 3. Wait for the commit status `review`. `gh pr checks <N>` shows it. Gate: the required check.
    - `pending`: no review ran on this head. Ready, and no `review` run of this head in the
@@ -88,8 +91,9 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    - No review can run in CI (no credential, or the reviewer itself is what the pull request
      adds): with the owner's go-ahead, in the background with the output in a file:
      `py -3 tools/review/review.py --pr <N> --local`. It prints one line per pass and every
-     finding in full, posts the findings and an audit note, and no status: the merge then needs
-     the owner's approval for that pull request and head. HAZARD (#3). When the owner caps the
+     finding in full, posts the findings and an audit note, labels the pull request
+     `reviewed-off-pipeline` so that Ready starts no second run, and posts no status: the merge
+     then needs the owner's approval for that pull request and head. HAZARD (#3). When the owner caps the
      bill, add `--passes <N>`: a batch then gets at most N passes, and the note names the limit.
 4. Read every thread before fixing anything. Every thread, with its first comment:
    `gh api graphql --paginate -f owner=<owner> -f name=<name> -F pr=<N> -f query='query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { reviewThreads(first: 50, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { isResolved path comments(first: 1) { nodes { body } } } } } } }'`
