@@ -11,7 +11,7 @@ This repository is written mostly by AI agent sessions. The quality bar is what 
 rules that ship with their gates, a knowledge store, an automated reviewer that has to complete
 before a merge, and server-side merge checks. The method comes from a tutorial on quality bars
 for agent-driven development that is not published and not part of this repository (the copy
-used was read on 2026-10-01). It is written for GitLab; this guide states its laws and says how
+used was read on 2026-10-01, its version of 2026-10-07 on that day). It is written for GitLab; this guide states its laws and says how
 each part looks here, on GitHub.
 
 The numbers that show the bar working are in [quality-bar-evidence.md](quality-bar-evidence.md).
@@ -51,6 +51,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Living diagrams | Four entries tagged LIVING in `INDEX.md`; the lint requires each to have a diagram and its update triggers, and at least four of them to exist. |
 | Living guides | This guide and the evidence guide. The tree gate keeps both portable. The evidence guide's numbers are generated, carry a digest that a hand edit breaks, and expire: when the TTL runs out, `knowledge` is red on every pull request and on `main`, whatever the change touches, until a pull request regenerates the page with `py -3 tools/quality_evidence.py`. That tool refuses while a self-test or the reference lint is red and needs a login that can read the forge; so once the TTL has run out, a red reference blocks the only way back to green until it is fixed. |
 | Not in the method: the product is a language definition | `reference/` (rules with an id and a status), `corpus/` (one case per file) and `tools/lint_reference.py` (gate `reference`), which keeps the two consistent in shape. Nothing runs a case (HAZARD #1). |
+| Product rules: the decisions a diff must respect (section 7.5 of the guide's 2026-10-07 version) | The design record `kurz-design.md` and `reference/`: one statement per decision, the owner's choice with its date and the options it was chosen against, *(assumed)* and *(proposed)* for what the owner has not decided, and `open` rules for the forks. The reviewer carries the rule "design record", which flags a decision without the owner's choice behind it, as the guide's reviewer carries the product rules. The corpus is the scan: a rule a case can check gets the case (gate `reference`). The product pass, the acceptance judge and the knowledge-scout hook are not here; see "Not implemented". |
 
 ## Gates
 
@@ -189,6 +190,13 @@ changes in the same pull request.
 - **Running the corpus.** Nothing in this repository executes Kurz. The reference lint checks the
   shape of a case and that the reference shows it unchanged; whether an expected output or error
   is right is decided by reading and by the review (HAZARD #1).
+- **The product pass, the product acceptance and the knowledge-scout hook** (section 7.5 of the
+  guide's 2026-10-07 version). They judge a change to a product's surfaces, for users who pay, see
+  and change things. This repository has no product surface; its questions to the owner are design
+  questions, asked by the skill `design-round` before anything is derived from them.
+- **Agent-behaviour plugins.** The guide's 2026-10-07 version installs none; its section 13 says why
+  the two it once used were removed. Nothing here depends on one. The one `ponytail:` comment in
+  `tools/` names a shortcut's ceiling and its upgrade path, and reads without the plugin.
 
 ## Changing the bar
 
