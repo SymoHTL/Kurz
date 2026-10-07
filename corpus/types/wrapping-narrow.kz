@@ -1,0 +1,9 @@
+// expect: output
+// | 44
+// | 300
+// rules: T28, T12
+
+byte a = 200
+byte b = 100
+print(a +% b)
+print(a + b)

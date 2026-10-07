@@ -233,8 +233,8 @@ the parts outside this reference add, each listed where that part is specified. 
 this on 2026-10-03, against the keywords of C#, which would take `goto`, `unsafe` and `checked`
 from programs for nothing; the cost is that the list has to be kept. Four words were not in the
 list the owner saw: `equal` and `by` are core words by K8 (the owner, 2026-10-02), `this` is the
-call of the primary constructor (K14) and `virtual` the marker of K7, both *(proposed)* there, and
-so here. Whether the names of the built-in types are core words as well is L19.
+call of the primary constructor (K14) and `virtual` the marker of K7 (both the owner, 2026-10-04).
+The names of the built-in types are core words as well (L19).
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
@@ -242,21 +242,20 @@ equal = 1
 print(equal)
 ```
 
-### L19 (open) The names of the built-in types as names
+### L19 (decided, §8) The names of the built-in types are core words
 
-L18 leaves the names of the built-in types (`int`, `string`, `bool`, ...) off the list, so
-`long = 1`, a parameter named `int` and `class string` pass L12, and nothing says what `long(x)`
-(T10) means where a value named `long` is in scope. In C# the names are keywords. The question
-stood beside L18's in the round that decided it and rested on a wrong claim about C#, so it is
-asked again. The options:
+The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,
+`ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, `bool`, `string`, `char`,
+`duration`, `timestamp`, `longduration` and `longtimestamp` (T29). Using one as a name is
+`reserved-word` (L12), as it is in C#, where they are keywords. The owner chose this on
+2026-10-04, against ordinary names that a declaration hides in its block, under which `long(x)`
+(T10) would have two readings in one program; the cost is that nothing can be called `string`.
 
-- (a) The names are core words: using one as a name is `reserved-word`. Cost: L18's list grows by
-  the type names, and nothing can be called `string`.
-- (b) The names are ordinary names that the language binds to its types: a declaration of the
-  same name hides the type in its block, and `long(x)` there calls what `long` names. Cost: two
-  readings of `long(x)` in one program, and the type is out of reach where it is hidden.
-
-The lean is (a): nothing is gained by hiding `int`, and the error is cheap to give.
+Case: [source/type-name-as-name.kz](../corpus/source/type-name-as-name.kz)
+```kurz
+int = 1
+print(int)
+```
 
 ### L13 (decided, §8) A string over several lines
 

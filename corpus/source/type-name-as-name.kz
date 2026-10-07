@@ -1,0 +1,5 @@
+// expect: error reserved-word at 4
+// rules: L19
+
+int = 1
+print(int)

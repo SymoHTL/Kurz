@@ -139,8 +139,8 @@ T28): operands narrower than `int` are promoted to `int` first, so `sb + b` with
 `byte` is an `int`, and `u + b` with a `uint` and a `byte` is a `uint`, as there. Where C# joins
 the two through `long`, or refuses them, Kurz reports the compile error `sign-mix`: that is `uint`
 with a signed type (`u + i`, a `long` in C#) and `ulong` with a signed type (an error in C# too).
-*(proposed: the meeting point of T23 and this rule; the owner's answer to T23 covered `b + i`, and
-the record has both rules)* A conversion (T10) puts both on one side.
+The owner chose this on 2026-10-04, against C#'s `long` for `uint` with `int`; the cost is that a
+ported program writes `long(u) + i`. A conversion (T10) puts both on one side.
 
 Case: [types/sign-mix.kz](../corpus/types/sign-mix.kz)
 ```kurz
@@ -250,6 +250,14 @@ result leaves the range of its type.
 
 Case: [types/wrapping.kz](../corpus/types/wrapping.kz)
 
+Case: [types/wrapping-narrow.kz](../corpus/types/wrapping-narrow.kz)
+```kurz
+byte a = 200
+byte b = 100
+print(a +% b)
+print(a + b)
+```
+
 ### T13 (decided, §4) Durations and timestamps
 
 Durations and timestamps are 64-bit types of their own and never raw integers: one of them where
@@ -282,23 +290,26 @@ void Show(duration d) {
 Show(90min)
 ```
 
-### T29 (open) A wider variant of `duration` and `timestamp`
+### T29 (decided, §4) The wider pair: `longduration` and `longtimestamp`
 
-The owner asked for a "bigger" variant when choosing the nanosecond step (T24): a `duration` of
-64 bits ends at about 292 years, and a `timestamp` before 1677 and after 2262, which a calendar
-or an archive can reach. The options:
+Beside the 64-bit pair of T24 stand `longduration` and `longtimestamp`: 128 bits with the same
+step of one nanosecond, for a calendar or an archive that reaches before 1677 or after 2262. A
+`duration` widens into a `longduration` and a `timestamp` into a `longtimestamp` without a word
+(T8), a conversion the other way is written out and checked as T20 says, and the texts are A12's.
+The owner chose this on 2026-10-04, against a 64-bit pair with a millisecond step, in which
+nothing below a millisecond exists, and against a type of the library, which has no literal
+(L14); the cost is 128-bit arithmetic and a second name for every operation on time in the
+library. *(proposed: the names, which stand to the narrow pair as `long` stands to `int`)*
 
-- (a) A second pair of types with 128 bits and the same step, named by a prefix the way `long`
-  stands beside `int`; a conversion from the narrow pair is exact, one into it is T20's loss.
-  Cost: 128-bit arithmetic, and a second name for every operation on time in the library.
-- (b) A second pair with 64 bits and a step of one millisecond, which holds 292 million years.
-  Cost: a value below a millisecond cannot exist in it, and a conversion from the nanosecond pair
-  drops digits or is T20's loss.
-- (c) No core type: a `data` type of the library over two integers. Cost: it has no literal (L14)
-  and no text of its own (A12).
+Case: [types/longduration-parameter.kz](../corpus/types/longduration-parameter.kz)
+```kurz
+void Show(longduration d) {
+    print(d)
+}
 
-The lean is (a): it mirrors `int` and `long`, and the conversion from the narrow pair loses
-nothing.
+duration d = 90min
+Show(d)
+```
 
 ### T14 (assumed, §4) Out of range and division by zero
 
@@ -515,7 +526,10 @@ the cost is that `byte c = a + b` needs `byte(a + b)`, and that the wrap of T4 n
 or 16 bits, while `ushort * ushort` is computed in a signed `int` and can overflow it. The
 wrapping operators `+%`, `-%` and `*%` (T12) do not promote: they compute in the wider of their
 operand types and wrap there, so that an 8-bit checksum is `a +% b` on two `byte`s, where a
-promoted `+%` would need a mask on every narrow checksum. *(proposed: C# has no such operators)*
+promoted `+%` would need a mask on every narrow checksum (the owner, 2026-10-04, against promoting
+them; C# has no such operators). The cost: `a + b` and `a +% b` differ in type.
+
+Case: [types/wrapping-narrow.kz](../corpus/types/wrapping-narrow.kz)
 
 Case: [types/promotion.kz](../corpus/types/promotion.kz)
 ```kurz

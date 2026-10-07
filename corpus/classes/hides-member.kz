@@ -1,0 +1,12 @@
+// expect: error hides-member at 9
+// rules: K7
+
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    pub string Sound() => "woof"
+}
+
+print(Dog().Sound())
