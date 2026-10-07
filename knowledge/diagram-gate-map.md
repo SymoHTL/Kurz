@@ -168,7 +168,7 @@ flowchart TD
   W1, P1, G2.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
-- `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command resolves what G8 reads as answered.
+- `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command resolves what G8 reads as answered by an edit.
 - `.github/workflows/review.yml`, `tools/review/review.py` or `.review/review-rules.yaml`
   changes: the subgraph R.
 - `tools/ruleset.json` or `tools/merge_pr.py` changes: the subgraph M and G5.

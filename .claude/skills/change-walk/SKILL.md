@@ -123,8 +123,9 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
 7. Order: edit, push ONE commit with every fix, then resolve the threads the edits answered:
    `py -3 tools/pr_gates.py resolve --pr <N>` prints which threads the head's edits answer and
    which stay open and why, and `--go` resolves the former
-   (`knowledge/resolve-what-the-edit-answered.md`); what stays open gets its reply or edit first,
-   and a tool-code thread answered by a reply is resolved by hand in the thread. The `gates` run
+   (`knowledge/resolve-what-the-edit-answered.md`). A tool-code thread it leaves open gets its
+   reply and is resolved by hand; a thread left open for want of an edit means the round's push
+   missed a fix, and that fix is the next round's one push. The `gates` run
    of the push saw the threads open; a description edit runs the gates again without a review. The
    walk that needs no re-run: mark the pull request Draft before the push, resolve, then Ready, so
    the one review and the gates run on the head with its threads resolved. Each push is a new head

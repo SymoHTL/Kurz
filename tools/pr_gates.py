@@ -166,24 +166,39 @@ def resolve_plan(threads, changed_since):
 
 
 def resolve_threads(repo, number, go, get=None):
-    """Prints what is left open with its reason, then each answered thread as it is resolved (with
-    `go`, one write a second) or would be: (resolved, left open). An answer that does not say
-    resolved is a refusal; what was resolved before it stays so."""
+    """Prints what is left open with its reason and id, then each answered thread as it would be
+    resolved or, with `go`, once the forge said it is, one write a second: (resolved, left open).
+    An answer that does not say resolved is a refusal; what was resolved before it stays so."""
     get = get or kit.gh_json
     head = get(f"repos/{repo}/pulls/{number}")["head"]["sha"]
     threads = fetch_threads(repo, number, get)
     changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
     resolve, left = resolve_plan(threads, changed)
     for t, paths, why in left:
-        print(f"left open: {', '.join(paths)}: {why}")
+        print(f"left open: {', '.join(paths) or '(no file)'} ({t.get('id')}): {why}")
     for t, paths in resolve:
-        print(f"{'resolve' if go else 'would resolve'} {', '.join(paths)} ({t['id']})")
-        if go:
-            answer = get("graphql", "-f", f"query={RESOLVE}", "-f", f"thread={t['id']}")
-            if not (((answer.get("data") or {}).get("resolveReviewThread") or {}).get("thread") or {}).get("isResolved"):
-                raise kit.Refused(f"the forge did not resolve the thread on {', '.join(paths)}: {str(answer)[:200]}")
-            time.sleep(1)
+        if not go:
+            print(f"would resolve {', '.join(paths)} ({t['id']})")
+            continue
+        answer = get("graphql", "-f", f"query={RESOLVE}", "-f", f"thread={t['id']}")
+        if not (((answer.get("data") or {}).get("resolveReviewThread") or {}).get("thread") or {}).get("isResolved"):
+            raise kit.Refused(f"the forge did not resolve the thread on {', '.join(paths)} ({t['id']}): {str(answer)[:200]}")
+        print(f"resolved {', '.join(paths)} ({t['id']})")  # after the forge said so, never before
+        time.sleep(1)
     return len(resolve), len(left)
+
+
+def resolve_command(repo, number, go, get=None):
+    """The exit code of the resolve command: 0 when the plan ran, 1 when a read or a write failed. Any
+    failure after the first write leaves threads resolved, so the message says what stands."""
+    try:
+        resolved, left = resolve_threads(repo, number, go, get)
+    except Exception as e:  # whatever failed, the lines printed above are what the forge confirmed
+        print(f"ERROR: resolve stopped: {type(e).__name__}: {e}. The threads printed as resolved above stay resolved; "
+              f"run the plan again for the rest")
+        return 1
+    print(f"resolve: {resolved} threads {'resolved' if go else 'to resolve (plan only: add --go)'}, {left} left open")
+    return 0
 
 
 def fetch_threads(repo, number, get=None):
@@ -414,17 +429,21 @@ def self_test():
         cases.append(("resolve: a reviewer post that names no file is left open",
                       counts(plan) == [0, 1] and plan[1][0][2] == "the reviewer's post names no file", repr(plan)))
 
-        def resolving(blob, says=True):
-            """A forge for resolve_threads: the pull request, one page with the real thread unresolved,
-            blob(ref) for a file, and the mutation, which it records and answers as told."""
+        def resolving(blob, says=True, threads=1, breaks_at=None):
+            """A forge for resolve_threads: the pull request, one page with the real thread unresolved
+            (`threads` copies with their own ids), blob(ref) for a file, and the mutation, which it
+            records and answers as told, or raises an error nobody expected at write `breaks_at`."""
             written = []
 
             def get(*args):
                 if args[0] == "graphql" and args[2].startswith("query=mutation"):
+                    if breaks_at is not None and len(written) == breaks_at:
+                        raise ValueError("an answer nobody expected")
                     written.append(args[-1])
                     return {"data": {"resolveReviewThread": {"thread": {"isResolved": says}}}}
                 if args[0] == "graphql":
-                    page = {"nodes": variant(False), "pageInfo": {"hasNextPage": False, "endCursor": None}}
+                    nodes = [dict(variant(False)[0], id=f"t{n}") for n in range(threads)]
+                    page = {"nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}
                     return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
                 if "/contents/" in args[0]:
                     return {"sha": blob(args[0].split("?ref=")[1])}
@@ -432,24 +451,42 @@ def self_test():
             return get, written
 
         def quietly(fn):
-            with contextlib.redirect_stdout(io.StringIO()):
-                return got(fn)
+            """(what fn returned or raised, what it printed)."""
+            with contextlib.redirect_stdout(io.StringIO()) as printed:
+                out = got(fn)
+            return out, printed.getvalue()
 
-        saved_sleep, time.sleep = time.sleep, (lambda seconds: None)
+        resolved_lines = lambda printed: sum(line.startswith("resolved ") for line in printed.splitlines())  # the error text says "resolved" too
+        slept = []
+        saved_sleep, time.sleep = time.sleep, slept.append
         try:
             get, written = resolving(lambda ref: "blob@" + ref)
-            out = quietly(lambda: resolve_threads("o/n", 1, False, get))
-            cases.append(("resolve: without --go the plan is printed and nothing is written", out == (1, 0) and written == [], repr((out, written))))
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, False, get))
+            cases.append(("resolve: without --go the plan is printed and nothing is written",
+                          out == (1, 0) and written == [] and "would resolve" in printed, repr((out, written, printed))))
             get, written = resolving(lambda ref: "blob@" + ref)
-            out = quietly(lambda: resolve_threads("o/n", 1, True, get))
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: with --go the answered thread is resolved by its id",
-                          out == (1, 0) and written == [f"thread={thread['id']}"], repr((out, written))))
+                          out == (1, 0) and written == ["thread=t0"] and resolved_lines(printed) == 1, repr((out, written, printed))))
             get, written = resolving(lambda ref: "blob")
-            out = quietly(lambda: resolve_threads("o/n", 1, True, get))
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: a thread whose file did not change is not written, with --go", out == (0, 1) and written == [], repr((out, written))))
             get, written = resolving(lambda ref: "blob@" + ref, says=False)
-            out = quietly(lambda: resolve_threads("o/n", 1, True, get))
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: an answer that does not say resolved is a refusal", type(out) is kit.Refused, repr(out)))
+            cases.append(("resolve: a thread is printed as resolved only after the forge said so",
+                          type(out) is kit.Refused and resolved_lines(printed) == 0, repr(printed)))
+            slept.clear()
+            get, written = resolving(lambda ref: "blob@" + ref, threads=2)
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
+            cases.append(("resolve: writes are a second apart", out == (2, 0) and slept == [1, 1], repr((out, slept))))
+            get, written = resolving(lambda ref: "blob@" + ref, threads=2, breaks_at=1)
+            out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
+            cases.append(("resolve: a failure of any kind after a write says what stands",
+                          out == 1 and resolved_lines(printed) == 1 and "resolve stopped: ValueError" in printed, repr((out, printed))))
+            get, written = resolving(lambda ref: "blob@" + ref)
+            out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
+            cases.append(("resolve: the command ends 0 when the plan ran", out == 0 and "1 threads resolved" in printed, repr((out, printed))))
         finally:
             time.sleep = saved_sleep
 
@@ -491,14 +528,7 @@ if __name__ == "__main__":
     try:
         number = pr_number(sys.argv)
         if gate == "resolve":
-            try:
-                resolved, left = resolve_threads(kit.repo(), number, "--go" in sys.argv)
-            except (kit.Refused, kit.Unanswered, KeyError, TypeError) as e:
-                print(f"ERROR: resolve stopped: {type(e).__name__}: {e}. The threads printed as resolved above stay resolved; "
-                      f"run the plan again for the rest")
-                sys.exit(1)
-            print(f"resolve: {resolved} threads {'resolved' if '--go' in sys.argv else 'to resolve (plan only: add --go)'}, {left} left open")
-            sys.exit(0)
+            sys.exit(resolve_command(kit.repo(), number, "--go" in sys.argv))
         errors, scanned = run_gate(gate, kit.repo(), number)
     except (kit.Refused, KeyError, IndexError, ValueError, TypeError, AttributeError) as e:
         print(f"ERROR: pr gate {gate or '?'} could not run: {type(e).__name__}: {e}")

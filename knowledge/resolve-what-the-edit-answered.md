@@ -17,9 +17,9 @@ hand was a script per pull request, twice, before the third-time rule made it th
    `would resolve <files> (<thread id>)` or `left open: <files>: <why>`, where why is "no finding
    of the reviewer" (a person's thread, or a reviewer post that names no file), "its commit is
    gone" (the finding's commit is not on the forge) or "the file did not change".
-2. Answer what is left open first: an edit, or on tool code a reply in the thread, after which
-   that thread is resolved by hand, since the tool resolves edits only; a person's thread is
-   theirs to resolve.
+2. What is left open: a tool-code thread gets its reply and is resolved by hand, since the tool
+   resolves edits only; a person's thread is theirs to resolve; a thread left open for want of an
+   edit means the push missed a fix, which is the next round's one push.
 3. `py -3 tools/pr_gates.py resolve --pr <N> --go` resolves the plan, a second between writes. An
    answer that does not say resolved is a refusal (exit 1): what was resolved before it stays so,
    and the plan run shows what is left.

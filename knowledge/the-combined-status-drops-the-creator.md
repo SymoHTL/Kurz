@@ -41,9 +41,11 @@ the thing under test can fail no case about it.
   `head_states` and `context_states`). Gate: `self-tests`: the real status is read as success from
   the captured list, the same status from the captured combined status does not count, the tool
   asks the forge for the list, the newest status of a context counts, an older success does not
-  outvote a newer error; each case has its mutation in `tools/red_proofs.json`.
+  outvote a newer error, and a context pinned to an app whose poster the tool does not know takes
+  no status, with or without a creator; each case has its mutation in `tools/red_proofs.json`.
 - A fixture captured before the platform had sent the thing under test is captured again once it
   has, and a case over a captured collection has a floor; `tools/fixtures/SOURCES.txt` says when
   and from which head each payload came. Gate: review rule "tools" (CLAUDE.md, Tests item 1).
-- Issue #5 is closed by this: the ruleset accepts the status for the pinned app. HAZARD #11
-  stays: any workflow run of this repository can post the status.
+- Issue #5 is closed by this: the ruleset accepted the status for the pinned app, seen once on
+  2026-10-07 and re-checked by nothing. HAZARD #11 stays: any workflow run of this repository can
+  post the status.

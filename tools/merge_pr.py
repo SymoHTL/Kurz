@@ -78,8 +78,8 @@ def required(rules):
 
 # A commit status names its creator, not an app. The one app a context is pinned to here is GitHub
 # Actions, whose workflow runs post statuses as this login; a status from any other creator does
-# not satisfy a pinned context, whatever its name says. Only the list of statuses
-# (`commits/{sha}/statuses`) names the creator: the combined status (`commits/{sha}/status`) drops
+# not satisfy a pinned context, whatever its name says. The list of statuses
+# (`commits/{sha}/statuses`) names the creator; the combined status (`commits/{sha}/status`) drops
 # it, so a status read from there never matched the poster and the context read as absent, on the
 # first head with a real `review` status (2026-10-07). The list holds every status ever posted for
 # the head, newest first, so the newest of a context counts.
