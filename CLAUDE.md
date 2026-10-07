@@ -63,7 +63,10 @@ Each line names a trap; its evidence is in the entry it links.
 ## Tests: every decision is proven
 
 1. **A case must be able to fail.** A negative case carries a positive control; an `all()` over a
-   collection that can be empty checks that it is not. Gate: review rule "tools".
+   collection that can be empty checks that it is not; a captured payload that holds none of the
+   thing under test (the status fixture from before the first status, 2026-10-07) is captured
+   again once the platform has sent one, and the case over it has a floor. Gate: review rule
+   "tools".
 2. **Every recorded case was seen red.** The mutation is recorded and replayed on every run, so a
    gate that went soft turns the build red. Gate: `self-tests`.
 3. **Unchecked never looks clean.** A scan that is satisfied by finding nothing has a floor; a
@@ -117,8 +120,11 @@ Each line names a trap; its evidence is in the entry it links.
   stopped at the pass cap with defects above low still open completed, and posts `success` with
   "NOT converged" in its description: HAZARD (#17). Nothing proves that a status of this name came
   from a completed review: every workflow run of the repository, and everyone who may write
-  statuses, can post it. HAZARD (#11). Whether the pinned check accepts this status at all has not
-  been seen: HAZARD (#5).
+  statuses, can post it. HAZARD (#11). The pinned check accepts this status: seen on 2026-10-07,
+  when pull request 22 was mergeable on it alone and merged through the merge tool with no waiver
+  (#5, closed). The tool reads the status from the list of statuses, the one endpoint that names
+  the creator ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
+  Gate: `self-tests` (the tool's read of the captured status).
 - `gates` red: read the `=== gates` table at the end of the log and fix the first row that turned
   the run red: FAIL, BROKEN or NOT RUN, or PARTLY on a gate that is not listed (the docstring of
   `tools/gates.py` is the one definition). A red `pr-title` or `pr-breadth` is fixed by editing
@@ -301,7 +307,7 @@ Gate: review rule "rules for sessions".
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
-| the reviewer's pinned model, the environment of its call, what a failed run keeps (`self-tests`) | that the `review` status satisfies the ruleset (#5, unverified), and that it came from a completed review (#11) |
+| the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |

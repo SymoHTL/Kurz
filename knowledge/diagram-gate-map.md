@@ -100,7 +100,8 @@ flowchart TD
         at the pass cap it says NOT converged, and is success all the same: HAZARD issue 17.
         Draft, outside pull request, the Ready event of a head labelled reviewed- plus its own sha, no run:
         stays pending; a skipped job reports a check named review-run, never this status.
-        Does it satisfy the ruleset's pinned app: unverified, HAZARD issue 5; if not, every merge needs --over-red.
+        It satisfied the ruleset's pinned app on 2026-10-07 (issue 5 closed); the merge tool reads it from the list
+        of statuses, the endpoint that names the creator; the combined status drops it.
         Any workflow run of this repository can post the same status: HAZARD issue 11"]
         R3["findings: high and medium become threads on the pull request, per file,
         and block through thread resolution, not through the job.

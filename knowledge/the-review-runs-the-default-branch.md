@@ -52,8 +52,8 @@ What it does not give:
   branch runs the copy, with its own reviewer, this repository's secrets and a token that may
   post statuses.
 - The ruleset pins `review` to the app that every workflow run of this repository reports as
-  (`tools/fixtures/branch-rules.json` shows the pin); whether a commit status satisfies that pin
-  has not been seen on the platform: HAZARD #5. A workflow that a branch adds, with
+  (`tools/fixtures/branch-rules.json` shows the pin); a commit status posted with a workflow's
+  token satisfies that pin, seen on 2026-10-07 (issue #5 closed). A workflow that a branch adds, with
   `statuses: write`, can post `review` = success on any head the statuses API is given, its own
   or another pull request's. So the status proves that a workflow run of this repository posted
   it, not that a review completed.

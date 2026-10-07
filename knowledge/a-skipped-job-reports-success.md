@@ -33,10 +33,12 @@ How this repository is built around it:
   reviewed automatically. So the required check is not the job. It is the commit status `review`,
   which the reviewer posts when a review completed. A skipped job posts nothing, and the check
   stays pending.
-- Two things about that status are not gated. Whether it satisfies the ruleset's pinned app had
-  not been seen on the live platform by 2026-10-02, because no review had run in CI yet; the
-  current state is on issue #5 (HAZARD #5). And any workflow run of this repository can post a
-  status of that name: HAZARD #11, see [[the-review-runs-the-default-branch]].
+- Whether that status satisfies the ruleset's pinned app had not been seen on the live platform
+  by 2026-10-02, because no review had run in CI yet. On 2026-10-07 it did: pull request 22 was
+  mergeable on the status alone and merged with no waiver (issue #5 closed). The merge tool, which
+  reads the same status, has to read it from the endpoint that names its creator:
+  [[the-combined-status-drops-the-creator]]. What stays ungated: any workflow run of this
+  repository can post a status of that name: HAZARD #11, see [[the-review-runs-the-default-branch]].
 - A head with no `gates` run at all, and the check pending, is one of the two cases above: look
   for a merge conflict first, then for a skip literal in the head commit's message.
 - A skip literal can also reach `main`, where it would skip the gates run on the merge commit.
