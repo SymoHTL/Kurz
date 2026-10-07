@@ -796,9 +796,11 @@ def suite(case):
          and kinds(forge) == ["failed", "off-pipeline"] and stored(forge) == ["a.md", "b.md", "e.md", "new.kz"] and len(forge.threads) == 1,
          (again.batches, code, kinds(forge), stored(forge)))
     case("run: a run outside CI posts no status", forge.statuses == [], forge.statuses)
-    case("run: a completed run outside CI labels the pull request, so that Ready starts no paid run", forge.labels == [rv.LOCAL_LABEL], forge.labels)
-    case("run: the label the reviewer adds is the one the workflow's job reads",
-         f"'{rv.LOCAL_LABEL}'" in kit.read(os.path.join(FIX, "..", "..", "..", ".github", "workflows", "review.yml")), rv.LOCAL_LABEL)
+    case("run: a completed run outside CI labels the pull request with the head, so that Ready of that head starts no paid run",
+         forge.labels == [f"{rv.LOCAL_LABEL}{HEAD}"], forge.labels)
+    case("run: the label the reviewer adds is the one the workflow's clause builds from the head",
+         f"format('{rv.LOCAL_LABEL}{{0}}', github.event.pull_request.head.sha)"
+         in kit.read(os.path.join(FIX, "..", "..", "..", ".github", "workflows", "review.yml")), rv.LOCAL_LABEL)
     forge = MemoryForge()
     forge.refuse_labels = True
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local"])

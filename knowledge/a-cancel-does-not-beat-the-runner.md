@@ -1,6 +1,6 @@
 ---
 name: a-cancel-does-not-beat-the-runner
-description: Postmortem of 2026-10-07 - the review run that GitHub starts when a pull request goes Ready was cancelled six seconds in, while the forge still listed it as queued, and ran two paid passes before the runner got the signal; the findings died with the process and nothing was posted. A run that started is a bill, cancelled or not, so a run that must not start is kept from starting - a completed off-pipeline review labels the pull request reviewed-off-pipeline and the job's if skips it - and nothing is cancelled to save its cost
+description: Postmortem of 2026-10-07 - the review run that GitHub starts when a pull request goes Ready was cancelled six seconds in, while the forge still listed it as queued, and ran two paid passes before the runner got the signal; the findings died with the process and nothing was posted. A run that started is a bill, cancelled or not, so a run that must not start is kept from starting - a completed off-pipeline review labels the pull request reviewed-<head sha> and the job's if skips the Ready event of that head - and nothing is cancelled to save its cost
 metadata:
   type: feedback
 ---
@@ -29,13 +29,14 @@ winning that race spends money at random.
 - A run that started is a bill, cancelled or not. Never start one, and never let the forge start
   one, meaning to cancel it; `gh run cancel` is for a run that is wrong, not for one that is
   unwanted.
-- A run that must not start is kept from starting at its trigger: the review workflow's job skips
-  a pull request labelled `reviewed-off-pipeline`, and a completed run of `review.py --local`
-  puts that label on the pull request. The clause reads the label on the Ready event only, so a
-  push to the pull request is reviewed as before and a stale label does nothing; `tools/lint_ci.py`
-  pins the clause and the job's name (`review-run`, whose skip reports a check of that name and
-  never the required status `review`), and the reviewer's self-test proves the label, and that a
-  label write the forge refuses ends the run red. No tool removes the label.
+- A run that must not start is kept from starting at its trigger: a completed run of
+  `review.py --local` labels the pull request `reviewed-<head sha>`, and the review workflow's job
+  skips the Ready event of a pull request whose head carries that label. The label names one head,
+  so every other head, pushed before or after Ready, is reviewed by the run its event starts, and
+  a stale label matches nothing; `tools/lint_ci.py` pins the clause and the job's name
+  (`review-run`, whose skip reports a check of that name and never the required status `review`),
+  and the reviewer's self-test proves the label, its name, and that a label write the forge
+  refuses ends the run red. No tool removes a label.
 - A head whose review ran off the pipeline has no `review` status and is merged with the owner's
   approval for that head (`merge_pr.py --over-red`), as before; the label changes nothing there.
 - Findings that exist only in a running process are not yet a result. The reviewer prints its

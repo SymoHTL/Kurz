@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-07
-digest: b30e559a99323ed3b4a100f97cb0c395daf5924dae43c3df6de54e9b78ebeba5
+digest: 03830770e5e108a35e5ae7acf1912b8d51fce3b0f661956fa0f5e33815485453
 ttl_days: 60
 metadata:
   type: reference
@@ -129,7 +129,7 @@ counted from the record that the merge tool posts.
 | Pull requests merged | 4 |
 | Merged over red, with a recorded waiver | 4 |
 | Review findings posted: high | 37 |
-| Review findings posted: medium | 378 |
-| Review findings posted: low | 308 |
+| Review findings posted: medium | 385 |
+| Review findings posted: low | 316 |
 | Open HAZARD issues | 12 |
 <!-- /generated:forge -->
