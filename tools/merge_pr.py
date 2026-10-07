@@ -29,9 +29,10 @@ lets through only what it names:
 - a check that is still running is never waived: its result is coming and nobody has read it;
 - unresolved threads are never waived.
 A check run counts only when the app the ruleset pins reported it, and a commit status only when
-its creator is the login that app posts as (the Actions bot); that the ruleset reads a status that
-way was seen on 2026-10-07, when the head of pull request 22 was mergeable on its `review` status
-alone (#5). The statuses are read from the list endpoint, the one that names the creator: the
+its creator is the login that app posts as (the Actions bot); that the ruleset accepts a status the
+Actions bot posted was seen on 2026-10-07, when the head of pull request 22 was mergeable on its
+`review` status alone (#5); whether it would refuse one from another creator has not been seen.
+The statuses are read from the list endpoint, the one that names the creator: the
 combined status drops it (knowledge/the-combined-status-drops-the-creator.md). Both required
 checks are pinned to the app every workflow run of this repository reports as, so `review` proves
 that a workflow run of this repository posted it, not which one (HAZARD #11).
@@ -427,7 +428,7 @@ def self_test():
             return json.load(f)
 
     pr, runs, live = load("pull-request.json"), load("check-runs.json")["check_runs"], load("branch-rules.json")
-    combined, statuses = load("status.json"), load("statuses.json")  # one real status, from the two endpoints
+    combined, statuses = load("status.json"), load("statuses.json")  # one real status from the two endpoints; another head than check-runs.json, on purpose
     info, listed, full = load("repository.json"), load("rulesets.json"), load("ruleset-detail.json")
     sha, number, cases = pr["head"]["sha"], pr["number"], []
 

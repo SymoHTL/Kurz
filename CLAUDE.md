@@ -64,9 +64,9 @@ Each line names a trap; its evidence is in the entry it links.
 
 1. **A case must be able to fail.** A negative case carries a positive control; an `all()` over a
    collection that can be empty checks that it is not; a captured payload that holds none of the
-   thing under test (the status fixture from before the first status, 2026-10-07) is captured
-   again once the platform has sent one, and the case over it has a floor. Gate: review rule
-   "tools".
+   thing under test (the status fixture captured on 2026-10-01, before the first status, which
+   the first status exposed on 2026-10-07) is captured again once the platform has sent one, and
+   the case over it has a floor. Gate: review rule "tools".
 2. **Every recorded case was seen red.** The mutation is recorded and replayed on every run, so a
    gate that went soft turns the build red. Gate: `self-tests`.
 3. **Unchecked never looks clean.** A scan that is satisfied by finding nothing has a floor; a
@@ -92,7 +92,8 @@ Each line names a trap; its evidence is in the entry it links.
    2026-10-02, was retired by the owner on 2026-10-07 after it had stalled every round; the bill
    is counted before the run and named in the report after it. A run off the pipeline spends the
    seat at local prices and starts only after the owner said go to a bill that was named. The
-   bill is batches times passes times the price of a pass, with the batches from
+   bill is batches times passes times the price of a pass where it runs (in CI about 0.2 to 0.3
+   USD, off the pipeline about 1.3 to 1.8 USD; the entry below has the measurements), with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
    takes every pass up to the cap, so its bill is the plan's upper bound. On 2026-10-02 a bill was
    named from the 20 batches of an earlier run; the head had grown to 30, and the run was stopped
@@ -124,11 +125,13 @@ Each line names a trap; its evidence is in the entry it links.
   stopped at the pass cap with defects above low still open completed, and posts `success` with
   "NOT converged" in its description: HAZARD (#17). Nothing proves that a status of this name came
   from a completed review: every workflow run of the repository, and everyone who may write
-  statuses, can post it. HAZARD (#11). The pinned check accepts this status: seen on 2026-10-07,
-  when pull request 22 was mergeable on it alone and merged through the merge tool with no waiver
-  (#5, closed). The tool reads the status from the list of statuses, the one endpoint that names
-  the creator ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
-  Gate: `self-tests` (the tool's read of the captured status).
+  statuses, can post it. HAZARD (#11). The pinned check accepts this status: seen once, on
+  2026-10-07, when pull request 22 was mergeable on it alone and merged with no waiver through the
+  fixed copy of the merge tool on the branch that carried the fix (#5, closed); nothing re-checks
+  the platform on that. The tool reads the status from the list of statuses, the one endpoint that
+  names the creator ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
+  Gate: `self-tests` for the tool's read of the captured status; the platform's acceptance is a
+  fact seen, not a gate.
 - `gates` red: read the `=== gates` table at the end of the log and fix the first row that turned
   the run red: FAIL, BROKEN or NOT RUN, or PARTLY on a gate that is not listed (the docstring of
   `tools/gates.py` is the one definition). A red `pr-title` or `pr-breadth` is fixed by editing
@@ -255,7 +258,10 @@ Gate: review rule "rules for sessions".
   cancel a running review; a push to a Ready pull request does cancel it. `judgment step`
 - **A finding above low is a thread, and a thread is answered by an edit.** On the design
   record, the reference, the corpus, the knowledge store and rule files the file must change
-  before the thread is resolved; on tool and workflow code a written reply also counts.
+  before the thread is resolved; on tool and workflow code a written reply also counts. After
+  the fix push, `py -3 tools/pr_gates.py resolve --pr N --go` resolves the threads whose files all
+  changed and leaves the rest open with the reason
+  ([knowledge/resolve-what-the-edit-answered.md](knowledge/resolve-what-the-edit-answered.md)).
   Gate: `pr-findings`.
 - **Low findings open no thread and hold no merge** (the owner's decision, 2026-10-02). The
   reviewer collects them on the open issue labelled `review-lows`, where they are fixed together.

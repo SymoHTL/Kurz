@@ -35,7 +35,8 @@ How this repository is built around it:
   stays pending.
 - Whether that status satisfies the ruleset's pinned app had not been seen on the live platform
   by 2026-10-02, because no review had run in CI yet. On 2026-10-07 it did: pull request 22 was
-  mergeable on the status alone and merged with no waiver (issue #5 closed). The merge tool, which
+  mergeable on the status alone and merged with no waiver, through the fixed copy of the merge tool
+  on the branch that carried the fix (issue #5 closed). The merge tool, which
   reads the same status, has to read it from the endpoint that names its creator:
   [[the-combined-status-drops-the-creator]]. What stays ungated: any workflow run of this
   repository can post a status of that name: HAZARD #11, see [[the-review-runs-the-default-branch]].

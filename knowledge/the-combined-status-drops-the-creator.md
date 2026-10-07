@@ -10,7 +10,8 @@ metadata:
 On 2026-10-07 the review of pull request 22 completed in CI and posted the commit status
 `review` = success on its head, the first real one in this repository. GitHub called the pull
 request mergeable: the status satisfied the pinned check, which closed issue #5. The merge tool
-refused the same head with `review=absent`.
+refused the same head with `review=absent`; the head was merged with the fixed copy of the tool
+on the branch that carried the fix, no waiver.
 
 The tool read the statuses from the combined status,
 `GET repos/{owner}/{repo}/commits/{ref}/status`, and kept only those whose `creator.login` is the
@@ -20,9 +21,11 @@ login the pinned app posts as. The combined status carries no `creator` at all: 
 context read as absent.
 
 The list of statuses, `GET repos/{owner}/{repo}/commits/{ref}/statuses`, carries `creator`
-(`login`, `id`, `type`) on each entry. It is a different shape: every status ever posted for the
-ref, newest first, not one per context; so a reader takes the newest of a context, or an older
-`error` from a run that later succeeded outvotes the success.
+(`login`, `id`, `type`) on each entry. It is a different shape: GitHub's documentation of the
+endpoint lists every status posted for the ref in reverse chronological order, the latest first,
+not one per context (the captured list holds one entry, so the order was not seen here); so a
+reader takes the newest of a context, or an older `error` from a run that later succeeded
+outvotes the success.
 
 ## Why the self-test did not catch it
 
@@ -37,8 +40,8 @@ the thing under test can fail no case about it.
   and the newest status of a context from the pinned poster counts (`tools/merge_pr.py`,
   `head_states` and `context_states`). Gate: `self-tests`: the real status is read as success from
   the captured list, the same status from the captured combined status does not count, the tool
-  asks the forge for the list, the newest status counts; each case has its mutation in
-  `tools/red_proofs.json`.
+  asks the forge for the list, the newest status of a context counts, an older success does not
+  outvote a newer error; each case has its mutation in `tools/red_proofs.json`.
 - A fixture captured before the platform had sent the thing under test is captured again once it
   has, and a case over a captured collection has a floor; `tools/fixtures/SOURCES.txt` says when
   and from which head each payload came. Gate: review rule "tools" (CLAUDE.md, Tests item 1).

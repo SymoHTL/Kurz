@@ -122,6 +122,7 @@ sections:
       - A docstring or usage text that the code contradicts.
       - A self-test that cannot fail - a negative assertion without a positive control, an all() over a collection that can be empty, an expectation computed by the code under test.
       - An invented fixture where the real payload was available, or a fixture edited away from what the platform sent without saying so.
+      - A captured payload that holds none of the thing a case reads (an empty list from before the platform sent the first one) with no floor in the case over it, or such a fixture kept once the platform has sent the thing.
       - Code that lexes, parses, type-checks, interprets or generates Kurz. The design phase allows none.
 
   # The next two sections cover every surface their rules can be broken on.

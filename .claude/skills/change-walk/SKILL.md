@@ -60,9 +60,10 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
 
 A review run spends the owner's Claude seat: about 1.4 to 1.8 USD and 6 to 18 minutes per pass (`knowledge/what-a-review-pass-costs.md`), at
 least two passes per batch of the diff (`knowledge/what-a-review-pass-costs.md`). A run in CI, the one
-Ready or a push starts or a dispatch, starts without a question to the owner (the owner's decision,
-2026-10-07); its bill is named in the report. A run off the pipeline starts after the owner said go
-to the bill named. `judgment step`
+Ready or a push starts or a dispatch, starts without a question to the owner: the question before
+every run, set on 2026-10-02 after the first bills, was retired by the owner on 2026-10-07 because
+it stalled every round for a run of one to two USD; the bill is named in the report. A run off the
+pipeline, at local prices, starts after the owner said go to the bill named. `judgment step`
 Count the batches on the head that will be reviewed, with
 `py -3 tools/review/review.py --pr <N> --plan`, which pays nothing; never take them from an
 earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
@@ -117,9 +118,13 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    `review-lows`; they hold no merge and are fixed together, or with a push that is needed
    anyway. A pull request needs no further round once a round reports nothing above low.
    Gate: `self-tests` for where the reviewer puts them; fixing them is a `judgment step`.
-7. Order: edit, resolve the threads, then push ONE commit with every fix. Each push is a new
-   head that needs its own review. Never push to cancel a running review; a push to a Ready
-   pull request does cancel it. `judgment step`
+7. Order: edit, push ONE commit with every fix, then resolve the threads the edits answered:
+   `py -3 tools/pr_gates.py resolve --pr <N>` prints which threads the head's edits answer and
+   which stay open and why, and `--go` resolves the former
+   (`knowledge/resolve-what-the-edit-answered.md`); what stays open gets its reply or edit first.
+   The `gates` run of the push saw the threads open: a Ready event or a description edit runs it
+   again. Each push is a new head that needs its own review. Never push to cancel a running
+   review; a push to a Ready pull request does cancel it. `judgment step`
 
 ## 4. Merge
 

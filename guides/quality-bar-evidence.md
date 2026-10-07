@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-07
-digest: e85414a45c30dd60a1f766ef1e3baf0faaac57351aa8a223ec6ae764abd88238
+digest: 7a60f957812565d645ff65b8ed00335baf5be60007edf3477dffae2a425de4cc
 ttl_days: 60
 metadata:
   type: reference
@@ -61,13 +61,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/lint_ci.py` | 84 | 84 |
 | `tools/lint_knowledge.py` | 61 | 44 |
 | `tools/lint_reference.py` | 56 | 58 |
-| `tools/merge_pr.py` | 132 | 113 |
-| `tools/pr_gates.py` | 55 | 50 |
+| `tools/merge_pr.py` | 132 | 114 |
+| `tools/pr_gates.py` | 65 | 56 |
 | `tools/quality_evidence.py` | 28 | 27 |
 | `tools/red_proof.py` | 29 | 26 |
 | `tools/review/review.py` | 239 | 205 |
 | `tools/tree_gate.py` | 81 | 51 |
-| **total** | 815 | 694 |
+| **total** | 825 | 701 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -75,15 +75,15 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 26 |
+| Entries in INDEX.md | 27 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
-| tagged RECIPE | 1 |
+| tagged RECIPE | 2 |
 | tagged TRAP | 5 |
 | Review rule sections | 11 |
-| Review rules | 63 |
+| Review rules | 64 |
 <!-- /generated:store -->
 
 ## The design record
@@ -129,7 +129,7 @@ counted from the record that the merge tool posts.
 | Pull requests merged | 5 |
 | Merged over red, with a recorded waiver | 4 |
 | Review findings posted: high | 37 |
-| Review findings posted: medium | 385 |
-| Review findings posted: low | 320 |
+| Review findings posted: medium | 393 |
+| Review findings posted: low | 328 |
 | Open HAZARD issues | 11 |
 <!-- /generated:forge -->

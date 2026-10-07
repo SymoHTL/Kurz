@@ -1,6 +1,6 @@
 ---
 name: what-a-review-pass-costs
-description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 18 minutes, whatever the model and effort; per pass about 1.4 to 1.8 USD at list price on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD, so a review run is started only with the owner's go-ahead
+description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 18 minutes, whatever the model and effort; per pass about 1.4 to 1.8 USD at list price on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD; in CI a pass reports 0.19 to 0.26 USD (2026-10-07). A run in CI starts without a question to the owner since 2026-10-07; a run off the pipeline waits for the owner's go-ahead to the bill named
 metadata:
   type: reference
 ---
@@ -62,7 +62,10 @@ What follows from it:
   capturing the answers under `tools/review/fixtures/` again: the unit suite reads real answers of
   the pinned model.
 - A review costs batches times passes, and a batch needs at least two passes. An ordinary pull
-  request of one batch: two passes, about 3 USD, about 20 minutes.
+  request of one batch: two passes, about 3 USD off the pipeline and about 0.5 USD in CI, about
+  20 minutes. In CI a pass reported 0.19 to 0.26 USD on 2026-10-07 (four runs: 1.94 USD for 10
+  passes, 1.42 for 6, 1.04 for 4, 1.85 for 7); off the pipeline a pass reported 1.34 USD the same
+  day. Why the two places report prices this far apart was not established.
 - A run outside CI can be cut to a bill named in advance: `--passes N` (1 to 5, with `--local`
   or `--dry-run` only) gives a batch at most N passes, so `--passes 1` costs batches times one
   pass. What it gives up is the second pass, the one that shows whether the first found
@@ -77,8 +80,9 @@ What follows from it:
 - A review run in CI, a dispatch (`gh workflow run review.yml`) or the run the forge starts by
   itself when the session marks a pull request Ready or pushes to a Ready one, starts without a
   question to the owner. The question before every run, the owner's decision of 2026-10-02 after
-  the first bills, was retired by the owner on 2026-10-07: it had stalled every round for a run of
-  one to two USD. The bill is counted before the run and named in the report after it. A run off
+  the first bills, was retired by the owner on 2026-10-07: it had stalled every round for a run
+  that costs one to two USD in CI (the prices above). The bill is counted before the run and
+  named in the report after it. A run off
   the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go
   to the bill named. `judgment step`
 - The bill is counted on the head that will be reviewed, never taken from an earlier run:
