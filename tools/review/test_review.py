@@ -106,6 +106,8 @@ class MemoryForge(rv.Forge):
         self.base, self.heads = base, list(heads)
         self.issues, self.opened, self.collected = [], [], []  # open lows issues, issues this run opened, (issue, comment) pairs
         self.first_write = None  # how long the log was when the first write reached the wire
+        self.labels = []  # labels this run put on the pull request
+        self.refuse_labels = False  # the forge refuses the label write
 
     def pr(self):
         # the captured payload, with the head and the base of this case; its state is open, like the real one's
@@ -148,6 +150,10 @@ class MemoryForge(rv.Forge):
             self.threads.append(comment)
         elif path == f"issues/{self.number}/comments":
             self.notes.append(comment)
+        elif path == f"issues/{self.number}/labels":
+            if self.refuse_labels:
+                raise kit.Refused("`gh api` exited 1: gh: Not Found (HTTP 404)")
+            self.labels.extend(payload["labels"])
         elif path.startswith("issues/"):
             self.collected.append((int(path.split("/")[1]), body))
         elif path.startswith("statuses/"):
@@ -790,11 +796,24 @@ def suite(case):
          and kinds(forge) == ["failed", "off-pipeline"] and stored(forge) == ["a.md", "b.md", "e.md", "new.kz"] and len(forge.threads) == 1,
          (again.batches, code, kinds(forge), stored(forge)))
     case("run: a run outside CI posts no status", forge.statuses == [], forge.statuses)
+    case("run: a completed run outside CI labels the pull request with the head, so that Ready of that head starts no paid run",
+         forge.labels == [f"{rv.LOCAL_LABEL}{HEAD}"], forge.labels)
+    case("run: the label the reviewer adds is the one the workflow's clause builds from the head",
+         f"format('{rv.LOCAL_LABEL}{{0}}', github.event.pull_request.head.sha)"
+         in kit.read(os.path.join(FIX, "..", "..", "..", ".github", "workflows", "review.yml")), rv.LOCAL_LABEL)
+    forge = MemoryForge()
+    forge.refuse_labels = True
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local"])
+    case("run: a refused label write posts the findings and the note, says the label is missing, and ends the run red",
+         code != 0 and forge.labels == [] and "LABEL NOT ADDED" in out and "REVIEW DID NOT COMPLETE (failed)" in out
+         and any("could NOT be added" in (n["body"] or "") for n in forge.notes) and len(forge.threads) == 1,
+         (code, forge.labels, kinds(forge)))
     success, error = [(HEAD, "review", "success")], [(HEAD, "review", "error")]
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
     case("run: in CI a completed review posts the success status", (code, forge.statuses) == (0, success) and "REVIEW COMPLETE" in out,
          (code, forge.statuses))
+    case("run: in CI the pull request gets no label", forge.labels == [], forge.labels)
     case("run: the rules are asked from the default branch", forge.asked == ["trunk"], forge.asked)
     forge = MemoryForge(heads=(HEAD, "d" * 40))
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")

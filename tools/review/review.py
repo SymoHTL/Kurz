@@ -66,6 +66,17 @@ COMMENT_CHARS = 65_536  # the forge's limit on a comment body; what is posted is
 # Low findings open no thread. They are collected on the open issue with this label, and the pull
 # request gets a note that lists them without their bodies: this many fit one comment.
 LOWS_LABEL, NOTE_FINDINGS = "review-lows", 150
+# A review off the pipeline posts no status, and the run the forge starts on its own when the pull
+# request goes Ready would spend the seat on the same head again: a completed off-pipeline review
+# labels the pull request `reviewed-<head sha>`, and the workflow's job skips the Ready event of a
+# pull request whose head carries that label (the clause is pinned by tools/lint_ci.py). The label
+# names one head, so every other head, pushed before or after Ready, is reviewed by the run its
+# event starts, and a stale label matches nothing; nothing removes it, and the forge creates a label
+# it does not have. The skipped job is `review-run`: its skip reports a check of that name and
+# never the status `review`, which a run that completed posts as success and a run that failed as
+# error (lint_ci pins the job's name). A label write the forge refuses ends the run red: Ready
+# would start the paid run.
+LOCAL_LABEL = "reviewed-"  # followed by the 40 hex digits of the head: 49 characters, under the forge's 50
 POST_MARGIN_S = 300  # kept back from the job timeout for posting
 # The forge blocks an account that creates content too fast (its secondary rate limit; 40 posts
 # in a row were enough on 2026-10-02, and its documentation asks for a second between writes).
@@ -715,6 +726,10 @@ class Forge:
     def note(self, body):
         self.post(f"issues/{self.number}/comments", {"body": body})
 
+    def label(self, name):
+        """Put a label on the pull request."""
+        self.post(f"issues/{self.number}/labels", {"labels": [name]})
+
     def lows_issues(self):
         """The open issues that collect low findings, oldest first."""
         open_issues = kit.gh_pages(f"repos/{self.repo}/issues?state=open&labels={LOWS_LABEL}&per_page=100")
@@ -1008,11 +1023,23 @@ def review(argv):
             # A review at the pass cap completed: its findings are threads, and it says what it is.
             forge.status(head, "success", f"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: {summary}")
         else:
+            label, labelled = f"{LOCAL_LABEL}{head}", True
+            try:
+                forge.label(label)
+            except kit.Refused as e:
+                labelled = False
+                print(f"  LABEL NOT ADDED ({public(str(e))[:200]}): marking the pull request Ready starts a paid run")
+            about_label = (f"the label `{label}` keeps the workflow from starting a paid run of its own when this head "
+                           f"goes Ready" if labelled else
+                           f"the label `{label}` could NOT be added: marking this head Ready starts a paid run")
             forge.note(f"**Off-pipeline review** of `{head}` by `{me}`: {summary}; converged: {'no' if capped else 'yes'}{limited}; "
                        f"model `{MODEL}`, effort `{EFFORT}` asked for; rules from {rules_from}; "
                        f"git blob ids of what reviewed: {blobs}. "
                        f"No `review` status is posted by a run outside CI, so merging this head needs the owner's approval "
-                       f"for this item.\n\n{marker('note', {'kind': 'off-pipeline', 'sha': head})}")
+                       f"for this item; {about_label}.\n\n{marker('note', {'kind': 'off-pipeline', 'sha': head})}")
+            if not labelled:
+                return stop("failed", f"the label {label} was not added, so marking the pull request Ready starts a paid "
+                                      f"run of this head; add it by hand before Ready. Findings posted: {summary}")
         print(f"REVIEW COMPLETE head={head} files={len(files)} replayed={len(replay)} {summary}")
         return 0
     except ReviewError as e:

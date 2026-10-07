@@ -71,12 +71,21 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    workflow on another branch can drop it: HAZARD (#11).
 2. When the description is final, mark it Ready once: `gh pr ready <N>`. Where the forge starts
    the workflow, that starts the review, with the workflow, the reviewer and the rules of the
-   default branch. Whether it starts is the event policy: HAZARD (#10). An edit of the title or
-   the description after the review is text the review never read: HAZARD (#13).
+   default branch. When the review ran off the pipeline instead (the last bullet of step 3, while
+   the pull request was still a Draft), wait until `gh pr view <N> --json labels` shows
+   `reviewed-<sha>` for the head you mark Ready: the job then skips that Ready event, while any
+   other head, pushed before or after Ready, is reviewed by the run its event starts. Never mark
+   Ready meaning to cancel the run: a run that started is a bill, cancelled or not
+   (`knowledge/a-cancel-does-not-beat-the-runner.md`). Gate: `ci-config` pins the clause that
+   skips the Ready event of the labelled head; the decision to mark Ready is a `judgment step`.
+   Whether the run starts is the event policy: HAZARD (#10). An edit of the title or the
+   description after the review is text the review never read: HAZARD (#13).
 3. Wait for the commit status `review`. `gh pr checks <N>` shows it. Gate: the required check.
-   - `pending`: no review ran on this head. Ready, and no `review` run of this head in the
-     Actions list: check `knowledge/pull-request-target-is-blocked-by-default.md` first, then
-     dispatch it as in step 1.
+   - `pending` on a pull request whose head carries the label `reviewed-<its sha>`: by design, the
+     review of that head ran off the pipeline; the step is the owner's approval for that head at the
+     merge (section 4, item 4), not a dispatch. On any other head, `pending` means no
+     review ran on it. Ready, and no `review` run of this head in the Actions list: check
+     `knowledge/pull-request-target-is-blocked-by-default.md` first, then dispatch it as in step 1.
    - `error`: open the run and read its last line, `REVIEW DID NOT COMPLETE (<kind>)`.
      `usage-limit`: wait for the reset the message names; running it again now fixes nothing.
      `credential`: only the owner can fix the secret. `budget`: run it again; what it found is
@@ -88,9 +97,13 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    - No review can run in CI (no credential, or the reviewer itself is what the pull request
      adds): with the owner's go-ahead, in the background with the output in a file:
      `py -3 tools/review/review.py --pr <N> --local`. It prints one line per pass and every
-     finding in full, posts the findings and an audit note, and no status: the merge then needs
-     the owner's approval for that pull request and head. HAZARD (#3). When the owner caps the
-     bill, add `--passes <N>`: a batch then gets at most N passes, and the note names the limit.
+     finding in full, posts the findings, labels the pull request `reviewed-<head sha>` so that
+     Ready of that head starts no second run, posts an audit note that says whether the label
+     landed, and posts no status (a label write the forge refuses ends the run with
+     `REVIEW DID NOT COMPLETE (failed)`: add the label by hand before Ready): the merge then needs
+     the owner's approval for that pull request and head. Run it while the pull request is a
+     Draft, before step 2. HAZARD (#3). When the owner caps the bill, add `--passes <N>`: a batch
+     then gets at most N passes, and the note names the limit.
 4. Read every thread before fixing anything. Every thread, with its first comment:
    `gh api graphql --paginate -f owner=<owner> -f name=<name> -F pr=<N> -f query='query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { reviewThreads(first: 50, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { isResolved path comments(first: 1) { nodes { body } } } } } } }'`
    What is still unanswered: `py -3 tools/pr_gates.py findings --pr <N>`. Gate: `pr-findings`.

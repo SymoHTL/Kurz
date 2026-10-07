@@ -11,7 +11,7 @@ This repository is written mostly by AI agent sessions. The quality bar is what 
 rules that ship with their gates, a knowledge store, an automated reviewer that has to complete
 before a merge, and server-side merge checks. The method comes from a tutorial on quality bars
 for agent-driven development that is not published and not part of this repository (the copy
-used was read on 2026-10-01). It is written for GitLab; this guide states its laws and says how
+used was read on 2026-10-01, its version of 2026-10-07 on that day). It is written for GitLab; this guide states its laws and says how
 each part looks here, on GitHub.
 
 The numbers that show the bar working are in [quality-bar-evidence.md](quality-bar-evidence.md).
@@ -51,6 +51,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Living diagrams | Four entries tagged LIVING in `INDEX.md`; the lint requires each to have a diagram and its update triggers, and at least four of them to exist. |
 | Living guides | This guide and the evidence guide. The tree gate keeps both portable. The evidence guide's numbers are generated, carry a digest that a hand edit breaks, and expire: when the TTL runs out, `knowledge` is red on every pull request and on `main`, whatever the change touches, until a pull request regenerates the page with `py -3 tools/quality_evidence.py`. That tool refuses while a self-test or the reference lint is red and needs a login that can read the forge; so once the TTL has run out, a red reference blocks the only way back to green until it is fixed. |
 | Not in the method: the product is a language definition | `reference/` (rules with an id and a status), `corpus/` (one case per file) and `tools/lint_reference.py` (gate `reference`), which keeps the two consistent in shape. Nothing runs a case (HAZARD #1). |
+| Product rules: the decisions a diff must respect (section 7.5 of the guide's 2026-10-07 version) | The design record `kurz-design.md` and `reference/`: one statement per decision, the owner's choice with its date and the options it was chosen against, *(assumed)* and *(proposed)* for what the owner has not decided, and `open` rules for the forks. The reviewer carries the rule "design record", which flags a decision without the owner's choice behind it, as the guide's reviewer carries the product rules. The corpus holds the cases; the gate `reference` checks their shape and that every sample is a case, and nothing runs one (HAZARD #1): whether a rule gets a case, and whether its expectation is right, are judgment steps. The product pass, the product acceptance and the knowledge-scout hook are not here; see "Not implemented". |
 
 ## Gates
 
@@ -85,7 +86,7 @@ on, and the tree gate does not rely on them.
 | "All threads must be resolved" | Ruleset rule `pull_request` with `required_review_thread_resolution`. |
 | "Pipelines must succeed" | Ruleset rule `required_status_checks`, each check pinned to the GitHub Actions app. The pin keeps out other apps and users. It does not tell one workflow run of this repository from another: a workflow that a branch adds can report a check or post a status of the same name (HAZARD #11). What stands against that is the review of every change to a workflow, and that only people who may write here can push a branch. |
 | "Skipped pipelines count as successful: off" | No such switch. A job skipped by `if:` reports success, so the `gates` job has no `if:` anywhere, and the review's required check is not a job but the commit status `review`, which the reviewer posts when a review completed (`knowledge/a-skipped-job-reports-success.md`). Whether that status satisfies the pinned check had not been seen by 2026-10-02 (HAZARD #5); if it does not, every merge needs the gate-flip. |
-| Draft lane as a blocking manual job | A Draft cannot be merged. Marking it Ready starts the review where the forge starts the workflow, which depends on the event policy two rows down. A Draft, and a pull request from outside, is reviewed on demand: `gh workflow run review.yml -f pr=N`, started on the default branch. |
+| Draft lane as a blocking manual job | A Draft cannot be merged. Marking it Ready starts the review where the forge starts the workflow, which depends on the event policy two rows down, except the Ready event of a head labelled `reviewed-<its sha>`, which a completed off-pipeline review of that head adds (the job's `if`, pinned by `ci-config`; every other head is reviewed by the run its event starts, and the skipped job reports a check named `review-run`, never the required status `review`); a run that started is a bill, cancelled or not (`knowledge/a-cancel-does-not-beat-the-runner.md`). A Draft, and a pull request from outside, is reviewed on demand: `gh workflow run review.yml -f pr=N`, started on the default branch. |
 | Rules fetched from the target branch | `pull_request_target`: workflow, reviewer and rules all come from the default branch (`knowledge/the-review-runs-the-default-branch.md`). A pull request into another branch is not reviewed in CI. |
 | A merge-request pipeline needs no permission to start | GitHub's default policy blocks `pull_request_target` in a public repository unless an Actions event policy allows it. Whether the rule already blocks here or only evaluates was not known on 2026-10-02 (`knowledge/pull-request-target-is-blocked-by-default.md`). The policy is the owner's setting and nothing asserts it (HAZARD #10). Without it the review is dispatched by hand for each head. |
 | Unanchored thread for the lows | Lows are not threads here (the owner's decision, 2026-10-02). The reviewer collects them as comments on the one open issue labelled `review-lows`, and leaves a note on the pull request that lists them, so that a later run does not report them again. They hold no merge; they are fixed together, or with a push that is needed anyway. |
@@ -189,6 +190,13 @@ changes in the same pull request.
 - **Running the corpus.** Nothing in this repository executes Kurz. The reference lint checks the
   shape of a case and that the reference shows it unchanged; whether an expected output or error
   is right is decided by reading and by the review (HAZARD #1).
+- **The product pass, the product acceptance and the knowledge-scout hook** (section 7.5 of the
+  guide's 2026-10-07 version). They judge a change to a product's surfaces, for users who pay, see
+  and change things. This repository has no product surface; its questions to the owner are design
+  questions, asked by the skill `design-round` before anything is derived from them.
+- **Agent-behaviour plugins.** The guide's 2026-10-07 version installs none; its section 13 says why
+  the two it once used were removed. Nothing here depends on one. The one `ponytail:` comment in
+  `tools/` names a shortcut's ceiling and its upgrade path, and reads without the plugin.
 
 ## Changing the bar
 
