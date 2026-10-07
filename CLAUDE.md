@@ -88,8 +88,11 @@ Each line names a trap; its evidence is in the entry it links.
    (`gh workflow run review.yml`), and the run the forge starts by itself when a session marks a
    pull request Ready or pushes to a Ready one; the Ready run alone is skipped when the head
    carries the label `reviewed-<its sha>`, which a completed off-pipeline review of that head adds.
-   Each of these runs needs the owner's go-ahead for a bill that was
-   named, and the bill is batches times passes times the price of a pass, with the batches from
+   A run in CI starts without a question to the owner: the question before every run, set on
+   2026-10-02, was retired by the owner on 2026-10-07 after it had stalled every round; the bill
+   is counted before the run and named in the report after it. A run off the pipeline spends the
+   seat at local prices and starts only after the owner said go to a bill that was named. The
+   bill is batches times passes times the price of a pass, with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
    takes every pass up to the cap, so its bill is the plan's upper bound. On 2026-10-02 a bill was
    named from the 20 batches of an earlier run; the head had grown to 30, and the run was stopped
@@ -99,7 +102,8 @@ Each line names a trap; its evidence is in the entry it links.
    before the signal reached it ([knowledge/a-cancel-does-not-beat-the-runner.md](knowledge/a-cancel-does-not-beat-the-runner.md)).
    Gate: `self-tests` for the plan (it calls no model and posts nothing) and for the label a
    completed off-pipeline review adds, `ci-config` for the clause of the workflow that skips the
-   Ready event of a labelled head; naming the bill and waiting for the go-ahead is a `judgment step`.
+   Ready event of a labelled head; counting and naming the bill, and the go-ahead for a run off the
+   pipeline, are a `judgment step`.
 7. **An expectation nobody runs is not a proof.** Nothing runs `corpus/`. The lint checks the
    shape of a case; whether its expected output or error is right is decided by reading it
    against the rules it names ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).

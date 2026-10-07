@@ -74,16 +74,19 @@ What follows from it:
 - Passes run in rounds (`in_rounds` in `review.py`): every batch gets one pass before any batch
   gets a second. A time budget of about batches times pass time divided by three buys one pass
   over everything; a run that ends there is red (`budget`), and the next run continues.
-- A review run is started only after the owner said go, with the expected bill named (the
-  owner's decision, 2026-10-02). The runs a session starts are: a run off the pipeline
-  (`--local`), a dispatch (`gh workflow run review.yml`), and the run the forge starts by itself
-  when the session marks a pull request Ready or pushes to a Ready one; the go-ahead comes before
-  each of those actions. `judgment step`
+- A review run in CI, a dispatch (`gh workflow run review.yml`) or the run the forge starts by
+  itself when the session marks a pull request Ready or pushes to a Ready one, starts without a
+  question to the owner. The question before every run, the owner's decision of 2026-10-02 after
+  the first bills, was retired by the owner on 2026-10-07: it had stalled every round for a run of
+  one to two USD. The bill is counted before the run and named in the report after it. A run off
+  the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go
+  to the bill named. `judgment step`
 - The bill is counted on the head that will be reviewed, never taken from an earlier run:
   `py -3 tools/review/review.py --pr N --plan` prints the batches a run would read and the
   passes that is, calls no model and posts nothing; with `--passes N` it counts for that limit.
-  The bill is those passes times the price of a pass above. A go-ahead covers the bill that was
-  named: when the first line of a run names more batches than the plan did, stop the run.
+  The bill is those passes times the price of a pass above. The count is checked against the
+  run's first line: a run off the pipeline that names more batches than the plan did is stopped,
+  because the go-ahead covered the plan; a run in CI is reported with the count it names.
   Gate: `self-tests` for the plan; the rest is a `judgment step`.
 - Low findings do not keep a review going: a batch converges when a pass adds nothing above low,
   and lows are collected on the issue labelled `review-lows` instead of threads. They are fixed

@@ -148,8 +148,9 @@ What is specific to this repository:
   A run that posts the status does not take the option, so no caller can make the required
   check cheaper than two passes.
 - **The bill is counted before it is named.** `review.py --pr N --plan` prints the batches a run
-  would read and the passes that is, calls no model and posts nothing. The owner's go-ahead is
-  for a bill named from that count (`CLAUDE.md`, "Tests", rule 6).
+  would read and the passes that is, calls no model and posts nothing. The bill named in the
+  report, and the owner's go-ahead for a run off the pipeline, come from that count (`CLAUDE.md`,
+  "Tests", rule 6); a run in CI starts without a question (the owner's decision, 2026-10-07).
 - **Text is checked when it is read, before it is printed or posted.** A finding's title and
   body are withheld where they hold a credential shape or a machine-bound string as the model's
   answer is parsed (`public` in `review.py`), so the log and the posts show the same text; a
