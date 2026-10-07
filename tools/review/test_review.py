@@ -107,6 +107,7 @@ class MemoryForge(rv.Forge):
         self.issues, self.opened, self.collected = [], [], []  # open lows issues, issues this run opened, (issue, comment) pairs
         self.first_write = None  # how long the log was when the first write reached the wire
         self.labels = []  # labels this run put on the pull request
+        self.refuse_labels = False  # the forge refuses the label write
 
     def pr(self):
         # the captured payload, with the head and the base of this case; its state is open, like the real one's
@@ -150,6 +151,8 @@ class MemoryForge(rv.Forge):
         elif path == f"issues/{self.number}/comments":
             self.notes.append(comment)
         elif path == f"issues/{self.number}/labels":
+            if self.refuse_labels:
+                raise kit.Refused("`gh api` exited 1: gh: Not Found (HTTP 404)")
             self.labels.extend(payload["labels"])
         elif path.startswith("issues/"):
             self.collected.append((int(path.split("/")[1]), body))
@@ -796,6 +799,13 @@ def suite(case):
     case("run: a completed run outside CI labels the pull request, so that Ready starts no paid run", forge.labels == [rv.LOCAL_LABEL], forge.labels)
     case("run: the label the reviewer adds is the one the workflow's job reads",
          f"'{rv.LOCAL_LABEL}'" in kit.read(os.path.join(FIX, "..", "..", "..", ".github", "workflows", "review.yml")), rv.LOCAL_LABEL)
+    forge = MemoryForge()
+    forge.refuse_labels = True
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local"])
+    case("run: a refused label write posts the findings and the note, says the label is missing, and ends the run red",
+         code != 0 and forge.labels == [] and "LABEL NOT ADDED" in out and "REVIEW DID NOT COMPLETE (failed)" in out
+         and any("could NOT be added" in (n["body"] or "") for n in forge.notes) and len(forge.threads) == 1,
+         (code, forge.labels, kinds(forge)))
     success, error = [(HEAD, "review", "success")], [(HEAD, "review", "error")]
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")

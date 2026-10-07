@@ -31,11 +31,17 @@ winning that race spends money at random.
   unwanted.
 - A run that must not start is kept from starting at its trigger: the review workflow's job skips
   a pull request labelled `reviewed-off-pipeline`, and a completed run of `review.py --local`
-  puts that label on the pull request. `tools/lint_ci.py` pins the clause of the job's `if`, and
-  the reviewer's self-test proves the label. No tool removes the label: the ruleset still wants
-  the `review` status, so a stale label keeps a paid run from starting and holds nothing else.
+  puts that label on the pull request. The clause reads the label on the Ready event only, so a
+  push to the pull request is reviewed as before and a stale label does nothing; `tools/lint_ci.py`
+  pins the clause and the job's name (`review-run`, whose skip reports a check of that name and
+  never the required status `review`), and the reviewer's self-test proves the label, and that a
+  label write the forge refuses ends the run red. No tool removes the label.
 - A head whose review ran off the pipeline has no `review` status and is merged with the owner's
   approval for that head (`merge_pr.py --over-red`), as before; the label changes nothing there.
 - Findings that exist only in a running process are not yet a result. The reviewer prints its
   findings in full before it posts, but at the end of the run; a kill before the end loses them
-  all the same. The answer here is the trigger, not the print: the run is not started.
+  all the same. The answer here is the trigger, not the print: the run is not started. The other
+  kill is a push to a Ready pull request while its review runs, which the job's
+  `cancel-in-progress` turns into the same loss; what holds that path is the one-push rule of
+  `CLAUDE.md` (a `judgment step`), and printing each finding when its pass ends, which would
+  make a kill lose less, is not built.

@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-07
-digest: fb973b8d019cd096f9dc1931c111362c89f63e91e9b53832a3a80f7dbf285988
+digest: b30e559a99323ed3b4a100f97cb0c395daf5924dae43c3df6de54e9b78ebeba5
 ttl_days: 60
 metadata:
   type: reference
@@ -58,16 +58,16 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 |---|---|---|
 | `tools/gates.py` | 33 | 23 |
 | `tools/kit.py` | 17 | 13 |
-| `tools/lint_ci.py` | 83 | 83 |
+| `tools/lint_ci.py` | 84 | 84 |
 | `tools/lint_knowledge.py` | 61 | 44 |
 | `tools/lint_reference.py` | 56 | 58 |
 | `tools/merge_pr.py` | 127 | 109 |
 | `tools/pr_gates.py` | 55 | 50 |
 | `tools/quality_evidence.py` | 28 | 27 |
 | `tools/red_proof.py` | 29 | 26 |
-| `tools/review/review.py` | 238 | 203 |
+| `tools/review/review.py` | 239 | 205 |
 | `tools/tree_gate.py` | 81 | 51 |
-| **total** | 808 | 687 |
+| **total** | 810 | 690 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -125,11 +125,11 @@ counted from the record that the merge tool posts.
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened | 4 |
+| Pull requests opened | 5 |
 | Pull requests merged | 4 |
 | Merged over red, with a recorded waiver | 4 |
-| Review findings posted: high | 34 |
-| Review findings posted: medium | 365 |
-| Review findings posted: low | 300 |
+| Review findings posted: high | 37 |
+| Review findings posted: medium | 378 |
+| Review findings posted: low | 308 |
 | Open HAZARD issues | 12 |
 <!-- /generated:forge -->

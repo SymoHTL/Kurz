@@ -98,7 +98,8 @@ flowchart TD
         head is told to the model and hides nothing on this head's lines"]
         R2["status review: success only from a review that completed on this head;
         at the pass cap it says NOT converged, and is success all the same: HAZARD issue 17.
-        Draft, outside pull request, labelled reviewed-off-pipeline, no run: stays pending.
+        Draft, outside pull request, the Ready event of a pull request labelled reviewed-off-pipeline, no run:
+        stays pending; a skipped job reports a check named review-run, never this status.
         Does it satisfy the ruleset's pinned app: unverified, HAZARD issue 5; if not, every merge needs --over-red.
         Any workflow run of this repository can post the same status: HAZARD issue 11"]
         R3["findings: high and medium become threads on the pull request, per file,
@@ -112,8 +113,9 @@ flowchart TD
         see a file outside its batch, and a breach it rates low opens no thread and holds no merge.
         A rule that names a review rule as its gate has this much; the rest of it is a judgment step"]
         R6["what runs: the workflow file, the reviewer and the rules of the default branch; ci-config pins
-        that nothing of the pull request is checked out, and that the job skips a pull request labelled
-        reviewed-off-pipeline, which a completed off-pipeline review adds: a run that started is a bill. A dispatch on another ref runs that ref's copy,
+        that nothing of the pull request is checked out, and that the job skips the Ready event of a pull request
+        labelled reviewed-off-pipeline, which a completed off-pipeline review adds (a push is reviewed as before;
+        a run that started is a bill). A dispatch on another ref runs that ref's copy,
         and the job's if refuses it only in the default branch's copy: HAZARD issue 11"]
     end
     subgraph M["Merge: server side and the merge tool"]

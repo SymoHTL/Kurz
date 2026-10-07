@@ -83,16 +83,17 @@ Each line names a trap; its evidence is in the entry it links.
 6. **A paid run starts on a bill that was counted, not remembered.** Every review run a session
    starts spends the owner's seat: a run off the pipeline, a dispatch
    (`gh workflow run review.yml`), and the run the forge starts by itself when a session marks a
-   pull request Ready or pushes to a Ready one, unless the pull request carries the label
-   `reviewed-off-pipeline`, which a completed off-pipeline review adds. A run that started is a
-   bill, cancelled or not: on 2026-10-07 a run cancelled while still queued ran two passes before
-   the runner got the signal ([knowledge/a-cancel-does-not-beat-the-runner.md](knowledge/a-cancel-does-not-beat-the-runner.md)).
-   Each needs the owner's go-ahead for a bill that was
+   pull request Ready or pushes to a Ready one; the Ready run alone is skipped when the pull
+   request carries the label `reviewed-off-pipeline`, which a completed off-pipeline review adds.
+   Each of these runs needs the owner's go-ahead for a bill that was
    named, and the bill is batches times passes times the price of a pass, with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
    takes every pass up to the cap, so its bill is the plan's upper bound. On 2026-10-02 a bill was
    named from the 20 batches of an earlier run; the head had grown to 30, and the run was stopped
    at its first line ([knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)).
+   A run that started is a bill, cancelled or not: on 2026-10-07 a run cancelled while the forge
+   still listed it as queued was already on a runner, and two of its batches finished a pass
+   before the signal reached it ([knowledge/a-cancel-does-not-beat-the-runner.md](knowledge/a-cancel-does-not-beat-the-runner.md)).
    Gate: `self-tests` for the plan (it calls no model and posts nothing) and for the label a
    completed off-pipeline review adds, `ci-config` for the clause of the workflow that skips a
    labelled pull request; naming the bill and waiting for the go-ahead is a `judgment step`.
@@ -128,10 +129,13 @@ Each line names a trap; its evidence is in the entry it links.
   [knowledge/pull-request-target-is-blocked-by-default.md](knowledge/pull-request-target-is-blocked-by-default.md).
   Dispatch the review as above. The policy that allows the event is the owner's setting:
   HAZARD (#10).
-- `review` pending on a Ready pull request that carries the label `reviewed-off-pipeline`: the
-  job skipped it by design, because its review ran off the pipeline and posted no status; the
-  merge needs the owner's approval for that head (`--over-red`). Gate: `ci-config` pins the
-  clause; that the approval is asked is a `judgment step`.
+- `review` pending on a Ready pull request that carries the label `reviewed-off-pipeline`, and
+  the head is the one the off-pipeline review's audit note names: the job skipped the Ready event
+  by design, because that review posted no status; the merge needs the owner's approval for that
+  head (`--over-red`). Any other head has no review: a push after the off-pipeline review starts
+  the run as before (the clause reads the label on the Ready event only), and a head without a
+  run gets a dispatch or another off-pipeline review. Gate: `ci-config` pins the clause; reading
+  the note's head is a `judgment step`.
 - A review run that failed (the status says `error`): read the run's last line,
   `REVIEW DID NOT COMPLETE (kind)`. `usage-limit`: wait for the reset, do not run it again now.
   `credential`: the owner fixes the secret. `budget`: run it again; what the run found is posted

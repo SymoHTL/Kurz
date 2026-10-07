@@ -71,15 +71,20 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    workflow on another branch can drop it: HAZARD (#11).
 2. When the description is final, mark it Ready once: `gh pr ready <N>`. Where the forge starts
    the workflow, that starts the review, with the workflow, the reviewer and the rules of the
-   default branch, unless the pull request carries the label `reviewed-off-pipeline`, which a
-   completed off-pipeline review adds (step 3). Never mark Ready meaning to cancel the run: a run
-   that started is a bill, cancelled or not (`knowledge/a-cancel-does-not-beat-the-runner.md`).
-   Whether it starts is the event policy: HAZARD (#10). An edit of the title or
+   default branch. When the review ran off the pipeline instead (the last bullet of step 3, while
+   the pull request was still a Draft), wait until `gh pr view <N> --json labels` shows
+   `reviewed-off-pipeline`: the job then skips the Ready event, and a push after it is reviewed as
+   before. Never mark Ready meaning to cancel the run: a run that started is a bill, cancelled or
+   not (`knowledge/a-cancel-does-not-beat-the-runner.md`). Gate: `ci-config` pins the clause that
+   skips the labelled Ready; the decision to mark Ready is a `judgment step`. Whether the run
+   starts is the event policy: HAZARD (#10). An edit of the title or
    the description after the review is text the review never read: HAZARD (#13).
 3. Wait for the commit status `review`. `gh pr checks <N>` shows it. Gate: the required check.
-   - `pending`: no review ran on this head. Ready, and no `review` run of this head in the
-     Actions list: check `knowledge/pull-request-target-is-blocked-by-default.md` first, then
-     dispatch it as in step 1.
+   - `pending` on a pull request labelled `reviewed-off-pipeline`, on the head the off-pipeline
+     review's audit note names: by design, its review ran off the pipeline; the step is the owner's
+     approval for that head (section 4), not a dispatch. On any other head, `pending` means no
+     review ran on it. Ready, and no `review` run of this head in the Actions list: check
+     `knowledge/pull-request-target-is-blocked-by-default.md` first, then dispatch it as in step 1.
    - `error`: open the run and read its last line, `REVIEW DID NOT COMPLETE (<kind>)`.
      `usage-limit`: wait for the reset the message names; running it again now fixes nothing.
      `credential`: only the owner can fix the secret. `budget`: run it again; what it found is
@@ -92,8 +97,10 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
      adds): with the owner's go-ahead, in the background with the output in a file:
      `py -3 tools/review/review.py --pr <N> --local`. It prints one line per pass and every
      finding in full, posts the findings and an audit note, labels the pull request
-     `reviewed-off-pipeline` so that Ready starts no second run, and posts no status: the merge
-     then needs the owner's approval for that pull request and head. HAZARD (#3). When the owner caps the
+     `reviewed-off-pipeline` so that Ready starts no second run (a label write the forge refuses
+     ends the run with `REVIEW DID NOT COMPLETE (failed)`: add the label by hand before Ready), and
+     posts no status: the merge then needs the owner's approval for that pull request and head.
+     Run it while the pull request is a Draft, before step 2. HAZARD (#3). When the owner caps the
      bill, add `--passes <N>`: a batch then gets at most N passes, and the note names the limit.
 4. Read every thread before fixing anything. Every thread, with its first comment:
    `gh api graphql --paginate -f owner=<owner> -f name=<name> -F pr=<N> -f query='query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { reviewThreads(first: 50, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { isResolved path comments(first: 1) { nodes { body } } } } } } }'`

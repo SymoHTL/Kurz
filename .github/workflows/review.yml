@@ -22,9 +22,10 @@ permissions:
 
 jobs:
   # The required check is the commit status `review`, which this job posts when a review completed.
-  # The job may be skipped: a Draft, a pull request from outside, and a pull request labelled
-  # `reviewed-off-pipeline` (its review ran off the pipeline, which posts no status) get no status
-  # and stay pending.
+  # The job may be skipped: a Draft, a pull request from outside, and the Ready event of a pull
+  # request labelled `reviewed-off-pipeline` (its review ran off the pipeline, which posts no
+  # status) get no status and stay pending; a push to that pull request is reviewed as before. The
+  # skipped job reports a check named `review-run`, never the required status `review`.
   review-run:
     if: >-
       (github.event_name == 'workflow_dispatch' &&
@@ -32,7 +33,7 @@ jobs:
       (github.event_name == 'pull_request_target' &&
       github.event.pull_request.base.ref == github.event.repository.default_branch &&
       github.event.pull_request.draft == false &&
-      !contains(github.event.pull_request.labels.*.name, 'reviewed-off-pipeline') &&
+      !(github.event.action == 'ready_for_review' && contains(github.event.pull_request.labels.*.name, 'reviewed-off-pipeline')) &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
     # On the job, not on the workflow: a run whose job is skipped must not cancel a running review.
     concurrency:
