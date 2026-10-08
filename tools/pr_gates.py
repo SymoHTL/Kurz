@@ -10,7 +10,8 @@ title     a workflow-skip literal, a credential-shaped or machine-bound string o
           pre-push hook ever sees that commit.
 breadth   a pull request over BREADTH_FILES files, or one that touches the quality infrastructure,
           without a non-empty "## Blast radius" section in its description.
-findings  the review policy: every finding the reviewer posted is resolved, and resolved by an
+findings  the review policy: every finding the reviewer posted as a review thread (above low:
+          lows go to the review-lows issue and hold no merge) is resolved, and resolved by an
           edit. A finding on the design record, the reference, the corpus, the knowledge store or
           a rule file counts as answered only when that file changed after the finding; a finding
           on tool, workflow or hook code may also be answered by a written reply: a comment in its
@@ -280,7 +281,8 @@ def fetch_threads(repo, number, get=None):
     owner, name = repo.split("/")
     threads, after = [], None
     while True:
-        args = ["graphql", "-f", f"query={THREADS}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={number}"]
+        # -f sends a string, -F a typed value: an all-digit repository name must stay a String for GraphQL
+        args = ["graphql", "-f", f"query={THREADS}", "-f", f"owner={owner}", "-f", f"name={name}", "-F", f"pr={number}"]
         if after:
             args += ["-f", f"after={after}"]
         page = (get or kit.gh_json)(*args)["data"]["repository"]["pullRequest"]["reviewThreads"]
@@ -362,6 +364,17 @@ def fixture_threads():
         return []
 
 
+def fixture_pull_request():
+    """The forge's real answer for one pull request (see tools/fixtures/SOURCES.txt). {} when the file
+    is missing or unreadable, which fails the cases that need it instead of crashing the suite."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "pull-request.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def fixture_answer():
     """The forge's real answer to RESOLVE (see tools/fixtures/SOURCES.txt). {} when the file is missing
     or unreadable, which fails the cases that need it instead of crashing the suite."""
@@ -376,6 +389,7 @@ def fixture_answer():
 def self_test():
     threads = fixture_threads()
     captured = fixture_answer()
+    recorded = fixture_pull_request()  # each fake below answers it, edited only where a comment says so
     cases = []
 
     def check(name, errors, needle):
@@ -421,8 +435,8 @@ def self_test():
     check("infrastructure with the section", breadth_errors(section, ["tools/kit.py", ".github/workflows/gates.yml"]), None)
     check("the section is found in a description saved with CRLF", breadth_errors(section.replace("\n", "\r\n"), ["tools/kit.py"]), None)
     check("empty section does not count", breadth_errors("## Blast radius\n\n## Test plan\nx", ["tools/kit.py"]), "Blast radius")
-    check("many files without the section", breadth_errors(None, [f"knowledge/e{n}.md" for n in range(16)]), "16 files")
-    check("fifteen files are not many", breadth_errors(None, [f"knowledge/e{n}.md" for n in range(15)]), None)
+    check("many files without the section", breadth_errors("", [f"knowledge/e{n}.md" for n in range(16)]), "16 files")
+    check("fifteen files are not many", breadth_errors("", [f"knowledge/e{n}.md" for n in range(15)]), None)
 
     found = finding_threads(threads)
     cases.append(("the real answer holds finding threads", len(found) >= 1, f"{len(found)} of {len(threads)} threads"))
@@ -500,7 +514,7 @@ def self_test():
                     return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
                 if "/contents/" in args[0]:
                     return {"sha": blob(args[0].split("?ref=")[1])}
-                return {"title": "ok", "body": "", "head": {"sha": "h"}, "commits": 1}
+                return dict(recorded)  # unedited: its head is not the commit of the finding
             return get
 
         out = got(lambda: run_gate("findings", "o/n", 1, paged(lambda ref: "blob@" + ref)))
@@ -611,7 +625,7 @@ def self_test():
                     return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
                 if "/contents/" in args[0]:
                     return {"sha": blob(args[0].split("?ref=")[1])}
-                return {"title": "ok", "body": "", "head": {"sha": head}, "commits": 1}
+                return dict(recorded, head=dict(recorded["head"], sha=head))  # edited: the head this case pushed
             get.asked = asked
             return get, written
 
@@ -695,7 +709,8 @@ def self_test():
         finally:
             time.sleep = saved_sleep
 
-    pr = {"title": "ok", "body": "", "head": {"sha": "h"}, "commits": 1}
+    # edited: no description, so the breadth gate has a section to miss; the recorded one lists 1 commit, as these cases do
+    pr = dict(recorded, body="")
     commit, changed = {"commit": {"message": "x\n\n[skip ci]"}}, {"filename": "tools/kit.py"}
     listed = lambda commits, files: (lambda path: list(commits) if "/commits" in path else list(files))
     out = got(lambda: run_gate("title", "o/n", 1, lambda path: pr, listed([], [changed])))
@@ -706,6 +721,22 @@ def self_test():
     out = got(lambda: run_gate("title", "o/n", 1, lambda path: {**pr, "commits": 251}, listed([commit], [])))
     cases.append(("title: a pull request with more commits than the forge listed is refused, not passed on the ones read",
                   type(out) is kit.Refused and "251 commits" in str(out) and "listed 1" in str(out), repr(out)))
+    out = got(lambda: run_gate("title", "o/n", 1, lambda path: dict(pr, body=None), listed([{"commit": {"message": "x"}}], [])))
+    cases.append(("title: a description the forge sends as null is read as empty", out == ([], "title, description and 1 commit messages"),
+                  repr(out)))
+    out = got(lambda: run_gate("breadth", "o/n", 1, lambda path: dict(pr, body=None), listed([], [changed])))
+    cases.append(("breadth: a description the forge sends as null needs the section, like an empty one",
+                  type(out) is tuple and any("Blast radius" in e for e in out[0]), repr(out)))
+    sent = []
+
+    def threads_once(*args):
+        sent.append(args)
+        return {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}}
+
+    got(lambda: fetch_threads("o/0123", 7, threads_once))
+    flags = {a: sent[0][n - 1] for n, a in enumerate(sent[0]) if a in ("owner=o", "name=0123", "pr=7")} if sent else {}
+    cases.append(("threads: owner and name go as strings, so an all-digit name stays a name; the number goes typed",
+                  flags == {"owner=o": "-f", "name=0123": "-f", "pr=7": "-F"}, repr(flags)))
     out = got(lambda: run_gate("breadth", "o/n", 1, lambda path: pr, listed([commit], [])))
     cases.append(("breadth: a pull request that lists no files is refused", type(out) is kit.Refused and "no files" in str(out), repr(out)))
     moved = {"filename": "knowledge/walk.md", "previous_filename": ".claude/skills/change-walk/SKILL.md", "status": "renamed"}
