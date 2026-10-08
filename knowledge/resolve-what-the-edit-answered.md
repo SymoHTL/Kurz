@@ -6,8 +6,8 @@ metadata:
 ---
 
 A review round ends with threads to resolve. The rule (CLAUDE.md, "Git, pull requests &
-merging") says a thread above low is answered by an edit of its file, and on tool or workflow
-code also by a written reply; the gate `pr-findings` reads exactly that, after the fact.
+merging") says a thread above low is answered by an edit of its file, and on tool, workflow or
+hook code also by a written reply; the gate `pr-findings` reads exactly that, after the fact.
 Resolving by hand in the browser is one click per thread and no check; the GraphQL mutation by
 hand was a script per pull request, twice, before the third-time rule made it the tool.
 
@@ -34,7 +34,7 @@ hand was a script per pull request, twice, before the third-time rule made it th
    description edit runs the gates again without a review, and the merge tool reads the threads
    again at the merge.
 
-Gate: `self-tests` (fourteen cases: the plan's six, and the write's eight, among them the pacing,
-the order of write and print, and what a failure of any kind says; each named by a mutation in
+Gate: `self-tests` (fifteen cases: the plan's six, and the write's nine, among them the pacing,
+the order of write and print, and what a failure of any kind, an interrupt too, says; each named by a mutation in
 `tools/red_proofs.json`). Which threads need a reply, and resolving a person's thread, are a
 `judgment step`.

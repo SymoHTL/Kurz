@@ -66,7 +66,8 @@ Each line names a trap; its evidence is in the entry it links.
    collection that can be empty checks that it is not; a captured payload that holds none of the
    thing under test (the status fixture captured on 2026-10-01, before the first status, which
    the first status exposed on 2026-10-07) is captured again once the platform has sent one, and
-   the case over it has a floor. Gate: review rule "tools".
+   the case over it has a floor. Gate: review rule "tools" for the floor; the re-capture is a
+   `judgment step`.
 2. **Every recorded case was seen red.** The mutation is recorded and replayed on every run, so a
    gate that went soft turns the build red. Gate: `self-tests`.
 3. **Unchecked never looks clean.** A scan that is satisfied by finding nothing has a floor; a
@@ -92,7 +93,7 @@ Each line names a trap; its evidence is in the entry it links.
    2026-10-02, was retired by the owner on 2026-10-07 after it had stalled every round; the bill
    is counted before the run and named in the report after it. A run off the pipeline spends the
    seat at local prices and starts only after the owner said go to a bill that was named. The
-   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.26 USD,
+   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.27 USD,
    off the pipeline about 1.3 to 1.8 USD, measured in
    [knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)), with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
@@ -261,7 +262,7 @@ Gate: review rule "rules for sessions".
   request does cancel it. `judgment step`
 - **A finding above low is a thread, and a thread is answered by an edit.** On the design
   record, the reference, the corpus, the knowledge store and rule files the file must change
-  before the thread is resolved; on tool and workflow code a written reply also counts. After
+  before the thread is resolved; on tool, workflow and hook code a written reply also counts. After
   the fix push, `py -3 tools/pr_gates.py resolve --pr N --go` resolves the reviewer's threads whose
   files all changed since the finding's commit and leaves the rest open with the reason; a thread
   answered by a reply is resolved by hand

@@ -13,7 +13,7 @@ breadth   a pull request over BREADTH_FILES files, or one that touches the quali
 findings  the review policy: every finding the reviewer posted is resolved, and resolved by an
           edit. A finding on the design record, the reference, the corpus, the knowledge store or
           a rule file counts as answered only when that file changed after the finding; a finding
-          on tool or workflow code may also be answered by a written reply: a comment in its
+          on tool, workflow or hook code may also be answered by a written reply: a comment in its
           thread from someone who may write here, that is not a post of the reviewer. The check is
           per file, not per line: one real change to a file answers every finding on it.
 resolve   not a gate: the session's step after its fix push. Every unresolved thread of the
@@ -24,9 +24,9 @@ resolve   not a gate: the session's step after its fix push. Every unresolved th
           since a person's question and a written reply are the session's to give. Without --go
           the plan is printed and nothing is written; writes are a second apart. Two pull requests
           had this as a hand-written script before the third need made it the tool (2026-10-07).
-A failed API call is a refusal (exit 1), never a pass. Known limit, printed on every run: neither a
-resolved thread nor the review that posts its findings starts a pipeline, so this verdict is the
-one of the moment the job ran. Re-run the gates after resolving; the merge tool reads the threads
+A failed API call is a refusal (exit 1), never a pass. Known limit, printed by `findings` and by
+`resolve`: neither a resolved thread nor the review that posts its findings starts a pipeline, so
+the verdict is the one of the moment the job ran. Re-run the gates after resolving; the merge tool reads the threads
 again at the merge."""
 import contextlib
 import io
@@ -49,6 +49,7 @@ MARKER = "<!-- kurz-review:"  # every post of the reviewer carries one
 MARK = re.compile(r"<!-- kurz-review:findings (\[.*?\]) -->", re.S)
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 skip_literal = kit.skip_literal
+LIMIT = "known limit: neither a resolved thread nor a posted review starts a pipeline; re-run the gates after resolving"
 BOTS = {"github-actions", "github-actions[bot]"}  # the Actions token's login, as GraphQL and as REST spell it
 THREADS = """query($owner: String!, $name: String!, $pr: Int!, $after: String) {
   repository(owner: $owner, name: $name) { pullRequest(number: $pr) {
@@ -191,8 +192,9 @@ def resolve_threads(repo, number, go, get=None):
 
 
 def resolve_command(repo, number, go, get=None):
-    """The exit code of the resolve command: 0 when the plan ran, 1 when a read or a write failed. Any
-    failure after the first write leaves threads resolved, so the message says what stands."""
+    """The exit code of the resolve command: 0 when the plan ran, 1 when a read or a write failed or
+    the run was interrupted. Any failure after the first write leaves threads resolved, so the message
+    says what stands."""
     try:
         resolved, left = resolve_threads(repo, number, go, get)
     except BaseException as e:  # whatever failed, an interrupt too: the lines printed above are what the forge confirmed
@@ -200,6 +202,7 @@ def resolve_command(repo, number, go, get=None):
               f"if a write failed, its thread may or may not be: run the plan again, it shows what is left")
         return 1
     print(f"resolve: {resolved} threads {'resolved' if go else 'to resolve (plan only: add --go)'}, {left} left open")
+    print(LIMIT)
     return 0
 
 
@@ -261,7 +264,7 @@ def run_gate(gate, repo, number, get=None, pages=None):
         head = pr["head"]["sha"]
         threads = fetch_threads(repo, number, get)
         changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
-        print("known limit: neither a resolved thread nor a posted review starts a pipeline; re-run the gates after resolving")
+        print(LIMIT)
         return findings_errors(threads, changed), f"{len(threads)} threads, {len(finding_threads(threads))} with findings"
     raise kit.Refused(f"unknown gate {gate!r}: title, breadth or findings")
 
@@ -493,7 +496,8 @@ def self_test():
                           out == 1 and resolved_lines(printed) == 1 and "resolve stopped: KeyboardInterrupt" in printed, repr((out, printed))))
             get, written = resolving(lambda ref: "blob@" + ref)
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
-            cases.append(("resolve: the command ends 0 when the plan ran", out == 0 and "1 threads resolved" in printed, repr((out, printed))))
+            cases.append(("resolve: the command ends 0 when the plan ran, and prints the known limit",
+                          out == 0 and "1 threads resolved" in printed and LIMIT in printed, repr((out, printed))))
         finally:
             time.sleep = saved_sleep
 

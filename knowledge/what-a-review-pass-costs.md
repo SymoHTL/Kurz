@@ -1,6 +1,6 @@
 ---
 name: what-a-review-pass-costs
-description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 18 minutes, whatever the model and effort; per pass about 1.4 to 1.8 USD at list price on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD; in CI a pass reports 0.19 to 0.26 USD (2026-10-07). A run in CI starts without a question to the owner since 2026-10-07; a run off the pipeline waits for the owner's go-ahead to the bill named
+description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 18 minutes, whatever the model and effort; per pass about 1.4 to 1.8 USD at list price on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD; in CI a pass reports 0.19 to 0.27 USD (nine runs, 2026-10-07 and 2026-10-08). A run in CI starts without a question to the owner since 2026-10-07; a run off the pipeline waits for the owner's go-ahead to the bill named
 metadata:
   type: reference
 ---
@@ -63,10 +63,11 @@ What follows from it:
   the pinned model.
 - A review costs batches times passes, and a batch needs at least two passes. An ordinary pull
   request of one batch: two passes, about 3 USD off the pipeline and about 0.5 USD in CI, about
-  20 minutes. In CI a pass reported 0.19 to 0.26 USD on 2026-10-07 (five runs: 1.94 USD for 10
-  passes, 1.42 for 6, 1.04 for 4, 1.85 for 7, 2.47 for 10); off the pipeline a pass on the pinned
-  model reported 1.34 USD the same day, just under the range above. Why the two places report
-  prices this far apart was not established.
+  20 minutes. In CI a pass reported 0.19 to 0.27 USD on 2026-10-07 and 2026-10-08 (nine runs:
+  1.94 USD for 10 passes, 1.42 for 6, 1.04 for 4, 1.85 for 7, 2.47 for 10, 1.80 for 8, 1.91 for 8,
+  2.11 for 8, 2.04 for 8); off the pipeline a pass on the pinned model reported 1.34 USD on
+  2026-10-07, just under the range above. Why the two places report prices this far apart was not
+  established.
 - A run outside CI can be cut to a bill named in advance: `--passes N` (1 to 5, with `--local`
   or `--dry-run` only) gives a batch at most N passes, so `--passes 1` costs batches times one
   pass. What it gives up is the second pass, the one that shows whether the first found
@@ -83,7 +84,8 @@ What follows from it:
   question to the owner. The question before every run, the owner's decision of 2026-10-02 after
   the first bills, was retired by the owner on 2026-10-07: it had stalled every round for a run
   that costs one to three USD in CI (the runs above; the upper bound at the pass cap is batches
-  times ten passes times 0.26 USD: 5.2 USD for two batches, 10.4 for four). The bill is counted
+  times ten passes times 0.27 USD, the highest measured: 5.4 USD for two batches, 10.8 for four).
+  The bill is counted
   before the run and named in the report after it. A run off
   the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go
   to the bill named. `judgment step`
