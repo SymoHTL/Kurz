@@ -121,7 +121,9 @@ nothing in this repository executes Kurz.
 
 Findings above low are counted from the markers in the reviewer's threads, lows from the marker of
 the note it leaves on the pull request; the issue that collects them is not read. A merge over red
-is counted from the record that the merge tool posts.
+is counted from the record that the merge tool posts. Only pull requests that someone who may write
+here opened are counted, and only posts of the Actions token and of those people: anyone can open
+a pull request on, or comment in, a public repository.
 
 <!-- generated:forge -->
 | Forge | Count |

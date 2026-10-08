@@ -15,8 +15,10 @@ when the file has a block it did not compute, when a marker is not closed, when 
 old, or be no evidence, while the date said they were new. The new text is built completely before
 anything is written, and written through a temp file.
 
-What it counts on the forge it counts only from posts of the Actions token and of people who may
-write here (tools/pr_gates.py `trusted`): anyone can comment on a public repository."""
+What it counts on the forge it counts only from pull requests and posts of the Actions token and of
+people who may write here (tools/pr_gates.py `trusted`): anyone can open a pull request on, or
+comment in, a public repository."""
+import contextlib
 import datetime
 import json
 import os
@@ -95,7 +97,8 @@ def block_reference(root):
 
 def block_forge(root):
     repo = kit.repo()
-    pulls = kit.gh_pages(f"repos/{repo}/pulls?state=all&per_page=100")
+    pulls = [p for p in kit.gh_pages(f"repos/{repo}/pulls?state=all&per_page=100")
+             if pr_gates.trusted((p.get("user") or {}).get("login", ""), p.get("author_association"))]
     merged = [p for p in pulls if p.get("merged_at")]
     severity, over_red = {"high": 0, "medium": 0, "low": 0}, 0
     for p in pulls:
@@ -113,7 +116,7 @@ def block_forge(root):
                 except ValueError:
                     continue  # a damaged marker counts nothing; it must not stop the evidence
                 for f in found if isinstance(found, list) else []:
-                    if isinstance(f, dict) and f.get("severity") in severity:
+                    if isinstance(f, dict) and isinstance(f.get("severity"), str) and f["severity"] in severity:
                         severity[f["severity"]] += 1
             over_red += (c.get("body") or "").startswith("Merged over red")
     # the issues endpoint lists pull requests too
@@ -153,10 +156,19 @@ def update(path, compute, today, write=True):
     new = rewrite(text, {name: fn() for name, fn in compute.items()}, today)
     if write:
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            f.write(new)
-        os.replace(tmp, path)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                f.write(new)
+            os.replace(tmp, path)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(tmp)  # gone after the replace; left behind by a write or a replace that failed
     return new
+
+
+def writes(argv):
+    """Whether a run with these arguments writes the file: --print recomputes and prints only."""
+    return "--print" not in argv
 
 
 def self_test():
@@ -206,9 +218,9 @@ def self_test():
         cases.append(("a block that cannot be computed leaves the file untouched", False, "no refusal"))
     except kit.Refused:
         cases.append(("a block that cannot be computed leaves the file untouched", kit.read(path) == good, kit.read(path)))
-    update(path, {"a": lambda: "new a", "b": lambda: "new b"}, today, write=False)
+    update(path, {"a": lambda: "new a", "b": lambda: "new b"}, today, write=writes(["--print"]))
     cases.append(("--print writes nothing", kit.read(path) == good, ""))
-    update(path, {"a": lambda: "new a", "b": lambda: "new b"}, today)
+    update(path, {"a": lambda: "new a", "b": lambda: "new b"}, today, write=writes([]))
     cases.append(("a full run writes the file, and leaves no temp file", kit.read(path) == new and os.listdir(os.path.dirname(path)) == ["evidence.md"],
                   os.listdir(os.path.dirname(path))))
     cases.append(("the real guide has a marker for every block this tool computes, and no other",
@@ -220,6 +232,18 @@ def self_test():
             return fn(*args)
         except Exception as e:
             return e
+
+    def refuse(source, target):
+        raise OSError("the disk refused the replace")
+
+    saved_replace, os.replace = os.replace, refuse
+    try:
+        failed = got(update, path, {"a": lambda: "other a", "b": lambda: "other b"}, today)
+    finally:
+        os.replace = saved_replace
+    cases.append(("a write that fails leaves the file as it was, and no temp file",
+                  isinstance(failed, OSError) and kit.read(path) == new and os.listdir(os.path.dirname(path)) == ["evidence.md"],
+                  (repr(failed), os.listdir(os.path.dirname(path)))))
 
     # the blocks, against a small tree and a forge that answers what it is told to
     root = tempfile.mkdtemp()
@@ -266,17 +290,32 @@ def self_test():
 
         finding = lambda severity: f'<!-- kurz-review:findings [{{"file": "a.md", "line": 1, "severity": "{severity}", "title": "t"}}] -->'
         post = lambda login, association, body: {"user": {"login": login}, "author_association": association, "body": body}
+        opened = lambda number, login, association, merged=None: {"number": number, "merged_at": merged, "user": {"login": login},
+                                                                  "author_association": association}
+        # every path in full: a query that asks for something else gets no answer
         answers = {
-            "pulls?": [{"number": 1, "merged_at": "2026-10-01T00:00:00Z"}, {"number": 2, "merged_at": None}],
-            "pulls/1/comments": [post("github-actions[bot]", "NONE", finding("high")), post("a-stranger", "NONE", finding("high")),
-                                 post("the-owner", "OWNER", "<!-- kurz-review:findings [not json] -->")],
-            "issues/1/comments": [post("the-owner", "OWNER", "Merged over red at `abc`."), post("a-stranger", "NONE", "Merged over red at `abc`."),
-                                  post("the-owner", "OWNER", finding("low"))],
-            "pulls/2/comments": [], "issues/2/comments": [],
-            "issues?": [{"number": 3}, {"number": 4, "pull_request": {"url": "x"}}],
+            "repos/o/n/pulls?state=all&per_page=100": [opened(1, "the-owner", "OWNER", "2026-10-01T00:00:00Z"),
+                                                       opened(2, "a-collaborator", "COLLABORATOR"), opened(5, "a-stranger", "NONE")],
+            "repos/o/n/pulls/1/comments?per_page=100": [
+                post("github-actions[bot]", "NONE", finding("high")), post("a-stranger", "NONE", finding("high")),
+                post("the-owner", "OWNER", "<!-- kurz-review:findings [not json] -->"),
+                post("the-owner", "OWNER", '<!-- kurz-review:findings [{"severity": ["high"]}] -->')],
+            "repos/o/n/issues/1/comments?per_page=100": [
+                post("the-owner", "OWNER", "Merged over red at `abc`."), post("a-stranger", "NONE", "Merged over red at `abc`."),
+                post("the-owner", "OWNER", finding("low"))],
+            "repos/o/n/pulls/2/comments?per_page=100": [], "repos/o/n/issues/2/comments?per_page=100": [],
+            # the stranger's pull request holds a finding of the Actions token: counted, it would show
+            "repos/o/n/pulls/5/comments?per_page=100": [post("github-actions[bot]", "NONE", finding("medium"))],
+            "repos/o/n/issues/5/comments?per_page=100": [],
+            "repos/o/n/issues?state=open&labels=hazard&per_page=100": [{"number": 3}, {"number": 4, "pull_request": {"url": "x"}}],
         }
-        kit.repo = lambda: "o/n"
-        kit.gh_pages = lambda path: next(rows for key, rows in answers.items() if key in path)
+
+        def pages(path):
+            if path not in answers:
+                raise kit.Refused(f"the fake forge holds no answer for {path}")
+            return answers[path]
+
+        kit.repo, kit.gh_pages = (lambda: "o/n"), pages
         forge = got(block_forge, root)
     finally:
         red_proof.check, red_proof.copy_of_tree, kit.repo, kit.gh_pages = saved
@@ -286,7 +325,10 @@ def self_test():
                   all(row in str(forge) for row in ("| Pull requests opened | 2 |", "| Pull requests merged | 1 |", "| Open HAZARD issues | 1 |")), forge))
     cases.append(("forge: a finding marker counts from the Actions token and from a maintainer, not from a stranger",
                   all(row in str(forge) for row in ("posted: high | 1 |", "posted: medium | 0 |", "posted: low | 1 |")), forge))
-    cases.append(("forge: a damaged marker counts nothing and stops nothing", isinstance(forge, str), repr(forge)))
+    cases.append(("forge: a damaged marker counts nothing and stops nothing, a severity that is no word included",
+                  isinstance(forge, str), repr(forge)))
+    cases.append(("forge: a pull request that someone without write access opened counts nothing, its findings included",
+                  all(row in str(forge) for row in ("| Pull requests opened | 2 |", "posted: medium | 0 |")), forge))
     cases.append(("forge: a waiver record counts from a maintainer, not from a stranger", "| Merged over red, with a recorded waiver | 1 |" in str(forge), forge))
     return kit.report(cases)
 
@@ -294,10 +336,11 @@ def self_test():
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
+    write = writes(sys.argv[1:])
     try:
         new = update(os.path.join(kit.ROOT, EVIDENCE), {name: (lambda fn=fn: fn(kit.ROOT)) for name, fn in BLOCKS.items()},
-                     datetime.date.today(), write="--print" not in sys.argv)
+                     datetime.date.today(), write=write)
     except (kit.Refused, OSError, KeyError, ValueError) as e:
         print(f"REFUSED, nothing written: {type(e).__name__}: {e}")
         sys.exit(1)
-    print(new if "--print" in sys.argv else f"{EVIDENCE}: {len(BLOCKS)} blocks regenerated")
+    print(f"{EVIDENCE}: {len(BLOCKS)} blocks regenerated" if write else new)
