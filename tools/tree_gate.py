@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """What may exist in this public tree. Fails on: a path the design phase does not allow, a
 credential-shaped string, a machine-bound string (drive or profile path, private IP address,
-e-mail address), a merge-conflict marker, a file that is not UTF-8 text, a listed entry that is
-not a regular file (a link, a submodule), or a scan of fewer than FLOOR files.
+e-mail address) in a file or in its name, a merge-conflict marker, a file that is not UTF-8 text,
+a listed entry that is not a regular file (a link, a submodule), or a scan of fewer than FLOOR
+files.
 
 Three callers, one definition:
   (no flag)    every tracked or untracked-but-not-ignored file of the working tree  (CI, local gates)
   --pre-push   every commit a `git push` is about to publish: its message and the files it adds or
-               changes. Not its author and committer, which a push publishes as well   (.githooks/pre-push)
+               changes, a link or a submodule refused as in the working tree; the message of every
+               annotated tag it pushes. Not the author, committer or tagger, which a push publishes
+               as well (HAZARD #12)                                                 (.githooks/pre-push)
   --hook       one Write/Edit call of an agent session, path rule only              (.claude/settings.json)
 `--self-test` plants one case per rule and per pattern, plus precision cases that must stay clean.
-In --hook mode only exit 2 blocks the call, so every failure path there ends in exit 2, a
+In --hook mode the script blocks a call by exit 2 and prints no JSON decision, the other way the
+harness accepts (knowledge/a-hook-denies-by-exit-2-or-by-its-json.md), so every failure path there
+ends in exit 2, a
 tools/kit.py that does not import included. The command in .claude/settings.json turns every
 other way this script can end into exit 2 as well, and falls back to python3 where there is no
 `py` launcher; the self-test runs that command. What the hook cannot hold: a write made through
@@ -64,9 +69,11 @@ def check_text(where, text):
 
 
 def check_file(path, data):
-    """Errors for one file, given its repository path and its bytes."""
+    """Errors for one file, given its repository path and its bytes. A push publishes the path as
+    well, so the name is scanned like the content."""
     reason = check_path(path)
     errors = [reason] if reason else []
+    errors += check_text(f"{path} (name)", path)
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
@@ -124,29 +131,63 @@ def pushed_commits(remote, stdin_text, cwd=None):
     return list(dict.fromkeys(commits))
 
 
+def pushed_tags(stdin_text, cwd=None):
+    """The annotated tags a push publishes: the pushed objects that are tags. Their commits are in
+    pushed_commits, which has refused a line it does not understand already."""
+    shas = [line.split()[1] for line in stdin_text.splitlines() if len(line.split()) == 4]
+    return [sha for sha in shas if set(sha) != {"0"} and kit.run(["git", "cat-file", "-t", sha], cwd=cwd).strip() == "tag"]
+
+
+def check_tag(sha, cwd=None):
+    """The message of an annotated tag, which the push publishes beside its commit. The header above
+    it names the tagger, published like a commit's author and read by no gate (HAZARD #12)."""
+    message = kit.run(["git", "cat-file", "tag", sha], cwd=cwd).partition("\n\n")[2]
+    return check_text(f"{sha[:8]} (tag message)", message)
+
+
 def check_commit(sha, cwd=None):
     message = kit.run(["git", "log", "-1", "--format=%B", sha], cwd=cwd)
-    errors = check_text(f"{sha[:8]} (message)", message)
+    errors = check_text(f"{sha[:8]} (message)", kit.message_text(message))
     if kit.skip_literal(message):
         errors.append(f"{sha[:8]} (message): workflow-skip literal: the forge would start no workflow for this commit")
-    # every path but a deletion: a file turned into a link (T) carries its target as content, and is scanned like the rest
+    # every path but a deletion, a file turned into a link (T) included
     names = kit.run(["git", "show", "--format=", "--name-only", "--diff-filter=d", "-z", sha], cwd=cwd).split("\0")
     for path in filter(None, names):
+        mode = kit.run(["git", "--literal-pathspecs", "ls-tree", "-z", sha, "--", path], cwd=cwd).split(" ", 1)[0]
+        if mode in ("120000", "160000"):  # a link or a submodule: what is published is no file, as working_tree() refuses
+            errors += [f"{sha[:8]} {e}" for e in [check_path(path)] if e]
+            errors.append(f"{sha[:8]} {path}: not a regular file (a link, a submodule or a directory)")
+            continue
         blob = kit.run(["git", "show", f"{sha}:{path}"], cwd=cwd, binary=True)  # as stored: decoding it here would hide a file that is not UTF-8
         errors += [f"{sha[:8]} {e}" for e in check_file(path, blob)]
     return errors
+
+
+def within(target, root, exists=os.path.exists, same=os.path.samefile):
+    """The path of `target` inside `root` ("." for the root itself), or None when it lies outside.
+    Decided by identity: each existing ancestor of the target is compared with the root by the file
+    system, so a path spelled in another case where the file system ignores case (Windows, macOS)
+    is inside, as the file it writes is. The path comes back in the case it was written in, so the
+    allowlist is never matched against a lower-cased spelling."""
+    full = os.path.realpath(target)
+    path = full
+    while True:
+        if exists(path) and same(path, root):
+            return os.path.relpath(full, path)
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None
+        path = parent
 
 
 def hook_reason(raw):
     """The deny reason for one Write/Edit call, or None to allow it. Raises on input it cannot read."""
     tool_input = json.loads(raw)["tool_input"]
     target = tool_input.get("file_path") or tool_input["notebook_path"]
-    full = os.path.normcase(os.path.realpath(target))
-    root = os.path.normcase(os.path.realpath(kit.ROOT))
-    if full != root and not full.startswith(root + os.sep):
+    rel = within(target, kit.ROOT)
+    if rel is None:
         return None  # outside this repository: not this gate's business
-    # Case as written, so the allowlist is not matched against a lower-cased Windows path.
-    rel = os.path.relpath(os.path.realpath(target), os.path.realpath(kit.ROOT)).replace(os.sep, "/")
+    rel = rel.replace(os.sep, "/")
     return None if rel.startswith(".git/") else check_path(rel)
 
 
@@ -162,6 +203,14 @@ def hook(raw):
 
 
 def self_test():
+    base = tempfile.TemporaryDirectory(prefix="tree-gate-", ignore_cleanup_errors=True)  # every directory of the suite
+    try:
+        return cases_in(base.name)
+    finally:
+        base.cleanup()
+
+
+def cases_in(base):
     ok_files = {f"knowledge/e{n}.md": b"fact\n" for n in range(5)}
     # Built by concatenation, so this file never holds a string its own scan would refuse.
     secrets = {"gitlab-token": "glpat-" + "A" * 16, "github-token": "ghp_" + "a" * 36,
@@ -174,6 +223,8 @@ def self_test():
               ("a WSL profile path", "profile-path", "/mnt/c/" + "Users/someone"),
               ("a Cygwin profile path", "profile-path", "/cygdrive/c/" + "Users/someone"),
               ("a Linux home directory", "profile-path", "/home/" + "someone/notes"),
+              ("root's home directory", "profile-path", "/root/" + "work/x"),
+              ("a GitHub no-reply address", "email", "ask 123+someone@" + "users.noreply.github.com"),
               ("an address that ends a sentence", "ip-address", "it answered on 10.1." + "2.3."),
               ("a link-local IPv6 address", "ip6-address", "fe80" + "::1"),
               # a value that begins a line in JSON or a string literal follows the letter of an escape
@@ -202,6 +253,13 @@ def self_test():
     expect("nested knowledge entry is refused", {**ok_files, "knowledge/sub/x.md": b"x\n"}, "not allowed")
     expect("a binary file is refused", {**ok_files, "tools/x.py": b"\xff\xfe\x00"}, "not UTF-8")
     expect("conflict marker", {**ok_files, "CLAUDE.md": ("<" * 7 + " HEAD\n").encode()}, "merge-conflict")
+    expect("a machine-bound string in a file's name is refused", {**ok_files, "knowledge/host-10.1." + "2.3.md": b"fact\n"},
+           "(name): machine-bound string (ip-address)")
+    trailer = "Fix\n\nCo-authored-by: Someone <123+someone@" + "users.noreply.github.com>\n"
+    cases.append(("a GitHub no-reply address passes in a commit's trailer line only",
+                  check_text("m", kit.message_text(trailer)) == []
+                  and check_text("m", kit.message_text(trailer.replace("Co-authored-by: ", "Ask "))) == ["m: machine-bound string (email)"],
+                  check_text("m", kit.message_text(trailer))))
     for path in ("CLAUDE.md", "kurz-design.md", "reference/03-values.md", "corpus/values/with/path-write.kz",
                  "tools/review/review.py", "tools/review/fixtures/a.json", ".github/workflows/gates.yml",
                  ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push"):
@@ -227,7 +285,7 @@ def self_test():
     cases.append(("portable words stay clean", not check_text("x", portable), check_text("x", portable)))
 
     # the working tree: what a listed path is on disk
-    root = tempfile.mkdtemp()
+    root = tempfile.mkdtemp(dir=base)
     os.mkdir(os.path.join(root, "sub"))
     with open(os.path.join(root, "a.md"), "wb") as f:
         f.write(b"fact\n")
@@ -239,7 +297,7 @@ def self_test():
     cases.append(("tree: a link is refused whatever it points at", entry(os.path.join(root, "a.md"), islink=lambda p: True) == "special", ""))
 
     # the commits of a push, against a throwaway repository
-    repo = tempfile.mkdtemp()
+    repo = tempfile.mkdtemp(dir=base)
     git = lambda *args: kit.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
                                  "-c", "core.autocrlf=false", *args], cwd=repo).strip()
 
@@ -271,9 +329,11 @@ def self_test():
                          commit("a binary", {"knowledge/c.md": b"\xff\xfe\x00"}),
                          commit("a deletion", delete="knowledge/a.md"),
                          commit("quiet\n\n[skip " + "ci]", {"knowledge/d.md": b"fact\n"}),
+                         commit("credited\n\nCo-authored-by: Someone <123+someone@" + "users.noreply.github.com>",
+                                {"knowledge/e.md": b"fact\n"}),
                          link("knowledge/d.md", "D:" + "/work/notes")))
     if isinstance(built, tuple):
-        _, clean, message, lexer, binary, deletion, quiet, linked = built
+        _, clean, message, lexer, binary, deletion, quiet, credited, linked = built
         of = lambda sha: got(lambda: check_commit(sha, cwd=repo))
         has = lambda errors, needle: isinstance(errors, list) and any(needle in e for e in errors)
         cases.append(("pre-push: a clean commit passes", of(clean) == [], of(clean)))
@@ -284,8 +344,9 @@ def self_test():
         cases.append(("pre-push: a deleted file is not scanned", of(deletion) == [], of(deletion)))
         cases.append(("pre-push: a workflow-skip literal in a commit message is refused",
                       has(of(quiet), "(message): workflow-skip literal"), of(quiet)))
-        cases.append(("pre-push: a file turned into a link is scanned, and its target is the content",
-                      has(of(linked), "knowledge/d.md: machine-bound string (drive-path)"), of(linked)))
+        cases.append(("pre-push: a file turned into a link is refused, as in the working tree",
+                      has(of(linked), "knowledge/d.md: not a regular file"), of(linked)))
+        cases.append(("pre-push: a co-author's GitHub no-reply address in a trailer passes", of(credited) == [], of(credited)))
         git("update-ref", "refs/remotes/origin/main", clean)
         git("update-ref", "refs/remotes/other/main", deletion)
         line = f"refs/heads/main {deletion} refs/heads/main {clean}"
@@ -296,11 +357,36 @@ def self_test():
         cases.append(("pre-push: a deleted ref publishes nothing", gone == [], gone))
         odd = got(lambda: pushed_commits("origin", line + " extra\n", cwd=repo))
         cases.append(("pre-push: a line that is not four fields is refused", isinstance(odd, kit.Refused), odd))
+        git("tag", "-a", "v1", "-m", "see D:" + "/work/notes", clean)
+        tag = git("rev-parse", "v1")
+        tags = got(lambda: pushed_tags(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n{line}\n", cwd=repo))
+        cases.append(("pre-push: an annotated tag is read, and a branch is no tag", tags == [tag], tags))
+        cases.append(("pre-push: a machine-bound string in an annotated tag's message is refused",
+                      has(got(lambda: check_tag(tag, cwd=repo)), "(tag message): machine-bound string (drive-path)"),
+                      got(lambda: check_tag(tag, cwd=repo))))
+        # the script as the hook runs it, for its exit code: from tools/ of the repository it guards, since
+        # its git calls run in kit.ROOT; a clean commit of its own, which no ref of the remote holds
+        fresh = git("commit-tree", f"{clean}^{{tree}}", "-p", clean, "-m", "clean too")
+        os.makedirs(os.path.join(repo, "tools"), exist_ok=True)
+        for name in ("tree_gate.py", "kit.py"):
+            shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), name), os.path.join(repo, "tools", name))
+
+        def pre_push(stdin_text):
+            return subprocess.run([sys.executable, os.path.join(repo, "tools", "tree_gate.py"), "--pre-push", "origin"],
+                                  input=stdin_text, cwd=repo,
+                                  capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}).returncode
+        codes = got(lambda: (pre_push(f"refs/heads/side {fresh} refs/heads/side {'0' * 40}\n"), pre_push(line + "\n"),
+                             pre_push("not four fields\n"), pre_push(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n")))
+        cases.append(("pre-push: the script ends in 0 for a clean push", isinstance(codes, tuple) and codes[0] == 0, codes))
+        cases.append(("pre-push: the script ends in 1 for a push that holds a refused commit", isinstance(codes, tuple) and codes[1] == 1, codes))
+        cases.append(("pre-push: the script ends in 1 for a line it cannot read", isinstance(codes, tuple) and codes[2] == 1, codes))
+        cases.append(("pre-push: the script ends in 1 for a tag whose message is refused, though its commit is published already",
+                      isinstance(codes, tuple) and codes[3] == 1, codes))
     cases.append(("pre-push: the throwaway repository was built", isinstance(built, tuple), built))
 
     call = lambda path: json.dumps({"tool_name": "Write", "tool_input": {"file_path": path}})
     inside = lambda rel: os.path.join(kit.ROOT, *rel.split("/"))
-    outside = os.path.join(tempfile.gettempdir(), "x.cs")
+    outside = os.path.join(base, "x.cs")
     for name, raw, want in [
         ("hook: compiler source inside the repo is denied", call(inside("src/Lexer.cs")), 2),
         ("hook: the design record is allowed", call(inside("kurz-design.md")), 0),
@@ -315,9 +401,17 @@ def self_test():
         with contextlib.redirect_stderr(io.StringIO()):  # the deny reason is for the agent, not for this log
             code = hook(raw)
         cases.append((name, code == want, f"exit {code}, wanted {want}"))
+    # a file system that ignores case, stood in for by two functions: the repository's directory
+    # spelled in another case is the same directory there, and a write into it is inside
+    top, repository = os.path.realpath(os.path.join(os.sep, "r")), os.path.realpath(os.path.join(os.sep, "r", "kurz"))
+    known = {top.lower(), repository.lower()}
+    spelled = os.path.join(os.path.dirname(repository), "Kurz", "SRC", "x.cs")
+    found = got(lambda: within(spelled, repository, exists=lambda p: p.lower() in known, same=lambda a, b: a.lower() == b.lower()))
+    cases.append(("hook: a path spelled in another case is inside where the file system ignores case",
+                  found == os.path.join("SRC", "x.cs"), found))
 
     # a kit that does not import: the hook has to end in 2 before it has read anything
-    scratch = tempfile.mkdtemp()
+    scratch = tempfile.mkdtemp(dir=base)
     os.mkdir(os.path.join(scratch, "tools"))
     here = os.path.dirname(os.path.abspath(__file__))
     shutil.copy(os.path.abspath(__file__), os.path.join(scratch, "tools", "tree_gate.py"))
@@ -336,7 +430,7 @@ def self_test():
     # the gate. The gate here is a stand-in that ends as it is told to; `python3` in the second
     # directory stands for the interpreter of a machine that has no `py` launcher.
     command = got(lambda: json.loads(kit.read(os.path.join(kit.ROOT, ".claude", "settings.json")))["hooks"]["PreToolUse"][0]["hooks"][0]["command"])
-    shell, project, only_python3, nothing = shutil.which("sh"), tempfile.mkdtemp(), tempfile.mkdtemp(), tempfile.mkdtemp()
+    shell, project, only_python3, nothing = shutil.which("sh"), tempfile.mkdtemp(dir=base), tempfile.mkdtemp(dir=base), tempfile.mkdtemp(dir=base)
     os.mkdir(os.path.join(project, "tools"))
     with open(os.path.join(project, "tools", "tree_gate.py"), "w", encoding="utf-8") as f:
         f.write('import os, sys\nsys.exit(int(os.environ["GATE_EXIT"]))\n')
@@ -373,9 +467,11 @@ def main(argv):
     try:
         if "--pre-push" in argv:
             remote = argv[argv.index("--pre-push") + 1]
-            commits = pushed_commits(remote, sys.stdin.read())
-            errors = [e for sha in commits for e in check_commit(sha)]
-            scanned = f"{len(commits)} commits about to be published"
+            stdin_text = sys.stdin.read()
+            commits = pushed_commits(remote, stdin_text)
+            tags = pushed_tags(stdin_text)
+            errors = [e for sha in commits for e in check_commit(sha)] + [e for sha in tags for e in check_tag(sha)]
+            scanned = f"{len(commits)} commits and {len(tags)} annotated tags about to be published"
         else:
             files, special = working_tree()
             errors, scanned = special + scan(files), f"{len(files)} files"

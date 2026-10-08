@@ -92,7 +92,7 @@ def title_errors(title, messages, body=""):
         errors.append(f"the description carries a workflow-skip literal ({skip_literal(body)})")
     errors += tree_gate.check_text("the title", title) + tree_gate.check_text("the description", body)
     for n, m in enumerate(messages, 1):
-        errors += tree_gate.check_text(f"the message of commit {n} of {len(messages)}", m)
+        errors += tree_gate.check_text(f"the message of commit {n} of {len(messages)}", kit.message_text(m))
     return errors
 
 
@@ -404,6 +404,11 @@ def self_test():
           "the description carries")
     check("a machine-bound string in a commit message", title_errors("ok", ["Fix\n\nsee D:" + "/work/notes"]),
           "the message of commit 1 of 1: machine-bound string")
+    noreply = "<123+someone@" + "users.noreply.github.com>"
+    check("a co-author's GitHub no-reply address in a commit's trailer is clean",
+          title_errors("ok", [f"Fix\n\nCo-authored-by: Someone {noreply}\n"]), None)
+    check("a GitHub no-reply address in a commit message's body is machine-bound",
+          title_errors("ok", [f"Fix, ask {noreply}\n"]), "the message of commit 1 of 1: machine-bound string (email)")
     check("a credential shape in a later commit message", title_errors("ok", ["ok", "use ghp_" + "a" * 36]),
           "the message of commit 2 of 2: credential-shaped string")
 

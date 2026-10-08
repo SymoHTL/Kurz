@@ -27,20 +27,30 @@ MACHINE = {
     # a drive letter and its separator, also the doubled backslash of JSON and of string literals;
     # `x://` is left alone, it starts a URL
     "drive-path": r"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?!/)",
-    # a user's directory: Windows seen from a POSIX shell, from WSL or from Cygwin, macOS, Linux.
+    # a user's directory: Windows seen from a POSIX shell, from WSL or from Cygwin, macOS, Linux, root's.
     # /home/runner is the hosted CI runner's and names nobody.
-    "profile-path": r"(?:(?<![A-Za-z0-9])|(?<=\\[ntr]))(?:(?:/(?:mnt|cygdrive))?/(?:[a-z]/)?Users/|/home/(?!runner\b))[A-Za-z0-9]",
+    "profile-path": r"(?:(?<![A-Za-z0-9])|(?<=\\[ntr]))(?:(?:/(?:mnt|cygdrive))?/(?:[a-z]/)?Users/|/home/(?!runner\b)|/root/)[A-Za-z0-9]",
     # four dotted numbers that are not loopback, also at the end of a sentence; write a four-part
     # version as v1.0.0.0
     "ip-address": r"(?:(?<![\w.])|(?<=\\[ntr]))(?!127\.)(?!0\.0\.0\.0(?!\d))(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)",
     # the private ranges of IPv6: unique local and link-local addresses
     "ip6-address": r"(?i:(?<![\w:])(?:f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):[0-9a-f]{0,4}:)",
-    # not the documentation domains, not the two public no-reply addresses commit trailers carry,
-    # and not the user part of an SSH remote
+    # not the documentation domains, not the public no-reply address of Claude's commit trailers,
+    # and not the user part of an SSH remote. A GitHub no-reply address names an account: it passes
+    # only in a commit's trailer line (message_text below)
     "email": r"(?<![A-Za-z0-9._%+-])(?!noreply@anthropic\.com\b)(?!git@github\.com:)[A-Za-z0-9._%+-]+"
-             r"@(?!example\.(?:com|org|net)\b)(?!users\.noreply\.github\.com\b)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}",
+             r"@(?!example\.(?:com|org|net)\b)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}",
 }
 CONFLICT = re.compile(r"^(<<<<<<< |>>>>>>> )", re.M)
+# A trailer line that names a co-author or a signer by the GitHub no-reply address of an account. The
+# forge writes such lines into a squash, and the line publishes no more than the author line of the
+# same commit does, which no gate reads (HAZARD #12). Anywhere else the address is machine-bound.
+NOREPLY_TRAILER = re.compile(r"(?im)^(?:co-authored-by|signed-off-by):[^<\n]*<[A-Za-z0-9+._-]+@users\.noreply\.github\.com>[ \t]*$")
+
+
+def message_text(message):
+    """A commit message as the patterns read it: without the trailer lines of NOREPLY_TRAILER."""
+    return NOREPLY_TRAILER.sub("", message)
 # What makes the forge start no workflow for a commit. On main that is a commit nothing gated.
 SKIP_LITERALS = [r"\[skip ci\]", r"\[ci skip\]", r"\[no ci\]", r"\[skip actions\]", r"\[actions skip\]",
                  r"^skip-checks:[ \t]*true[ \t]*$"]

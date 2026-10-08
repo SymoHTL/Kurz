@@ -16,14 +16,18 @@ flowchart TD
     subgraph W["Write time: one agent session"]
         W1["write-time hook, tree_gate.py --hook:
         denies a Write or Edit to a path the design phase does not allow, and every call
-        the gate could not judge. The command falls back to python3 without the py launcher.
+        the gate could not judge; inside or outside the repository is decided by the file system's
+        identity of directories, so a path spelled in another case is inside where case is ignored.
+        It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
         Not held: a write through a shell command, a hook cut off at its timeout. HAZARD issue 4"]
     end
     subgraph P["Push time: this clone and the forge"]
         P1["pre-push hook, tree_gate.py --pre-push:
-        refuses the push when a commit about to be published holds a credential, a machine-bound string,
-        a conflict marker, a disallowed path or a file that is not UTF-8 text,
-        or when its message holds one of the first three or a workflow-skip literal.
+        refuses the push when a commit about to be published holds a credential, a machine-bound string
+        (in a file or in its name), a conflict marker, a disallowed path, a file that is not UTF-8 text
+        or a link or a submodule, when its message holds one of the first three or a workflow-skip literal
+        (a GitHub no-reply address passes in a trailer line only), or when the message of an annotated
+        tag it pushes holds one of the first three. The tagger, like the author, is read by no gate.
         Off until core.hooksPath is set: HAZARD issue 4"]
         P2["future plans in a commit: no gate before the push. HAZARD issue 2"]
         P3["author and committer name and e-mail: published with every commit, read by no gate.
@@ -45,7 +49,8 @@ flowchart TD
         G2["tree: disallowed path, credential, machine-bound string, conflict marker,
         non-UTF-8 file, a link or a submodule, fewer files than the floor.
         A shape counts after the letter of a newline or tab escape too, as a value begins a line in JSON;
-        before a push every path of a commit but a deletion is read, a file turned into a link included"]
+        before a push every path of a commit but a deletion is read, and a file turned into a link is refused;
+        a file's name is scanned like its content"]
         G3["knowledge: broken INDEX link, entry without INDEX line, hook or frontmatter;
         a store file named in an entry, CLAUDE.md, the review rules or a skill that does not exist; nested entry;
         LIVING entry without diagram or update triggers, fewer living entries than their floor;
@@ -63,8 +68,9 @@ flowchart TD
         fewer rules or cases than the floors"]
         G4["ci-config: a pinned fact of a workflow changed. Both: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
-        continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but a
-        step's env (in any case, behind any literal), a workflow- or job-level env, a job-level permissions grant,
+        continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
+        env of the job's last step (in any case, behind any literal), a workflow- or job-level env, a job-level
+        permissions grant, a job in a container or beside services,
         a step that writes GITHUB_ENV or GITHUB_PATH, a step that checks out or fetches by hand,
         the deciding step with any env key but the pinned ones, a key twice in one mapping.
         gates.yml: an if on the job (a skipped job reports success to the required check),

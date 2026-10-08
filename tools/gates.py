@@ -5,8 +5,9 @@
   gates.py [--pr N]    locally: the same gates; without --pr the pull-request gates print NOT RUN
 
 A gate ends as PASS, PARTLY, FAIL, BROKEN, NOT RUN or N/A.
-FAIL     the gate found what it exists to find. Red.
-BROKEN   the gate could not start. Red, in CI and locally: nothing was checked.
+FAIL     the gate found what it exists to find, or its tool crashed or could not be opened: any
+         exit but 0 and kit.PARTLY. Red.
+BROKEN   the gate's process could not start. Red, in CI and locally: nothing was checked.
 NOT RUN  a pull-request gate, and no pull request is known. Red in CI. Locally it is loud and does
          not fail the run, because a branch has no pull request before it is pushed.
 PARTLY   the gate found nothing wrong in what it could read and named what it could not read (its
@@ -61,7 +62,7 @@ GATES = [
     ("pr-breadth", ["tools/pr_gates.py", "breadth"], "pr",
      "more than 15 files, or a change to the quality infrastructure, without a Blast radius section"),
     ("pr-findings", ["tools/pr_gates.py", "findings"], "pr",
-     "a review finding that is unresolved, or resolved without the edit (or, on tool code, the reply) that answers it"),
+     "a review finding that is unresolved, or resolved without the edit (or, on tool, workflow or hook code, the reply) that answers it"),
     ("push-hook", ["tools/gates.py", "--check-push-hook"], "local",
      "this clone would publish without the tree gate: core.hooksPath is not .githooks"),
 ]
