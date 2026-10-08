@@ -1,6 +1,6 @@
 # 12. Errors
 
-The errors the cases expect. An id is what a corpus header names: `// expect: error <id> at
+The errors the corpus cases expect. An id is what a corpus header names: `// expect: error <id> at
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
 raises when it runs (E3). The two tables share one namespace of ids.
 
@@ -73,25 +73,25 @@ the range of the loop.
 
 ### E1 (assumed, §8) One error per case, with a line
 
-A case that expects an error expects exactly that one, reported on the named line of the file.
+A corpus case that expects an error expects exactly that one, reported on the named line of the file.
 The line is the one that holds the offending construct. For `unused-variable` that is the
 declaration; for `reference-cycle` it is the first declaration, in source order, of a class on
 the path.
 
-No case: every case that expects an error shows it.
+No case: every corpus case that expects an error shows it.
 
 ### E2 (decided, §8) The ids
 
-An error is identified by a word, such as `unused-variable`. A case pins the id and the line of
+An error is identified by a word, such as `unused-variable`. A corpus case pins the id and the line of
 an error and never its message, which stays free to improve.
 
-No case: every case that expects an error names its id and its line.
+No case: every corpus case that expects an error names its id and its line.
 
 ### E3 (decided, §5, §8) How a case names the exception it expects
 
-A case that ends with an exception names it: `// expect: throws <id> at <line>`, with the id from
+A corpus case that ends with an exception names it: `// expect: throws <id> at <line>`, with the id from
 the run-time table above and the line counted as for a compile error. The lint checks both as it
-checks a compile error's. So a case for a reversed range (C8), an overflow in a test build (T5), a
+checks a compile error's. So a corpus case for a reversed range (C8), an overflow in a test build (T5), a
 conversion that loses its value (T20) or an index out of range (T14) passes only with that
 exception from that line, and a `throw` of the program is `thrown` at the line of the `throw`
 that raised; the bare `throw` of an `else` arm (O5) is such a `throw`, and nothing is raised a
@@ -105,7 +105,8 @@ No case: every case that expects an exception names its id and its line.
 ### E4 (proposed) One id for text no rule gives a meaning
 
 Several rules rule a construct out without naming its error: C8 the three-part `for`, C2 an
-`else` on a line of its own, C9 an arm after `else`, O10 a call with a `void` success used as a
+`else` on a line of its own, C9 an arm after `else`, D13 a `match` that lists a set of flags
+case by case, O10 a call with a `void` success used as a
 value. Each is the compile error `syntax`, one id for every text that no rule of this reference
 gives a meaning, reported on the line where the text stops making sense. A more exact id can
 replace it for a construct whose rule names one.

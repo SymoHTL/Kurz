@@ -510,7 +510,7 @@ use mysql allow network        // may touch: network only
 
 - **Permissions.** Whole-program compilation knows which package opens sockets, reads files, calls C or contains `raw` blocks (section 3). A package that exceeds what the project granted fails to compile.
 - **Source only.** The whole-program checks (cycle rule, deadlock rule, permissions, `mock`) need the source, so closed-source binary packages of Kurz code cannot exist. *(assumed)*
-- **Home.** A git URL plus a version, pinned by content hash in a lock file. There is no central registry to run at first; later a registry comes as an index over git.
+- **Home.** A git URL plus a version, pinned by content hash in a lock file. There is no central registry to run; a registry is an index over git.
 - **Versions.** The resolver picks the lowest version that satisfies everyone, as Go does and as NuGet does for transitive packages: no surprise upgrades, and a security fix needs an explicit bump.
   - One version of a package per program; two versions would mean two copies of each type and of each `per cluster` actor inside. *(assumed)*
   - The compiler checks version numbers: `kurz release` compares the `pub` surface with the last release, with the same machinery as for `open`, and a breaking change without a major bump is an error. *(assumed)*
@@ -559,7 +559,7 @@ Browsers (through WebAssembly), apps and microcontrollers take part, but not as 
   - A `secret` field in a normal type is stripped when the value crosses and does not exist on the other side: code there that touches it is a compile error. No separate type per side is needed. A secret lives on the side whose code touches it; both sides touching it is a compile error.
   - A whole `secret data` type cannot cross at all; trying is a compile error. A private key marked this way provably never leaves the client.
   - The only way across is `Sealed<T>`, in the box: the value is encrypted on the sending client for named recipients, and the server stores and routes bytes it cannot open. This is what end-to-end encrypted apps build on.
-  - Key exchange, several devices per user and groups are a first-party package. The cipher primitives come through the C-ABI at first, as with TLS.
+  - Key exchange, several devices per user and groups are a first-party package. The cipher primitives come through the C-ABI, as with TLS.
   - Limits: the server cannot validate, search or index sealed content, so constraints run on the receiving client after opening. In a browser the server delivers the client code, so a compromised server can ship code that leaks keys; a native app and a flashed device do not have that hole. Who talks to whom, when and how much stays visible.
 - Limits per client connection (message size, messages in flight, rate) are on by default and set in the `deploy` block; a client that exceeds them is disconnected. *(assumed)*
 - Transport is the runtime's job: WebSocket for browsers, a TLS socket for devices, the Kurz binary format on both. The UI toolkit in the browser is a package, like graphics. *(assumed)*

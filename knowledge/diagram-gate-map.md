@@ -55,6 +55,7 @@ flowchart TD
         G9["reference: a rule without id, status or the record section it cites;
         a decided, assumed or proposed rule with neither a case nor a reason;
         a case on an open rule; a sample that differs from its corpus file;
+        a code block that is neither a case sample nor marked text, or that is never closed;
         a corpus header that cannot be read or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
         fewer rules or cases than the floors"]

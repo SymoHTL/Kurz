@@ -28,7 +28,6 @@ print(big + 1)
 ### T3 (decided, §4) Signed and unsigned
 
 `sbyte`, `short`, `int` and `long` are signed. `byte`, `ushort`, `uint` and `ulong` are unsigned.
-Together they are the integer types of C#.
 
 Case: [types/unsigned.kz](../corpus/types/unsigned.kz)
 ```kurz
