@@ -43,8 +43,9 @@ GATES = [
     ("reference", ["tools/lint_reference.py"], "always",
      "a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with "
      "neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is "
-     "neither a case sample nor marked text, or that is never closed; a corpus header that "
-     "cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; "
+     "neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that "
+     "cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an "
+     "error-table row that does not read as one; a design record that cannot be read; "
      "fewer rules or cases than the floors"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "

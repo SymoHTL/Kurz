@@ -56,8 +56,10 @@ flowchart TD
         a decided, assumed or proposed rule with neither a case nor a reason;
         a case on an open rule; a sample that differs from its corpus file;
         a code block that is neither a case sample nor marked text, or that is never closed;
+        a fence indented or made of tildes, which the lint would not read;
         a corpus header that cannot be read or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
+        an error-table row that does not read as one; a design record that cannot be read;
         fewer rules or cases than the floors"]
         G4["ci-config: a pinned fact of a workflow changed. Both: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
