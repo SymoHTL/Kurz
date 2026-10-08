@@ -24,8 +24,8 @@ resolve   not a gate: the session's step after its fix push. Every unresolved th
           shows as its head (right after a push, for a moment) are left open and printed with
           the reason and the thread id,
           since a person's question and a written reply are the session's to give. Without --go
-          the plan is printed and nothing is written; writes are a second apart. --head SHA, the
-          commit just pushed (in full, or its first seven or more hex digits), refuses the run while
+          the plan is printed and nothing is written; writes are a second apart. --head SHA (or
+          --head=SHA), the commit just pushed (in full, or its first seven or more hex digits), refuses the run while
           the pull request shows another head: the forge names the old one for a moment after a
           push. Two pull requests
           had this as a hand-written script before the third need made it the tool (2026-10-07).
@@ -57,6 +57,7 @@ skip_literal = kit.skip_literal
 LIMIT = "known limit: neither a resolved thread nor a posted review starts a pipeline; re-run the gates after resolving"
 STILL = ("the head is still the finding's commit: nothing was pushed since, or the push has not reached "
          "the pull request yet; run the plan again")  # the forge names the old head for a moment after a push
+ON_HEAD = "the finding sits on the pushed head: nothing was pushed since it; an edit or a reply answers it"
 REPLIED = "a person wrote in it: read the reply, then resolve by hand"
 BOTS = {"github-actions", "github-actions[bot]"}  # the Actions token's login, as GraphQL and as REST spell it
 THREADS = """query($owner: String!, $name: String!, $pr: Int!, $after: String) {
@@ -109,8 +110,8 @@ def breadth_errors(body, paths):
 def finding_threads(threads):
     """(thread, findings) for every thread whose first comment is a trusted reviewer post with findings.
     The opening post is told by its marker and a trusted association, not by a login: off the
-    pipeline the reviewer posts under the login that started it. A later post is the reviewer's
-    only under the Actions login (`spoke`), since the reviewer writes none off the pipeline."""
+    pipeline the reviewer posts under the login that started it. What a later post is, and whose,
+    is `spoke`'s to say."""
     out = []
     for t in threads:
         nodes = t["comments"]["nodes"]
@@ -133,11 +134,12 @@ def answers(comment):
 def spoke(comment):
     """A later post in a thread that is not the reviewer's: a person's question or reply, whoever
     wrote it, whatever the association, since a question from anyone is read before the thread is
-    resolved. A later post is the reviewer's by its marker and its login together: a marker in a
-    person's reply, pasted or typed, does not make it the reviewer's, a post under the Actions
-    login without the marker is another workflow's, and a reviewer post off the pipeline, under a
-    person's login, reads as that person's and holds the thread for a reading. The opening post
-    is read otherwise (`finding_threads`): by its marker and a trusted association."""
+    resolved. The reviewer writes no later post; one that carries its marker under the Actions
+    login is read as its own all the same, so a marker in a person's reply, pasted or typed, does
+    not make it the reviewer's, a post under the Actions login without the marker is another
+    workflow's, and a later post under a person's login is that person's, whatever it carries.
+    The opening post is read otherwise (`finding_threads`): by its marker and a trusted
+    association, since off the pipeline the reviewer posts under the login that started it."""
     bot = ((comment.get("author") or {}).get("login")) in BOTS
     return not (bot and MARKER in (comment.get("body") or ""))
 
@@ -166,7 +168,7 @@ def findings_errors(threads, changed_since):
 RESOLVE = "mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { isResolved } } }"
 
 
-def resolve_plan(threads, changed_since, head=None):
+def resolve_plan(threads, changed_since, head=None, proven=False):
     """(to resolve, left open) among the unresolved threads. A finding thread whose files all changed
     since the finding's commit is answered by its edit, the reading `findings` applies, and may be
     resolved; everything else is left with its reason: a thread without findings is a person's, a
@@ -177,8 +179,10 @@ def resolve_plan(threads, changed_since, head=None):
     left open whatever changed: the reply is read before the thread is resolved, by hand. A
     finding whose commit is `head`, the head the pull request shows, cannot have changed since
     it: right after a push the forge still names the old head for a moment, and the reason says
-    so instead of "did not change" for a finding that sits on that head; a finding from an earlier
-    round reads as unchanged on such a read, which only `expect` in resolve_threads refuses."""
+    so instead of "did not change" for a finding that sits on that head. With `proven`, the head is
+    the pushed commit the session named, so that finding sits on the pushed head and the reason
+    says that. A finding from an earlier round reads as unchanged on a stale read, which only
+    `expect` in resolve_threads refuses."""
     findings_of = {id(t): f for t, f in finding_threads(threads)}  # None below: not a reviewer post; []: one that names no file
     resolve, left = [], []
     for t in threads:
@@ -196,7 +200,7 @@ def resolve_plan(threads, changed_since, head=None):
         else:
             unchanged = [p for p in paths if not changed_since(p, sha)] if findings and sha and sha != head else paths
             why = ("no finding of the reviewer" if findings is None else "the reviewer's post names no file" if not findings
-                   else STILL if sha and sha == head
+                   else (ON_HEAD if proven else STILL) if sha and sha == head
                    else "its commit is gone" if not sha else "the file did not change" if unchanged == paths
                    else f"not every file changed: {', '.join(unchanged)} did not")
             left.append((t, paths, why))
@@ -219,7 +223,7 @@ def resolve_threads(repo, number, go, get=None, expect=None):
         raise kit.Refused(f"the pull request shows head {head}, not {expect}: the push has not reached it yet, or the checkout is elsewhere; run again")
     threads = fetch_threads(repo, number, get)
     changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
-    resolve, left = resolve_plan(threads, changed, head)
+    resolve, left = resolve_plan(threads, changed, head, proven=bool(expect))
     for t, paths, why in left:
         print(f"left open: {', '.join(paths) or '(no file)'} ({t.get('id')}): {why}")
     for t, paths in resolve:
@@ -279,10 +283,11 @@ def blob_at(repo, path, ref, get=None):
 
 
 def option(argv, flag):
-    """The value after `flag`; None without the flag; the flag without a value is a refusal."""
-    if flag not in argv:
+    """The value after `flag`, or after `flag=`; None without the flag; the flag without a value is a refusal."""
+    joined = [a for a in argv if a.startswith(flag + "=")]
+    if flag not in argv and not joined:
         return None
-    value = (argv[argv.index(flag) + 1:] or [""])[0]
+    value = joined[0][len(flag) + 1:] if joined else (argv[argv.index(flag) + 1:] or [""])[0]
     if not value or value.startswith("--"):
         raise kit.Refused(f"{flag} needs a value")
     return value
@@ -587,6 +592,15 @@ def self_test():
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get, expect="xyz"))
             cases.append(("resolve: --head that is no commit prefix is refused",
                           type(out) is kit.Refused and "no commit" in str(out) and written == [], repr((out, written))))
+            get, written = resolving(lambda ref: "blob@" + ref)
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get, expect=PUSHED[:6]))
+            cases.append(("resolve: --head shorter than seven digits is refused as no commit",
+                          type(out) is kit.Refused and "no commit" in str(out) and written == [], repr((out, written))))
+            get, written = resolving(lambda ref: "blob@" + ref, head=still)
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get, expect=still))
+            cases.append(("resolve: with --head matched, a finding on that head is reported as sitting on the pushed head",
+                          bool(still) and out == (0, 1) and written == [] and "sits on the pushed head" in printed
+                          and "run the plan again" not in printed, repr((out, written, printed))))
             get, written = resolving(lambda ref: "blob@" + ref, head=still)
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: a forge that still shows the finding's commit as the head writes nothing, and says so",
@@ -650,6 +664,9 @@ def self_test():
              got(lambda: option(["resolve", "--head"], "--head")), got(lambda: option(["resolve", "--head", "--go"], "--head")))
     cases.append(("option: --head reads its value, none is None, and the flag without a value or before another flag is refused",
                   heads[:2] == ("abc", None) and all(type(r) is kit.Refused for r in heads[2:]), repr(heads)))
+    joined = (got(lambda: option(["resolve", "--head=abc", "--go"], "--head")), got(lambda: option(["resolve", "--head="], "--head")))
+    cases.append(("option: --head=SHA is read too, and --head= without a value is refused",
+                  joined[0] == "abc" and type(joined[1]) is kit.Refused, repr(joined)))
     return kit.report(cases)
 
 

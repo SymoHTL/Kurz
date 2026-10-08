@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-08
-digest: 292355e0d02fcc024f3cd4b53c0bf6d4ca09728a392cdda35b1ceee255f71cd9
+digest: 9dd6c995b17a0d678af894e468cbdb9bad0c94290cebea5ac53038087345402f
 ttl_days: 60
 metadata:
   type: reference
@@ -62,12 +62,12 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/lint_knowledge.py` | 61 | 44 |
 | `tools/lint_reference.py` | 56 | 58 |
 | `tools/merge_pr.py` | 134 | 116 |
-| `tools/pr_gates.py` | 83 | 82 |
+| `tools/pr_gates.py` | 86 | 85 |
 | `tools/quality_evidence.py` | 28 | 27 |
 | `tools/red_proof.py` | 29 | 26 |
 | `tools/review/review.py` | 239 | 205 |
 | `tools/tree_gate.py` | 81 | 51 |
-| **total** | 845 | 729 |
+| **total** | 848 | 732 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -129,7 +129,7 @@ counted from the record that the merge tool posts.
 | Pull requests merged | 5 |
 | Merged over red, with a recorded waiver | 4 |
 | Review findings posted: high | 37 |
-| Review findings posted: medium | 419 |
-| Review findings posted: low | 439 |
+| Review findings posted: medium | 422 |
+| Review findings posted: low | 444 |
 | Open HAZARD issues | 11 |
 <!-- /generated:forge -->

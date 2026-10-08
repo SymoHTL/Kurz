@@ -40,7 +40,8 @@ of the gates.
   has not reached the pull request yet; run the plan again`; a finding from an earlier round
   reads as "the file did not change" on such a read, with no sign. Gate: `self-tests` (the plan
   with the finding's commit as the head, and the write path with a forge that still shows it;
-  each with its mutation).
+  each with its mutation). With `--head` matched, the same finding is reported as `the finding
+  sits on the pushed head`, since the match proved the push landed, with its case and mutation.
 - After the push, run the plan with `--head` and without `--go` first; `--go` comes when the plan
   lists the answered threads, and Ready after `--go` printed them as resolved
   ([[resolve-what-the-edit-answered]]). `judgment step`

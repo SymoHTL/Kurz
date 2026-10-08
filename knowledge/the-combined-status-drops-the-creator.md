@@ -24,8 +24,8 @@ The list of statuses, `GET repos/{owner}/{repo}/commits/{ref}/statuses`, carries
 (`login`, `id`, `type`) on each entry. It is a different shape: GitHub's documentation of the
 endpoint lists every status posted for the ref in reverse chronological order, the latest first,
 not one per context (the captured list holds one entry, so the order was not seen here); so a
-reader takes the newest of a context, or an older `error` from a run that later succeeded
-outvotes the success.
+reader takes the newest status of a context from the pinned poster, ignoring a newer one from
+another creator, or an older `error` from a run that later succeeded outvotes the success.
 
 ## Why the self-test did not catch it
 
