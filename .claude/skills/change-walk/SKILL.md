@@ -133,7 +133,7 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    resolved by hand; a thread in which a person wrote gets its reply to the person and, on a file
    outside tool, workflow and hook code, still its edit before it is resolved by hand, unless the
    post is the owner's decision to make, which holds until decided; a thread on tool,
-   workflow or hook code left open gets its reply and is resolved by hand; a file that did not change elsewhere means
+   workflow or hook code whose file did not change gets its reply and is resolved by hand; a file that did not change elsewhere means
    the round's push missed a fix, and that fix is the next round's one push; a finding whose commit
    is gone cannot be proven answered by an edit and holds the merge until the owner decides. The `gates` run
    of the push saw the threads open, and an edit of the description after the review is text the

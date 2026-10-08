@@ -28,11 +28,13 @@ of the gates.
 
 ## How to apply
 
-- The resolve tool takes the pushed commit as `--head` and refuses, before any read of a thread or
-  any write, while the pull request shows another head: `the pull request shows head <a>, not
-  <b>: the push has not reached it yet, or the checkout is elsewhere; run again`. Gate:
-  `self-tests` (a forge that shows another head is refused and one that shows the pushed head
-  runs, with the mutation in `tools/red_proofs.json`).
+- The resolve tool takes the pushed commit as `--head`, in full or its first seven or more hex
+  digits, and refuses, before any read of a thread or any write, while the pull request shows
+  another head: `the pull request shows head <a>, not <b>: the push has not reached it yet, or
+  the checkout is elsewhere; run again`, both in full. Gate: `self-tests` (a forge that shows
+  another head is refused with nothing read past the pull request, one that shows the pushed
+  head runs for the full, the short and the upper-case form, and a value that is no commit is
+  refused; each with its mutation in `tools/red_proofs.json`).
 - Without `--head`, the plan names the shape only where a finding sits on the head the pull
   request shows: `the head is still the finding's commit: nothing was pushed since, or the push
   has not reached the pull request yet; run the plan again`; a finding from an earlier round

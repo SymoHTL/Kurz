@@ -1,6 +1,6 @@
 ---
 name: the-combined-status-drops-the-creator
-description: GitHub's combined status (GET repos/{owner}/{repo}/commits/{ref}/status) lists each status without its creator, while the list of statuses (GET .../commits/{ref}/statuses) names the creator and holds every status ever posted for the ref, newest first; a tool that pins a status to its poster reads the list and takes the newest of a context. The merge tool read the combined status and refused the first head with a real review status as absent while the forge called it mergeable (2026-10-07); its fixture of that endpoint had been captured before any status existed, an empty list no case could fail on
+description: GitHub's combined status (GET repos/{owner}/{repo}/commits/{ref}/status) lists each status without its creator, while the list of statuses (GET .../commits/{ref}/statuses) names the creator and holds every status ever posted for the ref, newest first; a tool that pins a status to its poster reads the list and takes the newest status of a context from the pinned poster, ignoring another creator's however new it is. The merge tool read the combined status and refused the first head with a real review status as absent while the forge called it mergeable (2026-10-07); its fixture of that endpoint had been captured before any status existed, an empty list no case could fail on
 metadata:
   type: feedback
 ---

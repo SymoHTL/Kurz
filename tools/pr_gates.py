@@ -25,8 +25,9 @@ resolve   not a gate: the session's step after its fix push. Every unresolved th
           the reason and the thread id,
           since a person's question and a written reply are the session's to give. Without --go
           the plan is printed and nothing is written; writes are a second apart. --head SHA, the
-          commit just pushed, refuses the run while the pull request shows another head: the forge
-          names the old one for a moment after a push. Two pull requests
+          commit just pushed (in full, or its first seven or more hex digits), refuses the run while
+          the pull request shows another head: the forge names the old one for a moment after a
+          push. Two pull requests
           had this as a hand-written script before the third need made it the tool (2026-10-07).
 A failed API call is a refusal (exit 1), never a pass. Known limit, printed by `findings` and by
 `resolve`: neither a resolved thread nor the review that posts its findings starts a pipeline, so
@@ -106,7 +107,10 @@ def breadth_errors(body, paths):
 
 
 def finding_threads(threads):
-    """(thread, findings) for every thread whose first comment is a trusted reviewer post with findings."""
+    """(thread, findings) for every thread whose first comment is a trusted reviewer post with findings.
+    The opening post is told by its marker and a trusted association, not by a login: off the
+    pipeline the reviewer posts under the login that started it. A later post is the reviewer's
+    only under the Actions login (`spoke`), since the reviewer writes none off the pipeline."""
     out = []
     for t in threads:
         nodes = t["comments"]["nodes"]
@@ -129,9 +133,11 @@ def answers(comment):
 def spoke(comment):
     """A later post in a thread that is not the reviewer's: a person's question or reply, whoever
     wrote it, whatever the association, since a question from anyone is read before the thread is
-    resolved. The reviewer's post is told by its marker and its login together: a marker in a
-    person's reply, pasted or typed, does not make it the reviewer's, and a reviewer post off the
-    pipeline, under a person's login, reads as that person's and holds the thread for a reading."""
+    resolved. A later post is the reviewer's by its marker and its login together: a marker in a
+    person's reply, pasted or typed, does not make it the reviewer's, a post under the Actions
+    login without the marker is another workflow's, and a reviewer post off the pipeline, under a
+    person's login, reads as that person's and holds the thread for a reading. The opening post
+    is read otherwise (`finding_threads`): by its marker and a trusted association."""
     bot = ((comment.get("author") or {}).get("login")) in BOTS
     return not (bot and MARKER in (comment.get("body") or ""))
 
@@ -202,13 +208,15 @@ def resolve_threads(repo, number, go, get=None, expect=None):
     resolved or, with `go`, once the forge said it is, one write a second: (answered, left open),
     where answered counts the threads resolved with `go` and the ones to resolve without it.
     An answer that does not say resolved is a refusal; what was resolved before it stays so.
-    `expect` is the commit the session pushed: while the pull request shows another head, the
-    push has not reached it yet (or the checkout is elsewhere), and nothing is compared or written."""
+    `expect` is the commit the session pushed, in full or as a prefix of seven or more hex digits in
+    any case: while the pull request shows another head, the push has not reached it yet (or the
+    checkout is elsewhere), and no thread is read, nothing is compared or written."""
     get = get or kit.gh_json
     head = get(f"repos/{repo}/pulls/{number}")["head"]["sha"]
-    if expect and head != expect:
-        raise kit.Refused(f"the pull request shows head {head[:7]}, not {expect[:7]}: the push has not reached it yet, "
-                          f"or the checkout is elsewhere; run again")
+    if expect and not re.fullmatch(r"[0-9a-fA-F]{7,40}", expect):
+        raise kit.Refused(f"--head {expect!r} is no commit: pass the pushed commit, in full or its first seven or more hex digits")
+    if expect and not head.lower().startswith(expect.lower()):
+        raise kit.Refused(f"the pull request shows head {head}, not {expect}: the push has not reached it yet, or the checkout is elsewhere; run again")
     threads = fetch_threads(repo, number, get)
     changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
     resolve, left = resolve_plan(threads, changed, head)
@@ -490,9 +498,14 @@ def self_test():
         plan = resolve_plan(variant(False, replies=1), differs)
         cases.append(("resolve: a finding thread in which a person wrote is left open, whatever changed",
                       counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
-        plan = resolve_plan(variant(False, replies=1, reply={"body": MARKER + "findings [] -->\nstill there",
-                                                            "author": {"login": "github-actions[bot]"}}), differs)
-        cases.append(("resolve: a later post of the reviewer itself is no person's reply", counts(plan) == [1, 0], repr(plan)))
+        spellings = [resolve_plan(variant(False, replies=1, reply={"body": MARKER + "findings [] -->\nstill there",
+                                                                 "author": {"login": login}}), differs)
+                     for login in ("github-actions", "github-actions[bot]")]  # as GraphQL and as REST spell the Actions login
+        cases.append(("resolve: a later post of the reviewer itself, under the Actions login as GraphQL or REST spell it, is no person's reply",
+                      all(counts(p) == [1, 0] for p in spellings), repr(spellings)))
+        plan = resolve_plan(variant(False, replies=1, reply={"author": {"login": "github-actions"}}), differs)
+        cases.append(("resolve: a post under the reviewer's login without its marker holds the thread",
+                      counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
         plan = resolve_plan(variant(False, replies=1, reply={"authorAssociation": "NONE"}), differs)
         cases.append(("resolve: an outsider's reply holds the thread too",
                       counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
@@ -509,16 +522,19 @@ def self_test():
                       bool(still) and counts(plan) == [0, 1] and plan[1][0][2].startswith("the head is still the finding's commit"),
                       repr((still, plan))))
 
-        def resolving(blob, says=True, threads=1, breaks_at=None, error=None, head="h"):
+        PUSHED = "0123456789abcdef0123456789abcdef01234567"  # the head the fake forge shows, commit-shaped
+
+        def resolving(blob, says=True, threads=1, breaks_at=None, error=None, head=PUSHED):
             """A forge for resolve_threads: the pull request at `head`, one page with the real thread unresolved
             (`threads` copies with their own ids), blob(ref) for a file, and the mutation, which it
             records and answers as told, or raises `error` (an error nobody expected) at write `breaks_at`.
             The mutation's answer is written by hand, in the shape the real runs of pull request 23 were
             read with: capturing a real one is a write to the forge made for the fixture's sake, which is
-            the owner's to make, not a session's (CLAUDE.md, Tests item 1)."""
-            written = []
+            the owner's to make, not a session's (CLAUDE.md, Tests item 1). `get.asked` lists what was asked."""
+            written, asked = [], []
 
             def get(*args):
+                asked.append(args[0])
                 if args[0] == "graphql" and args[2].startswith("query=mutation"):
                     if breaks_at is not None and len(written) == breaks_at:
                         raise error or RuntimeError("an answer nobody expected")  # a kind no except tuple of this tool ever named
@@ -531,6 +547,7 @@ def self_test():
                 if "/contents/" in args[0]:
                     return {"sha": blob(args[0].split("?ref=")[1])}
                 return {"title": "ok", "body": "", "head": {"sha": head}, "commits": 1}
+            get.asked = asked
             return get, written
 
         def quietly(fn):
@@ -556,11 +573,20 @@ def self_test():
             cases.append(("resolve: a thread whose file did not change is not written, with --go",
                           out == (0, 1) and written == [] and "the file did not change" in printed, repr((out, written, printed))))
             get, written = resolving(lambda ref: "blob@" + ref)
-            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get, expect="other"))
-            fine, printed2 = quietly(lambda: resolve_threads("o/n", 1, True, get, expect="h"))
-            cases.append(("resolve: a pull request that shows another head than the pushed one is refused before any write",
-                          type(out) is kit.Refused and "shows head h, not other" in str(out) and fine == (1, 0) and written == ["thread=t0"],
-                          repr((out, fine, written))))
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get, expect="f" * 40))
+            cases.append(("resolve: a pull request that shows another head than the pushed one is refused before any read of a thread or any write",
+                          type(out) is kit.Refused and f"shows head {PUSHED}, not {'f' * 40}" in str(out) and written == []
+                          and get.asked == ["repos/o/n/pulls/1"], repr((out, written, get.asked))))
+            forms = []
+            for form in (PUSHED, PUSHED[:7], PUSHED[:12].upper()):
+                get, written = resolving(lambda ref: "blob@" + ref)
+                forms.append((quietly(lambda: resolve_threads("o/n", 1, True, get, expect=form))[0], written))
+            cases.append(("resolve: --head takes the pushed commit in full, as a prefix of seven digits, and in upper case",
+                          all(out == (1, 0) and written == ["thread=t0"] for out, written in forms), repr(forms)))
+            get, written = resolving(lambda ref: "blob@" + ref)
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get, expect="xyz"))
+            cases.append(("resolve: --head that is no commit prefix is refused",
+                          type(out) is kit.Refused and "no commit" in str(out) and written == [], repr((out, written))))
             get, written = resolving(lambda ref: "blob@" + ref, head=still)
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: a forge that still shows the finding's commit as the head writes nothing, and says so",
