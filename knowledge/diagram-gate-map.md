@@ -150,7 +150,8 @@ flowchart TD
         A merge by the button or gh pr merge still meets M1, but not the head pin, the auto-merge check,
         the answered findings, the comparison with the live rules or the title gate: HAZARD issue 14"]
         M3["merge_pr.py --over-red: ruleset off for one merge, restored and read back;
-        while it is off nothing on the server holds any pull request or a push to main.
+        while it is off nothing on the server holds any pull request or a push to main, so the checks
+        and the threads are read again once it is off, and a change since the decision merges nothing.
         Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3"]
         M4["title or description edited after the review: the status stays green on text
