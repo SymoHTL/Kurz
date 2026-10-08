@@ -146,8 +146,9 @@ def resolve_plan(threads, changed_since):
     """(to resolve, left open) among the unresolved threads. A finding thread whose files all changed
     since the finding's commit is answered by its edit, the reading `findings` applies, and may be
     resolved; everything else is left with its reason: a thread without findings is a person's, a
-    finding whose commit is gone cannot be proven answered, a finding whose file did not change is
-    answered by an edit or, on tool code, by a reply, which this tool cannot write."""
+    reviewer post that names no file names nothing to check, a finding whose commit is gone cannot
+    be proven answered, a finding whose file did not change is answered by an edit or, on tool,
+    workflow or hook code, by a reply, which this tool cannot write."""
     findings_of = {id(t): f for t, f in finding_threads(threads)}  # None below: not a reviewer post; []: one that names no file
     resolve, left = [], []
     for t in threads:
@@ -194,9 +195,9 @@ def resolve_command(repo, number, go, get=None):
     failure after the first write leaves threads resolved, so the message says what stands."""
     try:
         resolved, left = resolve_threads(repo, number, go, get)
-    except Exception as e:  # whatever failed, the lines printed above are what the forge confirmed
+    except BaseException as e:  # whatever failed, an interrupt too: the lines printed above are what the forge confirmed
         print(f"ERROR: resolve stopped: {type(e).__name__}: {e}. The threads printed as resolved above stay resolved; "
-              f"the thread of the failed write may or may not be: run the plan again, it shows what is left")
+              f"if a write failed, its thread may or may not be: run the plan again, it shows what is left")
         return 1
     print(f"resolve: {resolved} threads {'resolved' if go else 'to resolve (plan only: add --go)'}, {left} left open")
     return 0
@@ -285,10 +286,11 @@ def self_test():
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
 
     def got(fn):
-        """What fn returned, or the exception it raised, as a value."""
+        """What fn returned, or the exception it raised, as a value; an interrupt too, so that a case
+        about one can fail instead of ending the suite."""
         try:
             return fn()
-        except Exception as e:
+        except BaseException as e:
             return e
 
     check("clean title and messages", title_errors("Add the knowledge store", ["Add the lint\n\nbody"]), None)
@@ -430,16 +432,16 @@ def self_test():
         cases.append(("resolve: a reviewer post that names no file is left open",
                       counts(plan) == [0, 1] and plan[1][0][2] == "the reviewer's post names no file", repr(plan)))
 
-        def resolving(blob, says=True, threads=1, breaks_at=None):
+        def resolving(blob, says=True, threads=1, breaks_at=None, error=None):
             """A forge for resolve_threads: the pull request, one page with the real thread unresolved
             (`threads` copies with their own ids), blob(ref) for a file, and the mutation, which it
-            records and answers as told, or raises an error nobody expected at write `breaks_at`."""
+            records and answers as told, or raises `error` (an error nobody expected) at write `breaks_at`."""
             written = []
 
             def get(*args):
                 if args[0] == "graphql" and args[2].startswith("query=mutation"):
                     if breaks_at is not None and len(written) == breaks_at:
-                        raise RuntimeError("an answer nobody expected")  # a kind no except tuple of this tool ever named
+                        raise error or RuntimeError("an answer nobody expected")  # a kind no except tuple of this tool ever named
                     written.append(args[-1])
                     return {"data": {"resolveReviewThread": {"thread": {"isResolved": says}}}}
                 if args[0] == "graphql":
@@ -485,6 +487,10 @@ def self_test():
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
             cases.append(("resolve: a failure of any kind after a write says what stands",
                           out == 1 and resolved_lines(printed) == 1 and "resolve stopped: RuntimeError" in printed, repr((out, printed))))
+            get, written = resolving(lambda ref: "blob@" + ref, threads=2, breaks_at=1, error=KeyboardInterrupt())
+            out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
+            cases.append(("resolve: an interrupt during --go says what stands too",
+                          out == 1 and resolved_lines(printed) == 1 and "resolve stopped: KeyboardInterrupt" in printed, repr((out, printed))))
             get, written = resolving(lambda ref: "blob@" + ref)
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
             cases.append(("resolve: the command ends 0 when the plan ran", out == 0 and "1 threads resolved" in printed, repr((out, printed))))

@@ -19,11 +19,12 @@ hand was a script per pull request, twice, before the third-time rule made it th
    `would resolve <files> (<thread id>)` or `left open: <files> (<thread id>): <why>`, where why
    is "no finding of the reviewer" (a person's thread), "the reviewer's post names no file", "its
    commit is gone" (the finding's commit is not on the forge) or "the file did not change".
-3. What is left open: a person's thread is theirs to resolve; a tool-code thread with "the file
-   did not change" gets its reply and is resolved by hand, since the tool resolves edits only; any
-   other thread with "the file did not change" means the push missed a fix, which is the next
-   round's one push; "its commit is gone" cannot be proven answered by an edit: on tool code a
-   reply answers it, elsewhere it holds the merge until the owner decides.
+3. What is left open: a person's thread is theirs to resolve; a thread on tool, workflow or hook
+   code (`tools/`, `.github/`, `.githooks/`) with "the file did not change" gets its reply and is
+   resolved by hand, since the tool resolves edits only; a thread elsewhere with "the file did not
+   change" means the push missed a fix, which is the next round's one push; "its commit is gone"
+   cannot be proven answered by an edit: on tool, workflow or hook code a reply answers it,
+   elsewhere it holds the merge until the owner decides.
 4. `py -3 tools/pr_gates.py resolve --pr <N> --go` resolves the plan, a second between writes,
    and prints each thread once the forge said it is resolved. A failure of any kind stops the run
    (exit 1): what was printed stays resolved, the thread of the failed write may or may not be,

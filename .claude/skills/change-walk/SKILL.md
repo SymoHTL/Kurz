@@ -58,7 +58,7 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
 
 ## 3. Review
 
-A review run spends the owner's Claude seat: a pass reports about 0.2 to 0.3 USD in CI and 1.3 to
+A review run spends the owner's Claude seat: a pass reports 0.19 to 0.26 USD in CI and 1.3 to
 1.8 USD off the pipeline, and takes 6 to 18 minutes (`knowledge/what-a-review-pass-costs.md`), at
 least two passes per batch of the diff. A run in CI, the one
 Ready or a push starts or a dispatch, starts without a question to the owner: the question before
@@ -124,8 +124,8 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    `py -3 tools/pr_gates.py resolve --pr <N>` prints which threads the head's edits answer and
    which stay open and why (a person's thread, a reviewer post that names no file, a finding whose
    commit is gone, a file that did not change), and `--go` resolves the former
-   (`knowledge/resolve-what-the-edit-answered.md`). A person's thread is theirs; a tool-code thread
-   left open gets its reply and is resolved by hand; a file that did not change elsewhere means
+   (`knowledge/resolve-what-the-edit-answered.md`). A person's thread is theirs; a thread on tool,
+   workflow or hook code left open gets its reply and is resolved by hand; a file that did not change elsewhere means
    the round's push missed a fix, and that fix is the next round's one push; a finding whose commit
    is gone cannot be proven answered by an edit and holds the merge until the owner decides. The `gates` run
    of the push saw the threads open; a description edit runs the gates again without a review. The
