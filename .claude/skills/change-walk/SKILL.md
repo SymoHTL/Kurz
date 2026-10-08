@@ -58,14 +58,15 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
 
 ## 3. Review
 
-A review run spends the owner's Claude seat: a pass reports 0.19 to 0.27 USD in CI and 1.3 to
+A review run spends the owner's Claude seat: a pass reports 0.19 to 0.27 USD in CI (the top
+rounded up from 0.264) and 1.3 to
 1.8 USD off the pipeline, and takes 6 to 18 minutes (`knowledge/what-a-review-pass-costs.md`), at
 least two passes per batch of the diff. A run in CI, the one
 Ready or a push starts or a dispatch, starts without a question to the owner: the question before
 every run, set on 2026-10-02 after the first bills, was retired by the owner on 2026-10-07 because
 it stalled every round for a run that had cost 1.42 to 1.94 USD by then (1.04 to 2.47 in the ten
-runs measured to 2026-10-08; the upper bound at the pass cap, batches times ten passes times
-0.27 USD, is about 2.7 USD per batch); the bill is named in the report. A run off the
+runs measured to 2026-10-08; the upper bound at the pass cap, batches times five passes times
+0.27 USD, is about 1.35 USD per batch); the bill is named in the report. A run off the
 pipeline, at local prices, starts after the owner said go to the bill named. `judgment step`
 Count the batches on the head that will be reviewed, with
 `py -3 tools/review/review.py --pr <N> --plan`, which pays nothing; never take them from an
@@ -139,7 +140,8 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    workflow or hook code whose file did not change gets its reply and is resolved by hand; a file that did not change elsewhere means
    the round's push missed a fix, and that fix is the next round's one push; a finding whose commit
    is gone cannot be proven answered by an edit and holds the merge until the owner decides. The `gates` run
-   of the push saw the threads open, and an edit of the description after the review is text the
+   of the push may have seen the threads open, since it reads them when it reaches `pr-findings`,
+   before or after `--go`, and an edit of the description after the review is text the
    review never read (HAZARD #13): the walk is to mark the pull request Draft before the push,
    resolve, then Ready, so the one review and the gates run on the head with its threads resolved. Each push is a new head
    that needs its own review. Never push to cancel a running review; a push to a Ready pull

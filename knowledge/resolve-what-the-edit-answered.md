@@ -1,6 +1,6 @@
 ---
 name: resolve-what-the-edit-answered
-description: After the fix push, py -3 tools/pr_gates.py resolve --pr N --head <pushed commit> prints which unresolved reviewer threads the head's edits answer (every file of the finding changed since the finding's commit, the reading the findings gate applies) and which stay open and why; --go resolves the former, one write a second. Two pull requests had this as a hand-written script (21 and 22, 2026-10-07) before the third need made it the tool
+description: After the fix push, py -3 tools/pr_gates.py resolve --pr N --head <pushed commit> prints which unresolved reviewer threads the head's edits answer (every file of the finding changed since the finding's commit, the findings gate's reading of an edit) and which stay open and why; --go resolves the former, one write a second. Two pull requests had this as a hand-written script (21 and 22, 2026-10-07) before the third need made it the tool
 metadata:
   type: reference
 ---

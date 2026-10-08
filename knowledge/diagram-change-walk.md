@@ -59,7 +59,8 @@ flowchart TD
     with --passes N a batch gets at most N passes and the note names the limit.
     The merge then needs the owner's approval for this head: judgment step, HAZARD issue 3"]
     O --> I
-    G -- "success" --> I["read every thread; fix each finding in its file; then resolve; then push once.
+    G -- "success" --> I["read every thread; fix each finding in its file; mark Draft; push once;
+    resolve with pr_gates.py resolve --head; mark Ready.
     On tool and workflow code a finding that does not hold, or that a HAZARD issue records,
     is answered by a reply that says so: judgment step. On every other file only the edit counts.
     Low findings are collected on the issue labelled review-lows: they are fixed together,

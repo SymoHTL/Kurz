@@ -254,7 +254,7 @@ def resolve_threads(repo, number, go, get=None, expect=None):
             continue
         answer = get("graphql", "-f", f"query={RESOLVE}", "-f", f"thread={t['id']}")
         if not said_resolved(answer):
-            raise kit.Refused(f"the forge did not resolve the thread on {', '.join(paths)} ({t['id']}): {str(answer)[:200]}")
+            raise kit.Refused(f"the forge's answer did not confirm the thread on {', '.join(paths)} ({t['id']}) as resolved: {str(answer)[:200]}")
         print(f"resolved {', '.join(paths)} ({t['id']})")  # after the forge said so, never before
         time.sleep(1)
     return len(resolve), len(left)

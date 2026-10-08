@@ -82,8 +82,10 @@ def required(rules):
 # (`commits/{sha}/statuses`) names the creator; the combined status (`commits/{sha}/status`) drops
 # it, so a status read from there never matched the poster and the context read as absent, on the
 # first head with a real `review` status (2026-10-07). The list holds every status posted for the
-# head, newest first; the tool reads the first page (100 entries) and, of the context's statuses
-# there from the pinned poster, the newest counts; a newer one from another creator is ignored.
+# head, newest first across all contexts; the tool reads the first page (100 entries) and, of the
+# context's statuses there from the pinned poster, the newest counts; a newer one from another
+# creator is ignored, and a context with no status of the poster on that page reads as absent,
+# which holds the merge.
 STATUS_POSTERS = {15368: "github-actions[bot]"}
 
 

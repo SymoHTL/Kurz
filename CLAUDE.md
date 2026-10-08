@@ -94,6 +94,7 @@ Each line names a trap; its evidence is in the entry it links.
    is counted before the run and named in the report after it. A run off the pipeline spends the
    seat at local prices and starts only after the owner said go to a bill that was named. The
    bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.27 USD,
+   the top rounded up from 0.264,
    off the pipeline about 1.3 to 1.8 USD, measured in
    [knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)), with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
@@ -130,7 +131,7 @@ Each line names a trap; its evidence is in the entry it links.
   statuses, can post it. HAZARD (#11). The pinned check accepts this status: seen once, on
   2026-10-07, when pull request 22 was mergeable on it alone and merged with no waiver through the
   fixed copy of the merge tool on the branch that carried the fix (#5, closed); nothing re-checks
-  the platform on that, and it fails closed: a status the ruleset stopped accepting leaves the
+  the platform on that, HAZARD (#24), and it fails closed: a status the ruleset stopped accepting leaves the
   merge pending, never open. The tool reads the status from the list of statuses, an endpoint that names
   the creator, which the combined status does not ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
   Gate: `self-tests` for the tool's read of the captured status; the platform's acceptance is a
@@ -327,7 +328,7 @@ Gate: review rule "rules for sessions".
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
-| the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing |
+| the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
