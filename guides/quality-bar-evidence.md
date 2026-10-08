@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-07
-digest: 03830770e5e108a35e5ae7acf1912b8d51fce3b0f661956fa0f5e33815485453
+generated: 2026-10-08
+digest: 9dd6c995b17a0d678af894e468cbdb9bad0c94290cebea5ac53038087345402f
 ttl_days: 60
 metadata:
   type: reference
@@ -61,13 +61,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/lint_ci.py` | 84 | 84 |
 | `tools/lint_knowledge.py` | 61 | 44 |
 | `tools/lint_reference.py` | 56 | 58 |
-| `tools/merge_pr.py` | 127 | 109 |
-| `tools/pr_gates.py` | 55 | 50 |
+| `tools/merge_pr.py` | 134 | 116 |
+| `tools/pr_gates.py` | 86 | 85 |
 | `tools/quality_evidence.py` | 28 | 27 |
 | `tools/red_proof.py` | 29 | 26 |
 | `tools/review/review.py` | 239 | 205 |
 | `tools/tree_gate.py` | 81 | 51 |
-| **total** | 810 | 690 |
+| **total** | 848 | 732 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -75,15 +75,15 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 25 |
+| Entries in INDEX.md | 28 |
 | tagged (untagged) | 2 |
-| tagged HARD | 13 |
+| tagged HARD | 14 |
 | tagged LIVING | 4 |
-| tagged POSTMORTEM | 3 |
-| tagged RECIPE | 1 |
-| tagged TRAP | 5 |
+| tagged POSTMORTEM | 4 |
+| tagged RECIPE | 2 |
+| tagged TRAP | 6 |
 | Review rule sections | 11 |
-| Review rules | 63 |
+| Review rules | 64 |
 <!-- /generated:store -->
 
 ## The design record
@@ -125,11 +125,11 @@ counted from the record that the merge tool posts.
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened | 5 |
-| Pull requests merged | 4 |
+| Pull requests opened | 6 |
+| Pull requests merged | 5 |
 | Merged over red, with a recorded waiver | 4 |
 | Review findings posted: high | 37 |
-| Review findings posted: medium | 385 |
-| Review findings posted: low | 316 |
-| Open HAZARD issues | 12 |
+| Review findings posted: medium | 422 |
+| Review findings posted: low | 444 |
+| Open HAZARD issues | 11 |
 <!-- /generated:forge -->

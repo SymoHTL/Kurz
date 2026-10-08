@@ -85,8 +85,11 @@ flowchart TD
         (tools, workflows, review rules, skills, hooks, CLAUDE.md, .gitattributes; a file moved out of it counts),
         without a Blast radius section"]
         G8["pr-findings: a review thread unresolved, or resolved without the edit that answers it;
-        on tool, workflow and hook code a written reply also answers.
-        Its verdict is the one of the moment the job ran: resolving a thread starts no run"]
+        on tool, workflow and hook code a written reply also answers. The tool's resolve command plans
+        the reviewer's threads whose files all changed since the finding's commit, resolves them with --go, and leaves the rest open
+        with the reason, a person's reply in the thread and a head the forge still shows as the
+        finding's commit among them (self-tests).
+        The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]
     end
     subgraph R["CI: workflow review, pull_request_target and dispatch"]
         R1["job review-run: red when the review did not complete. The last line names the kind:
@@ -100,7 +103,10 @@ flowchart TD
         at the pass cap it says NOT converged, and is success all the same: HAZARD issue 17.
         Draft, outside pull request, the Ready event of a head labelled reviewed- plus its own sha, no run:
         stays pending; a skipped job reports a check named review-run, never this status.
-        Does it satisfy the ruleset's pinned app: unverified, HAZARD issue 5; if not, every merge needs --over-red.
+        It satisfied the ruleset's pinned app on 2026-10-07 (issue 5 closed; a fact seen once, re-checked by nothing,
+        failing closed: a status the ruleset stopped accepting leaves the merge pending);
+        the merge tool reads it from the list of statuses, the endpoint that names the creator, which the combined
+        status drops (self-tests: the read of the captured status).
         Any workflow run of this repository can post the same status: HAZARD issue 11"]
         R3["findings: high and medium become threads on the pull request, per file,
         and block through thread resolution, not through the job.
@@ -164,7 +170,7 @@ flowchart TD
   W1, P1, G2.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
-- `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8.
+- `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.
 - `.github/workflows/review.yml`, `tools/review/review.py` or `.review/review-rules.yaml`
   changes: the subgraph R.
 - `tools/ruleset.json` or `tools/merge_pr.py` changes: the subgraph M and G5.

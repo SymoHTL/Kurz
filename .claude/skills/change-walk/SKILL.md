@@ -58,9 +58,15 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
 
 ## 3. Review
 
-A review run spends the owner's Claude seat: about 1.4 to 1.8 USD and 6 to 18 minutes per pass (`knowledge/what-a-review-pass-costs.md`), at
-least two passes per batch of the diff (`knowledge/what-a-review-pass-costs.md`). Before starting
-or dispatching one, tell the owner the expected bill and wait for the go-ahead. `judgment step`
+A review run spends the owner's Claude seat: a pass reports 0.19 to 0.27 USD in CI and 1.3 to
+1.8 USD off the pipeline, and takes 6 to 18 minutes (`knowledge/what-a-review-pass-costs.md`), at
+least two passes per batch of the diff. A run in CI, the one
+Ready or a push starts or a dispatch, starts without a question to the owner: the question before
+every run, set on 2026-10-02 after the first bills, was retired by the owner on 2026-10-07 because
+it stalled every round for a run that had cost 1.42 to 1.94 USD by then (1.04 to 2.47 in the ten
+runs measured to 2026-10-08; the upper bound at the pass cap, batches times ten passes times
+0.27 USD, is about 2.7 USD per batch); the bill is named in the report. A run off the
+pipeline, at local prices, starts after the owner said go to the bill named. `judgment step`
 Count the batches on the head that will be reviewed, with
 `py -3 tools/review/review.py --pr <N> --plan`, which pays nothing; never take them from an
 earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
@@ -115,9 +121,26 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    `review-lows`; they hold no merge and are fixed together, or with a push that is needed
    anyway. A pull request needs no further round once a round reports nothing above low.
    Gate: `self-tests` for where the reviewer puts them; fixing them is a `judgment step`.
-7. Order: edit, resolve the threads, then push ONE commit with every fix. Each push is a new
-   head that needs its own review. Never push to cancel a running review; a push to a Ready
-   pull request does cancel it. `judgment step`
+7. Order: edit, mark the pull request Draft, push ONE commit with every fix, resolve the threads
+   the edits answered, mark it Ready:
+   `py -3 tools/pr_gates.py resolve --pr <N> --head <the pushed commit>` prints which threads the head's edits answer and
+   which stay open and why (a person's thread, a reviewer post that names no file, a finding whose
+   commit is gone, a file that did not change, a thread in which a person wrote, or a head the
+   pull request still shows as the finding's commit right after the push, where `--head` refuses
+   the run until the forge shows the pushed commit: run it again), and `--go` resolves the former
+   (`knowledge/resolve-what-the-edit-answered.md`). A person's thread is theirs; a reviewer post
+   that names no file is read, what it asks is answered by an edit or a reply, and the thread is
+   resolved by hand; a thread in which a person wrote gets its reply to the person and, on a file
+   outside tool, workflow and hook code, still its edit before it is resolved by hand, unless the
+   post is the owner's decision to make, which holds until decided; a thread on tool,
+   workflow or hook code whose file did not change gets its reply and is resolved by hand; a file that did not change elsewhere means
+   the round's push missed a fix, and that fix is the next round's one push; a finding whose commit
+   is gone cannot be proven answered by an edit and holds the merge until the owner decides. The `gates` run
+   of the push saw the threads open, and an edit of the description after the review is text the
+   review never read (HAZARD #13): the walk is to mark the pull request Draft before the push,
+   resolve, then Ready, so the one review and the gates run on the head with its threads resolved. Each push is a new head
+   that needs its own review. Never push to cancel a running review; a push to a Ready pull
+   request does cancel it. `judgment step`
 
 ## 4. Merge
 

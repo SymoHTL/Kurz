@@ -22,7 +22,15 @@ tools/fixtures/ (GitHub, repository SymoHTL/Kurz; captured 2026-10-01 unless a l
   check-runs.json       gh api "repos/SymoHTL/Kurz/commits/<head>/check-runs?per_page=100"
                         the head of pull-request.json, after its first gates run had failed
   status.json           gh api "repos/SymoHTL/Kurz/commits/<head>/status?per_page=100"
-                        the same head, before anything had posted a commit status
+                        the head of pull request 22 on 2026-10-07, after its review in CI had posted
+                        the status `review`: the combined status, whose entries name no creator.
+                        Until then it was the head of pull-request.json before any status: an
+                        empty list, which no case could fail on.
+  statuses.json         gh api "repos/SymoHTL/Kurz/commits/<head>/statuses?per_page=100"
+                        the same head and moment: the list of statuses, each with its creator.
+                        Both are from another head than check-runs.json and pull-request.json; the
+                        merge tool's self-test mixes them on purpose, real check runs of one head
+                        and real statuses of another, and says so where it loads them.
   review-threads.json   gh api graphql with the query THREADS of tools/pr_gates.py, asked for the
                         first two threads only (reviewThreads(first: 2)), for pull request 8 on
                         2026-10-02, after the first review that posted threads

@@ -63,7 +63,11 @@ Each line names a trap; its evidence is in the entry it links.
 ## Tests: every decision is proven
 
 1. **A case must be able to fail.** A negative case carries a positive control; an `all()` over a
-   collection that can be empty checks that it is not. Gate: review rule "tools".
+   collection that can be empty checks that it is not; a captured payload that holds none of the
+   thing under test (the status fixture captured on 2026-10-01, before the first status, which
+   the first status exposed on 2026-10-07) is captured again once the platform has sent one, and
+   the case over it has a floor. Gate: review rule "tools" for the floor; the re-capture is a
+   `judgment step`.
 2. **Every recorded case was seen red.** The mutation is recorded and replayed on every run, so a
    gate that went soft turns the build red. Gate: `self-tests`.
 3. **Unchecked never looks clean.** A scan that is satisfied by finding nothing has a floor; a
@@ -85,8 +89,13 @@ Each line names a trap; its evidence is in the entry it links.
    (`gh workflow run review.yml`), and the run the forge starts by itself when a session marks a
    pull request Ready or pushes to a Ready one; the Ready run alone is skipped when the head
    carries the label `reviewed-<its sha>`, which a completed off-pipeline review of that head adds.
-   Each of these runs needs the owner's go-ahead for a bill that was
-   named, and the bill is batches times passes times the price of a pass, with the batches from
+   A run in CI starts without a question to the owner: the question before every run, set on
+   2026-10-02, was retired by the owner on 2026-10-07 after it had stalled every round; the bill
+   is counted before the run and named in the report after it. A run off the pipeline spends the
+   seat at local prices and starts only after the owner said go to a bill that was named. The
+   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.27 USD,
+   off the pipeline about 1.3 to 1.8 USD, measured in
+   [knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)), with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
    takes every pass up to the cap, so its bill is the plan's upper bound. On 2026-10-02 a bill was
    named from the 20 batches of an earlier run; the head had grown to 30, and the run was stopped
@@ -96,7 +105,8 @@ Each line names a trap; its evidence is in the entry it links.
    before the signal reached it ([knowledge/a-cancel-does-not-beat-the-runner.md](knowledge/a-cancel-does-not-beat-the-runner.md)).
    Gate: `self-tests` for the plan (it calls no model and posts nothing) and for the label a
    completed off-pipeline review adds, `ci-config` for the clause of the workflow that skips the
-   Ready event of a labelled head; naming the bill and waiting for the go-ahead is a `judgment step`.
+   Ready event of a labelled head; counting and naming the bill, and the go-ahead for a run off the
+   pipeline, are a `judgment step`.
 7. **An expectation nobody runs is not a proof.** Nothing runs `corpus/`. The lint checks the
    shape of a case; whether its expected output or error is right is decided by reading it
    against the rules it names ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
@@ -117,8 +127,14 @@ Each line names a trap; its evidence is in the entry it links.
   stopped at the pass cap with defects above low still open completed, and posts `success` with
   "NOT converged" in its description: HAZARD (#17). Nothing proves that a status of this name came
   from a completed review: every workflow run of the repository, and everyone who may write
-  statuses, can post it. HAZARD (#11). Whether the pinned check accepts this status at all has not
-  been seen: HAZARD (#5).
+  statuses, can post it. HAZARD (#11). The pinned check accepts this status: seen once, on
+  2026-10-07, when pull request 22 was mergeable on it alone and merged with no waiver through the
+  fixed copy of the merge tool on the branch that carried the fix (#5, closed); nothing re-checks
+  the platform on that, and it fails closed: a status the ruleset stopped accepting leaves the
+  merge pending, never open. The tool reads the status from the list of statuses, an endpoint that names
+  the creator, which the combined status does not ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
+  Gate: `self-tests` for the tool's read of the captured status; the platform's acceptance is a
+  fact seen, not a gate.
 - `gates` red: read the `=== gates` table at the end of the log and fix the first row that turned
   the run red: FAIL, BROKEN or NOT RUN, or PARTLY on a gate that is not listed (the docstring of
   `tools/gates.py` is the one definition). A red `pr-title` or `pr-breadth` is fixed by editing
@@ -241,11 +257,21 @@ Gate: review rule "rules for sessions".
   as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
   HAZARD (#3): the session holds the owner's token, so the permission classifier and this rule
   are the only guards on the approval.
-- **One push per review round.** Read every thread, fix everything, push once. Never push to
-  cancel a running review; a push to a Ready pull request does cancel it. `judgment step`
+- **One push per review round.** Read every thread, fix everything, mark the pull request Draft,
+  push once, resolve the threads the push answered, then mark it Ready (the skill `change-walk`,
+  step 7), so the one review and the gates run on a head with its threads resolved. Never push
+  to cancel a running review; a push to a Ready pull request does cancel it. `judgment step`
 - **A finding above low is a thread, and a thread is answered by an edit.** On the design
   record, the reference, the corpus, the knowledge store and rule files the file must change
-  before the thread is resolved; on tool and workflow code a written reply also counts.
+  before the thread is resolved; on tool, workflow and hook code a written reply also counts. After
+  the fix push, `py -3 tools/pr_gates.py resolve --pr N --head <sha> --go`, with the pushed commit,
+  resolves the reviewer's threads whose files all changed since the finding's commit and leaves
+  the rest open with the reason (a thread in which a person wrote among them); right after the
+  push the forge still names the old head for a moment, and the tool refuses until it shows the
+  pushed one (run it again,
+  [knowledge/the-pull-request-shows-the-old-head-after-a-push.md](knowledge/the-pull-request-shows-the-old-head-after-a-push.md));
+  a thread answered by a reply is resolved by hand
+  ([knowledge/resolve-what-the-edit-answered.md](knowledge/resolve-what-the-edit-answered.md)).
   Gate: `pr-findings`.
 - **Low findings open no thread and hold no merge** (the owner's decision, 2026-10-02). The
   reviewer collects them on the open issue labelled `review-lows`, where they are fixed together.
@@ -301,7 +327,7 @@ Gate: review rule "rules for sessions".
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
-| the reviewer's pinned model, the environment of its call, what a failed run keeps (`self-tests`) | that the `review` status satisfies the ruleset (#5, unverified), and that it came from a completed review (#11) |
+| the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |

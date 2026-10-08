@@ -1,6 +1,6 @@
 ---
 name: what-a-review-pass-costs
-description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 18 minutes, whatever the model and effort; per pass about 1.4 to 1.8 USD at list price on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD, so a review run is started only with the owner's go-ahead
+description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 18 minutes, whatever the model and effort; per pass about 1.4 to 1.8 USD at list price on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD; in CI a pass reports 0.19 to 0.27 USD (ten runs, 2026-10-07 and 2026-10-08). A run in CI starts without a question to the owner since 2026-10-07; a run off the pipeline waits for the owner's go-ahead to the bill named
 metadata:
   type: reference
 ---
@@ -62,7 +62,14 @@ What follows from it:
   capturing the answers under `tools/review/fixtures/` again: the unit suite reads real answers of
   the pinned model.
 - A review costs batches times passes, and a batch needs at least two passes. An ordinary pull
-  request of one batch: two passes, about 3 USD, about 20 minutes.
+  request of one batch: two passes, about 3 USD off the pipeline and about 0.5 USD in CI, about
+  20 minutes. In CI a pass reported 0.19 to 0.27 USD on 2026-10-07 and 2026-10-08 (ten runs:
+  1.94 USD for 10 passes, 1.42 for 6, 1.04 for 4, 1.85 for 7, 2.47 for 10, 1.80 for 8, 1.91 for 8,
+  2.11 for 8, 2.04 for 8, 2.42 for 11; the highest, 1.85 for 7, is 0.264 a pass, rounded up to
+  0.27); off the pipeline a pass on the pinned model reported 1.34 USD on
+  2026-10-07, just under the 1.4 to 1.8 USD a pass measured off the pipeline on 2026-10-02 (above).
+  Why the two places report prices this far apart was not
+  established.
 - A run outside CI can be cut to a bill named in advance: `--passes N` (1 to 5, with `--local`
   or `--dry-run` only) gives a batch at most N passes, so `--passes 1` costs batches times one
   pass. What it gives up is the second pass, the one that shows whether the first found
@@ -74,16 +81,24 @@ What follows from it:
 - Passes run in rounds (`in_rounds` in `review.py`): every batch gets one pass before any batch
   gets a second. A time budget of about batches times pass time divided by three buys one pass
   over everything; a run that ends there is red (`budget`), and the next run continues.
-- A review run is started only after the owner said go, with the expected bill named (the
-  owner's decision, 2026-10-02). The runs a session starts are: a run off the pipeline
-  (`--local`), a dispatch (`gh workflow run review.yml`), and the run the forge starts by itself
-  when the session marks a pull request Ready or pushes to a Ready one; the go-ahead comes before
-  each of those actions. `judgment step`
+- A review run in CI, a dispatch (`gh workflow run review.yml`) or the run the forge starts by
+  itself when the session marks a pull request Ready or pushes to a Ready one, starts without a
+  question to the owner. The question before every run, the owner's decision of 2026-10-02 after
+  the first bills, was retired by the owner on 2026-10-07, when the runs in CI had cost 1.42 to
+  1.94 USD: it had stalled every round for a run of that size. The ten runs measured to
+  2026-10-08 cost 1.04 to 2.47 USD (a two-pass run of one batch would be about half a USD);
+  the upper bound at the pass cap is batches times ten passes times 0.27 USD, the highest
+  measured rounded up, about 2.7 USD per batch: 5.4 USD for two batches, 13.5 for five.
+  The bill is counted
+  before the run and named in the report after it. A run off
+  the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go
+  to the bill named. `judgment step`
 - The bill is counted on the head that will be reviewed, never taken from an earlier run:
   `py -3 tools/review/review.py --pr N --plan` prints the batches a run would read and the
   passes that is, calls no model and posts nothing; with `--passes N` it counts for that limit.
-  The bill is those passes times the price of a pass above. A go-ahead covers the bill that was
-  named: when the first line of a run names more batches than the plan did, stop the run.
+  The bill is those passes times the price of a pass above. The count is checked against the
+  run's first line: a run off the pipeline that names more batches than the plan did is stopped,
+  because the go-ahead covered the plan; a run in CI is reported with the count it names.
   Gate: `self-tests` for the plan; the rest is a `judgment step`.
 - Low findings do not keep a review going: a batch converges when a pass adds nothing above low,
   and lows are collected on the issue labelled `review-lows` instead of threads. They are fixed

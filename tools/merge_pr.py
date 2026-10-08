@@ -29,10 +29,13 @@ lets through only what it names:
 - a check that is still running is never waived: its result is coming and nobody has read it;
 - unresolved threads are never waived.
 A check run counts only when the app the ruleset pins reported it, and a commit status only when
-its creator is the login that app posts as (the Actions bot); whether the ruleset itself reads a
-status that way was never seen here (#5). Both required checks are pinned to the app every
-workflow run of this repository reports as, so `review` proves that a workflow run of this
-repository posted it, not which one (HAZARD #11).
+its creator is the login that app posts as (the Actions bot); that the ruleset accepts a status the
+Actions bot posted was seen on 2026-10-07, when the head of pull request 22 was mergeable on its
+`review` status alone (#5); whether it would refuse one from another creator has not been seen.
+The statuses are read from the list endpoint, the one that names the creator: the
+combined status drops it (knowledge/the-combined-status-drops-the-creator.md). Both required
+checks are pinned to the app every workflow run of this repository reports as, so `review` proves
+that a workflow run of this repository posted it, not which one (HAZARD #11).
 
 A write whose answer cannot be read, that ran out of time, or that ended in an answer nobody
 expected may have landed. It is never reported as refused: the state is read back, the ruleset is
@@ -75,16 +78,29 @@ def required(rules):
 
 # A commit status names its creator, not an app. The one app a context is pinned to here is GitHub
 # Actions, whose workflow runs post statuses as this login; a status from any other creator does
-# not satisfy a pinned context, whatever its name says.
+# not satisfy a pinned context, whatever its name says. The list of statuses
+# (`commits/{sha}/statuses`) names the creator; the combined status (`commits/{sha}/status`) drops
+# it, so a status read from there never matched the poster and the context read as absent, on the
+# first head with a real `review` status (2026-10-07). The list holds every status posted for the
+# head, newest first, so the newest of a context is on the first page, the one the tool reads (100
+# entries); that one counts.
 STATUS_POSTERS = {15368: "github-actions[bot]"}
+
+
+def head_states(repo, head, contexts):
+    """The state of every required context on one head, from its check runs and its list of
+    statuses (context_states)."""
+    runs = kit.gh_json(f"repos/{repo}/commits/{head}/check-runs?per_page=100")["check_runs"]
+    statuses = kit.gh_json(f"repos/{repo}/commits/{head}/statuses?per_page=100")
+    return context_states(contexts, runs, statuses)
 
 
 def context_states(contexts, check_runs, statuses):
     """{context: success | failed | skipped | running | absent} on one head. A context that both a
     check run and a commit status report must be green in both. The newest check run of a name
-    counts, and only one from the app pinned for that context; a status counts only from the login
-    that app posts as (STATUS_POSTERS): with the ruleset off, this reading is all that holds a
-    check nobody waived."""
+    counts, and only one from the app pinned for that context; of the statuses of the context from
+    the login that app posts as (STATUS_POSTERS) the newest counts, and a newer one from another
+    creator is ignored: with the ruleset off, this reading is all that holds a check nobody waived."""
     states = {}
     for ctx, app in contexts.items():
         seen = []
@@ -93,9 +109,11 @@ def context_states(contexts, check_runs, statuses):
             run = max(runs, key=lambda r: r["id"])
             seen.append("running" if run["status"] != "completed" else
                         {"success": "success", "skipped": "skipped"}.get(run["conclusion"], "failed"))
-        for s in statuses:
-            if s["context"] == ctx and (app is None or (s.get("creator") or {}).get("login") == STATUS_POSTERS.get(app)):
-                seen.append({"success": "success", "pending": "running"}.get(s["state"], "failed"))
+        poster = STATUS_POSTERS.get(app)  # None: no pinned app, or a pinned app whose login this tool does not know
+        posts = [s for s in statuses if s["context"] == ctx and (app is None or (poster is not None and (s.get("creator") or {}).get("login") == poster))]
+        if posts:
+            post = max(posts, key=lambda s: s["id"])
+            seen.append({"success": "success", "pending": "running"}.get(post["state"], "failed"))
         states[ctx] = next((s for s in ("running", "failed", "skipped") if s in seen), "success" if seen else "absent")
     return states
 
@@ -382,9 +400,7 @@ def run(argv):
     head, default_branch = pr["head"]["sha"], info["default_branch"]
     settings, notes = settings_errors(ruleset(), info, kit.gh_json(f"repos/{repo}/rules/branches/{default_branch}"),
                                       kit.gh_json(f"repos/{repo}/rulesets"), lambda rid: kit.gh_json(f"repos/{repo}/rulesets/{rid}"))
-    runs = kit.gh_json(f"repos/{repo}/commits/{head}/check-runs?per_page=100")["check_runs"]
-    statuses = kit.gh_json(f"repos/{repo}/commits/{head}/status?per_page=100")["statuses"]
-    states = context_states(required(ruleset()), runs, statuses)
+    states = head_states(repo, head, required(ruleset()))
     threads = pr_gates.fetch_threads(repo, number)
     changed = lambda path, at: pr_gates.blob_at(repo, path, at) != pr_gates.blob_at(repo, path, head)
     behind = kit.gh_json(f"repos/{repo}/compare/{pr['base']['ref']}...{head}")["behind_by"]
@@ -413,7 +429,8 @@ def self_test():
         with open(os.path.join(fixtures, name), encoding="utf-8") as f:
             return json.load(f)
 
-    pr, runs, status, live = load("pull-request.json"), load("check-runs.json")["check_runs"], load("status.json")["statuses"], load("branch-rules.json")
+    pr, runs, live = load("pull-request.json"), load("check-runs.json")["check_runs"], load("branch-rules.json")
+    combined, statuses = load("status.json"), load("statuses.json")  # one real status from the two endpoints; another head than check-runs.json, on purpose
     info, listed, full = load("repository.json"), load("rulesets.json"), load("ruleset-detail.json")
     sha, number, cases = pr["head"]["sha"], pr["number"], []
 
@@ -431,8 +448,38 @@ def self_test():
     run0 = next(r for r in runs if r["name"] == "gates")
     pin = run0["app"]["id"]  # the app that really reported the check: the id the ruleset pins
     G, R = {"gates": pin}, {"review": pin}
-    real_states = context_states({**G, **R}, runs, status)
+    real_states = context_states({**G, **R}, runs, statuses)
     case("states: the real check run of the gates job is read", real_states["gates"] in ("success", "failed"), real_states)
+    case("states: the real review status is read from the list of statuses, which names its creator",
+         len(statuses) >= 1 and real_states["review"] == "success", (len(statuses), real_states))
+    trap = combined["statuses"]
+    case("states: the combined status drops the creator, so the same status read from it does not count for the pinned context",
+         len(trap) >= 1 and all(s["id"] in {x["id"] for x in statuses} for s in trap) and all("creator" not in s for s in trap)
+         and context_states(R, [], trap)["review"] == "absent", trap)
+    asked = []
+
+    def forge_of_head(path):
+        asked.append(path)
+        return (load("check-runs.json") if "/check-runs?" in path else load("statuses.json") if "/statuses?" in path
+                else load("status.json") if "/status?" in path or path.endswith("/status") else {})  # the old read, paged or not
+
+    saved, kit.gh_json = kit.gh_json, forge_of_head
+    try:
+        read = attempt(head_states, "o/r", sha, {**G, **R})
+    finally:
+        kit.gh_json = saved
+    case("read: the tool asks the forge for the list of statuses, and reads the review from it",
+         isinstance(read, dict) and read["review"] == "success" and any("/statuses?" in p for p in asked), (read, asked))
+    two = [{"context": "review", "state": "error", "creator": {"login": "github-actions[bot]"}, "id": 1},
+           {"context": "review", "state": "success", "creator": {"login": "github-actions[bot]"}, "id": 2}]
+    case("states: the newest status of a context counts, whatever the order of the list",
+         (context_states(R, [], two)["review"], context_states(R, [], two[::-1])["review"]) == ("success", "success"))
+    case("states: an older success does not outvote a newer error", context_states(R, [], [dict(two[0], id=3), two[1]])["review"] == "failed")
+    mixed = two + [{"context": "review", "state": "error", "creator": {"login": "someone"}, "id": 3}]  # the poster's two, then a stranger's, newer
+    case("states: a newer status from another creator is ignored, the pinned poster's newest counts, whatever the order",
+         (context_states(R, [], mixed)["review"], context_states(R, [], mixed[::-1])["review"],
+          context_states(R, [], [dict(two[0], id=4), two[1], dict(mixed[2], state="success")])["review"]) == ("success", "success", "failed"),
+         mixed)
     newer = dict(run0, id=run0["id"] + 1)
     for name, change, want in [("a completed success", {"status": "completed", "conclusion": "success"}, "success"),
                                ("a failure", {"status": "completed", "conclusion": "failure"}, "failed"),
@@ -447,16 +494,19 @@ def self_test():
     rerun = context_states(G, [dict(newer, status="completed", conclusion="success"), dict(run0, status="completed", conclusion="failure")], [])
     case("states: a green re-run after a failure is green, whatever the order of the list", rerun["gates"] == "success", rerun)
     case("states: a check nobody reported is absent", context_states(R, runs, [])["review"] == "absent")
-    one = lambda state, login="github-actions[bot]": [{"context": "review", "state": state, "creator": {"login": login}}]
+    one = lambda state, login="github-actions[bot]": [{"context": "review", "state": state, "creator": {"login": login}, "id": 1}]
     case("states: a success status", context_states(R, [], one("success"))["review"] == "success")
     case("states: a status of the pinned context from another creator than the Actions bot does not count",
-         (context_states(R, [], one("success", "someone"))["review"], context_states(R, [], [{"context": "review", "state": "success"}])["review"])
+         (context_states(R, [], one("success", "someone"))["review"], context_states(R, [], [{"context": "review", "state": "success", "id": 1}])["review"])
          == ("absent", "absent"))
     case("states: a context nobody pinned takes a status from any creator", context_states({"review": None}, [], one("success", "someone"))["review"] == "success")
+    case("states: a context pinned to an app whose poster this tool does not know takes no status, with or without a creator",
+         (context_states({"review": 999}, [], one("success"))["review"], context_states({"review": 999}, [], [{"context": "review", "state": "success", "id": 1}])["review"])
+         == ("absent", "absent"))
     case("states: a pending status is running", context_states(R, [], one("pending"))["review"] == "running")
     case("states: an error status is a failure", context_states(R, [], one("error"))["review"] == "failed")
     both = context_states(G, [dict(run0, status="completed", conclusion="success")],
-                          [{"context": "gates", "state": "failure", "creator": {"login": "github-actions[bot]"}}])
+                          [{"context": "gates", "state": "failure", "creator": {"login": "github-actions[bot]"}, "id": 1}])
     case("states: a check and a status of one name must both pass", both["gates"] == "failed", both)
     passed = dict(run0, status="completed", conclusion="success")
     stranger = dict(passed, app={**run0["app"], "id": pin + 1})
