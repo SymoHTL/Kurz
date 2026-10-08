@@ -83,8 +83,9 @@ What follows from it:
 - A review run in CI, a dispatch (`gh workflow run review.yml`) or the run the forge starts by
   itself when the session marks a pull request Ready or pushes to a Ready one, starts without a
   question to the owner. The question before every run, the owner's decision of 2026-10-02 after
-  the first bills, was retired by the owner on 2026-10-07: it had stalled every round for a run
-  that cost between half a USD (two passes of one batch) and three in CI in the ten runs above;
+  the first bills, was retired by the owner on 2026-10-07, when the runs in CI had cost 1.42 to
+  1.94 USD: it had stalled every round for a run of that size. The ten runs measured to
+  2026-10-08 cost 1.04 to 2.47 USD (a two-pass run of one batch would be about half a USD);
   the upper bound at the pass cap is batches times ten passes times 0.27 USD, the highest
   measured rounded up, about 2.7 USD per batch: 5.4 USD for two batches, 13.5 for five.
   The bill is counted

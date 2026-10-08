@@ -85,8 +85,8 @@ flowchart TD
         (tools, workflows, review rules, skills, hooks, CLAUDE.md, .gitattributes; a file moved out of it counts),
         without a Blast radius section"]
         G8["pr-findings: a review thread unresolved, or resolved without the edit that answers it;
-        on tool, workflow and hook code a written reply also answers. The tool's resolve command resolves
-        the reviewer's threads whose files all changed since the finding's commit, and leaves the rest open
+        on tool, workflow and hook code a written reply also answers. The tool's resolve command plans
+        the reviewer's threads whose files all changed since the finding's commit, resolves them with --go, and leaves the rest open
         with the reason, a person's reply in the thread and a head the forge still shows as the
         finding's commit among them (self-tests).
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]
@@ -170,7 +170,7 @@ flowchart TD
   W1, P1, G2.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
-- `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command resolves the reviewer's threads that G8 reads as answered by an edit.
+- `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.
 - `.github/workflows/review.yml`, `tools/review/review.py` or `.review/review-rules.yaml`
   changes: the subgraph R.
 - `tools/ruleset.json` or `tools/merge_pr.py` changes: the subgraph M and G5.

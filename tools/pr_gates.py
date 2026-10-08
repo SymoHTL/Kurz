@@ -484,7 +484,10 @@ def self_test():
         def resolving(blob, says=True, threads=1, breaks_at=None, error=None, head="h"):
             """A forge for resolve_threads: the pull request at `head`, one page with the real thread unresolved
             (`threads` copies with their own ids), blob(ref) for a file, and the mutation, which it
-            records and answers as told, or raises `error` (an error nobody expected) at write `breaks_at`."""
+            records and answers as told, or raises `error` (an error nobody expected) at write `breaks_at`.
+            The mutation's answer is written by hand, in the shape the real runs of pull request 23 were
+            read with: capturing a real one is a write to the forge made for the fixture's sake, which is
+            the owner's to make, not a session's (CLAUDE.md, Tests item 1)."""
             written = []
 
             def get(*args):
@@ -522,12 +525,13 @@ def self_test():
                           out == (1, 0) and written == ["thread=t0"] and resolved_lines(printed) == 1, repr((out, written, printed))))
             get, written = resolving(lambda ref: "blob")
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
+            cases.append(("resolve: a thread whose file did not change is not written, with --go",
+                          out == (0, 1) and written == [] and "the file did not change" in printed, repr((out, written, printed))))
             get, written = resolving(lambda ref: "blob@" + ref, head=still)
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: a forge that still shows the finding's commit as the head writes nothing, and says so",
                           bool(still) and out == (0, 1) and written == [] and "the head is still the finding's commit" in printed,
                           repr((out, written, printed))))
-            cases.append(("resolve: a thread whose file did not change is not written, with --go", out == (0, 1) and written == [], repr((out, written))))
             get, written = resolving(lambda ref: "blob@" + ref, says=False)
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: an answer that does not say resolved is a refusal", type(out) is kit.Refused, repr(out)))
