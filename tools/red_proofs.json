@@ -763,5 +763,15 @@
   {"tool": "tools/lint_ci.py", "anchor": "        last = isinstance(steps, list) and path[3] == str(len(steps) - 1)\n", "replacement": "        last = True\n", "expect": "review.yml: the credential on the step that installs the CLI"},
   {"tool": "tools/lint_ci.py", "anchor": "        if \"container\" in job or \"services\" in job:\n", "replacement": "        if False:\n", "expect": "gates.yml: a job in a container"},
   {"tool": "tools/lint_ci.py", "anchor": "        if \"container\" in job or \"services\" in job:\n", "replacement": "        if False:\n", "expect": "review.yml: a service beside the review"},
-  {"tool": "tools/lint_ci.py", "anchor": "    return errors, read\n", "replacement": "    return errors, len(FILES)\n", "expect": "lint: the count is of the workflows read, not of the ones expected"}
+  {"tool": "tools/lint_ci.py", "anchor": "    return errors, read\n", "replacement": "    return errors, len(FILES)\n", "expect": "lint: the count is of the workflows read, not of the ones expected"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "        name = re.search(r\"^name:[ \\t]*\" + VALUE + r\"(\\S+)\", fm, re.M)", "replacement": "        name = re.search(r\"^name:[ \\t]*(\\S+)\", fm, re.M)", "expect": "name: \"\" is empty"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "[ \\t]+type:[ \\t]*\" + VALUE + r\"\\S\", re.M)", "replacement": "[ \\t]+type:[ \\t]*\\S\", re.M)", "expect": "type: null is empty"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "        errors += link_errors(root, rel, body, files)\n", "replacement": "", "expect": "a link relative to its entry that leads nowhere"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "else posixpath.join(posixpath.dirname(rel), target))", "replacement": "else target)", "expect": "relative links that resolve are clean"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "target.lstrip(\"/\") if rooted else ", "replacement": "", "expect": "a link rooted at / that leads nowhere"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "        if path == \"..\" or path.startswith(\"../\"):", "replacement": "        if False:", "expect": "a link that leaves the repository"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "            if path not in files:", "replacement": "            if not os.path.isfile(os.path.join(root, path)):", "expect": "a link to a nested file reaches no entry"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "        if URL.match(target):\n            continue\n", "replacement": "", "expect": "relative links that resolve are clean"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "        elif not os.path.isfile(os.path.join(root, path)):", "replacement": "        elif False:", "expect": "a link from a guide up to a root file that is not there"},
+  {"tool": "tools/lint_knowledge.py", "anchor": "        return errors, []\n", "replacement": "", "expect": "an expired page gets no 'expire in' warning"}
 ]

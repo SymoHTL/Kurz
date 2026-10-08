@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Lint for the knowledge store: knowledge/, guides/ and INDEX.md. Fails on: an INDEX link to a
 missing file, a store file no INDEX line links to, a path of a store file that does not exist,
-written in an entry, in CLAUDE.md or in a skill, an INDEX line without a hook after its em dash,
+written in an entry, in CLAUDE.md, in the review rules or in a skill, a link in a store file that,
+resolved from that file as GitHub resolves it, reaches no entry or no file or leaves the repository,
+an INDEX line without a hook after its em dash,
 an entry whose frontmatter lacks a non-empty name, description or metadata.type, a nested or
 non-.md file under knowledge/ or guides/, an entry tagged LIVING without a mermaid block or an
 "Update triggers" section, a LIVING tag that is not the bare word, a scan that found fewer than
@@ -13,12 +15,13 @@ or a page the tool never wrote), and on a missing `ttl_days:`.
 The real tree is also checked for what the rules above are satisfied without: CLAUDE.md, a skill
 file in every skill directory and at least one skill, LIVING_FLOOR living entries, and the
 evidence guide with its blocks. Reports without failing: [[wikilinks]] that resolve to nothing,
-the days every TTL has left, and a TTL in its last week. Credentials, machine-bound strings and
+the days a TTL that has not run out has left, and a TTL in its last week. Credentials, machine-bound strings and
 conflict markers are the tree gate's job (tools/tree_gate.py), for the whole tree.
 `--self-test` plants one case per rule, plus precision cases that must stay clean."""
 import datetime
 import hashlib
 import os
+import posixpath
 import re
 import sys
 import tempfile
@@ -41,6 +44,9 @@ META_TYPE = re.compile(r"^metadata:[ \t]*\n(?:[ \t]+\S.*\n)*?[ \t]+type:[ \t]*" 
 LINK = r"\]\(((?:knowledge|guides)/[^)#]+\.md)(?:#[^)]*)?\)"  # an #anchor is still a link
 # The path of a store file, as prose, rules and skills write it: in a link or in backticks.
 REFERENCE = re.compile(r"(?<![\w/.-])((?:knowledge|guides)/[A-Za-z0-9._-]+\.md)")
+# A link to a Markdown file, as a store file writes it: relative to itself, or from the root with a "/".
+RELATIVE = re.compile(r"\]\(([^)\s#]+\.md)(?:#[^)]*)?\)")
+URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")  # https:, mailto: and the like: not a file of this tree
 
 
 def expiry(rel, fm, today):
@@ -64,7 +70,29 @@ def expiry(rel, fm, today):
     left = days - (today - made).days
     if left <= 0:
         errors.append(f"{rel}: numbers expired {-left} days ago: regenerate them (tools/quality_evidence.py)")
+        return errors, []
     return errors, [f"{rel}: numbers expire in {left} days" + (": regenerate soon" if left <= 7 else "")]
+
+
+def link_errors(root, rel, body, files):
+    """Errors for the links of one store file, resolved as GitHub resolves them: from the file's own
+    directory, or from the root when the target starts with "/". REFERENCE reads only the spelling
+    from the root, which the rules and the skills use; inside the store a link is written relative
+    to its file. A link into the store must reach an entry, a link out of it a file."""
+    errors = []
+    for target in sorted(set(RELATIVE.findall(body))):
+        if URL.match(target):
+            continue
+        rooted = target.startswith("/")
+        path = posixpath.normpath(target.lstrip("/") if rooted else posixpath.join(posixpath.dirname(rel), target))
+        if path == ".." or path.startswith("../"):
+            errors.append(f"{rel} links {target}, which leaves the repository")
+        elif path.split("/")[0] in STORE:
+            if path not in files:
+                errors.append(f"{rel} links {target}, which resolves to {path}: no entry of the store")
+        elif not os.path.isfile(os.path.join(root, path)):
+            errors.append(f"{rel} links {target}, which resolves to {path}: no such file")
+    return errors
 
 
 def digest(text):
@@ -151,6 +179,7 @@ def lint(root, floor=FLOOR, today=None, whole=True):
     names, links = set(), []
     for rel in sorted(files):
         body = kit.read(os.path.join(root, rel))
+        errors += link_errors(root, rel, body, files)
         m = re.match(r"---\n(.*?)\n---\n", body, re.S)
         fm = m.group(1) if m else ""
         # [ \t]*, not \s*: an empty `name:` must not borrow the next line's key as its value.
@@ -170,8 +199,18 @@ def lint(root, floor=FLOOR, today=None, whole=True):
 
 def self_test():
     """Each rule against a tree built to break it. A rule that never fired here is not a gate."""
+    with tempfile.TemporaryDirectory(prefix="lint-knowledge-", ignore_cleanup_errors=True) as base:
+        return cases_in(base)
+
+
+def cases_in(base):
+    """The cases of self_test, each tree a directory under `base`; `base` also holds a file beside
+    the trees, for the link that leaves its repository."""
+    with open(os.path.join(base, "outside.md"), "w", encoding="utf-8") as handle:
+        handle.write("beside every tree\n")
+
     def tree(entries, index=None):
-        root = tempfile.mkdtemp()
+        root = tempfile.mkdtemp(dir=base)
         for store in STORE:
             os.mkdir(os.path.join(root, store))
         for rel, body in entries.items():
@@ -232,6 +271,10 @@ def self_test():
             "frontmatter"),
         'description: "" is empty': (
             tree({**good, k + "q.md": '---\nname: q\ndescription: ""\nmetadata:\n  type: project\n---\n'}), "frontmatter"),
+        'name: "" is empty': (
+            tree({**good, k + "nq.md": '---\nname: ""\ndescription: d\nmetadata:\n  type: project\n---\n'}), "frontmatter"),
+        "type: null is empty": (
+            tree({**good, k + "tn.md": "---\nname: tn\ndescription: d\nmetadata:\n  type: null\n---\n"}), "frontmatter"),
         "type: after another metadata key": (
             tree({**good, k + "v.md": "---\nname: v\ndescription: d\nmetadata:\n  local_reason: x\n  type: user\n---\n"}), None),
         "LIVING without a diagram": (tree(good, index=good_index[:2] + ["- [e2](knowledge/e2.md) LIVING — hook"]),
@@ -271,6 +314,26 @@ def self_test():
         "a skill names a store file that is not there": (
             tree({**good, ".claude/skills/walk/SKILL.md": "the picture is `knowledge/gone.md`\n"}, index=good_index),
             ".claude/skills/walk/SKILL.md names knowledge/gone.md"),
+        "a link relative to its entry that leads nowhere": (
+            tree({**good, k + "r.md": ok(4) + "see [it](gone.md)\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a link rooted at / that leads nowhere": (
+            tree({**good, k + "r.md": ok(4) + "see [it](/guides/gone.md#part)\n"}),
+            "knowledge/r.md links /guides/gone.md, which resolves to guides/gone.md: no entry of the store"),
+        "a link to a nested file reaches no entry": (
+            tree({**good, k + "sub/x.md": ok(5), k + "r.md": ok(4) + "see [it](sub/x.md)\n"}),
+            "knowledge/r.md links sub/x.md, which resolves to knowledge/sub/x.md: no entry of the store"),
+        "a link from a guide up to a root file that is not there": (
+            tree({**good, "guides/g.md": ok(5) + "see [the rules](../CLAUDE.md)\n"}),
+            "guides/g.md links ../CLAUDE.md, which resolves to CLAUDE.md: no such file"),
+        # base/outside.md is there, so only the rule on leaving the repository can refuse this link.
+        "a link that leaves the repository": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../../outside.md)\n"}),
+            "knowledge/r.md links ../../outside.md, which leaves the repository"),
+        "relative links that resolve are clean": (
+            tree({**good, k + "r.md": ok(4) + "see [a](e0.md#part), [b](../guides/g.md), [c](../CLAUDE.md), [d](/knowledge/e1.md),"
+                  " [e](./e2.md) and [web](https://example.com/x.md)\n", "guides/g.md": ok(5), "CLAUDE.md": "rules\n"},
+                 index=good_index + ["- [r](knowledge/r.md) — hook", "- [g](guides/g.md) — hook"]), None),
         "naming store files that exist is clean": (
             tree({**good, k + "r.md": ok(4) + "see knowledge/e0.md\n", "CLAUDE.md": "read `knowledge/e1.md`\n",
                   ".claude/skills/walk/SKILL.md": "and knowledge/e2.md\n"}, index=good_index + ["- [r](knowledge/r.md) — hook"]), None),
@@ -315,6 +378,11 @@ def self_test():
         else:
             hit = any(needle in e for e in errors) if needle else not errors and not warnings
         results.append((label, hit, f"errors={errors} warnings={warnings}"))
+    errors, warnings = lint(tree({**good, "guides/g.md": ok(5, "ttl_days: 30\ngenerated: 2026-08-20\n")}), floor=3, today=today,
+                            whole=False)
+    results.append(("an expired page gets no 'expire in' warning",
+                    any("expired 12 days ago" in e for e in errors) and not any("expire in" in w for w in warnings),
+                    f"errors={errors} warnings={warnings}"))
     errors, _ = lint(tree(good), today=today)
     results.append(("left to its defaults the lint demands the whole tree and the real floor",
                     any("CLAUDE.md is missing" in e for e in errors) and any("floor is 5" in e for e in errors), errors))

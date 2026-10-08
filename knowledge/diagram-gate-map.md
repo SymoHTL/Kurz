@@ -52,7 +52,9 @@ flowchart TD
         before a push every path of a commit but a deletion is read, and a file turned into a link is refused;
         a file's name is scanned like its content"]
         G3["knowledge: broken INDEX link, entry without INDEX line, hook or frontmatter;
-        a store file named in an entry, CLAUDE.md, the review rules or a skill that does not exist; nested entry;
+        a store file named in an entry, CLAUDE.md, the review rules or a skill that does not exist;
+        a link in a store file that, resolved from that file, reaches no entry or file or leaves the repository;
+        nested entry;
         LIVING entry without diagram or update triggers, fewer living entries than their floor;
         expired or future-dated numbers, a TTL over 90 days; a generated block that is empty, or a page
         whose digest is stale: a number, the generated date or the TTL edited by hand
