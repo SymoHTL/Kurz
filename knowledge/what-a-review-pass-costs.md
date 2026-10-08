@@ -82,9 +82,9 @@ What follows from it:
   itself when the session marks a pull request Ready or pushes to a Ready one, starts without a
   question to the owner. The question before every run, the owner's decision of 2026-10-02 after
   the first bills, was retired by the owner on 2026-10-07: it had stalled every round for a run
-  that costs one to three USD in CI (the runs above; the plan's upper bound at the pass cap is a
-  few USD). The bill is counted before the run and
-  named in the report after it. A run off
+  that costs one to three USD in CI (the runs above; the upper bound at the pass cap is batches
+  times ten passes times 0.26 USD: 5.2 USD for two batches, 10.4 for four). The bill is counted
+  before the run and named in the report after it. A run off
   the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go
   to the bill named. `judgment step`
 - The bill is counted on the head that will be reviewed, never taken from an earlier run:

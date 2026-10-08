@@ -81,8 +81,9 @@ def required(rules):
 # not satisfy a pinned context, whatever its name says. The list of statuses
 # (`commits/{sha}/statuses`) names the creator; the combined status (`commits/{sha}/status`) drops
 # it, so a status read from there never matched the poster and the context read as absent, on the
-# first head with a real `review` status (2026-10-07). The list holds every status ever posted for
-# the head, newest first, so the newest of a context counts.
+# first head with a real `review` status (2026-10-07). The list holds every status posted for the
+# head, newest first; the tool reads its first page of 100, so the newest of a context is on it and
+# counts.
 STATUS_POSTERS = {15368: "github-actions[bot]"}
 
 

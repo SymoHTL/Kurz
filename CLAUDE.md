@@ -128,7 +128,8 @@ Each line names a trap; its evidence is in the entry it links.
   statuses, can post it. HAZARD (#11). The pinned check accepts this status: seen once, on
   2026-10-07, when pull request 22 was mergeable on it alone and merged with no waiver through the
   fixed copy of the merge tool on the branch that carried the fix (#5, closed); nothing re-checks
-  the platform on that. The tool reads the status from the list of statuses, an endpoint that names
+  the platform on that, and it fails closed: a status the ruleset stopped accepting leaves the
+  merge pending, never open. The tool reads the status from the list of statuses, an endpoint that names
   the creator, which the combined status does not ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
   Gate: `self-tests` for the tool's read of the captured status; the platform's acceptance is a
   fact seen, not a gate.

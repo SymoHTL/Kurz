@@ -18,8 +18,9 @@ findings  the review policy: every finding the reviewer posted is resolved, and 
           per file, not per line: one real change to a file answers every finding on it.
 resolve   not a gate: the session's step after its fix push. Every unresolved thread of the
           reviewer whose files all changed since the finding's commit is resolved, because its
-          edit is the answer as `findings` reads it; a thread without findings, one whose commit
-          is gone and one whose file did not change are left open and printed with the reason,
+          edit is the answer as `findings` reads it; a thread without findings, a reviewer post that
+          names no file, a finding whose commit is gone and one whose file did not change are left
+          open and printed with the reason and the thread id,
           since a person's question and a written reply are the session's to give. Without --go
           the plan is printed and nothing is written; writes are a second apart. Two pull requests
           had this as a hand-written script before the third need made it the tool (2026-10-07).
@@ -195,7 +196,7 @@ def resolve_command(repo, number, go, get=None):
         resolved, left = resolve_threads(repo, number, go, get)
     except Exception as e:  # whatever failed, the lines printed above are what the forge confirmed
         print(f"ERROR: resolve stopped: {type(e).__name__}: {e}. The threads printed as resolved above stay resolved; "
-              f"run the plan again for the rest")
+              f"the thread of the failed write may or may not be: run the plan again, it shows what is left")
         return 1
     print(f"resolve: {resolved} threads {'resolved' if go else 'to resolve (plan only: add --go)'}, {left} left open")
     return 0
@@ -438,7 +439,7 @@ def self_test():
             def get(*args):
                 if args[0] == "graphql" and args[2].startswith("query=mutation"):
                     if breaks_at is not None and len(written) == breaks_at:
-                        raise ValueError("an answer nobody expected")
+                        raise RuntimeError("an answer nobody expected")  # a kind no except tuple of this tool ever named
                     written.append(args[-1])
                     return {"data": {"resolveReviewThread": {"thread": {"isResolved": says}}}}
                 if args[0] == "graphql":
@@ -483,7 +484,7 @@ def self_test():
             get, written = resolving(lambda ref: "blob@" + ref, threads=2, breaks_at=1)
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
             cases.append(("resolve: a failure of any kind after a write says what stands",
-                          out == 1 and resolved_lines(printed) == 1 and "resolve stopped: ValueError" in printed, repr((out, printed))))
+                          out == 1 and resolved_lines(printed) == 1 and "resolve stopped: RuntimeError" in printed, repr((out, printed))))
             get, written = resolving(lambda ref: "blob@" + ref)
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
             cases.append(("resolve: the command ends 0 when the plan ran", out == 0 and "1 threads resolved" in printed, repr((out, printed))))

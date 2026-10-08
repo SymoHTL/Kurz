@@ -63,8 +63,8 @@ A review run spends the owner's Claude seat: a pass reports about 0.2 to 0.3 USD
 least two passes per batch of the diff. A run in CI, the one
 Ready or a push starts or a dispatch, starts without a question to the owner: the question before
 every run, set on 2026-10-02 after the first bills, was retired by the owner on 2026-10-07 because
-it stalled every round for a run of one to three USD (the plan's upper bound at the pass cap is a
-few USD); the bill is named in the report. A run off the
+it stalled every round for a run of one to three USD (the upper bound at the pass cap: batches times
+ten passes times 0.26 USD); the bill is named in the report. A run off the
 pipeline, at local prices, starts after the owner said go to the bill named. `judgment step`
 Count the batches on the head that will be reviewed, with
 `py -3 tools/review/review.py --pr <N> --plan`, which pays nothing; never take them from an
@@ -122,10 +122,12 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    Gate: `self-tests` for where the reviewer puts them; fixing them is a `judgment step`.
 7. Order: edit, push ONE commit with every fix, then resolve the threads the edits answered:
    `py -3 tools/pr_gates.py resolve --pr <N>` prints which threads the head's edits answer and
-   which stay open and why, and `--go` resolves the former
-   (`knowledge/resolve-what-the-edit-answered.md`). A tool-code thread it leaves open gets its
-   reply and is resolved by hand; a thread left open for want of an edit means the round's push
-   missed a fix, and that fix is the next round's one push. The `gates` run
+   which stay open and why (a person's thread, a reviewer post that names no file, a finding whose
+   commit is gone, a file that did not change), and `--go` resolves the former
+   (`knowledge/resolve-what-the-edit-answered.md`). A person's thread is theirs; a tool-code thread
+   left open gets its reply and is resolved by hand; a file that did not change elsewhere means
+   the round's push missed a fix, and that fix is the next round's one push; a finding whose commit
+   is gone cannot be proven answered by an edit and holds the merge until the owner decides. The `gates` run
    of the push saw the threads open; a description edit runs the gates again without a review. The
    walk that needs no re-run: mark the pull request Draft before the push, resolve, then Ready, so
    the one review and the gates run on the head with its threads resolved. Each push is a new head
