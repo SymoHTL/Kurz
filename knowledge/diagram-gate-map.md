@@ -85,7 +85,7 @@ flowchart TD
         (tools, workflows, review rules, skills, hooks, CLAUDE.md, .gitattributes; a file moved out of it counts),
         without a Blast radius section"]
         G8["pr-findings: a review thread unresolved, or resolved without the edit that answers it;
-        on tool, workflow and hook code a written reply also answers. The tool's resolve command plans
+        on tool, workflow and hook code a written reply also answers. The resolve command of tools/pr_gates.py plans
         the reviewer's threads whose files all changed since the finding's commit, resolves them with --go, and leaves the rest open
         with the reason, a person's reply in the thread and a head the forge still shows as the
         finding's commit among them (self-tests).

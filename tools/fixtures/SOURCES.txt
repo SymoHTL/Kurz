@@ -34,6 +34,11 @@ tools/fixtures/ (GitHub, repository SymoHTL/Kurz; captured 2026-10-01 unless a l
   review-threads.json   gh api graphql with the query THREADS of tools/pr_gates.py, asked for the
                         first two threads only (reviewThreads(first: 2)), for pull request 8 on
                         2026-10-02, after the first review that posted threads
+  resolve-thread.json   gh api graphql with the mutation RESOLVE of tools/pr_gates.py, for a thread of
+                        pull request 23 that was already resolved (2026-10-08, after its merge): the
+                        answer for a thread already resolved. The tool read the same field as true in
+                        every write of that pull request's rounds; it prints no answer, so those were
+                        not kept
 
 tools/review/fixtures/ (Claude CLI 2.1.283; the flags are in knowledge/claude-cli-headless-answer.md.
 The CLI's answers are kept as the CLI printed them, on one line.)

@@ -82,8 +82,8 @@ def required(rules):
 # (`commits/{sha}/statuses`) names the creator; the combined status (`commits/{sha}/status`) drops
 # it, so a status read from there never matched the poster and the context read as absent, on the
 # first head with a real `review` status (2026-10-07). The list holds every status posted for the
-# head, newest first, so the newest of a context is on the first page, the one the tool reads (100
-# entries); that one counts.
+# head, newest first; the tool reads the first page (100 entries) and, of the context's statuses
+# there from the pinned poster, the newest counts; a newer one from another creator is ignored.
 STATUS_POSTERS = {15368: "github-actions[bot]"}
 
 
@@ -470,12 +470,14 @@ def self_test():
         kit.gh_json = saved
     case("read: the tool asks the forge for the list of statuses, and reads the review from it",
          isinstance(read, dict) and read["review"] == "success" and any("/statuses?" in p for p in asked), (read, asked))
-    two = [{"context": "review", "state": "error", "creator": {"login": "github-actions[bot]"}, "id": 1},
-           {"context": "review", "state": "success", "creator": {"login": "github-actions[bot]"}, "id": 2}]
+    # the cases below edit the captured statuses (a test may edit a loaded payload); without them they fail
+    from_list = statuses[0] if statuses else {"context": "review"}  # from the list: it names its creator
+    from_combined = trap[0] if trap else {"context": "review"}  # from the combined status: no creator
+    two = [dict(from_list, state="error", id=1), dict(from_list, state="success", id=2)]
     case("states: the newest status of a context counts, whatever the order of the list",
          (context_states(R, [], two)["review"], context_states(R, [], two[::-1])["review"]) == ("success", "success"))
     case("states: an older success does not outvote a newer error", context_states(R, [], [dict(two[0], id=3), two[1]])["review"] == "failed")
-    mixed = two + [{"context": "review", "state": "error", "creator": {"login": "someone"}, "id": 3}]  # the poster's two, then a stranger's, newer
+    mixed = two + [dict(from_list, state="error", id=3, creator=dict(from_list.get("creator") or {}, login="someone"))]  # the poster's two, then a stranger's, newer
     case("states: a newer status from another creator is ignored, the pinned poster's newest counts, whatever the order",
          (context_states(R, [], mixed)["review"], context_states(R, [], mixed[::-1])["review"],
           context_states(R, [], [dict(two[0], id=4), two[1], dict(mixed[2], state="success")])["review"]) == ("success", "success", "failed"),
@@ -494,14 +496,14 @@ def self_test():
     rerun = context_states(G, [dict(newer, status="completed", conclusion="success"), dict(run0, status="completed", conclusion="failure")], [])
     case("states: a green re-run after a failure is green, whatever the order of the list", rerun["gates"] == "success", rerun)
     case("states: a check nobody reported is absent", context_states(R, runs, [])["review"] == "absent")
-    one = lambda state, login="github-actions[bot]": [{"context": "review", "state": state, "creator": {"login": login}, "id": 1}]
+    one = lambda state, login="github-actions[bot]": [dict(from_list, state=state, id=1, creator=dict(from_list.get("creator") or {}, login=login))]
     case("states: a success status", context_states(R, [], one("success"))["review"] == "success")
     case("states: a status of the pinned context from another creator than the Actions bot does not count",
-         (context_states(R, [], one("success", "someone"))["review"], context_states(R, [], [{"context": "review", "state": "success", "id": 1}])["review"])
+         (context_states(R, [], one("success", "someone"))["review"], context_states(R, [], [dict(from_combined, state="success", id=1)])["review"])
          == ("absent", "absent"))
     case("states: a context nobody pinned takes a status from any creator", context_states({"review": None}, [], one("success", "someone"))["review"] == "success")
     case("states: a context pinned to an app whose poster this tool does not know takes no status, with or without a creator",
-         (context_states({"review": 999}, [], one("success"))["review"], context_states({"review": 999}, [], [{"context": "review", "state": "success", "id": 1}])["review"])
+         (context_states({"review": 999}, [], one("success"))["review"], context_states({"review": 999}, [], [dict(from_combined, state="success", id=1)])["review"])
          == ("absent", "absent"))
     case("states: a pending status is running", context_states(R, [], one("pending"))["review"] == "running")
     case("states: an error status is a failure", context_states(R, [], one("error"))["review"] == "failed")

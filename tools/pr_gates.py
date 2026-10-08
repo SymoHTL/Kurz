@@ -57,8 +57,10 @@ skip_literal = kit.skip_literal
 LIMIT = "known limit: neither a resolved thread nor a posted review starts a pipeline; re-run the gates after resolving"
 STILL = ("the head is still the finding's commit: nothing was pushed since, or the push has not reached "
          "the pull request yet; run the plan again")  # the forge names the old head for a moment after a push
-ON_HEAD = "the finding sits on the pushed head: nothing was pushed since it; an edit or a reply answers it"
-REPLIED = "a person wrote in it: read the reply, then resolve by hand"
+ON_HEAD = ("the finding sits on the pushed head: nothing was pushed since it; its edit answers it, or on tool, "
+           "workflow or hook code also a reply")
+REPLIED = ("a person wrote in it: read and answer the reply; the finding still needs its edit, or on tool, "
+           "workflow or hook code a reply, before it is resolved by hand")
 BOTS = {"github-actions", "github-actions[bot]"}  # the Actions token's login, as GraphQL and as REST spell it
 THREADS = """query($owner: String!, $name: String!, $pr: Int!, $after: String) {
   repository(owner: $owner, name: $name) { pullRequest(number: $pr) {
@@ -168,6 +170,23 @@ def findings_errors(threads, changed_since):
 RESOLVE = "mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { isResolved } } }"
 
 
+def said_resolved(answer):
+    """True when the forge's answer to RESOLVE says the thread is resolved; the shape is the captured
+    tools/fixtures/resolve-thread.json."""
+    return bool((((answer.get("data") or {}).get("resolveReviewThread") or {}).get("thread") or {}).get("isResolved"))
+
+
+def once(read):
+    """read(*args), asked once per args: a second read of the forge could disagree with the first."""
+    seen = {}
+
+    def first(*args):
+        if args not in seen:
+            seen[args] = read(*args)
+        return seen[args]
+    return first
+
+
 def resolve_plan(threads, changed_since, head=None, proven=False):
     """(to resolve, left open) among the unresolved threads. A finding thread whose files all changed
     since the finding's commit is answered by its edit, the reading `findings` applies, and may be
@@ -182,7 +201,9 @@ def resolve_plan(threads, changed_since, head=None, proven=False):
     so instead of "did not change" for a finding that sits on that head. With `proven`, the head is
     the pushed commit the session named, so that finding sits on the pushed head and the reason
     says that. A finding from an earlier round reads as unchanged on a stale read, which only
-    `expect` in resolve_threads refuses."""
+    `expect` in resolve_threads refuses. Each file is read once per commit, so the plan and the
+    reason it prints rest on the same answer."""
+    changed_since = once(changed_since)  # a second read of the same blob could disagree with the first
     findings_of = {id(t): f for t, f in finding_threads(threads)}  # None below: not a reviewer post; []: one that names no file
     resolve, left = [], []
     for t in threads:
@@ -201,7 +222,8 @@ def resolve_plan(threads, changed_since, head=None, proven=False):
             unchanged = [p for p in paths if not changed_since(p, sha)] if findings and sha and sha != head else paths
             why = ("no finding of the reviewer" if findings is None else "the reviewer's post names no file" if not findings
                    else (ON_HEAD if proven else STILL) if sha and sha == head
-                   else "its commit is gone" if not sha else "the file did not change" if unchanged == paths
+                   else "its commit is gone" if not sha
+                   else ("the file did not change" if len(paths) == 1 else "none of its files changed") if unchanged == paths
                    else f"not every file changed: {', '.join(unchanged)} did not")
             left.append((t, paths, why))
     return resolve, left
@@ -231,7 +253,7 @@ def resolve_threads(repo, number, go, get=None, expect=None):
             print(f"would resolve {', '.join(paths)} ({t['id']})")
             continue
         answer = get("graphql", "-f", f"query={RESOLVE}", "-f", f"thread={t['id']}")
-        if not (((answer.get("data") or {}).get("resolveReviewThread") or {}).get("thread") or {}).get("isResolved"):
+        if not said_resolved(answer):
             raise kit.Refused(f"the forge did not resolve the thread on {', '.join(paths)} ({t['id']}): {str(answer)[:200]}")
         print(f"resolved {', '.join(paths)} ({t['id']})")  # after the forge said so, never before
         time.sleep(1)
@@ -239,9 +261,9 @@ def resolve_threads(repo, number, go, get=None, expect=None):
 
 
 def resolve_command(repo, number, go, get=None, expect=None):
-    """The exit code of the resolve command: 0 when the plan ran, 1 when a read or a write failed or
-    the run was interrupted. Any failure after the first write leaves threads resolved, so the message
-    says what stands."""
+    """The exit code of the resolve command: 0 when the plan ran, 1 when `--head` was refused (no
+    commit, or another head shown), a read or a write failed, or the run was interrupted. Any
+    failure after the first write leaves threads resolved, so the message says what stands."""
     try:
         resolved, left = resolve_threads(repo, number, go, get, expect)
     except BaseException as e:  # whatever failed, an interrupt too: the lines printed above are what the forge confirmed
@@ -340,8 +362,20 @@ def fixture_threads():
         return []
 
 
+def fixture_answer():
+    """The forge's real answer to RESOLVE (see tools/fixtures/SOURCES.txt). {} when the file is missing
+    or unreadable, which fails the cases that need it instead of crashing the suite."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "resolve-thread.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def self_test():
     threads = fixture_threads()
+    captured = fixture_answer()
     cases = []
 
     def check(name, errors, needle):
@@ -500,6 +534,20 @@ def self_test():
         cases.append(("resolve: a finding whose files did not all change is left open, naming the unchanged",
                       counts(half) == [0, 1] and half[1][0][2] == "not every file changed: b.md did not" and counts(whole) == [1, 0],
                       repr((half, whole))))
+        plan = resolve_plan(both, same)
+        cases.append(("resolve: a finding of several files of which none changed is left open, saying so",
+                      counts(plan) == [0, 1] and plan[1][0][2] == "none of its files changed", repr(plan)))
+        calls = []
+
+        def flaky(path, sha):
+            """a.md changed; b.md answers no, then yes: a forge whose second read disagrees with the first."""
+            calls.append(path)
+            return path == "a.md" or calls.count(path) > 1
+
+        plan = resolve_plan(both, flaky)
+        cases.append(("resolve: each file of a finding is read once, so a second read cannot disagree with the first",
+                      counts(plan) == [0, 1] and plan[1][0][2] == "not every file changed: b.md did not" and sorted(calls) == ["a.md", "b.md"],
+                      repr((plan, calls))))
         plan = resolve_plan(variant(False, replies=1), differs)
         cases.append(("resolve: a finding thread in which a person wrote is left open, whatever changed",
                       counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
@@ -529,13 +577,20 @@ def self_test():
 
         PUSHED = "0123456789abcdef0123456789abcdef01234567"  # the head the fake forge shows, commit-shaped
 
+        def refused_answer():
+            """The captured answer, edited to say the thread is not resolved (a test may edit a loaded payload)."""
+            answer = json.loads(json.dumps(captured))
+            thread = ((answer.get("data") or {}).get("resolveReviewThread") or {}).get("thread")
+            if isinstance(thread, dict):
+                thread["isResolved"] = False
+            return answer
+
         def resolving(blob, says=True, threads=1, breaks_at=None, error=None, head=PUSHED):
             """A forge for resolve_threads: the pull request at `head`, one page with the real thread unresolved
             (`threads` copies with their own ids), blob(ref) for a file, and the mutation, which it
             records and answers as told, or raises `error` (an error nobody expected) at write `breaks_at`.
-            The mutation's answer is written by hand, in the shape the real runs of pull request 23 were
-            read with: capturing a real one is a write to the forge made for the fixture's sake, which is
-            the owner's to make, not a session's (CLAUDE.md, Tests item 1). `get.asked` lists what was asked."""
+            The mutation's answer is the captured one (tools/fixtures/resolve-thread.json), edited to say the
+            thread is not resolved where `says` is false. `get.asked` lists what was asked."""
             written, asked = [], []
 
             def get(*args):
@@ -544,7 +599,7 @@ def self_test():
                     if breaks_at is not None and len(written) == breaks_at:
                         raise error or RuntimeError("an answer nobody expected")  # a kind no except tuple of this tool ever named
                     written.append(args[-1])
-                    return {"data": {"resolveReviewThread": {"thread": {"isResolved": says}}}}
+                    return json.loads(json.dumps(captured)) if says else refused_answer()
                 if args[0] == "graphql":
                     nodes = [dict(variant(False)[0], id=f"t{n}") for n in range(threads)]
                     page = {"nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}
@@ -611,6 +666,9 @@ def self_test():
             cases.append(("resolve: an answer that does not say resolved is a refusal", type(out) is kit.Refused, repr(out)))
             cases.append(("resolve: a thread is printed as resolved only after the forge said so",
                           type(out) is kit.Refused and resolved_lines(printed) == 0, repr(printed)))
+            cases.append(("resolve: the forge's captured answer to the mutation reads as resolved, and the same answer edited to false does not",
+                          "resolveReviewThread" in (captured.get("data") or {}) and said_resolved(captured) is True
+                          and said_resolved(refused_answer()) is False, repr(captured)))
             slept.clear()
             get, written = resolving(lambda ref: "blob@" + ref, threads=2)
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))

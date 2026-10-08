@@ -21,15 +21,18 @@ hand was a script per pull request, twice, before the third-time rule made it th
    again. Each line is
    `would resolve <files> (<thread id>)` or `left open: <files> (<thread id>): <why>`, where why
    is "no finding of the reviewer" (a person's thread), "the reviewer's post names no file", "its
-   commit is gone" (the finding's commit is not on the forge), "the file did not change", "not
-   every file changed: <files> did not" (a finding of several files), "a person wrote in it" (a
+   commit is gone" (the finding's commit is not on the forge), "the file did not change" (of a
+   finding of several files, "none of its files changed" or "not every file changed: <files> did
+   not"), "a person wrote in it" (a
    question or a reply after the reviewer's post, whoever wrote it), "the finding sits on the
-   pushed head" (with `--head`: nothing was pushed since it, and an edit or a reply answers it)
+   pushed head" (with `--head`: nothing was pushed since it, and its edit answers it, or on tool,
+   workflow or hook code also a reply)
    or "the head is still the finding's commit" (without `--head`: the same, or the pull request
    still naming the old head right after the push,
    [[the-pull-request-shows-the-old-head-after-a-push]]).
 3. What is left open: a person's thread is theirs to resolve; a reviewer post that names no file
-   is read, what it asks is answered, by a reply or by an edit where the finding is placed, and
+   is read, and what it asks is answered as the thread rule says for the file the thread sits on
+   (an edit, or on tool, workflow or hook code also a reply), and
    the thread is resolved by hand, since the gate has no file to check; a thread on tool, workflow or hook
    code (`tools/`, `.github/`, `.githooks/`) with "the file did not change" gets its reply and is
    resolved by hand, since the tool resolves edits only; a thread elsewhere with "the file did not
@@ -51,7 +54,7 @@ hand was a script per pull request, twice, before the third-time rule made it th
    gates run of the head, and reads the threads again itself; an edit of the description after
    the review is text the review never read (HAZARD #13), so it is no way to run the gates again.
 
-Gate: `self-tests` (thirty-one cases: the plan's fourteen, the write's fifteen and two on the parsing
+Gate: `self-tests` (thirty-four cases: the plan's sixteen, the write's sixteen and two on the parsing
 of `--head`, among them the pacing,
 the order of write and print, and what a failure of any kind, an interrupt too, says; each named by a mutation in
 `tools/red_proofs.json`). Which threads need a reply, and resolving a person's thread, are a

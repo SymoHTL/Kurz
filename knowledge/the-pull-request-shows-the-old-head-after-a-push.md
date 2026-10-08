@@ -1,6 +1,6 @@
 ---
 name: the-pull-request-shows-the-old-head-after-a-push
-description: Read one second after a push, the pull request (GET repos/{owner}/{repo}/pulls/{n}) still named the old head, a minute later the new one, and 15 seconds after the next push (seen 2026-10-08); the resolve tool had compared the finding's commit with itself and reported the answered thread as "the file did not change"
+description: Read one second after a push, the pull request (GET repos/{owner}/{repo}/pulls/{n}) still named the old head, a minute later the new one, and 15 seconds after the next push (seen 2026-10-08); the resolve tool had compared the finding's commit with itself and reported the answered thread as "the file did not change"; pass the pushed commit as --head, and the tool refuses while the pull request shows another head: run it again
 metadata:
   type: reference
 ---
@@ -31,7 +31,8 @@ of the gates.
 - The resolve tool takes the pushed commit as `--head`, in full or its first seven or more hex
   digits, and refuses, before any read of a thread or any write, while the pull request shows
   another head: `the pull request shows head <a>, not <b>: the push has not reached it yet, or
-  the checkout is elsewhere; run again`, both in full. Gate: `self-tests` (a forge that shows
+  the checkout is elsewhere; run again`, the head shown in full and the `--head` as given.
+  Gate: `self-tests` (a forge that shows
   another head is refused with nothing read past the pull request, one that shows the pushed
   head runs for the full, the short and the upper-case form, and a value that is no commit is
   refused; each with its mutation in `tools/red_proofs.json`).
