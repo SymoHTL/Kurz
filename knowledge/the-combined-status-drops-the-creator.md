@@ -45,7 +45,8 @@ the thing under test can fail no case about it.
   no status, with or without a creator; each case has its mutation in `tools/red_proofs.json`.
 - A fixture captured before the platform had sent the thing under test is captured again once it
   has, and a case over a captured collection has a floor; `tools/fixtures/SOURCES.txt` says when
-  and from which head each payload came. Gate: review rule "tools" (CLAUDE.md, Tests item 1).
+  and from which head each payload came. Gate: review rule "tools" for the floor; the re-capture
+  is a `judgment step` (CLAUDE.md, Tests item 1).
 - Issue #5 is closed by this: the ruleset accepted the status for the pinned app, seen once on
   2026-10-07 and re-checked by nothing. HAZARD #11 stays: any workflow run of this repository can
   post the status.

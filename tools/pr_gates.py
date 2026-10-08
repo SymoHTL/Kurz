@@ -148,8 +148,9 @@ def resolve_plan(threads, changed_since):
     since the finding's commit is answered by its edit, the reading `findings` applies, and may be
     resolved; everything else is left with its reason: a thread without findings is a person's, a
     reviewer post that names no file names nothing to check, a finding whose commit is gone cannot
-    be proven answered, a finding whose file did not change is answered by an edit or, on tool,
-    workflow or hook code, by a reply, which this tool cannot write."""
+    be proven answered, a finding whose file did not change (of several, the reason names the
+    ones that did not) is answered by an edit or, on tool, workflow or hook code, by a reply,
+    which this tool cannot write."""
     findings_of = {id(t): f for t, f in finding_threads(threads)}  # None below: not a reviewer post; []: one that names no file
     resolve, left = [], []
     for t in threads:
@@ -162,8 +163,10 @@ def resolve_plan(threads, changed_since):
         if findings is not None and sha and paths and all(changed_since(p, sha) for p in paths):
             resolve.append((t, paths))
         else:
+            unchanged = [p for p in paths if not changed_since(p, sha)] if findings and sha else paths
             why = ("no finding of the reviewer" if findings is None else "the reviewer's post names no file" if not findings
-                   else "its commit is gone" if not sha else "the file did not change")
+                   else "its commit is gone" if not sha else "the file did not change" if unchanged == paths
+                   else f"not every file changed: {', '.join(unchanged)} did not")
             left.append((t, paths, why))
     return resolve, left
 
@@ -200,6 +203,7 @@ def resolve_command(repo, number, go, get=None):
     except BaseException as e:  # whatever failed, an interrupt too: the lines printed above are what the forge confirmed
         print(f"ERROR: resolve stopped: {type(e).__name__}: {e}. The threads printed as resolved above stay resolved; "
               f"if a write failed, its thread may or may not be: run the plan again, it shows what is left")
+        print(LIMIT)
         return 1
     print(f"resolve: {resolved} threads {'resolved' if go else 'to resolve (plan only: add --go)'}, {left} left open")
     print(LIMIT)
@@ -266,7 +270,7 @@ def run_gate(gate, repo, number, get=None, pages=None):
         changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
         print(LIMIT)
         return findings_errors(threads, changed), f"{len(threads)} threads, {len(finding_threads(threads))} with findings"
-    raise kit.Refused(f"unknown gate {gate!r}: title, breadth or findings")
+    raise kit.Refused(f"unknown gate {gate!r}: title, breadth, findings or resolve")
 
 
 def fixture_threads():
@@ -434,6 +438,13 @@ def self_test():
         plan = resolve_plan(empty, differs)
         cases.append(("resolve: a reviewer post that names no file is left open",
                       counts(plan) == [0, 1] and plan[1][0][2] == "the reviewer's post names no file", repr(plan)))
+        both = variant(False)
+        named = json.dumps([dict(findings[0], file="a.md"), dict(findings[0], file="b.md")])
+        both[0]["comments"]["nodes"][0]["body"] = MARK.sub(lambda m: f"<!-- kurz-review:findings {named} -->", both[0]["comments"]["nodes"][0]["body"])
+        half, whole = resolve_plan(both, lambda p, s: p == "a.md"), resolve_plan(both, differs)
+        cases.append(("resolve: a finding whose files did not all change is left open, naming the unchanged",
+                      counts(half) == [0, 1] and half[1][0][2] == "not every file changed: b.md did not" and counts(whole) == [1, 0],
+                      repr((half, whole))))
 
         def resolving(blob, says=True, threads=1, breaks_at=None, error=None):
             """A forge for resolve_threads: the pull request, one page with the real thread unresolved
@@ -489,15 +500,17 @@ def self_test():
             get, written = resolving(lambda ref: "blob@" + ref, threads=2, breaks_at=1)
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
             cases.append(("resolve: a failure of any kind after a write says what stands",
-                          out == 1 and resolved_lines(printed) == 1 and "resolve stopped: RuntimeError" in printed, repr((out, printed))))
+                          out == 1 and resolved_lines(printed) == 1 and "resolve stopped: RuntimeError" in printed
+                          and "re-run the gates after resolving" in printed, repr((out, printed))))
             get, written = resolving(lambda ref: "blob@" + ref, threads=2, breaks_at=1, error=KeyboardInterrupt())
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
             cases.append(("resolve: an interrupt during --go says what stands too",
-                          out == 1 and resolved_lines(printed) == 1 and "resolve stopped: KeyboardInterrupt" in printed, repr((out, printed))))
+                          out == 1 and resolved_lines(printed) == 1 and "resolve stopped: KeyboardInterrupt" in printed
+                          and "re-run the gates after resolving" in printed, repr((out, printed))))
             get, written = resolving(lambda ref: "blob@" + ref)
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
             cases.append(("resolve: the command ends 0 when the plan ran, and prints the known limit",
-                          out == 0 and "1 threads resolved" in printed and LIMIT in printed, repr((out, printed))))
+                          out == 0 and "1 threads resolved" in printed and "re-run the gates after resolving" in printed, repr((out, printed))))
         finally:
             time.sleep = saved_sleep
 

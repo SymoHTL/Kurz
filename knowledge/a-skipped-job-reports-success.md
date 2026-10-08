@@ -39,7 +39,8 @@ How this repository is built around it:
   on the branch that carried the fix (issue #5 closed). The merge tool, which
   reads the same status, has to read it from the endpoint that names its creator:
   [[the-combined-status-drops-the-creator]]. What stays ungated: the acceptance was seen once and
-  nothing re-checks it, and any workflow run of this repository can post a status of that name:
+  nothing re-checks it (it fails closed: a status the ruleset stopped accepting leaves the merge
+  pending), and any workflow run of this repository can post a status of that name:
   HAZARD #11, see [[the-review-runs-the-default-branch]].
 - A head with no `gates` run at all, and the check pending, is one of the two cases above: look
   for a merge conflict first, then for a skip literal in the head commit's message.

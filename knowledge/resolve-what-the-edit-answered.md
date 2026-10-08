@@ -19,7 +19,8 @@ hand was a script per pull request, twice, before the third-time rule made it th
    `would resolve <files> (<thread id>)` or `left open: <files> (<thread id>): <why>`, where why
    is "no finding of the reviewer" (a person's thread), "the reviewer's post names no file", "its
    commit is gone" (the finding's commit is not on the forge) or "the file did not change".
-3. What is left open: a person's thread is theirs to resolve; a thread on tool, workflow or hook
+3. What is left open: a person's thread is theirs to resolve; a reviewer post that names no file
+   has nothing to answer and is resolved by hand; a thread on tool, workflow or hook
    code (`tools/`, `.github/`, `.githooks/`) with "the file did not change" gets its reply and is
    resolved by hand, since the tool resolves edits only; a thread elsewhere with "the file did not
    change" means the push missed a fix, which is the next round's one push; "its commit is gone"
@@ -30,11 +31,11 @@ hand was a script per pull request, twice, before the third-time rule made it th
    (exit 1): what was printed stays resolved, the thread of the failed write may or may not be,
    and the plan run shows what is left.
 5. Mark the pull request Ready: the one review and the gates run on the head with its threads
-   resolved. The gate `pr-findings` ran at the push, before the threads were resolved; a
-   description edit runs the gates again without a review, and the merge tool reads the threads
-   again at the merge.
+   resolved. The gate `pr-findings` ran at the push, before the threads were resolved, and the
+   merge tool reads the threads again at the merge; an edit of the description after the review
+   is text the review never read (HAZARD #13), so it is no way to run the gates again.
 
-Gate: `self-tests` (fifteen cases: the plan's six, and the write's nine, among them the pacing,
+Gate: `self-tests` (sixteen cases: the plan's seven, and the write's nine, among them the pacing,
 the order of write and print, and what a failure of any kind, an interrupt too, says; each named by a mutation in
 `tools/red_proofs.json`). Which threads need a reply, and resolving a person's thread, are a
 `judgment step`.

@@ -454,7 +454,8 @@ def self_test():
          len(statuses) >= 1 and real_states["review"] == "success", (len(statuses), real_states))
     trap = combined["statuses"]
     case("states: the combined status drops the creator, so the same status read from it does not count for the pinned context",
-         len(trap) >= 1 and all("creator" not in s for s in trap) and context_states(R, [], trap)["review"] == "absent", trap)
+         len(trap) >= 1 and all(s["id"] in {x["id"] for x in statuses} for s in trap) and all("creator" not in s for s in trap)
+         and context_states(R, [], trap)["review"] == "absent", trap)
     asked = []
 
     def forge_of_head(path):

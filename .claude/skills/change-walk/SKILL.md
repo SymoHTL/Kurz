@@ -63,7 +63,7 @@ A review run spends the owner's Claude seat: a pass reports 0.19 to 0.27 USD in 
 least two passes per batch of the diff. A run in CI, the one
 Ready or a push starts or a dispatch, starts without a question to the owner: the question before
 every run, set on 2026-10-02 after the first bills, was retired by the owner on 2026-10-07 because
-it stalled every round for a run of one to three USD (the upper bound at the pass cap: batches times
+it stalled every round for a run of about half a USD to three (the upper bound at the pass cap: batches times
 ten passes times 0.27 USD); the bill is named in the report. A run off the
 pipeline, at local prices, starts after the owner said go to the bill named. `judgment step`
 Count the batches on the head that will be reviewed, with
@@ -128,9 +128,9 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    workflow or hook code left open gets its reply and is resolved by hand; a file that did not change elsewhere means
    the round's push missed a fix, and that fix is the next round's one push; a finding whose commit
    is gone cannot be proven answered by an edit and holds the merge until the owner decides. The `gates` run
-   of the push saw the threads open; a description edit runs the gates again without a review. The
-   walk that needs no re-run: mark the pull request Draft before the push, resolve, then Ready, so
-   the one review and the gates run on the head with its threads resolved. Each push is a new head
+   of the push saw the threads open, and an edit of the description after the review is text the
+   review never read (HAZARD #13): the walk is to mark the pull request Draft before the push,
+   resolve, then Ready, so the one review and the gates run on the head with its threads resolved. Each push is a new head
    that needs its own review. Never push to cancel a running review; a push to a Ready pull
    request does cancel it. `judgment step`
 
