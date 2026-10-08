@@ -1,6 +1,6 @@
 ---
 name: diagram-change-walk
-description: Living diagram - the walk one change takes from a branch to main, in the order the gates bite, with every place it bounces back; the procedure itself is the skill change-walk
+description: Living diagram - the walk one change takes from a branch to main, in the order the gates bite, with the places where the review and the merge send it back; the procedure itself is the skill change-walk
 metadata:
   type: reference
 ---
@@ -39,11 +39,15 @@ flowchart TD
     No run at all on a head: a merge conflict, or a skip literal in the head commit"]
     E --> F["mark Ready once, with the description final.
     The review is the default branch's workflow, reviewer and rules, with the diff as data.
-    Whether the forge starts it is the event policy: HAZARD issue 10"]
+    Whether the forge starts it is the event policy: HAZARD issue 10.
+    An edit of the title or the description after the review is text the review never read:
+    dispatch it again, HAZARD issue 13"]
     F --> G{"review status on this head?"}
-    G -- "pending: a Draft, a pull request from outside, or a Ready one with no run" --> P["start the review on this head:
-    gh workflow run review.yml -f pr=N, on the default branch. A run costs the owner's seat,
-    so the owner says go first: judgment step. A dispatch on another ref: HAZARD issue 11"]
+    G -- "pending: still a Draft" --> F
+    G -- "pending: a pull request from outside, or a Ready one with no run" --> P["start the review on this head:
+    gh workflow run review.yml -f pr=N, on the default branch. A run costs the owner's seat;
+    it starts without a question and the bill is named in the report: judgment step.
+    A dispatch on another ref: HAZARD issue 11"]
     P --> G
     G -- "error: did not complete" --> H["read the run's last line, REVIEW DID NOT COMPLETE (kind).
     Gate: the status stays error, so the ruleset holds the merge.
@@ -72,7 +76,8 @@ flowchart TD
     Gate: the ruleset. The merge button skips what only the tool checks: HAZARD issue 14"]
     J -- "red for a cause outside the change" --> N["the owner approves this pull request and head:
     merge_pr.py --over-red. The ruleset is off for that one merge: nothing else may merge or push meanwhile.
-    Exit 3: still off, say so at once. Exit 6: post the waiver record by hand.
+    Exit 3: not read back as on; say so at once and switch it back on with the skill's commands,
+    merge-checks is red until it is back. Exit 6: post the waiver record by hand.
     Judgment step, HAZARD issue 3"]
     N --> L
     K --> L["delete the branch. The gates job runs on main: red when a gate of subgraph G fails there.
@@ -93,4 +98,4 @@ flowchart TD
 - `tools/pr_gates.py` changes a pull-request gate: nodes D and I.
 - `tools/gates.py` changes a verdict or the gate list: nodes B2, E and L.
 - `tools/tree_gate.py`, `.claude/settings.json` or `.githooks/pre-push` changes: nodes B1 and C.
-- A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 14) closes or opens: that node.
+- A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 13, 14) closes or opens: that node.

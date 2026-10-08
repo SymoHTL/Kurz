@@ -15,7 +15,8 @@ The cause:
 
 - Two neighbouring ledger entries mutate the same shared module, `tools/kit.py`, and both make
   it exactly 20 bytes shorter.
-- A module that is imported is cached as `__pycache__/<name>.pyc`. Python reuses the cache when
+- A module that is imported is cached as `__pycache__/<name>.<cache tag>.pyc` (for example
+  `kit.cpython-312.pyc`). Python reuses the cache when
   the source's size and its modification time, in whole seconds, equal the ones the cache
   recorded. It does not look at the content.
 - The CI runner replayed both entries within one second. The second run imported the bytecode of

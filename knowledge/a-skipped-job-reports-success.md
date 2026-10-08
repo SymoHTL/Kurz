@@ -45,10 +45,13 @@ How this repository is built around it:
 - A head with no `gates` run at all, and the check pending, is one of the two cases above: look
   for a merge conflict first, then for a skip literal in the head commit's message.
 - A skip literal can also reach `main`, where it would skip the gates run on the merge commit.
-  The squash commit is written from the title and the description by the merge tool, and from
-  the commit messages by a merge through the button. So `tools/pr_gates.py title` (the gate
+  The squash commit is written from the title and the description by the merge tool, and by a
+  squash through the button from the commit's or the pull request's title and the commit messages,
+  as the repository's settings say, plus whatever is typed into its dialog, which no gate reads
+  (HAZARD #14). So `tools/pr_gates.py title` (the gate
   `pr-title`) refuses a skip literal in the title, in the description and in every commit message
   of the branch, the merge tool checks the title and the description again at the merge, and the
-  pre-push hook refuses one in a commit message before it is published. `pr-title` cannot report
+  pre-push hook, in a clone that switched it on (HAZARD #4 where it is off), refuses one in a
+  commit message before it is published. `pr-title` cannot report
   a literal in the head commit, because its own job does not start then: that is the pending
   check above.

@@ -1,4 +1,5 @@
-# Every text file is stored with LF line endings and checked out with LF on every system. This
-# reaches the corpus: an expectation is compared byte for byte, so expectations are LF-only, and a
-# case cannot expect a carriage-return byte until its path is marked `-text` here.
+# CRLF in a file git judges to be text is stored and checked out as LF on every system; a file
+# with a lone carriage return counts as binary and keeps its bytes (git 2.53, seen 2026-10-08).
+# This reaches the corpus: an expectation is compared byte for byte, so a case that expects a
+# carriage-return byte marks its path `-text` here.
 * text=auto eol=lf

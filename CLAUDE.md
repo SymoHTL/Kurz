@@ -10,6 +10,8 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 
 ## Build & Test
 
+The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
+
 - `py -3 tools/gates.py` runs every gate; `--pr N` adds the pull-request gates. CI runs the same
   file with `python3`. A gate ends as PASS, PARTLY, FAIL, BROKEN, NOT RUN or N/A; the docstring of
   `tools/gates.py` is the one definition of what each verdict does to the run. FAIL and BROKEN
@@ -140,8 +142,10 @@ Each line names a trap; its evidence is in the entry it links.
   the run red: FAIL, BROKEN or NOT RUN, or PARTLY on a gate that is not listed (the docstring of
   `tools/gates.py` is the one definition). A red `pr-title` or `pr-breadth` is fixed by editing
   the title or the description, which runs the job again; the others by a push. `judgment step`
-- `review` pending: nothing reviewed this head. A Draft and a pull request from outside are
-  reviewed on demand: `gh workflow run review.yml -f pr=N`. `judgment step`
+- `review` pending: no review of this head has finished. Look for a running `review` run in the
+  Actions list before a dispatch: a new run cancels it, and both are billed. A Draft and a pull
+  request from outside are reviewed on demand: `gh workflow run review.yml -f pr=N`.
+  `judgment step`
 - `review` pending on a Ready pull request, and no `review` run in the Actions list at all:
   [knowledge/pull-request-target-is-blocked-by-default.md](knowledge/pull-request-target-is-blocked-by-default.md).
   Dispatch the review as above. The policy that allows the event is the owner's setting:
@@ -226,8 +230,8 @@ Gate: review rule "rules for sessions".
 
 ### A public repository
 
-- **Future plans stay out**: what gets built when, steps, milestones, schedules, which program
-  comes first, when the compiler is rewritten. Not in a file, a commit message, a branch name, a
+- **Future plans stay out**: what gets built when, steps, milestones, schedules, the order in
+  which parts are built, when a part is replaced. Not in a file, a commit message, a branch name, a
   pull request, an issue. That the design holds a thing is not a plan; when it gets built is. The
   plan is kept outside this repository (2026-10-01). HAZARD (#2): no gate before the push; the
   reviewer flags a plan in the files, the title and the description afterwards, and reads no
@@ -238,8 +242,12 @@ Gate: review rule "rules for sessions".
   commit messages; `pr-title` for the title, the description and the commit messages of the
   branch; review rule "every pull request" for names. The author and committer address of a
   commit is read by no gate: HAZARD (#12).
-- **A push cannot be taken back.** A history rewrite leaves the old commits reachable on GitHub.
+- **A push cannot be taken back.** A history rewrite leaves the old commits reachable on GitHub
+  ([knowledge/a-force-push-does-not-unpublish.md](knowledge/a-force-push-does-not-unpublish.md)).
   Run the gates before the push, not after. Gate: the pre-push hook; HAZARD (#4) where it is off.
+- **A false positive of the pre-push hook is fixed in the tree gate's patterns** (`tools/kit.py`,
+  `tools/tree_gate.py`) with a case and its red proof, never by `git push --no-verify`.
+  HAZARD (#4): nothing stops the flag.
 
 ### Git, pull requests & merging
 
@@ -254,8 +262,8 @@ Gate: review rule "rules for sessions".
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
   head**, passed as `--over-red`. An approval is never standing. The tool switches the whole
   ruleset off for the one merge and restores it; while it is off nothing on the server holds any
-  pull request or any push to `main`. Exit 3 means it is still off: say so at once and restore it
-  as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
+  pull request or any push to `main`. Exit 3 means it was not read back as active, so it may still
+  be off: say so at once, read it back and restore it as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
   HAZARD (#3): the session holds the owner's token, so the permission classifier and this rule
   are the only guards on the approval.
 - **One push per review round.** Read every thread, fix everything, mark the pull request Draft,
@@ -296,8 +304,9 @@ Gate: review rule "rules for sessions".
 
 ### Knowledge
 
-- **Facts are routed by kind.** A rule with its gate: this file. A durable lesson, trap or recipe:
-  one file in `knowledge/` plus its `INDEX.md` line, in the same pull request. In-flight state:
+- **Facts are routed by kind.** A rule with its gate: this file. A durable lesson, trap or short
+  recipe: one file in `knowledge/` plus its `INDEX.md` line, in the same pull request; a procedure
+  longer than about fifteen lines: a skill in `.claude/skills/`. In-flight state:
   issues. A fact bound to one machine or one person: private agent memory, never here.
   Gate: `knowledge` for the store's shape; routing itself is a `judgment step`.
 - **A postmortem lands as a rule here with its gate, a knowledge entry and its `INDEX.md` line**,
@@ -337,3 +346,4 @@ Gate: review rule "rules for sessions".
 | | the gates job judging a pull request with the pull request's own gates (#16) |
 | | a review that stopped at the pass cap posting `success` (#17) |
 | | the evidence digest, which a recomputed hash passes (#18) |
+| | GitHub push protection staying on (#25) |

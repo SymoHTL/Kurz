@@ -30,7 +30,7 @@ flowchart TD
         HAZARD issue 12"]
         P4["GitHub push protection: the forge refuses a push that holds a secret of a pattern it knows.
         Enabled, read 2026-10-02 from the repository's security_and_analysis.
-        No gate asserts that it stays on: judgment step"]
+        No gate asserts that it stays on: HAZARD issue 25"]
     end
     subgraph G["CI: job gates, on every pull request event and on a push to main"]
         G0["the run is red on a FAIL, a BROKEN, a NOT RUN,
@@ -68,7 +68,8 @@ flowchart TD
         a step that writes GITHUB_ENV or GITHUB_PATH, a step that checks out or fetches by hand,
         the deciding step with any env key but the pinned ones, a key twice in one mapping.
         gates.yml: an if on the job (a skipped job reports success to the required check),
-        a path or branch filter, a wider token, a second job.
+        a path filter, any filter on pull_request, a push trigger for any branch but main, a wider token,
+        a second job.
         review.yml: an if, a checkout ref, a concurrency group or permissions other than the pinned ones,
         no start-time step first, the budget anywhere but on the review step,
         a CLI that is not at an exact version. A third workflow file.
@@ -114,8 +115,9 @@ flowchart TD
         R3["findings: high and medium become threads on the pull request, per file,
         and block through thread resolution, not through the job.
         Lows are collected on the open issue labelled review-lows and block nothing: judgment step"]
-        R4["the workflow starts at all: GitHub's default policy blocks pull_request_target in a public repository
-        unless an Actions event policy allows it. Nothing asserts the policy: HAZARD issue 10"]
+        R4["the workflow starts at all: GitHub's default rule may block pull_request_target here (whether it
+        enforces or only evaluates was not known on 2026-10-02); the owner's event policy allows the event
+        since 2026-10-03. Nothing asserts the policy: HAZARD issue 10"]
         R5["review rules, .review/review-rules.yaml of the default branch: one section per surface.
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).
         The reviewer is a model that is given one batch of the diff: it can miss a defect, it cannot
@@ -137,10 +139,11 @@ flowchart TD
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
         a title or description the title gate refuses, an option it does not know.
-        A merge by the button or gh pr merge gets none of this: HAZARD issue 14"]
+        A merge by the button or gh pr merge still meets M1, but not the head pin, the auto-merge check,
+        the answered findings, the comparison with the live rules or the title gate: HAZARD issue 14"]
         M3["merge_pr.py --over-red: ruleset off for one merge, restored and read back;
         while it is off nothing on the server holds any pull request or a push to main.
-        Exit 3 when the gate stayed off, exit 6 when the waiver record is missing.
+        Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
@@ -171,6 +174,7 @@ flowchart TD
 - `tools/red_proof.py` or the shape of `tools/red_proofs.json` changes: G1.
 - `tools/tree_gate.py`, `.claude/settings.json` (the hook command), `.githooks/pre-push` change:
   W1, P1, G2.
+- `tools/kit.py` (SECRETS, MACHINE, CONFLICT, the skip literals) changes: P1, G2, G6.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.

@@ -119,8 +119,9 @@ nothing in this repository executes Kurz.
 
 ## The forge
 
-Findings are counted from the markers the reviewer leaves in its own threads. A merge over red is
-counted from the record that the merge tool posts.
+Findings above low are counted from the markers in the reviewer's threads, lows from the marker of
+the note it leaves on the pull request; the issue that collects them is not read. A merge over red
+is counted from the record that the merge tool posts.
 
 <!-- generated:forge -->
 | Forge | Count |

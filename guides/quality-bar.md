@@ -22,7 +22,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 |---|---|
 | 1. A rule ships with its gate | Every rule in `CLAUDE.md` ends in `Gate:`, `HAZARD` with the number of its issue, or `judgment step`. The review rule "rules for sessions" flags one that does not. |
 | 2. A postmortem ships as rule, gate and knowledge entry | `knowledge/design-before-build.md` is the pattern: the rule is in `CLAUDE.md`, the gate is the tree gate, the story is the entry. |
-| 3. Detection is built while building | Each decision tool carries its cases, and `self-tests` replays the recorded mutation of every case. What that catches: a case that no longer goes red, a tool without a self-test or without any recorded proof. A decision that was added with no case at all is invisible to it; the review rule "tools" names that shape, which makes it a judgment step. |
+| 3. Detection is built while building | Each decision tool carries its cases, and `self-tests` replays every recorded mutation; a case without one is not replayed. What that catches: a recorded case that no longer goes red, a tool without a self-test or without any recorded proof. A decision that was added with no case at all is invisible to it; the review rule "tools" names that shape, which makes it a judgment step. |
 | 4. One definition per concept | One gate runner (`tools/gates.py`) for CI and local runs; one tree gate for CI, the write-time hook and the pre-push hook; one ruleset file for the server setting, its assertion and the merge tool; one pattern list (`tools/kit.py`). |
 | 5. Facts are routed by kind | The "Knowledge" rules in `CLAUDE.md`; `knowledge/diagram-knowledge-routing.md`. |
 | 6. Unchecked must never look clean | Floors in every scan; `BROKEN` for a gate that could not start, `NOT RUN` for a pull-request gate without its pull request, `PARTLY` for a gate that could read only part of what it checks; a batch that failed or ran out of time is not reviewed; a failed command is a refusal (`kit.Refused`). |
@@ -37,7 +37,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Routing and the memory audit | Rules in `CLAUDE.md`. No audit tool is part of this repository, and nothing here forces the wrap-up (HAZARD #6). |
 | Zero findings on the store | Zero findings above low: `tools/pr_gates.py findings` (gate `pr-findings`) reads the review threads, and a thread on anything but tool, workflow and hook code is answered only by changing the file. A low finding opens no thread and holds no merge (below), so a low on a knowledge entry or a guide can reach `main` and is fixed later. After the fix push, `tools/pr_gates.py resolve --head <the pushed commit>` lists the reviewer's threads whose files all changed since the finding's commit and the rest with the reason, and `--go` resolves the former (`knowledge/resolve-what-the-edit-answered.md`); `--head` refuses the run while the forge still shows the old head (`knowledge/the-pull-request-shows-the-old-head-after-a-push.md`). |
 | Skills | `.claude/skills/change-walk` and `.claude/skills/design-round`. |
-| Hooks for shapes that already cost | One: writing code in the design phase, which happened on 2026-10-01. `.claude/settings.json` calls `tools/tree_gate.py --hook` for the Write and Edit tools of a session. It does not hold a write made through a shell command, or a hook the harness cut off at its timeout (HAZARD #4). The pre-push hook is the same gate before a push, in a clone that switched it on (HAZARD #4 where it is off). Only the CI gate `tree` always runs, and it runs after the push has published. |
+| Hooks for shapes that already cost | One: writing code in the design phase, which happened on 2026-10-01. `.claude/settings.json` calls `tools/tree_gate.py --hook` for the Write and Edit tools of a session. It does not hold a write made through a shell command, or a hook the harness cut off at its timeout (HAZARD #4). The pre-push hook is the same gate before a push, in a clone that switched it on (HAZARD #4 where it is off). The CI gate `tree` runs on every pull request event and every push to `main`, after the push has published; a branch without a pull request, and a head commit with a skip literal, get no run. |
 | The tools law | `tools/red_proof.py` and `tools/red_proofs.json` (gate `self-tests`). |
 | Pipeline jobs | Two workflows: `gates.yml` with the one job `gates`, which runs `tools/gates.py`, and `review.yml` with the job `review-run`, which runs the reviewer. See "Gates" below for which of the method's jobs exist. |
 | CI configuration is code | `tools/lint_ci.py` (gate `ci-config`): each fact is broken in the real workflow file by its self-test. |
@@ -49,7 +49,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | CI triage | The "CI" section of `CLAUDE.md`. |
 | Agent operations (isolation, notes file, owner queue, worktrees) | Outside this repository. Nothing here depends on it. |
 | Living diagrams | Four entries tagged LIVING in `INDEX.md`; the lint requires each to have a diagram and its update triggers, and at least four of them to exist. |
-| Living guides | This guide and the evidence guide. The tree gate keeps both portable. The evidence guide's numbers are generated, carry a digest that a hand edit breaks, and expire: when the TTL runs out, `knowledge` is red on every pull request and on `main`, whatever the change touches, until a pull request regenerates the page with `py -3 tools/quality_evidence.py`. That tool refuses while a self-test or the reference lint is red and needs a login that can read the forge; so once the TTL has run out, a red reference blocks the only way back to green until it is fixed. |
+| Living guides | This guide and the evidence guide. The tree gate keeps both portable. The evidence guide's numbers are generated, carry a digest that a hand edit breaks, and expire: when the TTL runs out, `knowledge` is red on every pull request and on `main`, whatever the change touches, until a pull request regenerates the page with `tools/quality_evidence.py`. That tool refuses while a self-test or the reference lint is red and needs a login that can read the forge; so once the TTL has run out, a red reference blocks the only way back to green until it is fixed. |
 | Not in the method: the product is a language definition | `reference/` (rules with an id and a status), `corpus/` (one case per file) and `tools/lint_reference.py` (gate `reference`), which keeps the two consistent in shape. Nothing runs a case (HAZARD #1). |
 | Product rules: the decisions a diff must respect (section 7.5 of the guide's 2026-10-07 version) | The design record `kurz-design.md` and `reference/`: one statement per decision, the owner's choice with its date and the options it was chosen against, *(assumed)* and *(proposed)* for what the owner has not decided, and `open` rules for the forks. The reviewer carries the rule "design record", which flags a decision without the owner's choice behind it, as the guide's reviewer carries the product rules. The corpus holds the cases; the gate `reference` checks their shape and that every sample is a case, and nothing runs one (HAZARD #1): whether a rule gets a case, and whether its expectation is right, are judgment steps. The product pass, the product acceptance and the knowledge-scout hook are not here; see "Not implemented". |
 
@@ -92,7 +92,7 @@ on, and the tree gate does not rely on them.
 | Unanchored thread for the lows | Lows are not threads here (the owner's decision, 2026-10-02). The reviewer collects them as comments on the one open issue labelled `review-lows`, and leaves a note on the pull request that lists them, so that a later run does not report them again. They hold no merge; they are fixed together, or with a push that is needed anyway. |
 | The size of a thread | A thread carries at most twenty findings, each with its title cut at 200 and its text at 2,000 characters, and further findings go into further threads. The forge's limit for one comment is taken as 65,536 characters. Rendering widens a text (a marker opened in a body is escaped, a quote or a character outside ASCII in a title is escaped in the marker's JSON), so a thread, a comment on the lows issue and a note of lows are each measured as rendered, and split until every part fits; self-test cases render findings made of such characters and check every part. The number itself is not in the forge's REST reference (looked for on 2026-10-02) and was not provoked here. |
 | No per-request override of the pipeline check | GitHub has one: an actor on a ruleset's bypass list, set to "For pull requests only", can merge a pull request over unmet rules while the ruleset stays on for everything else (GitHub docs, "Creating rulesets for a repository", read 2026-10-02). It is not used here. A bypass is a standing permission of a role, which every session holding the owner's token would have for every pull request; the forge records each bypass in the repository's rule insights (GitHub docs, "Managing rulesets for a repository", read 2026-10-03), but as an act of that role, tied to no approval of one pull request and head, which is the rule here. So the bypass list is kept empty. Only a local `merge-checks` run with the owner's login asserts that: the job token in CI cannot read the list, prints NOT CHECKED and ends PARTLY (HAZARD #7), so an actor added to the list turns no CI run red. The gate-flip instead switches the ruleset's enforcement off for one merge, restores it and reads it back. Its price: while it is off nothing on the server holds any pull request or a push to `main`. |
-| Pipeline-control literals in the title | The workflow-skip literals. The merge tool writes the title and the description into the squash commit; a merge by the button takes the commit messages. `pr-title` refuses a literal in all three. |
+| Pipeline-control literals in the title | The workflow-skip literals. The merge tool writes the title and the description into the squash commit; a squash by the button takes the commit's title (one commit) or the pull request's (several) and the commit messages, as the repository's settings say, and whatever is typed into its dialog. `pr-title` refuses a literal in the title, the description and the commit messages; the dialog's text is read by no gate (HAZARD #14). |
 | Editing title or description starts no pipeline | The gates do run on `edited`. The review does not: the description is part of its cache key, and every edit would cost a full review. So after an edit the `review` status still stands, on text the review never read. Dispatching the review again after an edit that changes what the text says is an instruction, not a gate (HAZARD #13). |
 | Trigger jobs must never be waived | There are none: `tools/lint_ci.py` refuses a job that calls another workflow. |
 | Diff versions to tell whether a file changed since a finding | The blob id of the file at the finding's commit against the blob id at the head. |
@@ -112,7 +112,8 @@ What is specific to this repository:
 
 - **The model is pinned by exact id** in `review.py`, and an answer from any other model is
   refused. **The effort is pinned next to it**: it is asked for through the call's environment,
-  and the answer has no field that would confirm it. The model call gets an environment built
+  and the answer has no field that would confirm it (no field names the effort in the answers of
+  CLI 2.1.283 captured on 2026-10-01 and 2026-10-02, `tools/review/fixtures/cli-*.json`). The model call gets an environment built
   from an allow-list: what a process needs to start and to find its login, and nothing else. No
   forge token, no variable of a Claude session that happens to run the script
   (`knowledge/a-headless-call-inherits-its-session.md`).
@@ -120,13 +121,14 @@ What is specific to this repository:
   what the finished passes found, stores the files whose batches converged and whose findings
   the forge took, and then ends red. The next run replays those files and reviews the rest. A
   batch that had not converged starts again at its first pass: what it found is posted, its
-  passes are paid again. The first version here posted nothing unless every batch had run, and
+  passes are paid again. The first version here, until 2026-10-02, posted nothing unless every
+  batch had run, and
   let a batch that ran out of time after one pass stand as reviewed.
 - **A batch at the pass cap counts as reviewed, and the review says so.** After five passes that
   still found something above low, the review completes: the status reads "NOT converged on N
   files" and a note names them. Their files are not stored, so the next run reads them again.
-- **Passes run in rounds.** Every batch is read once before any is read twice. The first version
-  gave each batch all its passes in turn, which on a large diff spends the budget on the first
+- **Passes run in rounds.** Every batch is read once before any is read twice. The first version,
+  until 2026-10-02, gave each batch all its passes in turn, which on a large diff spends the budget on the first
   batches and never reads the last ones (`knowledge/what-a-review-pass-costs.md`).
 - **A finding is in the log before it is posted, and posts are paced.** Every finding is printed
   in full, with what the passes cost, before the first post; the log takes every character
@@ -159,7 +161,9 @@ What is specific to this repository:
   itself.
 
 The credential is one repository secret, `CLAUDE_CODE_OAUTH_TOKEN`. Without it the job is red: a
-review that cannot run must never look like a review that found nothing.
+review that cannot run must never look like a review that found nothing. Every workflow run of a
+branch of this repository can read it, a workflow that the branch adds included (HAZARD #11); an
+environment limited to the default branch would close that, and is the owner's choice.
 
 ## Hazards
 
@@ -203,8 +207,10 @@ changes in the same pull request.
 ## Changing the bar
 
 A change to a gate, a tool, a hook, a workflow or a review rule carries, in the same pull
-request: the case and its red proof; an update of `knowledge/diagram-gate-map.md` or of this
-guide, whichever describes what changed, or a sentence in the description that says why neither
-applies; and a "Blast radius" section in the description. The gates for it are `self-tests`,
-`pr-breadth` and the review rule "every pull request", which flags a change whose list of files
-holds neither the gate map nor this guide while the description gives no reason.
+request: an update of `knowledge/diagram-gate-map.md` or of this guide, whichever describes what
+changed, or a sentence in the description that says why neither applies; a "Blast radius"
+section in the description; and, for a decision of a tool, a hook or a workflow, its case and its
+red proof (a review rule has no self-test). The gates for it are `self-tests` for the proofs,
+`pr-breadth` for the section, and the review rule "every pull request", which flags a change whose
+list of files holds neither the gate map nor this guide while the description gives no reason; a
+review rule holds only above low, so for a low breach it is a `judgment step`.

@@ -5,7 +5,7 @@ metadata:
   type: reference
 ---
 
-When this repository was made public on 2026-10-01, its earlier history held material that the
+When this repository was to go public on 2026-10-01, its earlier history held material that the
 owner wanted to keep private. Rewriting the history and force-pushing would not have been enough:
 
 - GitHub's own guide on removing sensitive data says that after a force push the old commits

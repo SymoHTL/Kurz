@@ -27,7 +27,7 @@ flowchart TD
     Gate: review rule rules for sessions"]
     Q1 -- "a lesson, trap, recipe or postmortem" --> KN["one file in knowledge/ plus its INDEX.md line,
     same pull request. Gate: knowledge"]
-    Q1 -- "open work, status, a question for later" --> IS["an issue. Never repository markdown.
+    Q1 -- "open work, status, a question for later that is not a design question (those go under Open, DR)" --> IS["an issue. Never repository markdown.
     Gate: review rule rules for sessions"]
     Q1 -- "this session's task, decisions, next step" --> NO["the session notes file, outside the repository.
     Judgment step"]
@@ -52,7 +52,8 @@ flowchart TD
 
 - The "Knowledge" rules or the "A public repository" rules in `CLAUDE.md` change: the whole tree.
 - `tools/lint_knowledge.py` changes what it checks: the node KN.
-- `tools/tree_gate.py` or `.githooks/pre-push` changes what it refuses: the node PM.
+- `tools/tree_gate.py`, `tools/kit.py` (its patterns) or `.githooks/pre-push` changes what it
+  refuses: the node PM.
 - `.review/review-rules.yaml` changes the sections "design record", "rules for sessions" or
   "every pull request": the nodes DR, CL, IS and PO.
 - A HAZARD issue that a node names (2, 6) closes or opens: that node.
