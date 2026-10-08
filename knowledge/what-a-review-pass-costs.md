@@ -84,9 +84,9 @@ What follows from it:
   itself when the session marks a pull request Ready or pushes to a Ready one, starts without a
   question to the owner. The question before every run, the owner's decision of 2026-10-02 after
   the first bills, was retired by the owner on 2026-10-07: it had stalled every round for a run
-  that costs between half a USD (two passes of one batch) and three in CI (the runs above; the
-  upper bound at the pass cap is batches times ten passes times 0.27 USD, the highest measured
-  rounded up: 5.4 USD for two batches, 10.8 for four).
+  that cost between half a USD (two passes of one batch) and three in CI in the ten runs above;
+  the upper bound at the pass cap is batches times ten passes times 0.27 USD, the highest
+  measured rounded up, about 2.7 USD per batch: 5.4 USD for two batches, 13.5 for five.
   The bill is counted
   before the run and named in the report after it. A run off
   the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go

@@ -19,8 +19,10 @@ findings  the review policy: every finding the reviewer posted is resolved, and 
 resolve   not a gate: the session's step after its fix push. Every unresolved thread of the
           reviewer whose files all changed since the finding's commit is resolved, because its
           edit is the answer as `findings` reads it; a thread without findings, a reviewer post that
-          names no file, a finding whose commit is gone and one whose file did not change are left
-          open and printed with the reason and the thread id,
+          names no file, a finding whose commit is gone, one whose files did not all change, one in
+          which a person wrote after the reviewer, and one whose commit the pull request still
+          shows as its head (right after a push, for a moment) are left open and printed with
+          the reason and the thread id,
           since a person's question and a written reply are the session's to give. Without --go
           the plan is printed and nothing is written; writes are a second apart. Two pull requests
           had this as a hand-written script before the third need made it the tool (2026-10-07).
@@ -50,6 +52,9 @@ MARK = re.compile(r"<!-- kurz-review:findings (\[.*?\]) -->", re.S)
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 skip_literal = kit.skip_literal
 LIMIT = "known limit: neither a resolved thread nor a posted review starts a pipeline; re-run the gates after resolving"
+STILL = ("the head is still the finding's commit: nothing was pushed since, or the push has not reached "
+         "the pull request yet; run the plan again")  # the forge names the old head for a moment after a push
+REPLIED = "a person wrote in it: read the reply, then resolve by hand"
 BOTS = {"github-actions", "github-actions[bot]"}  # the Actions token's login, as GraphQL and as REST spell it
 THREADS = """query($owner: String!, $name: String!, $pr: Int!, $after: String) {
   repository(owner: $owner, name: $name) { pullRequest(number: $pr) {
@@ -119,6 +124,13 @@ def answers(comment):
     return comment.get("authorAssociation") in TRUSTED and MARKER not in (comment.get("body") or "")
 
 
+def spoke(comment):
+    """A later post in a thread that is not the reviewer's: a person's question or reply, whoever
+    wrote it; what `answers` reads, without the association, since a question from anyone is read
+    before the thread is resolved."""
+    return MARKER not in (comment.get("body") or "")
+
+
 def findings_errors(threads, changed_since):
     """changed_since(path, sha) -> True when the file at the head differs from the file at sha."""
     errors = []
@@ -143,14 +155,18 @@ def findings_errors(threads, changed_since):
 RESOLVE = "mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { isResolved } } }"
 
 
-def resolve_plan(threads, changed_since):
+def resolve_plan(threads, changed_since, head=None):
     """(to resolve, left open) among the unresolved threads. A finding thread whose files all changed
     since the finding's commit is answered by its edit, the reading `findings` applies, and may be
     resolved; everything else is left with its reason: a thread without findings is a person's, a
     reviewer post that names no file names nothing to check, a finding whose commit is gone cannot
     be proven answered, a finding whose file did not change (of several, the reason names the
     ones that did not) is answered by an edit or, on tool, workflow or hook code, by a reply,
-    which this tool cannot write."""
+    which this tool cannot write. A finding thread in which a person wrote after the reviewer is
+    left open whatever changed: the reply is read before the thread is resolved, by hand. A
+    finding whose commit is `head`, the head the pull request shows, cannot have changed since
+    it: right after a push the forge still names the old head for a moment, and the reason says
+    so instead of "did not change"."""
     findings_of = {id(t): f for t, f in finding_threads(threads)}  # None below: not a reviewer post; []: one that names no file
     resolve, left = [], []
     for t in threads:
@@ -159,12 +175,16 @@ def resolve_plan(threads, changed_since):
         nodes = t["comments"]["nodes"]
         sha = (nodes[0].get("originalCommit") or {}).get("oid") if nodes else None
         findings = findings_of.get(id(t))
-        paths = sorted({f["file"] for f in findings}) if findings is not None else [t.get("path") or "?"]
+        paths = sorted({f["file"] for f in findings}) if findings is not None else [p for p in [t.get("path")] if p]
+        if findings is not None and any(spoke(c) for c in nodes[1:]):
+            left.append((t, paths, REPLIED))
+            continue
         if findings is not None and sha and paths and all(changed_since(p, sha) for p in paths):
             resolve.append((t, paths))
         else:
-            unchanged = [p for p in paths if not changed_since(p, sha)] if findings and sha else paths
+            unchanged = [p for p in paths if not changed_since(p, sha)] if findings and sha and sha != head else paths
             why = ("no finding of the reviewer" if findings is None else "the reviewer's post names no file" if not findings
+                   else STILL if sha and sha == head
                    else "its commit is gone" if not sha else "the file did not change" if unchanged == paths
                    else f"not every file changed: {', '.join(unchanged)} did not")
             left.append((t, paths, why))
@@ -173,13 +193,14 @@ def resolve_plan(threads, changed_since):
 
 def resolve_threads(repo, number, go, get=None):
     """Prints what is left open with its reason and id, then each answered thread as it would be
-    resolved or, with `go`, once the forge said it is, one write a second: (resolved, left open).
+    resolved or, with `go`, once the forge said it is, one write a second: (answered, left open),
+    where answered counts the threads resolved with `go` and the ones to resolve without it.
     An answer that does not say resolved is a refusal; what was resolved before it stays so."""
     get = get or kit.gh_json
     head = get(f"repos/{repo}/pulls/{number}")["head"]["sha"]
     threads = fetch_threads(repo, number, get)
     changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
-    resolve, left = resolve_plan(threads, changed)
+    resolve, left = resolve_plan(threads, changed, head)
     for t, paths, why in left:
         print(f"left open: {', '.join(paths) or '(no file)'} ({t.get('id')}): {why}")
     for t, paths in resolve:
@@ -445,9 +466,23 @@ def self_test():
         cases.append(("resolve: a finding whose files did not all change is left open, naming the unchanged",
                       counts(half) == [0, 1] and half[1][0][2] == "not every file changed: b.md did not" and counts(whole) == [1, 0],
                       repr((half, whole))))
+        plan = resolve_plan(variant(False, replies=1), differs)
+        cases.append(("resolve: a finding thread in which a person wrote is left open, whatever changed",
+                      counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
+        plan = resolve_plan(variant(False, replies=1, reply={"body": MARKER + "findings [] -->\nstill there"}), differs)
+        cases.append(("resolve: a later post of the reviewer itself is no person's reply", counts(plan) == [1, 0], repr(plan)))
+        bare = [dict(plain[0], path=None)]
+        plan = resolve_plan(bare, differs)
+        cases.append(("resolve: a person's thread without a path names no placeholder",
+                      counts(plan) == [0, 1] and plan[1][0][1] == [], repr(plan)))
+        still = (thread["comments"]["nodes"][0].get("originalCommit") or {}).get("oid")  # the real finding's commit
+        plan = resolve_plan(variant(False), same, head=still)
+        cases.append(("resolve: a finding whose commit is still the head is left open, saying so",
+                      bool(still) and counts(plan) == [0, 1] and plan[1][0][2].startswith("the head is still the finding's commit"),
+                      repr((still, plan))))
 
-        def resolving(blob, says=True, threads=1, breaks_at=None, error=None):
-            """A forge for resolve_threads: the pull request, one page with the real thread unresolved
+        def resolving(blob, says=True, threads=1, breaks_at=None, error=None, head="h"):
+            """A forge for resolve_threads: the pull request at `head`, one page with the real thread unresolved
             (`threads` copies with their own ids), blob(ref) for a file, and the mutation, which it
             records and answers as told, or raises `error` (an error nobody expected) at write `breaks_at`."""
             written = []
@@ -464,7 +499,7 @@ def self_test():
                     return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
                 if "/contents/" in args[0]:
                     return {"sha": blob(args[0].split("?ref=")[1])}
-                return {"title": "ok", "body": "", "head": {"sha": "h"}, "commits": 1}
+                return {"title": "ok", "body": "", "head": {"sha": head}, "commits": 1}
             return get, written
 
         def quietly(fn):
@@ -487,6 +522,11 @@ def self_test():
                           out == (1, 0) and written == ["thread=t0"] and resolved_lines(printed) == 1, repr((out, written, printed))))
             get, written = resolving(lambda ref: "blob")
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
+            get, written = resolving(lambda ref: "blob@" + ref, head=still)
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
+            cases.append(("resolve: a forge that still shows the finding's commit as the head writes nothing, and says so",
+                          bool(still) and out == (0, 1) and written == [] and "the head is still the finding's commit" in printed,
+                          repr((out, written, printed))))
             cases.append(("resolve: a thread whose file did not change is not written, with --go", out == (0, 1) and written == [], repr((out, written))))
             get, written = resolving(lambda ref: "blob@" + ref, says=False)
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))

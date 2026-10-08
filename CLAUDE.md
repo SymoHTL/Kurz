@@ -257,15 +257,18 @@ Gate: review rule "rules for sessions".
   as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
   HAZARD (#3): the session holds the owner's token, so the permission classifier and this rule
   are the only guards on the approval.
-- **One push per review round.** Read every thread, fix everything, push once, then resolve the
-  threads the push answered. Never push to cancel a running review; a push to a Ready pull
-  request does cancel it. `judgment step`
+- **One push per review round.** Read every thread, fix everything, mark the pull request Draft,
+  push once, resolve the threads the push answered, then mark it Ready (the skill `change-walk`,
+  step 7), so the one review and the gates run on a head with its threads resolved. Never push
+  to cancel a running review; a push to a Ready pull request does cancel it. `judgment step`
 - **A finding above low is a thread, and a thread is answered by an edit.** On the design
   record, the reference, the corpus, the knowledge store and rule files the file must change
   before the thread is resolved; on tool, workflow and hook code a written reply also counts. After
   the fix push, `py -3 tools/pr_gates.py resolve --pr N --go` resolves the reviewer's threads whose
-  files all changed since the finding's commit and leaves the rest open with the reason; a thread
-  answered by a reply is resolved by hand
+  files all changed since the finding's commit and leaves the rest open with the reason (a thread
+  in which a person wrote among them; and right after the push the forge still names the old
+  head for a moment, which the reason says: run the plan again); a thread answered by a reply is
+  resolved by hand
   ([knowledge/resolve-what-the-edit-answered.md](knowledge/resolve-what-the-edit-answered.md)).
   Gate: `pr-findings`.
 - **Low findings open no thread and hold no merge** (the owner's decision, 2026-10-02). The

@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-08
-digest: 06fbd72c73d421bc448223ff88bb1ff5b3874112fee56761720b93e3702eebad
+digest: b1556babc5b20ac495614a4742d3c1981a77a694eaa34d1ecb7957cd8d9e193a
 ttl_days: 60
 metadata:
   type: reference
@@ -62,12 +62,12 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/lint_knowledge.py` | 61 | 44 |
 | `tools/lint_reference.py` | 56 | 58 |
 | `tools/merge_pr.py` | 133 | 115 |
-| `tools/pr_gates.py` | 71 | 68 |
+| `tools/pr_gates.py` | 76 | 73 |
 | `tools/quality_evidence.py` | 28 | 27 |
 | `tools/red_proof.py` | 29 | 26 |
 | `tools/review/review.py` | 239 | 205 |
 | `tools/tree_gate.py` | 81 | 51 |
-| **total** | 832 | 714 |
+| **total** | 837 | 719 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -75,13 +75,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 27 |
+| Entries in INDEX.md | 28 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 5 |
+| tagged TRAP | 6 |
 | Review rule sections | 11 |
 | Review rules | 64 |
 <!-- /generated:store -->
@@ -129,7 +129,7 @@ counted from the record that the merge tool posts.
 | Pull requests merged | 5 |
 | Merged over red, with a recorded waiver | 4 |
 | Review findings posted: high | 37 |
-| Review findings posted: medium | 409 |
-| Review findings posted: low | 391 |
+| Review findings posted: medium | 410 |
+| Review findings posted: low | 403 |
 | Open HAZARD issues | 11 |
 <!-- /generated:forge -->

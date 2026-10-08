@@ -98,9 +98,9 @@ def head_states(repo, head, contexts):
 def context_states(contexts, check_runs, statuses):
     """{context: success | failed | skipped | running | absent} on one head. A context that both a
     check run and a commit status report must be green in both. The newest check run of a name
-    counts, and only one from the app pinned for that context; the newest status of the context
-    counts, and only one from the login that app posts as (STATUS_POSTERS): with the ruleset off,
-    this reading is all that holds a check nobody waived."""
+    counts, and only one from the app pinned for that context; of the statuses of the context from
+    the login that app posts as (STATUS_POSTERS) the newest counts, and a newer one from another
+    creator is ignored: with the ruleset off, this reading is all that holds a check nobody waived."""
     states = {}
     for ctx, app in contexts.items():
         seen = []
@@ -461,7 +461,7 @@ def self_test():
     def forge_of_head(path):
         asked.append(path)
         return (load("check-runs.json") if "/check-runs?" in path else load("statuses.json") if "/statuses?" in path
-                else load("status.json") if "/status?" in path else {})
+                else load("status.json") if "/status?" in path or path.endswith("/status") else {})  # the old read, paged or not
 
     saved, kit.gh_json = kit.gh_json, forge_of_head
     try:
