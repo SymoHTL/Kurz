@@ -28,14 +28,20 @@ of the gates.
 
 ## How to apply
 
-- The resolve plan names the shape: a finding whose commit is the head the pull request shows is
-  left open with `the head is still the finding's commit: nothing was pushed since, or the push
-  has not reached the pull request yet; run the plan again`, never with "the file did not
-  change". Gate: `self-tests` (the plan with the finding's commit as the head, and the write path
-  with a forge that still shows it; each with its mutation in `tools/red_proofs.json`).
-- After the push, run the plan without `--go` and read its lines; that reason means wait and run
-  it again; `--go` comes when the plan lists the answered threads, and Ready after `--go` printed
-  them as resolved ([[resolve-what-the-edit-answered]]). `judgment step`
-- A local `gates.py --pr N` right after a push reads the head the same way: run it once the plan
-  shows the pushed head, or read its `pr-findings` verdict as one about the old head.
-  `judgment step`
+- The resolve tool takes the pushed commit as `--head` and refuses, before any read of a thread or
+  any write, while the pull request shows another head: `the pull request shows head <a>, not
+  <b>: the push has not reached it yet, or the checkout is elsewhere; run again`. Gate:
+  `self-tests` (a forge that shows another head is refused and one that shows the pushed head
+  runs, with the mutation in `tools/red_proofs.json`).
+- Without `--head`, the plan names the shape only where a finding sits on the head the pull
+  request shows: `the head is still the finding's commit: nothing was pushed since, or the push
+  has not reached the pull request yet; run the plan again`; a finding from an earlier round
+  reads as "the file did not change" on such a read, with no sign. Gate: `self-tests` (the plan
+  with the finding's commit as the head, and the write path with a forge that still shows it;
+  each with its mutation).
+- After the push, run the plan with `--head` and without `--go` first; `--go` comes when the plan
+  lists the answered threads, and Ready after `--go` printed them as resolved
+  ([[resolve-what-the-edit-answered]]). `judgment step`
+- A local `gates.py --pr N` right after a push reads the head the same way and has no `--head`:
+  compare the head of `gh pr view N --json headRefOid` with the pushed commit before running it,
+  or read its `pr-findings` verdict as one about the head the forge showed. `judgment step`

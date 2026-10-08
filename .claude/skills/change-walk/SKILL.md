@@ -123,15 +123,16 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    Gate: `self-tests` for where the reviewer puts them; fixing them is a `judgment step`.
 7. Order: edit, mark the pull request Draft, push ONE commit with every fix, resolve the threads
    the edits answered, mark it Ready:
-   `py -3 tools/pr_gates.py resolve --pr <N>` prints which threads the head's edits answer and
+   `py -3 tools/pr_gates.py resolve --pr <N> --head <the pushed commit>` prints which threads the head's edits answer and
    which stay open and why (a person's thread, a reviewer post that names no file, a finding whose
    commit is gone, a file that did not change, a thread in which a person wrote, or a head the
-   pull request still shows as the finding's commit right after the push: wait and run the plan
-   again), and `--go` resolves the former
+   pull request still shows as the finding's commit right after the push, where `--head` refuses
+   the run until the forge shows the pushed commit: run it again), and `--go` resolves the former
    (`knowledge/resolve-what-the-edit-answered.md`). A person's thread is theirs; a reviewer post
-   that names no file has nothing to check and is resolved by hand; a thread in which a person
-   wrote is read, answered with a reply and resolved by hand, unless the post is the owner's
-   decision to make, which holds until decided; a thread on tool,
+   that names no file is read, what it asks is answered by an edit or a reply, and the thread is
+   resolved by hand; a thread in which a person wrote gets its reply to the person and, on a file
+   outside tool, workflow and hook code, still its edit before it is resolved by hand, unless the
+   post is the owner's decision to make, which holds until decided; a thread on tool,
    workflow or hook code left open gets its reply and is resolved by hand; a file that did not change elsewhere means
    the round's push missed a fix, and that fix is the next round's one push; a finding whose commit
    is gone cannot be proven answered by an edit and holds the merge until the owner decides. The `gates` run

@@ -475,10 +475,11 @@ def self_test():
     case("states: the newest status of a context counts, whatever the order of the list",
          (context_states(R, [], two)["review"], context_states(R, [], two[::-1])["review"]) == ("success", "success"))
     case("states: an older success does not outvote a newer error", context_states(R, [], [dict(two[0], id=3), two[1]])["review"] == "failed")
-    mixed = [two[1], {"context": "review", "state": "error", "creator": {"login": "someone"}, "id": 3}]  # a stranger's, newer
-    case("states: a newer status from another creator is ignored, the pinned poster's newest counts",
-         (context_states(R, [], mixed)["review"],
-          context_states(R, [], [dict(mixed[0], state="error"), dict(mixed[1], state="success")])["review"]) == ("success", "failed"), mixed)
+    mixed = two + [{"context": "review", "state": "error", "creator": {"login": "someone"}, "id": 3}]  # the poster's two, then a stranger's, newer
+    case("states: a newer status from another creator is ignored, the pinned poster's newest counts, whatever the order",
+         (context_states(R, [], mixed)["review"], context_states(R, [], mixed[::-1])["review"],
+          context_states(R, [], [dict(two[0], id=4), two[1], dict(mixed[2], state="success")])["review"]) == ("success", "success", "failed"),
+         mixed)
     newer = dict(run0, id=run0["id"] + 1)
     for name, change, want in [("a completed success", {"status": "completed", "conclusion": "success"}, "success"),
                                ("a failure", {"status": "completed", "conclusion": "failure"}, "failed"),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gates that read a pull request rather than the tree. Usage: pr_gates.py title|breadth|findings|resolve [--pr N] [--go]
+"""Gates that read a pull request rather than the tree. Usage: pr_gates.py title|breadth|findings|resolve [--pr N] [--head SHA] [--go]
 (the number comes from PR_NUMBER in CI).
 
 title     a workflow-skip literal, a credential-shaped or machine-bound string or a conflict marker
@@ -24,7 +24,9 @@ resolve   not a gate: the session's step after its fix push. Every unresolved th
           shows as its head (right after a push, for a moment) are left open and printed with
           the reason and the thread id,
           since a person's question and a written reply are the session's to give. Without --go
-          the plan is printed and nothing is written; writes are a second apart. Two pull requests
+          the plan is printed and nothing is written; writes are a second apart. --head SHA, the
+          commit just pushed, refuses the run while the pull request shows another head: the forge
+          names the old one for a moment after a push. Two pull requests
           had this as a hand-written script before the third need made it the tool (2026-10-07).
 A failed API call is a refusal (exit 1), never a pass. Known limit, printed by `findings` and by
 `resolve`: neither a resolved thread nor the review that posts its findings starts a pipeline, so
@@ -126,9 +128,12 @@ def answers(comment):
 
 def spoke(comment):
     """A later post in a thread that is not the reviewer's: a person's question or reply, whoever
-    wrote it; what `answers` reads, without the association, since a question from anyone is read
-    before the thread is resolved."""
-    return MARKER not in (comment.get("body") or "")
+    wrote it, whatever the association, since a question from anyone is read before the thread is
+    resolved. The reviewer's post is told by its marker and its login together: a marker in a
+    person's reply, pasted or typed, does not make it the reviewer's, and a reviewer post off the
+    pipeline, under a person's login, reads as that person's and holds the thread for a reading."""
+    bot = ((comment.get("author") or {}).get("login")) in BOTS
+    return not (bot and MARKER in (comment.get("body") or ""))
 
 
 def findings_errors(threads, changed_since):
@@ -166,7 +171,8 @@ def resolve_plan(threads, changed_since, head=None):
     left open whatever changed: the reply is read before the thread is resolved, by hand. A
     finding whose commit is `head`, the head the pull request shows, cannot have changed since
     it: right after a push the forge still names the old head for a moment, and the reason says
-    so instead of "did not change"."""
+    so instead of "did not change" for a finding that sits on that head; a finding from an earlier
+    round reads as unchanged on such a read, which only `expect` in resolve_threads refuses."""
     findings_of = {id(t): f for t, f in finding_threads(threads)}  # None below: not a reviewer post; []: one that names no file
     resolve, left = [], []
     for t in threads:
@@ -191,13 +197,18 @@ def resolve_plan(threads, changed_since, head=None):
     return resolve, left
 
 
-def resolve_threads(repo, number, go, get=None):
+def resolve_threads(repo, number, go, get=None, expect=None):
     """Prints what is left open with its reason and id, then each answered thread as it would be
     resolved or, with `go`, once the forge said it is, one write a second: (answered, left open),
     where answered counts the threads resolved with `go` and the ones to resolve without it.
-    An answer that does not say resolved is a refusal; what was resolved before it stays so."""
+    An answer that does not say resolved is a refusal; what was resolved before it stays so.
+    `expect` is the commit the session pushed: while the pull request shows another head, the
+    push has not reached it yet (or the checkout is elsewhere), and nothing is compared or written."""
     get = get or kit.gh_json
     head = get(f"repos/{repo}/pulls/{number}")["head"]["sha"]
+    if expect and head != expect:
+        raise kit.Refused(f"the pull request shows head {head[:7]}, not {expect[:7]}: the push has not reached it yet, "
+                          f"or the checkout is elsewhere; run again")
     threads = fetch_threads(repo, number, get)
     changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
     resolve, left = resolve_plan(threads, changed, head)
@@ -215,12 +226,12 @@ def resolve_threads(repo, number, go, get=None):
     return len(resolve), len(left)
 
 
-def resolve_command(repo, number, go, get=None):
+def resolve_command(repo, number, go, get=None, expect=None):
     """The exit code of the resolve command: 0 when the plan ran, 1 when a read or a write failed or
     the run was interrupted. Any failure after the first write leaves threads resolved, so the message
     says what stands."""
     try:
-        resolved, left = resolve_threads(repo, number, go, get)
+        resolved, left = resolve_threads(repo, number, go, get, expect)
     except BaseException as e:  # whatever failed, an interrupt too: the lines printed above are what the forge confirmed
         print(f"ERROR: resolve stopped: {type(e).__name__}: {e}. The threads printed as resolved above stay resolved; "
               f"if a write failed, its thread may or may not be: run the plan again, it shows what is left")
@@ -257,6 +268,16 @@ def blob_at(repo, path, ref, get=None):
             raise
     get(f"repos/{repo}/commits/{ref}")
     return None
+
+
+def option(argv, flag):
+    """The value after `flag`; None without the flag; the flag without a value is a refusal."""
+    if flag not in argv:
+        return None
+    value = (argv[argv.index(flag) + 1:] or [""])[0]
+    if not value or value.startswith("--"):
+        raise kit.Refused(f"{flag} needs a value")
+    return value
 
 
 def pr_number(argv, env=None):
@@ -469,8 +490,15 @@ def self_test():
         plan = resolve_plan(variant(False, replies=1), differs)
         cases.append(("resolve: a finding thread in which a person wrote is left open, whatever changed",
                       counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
-        plan = resolve_plan(variant(False, replies=1, reply={"body": MARKER + "findings [] -->\nstill there"}), differs)
+        plan = resolve_plan(variant(False, replies=1, reply={"body": MARKER + "findings [] -->\nstill there",
+                                                            "author": {"login": "github-actions[bot]"}}), differs)
         cases.append(("resolve: a later post of the reviewer itself is no person's reply", counts(plan) == [1, 0], repr(plan)))
+        plan = resolve_plan(variant(False, replies=1, reply={"authorAssociation": "NONE"}), differs)
+        cases.append(("resolve: an outsider's reply holds the thread too",
+                      counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
+        plan = resolve_plan(variant(False, replies=1, reply={"body": MARKER + "findings [] --> pasted"}), differs)
+        cases.append(("resolve: a marker in a person's reply does not make it the reviewer's",
+                      counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
         bare = [dict(plain[0], path=None)]
         plan = resolve_plan(bare, differs)
         cases.append(("resolve: a person's thread without a path names no placeholder",
@@ -527,6 +555,12 @@ def self_test():
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: a thread whose file did not change is not written, with --go",
                           out == (0, 1) and written == [] and "the file did not change" in printed, repr((out, written, printed))))
+            get, written = resolving(lambda ref: "blob@" + ref)
+            out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get, expect="other"))
+            fine, printed2 = quietly(lambda: resolve_threads("o/n", 1, True, get, expect="h"))
+            cases.append(("resolve: a pull request that shows another head than the pushed one is refused before any write",
+                          type(out) is kit.Refused and "shows head h, not other" in str(out) and fine == (1, 0) and written == ["thread=t0"],
+                          repr((out, fine, written))))
             get, written = resolving(lambda ref: "blob@" + ref, head=still)
             out, printed = quietly(lambda: resolve_threads("o/n", 1, True, get))
             cases.append(("resolve: a forge that still shows the finding's commit as the head writes nothing, and says so",
@@ -586,6 +620,10 @@ def self_test():
                got(lambda: pr_number(["title", "--pr", "x"], {}))]
     cases.append(("number: none, none after --pr, and one that is no number are refused",
                   all(type(r) is kit.Refused for r in refused), repr(refused)))
+    heads = (got(lambda: option(["resolve", "--head", "abc"], "--head")), got(lambda: option(["resolve"], "--head")),
+             got(lambda: option(["resolve", "--head"], "--head")), got(lambda: option(["resolve", "--head", "--go"], "--head")))
+    cases.append(("option: --head reads its value, none is None, and the flag without a value or before another flag is refused",
+                  heads[:2] == ("abc", None) and all(type(r) is kit.Refused for r in heads[2:]), repr(heads)))
     return kit.report(cases)
 
 
@@ -596,7 +634,7 @@ if __name__ == "__main__":
     try:
         number = pr_number(sys.argv)
         if gate == "resolve":
-            sys.exit(resolve_command(kit.repo(), number, "--go" in sys.argv))
+            sys.exit(resolve_command(kit.repo(), number, "--go" in sys.argv, expect=option(sys.argv, "--head")))
         errors, scanned = run_gate(gate, kit.repo(), number)
     except (kit.Refused, KeyError, IndexError, ValueError, TypeError, AttributeError) as e:
         print(f"ERROR: pr gate {gate or '?'} could not run: {type(e).__name__}: {e}")

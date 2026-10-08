@@ -264,10 +264,11 @@ Gate: review rule "rules for sessions".
 - **A finding above low is a thread, and a thread is answered by an edit.** On the design
   record, the reference, the corpus, the knowledge store and rule files the file must change
   before the thread is resolved; on tool, workflow and hook code a written reply also counts. After
-  the fix push, `py -3 tools/pr_gates.py resolve --pr N --go` resolves the reviewer's threads whose
-  files all changed since the finding's commit and leaves the rest open with the reason (a thread
-  in which a person wrote among them; and right after the push the forge still names the old
-  head for a moment, which the reason says: run the plan again,
+  the fix push, `py -3 tools/pr_gates.py resolve --pr N --head <sha> --go`, with the pushed commit,
+  resolves the reviewer's threads whose files all changed since the finding's commit and leaves
+  the rest open with the reason (a thread in which a person wrote among them); right after the
+  push the forge still names the old head for a moment, and the tool refuses until it shows the
+  pushed one (run it again,
   [knowledge/the-pull-request-shows-the-old-head-after-a-push.md](knowledge/the-pull-request-shows-the-old-head-after-a-push.md));
   a thread answered by a reply is resolved by hand
   ([knowledge/resolve-what-the-edit-answered.md](knowledge/resolve-what-the-edit-answered.md)).

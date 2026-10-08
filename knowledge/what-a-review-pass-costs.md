@@ -67,7 +67,8 @@ What follows from it:
   1.94 USD for 10 passes, 1.42 for 6, 1.04 for 4, 1.85 for 7, 2.47 for 10, 1.80 for 8, 1.91 for 8,
   2.11 for 8, 2.04 for 8, 2.42 for 11; the highest, 1.85 for 7, is 0.264 a pass, rounded up to
   0.27); off the pipeline a pass on the pinned model reported 1.34 USD on
-  2026-10-07, just under the range above. Why the two places report prices this far apart was not
+  2026-10-07, just under the 1.4 to 1.8 USD a pass measured off the pipeline on 2026-10-02 (above).
+  Why the two places report prices this far apart was not
   established.
 - A run outside CI can be cut to a bill named in advance: `--passes N` (1 to 5, with `--local`
   or `--dry-run` only) gives a batch at most N passes, so `--passes 1` costs batches times one

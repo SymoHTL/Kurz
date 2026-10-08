@@ -15,7 +15,10 @@ hand was a script per pull request, twice, before the third-time rule made it th
 
 1. Mark the pull request Draft if it is Ready, so that the push starts no review, and push the
    fix commit.
-2. `py -3 tools/pr_gates.py resolve --pr <N>`: the plan. Each line is
+2. `py -3 tools/pr_gates.py resolve --pr <N> --head <the pushed commit>`: the plan. While the
+   pull request shows another head the tool refuses and says so, since the forge names the old
+   head for a moment after a push ([[the-pull-request-shows-the-old-head-after-a-push]]); run it
+   again. Each line is
    `would resolve <files> (<thread id>)` or `left open: <files> (<thread id>): <why>`, where why
    is "no finding of the reviewer" (a person's thread), "the reviewer's post names no file", "its
    commit is gone" (the finding's commit is not on the forge), "the file did not change", "not
@@ -33,17 +36,18 @@ hand was a script per pull request, twice, before the third-time rule made it th
    the question is answered; "its commit is gone"
    cannot be proven answered by an edit: on tool, workflow or hook code a reply answers it,
    elsewhere it holds the merge until the owner decides.
-4. `py -3 tools/pr_gates.py resolve --pr <N> --go` resolves the plan, a second between writes,
+4. `py -3 tools/pr_gates.py resolve --pr <N> --head <the pushed commit> --go` resolves the plan, a second between writes,
    and prints each thread once the forge said it is resolved. A failure of any kind stops the run
    (exit 1): what was printed stays resolved, the thread of the failed write may or may not be,
    and the plan run shows what is left.
 5. Mark the pull request Ready: the review and a gates run start on the head, and this gates run
-   reads the threads resolved; the gates run of the push had read them open (the gates workflow
-   runs at a push, at Ready and at an edit of the description). The merge tool takes the newest
+   reads the threads resolved; the gates run of the push may have read them open, since it reads
+   them when it reaches `pr-findings`, before or after `--go` (the gates workflow runs at a push,
+   at Ready and at an edit of the description). The merge tool takes the newest
    gates run of the head, and reads the threads again itself; an edit of the description after
    the review is text the review never read (HAZARD #13), so it is no way to run the gates again.
 
-Gate: `self-tests` (twenty-one cases: the plan's eleven, and the write's ten, among them the pacing,
+Gate: `self-tests` (twenty-five cases: the plan's thirteen, the write's eleven, among them the pacing,
 the order of write and print, and what a failure of any kind, an interrupt too, says; each named by a mutation in
 `tools/red_proofs.json`). Which threads need a reply, and resolving a person's thread, are a
 `judgment step`.
