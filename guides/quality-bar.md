@@ -198,7 +198,7 @@ changes in the same pull request.
   questions, asked by the skill `design-round` before anything is derived from them.
 - **Agent-behaviour plugins.** The guide's 2026-10-07 version installs none; its section 13 says why
   the two it once used were removed. Nothing here depends on one. The one `ponytail:` comment in
-  `tools/` names a shortcut's ceiling and its upgrade path, and reads without the plugin.
+  `tools/` names a shortcut's ceiling and its upgrade path.
 
 ## Changing the bar
 

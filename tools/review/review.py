@@ -70,8 +70,8 @@ LOWS_LABEL, NOTE_FINDINGS = "review-lows", 150
 # request goes Ready would spend the seat on the same head again: a completed off-pipeline review
 # labels the pull request `reviewed-<head sha>`, and the workflow's job skips the Ready event of a
 # pull request whose head carries that label (the clause is pinned by tools/lint_ci.py). The label
-# names one head, so every other head, pushed before or after Ready, is reviewed by the run its
-# event starts, and a stale label matches nothing; nothing removes it, and the forge creates a label
+# names one head, so every other head is reviewed by the run its event starts (the Ready for a
+# head pushed during the Draft, the push for one pushed after Ready), and a stale label matches nothing; nothing removes it, and the forge creates a label
 # it does not have. The skipped job is `review-run`: its skip reports a check of that name and
 # never the status `review`, which a run that completed posts as success and a run that failed as
 # error (lint_ci pins the job's name). A label write the forge refuses ends the run red: Ready

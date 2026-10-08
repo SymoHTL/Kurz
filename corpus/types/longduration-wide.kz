@@ -1,0 +1,6 @@
+// expect: throws overflow at 6
+// build: test
+// rules: T29
+
+longduration l = 200000days
+print(duration(l))

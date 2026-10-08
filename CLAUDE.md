@@ -147,8 +147,8 @@ Each line names a trap; its evidence is in the entry it links.
   Dispatch the review as above. The policy that allows the event is the owner's setting:
   HAZARD (#10).
 - `review` pending on a Ready pull request whose head carries the label `reviewed-<that head's
-  sha>`: the job skipped the Ready event by design, because the off-pipeline review of that head
-  posted no status; the merge needs the owner's approval for that head (`--over-red`). Any other
+  sha>`: by design, the review of that head ran off the pipeline, which posts no status; the
+  merge needs the owner's approval for that head (`--over-red`). Any other
   head is reviewed by the run its event starts, a push to the Ready pull request or the Ready of a
   head pushed during the Draft; a head whose run did not start gets a dispatch. Gate: `ci-config`
   pins the clause; asking the approval is a `judgment step`.

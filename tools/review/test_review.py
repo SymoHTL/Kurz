@@ -798,9 +798,9 @@ def suite(case):
     case("run: a run outside CI posts no status", forge.statuses == [], forge.statuses)
     case("run: a completed run outside CI labels the pull request with the head, so that Ready of that head starts no paid run",
          forge.labels == [f"{rv.LOCAL_LABEL}{HEAD}"], forge.labels)
+    clause = kit.load_yaml(kit.read(os.path.join(FIX, "..", "..", "..", ".github", "workflows", "review.yml")))["jobs"]["review-run"]["if"]
     case("run: the label the reviewer adds is the one the workflow's clause builds from the head",
-         f"format('{rv.LOCAL_LABEL}{{0}}', github.event.pull_request.head.sha)"
-         in kit.read(os.path.join(FIX, "..", "..", "..", ".github", "workflows", "review.yml")), rv.LOCAL_LABEL)
+         f"format('{rv.LOCAL_LABEL}{{0}}', github.event.pull_request.head.sha)" in clause, (rv.LOCAL_LABEL, clause))
     forge = MemoryForge()
     forge.refuse_labels = True
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local"])

@@ -228,9 +228,8 @@ Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
 alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
-`throw-needs-value`: there is no value it could mean. *(proposed)* The record marks as
-*(assumed)* that the runtime adds the place and the chain id to what was thrown. When a
-supervisor reads it as the `Reason` of a crashed child, its type is the union of everything the
+`throw-needs-value`: there is no value it could mean. *(proposed)* When a supervisor reads what
+was thrown as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
 that carries the text and the place, and against limiting `throw` to `data` values and text). The
 run-time errors of chapter 12 are values of one `data` type of the runtime, a member of every

@@ -312,6 +312,12 @@ duration span = 90min
 Show(span)
 ```
 
+Case: [types/longduration-wide.kz](../corpus/types/longduration-wide.kz)
+```kurz
+longduration l = 200000days
+print(duration(l))
+```
+
 ### T14 (assumed, §4) Out of range and division by zero
 
 An index that is out of range raises the exception `index-out-of-range`, and a division by zero

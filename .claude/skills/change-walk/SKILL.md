@@ -81,7 +81,8 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    default branch. When the review ran off the pipeline instead (the last bullet of step 3, while
    the pull request was still a Draft), wait until `gh pr view <N> --json labels` shows
    `reviewed-<sha>` for the head you mark Ready: the job then skips that Ready event, while any
-   other head, pushed before or after Ready, is reviewed by the run its event starts. Never mark
+   other head is reviewed by the run its event starts: the Ready for a head pushed during the
+   Draft, the push for one pushed after Ready. Never mark
    Ready meaning to cancel the run: a run that started is a bill, cancelled or not
    (`knowledge/a-cancel-does-not-beat-the-runner.md`). Gate: `ci-config` pins the clause that
    skips the Ready event of the labelled head; the decision to mark Ready is a `judgment step`.

@@ -1,6 +1,8 @@
 // expect: output
 // | guest
 // | 3
+// | Bea
+// | 2
 // rules: K16
 
 class User(string Name = "guest")
@@ -10,3 +12,6 @@ class Admin(int Level) : User
 a = Admin(Level: 3)
 print(a.Name)
 print(a.Level)
+b = Admin("Bea", 2)
+print(b.Name)
+print(b.Level)

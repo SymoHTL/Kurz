@@ -158,7 +158,7 @@ print("got {c}")
 `ToString()` is in C#: `print(admin)` has a text when only the base `User` declares `Text()`, and
 a `User` variable that holds an `Admin` shows the text of `Admin` where `Admin` overrides it (K7).
 A `Text()` without `pub` is the compile error `not-visible` where the text is used outside the
-class, and `print` is such a use; inside the class it is usable, as any private member is. The owner chose this on 2026-10-03, against counting only a
+class, and `print` is such a use wherever it is written, inside the class too; there `Text()` itself can be called, as any private member can. The owner chose this on 2026-10-03, against counting only a
 `pub Text()` the class itself declares, which would have made every class of a hierarchy repeat
 the method; the cost is that whether a class has a text depends on its base, and that a
 base-typed value may print more than its static type says.
@@ -189,6 +189,19 @@ class Counter(int Count) {
 }
 
 print(Counter(1))
+```
+
+Case: [classes/text-private-inside.kz](../corpus/classes/text-private-inside.kz)
+```kurz
+class Counter(int Count) {
+    string Text() => "counter {Count}"
+
+    pub void Show() {
+        print(Counter(2))
+    }
+}
+
+Counter(1).Show()
 ```
 
 ### A10 (decided, §8) Printing through an interface or a type parameter
