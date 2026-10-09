@@ -58,8 +58,9 @@ the only copy of their result was held back until a write to a rate-limited serv
   rate limit while waits are left, and whatever it raises is printed.
 - Low findings open no thread. They are collected on one issue, in parts: each part goes first
   as a note on the pull request, which the next run reads back as reported, then as a comment on
-  the issue; when that comment fails and the issue, read back, does not show it, the note is
-  withdrawn, so that the part comes again instead of standing recorded and missing.
+  the issue; when that comment is refused, or fails otherwise and the issue, read back, does not
+  show it, the note is withdrawn, so that the part comes again instead of standing recorded and
+  missing; a note that got no answer is read back on the pull request the same way.
 
 The general shape: when a step that costs money or time is followed by a step that can be
 refused, the result is made durable (a log, a file) between the two.

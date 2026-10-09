@@ -77,7 +77,10 @@ def lf(text):
 
 def trusted(login, association):
     """True for a post of the Actions token or of someone who may write here. Anyone can comment on
-    a public repository, so a marker counts only from these."""
+    a public repository, so a marker counts only from these. The association is enough here, though
+    a collaborator with read access alone carries COLLABORATOR too: what it decides holds a merge
+    (a finding to answer, a thread a person wrote in) and never passes one; the evidence counts,
+    which such a post would inflate, read the collaborators list instead (tools/quality_evidence.py)."""
     return login in BOTS or association in TRUSTED
 
 
@@ -424,8 +427,10 @@ def self_test():
     noreply = "<123+someone@" + "users.noreply.github.com>"
     check("a co-author's GitHub no-reply address in a commit's trailer is clean",
           title_errors("ok", [f"Fix\n\nCo-authored-by: Someone {noreply}\n"]), None)
-    check("a GitHub no-reply address in a commit message's body is machine-bound",
+    check("a GitHub no-reply address in a commit message's subject line is machine-bound",
           title_errors("ok", [f"Fix, ask {noreply}\n"]), "the message of commit 1 of 1: machine-bound string (email)")
+    check("a GitHub no-reply address in a commit message's body, after the blank line, is machine-bound: a trailer line alone passes",
+          title_errors("ok", [f"Fix\n\nask {noreply}\n"]), "the message of commit 1 of 1: machine-bound string (email)")
     check("a credential shape in a later commit message", title_errors("ok", ["ok", "use ghp_" + "a" * 36]),
           "the message of commit 2 of 2: credential-shaped string")
 
@@ -721,13 +726,13 @@ def self_test():
     out = got(lambda: run_gate("title", "o/n", 1, lambda path: pr, listed([commit], [])))
     cases.append(("title: the messages of the commits the pull request lists are read",
                   type(out) is tuple and any("a commit message carries" in e for e in out[0]) and "1 commit messages" in out[1], repr(out)))
-    out = got(lambda: run_gate("title", "o/n", 1, lambda path: {**pr, "commits": 251}, listed([commit], [])))
+    out = got(lambda: run_gate("title", "o/n", 1, lambda path: {**pr, "commits": 251}, listed([commit], [])))  # edited: more commits than the forge lists
     cases.append(("title: a pull request with more commits than the forge listed is refused, not passed on the ones read",
                   type(out) is kit.Refused and "251 commits" in str(out) and "listed 1" in str(out), repr(out)))
-    out = got(lambda: run_gate("title", "o/n", 1, lambda path: dict(pr, body=None), listed([{"commit": {"message": "x"}}], [])))
+    out = got(lambda: run_gate("title", "o/n", 1, lambda path: dict(pr, body=None), listed([{"commit": {"message": "x"}}], [])))  # edited: a null body, as the forge sends one
     cases.append(("title: a description the forge sends as null is read as empty", out == ([], "title, description and 1 commit messages"),
                   repr(out)))
-    out = got(lambda: run_gate("breadth", "o/n", 1, lambda path: dict(pr, body=None), listed([], [changed])))
+    out = got(lambda: run_gate("breadth", "o/n", 1, lambda path: dict(pr, body=None), listed([], [changed])))  # edited: a null body, as the forge sends one
     cases.append(("breadth: a description the forge sends as null needs the section, like an empty one",
                   type(out) is tuple and any("Blast radius" in e for e in out[0]), repr(out)))
     sent = []

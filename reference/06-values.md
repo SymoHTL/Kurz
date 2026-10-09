@@ -191,7 +191,7 @@ print(ages["Bea"] ?? 0)
 
 Case: [values/list-index-out-of-range.kz](../corpus/values/list-index-out-of-range.kz)
 ```kurz
-xs = List<int>()
+mut xs = List<int>()
 xs.Add(1)
 print(xs[1])
 ```

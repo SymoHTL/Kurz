@@ -10,7 +10,7 @@ Three callers, one definition:
   --pre-push   every commit a `git push` is about to publish: its message and the files it adds or
                changes, a link or a submodule refused as in the working tree; the name of every ref
                it publishes; the message and the name of every annotated tag it pushes, and of each
-               tag that one points at, and a tag that points at a blob or a tree is refused. Not the
+               tag that one points at, and a tag or a ref that points straight at a blob or a tree is refused. Not the
                author, committer or tagger, which a push publishes as well (HAZARD #12)
                                                                                    (.githooks/pre-push)
   --hook       one Write/Edit call of an agent session, path rule only              (.claude/settings.json)
@@ -417,8 +417,8 @@ def cases_in(base):
                       refs == ["refs/tags/v1", "refs/heads/main"], refs))
         git("tag", "-a", "v1", "-m", "see D:" + "/work/notes", clean)
         tag = git("rev-parse", "v1")
-        tags = got(lambda: pushed_tags(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n{line}\n", cwd=repo))
-        cases.append(("pre-push: an annotated tag is read, and a branch is no tag", tags == [tag], tags))
+        tags = got(lambda: pushed_tags(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n{line}\n(delete) {'0' * 40} refs/heads/old {clean}\n", cwd=repo))
+        cases.append(("pre-push: an annotated tag is read; a branch is no tag, and a deletion is not looked at", tags == [tag], tags))
         cases.append(("pre-push: a machine-bound string in an annotated tag's message is refused",
                       has(got(lambda: check_tag(tag, cwd=repo)), "(tag message): machine-bound string (drive-path)"),
                       got(lambda: check_tag(tag, cwd=repo))))
@@ -470,18 +470,24 @@ def cases_in(base):
                              pre_push("not four fields\n"), pre_push(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n"),
                              pre_push(f"refs/heads/host-10.1." + f"2.3 {fresh} refs/heads/host-10.1." + f"2.3 {'0' * 40}\n"),
                              pre_push(f"refs/tags/raw {note} refs/tags/raw {'0' * 40}\n"),
-                             pre_push(f"refs/tags/rawtree {tree_sha} refs/tags/rawtree {'0' * 40}\n")))
+                             pre_push(f"refs/tags/rawtree {tree_sha} refs/tags/rawtree {'0' * 40}\n"),
+                             pre_push(f"(delete) {'0' * 40} refs/heads/old {clean}\n"),
+                             pre_push(f"refs/tags/v2 {credited_tag} refs/tags/v2 {'0' * 40}\n")))
         ended = lambda n, code, needle: isinstance(codes, tuple) and codes[n][0] == code and needle in codes[n][1]
         cases.append(("pre-push: the script ends in 0 for a clean push, and says what it scanned", ended(0, 0, "ref names about to be published, 0 errors"), codes))
         cases.append(("pre-push: the script ends in 1 for a push that holds a refused commit, and names the commit's defect",
                       ended(1, 1, "(message): machine-bound string (drive-path)"), codes))
         cases.append(("pre-push: the script ends in 1 for a line it cannot read, and says so", ended(2, 1, "pre-push line not understood"), codes))
         cases.append(("pre-push: the script ends in 1 for a tag whose message is refused, though its commit is published already, and names the tag",
-                      ended(3, 1, "(tag message): machine-bound string (drive-path)"), codes))
+                      ended(3, 1, f"{tag[:8]} (tag message): machine-bound string (drive-path)"), codes))
         cases.append(("pre-push: the script ends in 1 for a ref whose name holds a machine-bound string, and names the ref",
-                      ended(4, 1, "(ref name): machine-bound string (ip-address)"), codes))
+                      ended(4, 1, "refs/heads/host-10.1." + "2.3 (ref name): machine-bound string (ip-address)"), codes))
         cases.append(("pre-push: a ref aimed straight at a blob or a tree is refused: rev-list lists no commit for it, and what it publishes is read by no check",
                       ended(5, 1, "refs/tags/raw (") and ended(5, 1, "points at a blob") and ended(6, 1, "points at a tree"), codes))
+        cases.append(("pre-push: a deletion alone publishes nothing: the script ends in 0 without looking at the zero sha",
+                      ended(7, 0, "0 commits, 0 annotated tags and 0 ref names about to be published, 0 errors"), codes))
+        cases.append(("pre-push: a clean annotated tag of a published commit is let through: the script ends in 0 and counts the tag",
+                      ended(8, 0, "0 commits, 1 annotated tags and 1 ref names about to be published, 0 errors"), codes))
     cases.append(("pre-push: the throwaway repository was built", isinstance(built, tuple), built))
 
     call = lambda path: json.dumps({"tool_name": "Write", "tool_input": {"file_path": path}})

@@ -311,6 +311,10 @@ duration span = 90min
 Show(span)
 ```
 
+A `longduration` is narrowed to a `duration` only by a written conversion, which T20 checks like any
+other: in the case below the sum is two hundred thousand days, beyond the narrow range, so `duration(l)`
+raises `overflow` in a test build.
+
 Case: [types/longduration-wide.kz](../corpus/types/longduration-wide.kz)
 ```kurz
 longduration a = 100000days

@@ -17,7 +17,7 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `unknown-name` | V10, F16 | a name that is not visible at this place, a top-level variable read inside a top-level function included |
 | `type-mismatch` | T1, T13, T19, N6, C3 | a value of one type where another type is required |
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
-| `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance whose `Text()` is not `pub` is such a use |
+| `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance, or an interpolation of one, whose `Text()` is not `pub`, from outside its class (A9); the same inside the class is A15's reading |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
 | `constant-overflow` | T6, L10 | an expression of literals whose result leaves the range of its type, or a literal that fits no integer type |
 | `constant-divide-by-zero` | T25 | a division or remainder of literals by the literal `0` |

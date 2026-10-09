@@ -279,7 +279,8 @@ def drift(states, threads, now_states, now_threads):
     if was != now:
         differ = sorted(str(i) for i in set(was) | set(now) if was.get(i) != now.get(i))
         changed.append(f"the threads changed: {len(threads)} read for the decision, {len(now_threads)} now; "
-                       f"{len(differ)} added, gone or changed: {', '.join(differ)[:300]}")
+                       f"{len(differ)} added, gone or changed: {', '.join(differ[:10])}"
+                       + (f" and {len(differ) - 10} more" if len(differ) > 10 else ""))
     return changed
 
 
@@ -951,6 +952,17 @@ def self_test():
     code, f = flip(over, fail={"on"}, error=odd)
     case("flip: a restore that ends in an answer nobody expected is read back, and a gate that is off is exit 3",
          (code, f.enforcement) == (3, "disabled"), (code, f.calls, f.enforcement))
+    try:
+        twice = by_id([{"id": "a"}, {"id": "a"}], "twice")
+    except Exception as e:
+        twice = e
+    cases.append(("flip: two threads with one id refuse the second reading: the readings cannot be compared",
+                  isinstance(twice, kit.Refused) and "two with one id" in str(twice), repr(twice)))
+    many = [{"id": f"t{i:02d}", "isResolved": False} for i in range(12)]
+    named = drift(["x"], many, ["x"], [{**t, "isResolved": True} for t in many])
+    cases.append(("flip: a second reading that finds many threads changed names the first ten by id, whole, and counts the rest",
+                  len(named) == 1 and "t00, t01, t02, t03, t04, t05, t06, t07, t08, t09 and 2 more" in named[0] and "t10" not in named[0],
+                  named))
     return kit.report(cases)
 
 

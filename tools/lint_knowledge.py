@@ -3,8 +3,8 @@
 missing file, a store file no INDEX line links to, a path of a store file that does not exist,
 written in an entry, in CLAUDE.md, in the review rules or in a skill, a link in a store file (inline
 or reference-style, to a file of any kind, read outside code spans and fences and percent-decoded)
-that, resolved from that file as GitHub resolves it and in its exact spelling, reaches no entry or no
-file or leaves the repository,
+that, resolved from that file as GitHub resolves it and in its exact spelling, reaches no entry, no file or
+directory, or leaves the repository,
 an INDEX line without a hook after its em dash,
 an entry whose frontmatter lacks a non-empty name, description or metadata.type, a nested or
 non-.md file under knowledge/ or guides/, an entry tagged LIVING without a mermaid block or an
@@ -113,7 +113,7 @@ def link_errors(root, rel, body, files):
     for raw in sorted(set(inline) | set(defined)):
         written = re.split(r"[#?]", raw, maxsplit=1)[0]  # the target as the file spells it, without the anchor and the query
         target = urllib.parse.unquote(written)
-        if not target or URL.match(target):
+        if not target or URL.match(written):  # as written: an encoded colon or slash is no scheme and no host
             continue  # an anchor of this page, or https:, mailto: and the like
         rooted = target.startswith("/")
         path = posixpath.normpath(target.lstrip("/") if rooted else posixpath.join(posixpath.dirname(rel), target))
@@ -125,7 +125,7 @@ def link_errors(root, rel, body, files):
             if path not in files:
                 errors.append(f"{rel} links {written}, which resolves to {path}: no entry of the store")
         elif not exists_exactly(root, path):
-            errors.append(f"{rel} links {written}, which resolves to {path}: no such file in this spelling")
+            errors.append(f"{rel} links {written}, which resolves to {path}: no such file or directory in this spelling")
     return errors
 
 
@@ -351,6 +351,8 @@ def cases_in(base):
         "a link relative to its entry that leads nowhere": (
             tree({**good, k + "r.md": ok(4) + "see [it](gone.md)\n"}),
             "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a link rooted at / that resolves, to a file outside the store, is clean": (
+            tree({**good, k + "r.md": ok(4) + "see [it](/tools/x.md)\n", "tools/x.md": "x\n"}), None),
         "a link rooted at / that leads nowhere": (
             tree({**good, k + "r.md": ok(4) + "see [it](/guides/gone.md#part)\n"}),
             "knowledge/r.md links /guides/gone.md, which resolves to guides/gone.md: no entry of the store"),
@@ -359,10 +361,10 @@ def cases_in(base):
             "knowledge/r.md links sub/x.md, which resolves to knowledge/sub/x.md: no entry of the store"),
         "a link from a guide up to a root file that is not there": (
             tree({**good, "guides/g.md": ok(5) + "see [the rules](../CLAUDE.md)\n"}),
-            "guides/g.md links ../CLAUDE.md, which resolves to CLAUDE.md: no such file in this spelling"),
+            "guides/g.md links ../CLAUDE.md, which resolves to CLAUDE.md: no such file or directory in this spelling"),
         "a link to a file that is not Markdown, which is not there": (
             tree({**good, k + "r.md": ok(4) + "see [it](../tools/gone.py)\n"}),
-            "knowledge/r.md links ../tools/gone.py, which resolves to tools/gone.py: no such file in this spelling"),
+            "knowledge/r.md links ../tools/gone.py, which resolves to tools/gone.py: no such file or directory in this spelling"),
         "a link with a title is a link": (
             tree({**good, k + "r.md": ok(4) + "see [it](gone.md \"the title\")\n"}),
             "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
@@ -388,6 +390,8 @@ def cases_in(base):
             "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
         "a reference-style target in angle brackets is read as GitHub reads it": (
             tree({**good, k + "r.md": ok(4) + "see [it][1]\n\n[1]: <../tools/my note.txt>\n", "tools/my note.txt": "x\n"}), None),
+        "an encoded colon is no scheme: the target is decoded for the lookup alone, and a missing file is refused": (
+            tree({**good, k + "r.md": ok(4) + "see [it](a%3Ab.md)\n"}), "no entry of the store"),
         "a bare target with balanced parentheses is one target": (
             tree({**good, k + "r.md": ok(4) + "see [it](../tools/notes_(old).md)\n", "tools/notes_(old).md": "x\n"}), None),
         "a query string is dropped before the lookup, as GitHub drops it": (
@@ -403,7 +407,7 @@ def cases_in(base):
         # in its place would be red only where the file system ignores case (Windows, macOS), which CI does not
         "a link spelled in another case than the file is broken on the page, whatever the file system says": (
             tree({**good, k + "r.md": ok(4) + "see [it](../tools/X.py)\n", "tools/x.py": "code\n"}),
-            "knowledge/r.md links ../tools/X.py, which resolves to tools/X.py: no such file in this spelling"),
+            "knowledge/r.md links ../tools/X.py, which resolves to tools/X.py: no such file or directory in this spelling"),
         "a link shape inside a code span or a fence is text, not a link": (
             tree({**good, k + "r.md": ok(4) + "write `[it](gone.md)`, as in\n\n```text\n[it](gone.md)\n```\n"}), None),
         "a percent-encoded target is decoded before the lookup": (

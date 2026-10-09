@@ -138,6 +138,8 @@ class MemoryForge(rv.Forge):
 
     def issue_posts(self, number):
         self.read_back += 1
+        if number == self.number:  # the pull request's own comments: the notes
+            return [{"id": c["id"], "body": c["body"]} for c in self.notes]
         return [{"body": body} for n, body in self.collected if n == number]
 
     def send(self, path, payload, method):
@@ -1021,8 +1023,8 @@ def suite(case):
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
     told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
     case("run: a comment on the issue refused after its note landed withdraws the note, so the part is not recorded as reported; a refusal is an answer, so the issue is not read back",
-         code == 1 and told == [f"low {rv.THREAD_FINDINGS}"] and any("was withdrawn" in c["body"] for c in forge.notes) and on_issue() == 1
-         and forge.read_back == 0, (code, told, on_issue(), forge.read_back, [c["body"][:80] for c in forge.notes]))
+         code == 1 and told == [f"low {rv.THREAD_FINDINGS}"] and any("was withdrawn" in c["body"] and "was refused" in c["body"] for c in forge.notes)
+         and on_issue() == 1 and forge.read_back == 0, (code, told, on_issue(), forge.read_back, [c["body"][:80] for c in forge.notes]))
 
     class IssueDown(MemoryForge):
         """A forge whose first comment on the lows issue dies on the way without landing, with no answer of
@@ -1041,11 +1043,12 @@ def suite(case):
     forge = IssueDown()
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
     told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
-    # the error is no refusal, so the issue is read back; the comment is not there, and the error ends the run
-    # before the second part: nothing stays recorded as reported
-    case("run: a comment on the issue that died on the way and did not land, the issue read back, withdraws the note too, and the run is red",
-         code == 1 and told == [] and any("was withdrawn" in c["body"] for c in forge.notes) and forge.read_back == 1,
-         (code, told, forge.read_back, [c["body"][:80] for c in forge.notes], out[-300:]))
+    # the error is no refusal, so the issue is read back; the comment is not there, so the note is withdrawn and the
+    # run goes on to the next part, as after a refusal: one part is lost, not every low, and the run is red
+    case("run: a comment on the issue that died on the way and did not land, the issue read back, withdraws the note too, posts the next part, and the run is red",
+         code == 1 and told == [f"low {rv.THREAD_FINDINGS}"] and any("was withdrawn" in c["body"] for c in forge.notes) and on_issue() == 1
+         and forge.read_back == 1 and "did not land" not in out and "the comment on #" in out,
+         (code, told, on_issue(), forge.read_back, [c["body"][:80] for c in forge.notes], out[-300:]))
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
     case("run: the next run then posts the withdrawn part, and the issue gets it once",
          code == 0 and len(forge.collected) == 2 and on_issue() == rv.THREAD_FINDINGS + 1, (code, len(forge.collected), on_issue()))
@@ -1072,7 +1075,95 @@ def suite(case):
          and not any("was withdrawn" in c["body"] for c in forge.notes) and "landed although its answer did not arrive" in out,
          (code, len(forge.collected), on_issue(), forge.read_back, [c["body"][:80] for c in forge.notes], out[-300:]))
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
-    case("run: the next run adds no duplicate of the part that landed", code == 0 and len(forge.collected) == 2, (code, len(forge.collected)))
+    case("run: the next run adds no duplicate of the part that landed, having replayed its file as reviewed",
+         code == 0 and len(forge.collected) == 2 and "replayed (unchanged since a converged review): new.kz" in out,
+         (code, len(forge.collected), out[-300:]))
+
+    class IssueUnanswered(MemoryForge):
+        """A forge whose first comment on the lows issue lands and answers with something nobody can read
+        (kit.Unanswered, as kit.gh_send raises it): the error is written by hand, see the top of this file."""
+
+        def __init__(self):
+            super().__init__()
+            self.died = 0
+
+        def send(self, path, payload, method):
+            answer = super().send(path, payload, method)
+            if "low findings of pull request" in (payload.get("body") or "") and not self.died:
+                self.died += 1
+                raise kit.Unanswered("gh api: the answer is not an object")
+            return answer
+
+    forge = IssueUnanswered()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    case("run: a comment on the issue whose answer nobody could read is no refusal: the issue is read back, and the comment that is there stands",
+         code == 0 and len(forge.collected) == 2 and forge.read_back == 1 and not any("was withdrawn" in c["body"] for c in forge.notes),
+         (code, len(forge.collected), forge.read_back, [c["body"][:80] for c in forge.notes], out[-300:]))
+
+    class NoteDownLanded(MemoryForge):
+        """A forge whose first note of a lows part lands and then dies on the way back, with no answer of
+        the forge: the error is written by hand, see the top of this file."""
+
+        def __init__(self):
+            super().__init__()
+            self.died = 0
+
+        def send(self, path, payload, method):
+            answer = super().send(path, payload, method)
+            if "are collected in #" in (payload.get("body") or "") and not self.died:
+                self.died += 1
+                raise OSError("connection reset")
+            return answer
+
+    forge = NoteDownLanded()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
+    case("run: a note that landed before the connection died is found on the pull request, read back, and its part goes on to the issue once",
+         code == 0 and len(forge.collected) == 2 and on_issue() == rv.THREAD_FINDINGS + 1 and len(told) == rv.THREAD_FINDINGS + 1
+         and forge.read_back == 1 and "the note of this part landed although its answer did not arrive" in out,
+         (code, len(forge.collected), on_issue(), len(told), forge.read_back, out[-300:]))
+
+    class NoteDown(MemoryForge):
+        """A forge whose first note of a lows part dies on the way without landing, with no answer of the
+        forge: the error is written by hand, see the top of this file."""
+
+        def __init__(self):
+            super().__init__()
+            self.died = 0
+
+        def send(self, path, payload, method):
+            if "are collected in #" in (payload.get("body") or "") and not self.died:
+                self.died += 1
+                raise OSError("connection reset")
+            return super().send(path, payload, method)
+
+    forge = NoteDown()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
+    case("run: a note that died on the way and did not land, the pull request read back, is posted nowhere, and the error ends the run",
+         code == 1 and told == [] and len(forge.collected) == 0 and forge.read_back == 1
+         and "REVIEW DID NOT COMPLETE (failed): OSError: connection reset" in out,
+         (code, told, len(forge.collected), forge.read_back, out[-300:]))
+
+    class NoteShy(MemoryForge):
+        """A forge that refuses the first note of a lows part; the 422 is written by hand, see the top of this file."""
+
+        def __init__(self):
+            super().__init__()
+            self.refused = 0
+
+        def send(self, path, payload, method):
+            if "are collected in #" in (payload.get("body") or "") and not self.refused:
+                self.refused += 1
+                raise kit.Refused("`gh api` exited 1: gh: Validation Failed (HTTP 422)")
+            return super().send(path, payload, method)
+
+    forge = NoteShy()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
+    case("run: a note the forge refuses is posted nowhere and not read back, a refusal being an answer, and the next part is posted",
+         code == 1 and told == [f"low {rv.THREAD_FINDINGS}"] and on_issue() == 1 and forge.read_back == 0,
+         (code, told, on_issue(), forge.read_back, out[-300:]))
 
     class IssueDownTwice(MemoryForge):
         """A forge whose first comment on the lows issue dies on the way without landing, and whose rewrite of
@@ -1087,15 +1178,17 @@ def suite(case):
                 self.died += 1
                 raise OSError("connection reset")
             if method == "PATCH" and "was withdrawn" in (payload.get("body") or ""):
-                raise OSError("connection reset again")
+                raise OSError("link down")  # no prefix of the comment's own error, so the log tells the two apart
             return super().send(path, payload, method)
 
     forge = IssueDownTwice()
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
-    case("run: a rewrite of the note that dies on the way, whatever ended it, is said in the log, and the comment's own error ends the run",
-         code == 1 and "could not be withdrawn (" in out and "connection reset again" in out
-         and "REVIEW DID NOT COMPLETE (failed): OSError: connection reset" in out,
-         (code, out[-500:]))
+    told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
+    case("run: a rewrite of the note that dies on the way, whatever ended it, is said in the log with what is known of the part, and the run goes on to the next part",
+         code == 1 and "could not be withdrawn (link down)" in out and "is missing from #" in out
+         and "REVIEW DID NOT COMPLETE (failed): OSError: connection reset" not in out and on_issue() == 1
+         and len(told) == rv.THREAD_FINDINGS + 1,  # the note whose rewrite failed still carries its marker, and the next part was posted
+         (code, told, on_issue(), out[-500:]))
     # --- off the pipeline, a run inside CI posts no status, completed or not
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model({**found, "new.kz": rv.ReviewError("usage-limit", "resets at 3pm", 429)}),

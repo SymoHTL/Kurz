@@ -37,7 +37,7 @@ GATES = [
      "a path the design phase does not allow; a credential-shaped or machine-bound string or a merge-conflict marker, "
      "in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a "
      "push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name "
-     "of every annotated tag and of each tag it points at, and a tag that points at a blob or a tree"),
+     "of every annotated tag and of each tag it points at, and a tag or a ref that points straight at a blob or a tree"),
     ("knowledge", ["tools/lint_knowledge.py"], "always",
      "an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, "
      "in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the "
@@ -49,8 +49,8 @@ GATES = [
      "neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is "
      "neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that "
      "cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an "
-     "error-table row that does not read as one, or a row that reads as one outside an error table; a design record that "
-     "cannot be read; "
+     "error-table row that does not read as one, or a row that reads as one outside an error table; a design record, a "
+     "chapter or a corpus file that cannot be read, named with what went unchecked; "
      "fewer rules or cases than the floors"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "

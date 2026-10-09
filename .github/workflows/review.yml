@@ -26,7 +26,8 @@ jobs:
   # request whose head carries the label `reviewed-<that head's sha>` (its review ran off the
   # pipeline, which posts no status) get no status and stay pending. A label names one head: an
   # unlabelled head current when the pull request is marked Ready is reviewed by the Ready's run,
-  # a head pushed after Ready by its push's run, and an earlier Draft head only by a dispatch. The skipped
+  # a head pushed after Ready by its push's run, and an earlier Draft head only by a dispatch, or by a run
+  # off the pipeline, which posts no status. The skipped
   # job reports a check named `review-run`, never the required status `review`.
   review-run:
     if: >-

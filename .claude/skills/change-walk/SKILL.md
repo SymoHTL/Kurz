@@ -91,8 +91,8 @@ the head that will be reviewed is a `judgment step`.
    the pull request was still a Draft), wait until `gh pr view <N> --json labels` shows
    `reviewed-<sha>` for the head you mark Ready: the job then skips that Ready event, while an
    unlabelled head current when you mark Ready is reviewed by the Ready's run, a head pushed
-   after Ready by its push's run, and an earlier Draft head only by a dispatch. Never mark
-   Ready meaning to cancel the run: a run that started is a bill, cancelled or not
+   after Ready by its push's run, and an earlier Draft head only by a dispatch, or by a run off
+   the pipeline, which posts no status. Never mark Ready meaning to cancel the run: a run that started is a bill, cancelled or not
    (`knowledge/a-cancel-does-not-beat-the-runner.md`). Gate: `ci-config` pins the clause that
    skips the Ready event of the labelled head; the decision to mark Ready is a `judgment step`.
    Whether the run starts is the event policy: HAZARD (#10). An edit of the title or the

@@ -49,8 +49,9 @@ def self_test_of(root, tool):
     """(exit code, output) of one tool's self-test, run inside `root`, with its temporary files beside
     `root`, in `tmp` next to it: what a mutant leaves behind (a mutation that disables a removal does)
     goes with the directory the replay removes, instead of piling up in the system's temporary
-    directory, and lies outside the copy a suite reads as the tree, so no suite reads a leftover of
-    an earlier one. A directory that cannot be made is a failed run (99), like a process that could
+    directory, and lies outside the copy a suite reads as the tree; the directory is one for the
+    whole replay, so a suite that lists its temporary directory can see what an earlier one left
+    there. A directory that cannot be made is a failed run (99), like a process that could
     not start. No bytecode is written: Python takes a cached module for current when the source has
     the same size and the same second of modification, so two equally long mutations of a shared
     module read as the first one."""
@@ -97,14 +98,21 @@ def canonical(ledger):
 
 
 def format_ledger(root):
-    """Rewrite the ledger in its form; True when the file changed."""
+    """Rewrite the ledger in its form; True when the file changed. The text is written beside the
+    ledger and moved over it, so a write that fails leaves the ledger as it was; a ledger that
+    cannot be read is a refusal that names it, never a traceback."""
     path = os.path.join(root, LEDGER)
-    with open(path, encoding="utf-8") as f:
-        text = f.read()
-    want = canonical(json.loads(text))
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        want = canonical(json.loads(text))
+    except (OSError, ValueError) as e:
+        raise kit.Refused(f"{LEDGER} cannot be read: {type(e).__name__}: {e}")
     if want != text:
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
+        fd, fresh = tempfile.mkstemp(prefix="red_proofs.", suffix=".json", dir=os.path.dirname(path))
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(want)
+        os.replace(fresh, path)
     return want != text
 
 
@@ -278,6 +286,17 @@ def cases_in(base):
     cases.append(("--format writes the ledger in its form, after which the check passes, and a second run changes nothing",
                   changed and not errors and not format_ledger(reformatted) and kit.read(os.path.join(reformatted, LEDGER)) == canonical([proof]),
                   (changed, errors)))
+    unreadable = tree({"toy.py": toy}, [proof])
+    with open(os.path.join(unreadable, LEDGER), "w", encoding="utf-8") as f:
+        f.write("[")
+    refused = None
+    try:
+        format_ledger(unreadable)
+    except Exception as e:
+        refused = e
+    cases.append(("--format on a ledger that is not JSON is a refusal that names it, and the file is left as it is",
+                  isinstance(refused, kit.Refused) and "cannot be read" in str(refused) and kit.read(os.path.join(unreadable, LEDGER)) == "[",
+                  repr(refused)))
     two = [proof, {**proof, "expect": "adds \u00e9"}]
     cases.append(("the form is one entry per line, two spaces in, text as it is, so a diff shows the entries that changed",
                   canonical(two) == '[\n  {"tool": "tools/toy.py", "anchor": "return a + b", "replacement": "return a - b", "expect": "adds"},\n'
@@ -344,7 +363,11 @@ if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     if "--format" in sys.argv:
-        print(f"{LEDGER}: " + ("rewritten in its form" if format_ledger(kit.ROOT) else "already in its form"))
+        try:
+            print(f"{LEDGER}: " + ("rewritten in its form" if format_ledger(kit.ROOT) else "already in its form"))
+        except kit.Refused as e:
+            print(f"REFUSED, nothing written: {e}")
+            sys.exit(1)
         sys.exit(0)
     errors, stats = replay()
     for tool, s in stats.items():

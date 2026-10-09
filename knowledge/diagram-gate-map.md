@@ -28,7 +28,8 @@ flowchart TD
         or a link or a submodule, when its message holds one of the first three or a workflow-skip literal
         (a GitHub no-reply address passes in a trailer line only, in a tag's message too), when the message of an
         annotated tag it pushes, or of a tag that one points at, holds one of the first three, when a tag points at a
-        blob or a tree, or when the name of a ref it publishes, or the name in a tag's own header, holds one of them.
+        blob or a tree, when a ref is aimed straight at a blob or a tree, or when the name of a ref it publishes,
+        or the name in a tag's own header, holds one of them.
         Off until core.hooksPath is set: HAZARD issue 4"]
         P2["future plans in a commit: no gate before the push. HAZARD issue 2"]
         P3["author and committer name and e-mail, published with every commit, and the tagger of an annotated tag:
@@ -72,7 +73,8 @@ flowchart TD
         a corpus header that cannot be read or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
         a row that reads as an error id outside a table headed id, rules, meaning;
-        an error-table row that does not read as one; a design record that cannot be read;
+        an error-table row that does not read as one; a design record, a chapter or a corpus file that cannot be
+        read, missing or not UTF-8, named with what went unchecked;
         fewer rules or cases than the floors"]
         G4["ci-config: a pinned fact of a workflow changed. Both: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
@@ -130,8 +132,9 @@ flowchart TD
         and block through thread resolution, not through the job.
         Lows are collected on the open issue labelled review-lows, in parts, each part a note on the pull request
         first and then a comment on the issue; a part whose post failed is printed in the log, its note withdrawn
-        when the comment failed for any reason and the issue, read back, does not show it, its file reviewed again
-        by the next run, and the run ends red;
+        when the comment was refused, or failed otherwise and the issue, read back, does not show it (a note that
+        got no answer is read back on the pull request the same way, and one that landed goes on), its file
+        reviewed again by the next run, and the run ends red;
         they block nothing: judgment step"]
         R4["the workflow starts at all: GitHub's default rule may block pull_request_target here (whether it
         enforces or only evaluates was not known on 2026-10-02); the owner's event policy allows
@@ -165,8 +168,9 @@ flowchart TD
         M3["merge_pr.py --over-red: ruleset off for one merge, restored and read back;
         while it is off nothing on the server holds any pull request or a push to main, so the checks
         and the threads are read again once it is off, and a change that reading finds merges nothing (exit 1,
-        the gate restored); what changes between that reading and the merge call is caught by nobody, so the
-        window is narrowed, not closed, and nothing stops another merge or push in it: HAZARD issue 27.
+        the gate restored); what changes between that reading and the restore of the ruleset, the merge call
+        included, is caught by nobody, so the window is narrowed, not closed, and nothing stops another merge
+        or push in it: HAZARD issue 27.
         Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3"]
         M4["title or description edited after the review: the status stays green on text
@@ -199,7 +203,9 @@ flowchart TD
 - `tools/tree_gate.py`, `.claude/settings.json` (the hook command), `.githooks/pre-push` change:
   W1, P1, G2.
 - `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals) changes: P1, G2, G6 and M2;
-  W1 reads paths only, so a pattern reaches it nowhere.
+  W1 reads paths only, so a pattern reaches it nowhere. `kit.scratch` or `kit.writable_then_retry` changes: G1,
+  whose replay runs every suite in it; `kit.message_text` changes: P1 and G6, which read commit and tag messages
+  through it.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.

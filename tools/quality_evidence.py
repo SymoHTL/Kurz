@@ -120,7 +120,7 @@ def writers_of(repo):
 
 def labelled_by_a_writer(repo, issue, writers):
     """True when someone who may push here put the hazard label on the issue: a hazard that a stranger
-    reported counts once a maintainer confirmed it that way, and an issue template that labels on its
+    reported counts once someone with push access confirmed it that way, and an issue template that labels on its
     own does not count a stranger's report. The issue's events name who applied each label."""
     events = kit.gh_pages(f"repos/{repo}/issues/{issue['number']}/events?per_page=100")
     return any(e.get("event") == "labeled" and (e.get("label") or {}).get("name") == "hazard"
@@ -129,13 +129,18 @@ def labelled_by_a_writer(repo, issue, writers):
 
 def block_forge(root):
     repo = kit.repo()
-    # one test for every record: its author is the Actions token or someone the collaborators list
-    # says may push here. The author_association of a record is not read: a collaborator with read
-    # access alone carries COLLABORATOR too.
+    # one test for a record's author: the Actions token, or someone the collaborators list says may
+    # push here; a label counts from such a person alone (labelled_by_a_writer), never from the token,
+    # since a workflow that labels does what a template told it. The author_association of a record
+    # is not read: a collaborator with read access alone carries COLLABORATOR too, and a count that
+    # trusted it would count their records as a writer's. The pull-request gates do read it
+    # (pr_gates.trusted, pr_gates.answers), for another question, whether a person of the project
+    # wrote in a thread: there a read-only collaborator's post holds a thread open or is a finding to
+    # answer, which blocks a merge and never passes one.
     writers = writers_of(repo)
     counted = lambda rec: (rec.get("user") or {}).get("login") in pr_gates.BOTS or (rec.get("user") or {}).get("login") in writers()
     # a pull request counts when someone who may write here opened it, or when it was merged: the
-    # merge shows that a maintainer accepted it. Anyone can open one on a public repository.
+    # merge shows that someone with push access accepted it. Anyone can open one on a public repository.
     pulls = [p for p in kit.gh_pages(f"repos/{repo}/pulls?state=all&per_page=100") if p.get("merged_at") or counted(p)]
     merged = [p for p in pulls if p.get("merged_at")]
     severity, over_red = {"high": 0, "medium": 0, "low": 0}, 0
@@ -345,7 +350,7 @@ def cases_in(base):
         label_event = next((e for e in captured["issue-events"] if e.get("event") == "labeled"), {})
         writer = next((c for c in captured["collaborators"] if c.get("permissions", {}).get("push") is True), {})
         cases.append(("fixture: the captured pull request, hazard issue, events and collaborators are read, for the fake forge to relabel; each holds at least one record",
-                      bool(captured["pull-request"].get("user", {}).get("login") and len(captured["hazard-issues"]) >= 1
+                      bool(all(captured[n] for n in captured) and captured["pull-request"].get("user", {}).get("login") and len(captured["hazard-issues"]) >= 1
                            and label_event and (label_event.get("label") or {}).get("name") == "hazard" and writer),
                       {k: len(v) for k, v in captured.items()}))
         opened = lambda number, login, association, merged=None: {**captured["pull-request"], "number": number, "merged_at": merged,
@@ -363,10 +368,12 @@ def cases_in(base):
                                                        opened(11, "a-reader", "COLLABORATOR")],
             "repos/o/n/pulls/1/comments?per_page=100": [
                 post("github-actions[bot]", "NONE", finding("high")), post("a-stranger", "NONE", finding("high")),
+                post("a-reader", "COLLABORATOR", finding("high")),  # read access alone carries COLLABORATOR, and counts nothing
                 post("the-owner", "OWNER", "<!-- kurz-review:findings [not json] -->"),
                 post("the-owner", "OWNER", '<!-- kurz-review:findings [{"severity": ["high"]}] -->')],
             "repos/o/n/issues/1/comments?per_page=100": [
                 post("the-owner", "OWNER", "Merged over red at `abc`."), post("a-stranger", "NONE", "Merged over red at `abc`."),
+                post("a-reader", "COLLABORATOR", "Merged over red at `abc`."),
                 post("the-owner", "OWNER", finding("low"))],
             "repos/o/n/pulls/2/comments?per_page=100": [], "repos/o/n/issues/2/comments?per_page=100": [],
             # the stranger's pull request holds a finding of the Actions token: counted, it would show
@@ -381,13 +388,20 @@ def cases_in(base):
             "repos/o/n/issues?state=open&labels=hazard&per_page=100": [issue(3, "the-owner", "OWNER"),
                                                                         {**issue(4, "the-owner", "OWNER"), "pull_request": {"url": "x"}},
                                                                         issue(6, "a-stranger", "NONE"), issue(8, "a-stranger", "NONE"),
-                                                                        issue(10, "a-stranger", "NONE"), issue(12, "a-reader", "COLLABORATOR")],
+                                                                        issue(10, "a-stranger", "NONE"), issue(12, "a-reader", "COLLABORATOR"),
+                                                                        issue(14, "a-stranger", "NONE"), issue(16, "a-stranger", "NONE")],
             # the owner put the label on the stranger's issue 6; on issue 8 a stranger did, on issue 10 the collaborator
             # without push access, who also opened issue 12 and labelled it
             "repos/o/n/issues/6/events?per_page=100": labelled("the-owner"),
             "repos/o/n/issues/8/events?per_page=100": labelled("another-stranger"),
             "repos/o/n/issues/10/events?per_page=100": labelled("a-reader"),
             "repos/o/n/issues/12/events?per_page=100": labelled("a-reader"),
+            # on issue 14 the owner put another label; on issue 16 the owner's event is no label at all
+            "repos/o/n/issues/14/events?per_page=100": [{**labelled("the-owner")[0], "label": {"name": "question"}}],
+            "repos/o/n/issues/16/events?per_page=100": [{**labelled("the-owner")[0], "event": "assigned"}],
+            # the page without the label filter, which a mutant of the query asks for: an issue more, with no hazard label
+            "repos/o/n/issues?state=open&per_page=100": [issue(3, "the-owner", "OWNER"), {**issue(4, "the-owner", "OWNER"), "pull_request": {"url": "x"}},
+                                                         issue(6, "a-stranger", "NONE"), {**issue(20, "the-owner", "OWNER"), "labels": []}],
             "repos/o/n/collaborators?per_page=100": [{**writer, "login": "the-owner"}, {**writer, "login": "a-collaborator"},
                                                      {**writer, "login": "a-reader", "permissions": {**writer.get("permissions", {}), "push": False,
                                                                                                   "maintain": False, "admin": False}}],
@@ -400,6 +414,12 @@ def cases_in(base):
 
         kit.repo, kit.gh_pages = (lambda: "o/n"), pages
         forge = got(block_forge, root)
+        hazard_page = "repos/o/n/issues?state=open&labels=hazard&per_page=100"
+        page, alone = answers[hazard_page], {}
+        for number in (6, 8, 10, 14, 16):
+            answers[hazard_page] = [i for i in page if i["number"] == number]
+            alone[number] = str(got(block_forge, root))
+        answers[hazard_page] = page
         answers["repos/o/n/collaborators?per_page=100"] = []
         nobody = got(block_forge, root)
     finally:
@@ -408,21 +428,27 @@ def cases_in(base):
     cases.append(("self-tests: a green run is a table with its totals", "| **total** | 5 | 3 |" in str(green), green))
     cases.append(("forge: pull requests, merges and open hazard issues are counted, and a pull request is no issue",
                   all(row in str(forge) for row in ("| Pull requests opened by a writer, or merged | 3 |", "| Pull requests merged | 2 |", "| Open HAZARD issues | 2 |")), forge))
-    cases.append(("forge: a finding marker counts from the Actions token and from a maintainer, not from a stranger",
+    cases.append(("forge: a finding marker counts from the Actions token and from someone with push access, not from a stranger",
                   all(row in str(forge) for row in ("posted: high | 1 |", "posted: medium | 1 |", "posted: low | 1 |")), forge))
     cases.append(("forge: a damaged marker counts nothing and stops nothing, a severity that is no word included",
                   isinstance(forge, str), repr(forge)))
     cases.append(("forge: a pull request that someone without write access opened, and that was not merged, counts nothing, its findings included",
                   all(row in str(forge) for row in ("| Pull requests opened by a writer, or merged | 3 |", "posted: medium | 1 |")), forge))
-    cases.append(("forge: a stranger's pull request that was merged counts, with its findings: the merge shows a maintainer accepted it",
+    cases.append(("forge: a stranger's pull request that was merged counts, with its findings: the merge shows someone with push access accepted it",
                   all(row in str(forge) for row in ("| Pull requests merged | 2 |", "posted: medium | 1 |")), forge))
-    cases.append(("forge: a waiver record counts from a maintainer, not from a stranger", "| Merged over red, with a recorded waiver | 1 |" in str(forge), forge))
+    cases.append(("forge: a waiver record counts from someone with push access, not from a stranger", "| Merged over red, with a recorded waiver | 1 |" in str(forge), forge))
     cases.append(("forge: a hazard issue that a stranger opened, and that nobody with push access labelled, is not counted",
-                  "| Open HAZARD issues | 2 |" in str(forge), forge))
+                  "| Open HAZARD issues | 0 |" in alone[8], alone[8]))
     cases.append(("forge: a hazard issue that a stranger opened counts once someone with push access put the hazard label on it",
-                  "| Open HAZARD issues | 2 |" in str(forge) and "| Open HAZARD issues | 1 |" not in str(forge), forge))
+                  "| Open HAZARD issues | 1 |" in alone[6], alone[6]))
     cases.append(("forge: a hazard issue that a stranger opened, and that only a collaborator without push access labelled, is not counted",
-                  "| Open HAZARD issues | 2 |" in str(forge), forge))
+                  "| Open HAZARD issues | 0 |" in alone[10], alone[10]))
+    cases.append(("forge: a label from someone with push access that is not the hazard label counts a stranger's issue nothing",
+                  "| Open HAZARD issues | 0 |" in alone[14], alone[14]))
+    cases.append(("forge: an event of someone with push access that is no labeled event counts a stranger's issue nothing",
+                  "| Open HAZARD issues | 0 |" in alone[16], alone[16]))
+    cases.append(("forge: a comment of a collaborator without push access on a counted pull request counts nothing, whatever its association says: no finding, no waiver",
+                  "posted: high | 1 |" in str(forge) and "| Merged over red, with a recorded waiver | 1 |" in str(forge), forge))
     cases.append(("forge: a collaborator without push access is no writer, whatever the association says: their unmerged pull request, its findings and their hazard issue count nothing",
                   all(row in str(forge) for row in ("| Pull requests opened by a writer, or merged | 3 |", "posted: high | 1 |", "| Open HAZARD issues | 2 |")), forge))
     cases.append(("forge: a collaborators list that names nobody with push access is a refusal, not a page that counts nothing",

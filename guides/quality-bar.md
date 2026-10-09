@@ -22,7 +22,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 |---|---|
 | 1. A rule ships with its gate | Every rule in `CLAUDE.md` ends in `Gate:`, `HAZARD` with the number of its issue, or `judgment step`. The review rule "rules for sessions" flags one that does not. |
 | 2. A postmortem ships as rule, gate and knowledge entry | `knowledge/design-before-build.md` is the pattern: the rule is in `CLAUDE.md`, the gate is the tree gate, the story is the entry. |
-| 3. Detection is built while building | Each decision tool carries its cases, and `self-tests` replays every recorded mutation; a case without one is not replayed. What that catches: a recorded case that no longer goes red, a tool without a self-test or without any recorded proof. A decision that was added with no case at all is invisible to it; the review rule "tools" names that shape, which makes it a judgment step. |
+| 3. Detection is built while building | Each decision tool carries its cases, and `self-tests` replays every recorded mutation; a case without one is not replayed. What that catches: a recorded case that no longer goes red, a tool without a self-test or without any recorded proof. A decision that was added with no case at all is invisible to it; the review rule "tools" names that shape, which holds a breach above low and makes a low breach a judgment step. |
 | 4. One definition per concept | One gate runner (`tools/gates.py`) for CI and local runs; one tree gate for CI, the write-time hook and the pre-push hook; one ruleset file for the server setting, its assertion and the merge tool; one pattern list (`tools/kit.py`). |
 | 5. Facts are routed by kind | The "Knowledge" rules in `CLAUDE.md`; `knowledge/diagram-knowledge-routing.md`. |
 | 6. Unchecked must never look clean | Floors in every scan; `BROKEN` for a gate that could not start, `NOT RUN` for a pull-request gate without its pull request, `PARTLY` for a gate that could read only part of what it checks; a batch that failed or ran out of time is not reviewed; a failed command is a refusal (`kit.Refused`). |
@@ -164,8 +164,8 @@ The credential is one repository secret, `CLAUDE_CODE_OAUTH_TOKEN`. Without it t
 review that cannot run must never look like a review that found nothing. A repository secret is
 read through the `secrets` context by any workflow of this repository, a workflow that a branch
 adds included, run on a push to that branch or on a `pull_request` from the same repository, so a
-branch can read it (HAZARD #11); the docs withhold secrets only from a `pull_request` run that a
-fork triggered and from Dependabot's runs ("Using secrets in GitHub Actions", read 2026-10-09). The
+branch can read it (HAZARD #11); the docs withhold secrets from every run that a
+fork triggered (`pull_request_target` excepted) and from Dependabot's runs ("Using secrets in GitHub Actions", read 2026-10-09). The
 review's own `pull_request_target` run gets them too, and runs the default branch's workflow. An
 environment's secret is available only to a job that uses the environment, and an environment can
 be limited to selected branches ("Managing environments for deployment", read 2026-10-09): one

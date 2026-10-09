@@ -7,8 +7,8 @@
   with a shell or a working directory of its own, no expression inside a `run:` value (a value
   reaches a script through `env:`), a secret only as plain `secrets.<NAME>` in the `env:` of the
   job's last step, no key twice in one mapping;
-- gates.yml: runs on every push to a pull request, on every edit of its title or description, and
-  on pushes to main alone, with no path filter and no filter on pull_request; exactly one job,
+- gates.yml: runs on a pull request's opening, every push to it, its reopening, its Ready and every edit
+  of its title or description (PR_TYPES), and on pushes to main alone, with no path filter and no filter on pull_request; exactly one job,
   `gates`, with no `if` (a
   skipped job reports success to a required check); read-only token; no secret; the last step runs
   the full gate runner and carries nothing but its name, env and run.

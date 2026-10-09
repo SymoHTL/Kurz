@@ -159,7 +159,7 @@ print("got {c}")
 a `User` variable that holds an `Admin` shows the text of `Admin` where `Admin` overrides it (K7).
 A `Text()` without `pub` is the compile error `not-visible` wherever its text is used through
 `print` or an interpolation from outside the class; inside the class `Text()` itself can be
-called, as any private member can, and whether a `print` there is such a use is A15, with a
+called, as any private member can, and whether a `print` or an interpolation there is such a use is A15, with a
 status of its own. The owner chose the inheritance on 2026-10-03, against counting only a
 `pub Text()` the class itself declares, which would have made every class of a hierarchy repeat
 the method; the cost is that whether a class has a text depends on its base, and that a

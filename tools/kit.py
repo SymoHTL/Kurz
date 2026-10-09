@@ -176,7 +176,10 @@ def scratch(prefix):
     try:
         yield path
     finally:
-        shutil.rmtree(path, onexc=writable_then_retry)
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=writable_then_retry)
+        else:  # before 3.12 the handler is onerror, called with (function, path, exc_info); nothing here runs there
+            shutil.rmtree(path, onerror=lambda function, where, info: writable_then_retry(function, where, info[1]))
         if os.path.exists(path):
             print(f"WARNING: could not remove {path}: left behind", file=sys.stderr)
 
@@ -284,11 +287,13 @@ def self_test():
         escaped = e
     cases.append(("scratch: a block that raises has its directory removed too, and the exception goes on",
                   isinstance(escaped, ValueError) and not os.path.exists(raised), raised))
-    real_rmtree, warned = shutil.rmtree, io.StringIO()
+    real_rmtree, warned, raised = shutil.rmtree, io.StringIO(), None
     try:
         shutil.rmtree = lambda path, ignore_errors=False, **kw: None  # a removal that does nothing: the directory stays
         with contextlib.redirect_stderr(warned), scratch("kit-scratch-") as kept:
             pass
+    except Exception as e:  # the block must end quietly: a removal that failed is said, never raised
+        raised = e
     finally:
         shutil.rmtree = real_rmtree
     stayed = os.path.isdir(kept)
@@ -302,8 +307,25 @@ def self_test():
         os.rmdir(probe)
     cases.append(("scratch: the retry handler leaves a call that is no removal alone (os.open, for a directory the walk cannot open), and raises nothing",
                   handled is None, repr(handled)))
+    locked = tempfile.mkdtemp(prefix="kit-scratch-")
+    stored = os.path.join(locked, "object")
+    with open(stored, "w", encoding="utf-8") as f:
+        f.write("x")
+    os.chmod(stored, 0o400)  # read-only, as git stores its objects
+    retried = None
+    try:
+        writable_then_retry(os.unlink, stored, PermissionError("read-only"))
+    except Exception as e:
+        retried = e
+    removed = not os.path.exists(stored)
+    if not removed:  # under a mutation: leave nothing behind
+        os.chmod(stored, 0o600)
+        os.unlink(stored)
+    os.rmdir(locked)
+    cases.append(("scratch: the retry handler makes a read-only file writable and removes it, as git stores its objects, and raises nothing",
+                  removed and retried is None, (removed, repr(retried))))
     cases.append(("scratch: a removal that fails is said on stderr with the path, and nothing is raised",
-                  stayed and f"WARNING: could not remove {kept}" in warned.getvalue(), warned.getvalue()))
+                  stayed and f"WARNING: could not remove {kept}" in warned.getvalue() and raised is None, (warned.getvalue(), repr(raised))))
     return report(cases)
 
 

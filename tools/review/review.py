@@ -70,8 +70,9 @@ LOWS_LABEL = "review-lows"
 # request goes Ready would spend the seat on the same head again: a completed off-pipeline review
 # labels the pull request `reviewed-<head sha>`, and the workflow's job skips the Ready event of a
 # pull request whose head carries that label (the clause is pinned by tools/lint_ci.py). The label
-# names one head, so every other head is reviewed by the run its event starts (the Ready for a
-# head pushed during the Draft, the push for one pushed after Ready), and a stale label matches nothing; nothing removes it, and the forge creates a label
+# names one head, so every other head is reviewed by the run its event starts (the Ready for the
+# head current when the pull request is marked Ready; the push for one pushed after Ready; a head
+# pushed during the Draft and replaced before Ready has no run), and a stale label matches nothing; nothing removes it, and the forge creates a label
 # it does not have. The skipped job is `review-run`: its skip reports a check of that name and
 # never the status `review`, which a run that completed posts as success and a run that failed as
 # error (lint_ci pins the job's name). A label write the forge refuses ends the run red: Ready
@@ -783,21 +784,34 @@ class Forge:
 
         def post_part(part):
             # The note first: its marker is what a later run reads back as reported, so a part whose
-            # note the forge refuses is posted nowhere and comes again. When the comment on the issue
-            # fails after the note landed, the note is rewritten without its marker, so that the
-            # part comes again too instead of standing recorded on the pull request and missing from
-            # the issue; a rewrite that fails as well is said, and the part is then in this log only.
-            # A refusal is an answer: nothing landed. A timeout, a 5xx, a lost connection or an answer
-            # nobody could read (kit.Unanswered, or no kit.Refused at all) is none: the comment may have
-            # landed, so the issue is read back first, and a comment that is there stands, with its note.
+            # note the forge refuses is posted nowhere and comes again. A refusal is an answer: nothing
+            # landed. A timeout, a 5xx, a lost connection or an answer nobody could read (kit.Unanswered,
+            # or no kit.Refused at all) is none: the post may have landed, so what was posted is read
+            # back first. A note that is there goes on to the issue; one that is not comes again. When
+            # the comment on the issue fails after the note landed, the issue is read back the same way:
+            # a comment that is there stands, with its note; for one that is not, or that was refused,
+            # the note is rewritten without its marker, so that the part comes again instead of standing
+            # recorded on the pull request and missing from the issue, and the run goes on to the next
+            # part, as after a refusal; a rewrite that fails as well is said, with what is known of the
+            # part. A failure whose read-back failed too ends the run: nobody knows what landed.
             number = collecting()
-            body = collected(part)
-            answer = self.note(noted(part, number))
+            body, note_body = collected(part), noted(part, number)
+            try:
+                answer = self.note(note_body)
+            except Exception as e:
+                if isinstance(e, kit.Refused) and not isinstance(e, kit.Unanswered):
+                    raise
+                there = [c for c in self.issue_posts(self.number) if c.get("body") == note_body]
+                if not there:
+                    raise
+                answer = there[-1]
+                print(f"  the note of this part landed although its answer did not arrive: the comment on #{number} follows")
             try:
                 self.post(f"issues/{number}/comments", {"body": body})
             except Exception as e:
+                refused = isinstance(e, kit.Refused) and not isinstance(e, kit.Unanswered)
                 landed = None  # unknown until the issue says
-                if not isinstance(e, kit.Refused) or isinstance(e, kit.Unanswered):
+                if not refused:
                     try:
                         landed = any(c.get("body") == body for c in self.issue_posts(number))
                     except Exception as read:
@@ -805,7 +819,8 @@ class Forge:
                 if landed:
                     print(f"  the comment on #{number} landed although its answer did not arrive: the note stands")
                     return f"issue {number}"
-                why = "failed" if landed is False else "failed or got no answer, and the issue could not be read back"
+                absent = refused or landed is False
+                why = "was refused" if refused else "failed" if absent else "failed or got no answer, and the issue could not be read back"
                 withdrawn = (f"**Automated review**: a note of {len(part)} low findings on `{head[:8]}` was withdrawn, because "
                              f"their comment on #{number} {why}; the next run reviews their file again, and their text is in "
                              f"the log of this run.")
@@ -813,7 +828,9 @@ class Forge:
                     self.post(f"issues/comments/{answer['id']}", {"body": withdrawn}, method="PATCH")
                 except Exception as again:  # whatever ended the rewrite is said, and the comment's own error goes on
                     print(f"  the note of this part could not be withdrawn ({public(str(again))[:200]}): the part is recorded on the "
-                          f"pull request as reported and is missing from #{number}; its text is in this log")
+                          f"pull request as reported and {'is' if absent else 'may be'} missing from #{number}; its text is in this log")
+                if absent and not isinstance(e, kit.Refused):
+                    raise kit.Refused(f"the comment on #{number} {why}: the part comes again") from e
                 raise
             return f"issue {number}"
 

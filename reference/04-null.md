@@ -404,7 +404,7 @@ Case: [null/narrowed-field-after-assignment.kz](../corpus/null/narrowed-field-af
 class Account(mut string? Email)
 
 string? other = null
-acc = Account("a")
+mut acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
     acc.Email = other

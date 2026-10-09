@@ -1,6 +1,6 @@
 ---
 name: a-hook-denies-by-exit-2-or-by-its-json
-description: A PreToolUse hook blocks a tool call by exit 2, whatever it prints, or by a JSON decision "deny", which the harness reads on every exit code; every other end lets the call through, a crash, a timeout and a missing interpreter included (Claude Code docs, the hooks page, read 2026-10-08 and again 2026-10-09)
+description: A PreToolUse hook blocks a tool call by exit 2, whatever it prints, or by a JSON decision "deny", which the harness reads on every exit code; every other end leaves the call to the normal permission flow, a crash, a timeout and a missing interpreter included (Claude Code docs, the hooks page, read 2026-10-08 and again 2026-10-09)
 metadata:
   type: reference
 ---

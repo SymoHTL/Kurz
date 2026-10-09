@@ -4,7 +4,7 @@
 class Account(mut string? Email)
 
 string? other = null
-acc = Account("a")
+mut acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
     acc.Email = other

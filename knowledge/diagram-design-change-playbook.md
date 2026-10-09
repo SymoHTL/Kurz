@@ -37,7 +37,8 @@ flowchart TD
         Recipe: reading-a-paper-for-evidence. Judgment step"]
         D5["no future plan, nothing machine-bound.
         Gate: tree gate for shapes, before the push only through the pre-push hook
-        (the write-time hook reads the path alone; HAZARD issue 4 where either is off),
+        (the write-time hook reads the path alone, allowing or denying by where the file lies, and scans
+        no content, so the patterns reach it nowhere; HAZARD issue 4 where either is off),
         in CI after publishing; future plans HAZARD issue 2"]
     end
     subgraph A["After writing"]
@@ -65,7 +66,8 @@ flowchart TD
   would have prevented it.
 - The review rules for the design record in `.review/review-rules.yaml` change: the nodes that
   name that section as their gate.
-- `tools/tree_gate.py` or `tools/kit.py` (its patterns) changes what is refused, or `.githooks/pre-push` changes: the node D5.
+- `tools/tree_gate.py` or `tools/kit.py` (its patterns) changes what is refused, or `.githooks/pre-push` or
+  `.claude/settings.json` (which registers the write-time hook) changes: the node D5.
 - A HAZARD issue that a node names (1, 2, 4) closes or opens: that node.
 - A sample or a guarantee becomes checkable by a tool: the node names that tool as its gate.
 - The statuses or the format of the reference change (`reference/00-about.md`,

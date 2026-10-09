@@ -34,6 +34,9 @@ Fails on:
   under a `| id | rules | meaning |` head that does not read as one; a row that reads as one under
   any other head or outside a table, since its id would go unchecked;
 - a design record that cannot be read, said once instead of as every section it would lack;
+- a chapter or a corpus file that cannot be read, missing or not UTF-8, named with what went unchecked (its
+  rules, or the case); the rest of the tree is still checked, so a case that names a rule of an unread
+  chapter is reported as naming an unknown rule as well;
 - fewer rules or cases than the floors."""
 import os
 import re
@@ -251,8 +254,9 @@ def sync(root, say=print):
     written. Every chapter is computed before one is written: a sample that is never closed refuses
     the whole run, because dropping it would drop the rest of its chapter. A write that fails is a
     refusal that names the chapters written before it; its temporary file is removed, and one that
-    could not be removed is named in the refusal, to be removed by hand. A chapter or a case that
-    cannot be read refuses the run before anything is written. Returns the chapters written."""
+    could not be removed is named in the refusal, to be removed by hand. A chapter, a case or the
+    record that cannot be read refuses the run before anything is written: the record is not used
+    here, but an unread file is never passed over. Returns the chapters written."""
     chapters, files, _, unread = read_tree(root)
     if unread:
         raise kit.Refused("; ".join(unread) + "; nothing was written")
@@ -446,7 +450,7 @@ def cases_in(base):
     cases.append(("rules, cases and statuses are counted", counted == want, counted))
     unread = errors_of(tree(drop=("kurz-design.md",)))
     cases.append(("an unreadable record is reported once, not as sections it lacks",
-                  sum("kurz-design.md cannot be read" in e for e in unread) == 1
+                  isinstance(unread, list) and sum("kurz-design.md cannot be read" in e for e in unread) == 1
                   and not any("which kurz-design.md does not have" in e for e in unread), unread))
     garbled = tree()
     with open(os.path.join(garbled, "kurz-design.md"), "wb") as f:
@@ -465,10 +469,10 @@ def cases_in(base):
     cases.append(("a corpus file that is not UTF-8 is reported as unread with its path, not as a crash",
                   isinstance(case_unread, list) and sum("corpus/bad.kz cannot be read" in e for e in case_unread) == 1, case_unread))
     cases.append(("a record that is not UTF-8 is reported once as unread, not as a crash",
-                  sum("kurz-design.md cannot be read (UnicodeDecodeError" in e for e in undecoded) == 1, undecoded))
+                  isinstance(undecoded, list) and sum("kurz-design.md cannot be read (UnicodeDecodeError" in e for e in undecoded) == 1, undecoded))
     ghost = errors_of(tree(edit(ref, "## Errors\n", "| word | rules | meaning |\n|---|---|---|\n| `ghost` | V1 | elsewhere |\n\n## Errors\n")))
     cases.append(("a row refused outside an error table is not read as an id: no other error names it",
-                  any("outside a table headed" in e for e in ghost) and not any("ghost" in e for e in ghost if "outside a table headed" not in e),
+                  isinstance(ghost, list) and any("outside a table headed" in e for e in ghost) and not any("ghost" in e for e in ghost if "outside a table headed" not in e),
                   ghost))
     with_output = header("// expect: output\n// | a\n// | b\n// build: test\n// rules: V1, V2\n\nprint(1)\n")
     cases.append(("a header with output lines and a build is read", isinstance(with_output, dict) and with_output["rules"] == ["V1", "V2"], with_output))
