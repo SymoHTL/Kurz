@@ -2,9 +2,9 @@
 forge's refusal under fixtures/ are real: captured from the Claude CLI, from git and from the log
 of a run, not written by hand. Where a case needs an answer that could not be provoked (a usage
 limit, an exit code without its error flag, an answer without findings, an overlong title), it
-edits a real answer and marks the edit with a comment that says what the real one carries. One
-refusal of the forge that no capture holds, its 422 for a comment, is written by hand, and says so
-where it stands."""
+edits a real answer and marks the edit with a comment that says what the real one carries. Three
+answers of the forge that no capture holds are written by hand, and say so where they stand: its
+422 for a comment, a 502, and a write that gets no answer in time."""
 import contextlib
 import hashlib
 import io
@@ -152,6 +152,7 @@ class MemoryForge(rv.Forge):
             self.threads.append(comment)
         elif path == f"issues/{self.number}/comments":
             self.notes.append(comment)
+            return {"id": comment["id"]}  # as the forge answers a new comment
         elif path == f"issues/{self.number}/labels":
             if self.refuse_labels:
                 raise kit.Refused("`gh api` exited 1: gh: Not Found (HTTP 404)")
@@ -659,6 +660,12 @@ def suite(case):
          all(len(body) <= rv.COMMENT_CHARS for _, body in forge.collected) and all(len(c["body"]) <= rv.COMMENT_CHARS for c in forge.notes)
          and sorted(f["line"] for m in forge.marks(rv.FINDINGS_MARK) for f in m) == list(range(1, 3 * rv.THREAD_FINDINGS + 1))
          and len(forge.collected) > 1 and len(forge.notes) > 1, (len(forge.collected), len(forge.notes)))
+    forge = MemoryForge()
+    for _, post in forge.lows(HEAD, [finding(file="new.kz", line=n + 1, severity="low", title="t" * 3500, body="b") for n in range(rv.THREAD_FINDINGS)]):
+        attempt(post)
+    case("posted: a part of lows is sized as its note renders too, whose marker carries every title in full",
+         len(forge.collected) > 1 and all(len(c["body"]) <= rv.COMMENT_CHARS for c in forge.notes)
+         and all(len(body) <= rv.COMMENT_CHARS for _, body in forge.collected), (len(forge.collected), [len(c["body"]) for c in forge.notes]))
     collected = rv.render({"findings": [finding(severity="low")], "lows": (7, HEAD)})
     case("posted: the comment on the lows issue names the pull request and the head, and carries no marker",
          "pull request #7" in collected and HEAD[:8] in collected and "<!--" not in collected and "resolve this thread" not in collected, collected)
@@ -670,9 +677,9 @@ def suite(case):
 
         def post(self, path, payload, method="POST"):
             where = "note" if path.startswith("issues/") else payload.get("line", "file")
-            if where in self.unanswered:
+            if where in self.unanswered:  # written by hand, see the top of this file
                 raise kit.Unanswered("no answer within 120 s")
-            if where in self.gateway:
+            if where in self.gateway:  # written by hand, see the top of this file
                 raise kit.Refused("`gh api -X POST repos/o/r/pulls/1/comments` exited 1: gh: Bad Gateway (HTTP 502)")
             if where in self.refuse:  # the 422 is written by hand, see the top of this file
                 raise kit.Refused("`gh api -X POST repos/o/r/pulls/1/comments` exited 1: gh: Validation Failed (HTTP 422)")
@@ -755,7 +762,8 @@ def suite(case):
     case("post: a text that still holds a machine-bound string is not posted", getattr(got, "kind", None) == "failed" and wire.sent == []
          and attempt(wire.post, "issues/1/comments", {"body": "it is in the tree"}) == {}, (got, wire.sent))
     case("pin: the waits for the rate limit and the writes themselves fit into the time kept back for posting",
-         0 < sum(rv.RATE_WAITS) + rv.WRITES_S <= rv.POST_MARGIN_S and rv.WRITES_S > 0, (rv.RATE_WAITS, rv.WRITES_S, rv.POST_MARGIN_S))
+         0 < sum(rv.RATE_WAITS) and 0 < rv.WRITES_S and sum(rv.RATE_WAITS) + rv.WRITES_S <= rv.POST_MARGIN_S,
+         (rv.RATE_WAITS, rv.WRITES_S, rv.POST_MARGIN_S))
 
     # --- notes are never silent, and never repeated
     existing = [{"kind": "skipped", "reason": "oversized"}, {"kind": "failed", "sha": "aaa"}]
@@ -973,9 +981,37 @@ def suite(case):
     many_lows = [finding(file="new.kz", line=n + 1, severity="low", title=f"low {n}") for n in range(rv.THREAD_FINDINGS + 1)]
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
     told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
-    case("run: a refused note of one part of the lows loses that part only; the other part is posted and the run ends red",
-         code == 1 and f"{rv.THREAD_FINDINGS} findings on new.kz could not be posted" in out and len(forge.collected) == 2
-         and told == [f"low {rv.THREAD_FINDINGS}"], (code, len(forge.collected), told, out[-400:]))
+    on_issue = lambda: sum(body.count("- **low** `new.kz` line ") for _, body in forge.collected)
+    case("run: a refused note of one part of the lows loses that part only: it is posted nowhere, the other part is posted and the run ends red",
+         code == 1 and f"{rv.THREAD_FINDINGS} findings on new.kz could not be posted" in out and len(forge.collected) == 1 and on_issue() == 1
+         and told == [f"low {rv.THREAD_FINDINGS}"] and any("What it posted before stands" in c["body"] for c in forge.notes),
+         (code, len(forge.collected), told, out[-400:]))
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    case("run: the next run posts the part that was refused, and adds no duplicate to the issue",
+         code == 0 and len(forge.collected) == 2 and on_issue() == rv.THREAD_FINDINGS + 1, (code, len(forge.collected), on_issue()))
+
+    class IssueShy(MemoryForge):
+        """A forge that refuses the first comment on the lows issue; the 422 is written by hand, see the top of this file."""
+
+        def __init__(self):
+            super().__init__()
+            self.refused = 0
+
+        def send(self, path, payload, method):
+            if "low findings of pull request" in (payload.get("body") or "") and not self.refused:
+                self.refused += 1
+                raise kit.Refused("`gh api` exited 1: gh: Validation Failed (HTTP 422)")
+            return super().send(path, payload, method)
+
+    forge = IssueShy()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
+    case("run: a comment on the issue refused after its note landed withdraws the note, so the part is not recorded as reported",
+         code == 1 and told == [f"low {rv.THREAD_FINDINGS}"] and any("was withdrawn" in c["body"] for c in forge.notes) and on_issue() == 1,
+         (code, told, on_issue(), [c["body"][:80] for c in forge.notes]))
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    case("run: the next run then posts the withdrawn part, and the issue gets it once",
+         code == 0 and len(forge.collected) == 2 and on_issue() == rv.THREAD_FINDINGS + 1, (code, len(forge.collected), on_issue()))
     # --- off the pipeline, a run inside CI posts no status, completed or not
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model({**found, "new.kz": rv.ReviewError("usage-limit", "resets at 3pm", 429)}),
@@ -990,12 +1026,21 @@ def suite(case):
     case("run: a second run on a closed pull request posts no second failure note, and the status each time",
          code == 1 and kinds(forge) == ["failed"] and forge.statuses == error * 2 and "REVIEW DID NOT COMPLETE (closed)" in out,
          (code, kinds(forge), forge.statuses))
+    case("run: a stop before anything was posted says the pull request is not reviewed, not that what it posted stands",
+         any("is not reviewed" in c["body"] for c in forge.notes) and not any("What it posted before stands" in c["body"] for c in forge.notes),
+         [c["body"][:120] for c in forge.notes])
     # --- a findings marker that lacks a key is read past, not a crash on every later run
     forge = MemoryForge()
     forge.notes.append({"id": 1, "user": {"login": "bot"}, "body": rv.marker("findings", [{"line": 3, "severity": "medium", "title": "t", "sha": HEAD}])})
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
     case("run: a findings marker without a file is read past, and the run completes", (code, forge.statuses) == (0, success),
          (code, forge.statuses, out[-300:]))
+    forge = MemoryForge()
+    forge.notes.append({"id": 1, "user": {"login": "bot"}, "body": rv.marker("findings", [{"file": "new.kz", "line": True, "severity": "low",
+                                                                                           "title": "the low nobody posted", "sha": HEAD}])})
+    code, out = run_review(forge, scripted_model({**found, "new.kz": lows}), ["--pr", "1"], ci=True, credential="x")
+    case("run: a findings marker whose line is a bool is not read as reported, as valid_finding reads no such line, so the finding is posted",
+         code == 0 and len(forge.collected) == 1, (code, forge.collected))
     # --- an oversized diff is said once per reason, not once more per run and per head
     forge = MemoryForge()
     for _ in (1, 2):

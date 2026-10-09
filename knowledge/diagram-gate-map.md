@@ -26,12 +26,13 @@ flowchart TD
         refuses the push when a commit about to be published holds a credential, a machine-bound string
         (in a file or in its name), a conflict marker, a disallowed path, a file that is not UTF-8 text
         or a link or a submodule, when its message holds one of the first three or a workflow-skip literal
-        (a GitHub no-reply address passes in a trailer line only), or when the message of an annotated
-        tag it pushes holds one of the first three. The tagger, like the author, is read by no gate.
+        (a GitHub no-reply address passes in a trailer line only, in a tag's message too), when the message of an
+        annotated tag it pushes, or of a tag that one points at, holds one of the first three, when a tag points at a
+        blob or a tree, or when the name of a ref it publishes holds a machine-bound string.
         Off until core.hooksPath is set: HAZARD issue 4"]
         P2["future plans in a commit: no gate before the push. HAZARD issue 2"]
-        P3["author and committer name and e-mail: published with every commit, read by no gate.
-        HAZARD issue 12"]
+        P3["author and committer name and e-mail, published with every commit, and the tagger of an annotated tag:
+        read by no gate. HAZARD issue 12"]
         P4["GitHub push protection: the forge refuses a push that holds a secret of a pattern it knows.
         Enabled, read 2026-10-02 from the repository's security_and_analysis.
         No gate asserts that it stays on: HAZARD issue 25"]
@@ -53,7 +54,8 @@ flowchart TD
         a file's name is scanned like its content"]
         G3["knowledge: broken INDEX link, entry without INDEX line, hook or frontmatter;
         a store file named in an entry, CLAUDE.md, the review rules or a skill that does not exist;
-        a link in a store file that, resolved from that file, reaches no entry or file or leaves the repository;
+        a link in a store file (inline or reference-style, outside code, percent-decoded) that, resolved from that
+        file in its exact spelling, reaches no entry or file or leaves the repository;
         nested entry;
         LIVING entry without diagram or update triggers, fewer living entries than their floor;
         expired or future-dated numbers, a TTL over 90 days; a generated block that is empty, or a page
@@ -66,6 +68,7 @@ flowchart TD
         a fence indented or made of tildes, which the lint would not read;
         a corpus header that cannot be read or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
+        a row that reads as an error id outside a table headed id, rules, meaning;
         an error-table row that does not read as one; a design record that cannot be read;
         fewer rules or cases than the floors"]
         G4["ci-config: a pinned fact of a workflow changed. Both: an action not pinned by commit SHA (flow-style
@@ -125,8 +128,10 @@ flowchart TD
         Lows are collected on the open issue labelled review-lows, in parts, each part its own post, so a refused
         post loses one part; they block nothing: judgment step"]
         R4["the workflow starts at all: GitHub's default rule may block pull_request_target here (whether it
-        enforces or only evaluates was not known on 2026-10-02); the owner's event policy allows the event
-        since 2026-10-03. Nothing asserts the policy: HAZARD issue 10"]
+        enforces or only evaluates was not known on 2026-10-02); the owner's event policy allows
+        pull_request_target and workflow_dispatch for .github/workflows/review.yml, active since 2026-10-03
+        (read 2026-10-09 from the repository's Actions policies, gh api repos/OWNER/REPO/actions/policies).
+        Nothing asserts the policy: HAZARD issue 10"]
         R5["review rules, .review/review-rules.yaml of the default branch: one section per surface.
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).
         The reviewer is a model that is given one batch of the diff: it can miss a defect, it cannot
@@ -152,7 +157,9 @@ flowchart TD
         the answered findings, the comparison with the live rules or the title gate: HAZARD issue 14"]
         M3["merge_pr.py --over-red: ruleset off for one merge, restored and read back;
         while it is off nothing on the server holds any pull request or a push to main, so the checks
-        and the threads are read again once it is off, and a change since the decision merges nothing.
+        and the threads are read again once it is off, and a change that reading finds merges nothing (exit 1,
+        the gate restored); what changes between that reading and the merge call is caught by nobody, so the
+        window is narrowed, not closed: nothing else merges or pushes meanwhile, judgment step.
         Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3"]
         M4["title or description edited after the review: the status stays green on text
@@ -184,7 +191,7 @@ flowchart TD
 - `tools/red_proof.py` or the shape of `tools/red_proofs.json` changes: G1.
 - `tools/tree_gate.py`, `.claude/settings.json` (the hook command), `.githooks/pre-push` change:
   W1, P1, G2.
-- `tools/kit.py` (SECRETS, MACHINE, CONFLICT, the skip literals) changes: P1, G2, G6.
+- `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals) changes: W1, P1, G2, G6.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.

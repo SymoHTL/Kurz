@@ -1,7 +1,7 @@
 // expect: output
 // | 3
 // | 7
-// rules: L1, T15, T16
+// rules: T15, T16
 
 s = "aä😀"
 print(s.Chars.Count)

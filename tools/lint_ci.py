@@ -3,11 +3,13 @@
 - both: actions pinned by commit SHA, the hosted runner named by its versioned label (the forge
   offers no digest for a hosted image), a timeout on every job, pip with
   --require-hashes, no job or step that may fail quietly (`continue-on-error`), no step-level `if`,
-  no reusable-workflow job, no `defaults` and no step with a shell or a working directory of its
-  own, no expression inside a `run:` value (a value reaches a script through `env:`), a secret only
-  as plain `secrets.<NAME>` in a step's `env:`, no key twice in one mapping;
+  no reusable-workflow job, no job in a container or beside services, no `defaults` and no step
+  with a shell or a working directory of its own, no expression inside a `run:` value (a value
+  reaches a script through `env:`), a secret only as plain `secrets.<NAME>` in the `env:` of the
+  job's last step, no key twice in one mapping;
 - gates.yml: runs on every push to a pull request, on every edit of its title or description, and
-  on pushes to main, with no path or branch filter; exactly one job, `gates`, with no `if` (a
+  on pushes to main alone, with no path filter and no filter on pull_request; exactly one job,
+  `gates`, with no `if` (a
   skipped job reports success to a required check); read-only token; no secret; the last step runs
   the full gate runner and carries nothing but its name, env and run.
   Not covered by any trigger: a review that posts its findings and a thread that is resolved start
@@ -428,6 +430,8 @@ def self_test():
                                ("lint: no workflows directory is an error", tempfile.mkdtemp(), "cannot be listed")]:
         errors, read = lint(root)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
+        if needle is None:
+            cases.append(("lint: the count on the clean tree is of both workflows, so a capped count shows", read == len(FILES), read))
         if needle and "review.yml" in needle:
             cases.append(("lint: the count is of the workflows read, not of the ones expected", read == 1, read))
         shutil.rmtree(root, ignore_errors=True)

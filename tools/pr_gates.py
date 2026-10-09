@@ -395,6 +395,9 @@ def self_test():
     def check(name, errors, needle):
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
 
+    cases.append(("fixture: the recorded pull request carries a title and a head sha, which the fakes below answer",
+                  bool(recorded.get("title")) and bool((recorded.get("head") or {}).get("sha")), sorted(recorded)))
+
     def got(fn):
         """What fn returned, or the exception it raised, as a value; an interrupt too, so that a case
         about one can fail instead of ending the suite."""
@@ -625,7 +628,7 @@ def self_test():
                     return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
                 if "/contents/" in args[0]:
                     return {"sha": blob(args[0].split("?ref=")[1])}
-                return dict(recorded, head=dict(recorded["head"], sha=head))  # edited: the head this case pushed
+                return dict(recorded, head=dict(recorded.get("head") or {}, sha=head))  # edited: the head this case pushed
             get.asked = asked
             return get, written
 

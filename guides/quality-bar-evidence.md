@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-09
-digest: f1f428cf869aa4f32dec31558f19fe89e8558a28e5ea3a6b24af561c2771d19a
+digest: 1e98f0249d97f3c8e0edfda74c6a951bde6bc7b14532744b3634b324f485364d
 ttl_days: 60
 metadata:
   type: reference
@@ -38,9 +38,9 @@ defined in its docstring.
 |---|---|---|
 | `self-tests` | every run | a tool's self-test fails, ran no case or contradicts its own exit code; a tool has no self-test or no recorded red proof; a recorded mutation no longer turns its one named case red |
 | `tree` | every run | a path the design phase does not allow; a credential-shaped or machine-bound string; a merge-conflict marker; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor |
-| `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
-| `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an error-table row that does not read as one; a design record that cannot be read; fewer rules or cases than the floors |
-| `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path or branch filter; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; a workflow without facts |
+| `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the repository; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
+| `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an error-table row that does not read as one, or a row that reads as one outside an error table; a design record that cannot be read; fewer rules or cases than the floors |
+| `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a job in a container or beside services; the credential anywhere but the env of the job's last step; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request or a push trigger not limited to main; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; a workflow without facts |
 | `merge-checks` | every run | the rules active on main differ from tools/ruleset.json or carry a parameter that file does not name, the ruleset is not active, it has bypass actors, or auto-merge is allowed; PARTLY where the token cannot read the last two |
 | `pr-title` | pull requests | a workflow-skip literal, a credential-shaped or machine-bound string or a conflict marker in the title, the description or a commit message of the branch: each of them can become the squash commit on main |
 | `pr-breadth` | pull requests | more than 15 files, or a change to the quality infrastructure, without a Blast radius section |
@@ -57,17 +57,17 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
 | `tools/gates.py` | 33 | 23 |
-| `tools/kit.py` | 17 | 13 |
-| `tools/lint_ci.py` | 88 | 88 |
-| `tools/lint_knowledge.py` | 70 | 54 |
-| `tools/lint_reference.py` | 67 | 70 |
-| `tools/merge_pr.py` | 139 | 123 |
-| `tools/pr_gates.py` | 94 | 93 |
-| `tools/quality_evidence.py` | 30 | 32 |
+| `tools/kit.py` | 18 | 14 |
+| `tools/lint_ci.py` | 89 | 89 |
+| `tools/lint_knowledge.py` | 76 | 60 |
+| `tools/lint_reference.py` | 69 | 72 |
+| `tools/merge_pr.py` | 144 | 128 |
+| `tools/pr_gates.py` | 95 | 94 |
+| `tools/quality_evidence.py` | 31 | 33 |
 | `tools/red_proof.py` | 30 | 28 |
-| `tools/review/review.py` | 249 | 217 |
-| `tools/tree_gate.py` | 93 | 63 |
-| **total** | 910 | 804 |
+| `tools/review/review.py` | 255 | 225 |
+| `tools/tree_gate.py` | 101 | 73 |
+| **total** | 941 | 839 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -75,13 +75,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 29 |
+| Entries in INDEX.md | 30 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 7 |
+| tagged TRAP | 8 |
 | Review rule sections | 11 |
 | Review rules | 64 |
 <!-- /generated:store -->
@@ -95,7 +95,7 @@ A statement marked *(assumed)* was proposed and not objected to; it is not a dec
 |---|---|
 | Sections | 15 |
 | Statements marked *(assumed)* | 47 |
-| Open questions | 6 |
+| Open questions | 7 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -112,27 +112,28 @@ nothing in this repository executes Kurz.
 | of them assumed | 33 |
 | of them proposed | 11 |
 | of them open | 0 |
-| Corpus cases, none of them run | 236 |
+| Corpus cases, none of them run | 237 |
 | Compile-error ids | 46 |
 | Run-time error ids | 5 |
 <!-- /generated:reference -->
 
 ## The forge
 
-Findings above low are counted from the markers in the reviewer's threads, lows from the marker of
-the note it leaves on the pull request; the issue that collects them is not read. A merge over red
-is counted from the record that the merge tool posts. Only pull requests that someone who may write
-here opened are counted, and only posts of the Actions token and of those people: anyone can open
-a pull request on, or comment in, a public repository.
+Findings above low are counted from the markers in the reviewer's threads, lows from the markers of
+the notes it leaves on the pull request, one note per part it posts; the issue that collects them is
+not read. A merge over red is counted from the record that the merge tool posts. Only pull requests
+and hazard issues that someone who may write here opened are counted, and only posts of the Actions
+token and of those people: anyone can open a pull request or an issue on, or comment in, a public
+repository.
 
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened | 6 |
+| Pull requests opened | 7 |
 | Pull requests merged | 6 |
 | Merged over red, with a recorded waiver | 4 |
-| Review findings posted: high | 37 |
-| Review findings posted: medium | 422 |
-| Review findings posted: low | 457 |
+| Review findings posted: high | 39 |
+| Review findings posted: medium | 459 |
+| Review findings posted: low | 510 |
 | Open HAZARD issues | 13 |
 <!-- /generated:forge -->

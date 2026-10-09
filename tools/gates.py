@@ -38,7 +38,8 @@ GATES = [
      "a file that is not UTF-8 text; a link or a submodule; fewer files than the floor"),
     ("knowledge", ["tools/lint_knowledge.py"], "always",
      "an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, "
-     "in CLAUDE.md or in a skill that does not exist; a nested entry; a LIVING entry without diagram or update triggers; "
+     "in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the "
+     "repository; a nested entry; a LIVING entry without diagram or update triggers; "
      "expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; "
      "fewer entries or living diagrams than their floors"),
     ("reference", ["tools/lint_reference.py"], "always",
@@ -46,11 +47,14 @@ GATES = [
      "neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is "
      "neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that "
      "cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an "
-     "error-table row that does not read as one; a design record that cannot be read; "
+     "error-table row that does not read as one, or a row that reads as one outside an error table; a design record that "
+     "cannot be read; "
      "fewer rules or cases than the floors"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "
-     "a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path or branch filter; a wider token; "
+     "a job in a container or beside services; the credential anywhere but the env of the job's last step; "
+     "a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request "
+     "or a push trigger not limited to main; a wider token; "
      "a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the "
      "pinned one; a workflow without facts"),
     ("merge-checks", ["tools/merge_pr.py", "--assert-settings"], "always",

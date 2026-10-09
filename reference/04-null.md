@@ -388,7 +388,7 @@ void Log() {
     print("log")
 }
 
-acc = Account("a@example.com")
+acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
     Log()
@@ -401,13 +401,12 @@ Case: [null/narrowed-field-after-assignment.kz](../corpus/null/narrowed-field-af
 ```kurz
 class Account(mut string? Email)
 
-mut int k = 0
-acc = Account("a@example.com")
+acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
-    k = 1
+    acc.Email = "b"
     m = acc.Email.Bytes.Count
-    print(n + m + k)
+    print(n + m)
 }
 ```
 

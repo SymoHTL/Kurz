@@ -51,7 +51,8 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
    If the change touches `tools/`, `.github/`, `.review/`, `.claude/`, `.githooks/`, `CLAUDE.md`
    or `.gitattributes`, or more than 15 files, it has a `## Blast radius` section naming what can
    break and who reads it.
-   Gates: `pr-title`, `pr-breadth`.
+   Gates: `pr-title`, `pr-breadth` (the directories are its `INFRA` list and the two files its
+   `INFRA_FILES`, in `tools/pr_gates.py`, each with a case).
 4. The `gates` job runs on every push and on every edit of the title or description. Red: open
    the log, read the `=== gates` table at its end, fix the first row that is FAIL, BROKEN or
    NOT RUN, or PARTLY on a gate other than `merge-checks`. No run at all on a head: a merge
@@ -77,10 +78,11 @@ the head that will be reviewed is a `judgment step`.
 1. Iterate in Draft. A Draft, and a pull request from outside, is reviewed only on demand:
    `gh workflow run review.yml -f pr=<N>`, without `--ref`, so that it runs on the default
    branch, and only while no review run of this pull request is in progress: a new run cancels
-   it, and the cancelled run is still a bill. Gate: the job's `if` refuses another ref, pinned by `ci-config`; a copy of the
+   it, and the cancelled run is still a bill; looking for a run in progress is a `judgment step`.
+   Gate: the job's `if` refuses another ref, pinned by `ci-config`; a copy of the
    workflow on another branch can drop it: HAZARD (#11).
 2. When the description is final and no review run of this pull request is in progress (the run
-   Ready starts cancels it, and the cancelled run is still a bill), mark it Ready once:
+   Ready starts cancels it, and the cancelled run is still a bill), mark it Ready:
    `gh pr ready <N>`. Where the forge starts
    the workflow, that starts the review, with the workflow, the reviewer and the rules of the
    default branch. When the review ran off the pipeline instead (the last bullet of step 3, while

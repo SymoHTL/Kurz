@@ -47,7 +47,9 @@ How this repository is built around it:
 - A skip literal can also reach `main`, where it would skip the gates run on the merge commit.
   The squash commit is written from the title and the description by the merge tool, and by a
   squash through the button from the commit's or the pull request's title and the commit messages,
-  as the repository's settings say, plus whatever is typed into its dialog, which no gate reads
+  which is what this repository's settings say (`squash_merge_commit_title` COMMIT_OR_PR_TITLE and
+  `squash_merge_commit_message` COMMIT_MESSAGES, read 2026-10-09 with `gh api repos/OWNER/REPO`),
+  plus whatever is typed into its dialog, which no gate reads
   (HAZARD #14). So `tools/pr_gates.py title` (the gate
   `pr-title`) refuses a skip literal in the title, in the description and in every commit message
   of the branch, the merge tool checks the title and the description again at the merge, and the

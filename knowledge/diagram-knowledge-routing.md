@@ -27,7 +27,8 @@ flowchart TD
     Gate: review rule rules for sessions"]
     Q1 -- "a lesson, trap, recipe or postmortem" --> KN["one file in knowledge/ plus its INDEX.md line,
     same pull request. Gate: knowledge"]
-    Q1 -- "open work, status, a question for later that is not a design question (those go under Open, DR)" --> IS["an issue. Never repository markdown.
+    Q1 -- "open work, status, a question for later that is not a design question (a design question goes under Open in the record, DR,
+    and a design round asks it; an issue only points there)" --> IS["an issue. Never repository markdown.
     Gate: review rule rules for sessions"]
     Q1 -- "this session's task, decisions, next step" --> NO["the session notes file, outside the repository.
     Judgment step"]

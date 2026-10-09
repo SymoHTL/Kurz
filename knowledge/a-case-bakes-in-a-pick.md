@@ -20,7 +20,7 @@ class with a primary constructor inherits) and needed two more rules the record 
 round 8 answered those nine the same evening. The answers met nine forks again and one more
 unstated rule (round 9, the same night), the answers to those met four (round 10, 2026-10-03),
 and on 2026-10-03 the answers to the four met none, until the review of that day found the gaps
-that rounds 11 and 12 answered. It repeats with every batch of cases until the
+that rounds 11 (2026-10-03) and 12 (2026-10-04) answered. It repeats with every batch of cases until the
 forks run out, and each fork is narrower than the answer it came from: after "a class names the
 fields that count" the fork is how it names them.
 

@@ -149,13 +149,14 @@ def copy_of_tree(into):
 
 
 def replay():
-    """check() on a scratch copy of the repository, which is removed afterwards, whatever check() ended in."""
-    with tempfile.TemporaryDirectory(prefix="red-proof-", ignore_cleanup_errors=True) as tmp:
+    """check() on a scratch copy of the repository, which is removed afterwards, whatever check() ended
+    in; a removal that fails is said with the path, never raised (kit.scratch)."""
+    with kit.scratch("red-proof-") as tmp:
         return check(copy_of_tree(tmp))
 
 
 def self_test():
-    with tempfile.TemporaryDirectory(prefix="red-proof-cases-", ignore_cleanup_errors=True) as base:
+    with kit.scratch("red-proof-cases-") as base:
         return cases_in(base)
 
 

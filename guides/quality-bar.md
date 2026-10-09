@@ -92,7 +92,7 @@ on, and the tree gate does not rely on them.
 | Unanchored thread for the lows | Lows are not threads here (the owner's decision, 2026-10-02). The reviewer collects them as comments on the one open issue labelled `review-lows`, and leaves a note on the pull request that lists them, so that a later run does not report them again. They hold no merge; they are fixed together, or with a push that is needed anyway. |
 | The size of a thread | A thread carries at most twenty findings, each with its title cut at 200 and its text at 2,000 characters, and further findings go into further threads. The forge's limit for one comment is taken as 65,536 characters. Rendering widens a text (a marker opened in a body is escaped, a quote or a character outside ASCII in a title is escaped in the marker's JSON), so a thread, a comment on the lows issue and a note of lows are each measured as rendered, and split until every part fits; self-test cases render findings made of such characters and check every part. The number itself is not in the forge's REST reference (looked for on 2026-10-02) and was not provoked here. |
 | No per-request override of the pipeline check | GitHub has one: an actor on a ruleset's bypass list, set to "For pull requests only", can merge a pull request over unmet rules while the ruleset stays on for everything else (GitHub docs, "Creating rulesets for a repository", read 2026-10-02). It is not used here. A bypass is a standing permission of a role, which every session holding the owner's token would have for every pull request; the forge records each bypass in the repository's rule insights (GitHub docs, "Managing rulesets for a repository", read 2026-10-03), but as an act of that role, tied to no approval of one pull request and head, which is the rule here. So the bypass list is kept empty. Only a local `merge-checks` run with the owner's login asserts that: the job token in CI cannot read the list, prints NOT CHECKED and ends PARTLY (HAZARD #7), so an actor added to the list turns no CI run red. The gate-flip instead switches the ruleset's enforcement off for one merge, restores it and reads it back. Its price: while it is off nothing on the server holds any pull request or a push to `main`. |
-| Pipeline-control literals in the title | The workflow-skip literals. The merge tool writes the title and the description into the squash commit; a squash by the button takes the commit's title (one commit) or the pull request's (several) and the commit messages, as the repository's settings say, and whatever is typed into its dialog. `pr-title` refuses a literal in the title, the description and the commit messages; the dialog's text is read by no gate (HAZARD #14). |
+| Pipeline-control literals in the title | The workflow-skip literals. The merge tool writes the title and the description into the squash commit; a squash by the button takes the commit's title (one commit) or the pull request's (several) and the commit messages, which is what this repository's settings say (`squash_merge_commit_title` COMMIT_OR_PR_TITLE and `squash_merge_commit_message` COMMIT_MESSAGES, read 2026-10-09 with `gh api repos/OWNER/REPO`; the options are in the GitHub docs, "Configuring commit squashing for pull requests", read 2026-10-09), and whatever is typed into its dialog. `pr-title` refuses a literal in the title, the description and the commit messages; the dialog's text is read by no gate (HAZARD #14). |
 | Editing title or description starts no pipeline | The gates do run on `edited`. The review does not: the description is part of its cache key, and every edit would cost a full review. So after an edit the `review` status still stands, on text the review never read. Dispatching the review again after an edit that changes what the text says is an instruction, not a gate (HAZARD #13). |
 | Trigger jobs must never be waived | There are none: `tools/lint_ci.py` refuses a job that calls another workflow. |
 | Diff versions to tell whether a file changed since a finding | The blob id of the file at the finding's commit against the blob id at the head. |
@@ -161,9 +161,13 @@ What is specific to this repository:
   itself.
 
 The credential is one repository secret, `CLAUDE_CODE_OAUTH_TOKEN`. Without it the job is red: a
-review that cannot run must never look like a review that found nothing. Every workflow run of a
-branch of this repository can read it, a workflow that the branch adds included (HAZARD #11); an
-environment limited to the default branch would close that, and is the owner's choice.
+review that cannot run must never look like a review that found nothing. A repository secret is
+read through the `secrets` context by any workflow of this repository, a workflow that a branch
+adds included; the docs withhold secrets only from a run that a fork or Dependabot triggered
+("Using secrets in GitHub Actions", read 2026-10-09), so a branch can read it (HAZARD #11). An
+environment's secret is available only to a job that uses the environment, and an environment can
+be limited to selected branches ("Managing environments for deployment", read 2026-10-09): one
+limited to the default branch would close that, and is the owner's choice.
 
 ## Hazards
 
@@ -210,7 +214,8 @@ A change to a gate, a tool, a hook, a workflow or a review rule carries, in the 
 request: an update of `knowledge/diagram-gate-map.md` or of this guide, whichever describes what
 changed, or a sentence in the description that says why neither applies; a "Blast radius"
 section in the description; and, for a decision of a tool, a hook or a workflow, its case and its
-red proof (a review rule has no self-test). The gates for it are `self-tests` for the proofs,
+red proof (a review rule has no self-test: the reviewer reads it as prose, so a changed rule is
+judged by the review of the next pull request, not by a case). The gates for it are `self-tests` for the proofs,
 `pr-breadth` for the section, and the review rule "every pull request", which flags a change whose
 list of files holds neither the gate map nor this guide while the description gives no reason; a
 review rule holds only above low, so for a low breach it is a `judgment step`.

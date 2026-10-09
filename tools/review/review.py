@@ -348,9 +348,14 @@ def fresh_suffix(*texts):
 
 # --- the model call ---------------------------------------------------------------------------
 
+def a_line(value):
+    """A line number as a finding carries it: a positive int, and not a bool, which is an int to Python."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
 def valid_finding(f, paths):
     return (isinstance(f, dict) and isinstance(f.get("file"), str) and f["file"] in paths
-            and isinstance(f.get("line"), int) and not isinstance(f.get("line"), bool) and f["line"] >= 1
+            and a_line(f.get("line"))
             and isinstance(f.get("severity"), str) and f["severity"] in RANK
             and all(isinstance(f.get(k), str) and f[k].strip() for k in ("title", "body")))
 
@@ -737,7 +742,8 @@ class Forge:
         return "plain note"
 
     def note(self, body):
-        self.post(f"issues/{self.number}/comments", {"body": body})
+        """A comment on the pull request itself; the forge's answer names the comment's id."""
+        return self.post(f"issues/{self.number}/comments", {"body": body})
 
     def label(self, name):
         """Put a label on the pull request."""
@@ -764,15 +770,34 @@ class Forge:
                             "together. Close this issue when they are: the next review that finds a low opens a new one."})["number"])
             return issue[0]
 
+        def noted(part, number):
+            return (f"**Automated review**: {len(part)} low findings on `{head[:8]}` are collected in #{number}. They do not "
+                    f"hold this pull request; a push that is needed anyway fixes them too.\n\n{listed(part, head)}")
+
         def post_part(part):
+            # The note first: its marker is what a later run reads back as reported, so a part whose
+            # note the forge refuses is posted nowhere and comes again. When the comment on the issue
+            # is refused after the note landed, the note is rewritten without its marker, so that the
+            # part comes again too instead of standing recorded on the pull request and missing from
+            # the issue; a rewrite that is refused as well is said, and the part is then in this log only.
             number = collecting()
-            self.post(f"issues/{number}/comments", {"body": collected(part)})
-            self.note(f"**Automated review**: {len(part)} low findings on `{head[:8]}` are collected in #{number}. They do not "
-                      f"hold this pull request; a push that is needed anyway fixes them too.\n\n{listed(part, head)}")
+            answer = self.note(noted(part, number))
+            try:
+                self.post(f"issues/{number}/comments", {"body": collected(part)})
+            except kit.Refused:
+                withdrawn = (f"**Automated review**: a note of {len(part)} low findings on `{head[:8]}` was withdrawn, because "
+                             f"their comment on #{number} was refused; the next run posts them again.")
+                try:
+                    self.post(f"issues/comments/{answer['id']}", {"body": withdrawn}, method="PATCH")
+                except (kit.Refused, KeyError, TypeError) as again:
+                    print(f"  the note of this part could not be withdrawn ({public(str(again))[:200]}): the part is recorded on the "
+                          f"pull request as reported and is missing from #{number}; its text is in this log")
+                raise
             return f"issue {number}"
 
         collected = lambda part: render({"findings": part, "lows": (self.number, head)})
-        return [(part, lambda part=part: post_part(part)) for part in in_parts(findings, collected)]
+        widest = lambda part: max(collected(part), noted(part, 10 ** 9), key=len)  # sized as both posts render, the issue number at its widest
+        return [(part, lambda part=part: post_part(part)) for part in in_parts(findings, widest)]
 
     def save_state(self, comment_id, body):
         if comment_id:
@@ -848,7 +873,7 @@ def review(argv):
     cap = f"{bounds[1]} pass{'' if bounds[1] == 1 else 'es'}"
     limited = "" if bounds == (MIN_PASSES, MAX_PASSES) else f"; limited by the caller to {cap} a batch"
     forge = Forge(kit.repo(), call["pr"])
-    head, me, notes = None, None, []
+    head, me, notes, told_any = None, None, [], False  # told_any: a post of findings landed, so a failure note says what stands
 
     def stop(kind, detail):
         """Say that the review did not complete, here and on the pull request, and return the exit
@@ -862,8 +887,10 @@ def review(argv):
             print("A usage limit is not a crash: retry after the reset the message names, not now.")
         if head and me and not dry:
             key = note_wanted(notes, "failed", sha=head) if kind != "oversized" else None
+            tail = "What it posted before stands; the rest is in the log of the run." if told_any else \
+                "This pull request is not reviewed; what the run found, if anything, is in its log."
             writes = [lambda: forge.note(f"**Automated review did not complete** on `{head[:8]}` ({kind}): {detail[:500]}\n\n"
-                                         f"What it posted before stands; the rest is in the log of the run.\n\n{marker('note', key)}")] if key else []
+                                         f"{tail}\n\n{marker('note', key)}")] if key else []
             if in_ci and not local:  # a run off the pipeline posts no status, completed or not
                 writes.append(lambda: forge.status(head, "error", f"review did not complete: {kind}"))
             for write in writes:
@@ -935,7 +962,7 @@ def review(argv):
             return stop("failed", f"{len(unread)} files of the diff are in no batch and in no replay: {', '.join(sorted(unread))[:300]}")
         reported = [{**f, "stale": f.get("sha") != head} for c, fs in marked(review_comments + issue_comments, me, FINDINGS_MARK)
                     for f in fs if isinstance(f, dict) and isinstance(f.get("file"), str) and isinstance(f.get("title"), str)
-                    and isinstance(f.get("severity"), str) and f["severity"] in RANK and isinstance(f.get("line"), int)]
+                    and isinstance(f.get("severity"), str) and f["severity"] in RANK and a_line(f.get("line"))]
         print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache, "
               f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}")
         for path in sorted(replay):
@@ -1008,6 +1035,7 @@ def review(argv):
             try:
                 where = post()
                 print(f"  posted {len(posted)} findings at {where}")
+                told_any = told_any or where != "plain note"
                 if where == "plain note":
                     # not a thread: no check holds the merge for these findings, and the note carries no marker,
                     # so the next run posts them again; the run ends red like one whose posts were refused
@@ -1041,7 +1069,7 @@ def review(argv):
                          f"{marker('state', {'v': 1, 'key': key, 'head': head, 'files': cached})}")
         also = f" The review did not complete either ({incomplete[0]}): {incomplete[1]}." if incomplete else ""
         if unposted:
-            return stop("failed", f"{lost} findings on {', '.join(sorted(unposted))} could not be posted as threads. Their text is in "
+            return stop("failed", f"{lost} findings on {', '.join(sorted(unposted))} could not be posted, as threads or as parts on the lows issue. Their text is in "
                                   f"the log of this run; those files are not stored as reviewed, so the next run reviews them "
                                   f"again. Found: {summary}.{also}")
         if incomplete:

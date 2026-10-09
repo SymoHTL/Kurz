@@ -144,8 +144,10 @@ sections:
       - >-
         A hook that can fail open - an exit path that lets the action through on input it cannot read
         or after a failure of its own, a network call, an interpreter that may be missing with nothing
-        to fall back on. For a write-time hook, exit 2 denies, and so does a JSON deny decision printed on
-        any other exit; every other end lets the write through.
+        to fall back on. For a write-time hook, exit 2 denies, and so does a JSON deny decision printed
+        on any other exit, since the harness reads a hook's JSON on every exit code (the Claude Code
+        docs, the hooks page, read 2026-10-09; knowledge/a-hook-denies-by-exit-2-or-by-its-json.md);
+        every other end lets the write through: a plain exit 1, a crash, a timeout, a missing interpreter.
 
   - name: text from a pull request
     files: ["tools/*", ".githooks/*", ".github/*"]

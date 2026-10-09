@@ -157,8 +157,12 @@ print("got {c}")
 `Text()` is inherited, and the class of the instance picks it when the program runs, as
 `ToString()` is in C#: `print(admin)` has a text when only the base `User` declares `Text()`, and
 a `User` variable that holds an `Admin` shows the text of `Admin` where `Admin` overrides it (K7).
-A `Text()` without `pub` is the compile error `not-visible` where the text is used outside the
-class, and `print` is such a use wherever it is written, inside the class too; there `Text()` itself can be called, as any private member can. The owner chose this on 2026-10-03, against counting only a
+A `Text()` without `pub` is the compile error `not-visible` wherever its text is used through
+`print` or an interpolation, inside the class as well as outside it; inside the class `Text()`
+itself can be called, as any private member can. *(proposed: that `print` inside the class is
+such a use; the owner's choice of 2026-10-03 covered the inheritance and the `pub`, not the place
+of the use, and the case `classes/text-private-inside.kz` stands on this reading)* The owner chose
+the inheritance on 2026-10-03, against counting only a
 `pub Text()` the class itself declares, which would have made every class of a hierarchy repeat
 the method; the cost is that whether a class has a text depends on its base, and that a
 base-typed value may print more than its static type says.

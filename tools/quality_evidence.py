@@ -15,9 +15,10 @@ when the file has a block it did not compute, when a marker is not closed, when 
 old, or be no evidence, while the date said they were new. The new text is built completely before
 anything is written, and written through a temp file.
 
-What it counts on the forge it counts only from pull requests and posts of the Actions token and of
-people who may write here (tools/pr_gates.py `trusted`): anyone can open a pull request on, or
-comment in, a public repository."""
+What it counts on the forge it counts only from pull requests, issues and posts of the Actions token
+and of people who may write here (tools/pr_gates.py `trusted`): anyone can open a pull request or
+an issue on, or comment in, a public repository, and an issue template could put the hazard label
+on a stranger's issue."""
 import contextlib
 import datetime
 import json
@@ -120,7 +121,8 @@ def block_forge(root):
                         severity[f["severity"]] += 1
             over_red += (c.get("body") or "").startswith("Merged over red")
     # the issues endpoint lists pull requests too
-    hazards = [i for i in kit.gh_pages(f"repos/{repo}/issues?state=open&labels=hazard&per_page=100") if "pull_request" not in i]
+    hazards = [i for i in kit.gh_pages(f"repos/{repo}/issues?state=open&labels=hazard&per_page=100")
+               if "pull_request" not in i and pr_gates.trusted((i.get("user") or {}).get("login", ""), i.get("author_association"))]
     return table(["Forge", "Count"], [
         ("Pull requests opened", len(pulls)), ("Pull requests merged", len(merged)), ("Merged over red, with a recorded waiver", over_red),
         ("Review findings posted: high", severity["high"]), ("Review findings posted: medium", severity["medium"]),
@@ -306,7 +308,9 @@ def self_test():
             # the stranger's pull request holds a finding of the Actions token: counted, it would show
             "repos/o/n/pulls/5/comments?per_page=100": [post("github-actions[bot]", "NONE", finding("medium"))],
             "repos/o/n/issues/5/comments?per_page=100": [],
-            "repos/o/n/issues?state=open&labels=hazard&per_page=100": [{"number": 3}, {"number": 4, "pull_request": {"url": "x"}}],
+            "repos/o/n/issues?state=open&labels=hazard&per_page=100": [opened(3, "the-owner", "OWNER"),
+                                                                        {**opened(4, "the-owner", "OWNER"), "pull_request": {"url": "x"}},
+                                                                        opened(6, "a-stranger", "NONE")],
         }
 
         def pages(path):
@@ -329,6 +333,7 @@ def self_test():
     cases.append(("forge: a pull request that someone without write access opened counts nothing, its findings included",
                   all(row in str(forge) for row in ("| Pull requests opened | 2 |", "posted: medium | 0 |")), forge))
     cases.append(("forge: a waiver record counts from a maintainer, not from a stranger", "| Merged over red, with a recorded waiver | 1 |" in str(forge), forge))
+    cases.append(("forge: a hazard issue that a stranger opened is not counted, whatever label it carries", "| Open HAZARD issues | 1 |" in str(forge), forge))
     return kit.report(cases)
 
 

@@ -30,8 +30,8 @@ Fails on:
   under `## Run-time errors` for `throws`), or whose table row lists none of the case's rules; an
   error line outside the file, on a blank line or in the header; a table row with an unknown
   rule, a repeated id, an id no case expects, or a rule that no case expecting the id names; a row
-  under a `| id | rules | meaning |` head that does not read as one (rows under any other head are
-  not error ids);
+  under a `| id | rules | meaning |` head that does not read as one; a row that reads as one under
+  any other head or outside a table, since its id would go unchecked;
 - a design record that cannot be read, said once instead of as every section it would lack;
 - fewer rules or cases than the floors."""
 import contextlib
@@ -52,7 +52,7 @@ RUNTIME_TABLE = "## Run-time errors"
 ERROR_HEAD = "| id | rules | meaning |"  # an error table starts with this line, and every row under it is read
 SEPARATOR = re.compile(r"\|(?:-+\|)+")
 # a fence the lint would not see: Markdown also opens a block with a fence indented up to three spaces, or of tildes
-LOOKALIKE = re.compile(r" {1,3}```|~~~")
+LOOKALIKE = re.compile(r" {1,3}```| {0,3}~~~")
 
 
 def rule_heading(line):
@@ -141,6 +141,8 @@ def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
                 in_table = True
                 continue
             in_table = in_table and line.startswith("|")
+            if not in_table and ERROR_ROW.fullmatch(line):
+                errors.append(f"{where}: a row that reads as an error id outside a table headed {ERROR_HEAD}: the id would go unchecked")
             row = ERROR_ROW.fullmatch(line) if in_table and not SEPARATOR.fullmatch(line) else None
             if in_table and not row and not SEPARATOR.fullmatch(line):
                 errors.append(f"{where}: an error-table row that does not read | `id` | A1, B2 | meaning |")
@@ -277,15 +279,16 @@ def sync(root, say=print):
             new[chapter] = out
     written = []
     for chapter, out in new.items():
-        path = os.path.join(root, chapter)
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+        path, tmp = os.path.join(root, chapter), None
         try:
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
                 f.write("\n".join(out))
             os.replace(tmp, path)
         except OSError as e:
-            with contextlib.suppress(OSError):
-                os.remove(tmp)
+            if tmp:
+                with contextlib.suppress(OSError):
+                    os.remove(tmp)
             raise kit.Refused(f"wrote only {len(written)} of {len(new)} chapters ({', '.join(written) or 'none'}); "
                               f"{chapter} failed: {e}") from e
         written.append(chapter)
@@ -294,7 +297,11 @@ def sync(root, say=print):
 
 
 def self_test():
-    base = tempfile.TemporaryDirectory(prefix="lint-reference-", ignore_cleanup_errors=True)  # every tree of the suite
+    with kit.scratch("lint-reference-") as base:  # every tree of the suite; a removal that fails is said, not raised
+        return cases_in(base)
+
+
+def cases_in(base):
     record = "# Design\n\n## 1. Goals\n\n- fast\n\n## 4. Types\n\n- numbers\n- small values *(assumed)*\n"
     case = "// expect: output\n// | 9\n// rules: V1\n\nx = 4\nprint(x + 5)\n"
     bad = "// expect: error assign-immutable at 6\n// rules: V2\n\nx = 4\nprint(x)\nx = 5\n"
@@ -311,7 +318,7 @@ def self_test():
             "corpus/vars/overflow.kz": thrown}
 
     def tree(change=None, drop=()):
-        root = tempfile.mkdtemp(dir=base.name)
+        root = tempfile.mkdtemp(dir=base)
         for path, text in {**good, **(change or {})}.items():
             if path in drop:
                 continue
@@ -384,10 +391,12 @@ def self_test():
                                                          "a fence opens here inside it"),
         "an indented fence": (tree(edit(ref, "Nobody chose.", "Nobody chose.\n\n  ```text\ny = 1\n  ```")), "indented or made of tildes"),
         "a fence of tildes": (tree(edit(ref, "Nobody chose.", "Nobody chose.\n\n~~~\ny = 1\n~~~")), "indented or made of tildes"),
+        "an indented fence of tildes": (tree(edit(ref, "Nobody chose.", "Nobody chose.\n\n  ~~~\ny = 1\n  ~~~")), "indented or made of tildes"),
         "an error-table row that misses its pattern": (tree(edit(ref, "| `assign-immutable` | V2 |", "| assign-immutable | V2 |")),
                                                        "an error-table row that does not read"),
-        "a row of the pattern outside an error table is no error id": (
-            tree(edit(ref, "## Errors\n", "| word | rules | meaning |\n|---|---|---|\n| `ghost` | V1 | elsewhere |\n\n## Errors\n")), None),
+        "a row that reads as an error id under another head is refused, not read as an id and not passed over": (
+            tree(edit(ref, "## Errors\n", "| word | rules | meaning |\n|---|---|---|\n| `ghost` | V1 | elsewhere |\n\n## Errors\n")),
+            "outside a table headed"),
     }
     def attempt(fn, *args):
         """The result, or the exception as a value: a broken lint then fails the case that met it instead of ending the suite."""
@@ -478,10 +487,22 @@ def self_test():
                   isinstance(refusal, kit.Refused) and f"wrote only 1 of 2 chapters ({first})" in str(refusal)
                   and said == [f"rewrote the samples of {first}"], (repr(refusal), said)))
     cases.append(("--sync leaves no temporary file behind a failed write", isinstance(refusal, kit.Refused) and left == [], left))
+    two = tree({**edit(ref, "print(x + 5)\n```", "print(x + 6)\n```"), first: extra})
+    made, real_mkstemp = [], tempfile.mkstemp
+
+    def no_room(*args, **kwargs):
+        made.append(1)
+        if len(made) == 2:
+            raise OSError("no space left on device")
+        return real_mkstemp(*args, **kwargs)
+    tempfile.mkstemp = no_room
     try:
-        return kit.report(cases)
+        refusal = attempt(sync, two, quiet)
     finally:
-        base.cleanup()
+        tempfile.mkstemp = real_mkstemp
+    cases.append(("--sync: a temporary file that cannot be made is the same refusal, naming the chapter written before it",
+                  isinstance(refusal, kit.Refused) and f"wrote only 1 of 2 chapters ({first})" in str(refusal), repr(refusal)))
+    return kit.report(cases)
 
 
 if __name__ == "__main__":

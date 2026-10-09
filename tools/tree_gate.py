@@ -8,9 +8,10 @@ files.
 Three callers, one definition:
   (no flag)    every tracked or untracked-but-not-ignored file of the working tree  (CI, local gates)
   --pre-push   every commit a `git push` is about to publish: its message and the files it adds or
-               changes, a link or a submodule refused as in the working tree; the message of every
-               annotated tag it pushes. Not the author, committer or tagger, which a push publishes
-               as well (HAZARD #12)                                                 (.githooks/pre-push)
+               changes, a link or a submodule refused as in the working tree; the name of every ref
+               it publishes; the message of every annotated tag it pushes, and of each tag that one
+               points at. Not the author, committer or tagger, which a push publishes as well
+               (HAZARD #12)                                                        (.githooks/pre-push)
   --hook       one Write/Edit call of an agent session, path rule only              (.claude/settings.json)
 `--self-test` plants one case per rule and per pattern, plus precision cases that must stay clean.
 In --hook mode the script blocks a call by exit 2 and prints no JSON decision, the other way the
@@ -132,17 +133,34 @@ def pushed_commits(remote, stdin_text, cwd=None):
 
 
 def pushed_tags(stdin_text, cwd=None):
-    """The annotated tags a push publishes: the pushed objects that are tags. Their commits are in
-    pushed_commits, which has refused a line it does not understand already."""
+    """The annotated tags a push publishes: the pushed objects that are tags. A tag's commit is
+    checked by pushed_commits only when the push publishes it for the first time; pushed_commits
+    has refused a line it does not understand already."""
     shas = [line.split()[1] for line in stdin_text.splitlines() if len(line.split()) == 4]
     return [sha for sha in shas if set(sha) != {"0"} and kit.run(["git", "cat-file", "-t", sha], cwd=cwd).strip() == "tag"]
 
 
-def check_tag(sha, cwd=None):
-    """The message of an annotated tag, which the push publishes beside its commit. The header above
-    it names the tagger, published like a commit's author and read by no gate (HAZARD #12)."""
-    message = kit.run(["git", "cat-file", "tag", sha], cwd=cwd).partition("\n\n")[2]
-    return check_text(f"{sha[:8]} (tag message)", message)
+def pushed_refs(stdin_text):
+    """The names a push publishes: the remote ref of every line that publishes something. A deletion
+    publishes no name."""
+    return [line.split()[2] for line in stdin_text.splitlines() if len(line.split()) == 4 and set(line.split()[1]) != {"0"}]
+
+
+def check_tag(sha, cwd=None, seen=()):
+    """The message of an annotated tag, which the push publishes beside what it points at, read as a
+    commit message is (kit.message_text): a trailer's no-reply address passes. A tag that points at
+    a tag publishes that one too, so the chain is followed; one that points at a blob or a tree
+    publishes an object no other check reads, and is refused. The header above the message names
+    the tagger, published like a commit's author and read by no gate (HAZARD #12)."""
+    header, _, message = kit.run(["git", "cat-file", "tag", sha], cwd=cwd).partition("\n\n")
+    fields = dict(line.split(" ", 1) for line in header.splitlines() if " " in line)
+    target, kind = fields.get("object", ""), fields.get("type", "")
+    errors = check_text(f"{sha[:8]} (tag message)", kit.message_text(message))
+    if kind == "tag" and target not in seen:
+        errors += check_tag(target, cwd, (*seen, sha))
+    elif kind not in ("commit", "tag"):
+        errors.append(f"{sha[:8]} (tag): points at a {kind or 'nothing'}, not a commit: what it publishes is read by no check")
+    return errors
 
 
 def check_commit(sha, cwd=None):
@@ -167,8 +185,9 @@ def within(target, root, exists=os.path.exists, same=os.path.samefile):
     """The path of `target` inside `root` ("." for the root itself), or None when it lies outside.
     Decided by identity: each existing ancestor of the target is compared with the root by the file
     system, so a path spelled in another case where the file system ignores case (Windows, macOS)
-    is inside, as the file it writes is. The path comes back in the case it was written in, so the
-    allowlist is never matched against a lower-cased spelling."""
+    is inside, as the file it writes is. The path comes back as realpath returns it: existing parts
+    in the case the file system stores, the rest as written, never lower-cased, so the allowlist is
+    never matched against a lower-cased spelling."""
     full = os.path.realpath(target)
     path = full
     while True:
@@ -203,11 +222,8 @@ def hook(raw):
 
 
 def self_test():
-    base = tempfile.TemporaryDirectory(prefix="tree-gate-", ignore_cleanup_errors=True)  # every directory of the suite
-    try:
-        return cases_in(base.name)
-    finally:
-        base.cleanup()
+    with kit.scratch("tree-gate-") as base:  # every directory of the suite; a removal that fails is said, not raised
+        return cases_in(base)
 
 
 def cases_in(base):
@@ -260,6 +276,12 @@ def cases_in(base):
                   check_text("m", kit.message_text(trailer)) == []
                   and check_text("m", kit.message_text(trailer.replace("Co-authored-by: ", "Ask "))) == ["m: machine-bound string (email)"],
                   check_text("m", kit.message_text(trailer))))
+    named = "Fix\n\nCo-authored-by: see D:" + "/work/notes <123+someone@" + "users.noreply.github.com>\n"
+    cases.append(("a trailer line's name part is scanned: a machine-bound string before the no-reply address is refused",
+                  check_text("m", kit.message_text(named)) == ["m: machine-bound string (drive-path)"], check_text("m", kit.message_text(named))))
+    plain = "Fix\n\nCo-authored-by: Someone <someone@" + "mailhost.org>\n"
+    cases.append(("a trailer line with an ordinary address is refused: only the no-reply address passes",
+                  check_text("m", kit.message_text(plain)) == ["m: machine-bound string (email)"], check_text("m", kit.message_text(plain))))
     for path in ("CLAUDE.md", "kurz-design.md", "reference/03-values.md", "corpus/values/with/path-write.kz",
                  "tools/review/review.py", "tools/review/fixtures/a.json", ".github/workflows/gates.yml",
                  ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push"):
@@ -322,6 +344,12 @@ def cases_in(base):
         git("commit", "--quiet", "-m", "a link")
         return git("rev-parse", "HEAD")
 
+    def gitlink(path, target):
+        """Add a submodule entry that points at the commit `target`, in the index alone: no second repository is needed."""
+        git("update-index", "--add", "--cacheinfo", f"160000,{target},{path}")
+        git("commit", "--quiet", "-m", "a submodule")
+        return git("rev-parse", "HEAD")
+
     built = got(lambda: (git("init", "--quiet"),
                          commit("first", {"knowledge/a.md": b"fact\n"}),
                          commit("see D:" + "/work/notes", {"knowledge/b.md": b"fact\n"}),
@@ -331,9 +359,10 @@ def cases_in(base):
                          commit("quiet\n\n[skip " + "ci]", {"knowledge/d.md": b"fact\n"}),
                          commit("credited\n\nCo-authored-by: Someone <123+someone@" + "users.noreply.github.com>",
                                 {"knowledge/e.md": b"fact\n"}),
-                         link("knowledge/d.md", "D:" + "/work/notes")))
+                         link("knowledge/d.md", "D:" + "/work/notes"),
+                         gitlink("sub", git("rev-list", "--max-parents=0", "HEAD"))))
     if isinstance(built, tuple):
-        _, clean, message, lexer, binary, deletion, quiet, credited, linked = built
+        _, clean, message, lexer, binary, deletion, quiet, credited, linked, submodule = built
         of = lambda sha: got(lambda: check_commit(sha, cwd=repo))
         has = lambda errors, needle: isinstance(errors, list) and any(needle in e for e in errors)
         cases.append(("pre-push: a clean commit passes", of(clean) == [], of(clean)))
@@ -347,6 +376,7 @@ def cases_in(base):
         cases.append(("pre-push: a file turned into a link is refused, as in the working tree",
                       has(of(linked), "knowledge/d.md: not a regular file"), of(linked)))
         cases.append(("pre-push: a co-author's GitHub no-reply address in a trailer passes", of(credited) == [], of(credited)))
+        cases.append(("pre-push: a submodule is refused, as in the working tree", has(of(submodule), "sub: not a regular file"), of(submodule)))
         git("update-ref", "refs/remotes/origin/main", clean)
         git("update-ref", "refs/remotes/other/main", deletion)
         line = f"refs/heads/main {deletion} refs/heads/main {clean}"
@@ -357,6 +387,9 @@ def cases_in(base):
         cases.append(("pre-push: a deleted ref publishes nothing", gone == [], gone))
         odd = got(lambda: pushed_commits("origin", line + " extra\n", cwd=repo))
         cases.append(("pre-push: a line that is not four fields is refused", isinstance(odd, kit.Refused), odd))
+        refs = got(lambda: pushed_refs(f"refs/tags/v1 {clean} refs/tags/v1 {'0' * 40}\n(delete) {'0' * 40} refs/heads/old {clean}\n{line}\n"))
+        cases.append(("pre-push: the names a push publishes are its remote refs, a deletion's not among them",
+                      refs == ["refs/tags/v1", "refs/heads/main"], refs))
         git("tag", "-a", "v1", "-m", "see D:" + "/work/notes", clean)
         tag = git("rev-parse", "v1")
         tags = got(lambda: pushed_tags(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n{line}\n", cwd=repo))
@@ -364,6 +397,23 @@ def cases_in(base):
         cases.append(("pre-push: a machine-bound string in an annotated tag's message is refused",
                       has(got(lambda: check_tag(tag, cwd=repo)), "(tag message): machine-bound string (drive-path)"),
                       got(lambda: check_tag(tag, cwd=repo))))
+        git("tag", "-a", "v2", "-m", "release\n\nCo-authored-by: Someone <123+someone@" + "users.noreply.github.com>", clean)
+        credited_tag = git("rev-parse", "v2")
+        cases.append(("pre-push: a co-author's GitHub no-reply address in a tag's trailer passes, as in a commit",
+                      got(lambda: check_tag(credited_tag, cwd=repo)) == [], got(lambda: check_tag(credited_tag, cwd=repo))))
+        git("tag", "-a", "outer", "-m", "a tag of a tag", "v1")  # the message of v1 holds the drive path
+        outer = git("rev-parse", "outer")
+        cases.append(("pre-push: a tag that points at a tag is followed, and the inner tag's message is read",
+                      has(got(lambda: check_tag(outer, cwd=repo)), f"{tag[:8]} (tag message): machine-bound string (drive-path)"),
+                      got(lambda: check_tag(outer, cwd=repo))))
+        with open(os.path.join(repo, "note.txt"), "wb") as f:
+            f.write(b"a note\n")
+        note = git("hash-object", "-w", "note.txt")
+        os.remove(os.path.join(repo, "note.txt"))
+        git("tag", "-a", "notetag", "-m", "a tag of a blob", note)
+        notetag = git("rev-parse", "notetag")
+        cases.append(("pre-push: a tag that points at a blob or a tree is refused: what it publishes is read by no check",
+                      has(got(lambda: check_tag(notetag, cwd=repo)), "points at a blob"), got(lambda: check_tag(notetag, cwd=repo))))
         # the script as the hook runs it, for its exit code: from tools/ of the repository it guards, since
         # its git calls run in kit.ROOT; a clean commit of its own, which no ref of the remote holds
         fresh = git("commit-tree", f"{clean}^{{tree}}", "-p", clean, "-m", "clean too")
@@ -372,16 +422,23 @@ def cases_in(base):
             shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), name), os.path.join(repo, "tools", name))
 
         def pre_push(stdin_text):
-            return subprocess.run([sys.executable, os.path.join(repo, "tools", "tree_gate.py"), "--pre-push", "origin"],
-                                  input=stdin_text, cwd=repo,
-                                  capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}).returncode
+            """(exit code, what the script printed): a crash ends in 1 too, so each case reads the text as well."""
+            p = subprocess.run([sys.executable, os.path.join(repo, "tools", "tree_gate.py"), "--pre-push", "origin"],
+                               input=stdin_text, cwd=repo,
+                               capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            return p.returncode, p.stdout + p.stderr
         codes = got(lambda: (pre_push(f"refs/heads/side {fresh} refs/heads/side {'0' * 40}\n"), pre_push(line + "\n"),
-                             pre_push("not four fields\n"), pre_push(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n")))
-        cases.append(("pre-push: the script ends in 0 for a clean push", isinstance(codes, tuple) and codes[0] == 0, codes))
-        cases.append(("pre-push: the script ends in 1 for a push that holds a refused commit", isinstance(codes, tuple) and codes[1] == 1, codes))
-        cases.append(("pre-push: the script ends in 1 for a line it cannot read", isinstance(codes, tuple) and codes[2] == 1, codes))
-        cases.append(("pre-push: the script ends in 1 for a tag whose message is refused, though its commit is published already",
-                      isinstance(codes, tuple) and codes[3] == 1, codes))
+                             pre_push("not four fields\n"), pre_push(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n"),
+                             pre_push(f"refs/heads/host-10.1." + f"2.3 {fresh} refs/heads/host-10.1." + f"2.3 {'0' * 40}\n")))
+        ended = lambda n, code, needle: isinstance(codes, tuple) and codes[n][0] == code and needle in codes[n][1]
+        cases.append(("pre-push: the script ends in 0 for a clean push, and says what it scanned", ended(0, 0, "ref names about to be published, 0 errors"), codes))
+        cases.append(("pre-push: the script ends in 1 for a push that holds a refused commit, and names the commit's defect",
+                      ended(1, 1, "(message): machine-bound string (drive-path)"), codes))
+        cases.append(("pre-push: the script ends in 1 for a line it cannot read, and says so", ended(2, 1, "pre-push line not understood"), codes))
+        cases.append(("pre-push: the script ends in 1 for a tag whose message is refused, though its commit is published already, and names the tag",
+                      ended(3, 1, "(tag message): machine-bound string (drive-path)"), codes))
+        cases.append(("pre-push: the script ends in 1 for a ref whose name holds a machine-bound string, and names the ref",
+                      ended(4, 1, "(ref name): machine-bound string (ip-address)"), codes))
     cases.append(("pre-push: the throwaway repository was built", isinstance(built, tuple), built))
 
     call = lambda path: json.dumps({"tool_name": "Write", "tool_input": {"file_path": path}})
@@ -469,9 +526,10 @@ def main(argv):
             remote = argv[argv.index("--pre-push") + 1]
             stdin_text = sys.stdin.read()
             commits = pushed_commits(remote, stdin_text)
-            tags = pushed_tags(stdin_text)
-            errors = [e for sha in commits for e in check_commit(sha)] + [e for sha in tags for e in check_tag(sha)]
-            scanned = f"{len(commits)} commits and {len(tags)} annotated tags about to be published"
+            tags, refs = pushed_tags(stdin_text), pushed_refs(stdin_text)
+            errors = ([e for sha in commits for e in check_commit(sha)] + [e for sha in tags for e in check_tag(sha)]
+                      + [e for ref in refs for e in check_text(f"{ref} (ref name)", ref)])
+            scanned = f"{len(commits)} commits, {len(tags)} annotated tags and {len(refs)} ref names about to be published"
         else:
             files, special = working_tree()
             errors, scanned = special + scan(files), f"{len(files)} files"

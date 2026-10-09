@@ -262,7 +262,10 @@ Gate: review rule "rules for sessions".
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
   head**, passed as `--over-red`. An approval is never standing. The tool switches the whole
   ruleset off for the one merge and restores it; while it is off nothing on the server holds any
-  pull request or any push to `main`. Exit 3 means it was not read back as active, so it may still
+  pull request or any push to `main`, so the tool reads the checks and the threads again once it
+  is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
+  given again for the new state, or not at all). What changes between that reading and the
+  merge call is caught by nobody: nothing else merges or pushes meanwhile. Exit 3 means it was not read back as active, so it may still
   be off: say so at once, read it back and restore it as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
   HAZARD (#3): the session holds the owner's token, so the permission classifier and this rule
   are the only guards on the approval.

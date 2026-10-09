@@ -313,7 +313,8 @@ Show(span)
 
 Case: [types/longduration-wide.kz](../corpus/types/longduration-wide.kz)
 ```kurz
-longduration l = 200000days
+longduration a = 100000days
+longduration l = a + a
 print(duration(l))
 ```
 

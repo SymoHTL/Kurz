@@ -226,8 +226,10 @@ Show(Plan.Pro)
 It gives what `[Flags]` and `HasFlag` give in C#. Each name is one bit, and the compiler numbers
 the bits in order unless the declaration writes the number (D19). A name alone, `Access.Read`,
 is the set that holds that name. `set.Has(Access.Read)` is `true` when the set holds the name. A
-set is not one case, so a `match` cannot list it case by case: such a `match` is the compile
-error `syntax` (E4). How sets are combined is D17; the
+set is not one case, so a `match` cannot list it case by case. *(proposed: such a `match` is the
+compile error `syntax` (E4), the id the reference has for text no rule gives a meaning; a parser
+cannot tell it from a `match` on an enum, so the check is the type checker's, and an id of its
+own is a question for a design round)* How sets are combined is D17; the
 case tests a set of one name.
 
 Case: [data/flags.kz](../corpus/data/flags.kz)

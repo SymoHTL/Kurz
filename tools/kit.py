@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -45,12 +46,15 @@ CONFLICT = re.compile(r"^(<<<<<<< |>>>>>>> )", re.M)
 # A trailer line that names a co-author or a signer by the GitHub no-reply address of an account. The
 # forge writes such lines into a squash, and the line publishes no more than the author line of the
 # same commit does, which no gate reads (HAZARD #12). Anywhere else the address is machine-bound.
-NOREPLY_TRAILER = re.compile(r"(?im)^(?:co-authored-by|signed-off-by):[^<\n]*<[A-Za-z0-9+._-]+@users\.noreply\.github\.com>[ \t]*$")
+# Only the address is taken out (message_text); the rest of the line is scanned like the message.
+NOREPLY_TRAILER = re.compile(r"(?im)^((?:co-authored-by|signed-off-by):[^<\n]*<)[A-Za-z0-9+._-]+@users\.noreply\.github\.com(>[ \t]*)$")
 
 
 def message_text(message):
-    """A commit message as the patterns read it: without the trailer lines of NOREPLY_TRAILER."""
-    return NOREPLY_TRAILER.sub("", message)
+    """A commit or tag message as the patterns read it: the GitHub no-reply address is taken out of
+    every trailer line of NOREPLY_TRAILER, and the rest of the line stays, so that a machine-bound
+    string in the name part is still found."""
+    return NOREPLY_TRAILER.sub(r"\1\2", message)
 # What makes the forge start no workflow for a commit. On main that is a commit nothing gated.
 SKIP_LITERALS = [r"\[skip ci\]", r"\[ci skip\]", r"\[no ci\]", r"\[skip actions\]", r"\[actions skip\]",
                  r"^skip-checks:[ \t]*true[ \t]*$"]
@@ -143,6 +147,17 @@ def skip_literal(text):
 def read(path):
     with open(path, encoding="utf-8", newline="") as f:
         return f.read().replace("\r\n", "\n")
+
+
+@contextlib.contextmanager
+def scratch(prefix):
+    """A temporary directory for a suite or a replay, removed on exit. A removal that fails (Windows
+    holds a file of a fresh git repository open for a moment) is said on stderr with the path, never
+    raised: a leftover copy must not turn a green run red or hide a red one, and must not stay unseen."""
+    with tempfile.TemporaryDirectory(prefix=prefix, ignore_cleanup_errors=True) as path:
+        yield path
+    if os.path.exists(path):
+        print(f"WARNING: could not remove {path}: left behind", file=sys.stderr)
 
 
 def load_yaml(text):
@@ -238,6 +253,9 @@ def self_test():
         codes = (report([]), report([("a", True, "")]), report([("a", True, ""), ("b", False, "why")]))
     cases.append(("report: no case at all is a failure, and so is one failed case", codes == (1, 0, 1), codes))
     cases.append(("report: the summary line counts cases and failures", "2 cases, 1 failed" in said.getvalue(), said.getvalue()[-80:]))
+    with scratch("kit-scratch-") as path:
+        there = os.path.isdir(path)
+    cases.append(("scratch: the directory is there inside the block and gone after it", there and not os.path.exists(path), path))
     return report(cases)
 
 

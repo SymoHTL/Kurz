@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Lint for the knowledge store: knowledge/, guides/ and INDEX.md. Fails on: an INDEX link to a
 missing file, a store file no INDEX line links to, a path of a store file that does not exist,
-written in an entry, in CLAUDE.md, in the review rules or in a skill, a link in a store file that,
-resolved from that file as GitHub resolves it, reaches no entry or no file or leaves the repository,
+written in an entry, in CLAUDE.md, in the review rules or in a skill, a link in a store file (inline
+or reference-style, to a file of any kind, read outside code spans and fences and percent-decoded)
+that, resolved from that file as GitHub resolves it and in its exact spelling, reaches no entry or no
+file or leaves the repository,
 an INDEX line without a hook after its em dash,
 an entry whose frontmatter lacks a non-empty name, description or metadata.type, a nested or
 non-.md file under knowledge/ or guides/, an entry tagged LIVING without a mermaid block or an
@@ -25,6 +27,7 @@ import posixpath
 import re
 import sys
 import tempfile
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
@@ -44,8 +47,11 @@ META_TYPE = re.compile(r"^metadata:[ \t]*\n(?:[ \t]+\S.*\n)*?[ \t]+type:[ \t]*" 
 LINK = r"\]\(((?:knowledge|guides)/[^)#]+\.md)(?:#[^)]*)?\)"  # an #anchor is still a link
 # The path of a store file, as prose, rules and skills write it: in a link or in backticks.
 REFERENCE = re.compile(r"(?<![\w/.-])((?:knowledge|guides)/[A-Za-z0-9._-]+\.md)")
-# A link to a Markdown file, as a store file writes it: relative to itself, or from the root with a "/".
-RELATIVE = re.compile(r"\]\(([^)\s#]+\.md)(?:#[^)]*)?\)")
+# A link as a store file writes it, relative to itself or from the root with a "/": inline, `[text](target "title")`,
+# or reference-style, `[name]: target`. The target is read percent-decoded, as GitHub reads it.
+INLINE = re.compile(r"\]\(([^)\s]+)(?:[ \t]+\"[^\"]*\")?\)")
+DEFINED = re.compile(r"^[ \t]{0,3}\[[^\]]+\]:[ \t]*(\S+)", re.M)
+CODE = re.compile(r"```.*?```|`[^`\n]*`", re.S)  # code spans and fences: GitHub shows a link there as text
 URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")  # https:, mailto: and the like: not a file of this tree
 
 
@@ -74,24 +80,40 @@ def expiry(rel, fm, today):
     return errors, [f"{rel}: numbers expire in {left} days" + (": regenerate soon" if left <= 7 else "")]
 
 
+def exists_exactly(root, path):
+    """True when `path` is under `root` in exactly this spelling, part by part. GitHub resolves a link
+    case-sensitively, the file systems of Windows and macOS do not, so os.path.isfile would pass a
+    link here that is broken on the page."""
+    here = root
+    for part in path.split("/"):
+        if not os.path.isdir(here) or part not in os.listdir(here):
+            return False
+        here = os.path.join(here, part)
+    return True
+
+
 def link_errors(root, rel, body, files):
     """Errors for the links of one store file, resolved as GitHub resolves them: from the file's own
-    directory, or from the root when the target starts with "/". REFERENCE reads only the spelling
-    from the root, which the rules and the skills use; inside the store a link is written relative
-    to its file. A link into the store must reach an entry, a link out of it a file."""
-    errors = []
-    for target in sorted(set(RELATIVE.findall(body))):
-        if URL.match(target):
-            continue
+    directory, or from the root when the target starts with "/", percent-decoded, in the exact
+    spelling, and read outside code spans and fences, where GitHub shows a link as text. REFERENCE
+    reads only the spelling from the root, which the rules and the skills use; inside the store a
+    link is written relative to its file. A link into the store must reach an entry, a link out of
+    it a file or a directory."""
+    errors, prose = [], CODE.sub("", body)
+    for raw in sorted(set(INLINE.findall(prose)) | set(DEFINED.findall(prose))):
+        written = raw.split("#", 1)[0]  # the target as the file spells it, without the anchor
+        target = urllib.parse.unquote(written)
+        if not target or URL.match(target):
+            continue  # an anchor of this page, or https:, mailto: and the like
         rooted = target.startswith("/")
         path = posixpath.normpath(target.lstrip("/") if rooted else posixpath.join(posixpath.dirname(rel), target))
         if path == ".." or path.startswith("../"):
-            errors.append(f"{rel} links {target}, which leaves the repository")
+            errors.append(f"{rel} links {written}, which leaves the repository")
         elif path.split("/")[0] in STORE:
             if path not in files:
-                errors.append(f"{rel} links {target}, which resolves to {path}: no entry of the store")
-        elif not os.path.isfile(os.path.join(root, path)):
-            errors.append(f"{rel} links {target}, which resolves to {path}: no such file")
+                errors.append(f"{rel} links {written}, which resolves to {path}: no entry of the store")
+        elif not exists_exactly(root, path):
+            errors.append(f"{rel} links {written}, which resolves to {path}: no such file in this spelling")
     return errors
 
 
@@ -199,7 +221,7 @@ def lint(root, floor=FLOOR, today=None, whole=True):
 
 def self_test():
     """Each rule against a tree built to break it. A rule that never fired here is not a gate."""
-    with tempfile.TemporaryDirectory(prefix="lint-knowledge-", ignore_cleanup_errors=True) as base:
+    with kit.scratch("lint-knowledge-") as base:  # a removal that fails is said, not raised
         return cases_in(base)
 
 
@@ -326,6 +348,22 @@ def cases_in(base):
         "a link from a guide up to a root file that is not there": (
             tree({**good, "guides/g.md": ok(5) + "see [the rules](../CLAUDE.md)\n"}),
             "guides/g.md links ../CLAUDE.md, which resolves to CLAUDE.md: no such file"),
+        "a link to a file that is not Markdown, which is not there": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../tools/gone.py)\n"}),
+            "knowledge/r.md links ../tools/gone.py, which resolves to tools/gone.py: no such file"),
+        "a link with a title is a link": (
+            tree({**good, k + "r.md": ok(4) + "see [it](gone.md \"the title\")\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a reference-style link is a link": (
+            tree({**good, k + "r.md": ok(4) + "see [it][1]\n\n[1]: gone.md\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a link spelled in another case than the file is broken on the page, whatever the file system says": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../tools/X.py)\n", "tools/x.py": "code\n"}),
+            "knowledge/r.md links ../tools/X.py, which resolves to tools/X.py: no such file"),
+        "a link shape inside a code span or a fence is text, not a link": (
+            tree({**good, k + "r.md": ok(4) + "write `[it](gone.md)`, as in\n\n```text\n[it](gone.md)\n```\n"}), None),
+        "a percent-encoded target is decoded before the lookup": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../tools/my%20note.txt) and [that](e%30.md)\n", "tools/my note.txt": "x\n"}), None),
         # base/outside.md is there, so only the rule on leaving the repository can refuse this link.
         "a link that leaves the repository": (
             tree({**good, k + "r.md": ok(4) + "see [it](../../outside.md)\n"}),

@@ -34,9 +34,10 @@ hand was a script per pull request, twice, before the third-time rule made it th
    is read, and what it asks is answered as the thread rule says for the file the thread sits on
    (an edit, or on tool, workflow or hook code also a reply), and
    the thread is resolved by hand, since the gate has no file to check; a thread on tool, workflow or hook
-   code (`tools/`, `.github/`, `.githooks/`) with "the file did not change" gets its reply and is
-   resolved by hand, since the tool resolves edits only; a thread elsewhere with "the file did not
-   change" means the push missed a fix, which is the next round's one push; of several files
+   code (`tools/`, `.github/`, `.githooks/`) with "the file did not change", "none of its files
+   changed" or "not every file changed" gets its reply and is
+   resolved by hand, since the tool resolves edits only; a thread elsewhere with any of those three
+   reasons means the push missed a fix, which is the next round's one push; of several files
    the ones that did not change each follow that rule, a reply for tool, workflow or hook code
    and an edit elsewhere; a thread in which a person wrote is read and answered, and then
    follows the rule of the others, an edit of its file or a reply on tool, workflow or hook code,

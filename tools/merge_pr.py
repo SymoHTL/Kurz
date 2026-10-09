@@ -19,7 +19,9 @@ this tool writes them into the commit on main.
 --over-red is the gate-flip: the owner approved merging THIS head with THESE checks not green. The
 ruleset is switched off for the one merge, restored on every exit path and read back. While it is
 off nothing on the server holds any pull request or any push to main: the checks and the threads
-are read again once it is off, and a change since the decision merges nothing. Exit 3 means the
+are read again once it is off, and a change that second reading finds merges nothing; a change
+between the second reading and the merge call is caught by nobody, which is why nothing else may
+merge or push meanwhile (the owner's judgment step, HAZARD #3). Exit 3 means the
 ruleset was not read back as active, so it may still be off, until someone reads it back and
 switches it on; so the approval is per item and never standing. The tool cannot
 verify the approval: it is the caller's statement (HAZARD #3), and the record says so. The waiver
@@ -256,11 +258,24 @@ def send(path, payload, method="PUT"):
 
 
 def drift(states, threads, now_states, now_threads):
-    """What a second reading finds changed since the one the decision judged. With the ruleset off
-    for an over-red merge nothing on the server holds the merge, so a check or a thread that
-    changed in between refuses it."""
-    checks = [f"the checks are now {now_states}, the decision read {states}"] if now_states != states else []
-    return checks + ([f"the threads changed: {len(threads)} read for the decision, {len(now_threads)} now"] if now_threads != threads else [])
+    """What a second reading finds changed since the one the decision judged: the checks as
+    head_states reads them and the threads as pr_gates.fetch_threads lists them, each compared with
+    the same kind of value the decision read. With the ruleset off for an over-red merge nothing on
+    the server holds the merge, so a check or a thread that changed before the second reading
+    refuses it; what changes after it is caught by nobody. A thread is named by its id, so one that
+    changed state without a change of count is named too."""
+    changed = [f"the checks are now {now_states}, the decision read {states}"] if now_states != states else []
+    if now_threads != threads:
+        was, now = {t.get("id"): t for t in threads}, {t.get("id"): t for t in now_threads}
+        differ = sorted(str(i) for i in set(was) | set(now) if was.get(i) != now.get(i))
+        changed.append(f"the threads changed: {len(threads)} read for the decision, {len(now_threads)} now; "
+                       f"{len(differ)} added, gone or changed: {', '.join(differ)[:300]}")
+    return changed
+
+
+class Drift(kit.Refused):
+    """The second reading found a change since the decision: the merge is refused, and the reading
+    itself did not fail."""
 
 
 def merge(repo, number, sha, pr, waived, states, threads):
@@ -278,7 +293,7 @@ def merge(repo, number, sha, pr, waived, states, threads):
             step = "the second reading of the checks and the threads"
             changed = drift(states, threads, head_states(repo, sha, required(ruleset())), pr_gates.fetch_threads(repo, number))
             if changed:
-                raise kit.Refused("what the decision read has changed: " + "; ".join(changed))
+                raise Drift("what the decision read has changed: " + "; ".join(changed))
             step = "the merge call"
         answer = send(f"repos/{repo}/pulls/{number}/merge", payload)
         if answer.get("merged") is not True:  # the status alone is not the merge
@@ -286,7 +301,8 @@ def merge(repo, number, sha, pr, waived, states, threads):
         landed = True
         print(f"merged {repo}#{number} at {sha}")
     except ANSWER_ERRORS as e:
-        print(f"{step} failed: {type(e).__name__}: {e}")
+        print(f"REFUSED: {e}. The merge was not sent; the approval is given again for the new state, or not at all"
+              if isinstance(e, Drift) else f"{step} failed: {type(e).__name__}: {e}")
         # Only an answer of the forge that says no is a refusal. A call that died on the way
         # (a timeout, a 5xx, an answer nobody could read) may still land after the read-back.
         # A switch-off that failed, and a second reading that failed or found a change, sent no merge
@@ -491,7 +507,9 @@ def self_test():
         kit.gh_json = saved
     case("read: the tool asks the forge for the list of statuses, and reads the review from it",
          isinstance(read, dict) and read["review"] == "success" and any("/statuses?" in p for p in asked), (read, asked))
-    # the cases below edit the captured statuses (a test may edit a loaded payload); without them they fail
+    # the cases below edit the captured statuses (a test may edit a loaded payload). The stand-ins for an
+    # empty capture keep the suite running to its report; the two cases above, which need a status in
+    # each capture, are the floor that fails it then
     from_list = statuses[0] if statuses else {"context": "review"}  # from the list: it names its creator
     from_combined = trap[0] if trap else {"context": "review"}  # from the combined status: no creator
     two = [dict(from_list, state="error", id=1), dict(from_list, state="success", id=2)]
@@ -724,15 +742,20 @@ def self_test():
             # what the second reading finds: the checks the decision read with these changes, and these threads
             self.checks, self.threads = dict(checks or {}), list(threads)
             self.calls, self.reads, self.enforcement, self.payload, self.records = [], [], "active", None, []
+            self.asked = []  # what the second reading asked the forge for
 
         def head_states(self, repo, head, contexts):
             self.calls.append("checks")  # the second reading is logged with the writes, for its place between them
+            self.asked.append(("checks", head, dict(contexts)))
             if "checks" in self.fail:
                 raise self.error or kit.Refused("the forge refused the checks")
             return {**red, **self.checks}
 
         def fetch_threads(self, repo, number):
             self.calls.append("threads")
+            self.asked.append(("threads", number))
+            if "threads" in self.fail:
+                raise self.error or kit.Refused("the forge refused the threads")
             return list(self.threads)
 
         def send(self, path, payload, method="PUT"):
@@ -772,15 +795,15 @@ def self_test():
                 raise self.error or kit.Refused("refused")
             return [{"body": body} for body in self.records]
 
-    def flip(waived, **how):
+    def flip(waived, decided=(), **how):
         fake, g = Flip(**how), globals()
         saved = g["send"], g["find_ruleset"], g["head_states"], pr_gates.fetch_threads, kit.gh_json, kit.gh_pages, time.sleep
         (g["send"], g["find_ruleset"], g["head_states"], pr_gates.fetch_threads, kit.gh_json, kit.gh_pages,
          time.sleep) = (fake.send, (lambda repo: 7), fake.head_states, fake.fetch_threads, fake.gh_json, fake.gh_pages, (lambda seconds: None))
         try:
             with contextlib.redirect_stdout(io.StringIO()) as printed:
-                # the decision read `red` and no thread; an exception that escapes is the case's result
-                code = attempt(merge, "o/r", number, sha, ready, waived, dict(red), [])
+                # the decision read `red` and the threads `decided`; an exception that escapes is the case's result
+                code = attempt(merge, "o/r", number, sha, ready, waived, dict(red), list(decided))
         finally:
             (g["send"], g["find_ruleset"], g["head_states"], pr_gates.fetch_threads, kit.gh_json, kit.gh_pages, time.sleep) = saved
         fake.out = printed.getvalue()
@@ -806,6 +829,24 @@ def self_test():
     code, f = flip(over, threads=[{"id": "t9", "isResolved": False}])
     case("flip: a thread that appeared once the ruleset is off merges nothing, and the gate is restored",
          (code, "merge" in f.calls, f.enforcement) == (1, False, "active") and "the threads changed" in f.out, (code, f.calls, f.out))
+    captured = pr_gates.fixture_threads()  # the shape pr_gates.fetch_threads returns, as the forge really sent it
+    settled = [dict(captured[0], isResolved=True)] if captured else []  # edited: resolved, as a merge needs every thread
+    code, f = flip(over, threads=settled, decided=settled)
+    case("flip: a resolved thread that both readings hold, in the forge's own shape, is no change, and the merge goes through",
+         bool(captured) and (code, "merge" in f.calls) == (0, True), (bool(captured), code, f.calls, f.out[-300:]))
+    code, f = flip(over, threads=settled, decided=[dict(settled[0], isResolved=False)] if settled else [])
+    case("flip: a thread that changed state without a change of count is named by its id",
+         bool(captured) and code == 1 and "1 added, gone or changed: " + captured[0]["id"] in f.out, (code, f.out[-300:]))
+    code, f = flip(over, fail={"threads"})
+    case("flip: a second reading whose threads read fails merges nothing, and the gate is restored",
+         (code, "merge" in f.calls, f.enforcement) == (1, False, "active") and "the second reading of the checks and the threads failed" in f.out,
+         (code, f.calls, f.out))
+    code, f = flip(over)
+    case("flip: the second reading asks for the decision's head with the required contexts, and for this pull request's threads",
+         f.asked == [("checks", sha, required(ruleset())), ("threads", number)], f.asked)
+    code, f = flip(over, checks={"review": "running"})
+    case("flip: a change the second reading found is printed as a refusal, not as a reading that failed",
+         "REFUSED: what the decision read has changed" in f.out and "failed:" not in f.out, f.out)
     code, f = flip(over, fail={"checks"})
     case("flip: a second reading that fails merges nothing, and the gate is restored",
          (code, "merge" in f.calls, f.enforcement) == (1, False, "active"), (code, f.calls, f.out))

@@ -7,7 +7,7 @@ void Log() {
     print("log")
 }
 
-acc = Account("a@example.com")
+acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
     Log()

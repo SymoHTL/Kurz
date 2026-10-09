@@ -510,7 +510,7 @@ use mysql allow network        // may touch: network only
 
 - **Permissions.** Whole-program compilation knows which package opens sockets, reads files, calls C or contains `raw` blocks (section 3). A package that exceeds what the project granted fails to compile.
 - **Source only.** The whole-program checks (cycle rule, deadlock rule, permissions, `mock`) need the source, so closed-source binary packages of Kurz code cannot exist. *(assumed)*
-- **Home.** A git URL plus a version, pinned by content hash in a lock file. There is no central registry to run; a registry is an index over git.
+- **Home.** A git URL plus a version, pinned by content hash in a lock file. There is no central registry to run; a registry, where one exists, is an index over git (the owner, 2026-10-01, round 4).
 - **Versions.** The resolver picks the lowest version that satisfies everyone, as Go does and as NuGet does for transitive packages: no surprise upgrades, and a security fix needs an explicit bump.
   - One version of a package per program; two versions would mean two copies of each type and of each `per cluster` actor inside. *(assumed)*
   - The compiler checks version numbers: `kurz release` compares the `pub` surface with the last release, with the same machinery as for `open`, and a breaking change without a major bump is an error. *(assumed)*
@@ -559,7 +559,7 @@ Browsers (through WebAssembly), apps and microcontrollers take part, but not as 
   - A `secret` field in a normal type is stripped when the value crosses and does not exist on the other side: code there that touches it is a compile error. No separate type per side is needed. A secret lives on the side whose code touches it; both sides touching it is a compile error.
   - A whole `secret data` type cannot cross at all; trying is a compile error. A private key marked this way provably never leaves the client.
   - The only way across is `Sealed<T>`, in the box: the value is encrypted on the sending client for named recipients, and the server stores and routes bytes it cannot open. This is what end-to-end encrypted apps build on.
-  - Key exchange, several devices per user and groups are a first-party package. The cipher primitives come through the C-ABI, as with TLS.
+  - Key exchange, several devices per user and groups are a first-party package. The cipher primitives come through the C-ABI, as with TLS; where they come from in the long run is open (section 14).
   - Limits: the server cannot validate, search or index sealed content, so constraints run on the receiving client after opening. In a browser the server delivers the client code, so a compromised server can ship code that leaks keys; a native app and a flashed device do not have that hole. Who talks to whom, when and how much stays visible.
 - Limits per client connection (message size, messages in flight, rate) are on by default and set in the `deploy` block; a client that exceeds them is disconnected. *(assumed)*
 - Transport is the runtime's job: WebSocket for browsers, a TLS socket for devices, the Kurz binary format on both. The UI toolkit in the browser is a package, like graphics. *(assumed)*
@@ -663,6 +663,28 @@ Goal (the owner, 2026-10-01): Kurz should not be meaningfully slower than C++ in
 - What a full inbox does to a waiting call under the `drop` modes.
 - Over-the-air update for devices: a runtime feature or later. A device that gets `Outdated` has to be able to update itself.
 - Where the TLS cipher primitives come from in the long run.
+- What the review of the reference's cases left for a design round on 2026-10-08, by rule id. Each is a reading nobody made, not a decision; a round asks them by number:
+  - Integer types: whether C#'s `nint` and `nuint` are in "the full C# set" the record names.
+  - L9: whether a letter in a name is any Unicode letter, as in C#, or ASCII only, and whether `@` names exist.
+  - L11: whether number literals take all of C#'s forms (exponents, every suffix spelling, `0x_FF`) or only the forms listed.
+  - L13: `"""abc"""` on one line, text after an opening `"""`, text before a closing one: valid, `syntax`, or an id of its own; and whether a whitespace-only line is exempt from the indentation rule, as in C# 11.
+  - L14: whether a fraction, a hexadecimal or a suffixed literal may carry a unit, and whether a duration beyond 64 bits of nanoseconds is `constant-overflow`.
+  - T6: whether `2147483647 +% 1` and `byte(300)` are `constant-overflow` or the wrapped value.
+  - T12: whether `+%`, `-%` and `*%` take the precedence of `+`, `-` and `*`.
+  - T21: whether a `char` literal such as `'a'` exists; if not, which error `'a'` is.
+  - D3: whether a `data` value with a NaN field is equal to itself (as C# records compare) or unequal (as `==` on the field gives).
+  - K5: whether operator declarations exist, and whether a class member that defines equality is an ordinary member or a compile error, with which id.
+  - K: whether a method that implements an interface method must be written `pub`; left out, public anyway or which error.
+  - F11: whether a function type's result may be `void`, and whether `(int) => int?` returns an `int?` or makes the function nullable.
+  - F: whether arguments are evaluated in the order written, and whether a default value is a constant or any expression evaluated at each call.
+  - C8: the type of a range and its loop variable when the ends differ (`0..<n` with `n` a `long` or a `uint`), and which error when they cannot meet.
+  - C1: whether `if (x > 5) {` is a grouped condition or an error, and whether `{` on the next line is allowed, with which id.
+  - E1: which line an error in a construct spread over several lines reports.
+  - C4: when a value fits several arms (`Admin : User`), whether the first runs; whether an arm may name a subtype that is no case; whether an arm that never runs is an error.
+  - O4: a written union type that lists only some of a call's cases: whether the others leave as by O2, or `type-mismatch`.
+  - Run-time errors: when a child exhausts its stack or an allocation fails, whether that is a `Reason` member or the end of the process.
+  - F16: in `count = count + 1` on a captured variable, which error is reported first; K7: which error id an override with another return type raises.
+  - The readings the reference marks *(proposed)*, to confirm or refuse: L1 (UTF-8 source, no normalization), D13 (a `match` on a flags value is `syntax`, through E4), A9 (`print` inside the class needs a `pub Text()` too), and the candidates T28, T29, A10, F16's reach, K14 and K7.
 
 ## 15. Prototype
 

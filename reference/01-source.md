@@ -4,20 +4,12 @@
 
 A source file has the extension `.kz`. *(proposed: a source file is read as UTF-8, and a string
 literal holds the code points written in it, as they are written, without normalization; the
-cases below count the characters and bytes of such a literal)*
+case below prints such a literal as written, and the string cases of T15 and T16 count its
+characters and bytes)*
 
-Case: [types/string-bytes.kz](../corpus/types/string-bytes.kz)
+Case: [source/utf8-literal.kz](../corpus/source/utf8-literal.kz)
 ```kurz
-s = "aä"
-print(s.Bytes.Count)
-print(s.Bytes[0])
-```
-
-Case: [types/string-chars.kz](../corpus/types/string-chars.kz)
-```kurz
-s = "aä😀"
-print(s.Chars.Count)
-print(s.Bytes.Count)
+print("aä")
 ```
 
 ### L2 (decided, §8) A newline ends a statement
