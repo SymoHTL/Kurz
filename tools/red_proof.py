@@ -141,14 +141,26 @@ def check(root, floor=FLOOR):
     return errors, stats
 
 
-def copy_of_tree():
-    """A scratch copy of the repository, so that a mutation never touches the working tree."""
-    tmp = tempfile.mkdtemp(prefix="red-proof-")
-    shutil.copytree(kit.ROOT, os.path.join(tmp, "tree"), ignore=shutil.ignore_patterns(".git", "__pycache__"))
-    return os.path.join(tmp, "tree")
+def copy_of_tree(into):
+    """A copy of the repository under `into`, so that a mutation never touches the working tree."""
+    target = os.path.join(into, "tree")
+    shutil.copytree(kit.ROOT, target, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+    return target
+
+
+def replay():
+    """check() on a scratch copy of the repository, which is removed afterwards, whatever check() ended in."""
+    with tempfile.TemporaryDirectory(prefix="red-proof-", ignore_cleanup_errors=True) as tmp:
+        return check(copy_of_tree(tmp))
 
 
 def self_test():
+    with tempfile.TemporaryDirectory(prefix="red-proof-cases-", ignore_cleanup_errors=True) as base:
+        return cases_in(base)
+
+
+def cases_in(base):
+    """The cases of self_test, every tree a directory under `base`."""
     toy = ('import sys\n'
            'def add(a, b):\n    return a + b\n'
            'if __name__ == "__main__":\n'
@@ -177,7 +189,7 @@ def self_test():
     assert quiet != toy and lying != toy and late != toy
 
     def tree(files, ledger):
-        root = tempfile.mkdtemp()
+        root = tempfile.mkdtemp(dir=base)
         os.mkdir(os.path.join(root, "tools"))
         for name, text in {**files, "red_proofs.json": json.dumps(ledger)}.items():
             with open(os.path.join(root, "tools", name), "w", encoding="utf-8") as f:
@@ -223,8 +235,28 @@ def self_test():
         errors, _ = check(root, floor=1)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
     root = tree({"toy.py": toy}, [proof])
-    check(root, floor=1)
-    cases.append(("the mutated file is restored", kit.read(os.path.join(root, "tools", "toy.py")) == toy, ""))
+    errors, _ = check(root, floor=1)  # no error: the replay did write the mutation before it restored the file
+    cases.append(("the mutated file is restored", not errors and kit.read(os.path.join(root, "tools", "toy.py")) == toy, errors))
+    seen = []
+
+    def small_copy(into):
+        target = os.path.join(into, "tree")
+        os.mkdir(target)
+        return target
+
+    def noting_check(tree_root, floor=FLOOR):
+        seen.append(tree_root if os.path.isdir(tree_root) else None)
+        return [], {}
+
+    g = globals()
+    saved = g["check"], g["copy_of_tree"]
+    g["check"], g["copy_of_tree"] = noting_check, small_copy
+    try:
+        replayed = replay()
+    finally:
+        g["check"], g["copy_of_tree"] = saved
+    cases.append(("a replay removes the copy it checked",
+                  replayed == ([], {}) and len(seen) == 1 and bool(seen[0]) and not os.path.exists(os.path.dirname(seen[0])), seen))
     errors, _ = check(tree({"toy.py": toy}, [proof]))
     cases.append(("one tool is below the real floor", any("floor is" in e for e in errors), errors))
     here = tools_in(kit.ROOT)
@@ -248,7 +280,7 @@ def self_test():
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
-    errors, stats = check(copy_of_tree())
+    errors, stats = replay()
     for tool, s in stats.items():
         print(f"{tool}: {s['cases']} self-test cases, {s['proofs']} red proofs")
     for e in errors:

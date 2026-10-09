@@ -48,7 +48,7 @@ def block_gates(root):
 
 
 def block_self_tests(root):
-    errors, stats = red_proof.check(red_proof.copy_of_tree())
+    errors, stats = red_proof.replay()
     if errors:
         raise kit.Refused(f"the self-tests are not green, so their numbers are not evidence: {errors[0]}")
     rows = [(f"`{tool}`", s["cases"], s["proofs"]) for tool, s in stats.items()]
@@ -280,12 +280,11 @@ def self_test():
     cases.append(("reference: rules by status, cases and error ids are counted, each row from its own key",
                   all(row in str(green_reference) for row in rows) and str(green_reference).count("|") == 10 * 3, green_reference))
 
-    saved = red_proof.check, red_proof.copy_of_tree, kit.repo, kit.gh_pages
-    red_proof.copy_of_tree = lambda: root
+    saved = red_proof.replay, kit.repo, kit.gh_pages
     try:
-        red_proof.check = lambda tree: (["tools/x.py: its self-test does not pass (exit 1)"], {"tools/x.py": {"cases": 3, "proofs": 1}})
+        red_proof.replay = lambda: (["tools/x.py: its self-test does not pass (exit 1)"], {"tools/x.py": {"cases": 3, "proofs": 1}})
         red = got(block_self_tests, root)
-        red_proof.check = lambda tree: ([], {"tools/x.py": {"cases": 3, "proofs": 1}, "tools/y.py": {"cases": 2, "proofs": 2}})
+        red_proof.replay = lambda: ([], {"tools/x.py": {"cases": 3, "proofs": 1}, "tools/y.py": {"cases": 2, "proofs": 2}})
         green = got(block_self_tests, root)
 
         finding = lambda severity: f'<!-- kurz-review:findings [{{"file": "a.md", "line": 1, "severity": "{severity}", "title": "t"}}] -->'
@@ -318,7 +317,7 @@ def self_test():
         kit.repo, kit.gh_pages = (lambda: "o/n"), pages
         forge = got(block_forge, root)
     finally:
-        red_proof.check, red_proof.copy_of_tree, kit.repo, kit.gh_pages = saved
+        red_proof.replay, kit.repo, kit.gh_pages = saved
     cases.append(("self-tests: numbers from a red self-test are refused", isinstance(red, kit.Refused) and "not green" in str(red), repr(red)))
     cases.append(("self-tests: a green run is a table with its totals", "| **total** | 5 | 3 |" in str(green), green))
     cases.append(("forge: pull requests, merges and open hazard issues are counted, and a pull request is no issue",
