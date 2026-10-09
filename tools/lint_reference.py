@@ -4,8 +4,9 @@ two places: `reference/*.md` holds the rules, `corpus/**/*.kz` holds the cases. 
 the cases, so this lint keeps the two from drifting apart. It checks shape, never meaning.
 
   lint_reference.py           check
-  lint_reference.py --sync    rewrite the sample under every `Case:` line from its corpus file, naming
-                              each chapter as it is written
+  lint_reference.py --sync    rewrite the sample under every `Case:` line the lint accepts (outside a
+                              code block, inside a rule, its text equal to its path) from its corpus
+                              file, naming each chapter as it is written
 
 A rule is a heading `### <ID> (<status>[, §n ...])` with status decided, assumed, proposed or open
 (reference/00-about.md says what each means). A sample in the reference is a `Case:` line that
@@ -34,7 +35,6 @@ Fails on:
   any other head or outside a table, since its id would go unchecked;
 - a design record that cannot be read, said once instead of as every section it would lack;
 - fewer rules or cases than the floors."""
-import contextlib
 import os
 import re
 import sys
@@ -50,7 +50,8 @@ ERROR_ROW = re.compile(r"\| `([a-z][a-z-]*)` \| ([A-Z]\d+(?:, [A-Z]\d+)*) \| .*\
 EXPECT = re.compile(r"// expect: (?:(output)|(throws) ([a-z][a-z-]*) at (\d+)|error ([a-z][a-z-]*) at (\d+))")
 RUNTIME_TABLE = "## Run-time errors"
 ERROR_HEAD = "| id | rules | meaning |"  # an error table starts with this line, and every row under it is read
-SEPARATOR = re.compile(r"\|(?:-+\|)+")
+# the separator under a table head, in every form GitHub takes: bare, with spaces, with alignment colons
+SEPARATOR = re.compile(r"\|(?:[ \t]*:?-+:?[ \t]*\|)+")
 # a fence the lint would not see: Markdown also opens a block with a fence indented up to three spaces, or of tildes
 LOOKALIKE = re.compile(r" {1,3}```| {0,3}~~~")
 
@@ -96,7 +97,7 @@ def read_tree(root):
                 cases[os.path.relpath(full, os.path.join(root, "corpus")).replace(os.sep, "/")] = kit.read(full)
     try:
         record = kit.read(os.path.join(root, "kurz-design.md"))
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:  # a record that is not UTF-8 is unread, like one that is not there
         return chapters, cases, None, f"{type(e).__name__}: {e}"
     parts = re.split(r"(?m)^## (\d+)\. .*$", record)
     return chapters, cases, dict(zip(parts[1::2], parts[2::2])), None
@@ -120,23 +121,24 @@ def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
             where = f"{chapter}:{n + 1}"
             if line.strip() == RUNTIME_TABLE:
                 table = "throws"
-            if LOOKALIKE.match(line):
-                errors.append(f"{where}: a fence that is indented or made of tildes: the lint reads only ``` at the start of a line")
             if fence is not None:
                 if line == "```":
                     fence = None
                 if not line.startswith("```") or fence is None:
-                    continue
-                # another fence inside an open block: the block was never closed, and this line opens the next one
+                    continue  # content, an indented or a tilde fence included: a block holds Kurz or text, not Markdown
+                # three backticks inside an open block: the block was never closed, and this line opens the next one
                 errors.append(f"{where}: a code block that is never closed: a fence opens here inside it")
             if line.startswith("```"):
                 fence = line[3:]
+                in_table = False  # a fence ends a table: what follows the block is another table, or none
                 sample_of_case = n > 0 and CASE.fullmatch(lines[n - 1])
                 if fence == "kurz" and not sample_of_case:
                     errors.append(f"{where}: a Kurz sample that is not a corpus case: put a `Case:` line directly above it")
                 elif fence not in ("kurz", "text"):
                     errors.append(f"{where}: a code block marked neither `kurz` nor `text`")
                 continue
+            if LOOKALIKE.match(line):
+                errors.append(f"{where}: a fence that is indented or made of tildes: the lint reads only ``` at the start of a line")
             if line == ERROR_HEAD:
                 in_table = True
                 continue
@@ -286,11 +288,16 @@ def sync(root, say=print):
                 f.write("\n".join(out))
             os.replace(tmp, path)
         except OSError as e:
+            leftover = ""
             if tmp:
-                with contextlib.suppress(OSError):
+                try:
                     os.remove(tmp)
+                except FileNotFoundError:
+                    pass  # the failed write took it along
+                except OSError as still:  # a leftover is said with its path, never hidden
+                    leftover = f"; its temporary file {tmp} could not be removed ({still}): remove it by hand"
             raise kit.Refused(f"wrote only {len(written)} of {len(new)} chapters ({', '.join(written) or 'none'}); "
-                              f"{chapter} failed: {e}") from e
+                              f"{chapter} failed: {e}{leftover}") from e
         written.append(chapter)
         say(f"rewrote the samples of {chapter}")
     return written
@@ -394,9 +401,17 @@ def cases_in(base):
         "an indented fence of tildes": (tree(edit(ref, "Nobody chose.", "Nobody chose.\n\n  ~~~\ny = 1\n  ~~~")), "indented or made of tildes"),
         "an error-table row that misses its pattern": (tree(edit(ref, "| `assign-immutable` | V2 |", "| assign-immutable | V2 |")),
                                                        "an error-table row that does not read"),
-        "a row that reads as an error id under another head is refused, not read as an id and not passed over": (
+        "a row that reads as an error id under another head is refused": (
             tree(edit(ref, "## Errors\n", "| word | rules | meaning |\n|---|---|---|\n| `ghost` | V1 | elsewhere |\n\n## Errors\n")),
             "outside a table headed"),
+        "a separator with spaces and alignment colons is a separator, not a broken row": (
+            tree(edit(ref, "|---|---|---|\n| `assign-immutable` | V2 |", "| :--- | --- | ---: |\n| `assign-immutable` | V2 |")), None),
+        "a tilde line or an indented fence inside a block is content, not a lookalike fence": (
+            tree(edit(ref, "Nobody chose.", "Nobody chose.\n\n```text\n~~~\n  ```\n```")), None),
+        "a code block right after an error table ends the table: a later table's head is no error row": (
+            tree(edit(ref, "| `assign-immutable` | V2 | a second assignment |\n\n## Run-time errors",
+                      "| `assign-immutable` | V2 | a second assignment |\n```text\nx\n```\n| a | b |\n|---|---|\n| x | y |\n\n## Run-time errors")),
+            None),
     }
     def attempt(fn, *args):
         """The result, or the exception as a value: a broken lint then fails the case that met it instead of ending the suite."""
@@ -424,6 +439,16 @@ def cases_in(base):
     cases.append(("an unreadable record is reported once, not as sections it lacks",
                   sum("kurz-design.md cannot be read" in e for e in unread) == 1
                   and not any("which kurz-design.md does not have" in e for e in unread), unread))
+    garbled = tree()
+    with open(os.path.join(garbled, "kurz-design.md"), "wb") as f:
+        f.write(b"\xff\xfe## 1. Goals\n")  # not UTF-8
+    undecoded = errors_of(garbled)
+    cases.append(("a record that is not UTF-8 is reported once as unread, not as a crash",
+                  sum("kurz-design.md cannot be read (UnicodeDecodeError" in e for e in undecoded) == 1, undecoded))
+    ghost = errors_of(tree(edit(ref, "## Errors\n", "| word | rules | meaning |\n|---|---|---|\n| `ghost` | V1 | elsewhere |\n\n## Errors\n")))
+    cases.append(("a row refused outside an error table is not read as an id: no other error names it",
+                  any("outside a table headed" in e for e in ghost) and not any("ghost" in e for e in ghost if "outside a table headed" not in e),
+                  ghost))
     with_output = header("// expect: output\n// | a\n// | b\n// build: test\n// rules: V1, V2\n\nprint(1)\n")
     cases.append(("a header with output lines and a build is read", isinstance(with_output, dict) and with_output["rules"] == ["V1", "V2"], with_output))
     cases.append(("a build that does not exist is refused", header("// expect: throws overflow at 4\n// build: debug\n// rules: V1\n\nx\n") is None, ""))
@@ -502,6 +527,22 @@ def cases_in(base):
         tempfile.mkstemp = real_mkstemp
     cases.append(("--sync: a temporary file that cannot be made is the same refusal, naming the chapter written before it",
                   isinstance(refusal, kit.Refused) and f"wrote only 1 of 2 chapters ({first})" in str(refusal), repr(refusal)))
+    stuck_tree = tree(edit(ref, "print(x + 5)\n```", "print(x + 6)\n```"))
+    real_replace, real_remove = os.replace, os.remove
+
+    def locked(*args):
+        raise PermissionError("locked")
+    try:  # the write fails, and so does the removal of its temporary file
+        os.replace, os.remove = locked, locked
+        stuck = attempt(sync, stuck_tree, quiet)
+    finally:
+        os.replace, os.remove = real_replace, real_remove
+    leftovers = [f for f in os.listdir(os.path.join(stuck_tree, "reference")) if f.endswith(".tmp")]
+    for f in leftovers:
+        os.remove(os.path.join(stuck_tree, "reference", f))
+    cases.append(("--sync: a temporary file that cannot be removed after a failed write is named in the refusal, to be removed by hand",
+                  isinstance(stuck, kit.Refused) and leftovers == [f for f in leftovers if f in str(stuck)] and len(leftovers) == 1
+                  and "could not be removed" in str(stuck), (repr(stuck), leftovers)))
     return kit.report(cases)
 
 

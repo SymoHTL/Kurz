@@ -64,7 +64,7 @@ flowchart TD
   would have prevented it.
 - The review rules for the design record in `.review/review-rules.yaml` change: the nodes that
   name that section as their gate.
-- `tools/tree_gate.py` changes what it refuses: the node D5.
+- `tools/tree_gate.py` or `tools/kit.py` (its patterns) changes what is refused, or `.githooks/pre-push` changes: the node D5.
 - A HAZARD issue that a node names (1, 2, 4) closes or opens: that node.
 - A sample or a guarantee becomes checkable by a tool: the node names that tool as its gate.
 - The statuses or the format of the reference change (`reference/00-about.md`,

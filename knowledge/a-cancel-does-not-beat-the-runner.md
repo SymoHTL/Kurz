@@ -32,8 +32,9 @@ winning that race spends money at random.
 - A run that must not start is kept from starting at its trigger: a completed run of
   `review.py --local` labels the pull request `reviewed-<head sha>`, and the review workflow's job
   skips the Ready event of a pull request whose head carries that label. The label names one head,
-  so every other head is reviewed by the run its event starts (the Ready for a head pushed during
-  the Draft, the push for one pushed after Ready), and
+  so the head current at Ready and every head pushed after it are reviewed by the run their event
+  starts (the Ready, a push to the Ready pull request); a Draft head that a later push replaced
+  before Ready had no run, since a Draft is reviewed on demand only; and
   a stale label matches nothing; `tools/lint_ci.py` pins the clause and the job's name
   (`review-run`, whose skip reports a check of that name and never the required status `review`),
   and the reviewer's self-test proves the label, its name, and that a label write the forge

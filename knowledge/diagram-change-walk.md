@@ -1,6 +1,6 @@
 ---
 name: diagram-change-walk
-description: Living diagram - the walk one change takes from a branch to main, in the order the gates bite, with the places where the review and the merge send it back; the procedure itself is the skill change-walk
+description: Living diagram - the walk one change takes from a branch to main, in the order the gates bite, with the places where the gates, the review and the merge send it back; the procedure itself is the skill change-walk
 metadata:
   type: reference
 ---
@@ -66,7 +66,7 @@ flowchart TD
     O --> I
     G -- "success" --> I["read every thread; fix each finding in its file; mark Draft; push once;
     read the plan of pr_gates.py resolve --pr N --head <sha>, then resolve with --go; mark Ready again.
-    On tool and workflow code a finding that does not hold, or that a HAZARD issue records,
+    On tool, workflow and hook code a finding that does not hold, or that a HAZARD issue records,
     is answered by a reply that says so: judgment step. On every other file only the edit counts.
     Low findings are collected on the issue labelled review-lows: they are fixed together,
     or with a push that is needed anyway. Gate: pr-findings"]
@@ -76,7 +76,8 @@ flowchart TD
     J -- "yes" --> K["py -3 tools/merge_pr.py PR SHA: merges exactly that head, squash.
     Gate: the ruleset. The merge button skips what only the tool checks: HAZARD issue 14"]
     J -- "red for a cause outside the change" --> N["the owner approves this pull request and head:
-    merge_pr.py --over-red. The ruleset is off for that one merge: nothing else may merge or push meanwhile.
+    merge_pr.py --over-red. The ruleset is off for that one merge, and nothing stops another merge or push
+    in that window (HAZARD issue 27).
     Exit 1 with REFUSED: the checks or the threads changed since the decision; the ruleset is restored and
     nothing merged; the owner approves the new state again, or not at all.
     Exit 3: not read back as on; say so at once and switch it back on with the skill's commands,
@@ -100,5 +101,6 @@ flowchart TD
 - `tools/ruleset.json` changes: nodes A, J and K.
 - `tools/pr_gates.py` changes a pull-request gate: nodes D and I.
 - `tools/gates.py` changes a verdict or the gate list: nodes B2, E and L.
-- `tools/tree_gate.py`, `tools/kit.py` (its patterns), `.claude/settings.json` or `.githooks/pre-push` changes: nodes B1 and C.
-- A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 13, 14) closes or opens: that node.
+- `tools/tree_gate.py`, `tools/kit.py` (its patterns), `.claude/settings.json` or `.githooks/pre-push` changes: nodes B1 and C;
+  a change to the skip literals of `tools/kit.py` reaches node D as well.
+- A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 13, 14, 27) closes or opens: that node.

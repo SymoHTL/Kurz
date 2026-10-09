@@ -257,16 +257,26 @@ def send(path, payload, method="PUT"):
     return answer
 
 
+def by_id(threads, which):
+    """{id: thread}. A thread without an id, or two threads with one, cannot be compared by id and
+    refuse the reading, so that the comparison below never passes over a thread."""
+    ids = [t.get("id") for t in threads]
+    if None in ids or len(set(ids)) != len(ids):
+        raise kit.Refused(f"the threads {which} hold one without an id, or two with one id: the readings cannot be compared")
+    return dict(zip(ids, threads))
+
+
 def drift(states, threads, now_states, now_threads):
     """What a second reading finds changed since the one the decision judged: the checks as
     head_states reads them and the threads as pr_gates.fetch_threads lists them, each compared with
     the same kind of value the decision read. With the ruleset off for an over-red merge nothing on
     the server holds the merge, so a check or a thread that changed before the second reading
-    refuses it; what changes after it is caught by nobody. A thread is named by its id, so one that
-    changed state without a change of count is named too."""
+    refuses it; what changes after it is caught by nobody. The threads are compared by id, so the
+    same threads in another order are no change, and a thread that changed state without a change
+    of count is named by its id."""
     changed = [f"the checks are now {now_states}, the decision read {states}"] if now_states != states else []
-    if now_threads != threads:
-        was, now = {t.get("id"): t for t in threads}, {t.get("id"): t for t in now_threads}
+    was, now = by_id(threads, "the decision read"), by_id(now_threads, "the second reading found")
+    if was != now:
         differ = sorted(str(i) for i in set(was) | set(now) if was.get(i) != now.get(i))
         changed.append(f"the threads changed: {len(threads)} read for the decision, {len(now_threads)} now; "
                        f"{len(differ)} added, gone or changed: {', '.join(differ)[:300]}")
@@ -837,13 +847,21 @@ def self_test():
     code, f = flip(over, threads=settled, decided=[dict(settled[0], isResolved=False)] if settled else [])
     case("flip: a thread that changed state without a change of count is named by its id",
          bool(captured) and code == 1 and "1 added, gone or changed: " + captured[0]["id"] in f.out, (code, f.out[-300:]))
+    both = [dict(t, isResolved=True) for t in captured]  # edited: resolved, as a merge needs every thread
+    code, f = flip(over, threads=list(reversed(both)), decided=both)
+    case("flip: the same threads in another order are no change, and the merge goes through",
+         len(both) == 2 and (code, "merge" in f.calls) == (0, True), (len(both), code, f.calls, f.out[-300:]))
+    code, f = flip(over, threads=[{"isResolved": True}], decided=[{"isResolved": True}])
+    case("flip: a thread without an id refuses the second reading, with the gate restored: the readings cannot be compared",
+         (code, "merge" in f.calls, f.enforcement) == (1, False, "active") and "cannot be compared" in f.out, (code, f.calls, f.out[-300:]))
     code, f = flip(over, fail={"threads"})
     case("flip: a second reading whose threads read fails merges nothing, and the gate is restored",
          (code, "merge" in f.calls, f.enforcement) == (1, False, "active") and "the second reading of the checks and the threads failed" in f.out,
          (code, f.calls, f.out))
     code, f = flip(over)
+    # the contexts of tools/ruleset.json, written out: a wrong set, or a changed file, turns this red
     case("flip: the second reading asks for the decision's head with the required contexts, and for this pull request's threads",
-         f.asked == [("checks", sha, required(ruleset())), ("threads", number)], f.asked)
+         f.asked == [("checks", sha, {"gates": 15368, "review": 15368}), ("threads", number)], f.asked)
     code, f = flip(over, checks={"review": "running"})
     case("flip: a change the second reading found is printed as a refusal, not as a reading that failed",
          "REFUSED: what the decision read has changed" in f.out and "failed:" not in f.out, f.out)

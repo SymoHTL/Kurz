@@ -1,0 +1,6 @@
+// expect: throws index-out-of-range at 6
+// rules: M9
+
+xs = List<int>()
+xs.Add(1)
+print(xs[1])

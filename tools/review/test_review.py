@@ -11,7 +11,6 @@ import io
 import json
 import os
 import sys
-import tempfile
 import time
 import types
 
@@ -661,11 +660,16 @@ def suite(case):
          and sorted(f["line"] for m in forge.marks(rv.FINDINGS_MARK) for f in m) == list(range(1, 3 * rv.THREAD_FINDINGS + 1))
          and len(forge.collected) > 1 and len(forge.notes) > 1, (len(forge.collected), len(forge.notes)))
     forge = MemoryForge()
-    for _, post in forge.lows(HEAD, [finding(file="new.kz", line=n + 1, severity="low", title="t" * 3500, body="b") for n in range(rv.THREAD_FINDINGS)]):
-        attempt(post)
-    case("posted: a part of lows is sized as its note renders too, whose marker carries every title in full",
+    wide_title = "t" * 3500
+    outcomes = [attempt(post) for _, post in
+                forge.lows(HEAD, [finding(file="new.kz", line=n + 1, severity="low", title=wide_title, body="b") for n in range(rv.THREAD_FINDINGS)])]
+    told = [(f["line"], f["title"]) for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
+    case("posted: a part of lows is sized as its note renders too, whose marker carries every title in full, each low once",
          len(forge.collected) > 1 and all(len(c["body"]) <= rv.COMMENT_CHARS for c in forge.notes)
-         and all(len(body) <= rv.COMMENT_CHARS for _, body in forge.collected), (len(forge.collected), [len(c["body"]) for c in forge.notes]))
+         and all(len(body) <= rv.COMMENT_CHARS for _, body in forge.collected)
+         and not any(isinstance(o, Exception) for o in outcomes)
+         and sorted(told) == [(n + 1, wide_title) for n in range(rv.THREAD_FINDINGS)],
+         (len(forge.collected), [len(c["body"]) for c in forge.notes], outcomes, [(n, len(t)) for n, t in told]))
     collected = rv.render({"findings": [finding(severity="low")], "lows": (7, HEAD)})
     case("posted: the comment on the lows issue names the pull request and the head, and carries no marker",
          "pull request #7" in collected and HEAD[:8] in collected and "<!--" not in collected and "resolve this thread" not in collected, collected)
@@ -1009,6 +1013,28 @@ def suite(case):
     case("run: a comment on the issue refused after its note landed withdraws the note, so the part is not recorded as reported",
          code == 1 and told == [f"low {rv.THREAD_FINDINGS}"] and any("was withdrawn" in c["body"] for c in forge.notes) and on_issue() == 1,
          (code, told, on_issue(), [c["body"][:80] for c in forge.notes]))
+
+    class IssueDown(MemoryForge):
+        """A forge whose first comment on the lows issue dies on the way, with no answer of the forge: the
+        error is written by hand, see the top of this file."""
+
+        def __init__(self):
+            super().__init__()
+            self.died = 0
+
+        def send(self, path, payload, method):
+            if "low findings of pull request" in (payload.get("body") or "") and not self.died:
+                self.died += 1
+                raise OSError("connection reset")
+            return super().send(path, payload, method)
+
+    forge = IssueDown()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
+    # the error is no refusal, so it ends the run before the second part: nothing stays recorded as reported
+    case("run: a comment on the issue that died after its note landed, with no refusal, withdraws the note too, and the run is red",
+         code == 1 and told == [] and any("was withdrawn" in c["body"] for c in forge.notes),
+         (code, told, [c["body"][:80] for c in forge.notes], out[-300:]))
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
     case("run: the next run then posts the withdrawn part, and the issue gets it once",
          code == 0 and len(forge.collected) == 2 and on_issue() == rv.THREAD_FINDINGS + 1, (code, len(forge.collected), on_issue()))
@@ -1157,7 +1183,8 @@ def suite(case):
     audit = next((n["body"] for n in forge.notes if "Off-pipeline review" in n["body"]), "")
     case("run: a bootstrap rules file is named by its path inside the checkout", code == 0 and f"rules from {rv.RULES_PATH} from the working tree" in audit
          and kit.ROOT not in out + audit, (code, audit[:400]))
-    with tempfile.TemporaryDirectory() as outside:
+    # beside the checkout, so outside it wherever the temporary directory is (the red-proof replay puts it inside)
+    with kit.scratch("review-rules-", dir=os.path.dirname(kit.ROOT)) as outside:
         elsewhere = os.path.join(outside, "rules.yaml")
         with open(elsewhere, "w", encoding="utf-8") as f:
             f.write(RULES)

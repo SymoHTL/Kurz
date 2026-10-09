@@ -189,6 +189,13 @@ print(ages["Ann"] ?? 0)
 print(ages["Bea"] ?? 0)
 ```
 
+Case: [values/list-index-out-of-range.kz](../corpus/values/list-index-out-of-range.kz)
+```kurz
+xs = List<int>()
+xs.Add(1)
+print(xs[1])
+```
+
 ### M10 (decided, §4) The order of a map's entries
 
 A map has no order a program may rely on. A `for` loop over it (C6) and its text (A6) yield the

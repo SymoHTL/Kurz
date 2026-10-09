@@ -9,9 +9,10 @@ Three callers, one definition:
   (no flag)    every tracked or untracked-but-not-ignored file of the working tree  (CI, local gates)
   --pre-push   every commit a `git push` is about to publish: its message and the files it adds or
                changes, a link or a submodule refused as in the working tree; the name of every ref
-               it publishes; the message of every annotated tag it pushes, and of each tag that one
-               points at. Not the author, committer or tagger, which a push publishes as well
-               (HAZARD #12)                                                        (.githooks/pre-push)
+               it publishes; the message and the name of every annotated tag it pushes, and of each
+               tag that one points at, and a tag that points at a blob or a tree is refused. Not the
+               author, committer or tagger, which a push publishes as well (HAZARD #12)
+                                                                                   (.githooks/pre-push)
   --hook       one Write/Edit call of an agent session, path rule only              (.claude/settings.json)
 `--self-test` plants one case per rule and per pattern, plus precision cases that must stay clean.
 In --hook mode the script blocks a call by exit 2 and prints no JSON decision, the other way the
@@ -148,14 +149,16 @@ def pushed_refs(stdin_text):
 
 def check_tag(sha, cwd=None, seen=()):
     """The message of an annotated tag, which the push publishes beside what it points at, read as a
-    commit message is (kit.message_text): a trailer's no-reply address passes. A tag that points at
-    a tag publishes that one too, so the chain is followed; one that points at a blob or a tree
-    publishes an object no other check reads, and is refused. The header above the message names
-    the tagger, published like a commit's author and read by no gate (HAZARD #12)."""
+    commit message is (kit.message_text): a trailer's no-reply address passes. The name in the tag's
+    own header is published too, under the ref or through a chain, so it is scanned like a ref name.
+    A tag that points at a tag publishes that one too, so the chain is followed; one that points at
+    a blob or a tree publishes an object no other check reads, and is refused. The header also
+    names the tagger, published like a commit's author and read by no gate (HAZARD #12)."""
     header, _, message = kit.run(["git", "cat-file", "tag", sha], cwd=cwd).partition("\n\n")
     fields = dict(line.split(" ", 1) for line in header.splitlines() if " " in line)
     target, kind = fields.get("object", ""), fields.get("type", "")
     errors = check_text(f"{sha[:8]} (tag message)", kit.message_text(message))
+    errors += check_text(f"{sha[:8]} (tag name)", fields.get("tag", ""))
     if kind == "tag" and target not in seen:
         errors += check_tag(target, cwd, (*seen, sha))
     elif kind not in ("commit", "tag"):
@@ -174,7 +177,7 @@ def check_commit(sha, cwd=None):
         mode = kit.run(["git", "--literal-pathspecs", "ls-tree", "-z", sha, "--", path], cwd=cwd).split(" ", 1)[0]
         if mode in ("120000", "160000"):  # a link or a submodule: what is published is no file, as working_tree() refuses
             errors += [f"{sha[:8]} {e}" for e in [check_path(path)] if e]
-            errors.append(f"{sha[:8]} {path}: not a regular file (a link, a submodule or a directory)")
+            errors.append(f"{sha[:8]} {path}: not a regular file (a link or a submodule)")
             continue
         blob = kit.run(["git", "show", f"{sha}:{path}"], cwd=cwd, binary=True)  # as stored: decoding it here would hide a file that is not UTF-8
         errors += [f"{sha[:8]} {e}" for e in check_file(path, blob)]
@@ -222,11 +225,13 @@ def hook(raw):
 
 
 def self_test():
-    with kit.scratch("tree-gate-") as base:  # every directory of the suite; a removal that fails is said, not raised
-        return cases_in(base)
+    # every directory of the suite, and one beside the checkout for what must lie outside it wherever the
+    # temporary directory is (the red-proof replay puts it inside); a removal that fails is said, not raised
+    with kit.scratch("tree-gate-") as base, kit.scratch("tree-gate-outside-", dir=os.path.dirname(kit.ROOT)) as beside:
+        return cases_in(base, beside)
 
 
-def cases_in(base):
+def cases_in(base, beside):
     ok_files = {f"knowledge/e{n}.md": b"fact\n" for n in range(5)}
     # Built by concatenation, so this file never holds a string its own scan would refuse.
     secrets = {"gitlab-token": "glpat-" + "A" * 16, "github-token": "ghp_" + "a" * 36,
@@ -412,8 +417,21 @@ def cases_in(base):
         os.remove(os.path.join(repo, "note.txt"))
         git("tag", "-a", "notetag", "-m", "a tag of a blob", note)
         notetag = git("rev-parse", "notetag")
-        cases.append(("pre-push: a tag that points at a blob or a tree is refused: what it publishes is read by no check",
+        cases.append(("pre-push: a tag that points at a blob is refused: what it publishes is read by no check",
                       has(got(lambda: check_tag(notetag, cwd=repo)), "points at a blob"), got(lambda: check_tag(notetag, cwd=repo))))
+        git("tag", "-a", "treetag", "-m", "a tag of a tree", f"{clean}^{{tree}}")
+        treetag = git("rev-parse", "treetag")
+        cases.append(("pre-push: a tag that points at a tree is refused too, for the same reason",
+                      has(got(lambda: check_tag(treetag, cwd=repo)), "points at a tree"), got(lambda: check_tag(treetag, cwd=repo))))
+        # a ref name cannot hold a drive path (git refuses a colon), but an address of the private ranges it can
+        address = "10.1.2" + ".3"  # in two parts, so that this file holds no address
+        git("tag", "-a", address, "-m", "a clean message", clean)
+        named_tag = git("rev-parse", address)
+        git("tag", "-a", "wrapper", "-m", "a tag of the named tag", address)
+        wrapper = git("rev-parse", "wrapper")
+        cases.append(("pre-push: the name in a tag's own header is scanned, through a chain too, where no ref name shows it",
+                      has(got(lambda: check_tag(wrapper, cwd=repo)), f"{named_tag[:8]} (tag name): machine-bound string (ip-address)"),
+                      got(lambda: check_tag(wrapper, cwd=repo))))
         # the script as the hook runs it, for its exit code: from tools/ of the repository it guards, since
         # its git calls run in kit.ROOT; a clean commit of its own, which no ref of the remote holds
         fresh = git("commit-tree", f"{clean}^{{tree}}", "-p", clean, "-m", "clean too")
@@ -443,7 +461,7 @@ def cases_in(base):
 
     call = lambda path: json.dumps({"tool_name": "Write", "tool_input": {"file_path": path}})
     inside = lambda rel: os.path.join(kit.ROOT, *rel.split("/"))
-    outside = os.path.join(base, "x.cs")
+    outside = os.path.join(beside, "x.cs")  # outside the checkout, whatever the temporary directory is
     for name, raw, want in [
         ("hook: compiler source inside the repo is denied", call(inside("src/Lexer.cs")), 2),
         ("hook: the design record is allowed", call(inside("kurz-design.md")), 0),

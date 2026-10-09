@@ -23,12 +23,12 @@ flowchart TD
     end
     subgraph P["Push time: this clone and the forge"]
         P1["pre-push hook, tree_gate.py --pre-push:
-        refuses the push when a commit about to be published holds a credential, a machine-bound string
-        (in a file or in its name), a conflict marker, a disallowed path, a file that is not UTF-8 text
+        refuses the push when a commit about to be published holds, in a file or in its name, a credential,
+        a machine-bound string or a conflict marker, or holds a disallowed path, a file that is not UTF-8 text
         or a link or a submodule, when its message holds one of the first three or a workflow-skip literal
         (a GitHub no-reply address passes in a trailer line only, in a tag's message too), when the message of an
         annotated tag it pushes, or of a tag that one points at, holds one of the first three, when a tag points at a
-        blob or a tree, or when the name of a ref it publishes holds a machine-bound string.
+        blob or a tree, or when the name of a ref it publishes, or the name in a tag's own header, holds one of them.
         Off until core.hooksPath is set: HAZARD issue 4"]
         P2["future plans in a commit: no gate before the push. HAZARD issue 2"]
         P3["author and committer name and e-mail, published with every commit, and the tagger of an annotated tag:
@@ -45,7 +45,9 @@ flowchart TD
         The job runs the pull request's own copy of every gate: HAZARD issue 16"]
         G1["self-tests: a tool self-test fails, ran no case or contradicts its exit code;
         a tool has no self-test or no recorded red proof; a recorded mutation
-        no longer turns its one named case red; fewer tools than the floor.
+        no longer turns its one named case red; fewer tools than the floor. The replay runs each
+        self-test, green and mutated, in a copy of the tree with its temporary files under that copy,
+        which goes when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]
         G2["tree: disallowed path, credential, machine-bound string, conflict marker,
         non-UTF-8 file, a link or a submodule, fewer files than the floor.
@@ -125,8 +127,10 @@ flowchart TD
         Any workflow run of this repository can post the same status: HAZARD issue 11"]
         R3["findings: high and medium become threads on the pull request, per file,
         and block through thread resolution, not through the job.
-        Lows are collected on the open issue labelled review-lows, in parts, each part its own post, so a refused
-        post loses one part; they block nothing: judgment step"]
+        Lows are collected on the open issue labelled review-lows, in parts, each part a note on the pull request
+        first and then a comment on the issue; a part whose post is refused is printed in the log, its note withdrawn
+        when the comment was refused, its file reviewed again by the next run, and the run ends red;
+        they block nothing: judgment step"]
         R4["the workflow starts at all: GitHub's default rule may block pull_request_target here (whether it
         enforces or only evaluates was not known on 2026-10-02); the owner's event policy allows
         pull_request_target and workflow_dispatch for .github/workflows/review.yml, active since 2026-10-03
@@ -159,7 +163,7 @@ flowchart TD
         while it is off nothing on the server holds any pull request or a push to main, so the checks
         and the threads are read again once it is off, and a change that reading finds merges nothing (exit 1,
         the gate restored); what changes between that reading and the merge call is caught by nobody, so the
-        window is narrowed, not closed: nothing else merges or pushes meanwhile, judgment step.
+        window is narrowed, not closed, and nothing stops another merge or push in it: HAZARD issue 27.
         Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3"]
         M4["title or description edited after the review: the status stays green on text

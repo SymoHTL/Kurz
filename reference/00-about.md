@@ -158,11 +158,9 @@ print("got {c}")
 `ToString()` is in C#: `print(admin)` has a text when only the base `User` declares `Text()`, and
 a `User` variable that holds an `Admin` shows the text of `Admin` where `Admin` overrides it (K7).
 A `Text()` without `pub` is the compile error `not-visible` wherever its text is used through
-`print` or an interpolation, inside the class as well as outside it; inside the class `Text()`
-itself can be called, as any private member can. *(proposed: that `print` inside the class is
-such a use; the owner's choice of 2026-10-03 covered the inheritance and the `pub`, not the place
-of the use, and the case `classes/text-private-inside.kz` stands on this reading)* The owner chose
-the inheritance on 2026-10-03, against counting only a
+`print` or an interpolation from outside the class; inside the class `Text()` itself can be
+called, as any private member can, and whether a `print` there is such a use is A15, with a
+status of its own. The owner chose the inheritance on 2026-10-03, against counting only a
 `pub Text()` the class itself declares, which would have made every class of a hierarchy repeat
 the method; the cost is that whether a class has a text depends on its base, and that a
 base-typed value may print more than its static type says.
@@ -193,19 +191,6 @@ class Counter(int Count) {
 }
 
 print(Counter(1))
-```
-
-Case: [classes/text-private-inside.kz](../corpus/classes/text-private-inside.kz)
-```kurz
-class Counter(int Count) {
-    string Text() => "counter {Count}"
-
-    pub void Show() {
-        print(Counter(2))
-    }
-}
-
-Counter(1).Show()
 ```
 
 ### A10 (decided, §8) Printing through an interface or a type parameter
@@ -368,4 +353,25 @@ print(1e15)
 print(1e14)
 print(-0.0)
 print(1.0 / z)
+```
+
+### A15 (proposed) A private `Text()` used by `print` inside its class
+
+`print` of an instance inside the class reaches `Text()` the way a use from outside does,
+through the text of the value and not as a call of the member, so a `Text()` without `pub` is
+`not-visible` there too (A9 for the use from outside). The owner's choice of 2026-10-03 (A9)
+covered the inheritance and the `pub`, not the place of the use, and the record says nothing of
+it: this reading is proposed, and the case stands on it.
+
+Case: [classes/text-private-inside.kz](../corpus/classes/text-private-inside.kz)
+```kurz
+class Counter(int Count) {
+    string Text() => "counter {Count}"
+
+    pub void Show() {
+        print(Counter(2))
+    }
+}
+
+Counter(1).Show()
 ```

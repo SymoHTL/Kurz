@@ -9,9 +9,9 @@ What the Claude Code documentation says of a `PreToolUse` hook (the hooks page,
 code.claude.com/docs/en/hooks, read 2026-10-08 and read again on 2026-10-09, after a review had
 doubted it):
 
-- The exit code does not act alone: the harness reads JSON output from stdout on every exit code,
-  not only on 0, and for the events with a decision model a parsed object that passes the schema
-  takes effect beside the code.
+- The exit code does not act alone. In the page's own words, under "Exit code output": Claude
+  Code "reads JSON output fields from stdout on every exit code, not just 0"; for the events with
+  a decision model a parsed object that passes the schema takes effect beside the code.
 - Exit 2 is a blocking error: it blocks the tool call whether or not the hook prints JSON, and
   even a JSON `permissionDecision` of `"allow"` cannot override it. (Before CLI 2.1.214 an exit 2
   together with JSON that failed the schema was a non-blocking error, and the call went ahead.)

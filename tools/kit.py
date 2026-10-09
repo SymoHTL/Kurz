@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -38,7 +39,7 @@ MACHINE = {
     "ip6-address": r"(?i:(?<![\w:])(?:f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):[0-9a-f]{0,4}:)",
     # not the documentation domains, not the public no-reply address of Claude's commit trailers,
     # and not the user part of an SSH remote. A GitHub no-reply address names an account: it passes
-    # only in a commit's trailer line (message_text below)
+    # only in a trailer line of a commit or tag message (message_text below)
     "email": r"(?<![A-Za-z0-9._%+-])(?!noreply@anthropic\.com\b)(?!git@github\.com:)[A-Za-z0-9._%+-]+"
              r"@(?!example\.(?:com|org|net)\b)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}",
 }
@@ -149,15 +150,30 @@ def read(path):
         return f.read().replace("\r\n", "\n")
 
 
+def writable_then_retry(function, path, exc):
+    """shutil.rmtree's onexc for scratch: a read-only file, as git stores its objects, is made writable
+    and the removal tried once more; what still fails is left to the check after the removal."""
+    try:
+        os.chmod(path, 0o700)
+        function(path)
+    except OSError:
+        pass
+
+
 @contextlib.contextmanager
-def scratch(prefix):
-    """A temporary directory for a suite or a replay, removed on exit. A removal that fails (Windows
-    holds a file of a fresh git repository open for a moment) is said on stderr with the path, never
-    raised: a leftover copy must not turn a green run red or hide a red one, and must not stay unseen."""
-    with tempfile.TemporaryDirectory(prefix=prefix, ignore_cleanup_errors=True) as path:
+def scratch(prefix, dir=None):
+    """A temporary directory for a suite or a replay, in the temporary directory of the system or in
+    `dir`, removed on exit, on the way out of a block that raises as well. A removal that fails
+    (Windows holds a file of a fresh git repository open for a moment) is said on stderr with the
+    path, never raised: a leftover copy must not turn a green run red or hide a red one, and must
+    not stay unseen."""
+    path = tempfile.mkdtemp(prefix=prefix, dir=dir)
+    try:
         yield path
-    if os.path.exists(path):
-        print(f"WARNING: could not remove {path}: left behind", file=sys.stderr)
+    finally:
+        shutil.rmtree(path, onexc=writable_then_retry)
+        if os.path.exists(path):
+            print(f"WARNING: could not remove {path}: left behind", file=sys.stderr)
 
 
 def load_yaml(text):
@@ -256,6 +272,24 @@ def self_test():
     with scratch("kit-scratch-") as path:
         there = os.path.isdir(path)
     cases.append(("scratch: the directory is there inside the block and gone after it", there and not os.path.exists(path), path))
+    try:
+        with scratch("kit-scratch-") as raised:
+            raise ValueError("inside")
+    except ValueError as e:
+        escaped = e
+    cases.append(("scratch: a block that raises has its directory removed too, and the exception goes on",
+                  isinstance(escaped, ValueError) and not os.path.exists(raised), raised))
+    real_rmtree, warned = shutil.rmtree, io.StringIO()
+    try:
+        shutil.rmtree = lambda path, ignore_errors=False, **kw: None  # a removal that does nothing: the directory stays
+        with contextlib.redirect_stderr(warned), scratch("kit-scratch-") as kept:
+            pass
+    finally:
+        shutil.rmtree = real_rmtree
+    stayed = os.path.isdir(kept)
+    real_rmtree(kept, ignore_errors=True)
+    cases.append(("scratch: a removal that fails is said on stderr with the path, and nothing is raised",
+                  stayed and f"WARNING: could not remove {kept}" in warned.getvalue(), warned.getvalue()))
     return report(cases)
 
 

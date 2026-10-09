@@ -265,7 +265,8 @@ Gate: review rule "rules for sessions".
   pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
   given again for the new state, or not at all). What changes between that reading and the
-  merge call is caught by nobody: nothing else merges or pushes meanwhile. Exit 3 means it was not read back as active, so it may still
+  merge call is caught by nobody, and nothing stops another merge or push in that window: HAZARD
+  (#27). Exit 3 means it was not read back as active, so it may still
   be off: say so at once, read it back and restore it as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
   HAZARD (#3): the session holds the owner's token, so the permission classifier and this rule
   are the only guards on the approval.
@@ -334,7 +335,7 @@ Gate: review rule "rules for sessions".
 | Enforced by a mechanism | Only by instruction (HAZARD) |
 |---|---|
 | what may exist in the tree, and no credential or machine-bound string in files and commit messages (`tree`, the pre-push hook) | future plans stay out (#2) |
-| merge checks on `main` (ruleset; `merge-checks` asserts it on every run and is red while it is off) | per-item approval for a merge over red, and the window in which the ruleset is off (#3) |
+| merge checks on `main` (ruleset; `merge-checks` asserts it on every run and is red while it is off) | per-item approval for a merge over red (#3), and the window in which the ruleset is off (#27) |
 | every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout (#4) |
 | workflow facts (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |

@@ -38,7 +38,17 @@ tools/fixtures/ (GitHub, repository SymoHTL/Kurz; captured 2026-10-01 unless a l
                         pull request 23 that was already resolved (2026-10-08, after its merge): the
                         answer for a thread already resolved. The tool read the same field as true in
                         every write of that pull request's rounds; it prints no answer, so those were
-                        not kept
+                        not kept. Captured by a session on the owner's instruction of 2026-10-08, the
+                        one write to the forge made for a fixture: the mutation on a thread already
+                        resolved, which changed nothing
+  collaborators.json    gh api "repos/SymoHTL/Kurz/collaborators?per_page=100" (2026-10-09): who may
+                        write here, each with the permissions field the evidence generator reads
+  hazard-issues.json    gh api "repos/SymoHTL/Kurz/issues?state=open&labels=hazard&per_page=1"
+                        (2026-10-09): one page of one open hazard issue, as the list endpoint sends it
+  issue-events.json     gh api "repos/SymoHTL/Kurz/issues/<that issue>/events?per_page=100" (2026-10-09):
+                        its events, the one `labeled` event with its actor and its label. The self-test
+                        of tools/quality_evidence.py relabels these three and pull-request.json with the
+                        logins and associations its cases need, and says so
 
 tools/review/fixtures/ (Claude CLI 2.1.283; the flags are in knowledge/claude-cli-headless-answer.md.
 The CLI's answers are kept as the CLI printed them, on one line.)

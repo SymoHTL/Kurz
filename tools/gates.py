@@ -34,8 +34,10 @@ GATES = [
      "a tool's self-test fails, ran no case or contradicts its own exit code; a tool has no self-test or no recorded red proof; "
      "a recorded mutation no longer turns its one named case red"),
     ("tree", ["tools/tree_gate.py"], "always",
-     "a path the design phase does not allow; a credential-shaped or machine-bound string; a merge-conflict marker; "
-     "a file that is not UTF-8 text; a link or a submodule; fewer files than the floor"),
+     "a path the design phase does not allow; a credential-shaped or machine-bound string or a merge-conflict marker, "
+     "in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a "
+     "push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name "
+     "of every annotated tag and of each tag it points at, and a tag that points at a blob or a tree"),
     ("knowledge", ["tools/lint_knowledge.py"], "always",
      "an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, "
      "in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the "

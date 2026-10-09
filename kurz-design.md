@@ -662,7 +662,7 @@ Goal (the owner, 2026-10-01): Kurz should not be meaningfully slower than C++ in
 - The naming of the standard library.
 - What a full inbox does to a waiting call under the `drop` modes.
 - Over-the-air update for devices: a runtime feature or later. A device that gets `Outdated` has to be able to update itself.
-- Where the TLS cipher primitives come from in the long run.
+- Where the cipher primitives come from in the long run, TLS's (section 2) and `Sealed<T>`'s (section 13) alike.
 - What the review of the reference's cases left for a design round on 2026-10-08, by rule id. Each is a reading nobody made, not a decision; a round asks them by number:
   - Integer types: whether C#'s `nint` and `nuint` are in "the full C# set" the record names.
   - L9: whether a letter in a name is any Unicode letter, as in C#, or ASCII only, and whether `@` names exist.
@@ -684,7 +684,9 @@ Goal (the owner, 2026-10-01): Kurz should not be meaningfully slower than C++ in
   - O4: a written union type that lists only some of a call's cases: whether the others leave as by O2, or `type-mismatch`.
   - Run-time errors: when a child exhausts its stack or an allocation fails, whether that is a `Reason` member or the end of the process.
   - F16: in `count = count + 1` on a captured variable, which error is reported first; K7: which error id an override with another return type raises.
-  - The readings the reference marks *(proposed)*, to confirm or refuse: L1 (UTF-8 source, no normalization), D13 (a `match` on a flags value is `syntax`, through E4), A9 (`print` inside the class needs a `pub Text()` too), and the candidates T28, T29, A10, F16's reach, K14 and K7.
+  - L1: what a source file that is not valid UTF-8, a byte-order mark at its start or an encoded surrogate does, and which error id each of them has.
+  - N9: whether an assignment of a value whose type has no `null` narrows the path again, as C#'s flow analysis reads it, or only a test does.
+  - The readings the reference marks *(proposed)*, to confirm or refuse: L1 (UTF-8 source, no normalization), D13 (a `match` on a flags value is `syntax`, through E4), A15 (`print` inside the class needs a `pub Text()` too); and the proposed sentences inside decided rules: T28 (operands of different signedness are `sign-mix` whatever their widths), T29 (the names of the wide pair), A10 (the match through an interface or a type parameter), F16 (how far it reaches), K14 (a `mut` field without `=` is assigned on every path) and K7 (there is no `sealed`; the error id of an override with another return type is the question above).
 
 ## 15. Prototype
 

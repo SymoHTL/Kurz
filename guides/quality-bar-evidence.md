@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-09
-digest: 1e98f0249d97f3c8e0edfda74c6a951bde6bc7b14532744b3634b324f485364d
+digest: 20bac4317b32a0d45ae8b1bbd5efac09b362e336679a9c9cb5d1dc4fa323fa1b
 ttl_days: 60
 metadata:
   type: reference
@@ -37,7 +37,7 @@ defined in its docstring.
 | Gate | Runs on | What turns it red |
 |---|---|---|
 | `self-tests` | every run | a tool's self-test fails, ran no case or contradicts its own exit code; a tool has no self-test or no recorded red proof; a recorded mutation no longer turns its one named case red |
-| `tree` | every run | a path the design phase does not allow; a credential-shaped or machine-bound string; a merge-conflict marker; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor |
+| `tree` | every run | a path the design phase does not allow; a credential-shaped or machine-bound string or a merge-conflict marker, in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name of every annotated tag and of each tag it points at, and a tag that points at a blob or a tree |
 | `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the repository; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
 | `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an error-table row that does not read as one, or a row that reads as one outside an error table; a design record that cannot be read; fewer rules or cases than the floors |
 | `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a job in a container or beside services; the credential anywhere but the env of the job's last step; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request or a push trigger not limited to main; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; a workflow without facts |
@@ -57,17 +57,17 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
 | `tools/gates.py` | 33 | 23 |
-| `tools/kit.py` | 18 | 14 |
+| `tools/kit.py` | 20 | 16 |
 | `tools/lint_ci.py` | 89 | 89 |
-| `tools/lint_knowledge.py` | 76 | 60 |
-| `tools/lint_reference.py` | 69 | 72 |
-| `tools/merge_pr.py` | 144 | 128 |
-| `tools/pr_gates.py` | 95 | 94 |
-| `tools/quality_evidence.py` | 31 | 33 |
-| `tools/red_proof.py` | 30 | 28 |
-| `tools/review/review.py` | 255 | 225 |
-| `tools/tree_gate.py` | 101 | 73 |
-| **total** | 941 | 839 |
+| `tools/lint_knowledge.py` | 83 | 67 |
+| `tools/lint_reference.py` | 75 | 79 |
+| `tools/merge_pr.py` | 146 | 130 |
+| `tools/pr_gates.py` | 95 | 95 |
+| `tools/quality_evidence.py` | 34 | 37 |
+| `tools/red_proof.py` | 31 | 29 |
+| `tools/review/review.py` | 256 | 228 |
+| `tools/tree_gate.py` | 103 | 75 |
+| **total** | 965 | 868 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -107,12 +107,12 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 180 |
+| Rules in the reference | 181 |
 | of them decided | 136 |
 | of them assumed | 33 |
-| of them proposed | 11 |
+| of them proposed | 12 |
 | of them open | 0 |
-| Corpus cases, none of them run | 237 |
+| Corpus cases, none of them run | 238 |
 | Compile-error ids | 46 |
 | Run-time error ids | 5 |
 <!-- /generated:reference -->
@@ -132,8 +132,8 @@ repository.
 | Pull requests opened | 7 |
 | Pull requests merged | 6 |
 | Merged over red, with a recorded waiver | 4 |
-| Review findings posted: high | 39 |
-| Review findings posted: medium | 459 |
-| Review findings posted: low | 510 |
-| Open HAZARD issues | 13 |
+| Review findings posted: high | 40 |
+| Review findings posted: medium | 487 |
+| Review findings posted: low | 556 |
+| Open HAZARD issues | 14 |
 <!-- /generated:forge -->

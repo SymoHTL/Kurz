@@ -1,5 +1,5 @@
 // expect: error not-visible at 8
-// rules: A9
+// rules: A15
 
 class Counter(int Count) {
     string Text() => "counter {Count}"

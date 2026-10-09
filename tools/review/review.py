@@ -755,10 +755,11 @@ class Forge:
         return sorted(i["number"] for i in open_issues if "pull_request" not in i)  # the endpoint lists pull requests too
 
     def lows(self, head, findings):
-        """The low findings as (the findings of a part, a post of that part): each part goes on the
-        issue that collects lows, opened on the first post when none is open, and right after that
-        as a note on the pull request, which a later run reads back as already reported. The parts
-        are the caller's posts, so a refusal loses one part, not every low."""
+        """The low findings as (the findings of a part, a post of that part): each part goes first
+        as a note on the pull request, which a later run reads back as already reported, and right
+        after that as a comment on the issue that collects lows, opened on the first part when none
+        is open; a comment the forge refuses withdraws its note (post_part). The parts are the
+        caller's posts, so a refusal loses one part, not every low."""
         issue = []  # the issue's number, once it is known
 
         def collecting():
@@ -784,9 +785,11 @@ class Forge:
             answer = self.note(noted(part, number))
             try:
                 self.post(f"issues/{number}/comments", {"body": collected(part)})
-            except kit.Refused:
+            except Exception:  # a refusal or a timeout (kit.Unanswered is a Refused), a connection error, an answer nobody could
+                # read: whatever ended the post after the note landed, the note is withdrawn, and the error goes on
                 withdrawn = (f"**Automated review**: a note of {len(part)} low findings on `{head[:8]}` was withdrawn, because "
-                             f"their comment on #{number} was refused; the next run posts them again.")
+                             f"their comment on #{number} failed; the next run reviews their file again, and their text is in "
+                             f"the log of this run.")
                 try:
                     self.post(f"issues/comments/{answer['id']}", {"body": withdrawn}, method="PATCH")
                 except (kit.Refused, KeyError, TypeError) as again:

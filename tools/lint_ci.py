@@ -28,7 +28,6 @@
 `--self-test` breaks each fact in the real files, one token at a time, and expects its error."""
 import os
 import re
-import shutil
 import sys
 import tempfile
 
@@ -402,6 +401,11 @@ MUTATIONS = [
 
 
 def self_test():
+    with kit.scratch("lint-ci-") as base:  # every tree of the suite; a removal that fails is said, not raised
+        return cases_in(base)
+
+
+def cases_in(base):
     facts = {"gates.yml": gates_facts, "review.yml": review_facts}
     real = {f: kit.read(os.path.join(kit.ROOT, WORKFLOWS, f)) for f in facts}
     cases = [(f"the real {f} is clean", not facts[f](real[f]), facts[f](real[f])) for f in facts]
@@ -417,7 +421,7 @@ def self_test():
     cases.append(("a key that occurs twice is refused, not read as its last value", any("occurs twice" in e for e in twice), twice))
 
     def tree(files):
-        root = tempfile.mkdtemp()
+        root = tempfile.mkdtemp(dir=base)
         os.makedirs(os.path.join(root, WORKFLOWS))
         for fname in files:
             with open(os.path.join(root, WORKFLOWS, fname), "w", encoding="utf-8", newline="\n") as f:
@@ -427,14 +431,13 @@ def self_test():
     for name, root, needle in [("lint: the two real workflows are clean", tree(FILES), None),
                                ("lint: a third workflow is unchecked configuration", tree(FILES + ["extra.yml"]), "without facts"),
                                ("lint: a missing workflow is an error", tree(["gates.yml"]), "review.yml: cannot be read"),
-                               ("lint: no workflows directory is an error", tempfile.mkdtemp(), "cannot be listed")]:
+                               ("lint: no workflows directory is an error", tempfile.mkdtemp(dir=base), "cannot be listed")]:
         errors, read = lint(root)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
         if needle is None:
             cases.append(("lint: the count on the clean tree is of both workflows, so a capped count shows", read == len(FILES), read))
         if needle and "review.yml" in needle:
             cases.append(("lint: the count is of the workflows read, not of the ones expected", read == 1, read))
-        shutil.rmtree(root, ignore_errors=True)
     return kit.report(cases)
 
 

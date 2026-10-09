@@ -14,6 +14,7 @@ exist; fewer than FLOOR tools.
 An entry: {"tool": path of the tool, "file": the file to break (default: the tool), "anchor": text
 that occurs exactly once, "replacement": what it becomes, "expect": the name of the case that must
 fail, or a part of it that no other case shares}."""
+import glob
 import json
 import os
 import re
@@ -43,13 +44,17 @@ def tools_in(root):
 
 
 def self_test_of(root, tool):
-    """(exit code, output) of one tool's self-test, run inside `root`. No bytecode is written: Python
-    takes a cached module for current when the source has the same size and the same second of
-    modification, so two equally long mutations of a shared module read as the first one."""
+    """(exit code, output) of one tool's self-test, run inside `root`, with its temporary files under
+    `root/.tmp`: what a mutant leaves behind (a mutation that disables a removal does) goes with the
+    copy the replay removes, instead of piling up in the system's temporary directory. No bytecode is
+    written: Python takes a cached module for current when the source has the same size and the same
+    second of modification, so two equally long mutations of a shared module read as the first one."""
+    scratch = os.path.join(root, ".tmp")
+    os.makedirs(scratch, exist_ok=True)
     try:
         p = subprocess.run([sys.executable, os.path.join(root, tool), "--self-test"], cwd=root, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=600,
-                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch})
     except (OSError, subprocess.TimeoutExpired) as e:
         return 99, f"{type(e).__name__}: {e}"
     return p.returncode, p.stdout + p.stderr
@@ -238,6 +243,18 @@ def cases_in(base):
     root = tree({"toy.py": toy}, [proof])
     errors, _ = check(root, floor=1)  # no error: the replay did write the mutation before it restored the file
     cases.append(("the mutated file is restored", not errors and kit.read(os.path.join(root, "tools", "toy.py")) == toy, errors))
+    # a self-test that leaves a temporary directory behind on purpose, as a mutant that disables a removal does
+    leaky = toy.replace("import sys\n", "import sys, tempfile\n").replace(
+        "        ok = add(1, 1) == 2\n", "        tempfile.mkdtemp(prefix=\"red-proof-leak-\")\n        ok = add(1, 1) == 2\n")
+    assert leaky != toy
+    root = tree({"toy.py": leaky}, [proof])
+    errors, _ = check(root, floor=1)
+    outside = glob.glob(os.path.join(tempfile.gettempdir(), "red-proof-leak-*"))
+    for leaked in outside:  # not under this suite's directory: removed here, so that a red case leaves nothing behind
+        shutil.rmtree(leaked, ignore_errors=True)
+    inside = glob.glob(os.path.join(root, ".tmp", "red-proof-leak-*"))
+    cases.append(("a self-test's temporary files are made under the copy, one run green and one mutated, and none reaches the system's own",
+                  not errors and len(inside) == 2 and not outside, (errors, inside, outside)))
     seen = []
 
     def small_copy(into):

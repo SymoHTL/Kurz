@@ -53,7 +53,8 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
    break and who reads it.
    Gates: `pr-title`, `pr-breadth` (the directories are its `INFRA` list and the two files its
    `INFRA_FILES`, in `tools/pr_gates.py`, each with a case).
-4. The `gates` job runs on every push and on every edit of the title or description. Red: open
+4. The `gates` job runs on every push, on every edit of the title or description and on the Ready
+   event (the `pull_request` types in `gates.yml`). Red: open
    the log, read the `=== gates` table at its end, fix the first row that is FAIL, BROKEN or
    NOT RUN, or PARTLY on a gate other than `merge-checks`. No run at all on a head: a merge
    conflict, or a skip literal in the head commit. Gate: the required check `gates`.
@@ -67,7 +68,8 @@ least two passes per batch of the diff. A run in CI, the one
 Ready or a push starts or a dispatch, starts without a question to the owner: the question before
 every run, set on 2026-10-02 after the first bills, was retired by the owner on 2026-10-07 because
 it stalled every round for a run that had cost 1.42 to 1.94 USD by then (1.04 to 2.47 in the ten
-runs measured to 2026-10-08; the upper bound at the pass cap, batches times five passes times
+runs measured to 2026-10-08; the upper bound at the pass cap, `MAX_PASSES` in
+`tools/review/review.py`, batches times five passes times
 0.27 USD, is about 1.35 USD per batch); the bill is named in the report. A run off the
 pipeline, at local prices, starts after the owner said go to the bill named. `judgment step`
 Count the batches on the head that will be reviewed, with
@@ -151,7 +153,7 @@ the head that will be reviewed is a `judgment step`.
    of the push may have seen the threads open, since it reads them when it reaches `pr-findings`,
    before or after `--go`, and an edit of the description after the review is text the
    review never read (HAZARD #13): the walk is to mark the pull request Draft before the push,
-   resolve, then Ready, so the one review and the gates run on the head with its threads resolved. Each push is a new head
+   resolve, then Ready, whose event starts the one review and a `gates` run on the head with its threads resolved. Each push is a new head
    that needs its own review. Never push to cancel a running review; a push to a Ready pull
    request does cancel it. `judgment step`
 

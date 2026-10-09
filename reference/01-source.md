@@ -5,7 +5,9 @@
 A source file has the extension `.kz`. *(proposed: a source file is read as UTF-8, and a string
 literal holds the code points written in it, as they are written, without normalization; the
 case below prints such a literal as written, and the string cases of T15 and T16 count its
-characters and bytes)*
+characters and bytes)* What a file that is not valid UTF-8, a byte-order mark at its start or an
+encoded surrogate does, and which error id each of them has, is open (the record, section 14):
+nothing here decides it.
 
 Case: [source/utf8-literal.kz](../corpus/source/utf8-literal.kz)
 ```kurz
