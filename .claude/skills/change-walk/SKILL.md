@@ -89,9 +89,9 @@ the head that will be reviewed is a `judgment step`.
    the workflow, that starts the review, with the workflow, the reviewer and the rules of the
    default branch. When the review ran off the pipeline instead (the last bullet of step 3, while
    the pull request was still a Draft), wait until `gh pr view <N> --json labels` shows
-   `reviewed-<sha>` for the head you mark Ready: the job then skips that Ready event, while any
-   other head is reviewed by the run its event starts: the Ready for a head pushed during the
-   Draft, the push for one pushed after Ready. Never mark
+   `reviewed-<sha>` for the head you mark Ready: the job then skips that Ready event, while an
+   unlabelled head current when you mark Ready is reviewed by the Ready's run, a head pushed
+   after Ready by its push's run, and an earlier Draft head only by a dispatch. Never mark
    Ready meaning to cancel the run: a run that started is a bill, cancelled or not
    (`knowledge/a-cancel-does-not-beat-the-runner.md`). Gate: `ci-config` pins the clause that
    skips the Ready event of the labelled head; the decision to mark Ready is a `judgment step`.

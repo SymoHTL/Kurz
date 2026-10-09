@@ -24,9 +24,9 @@ jobs:
   # The required check is the commit status `review`, which this job posts when a review completed.
   # The job may be skipped: a Draft, a pull request from outside, and the Ready event of a pull
   # request whose head carries the label `reviewed-<that head's sha>` (its review ran off the
-  # pipeline, which posts no status) get no status and stay pending. A label names one head: any
-  # other head is reviewed by the run its event starts, the Ready for a head pushed during the
-  # Draft and the push for one pushed after Ready. The skipped
+  # pipeline, which posts no status) get no status and stay pending. A label names one head: an
+  # unlabelled head current when the pull request is marked Ready is reviewed by the Ready's run,
+  # a head pushed after Ready by its push's run, and an earlier Draft head only by a dispatch. The skipped
   # job reports a check named `review-run`, never the required status `review`.
   review-run:
     if: >-

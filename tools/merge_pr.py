@@ -20,8 +20,8 @@ this tool writes them into the commit on main.
 ruleset is switched off for the one merge, restored on every exit path and read back. While it is
 off nothing on the server holds any pull request or any push to main: the checks and the threads
 are read again once it is off, and a change that second reading finds merges nothing; a change
-between the second reading and the merge call is caught by nobody, which is why nothing else may
-merge or push meanwhile (the owner's judgment step, HAZARD #3). Exit 3 means the
+between the second reading and the moment the ruleset is restored is caught by nobody, which is why
+nothing else may merge or push meanwhile (the owner's judgment step, HAZARD #27). Exit 3 means the
 ruleset was not read back as active, so it may still be off, until someone reads it back and
 switches it on; so the approval is per item and never standing. The tool cannot
 verify the approval: it is the caller's statement (HAZARD #3), and the record says so. The waiver

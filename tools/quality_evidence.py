@@ -15,13 +15,17 @@ when the file has a block it did not compute, when a marker is not closed, when 
 old, or be no evidence, while the date said they were new. The new text is built completely before
 anything is written, and written through a temp file.
 
-What it counts on the forge it counts only from pull requests, issues and posts of the Actions token
-and of people who may write here (tools/pr_gates.py `trusted`): anyone can open a pull request or
-an issue on, or comment in, a public repository, and an issue template could put the hazard label
-on a stranger's issue."""
+What it counts on the forge it counts from people who may write here, read from the collaborators
+list (`permissions.push`), and from the Actions token: a pull request that such a person opened or
+that was merged, with its findings; a hazard issue that such a person opened or labelled, read from
+the issue's events; findings and waiver records that such a person or the token posted. Anyone can
+open a pull request or an issue on, or comment in, a public repository (the GitHub docs, read
+2026-10-09: "Creating an issue" says people with read access can create one, which a public
+repository gives everyone; "Creating a pull request from a fork" says write access to the head
+branch is enough, which a fork gives), and an issue template could put the hazard label on a
+stranger's issue."""
 import contextlib
 import datetime
-import io
 import json
 import os
 import re
@@ -98,13 +102,18 @@ def block_reference(root):
 
 
 def writers_of(repo):
-    """The logins that may push here, read once, and only when a hazard issue of someone else needs them."""
+    """The logins that may push here (the collaborators list, its `permissions.push`), read once per run.
+    An empty answer is a refusal: the owner is always on the list, so nobody on it means nothing was
+    read, and every record of someone else would drop out of the counts without a word."""
     cache = []
 
     def writers():
         if not cache:
-            cache.append({c.get("login") for c in kit.gh_pages(f"repos/{repo}/collaborators?per_page=100")
-                          if (c.get("permissions") or {}).get("push")})
+            found = {c.get("login") for c in kit.gh_pages(f"repos/{repo}/collaborators?per_page=100")
+                     if (c.get("permissions") or {}).get("push")}
+            if not found:
+                raise kit.Refused(f"the collaborators list of {repo} names nobody with push access: nothing can be counted from it")
+            cache.append(found)
         return cache[0]
     return writers
 
@@ -120,10 +129,14 @@ def labelled_by_a_writer(repo, issue, writers):
 
 def block_forge(root):
     repo = kit.repo()
+    # one test for every record: its author is the Actions token or someone the collaborators list
+    # says may push here. The author_association of a record is not read: a collaborator with read
+    # access alone carries COLLABORATOR too.
+    writers = writers_of(repo)
+    counted = lambda rec: (rec.get("user") or {}).get("login") in pr_gates.BOTS or (rec.get("user") or {}).get("login") in writers()
     # a pull request counts when someone who may write here opened it, or when it was merged: the
     # merge shows that a maintainer accepted it. Anyone can open one on a public repository.
-    pulls = [p for p in kit.gh_pages(f"repos/{repo}/pulls?state=all&per_page=100")
-             if p.get("merged_at") or pr_gates.trusted((p.get("user") or {}).get("login", ""), p.get("author_association"))]
+    pulls = [p for p in kit.gh_pages(f"repos/{repo}/pulls?state=all&per_page=100") if p.get("merged_at") or counted(p)]
     merged = [p for p in pulls if p.get("merged_at")]
     severity, over_red = {"high": 0, "medium": 0, "low": 0}, 0
     for p in pulls:
@@ -133,7 +146,7 @@ def block_forge(root):
         comments = kit.gh_pages(f"repos/{repo}/pulls/{p['number']}/comments?per_page=100")
         notes = kit.gh_pages(f"repos/{repo}/issues/{p['number']}/comments?per_page=100")
         for c in comments + notes:
-            if not pr_gates.trusted((c.get("user") or {}).get("login", ""), c.get("author_association")):
+            if not counted(c):
                 continue
             for raw in pr_gates.MARK.findall(c.get("body") or ""):
                 try:
@@ -146,12 +159,10 @@ def block_forge(root):
             over_red += (c.get("body") or "").startswith("Merged over red")
     # the issues endpoint lists pull requests too; a hazard issue counts when someone who may write here
     # opened it, or put the hazard label on it
-    writers = writers_of(repo)
     hazards = [i for i in kit.gh_pages(f"repos/{repo}/issues?state=open&labels=hazard&per_page=100")
-               if "pull_request" not in i and (pr_gates.trusted((i.get("user") or {}).get("login", ""), i.get("author_association"))
-                                                or labelled_by_a_writer(repo, i, writers))]
+               if "pull_request" not in i and (counted(i) or labelled_by_a_writer(repo, i, writers))]
     return table(["Forge", "Count"], [
-        ("Pull requests opened", len(pulls)), ("Pull requests merged", len(merged)), ("Merged over red, with a recorded waiver", over_red),
+        ("Pull requests opened by a writer, or merged", len(pulls)), ("Pull requests merged", len(merged)), ("Merged over red, with a recorded waiver", over_red),
         ("Review findings posted: high", severity["high"]), ("Review findings posted: medium", severity["medium"]),
         ("Review findings posted: low", severity["low"]), ("Open HAZARD issues", len(hazards)),
     ])
@@ -327,12 +338,15 @@ def cases_in(base):
         # association the case needs: no stranger and no collaborator has written here, so no record of
         # theirs could be captured. The comments above are written by hand, as their markers are the
         # thing under test.
-        captured = {name: json.load(io.open(os.path.join(kit.ROOT, "tools", "fixtures", f"{name}.json"), encoding="utf-8"))
+        captured = {name: json.loads(kit.read(os.path.join(kit.ROOT, "tools", "fixtures", f"{name}.json")))
                     for name in ("pull-request", "hazard-issues", "issue-events", "collaborators")}
-        cases.append(("fixture: the captured pull request, hazard issue, events and collaborators are read, for the fake forge to relabel",
-                      captured["pull-request"].get("user", {}).get("login") and len(captured["hazard-issues"]) == 1
-                      and len(captured["issue-events"]) == 1 and captured["issue-events"][0].get("event") == "labeled"
-                      and len(captured["collaborators"]) == 1 and captured["collaborators"][0].get("permissions", {}).get("push") is True,
+        # the floor is what the relabelling reads: one record of each kind, a labeled event and a writer among them;
+        # the page of hazard issues was asked for at one per page (SOURCES.txt), so one is its whole size
+        label_event = next((e for e in captured["issue-events"] if e.get("event") == "labeled"), {})
+        writer = next((c for c in captured["collaborators"] if c.get("permissions", {}).get("push") is True), {})
+        cases.append(("fixture: the captured pull request, hazard issue, events and collaborators are read, for the fake forge to relabel; each holds at least one record",
+                      bool(captured["pull-request"].get("user", {}).get("login") and len(captured["hazard-issues"]) >= 1
+                           and label_event and (label_event.get("label") or {}).get("name") == "hazard" and writer),
                       {k: len(v) for k, v in captured.items()}))
         opened = lambda number, login, association, merged=None: {**captured["pull-request"], "number": number, "merged_at": merged,
                                                                   "user": {**captured["pull-request"]["user"], "login": login},
@@ -340,13 +354,13 @@ def cases_in(base):
         issue = lambda number, login, association: {**captured["hazard-issues"][0], "number": number,
                                                     "user": {**captured["hazard-issues"][0]["user"], "login": login},
                                                     "author_association": association}
-        labelled = lambda login: [{**captured["issue-events"][0], "actor": {**captured["issue-events"][0]["actor"], "login": login}}]
-        writer = captured["collaborators"][0]
+        labelled = lambda login: [{**label_event, "actor": {**label_event.get("actor", {}), "login": login}}]
         # every path in full: a query that asks for something else gets no answer
         answers = {
             "repos/o/n/pulls?state=all&per_page=100": [opened(1, "the-owner", "OWNER", "2026-10-01T00:00:00Z"),
                                                        opened(2, "a-collaborator", "COLLABORATOR"), opened(5, "a-stranger", "NONE"),
-                                                       opened(9, "a-stranger", "NONE", "2026-10-02T00:00:00Z")],
+                                                       opened(9, "a-stranger", "NONE", "2026-10-02T00:00:00Z"),
+                                                       opened(11, "a-reader", "COLLABORATOR")],
             "repos/o/n/pulls/1/comments?per_page=100": [
                 post("github-actions[bot]", "NONE", finding("high")), post("a-stranger", "NONE", finding("high")),
                 post("the-owner", "OWNER", "<!-- kurz-review:findings [not json] -->"),
@@ -361,14 +375,21 @@ def cases_in(base):
             # the stranger's merged pull request holds a finding of the Actions token: counted
             "repos/o/n/pulls/9/comments?per_page=100": [post("github-actions[bot]", "NONE", finding("medium"))],
             "repos/o/n/issues/9/comments?per_page=100": [],
+            # the collaborator without push access carries COLLABORATOR, and counts nothing
+            "repos/o/n/pulls/11/comments?per_page=100": [post("a-reader", "COLLABORATOR", finding("high"))],
+            "repos/o/n/issues/11/comments?per_page=100": [],
             "repos/o/n/issues?state=open&labels=hazard&per_page=100": [issue(3, "the-owner", "OWNER"),
                                                                         {**issue(4, "the-owner", "OWNER"), "pull_request": {"url": "x"}},
-                                                                        issue(6, "a-stranger", "NONE"), issue(8, "a-stranger", "NONE")],
-            # the owner put the label on the stranger's issue 6; on issue 8 a stranger did
+                                                                        issue(6, "a-stranger", "NONE"), issue(8, "a-stranger", "NONE"),
+                                                                        issue(10, "a-stranger", "NONE"), issue(12, "a-reader", "COLLABORATOR")],
+            # the owner put the label on the stranger's issue 6; on issue 8 a stranger did, on issue 10 the collaborator
+            # without push access, who also opened issue 12 and labelled it
             "repos/o/n/issues/6/events?per_page=100": labelled("the-owner"),
             "repos/o/n/issues/8/events?per_page=100": labelled("another-stranger"),
-            "repos/o/n/collaborators?per_page=100": [{**writer, "login": "the-owner"},
-                                                     {**writer, "login": "a-reader", "permissions": {**writer["permissions"], "push": False,
+            "repos/o/n/issues/10/events?per_page=100": labelled("a-reader"),
+            "repos/o/n/issues/12/events?per_page=100": labelled("a-reader"),
+            "repos/o/n/collaborators?per_page=100": [{**writer, "login": "the-owner"}, {**writer, "login": "a-collaborator"},
+                                                     {**writer, "login": "a-reader", "permissions": {**writer.get("permissions", {}), "push": False,
                                                                                                   "maintain": False, "admin": False}}],
         }
 
@@ -379,18 +400,20 @@ def cases_in(base):
 
         kit.repo, kit.gh_pages = (lambda: "o/n"), pages
         forge = got(block_forge, root)
+        answers["repos/o/n/collaborators?per_page=100"] = []
+        nobody = got(block_forge, root)
     finally:
         red_proof.replay, kit.repo, kit.gh_pages = saved
     cases.append(("self-tests: numbers from a red self-test are refused", isinstance(red, kit.Refused) and "not green" in str(red), repr(red)))
     cases.append(("self-tests: a green run is a table with its totals", "| **total** | 5 | 3 |" in str(green), green))
     cases.append(("forge: pull requests, merges and open hazard issues are counted, and a pull request is no issue",
-                  all(row in str(forge) for row in ("| Pull requests opened | 3 |", "| Pull requests merged | 2 |", "| Open HAZARD issues | 2 |")), forge))
+                  all(row in str(forge) for row in ("| Pull requests opened by a writer, or merged | 3 |", "| Pull requests merged | 2 |", "| Open HAZARD issues | 2 |")), forge))
     cases.append(("forge: a finding marker counts from the Actions token and from a maintainer, not from a stranger",
                   all(row in str(forge) for row in ("posted: high | 1 |", "posted: medium | 1 |", "posted: low | 1 |")), forge))
     cases.append(("forge: a damaged marker counts nothing and stops nothing, a severity that is no word included",
                   isinstance(forge, str), repr(forge)))
     cases.append(("forge: a pull request that someone without write access opened, and that was not merged, counts nothing, its findings included",
-                  all(row in str(forge) for row in ("| Pull requests opened | 3 |", "posted: medium | 1 |")), forge))
+                  all(row in str(forge) for row in ("| Pull requests opened by a writer, or merged | 3 |", "posted: medium | 1 |")), forge))
     cases.append(("forge: a stranger's pull request that was merged counts, with its findings: the merge shows a maintainer accepted it",
                   all(row in str(forge) for row in ("| Pull requests merged | 2 |", "posted: medium | 1 |")), forge))
     cases.append(("forge: a waiver record counts from a maintainer, not from a stranger", "| Merged over red, with a recorded waiver | 1 |" in str(forge), forge))
@@ -398,6 +421,12 @@ def cases_in(base):
                   "| Open HAZARD issues | 2 |" in str(forge), forge))
     cases.append(("forge: a hazard issue that a stranger opened counts once someone with push access put the hazard label on it",
                   "| Open HAZARD issues | 2 |" in str(forge) and "| Open HAZARD issues | 1 |" not in str(forge), forge))
+    cases.append(("forge: a hazard issue that a stranger opened, and that only a collaborator without push access labelled, is not counted",
+                  "| Open HAZARD issues | 2 |" in str(forge), forge))
+    cases.append(("forge: a collaborator without push access is no writer, whatever the association says: their unmerged pull request, its findings and their hazard issue count nothing",
+                  all(row in str(forge) for row in ("| Pull requests opened by a writer, or merged | 3 |", "posted: high | 1 |", "| Open HAZARD issues | 2 |")), forge))
+    cases.append(("forge: a collaborators list that names nobody with push access is a refusal, not a page that counts nothing",
+                  isinstance(nobody, kit.Refused) and "nobody with push access" in str(nobody), repr(nobody)))
     return kit.report(cases)
 
 

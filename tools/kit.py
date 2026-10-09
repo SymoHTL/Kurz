@@ -152,7 +152,11 @@ def read(path):
 
 def writable_then_retry(function, path, exc):
     """shutil.rmtree's onexc for scratch: a read-only file, as git stores its objects, is made writable
-    and the removal tried once more; what still fails is left to the check after the removal."""
+    and the removal tried once more; what still fails is left to the check after the removal. Only a
+    removal is retried: on POSIX the walk calls this for os.open or os.scandir too, on a directory it
+    cannot open, and those take other arguments, so they are left to that check as well."""
+    if function not in (os.unlink, os.remove, os.rmdir):
+        return
     try:
         os.chmod(path, 0o700)
         function(path)
@@ -161,13 +165,14 @@ def writable_then_retry(function, path, exc):
 
 
 @contextlib.contextmanager
-def scratch(prefix, dir=None):
-    """A temporary directory for a suite or a replay, in the temporary directory of the system or in
-    `dir`, removed on exit, on the way out of a block that raises as well. A removal that fails
+def scratch(prefix):
+    """A temporary directory for a suite or a replay, in the temporary directory of the system (which
+    the red-proof replay points beside its copy), removed on exit, on the way out of a block that
+    raises as well. A removal that fails
     (Windows holds a file of a fresh git repository open for a moment) is said on stderr with the
     path, never raised: a leftover copy must not turn a green run red or hide a red one, and must
     not stay unseen."""
-    path = tempfile.mkdtemp(prefix=prefix, dir=dir)
+    path = tempfile.mkdtemp(prefix=prefix)
     try:
         yield path
     finally:
@@ -288,6 +293,15 @@ def self_test():
         shutil.rmtree = real_rmtree
     stayed = os.path.isdir(kept)
     real_rmtree(kept, ignore_errors=True)
+    handled, probe = None, tempfile.mkdtemp(prefix="kit-scratch-")  # a directory that exists, as the walk names one
+    try:
+        writable_then_retry(os.open, probe, PermissionError("cannot open"))
+    except Exception as e:  # the handler must raise nothing, whatever the walk called it for
+        handled = e
+    finally:
+        os.rmdir(probe)
+    cases.append(("scratch: the retry handler leaves a call that is no removal alone (os.open, for a directory the walk cannot open), and raises nothing",
+                  handled is None, repr(handled)))
     cases.append(("scratch: a removal that fails is said on stderr with the path, and nothing is raised",
                   stayed and f"WARNING: could not remove {kept}" in warned.getvalue(), warned.getvalue()))
     return report(cases)

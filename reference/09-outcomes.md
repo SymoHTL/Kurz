@@ -234,7 +234,8 @@ child's code can throw, found over the whole program (the owner, 2026-10-03, aga
 that carries the text and the place, and against limiting `throw` to `data` values and text). The
 run-time errors of chapter 12 are values of one `data` type of the runtime, a member of every
 such union in every build; the place and the chain id are fields of the `Crashed` case beside
-`Reason`; a thrown class instance is moved out of the dying child's heap into the supervisor's
+`Reason` (the record marks as *(assumed)* that the runtime adds them to what was thrown); a
+thrown class instance is moved out of the dying child's heap into the supervisor's
 with everything it reaches, which is the cost, paid once per such crash (the owner, 2026-10-04,
 against a compile error for a thrown class instance). The supervisors
 themselves are outside this reference. The bare `throw` of an `else` arm is the `throw` that

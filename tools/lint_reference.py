@@ -23,8 +23,8 @@ Fails on:
 - a `Case:` line outside a rule, to a missing file, whose text is not the path, or whose sample
   is missing, differs from the file's body or is shown a second time in one chapter; a code block
   that is neither a case sample nor marked `text`, or that is never closed (also when the fence of
-  another block is met inside it); a fence indented or made of tildes, which this lint would not
-  read as one;
+  another block is met inside it); a fence indented or made of tildes outside a code block, which
+  this lint would not read as one (inside a block it is content);
 - a corpus file with a header that cannot be read, with no body, naming an unknown or an open
   rule, not linked from a rule it names, or linked from a rule it does not name;
 - an expected error id that is not in its table (compile errors for `error`, the run-time table
@@ -84,30 +84,36 @@ def parse_case(text):
 
 def read_tree(root):
     """({chapter path: text}, {corpus path relative to corpus/: text}, the design record's section numbers and texts,
-    None), or with None for the sections and the reason last when the record cannot be read."""
-    chapters, cases = {}, {}
+    or None when the record cannot be read, [what could not be read: a chapter, a case or the record, each
+    named with its reason]). A file that is not UTF-8, or cannot be opened, is left out and named, never a crash."""
+    chapters, cases, unread = {}, {}, []
     ref = os.path.join(root, "reference")
     for name in sorted(os.listdir(ref)) if os.path.isdir(ref) else []:
         if name.endswith(".md"):
-            chapters[f"reference/{name}"] = kit.read(os.path.join(ref, name))
+            try:
+                chapters[f"reference/{name}"] = kit.read(os.path.join(ref, name))
+            except (OSError, UnicodeDecodeError) as e:
+                unread.append(f"reference/{name} cannot be read ({type(e).__name__}: {e}): its rules were not checked")
     for d, _, fs in os.walk(os.path.join(root, "corpus")):
         for f in sorted(fs):
             if f.endswith(".kz"):
                 full = os.path.join(d, f)
-                cases[os.path.relpath(full, os.path.join(root, "corpus")).replace(os.sep, "/")] = kit.read(full)
+                rel = os.path.relpath(full, os.path.join(root, "corpus")).replace(os.sep, "/")
+                try:
+                    cases[rel] = kit.read(full)
+                except (OSError, UnicodeDecodeError) as e:
+                    unread.append(f"corpus/{rel} cannot be read ({type(e).__name__}: {e}): the case was not checked")
     try:
         record = kit.read(os.path.join(root, "kurz-design.md"))
     except (OSError, UnicodeDecodeError) as e:  # a record that is not UTF-8 is unread, like one that is not there
-        return chapters, cases, None, f"{type(e).__name__}: {e}"
+        return chapters, cases, None, unread + [f"kurz-design.md cannot be read ({type(e).__name__}: {e}): no rule's sections were checked"]
     parts = re.split(r"(?m)^## (\d+)\. .*$", record)
-    return chapters, cases, dict(zip(parts[1::2], parts[2::2])), None
+    return chapters, cases, dict(zip(parts[1::2], parts[2::2])), unread
 
 
 def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
     chapters, files, sections, unread = read_tree(root)
-    errors, rules, links, error_ids = [], {}, [], {}
-    if unread:
-        errors.append(f"kurz-design.md cannot be read ({unread}): no rule's sections were checked")
+    errors, rules, links, error_ids = list(unread), {}, [], {}
     parsed = {}
     for path, text in files.items():
         parsed[path], why = parse_case(text)
@@ -244,9 +250,12 @@ def sync(root, say=print):
     rule, its text the path) from its corpus file, and name each chapter through `say` as it is
     written. Every chapter is computed before one is written: a sample that is never closed refuses
     the whole run, because dropping it would drop the rest of its chapter. A write that fails is a
-    refusal that names the chapters written before it, and leaves no temporary file. Returns the
-    chapters written."""
-    chapters, files, _, _ = read_tree(root)
+    refusal that names the chapters written before it; its temporary file is removed, and one that
+    could not be removed is named in the refusal, to be removed by hand. A chapter or a case that
+    cannot be read refuses the run before anything is written. Returns the chapters written."""
+    chapters, files, _, unread = read_tree(root)
+    if unread:
+        raise kit.Refused("; ".join(unread) + "; nothing was written")
     new = {}
     for chapter, text in chapters.items():
         lines, out, n, shown, fence, current = text.split("\n"), [], 0, set(), None, None
@@ -443,6 +452,18 @@ def cases_in(base):
     with open(os.path.join(garbled, "kurz-design.md"), "wb") as f:
         f.write(b"\xff\xfe## 1. Goals\n")  # not UTF-8
     undecoded = errors_of(garbled)
+    garbled_chapter = tree()
+    with open(os.path.join(garbled_chapter, "reference", "99-bad.md"), "wb") as f:
+        f.write(b"\xff\xfe### Z1 (decided, \xc2\xa71) Bad\n")  # not UTF-8
+    chapter_unread = errors_of(garbled_chapter)
+    cases.append(("a chapter that is not UTF-8 is reported as unread with its path, not as a crash",
+                  isinstance(chapter_unread, list) and sum("reference/99-bad.md cannot be read" in e for e in chapter_unread) == 1, chapter_unread))
+    garbled_case = tree()
+    with open(os.path.join(garbled_case, "corpus", "bad.kz"), "wb") as f:
+        f.write(b"// rules: V1\n\xff\xfe\n")  # not UTF-8
+    case_unread = errors_of(garbled_case)
+    cases.append(("a corpus file that is not UTF-8 is reported as unread with its path, not as a crash",
+                  isinstance(case_unread, list) and sum("corpus/bad.kz cannot be read" in e for e in case_unread) == 1, case_unread))
     cases.append(("a record that is not UTF-8 is reported once as unread, not as a crash",
                   sum("kurz-design.md cannot be read (UnicodeDecodeError" in e for e in undecoded) == 1, undecoded))
     ghost = errors_of(tree(edit(ref, "## Errors\n", "| word | rules | meaning |\n|---|---|---|\n| `ghost` | V1 | elsewhere |\n\n## Errors\n")))

@@ -37,7 +37,8 @@ flowchart TD
         Recipe: reading-a-paper-for-evidence. Judgment step"]
         D5["no future plan, nothing machine-bound.
         Gate: tree gate for shapes, before the push only through the pre-push hook
-        (HAZARD issue 4 where it is off), in CI after publishing; future plans HAZARD issue 2"]
+        (the write-time hook reads the path alone; HAZARD issue 4 where either is off),
+        in CI after publishing; future plans HAZARD issue 2"]
     end
     subgraph A["After writing"]
         A1["section numbers and cross-references still point at what they name, in the whole record:

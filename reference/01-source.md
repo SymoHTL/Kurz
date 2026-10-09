@@ -84,7 +84,7 @@ print(a); print(a + 1)
 
 ### L6 (decided, §8) Interpolation is always on
 
-Inside a string literal, `{expression}` is replaced by the text (A2 to A14) of the expression's value.
+Inside a string literal, `{expression}` is replaced by the text (A2 to A15) of the expression's value.
 
 Case: [source/interpolation.kz](../corpus/source/interpolation.kz)
 ```kurz

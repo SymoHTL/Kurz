@@ -102,5 +102,6 @@ flowchart TD
 - `tools/pr_gates.py` changes a pull-request gate: nodes D and I.
 - `tools/gates.py` changes a verdict or the gate list: nodes B2, E and L.
 - `tools/tree_gate.py`, `tools/kit.py` (its patterns), `.claude/settings.json` or `.githooks/pre-push` changes: nodes B1 and C;
-  a change to the skip literals of `tools/kit.py` reaches node D as well.
+  a change to any pattern of `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals)
+  reaches node D as well, which scans the title, the description and every commit message through them.
 - A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 13, 14, 27) closes or opens: that node.

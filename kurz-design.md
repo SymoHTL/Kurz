@@ -663,8 +663,8 @@ Goal (the owner, 2026-10-01): Kurz should not be meaningfully slower than C++ in
 - What a full inbox does to a waiting call under the `drop` modes.
 - Over-the-air update for devices: a runtime feature or later. A device that gets `Outdated` has to be able to update itself.
 - Where the cipher primitives come from in the long run, TLS's (section 2) and `Sealed<T>`'s (section 13) alike.
-- What the review of the reference's cases left for a design round on 2026-10-08, by rule id. Each is a reading nobody made, not a decision; a round asks them by number:
-  - Integer types: whether C#'s `nint` and `nuint` are in "the full C# set" the record names.
+- What the reviews of the reference's cases left for a design round, on 2026-10-08 and (L1, N9) on 2026-10-09, by rule id, or by the chapter where no rule names it yet. Each is a reading the owner has not made or confirmed, not a decision; a round asks them by number:
+  - Section 2 and T2, the integer types: whether C#'s `nint` and `nuint` are in "the full C# set" the record names.
   - L9: whether a letter in a name is any Unicode letter, as in C#, or ASCII only, and whether `@` names exist.
   - L11: whether number literals take all of C#'s forms (exponents, every suffix spelling, `0x_FF`) or only the forms listed.
   - L13: `"""abc"""` on one line, text after an opening `"""`, text before a closing one: valid, `syntax`, or an id of its own; and whether a whitespace-only line is exempt from the indentation rule, as in C# 11.
@@ -674,19 +674,19 @@ Goal (the owner, 2026-10-01): Kurz should not be meaningfully slower than C++ in
   - T21: whether a `char` literal such as `'a'` exists; if not, which error `'a'` is.
   - D3: whether a `data` value with a NaN field is equal to itself (as C# records compare) or unequal (as `==` on the field gives).
   - K5: whether operator declarations exist, and whether a class member that defines equality is an ordinary member or a compile error, with which id.
-  - K: whether a method that implements an interface method must be written `pub`; left out, public anyway or which error.
+  - K7: whether a method that implements an interface method must be written `pub`; left out, public anyway or which error.
   - F11: whether a function type's result may be `void`, and whether `(int) => int?` returns an `int?` or makes the function nullable.
-  - F: whether arguments are evaluated in the order written, and whether a default value is a constant or any expression evaluated at each call.
+  - F12: whether arguments are evaluated in the order written, and whether a default value is a constant or any expression evaluated at each call.
   - C8: the type of a range and its loop variable when the ends differ (`0..<n` with `n` a `long` or a `uint`), and which error when they cannot meet.
   - C1: whether `if (x > 5) {` is a grouped condition or an error, and whether `{` on the next line is allowed, with which id.
   - E1: which line an error in a construct spread over several lines reports.
   - C4: when a value fits several arms (`Admin : User`), whether the first runs; whether an arm may name a subtype that is no case; whether an arm that never runs is an error.
   - O4: a written union type that lists only some of a call's cases: whether the others leave as by O2, or `type-mismatch`.
-  - Run-time errors: when a child exhausts its stack or an allocation fails, whether that is a `Reason` member or the end of the process.
+  - O7, the run-time errors of chapter 12: when a child exhausts its stack or an allocation fails, whether that is a `Reason` member or the end of the process.
   - F16: in `count = count + 1` on a captured variable, which error is reported first; K7: which error id an override with another return type raises.
   - L1: what a source file that is not valid UTF-8, a byte-order mark at its start or an encoded surrogate does, and which error id each of them has.
   - N9: whether an assignment of a value whose type has no `null` narrows the path again, as C#'s flow analysis reads it, or only a test does.
-  - The readings the reference marks *(proposed)*, to confirm or refuse: L1 (UTF-8 source, no normalization), D13 (a `match` on a flags value is `syntax`, through E4), A15 (`print` inside the class needs a `pub Text()` too); and the proposed sentences inside decided rules: T28 (operands of different signedness are `sign-mix` whatever their widths), T29 (the names of the wide pair), A10 (the match through an interface or a type parameter), F16 (how far it reaches), K14 (a `mut` field without `=` is assigned on every path) and K7 (there is no `sealed`; the error id of an override with another return type is the question above).
+  - The readings the reference marks *(proposed)*, to confirm or refuse: L1 (UTF-8 source, no normalization), D13 (a `match` on a flags value is `syntax`, through E4), A15 (`print` or an interpolation inside the class needs a `pub Text()` too); and the proposed sentences inside decided rules: T28 (operands of different signedness are `sign-mix` whatever their widths), T29 (the names of the wide pair), A10 (the match through an interface or a type parameter), F16 (how far it reaches), K14 (a `mut` field without `=` is assigned on every path) and K7 (there is no `sealed`; the error id of an override with another return type is the question above).
 
 ## 15. Prototype
 

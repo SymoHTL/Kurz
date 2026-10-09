@@ -2,9 +2,10 @@
 forge's refusal under fixtures/ are real: captured from the Claude CLI, from git and from the log
 of a run, not written by hand. Where a case needs an answer that could not be provoked (a usage
 limit, an exit code without its error flag, an answer without findings, an overlong title), it
-edits a real answer and marks the edit with a comment that says what the real one carries. Three
+edits a real answer and marks the edit with a comment that says what the real one carries. Four
 answers of the forge that no capture holds are written by hand, and say so where they stand: its
-422 for a comment, a 502, and a write that gets no answer in time."""
+422 for a comment, a 502, a write that gets no answer in time, and a connection that dies on the
+way, with the write landed or not."""
 import contextlib
 import hashlib
 import io
@@ -109,6 +110,7 @@ class MemoryForge(rv.Forge):
         self.first_write = None  # how long the log was when the first write reached the wire
         self.labels = []  # labels this run put on the pull request
         self.refuse_labels = False  # the forge refuses the label write
+        self.read_back = 0  # how often the lows issue was read back after a comment on it failed
 
     def pr(self):
         # the captured payload, with the head and the base of this case; its state is open, like the real one's
@@ -133,6 +135,10 @@ class MemoryForge(rv.Forge):
 
     def lows_issues(self):
         return sorted(self.issues)
+
+    def issue_posts(self, number):
+        self.read_back += 1
+        return [{"body": body} for n, body in self.collected if n == number]
 
     def send(self, path, payload, method):
         body = payload.get("body") or ""
@@ -526,7 +532,8 @@ def suite(case):
     had, order = rounds([[[finding(line=1)]], [], [[finding(line=2)]]], budget())
     case("rounds: every batch has its first pass before any batch has a second", order == [0, 1, 2, 0, 1, 2] and had == [2, 2, 2], (had, order))
     clock = Clock()
-    had, order = rounds([[[finding(line=1)]], [], [[finding(line=2)]]], rv.Budget(0, 1000, margin=300, now=clock), clock, 200)
+    D = rv.DEFAULT_PASS_S  # the estimate before any pass was measured
+    had, order = rounds([[[finding(line=1)]], [], [[finding(line=2)]]], rv.Budget(0, 4 * D, margin=300, now=clock), clock, D)
     case("rounds: when the time ends after the first round every batch was read once, and none never", had == [1, 1, 1], (had, order))
     had, order = rounds([[], [[finding(line=n)] for n in range(1, 9)]], budget())
     case("rounds: a batch that converged drops out and the others go on", had == [2, rv.MAX_PASSES] and order == [0, 1, 0, 1, 1, 1, 1], (had, order))
@@ -571,16 +578,17 @@ def suite(case):
 
     # --- time budget
     clock = Clock()
-    b = rv.Budget(0, 1000, margin=300, now=clock)
-    case("budget: a pass fits at the start", b.fits() and b.remaining() == 700)
-    clock.t = 401
+    D = rv.DEFAULT_PASS_S
+    b = rv.Budget(0, D + 1000, margin=300, now=clock)
+    case("budget: a pass fits at the start", b.fits() and b.remaining() == D + 700)
+    clock.t = 701
     case("budget: no pass starts that cannot finish", not b.fits(), b.remaining())
     clock.t = 100
     fitted = b.fits()  # the control: at this moment a pass fits, until a slow one was seen
-    b.observe(650)
+    b.observe(D + 650)
     case("budget: a slow pass raises the estimate", fitted and not b.fits(), (fitted, b.estimate))
     clock = Clock()
-    r = rv.converge(scripted([finding()], [], clock=clock, seconds=400), [], rv.Budget(0, 1000, margin=300, now=clock))
+    r = rv.converge(scripted([finding()], [], clock=clock, seconds=D), [], rv.Budget(0, 2 * D, margin=300, now=clock))
     case("budget: a batch out of time stops unconverged after the pass it had", (r["passes"], r["converged"]) == (1, False), r)
     clock = Clock()
     clock.t = 900
@@ -904,6 +912,8 @@ def suite(case):
          (code, forge.statuses, forge.threads, len(plain)) == (1, error, [], 1) and "NOT POSTED as a thread" in out
          and "`a.md` line 3" in plain[0], (code, forge.statuses, len(forge.threads), len(plain), out[-300:]))
     case("run: the plain note carries no marker, so the next run posts its findings again", forge.marks(rv.FINDINGS_MARK) == [], forge.marks(rv.FINDINGS_MARK))
+    case("run: the failure note after a plain note says that what it posted stands, since the findings are on the pull request",
+         any("What it posted before stands" in n["body"] for n in forge.notes), [n["body"][:120] for n in forge.notes])
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local"])
     carried = [f for _, fs in rv.marked(forge.threads, "bot", rv.FINDINGS_MARK) for f in fs]
@@ -1010,13 +1020,13 @@ def suite(case):
     forge = IssueShy()
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
     told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
-    case("run: a comment on the issue refused after its note landed withdraws the note, so the part is not recorded as reported",
-         code == 1 and told == [f"low {rv.THREAD_FINDINGS}"] and any("was withdrawn" in c["body"] for c in forge.notes) and on_issue() == 1,
-         (code, told, on_issue(), [c["body"][:80] for c in forge.notes]))
+    case("run: a comment on the issue refused after its note landed withdraws the note, so the part is not recorded as reported; a refusal is an answer, so the issue is not read back",
+         code == 1 and told == [f"low {rv.THREAD_FINDINGS}"] and any("was withdrawn" in c["body"] for c in forge.notes) and on_issue() == 1
+         and forge.read_back == 0, (code, told, on_issue(), forge.read_back, [c["body"][:80] for c in forge.notes]))
 
     class IssueDown(MemoryForge):
-        """A forge whose first comment on the lows issue dies on the way, with no answer of the forge: the
-        error is written by hand, see the top of this file."""
+        """A forge whose first comment on the lows issue dies on the way without landing, with no answer of
+        the forge: the error is written by hand, see the top of this file."""
 
         def __init__(self):
             super().__init__()
@@ -1031,13 +1041,61 @@ def suite(case):
     forge = IssueDown()
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
     told = [f["title"] for _, fs in rv.marked(forge.notes, "bot", rv.FINDINGS_MARK) for f in fs]
-    # the error is no refusal, so it ends the run before the second part: nothing stays recorded as reported
-    case("run: a comment on the issue that died after its note landed, with no refusal, withdraws the note too, and the run is red",
-         code == 1 and told == [] and any("was withdrawn" in c["body"] for c in forge.notes),
-         (code, told, [c["body"][:80] for c in forge.notes], out[-300:]))
+    # the error is no refusal, so the issue is read back; the comment is not there, and the error ends the run
+    # before the second part: nothing stays recorded as reported
+    case("run: a comment on the issue that died on the way and did not land, the issue read back, withdraws the note too, and the run is red",
+         code == 1 and told == [] and any("was withdrawn" in c["body"] for c in forge.notes) and forge.read_back == 1,
+         (code, told, forge.read_back, [c["body"][:80] for c in forge.notes], out[-300:]))
     code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
     case("run: the next run then posts the withdrawn part, and the issue gets it once",
          code == 0 and len(forge.collected) == 2 and on_issue() == rv.THREAD_FINDINGS + 1, (code, len(forge.collected), on_issue()))
+
+    class IssueDownLanded(MemoryForge):
+        """A forge whose first comment on the lows issue lands and then dies on the way back, with no answer
+        of the forge: the error is written by hand, see the top of this file."""
+
+        def __init__(self):
+            super().__init__()
+            self.died = 0
+
+        def send(self, path, payload, method):
+            answer = super().send(path, payload, method)
+            if "low findings of pull request" in (payload.get("body") or "") and not self.died:
+                self.died += 1
+                raise OSError("connection reset")
+            return answer
+
+    forge = IssueDownLanded()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    case("run: a comment on the issue that landed before the connection died stands, the issue read back, with its note: nothing is withdrawn and the run is green",
+         code == 0 and len(forge.collected) == 2 and on_issue() == rv.THREAD_FINDINGS + 1 and forge.read_back == 1
+         and not any("was withdrawn" in c["body"] for c in forge.notes) and "landed although its answer did not arrive" in out,
+         (code, len(forge.collected), on_issue(), forge.read_back, [c["body"][:80] for c in forge.notes], out[-300:]))
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    case("run: the next run adds no duplicate of the part that landed", code == 0 and len(forge.collected) == 2, (code, len(forge.collected)))
+
+    class IssueDownTwice(MemoryForge):
+        """A forge whose first comment on the lows issue dies on the way without landing, and whose rewrite of
+        the note dies the same way: both errors are written by hand, see the top of this file."""
+
+        def __init__(self):
+            super().__init__()
+            self.died = 0
+
+        def send(self, path, payload, method):
+            if "low findings of pull request" in (payload.get("body") or "") and not self.died:
+                self.died += 1
+                raise OSError("connection reset")
+            if method == "PATCH" and "was withdrawn" in (payload.get("body") or ""):
+                raise OSError("connection reset again")
+            return super().send(path, payload, method)
+
+    forge = IssueDownTwice()
+    code, out = run_review(forge, scripted_model({**found, "new.kz": many_lows}), ["--pr", "1"], ci=True, credential="x")
+    case("run: a rewrite of the note that dies on the way, whatever ended it, is said in the log, and the comment's own error ends the run",
+         code == 1 and "could not be withdrawn (" in out and "connection reset again" in out
+         and "REVIEW DID NOT COMPLETE (failed): OSError: connection reset" in out,
+         (code, out[-500:]))
     # --- off the pipeline, a run inside CI posts no status, completed or not
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model({**found, "new.kz": rv.ReviewError("usage-limit", "resets at 3pm", 429)}),
@@ -1069,10 +1127,11 @@ def suite(case):
          code == 0 and len(forge.collected) == 1, (code, forge.collected))
     # --- an oversized diff is said once per reason, not once more per run and per head
     forge = MemoryForge()
-    for _ in (1, 2):
+    for head in (HEAD, "d" * 40):
+        forge.heads = [head]
         code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x", diff="x" * (rv.MAX_DIFF_CHARS + 1))
-    case("run: an oversized diff posts one note over two runs, and the error status each time",
-         code == 1 and kinds(forge) == ["skipped"] and len(forge.notes) == 1 and forge.statuses == error * 2
+    case("run: an oversized diff posts one note over two runs on two heads, and the error status each time",
+         code == 1 and kinds(forge) == ["skipped"] and len(forge.notes) == 1 and [s[1:] for s in forge.statuses] == [("review", "error")] * 2
          and "REVIEW DID NOT COMPLETE (oversized)" in out, (code, kinds(forge), len(forge.notes), forge.statuses))
     # --- lost posts and an unfinished batch are both said
     forge = MemoryForge()
@@ -1183,8 +1242,8 @@ def suite(case):
     audit = next((n["body"] for n in forge.notes if "Off-pipeline review" in n["body"]), "")
     case("run: a bootstrap rules file is named by its path inside the checkout", code == 0 and f"rules from {rv.RULES_PATH} from the working tree" in audit
          and kit.ROOT not in out + audit, (code, audit[:400]))
-    # beside the checkout, so outside it wherever the temporary directory is (the red-proof replay puts it inside)
-    with kit.scratch("review-rules-", dir=os.path.dirname(kit.ROOT)) as outside:
+    # the temporary directory lies outside the checkout (the red-proof replay points it beside its copy)
+    with kit.scratch("review-rules-") as outside:
         elsewhere = os.path.join(outside, "rules.yaml")
         with open(elsewhere, "w", encoding="utf-8") as f:
             f.write(RULES)

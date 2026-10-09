@@ -1,0 +1,12 @@
+// expect: error not-visible at 8
+// rules: A15
+
+class Counter(int Count) {
+    string Text() => "counter {Count}"
+
+    pub void Show() {
+        print("{Counter(2)}")
+    }
+}
+
+Counter(1).Show()

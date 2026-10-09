@@ -95,10 +95,11 @@ ENV_KEEP = {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "HOME", "USERP
             "XDG_CACHE_HOME", "XDG_STATE_HOME"}
 LOGIN = {"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"}
 SHAPES = {**kit.SECRETS, **kit.MACHINE}
-# A pass is assumed to take this long until one was measured; measured passes took 379 to 1149 s.
-# The estimate decides only whether a pass may still start, and a run's first passes start with the
-# whole budget: by the time it runs short, the passes before were measured (Budget.observe).
-DEFAULT_PASS_S = 300
+# A pass is assumed to take this long until one was measured: above the longest pass measured so far
+# (379 to 1149 s), so that a pass started on the assumption, by a batch that starts before any pass
+# was measured, still fits into what is left of the job. The estimate decides only whether a pass may
+# still start; a batch that starts later takes the measured passes before it (Budget.observe).
+DEFAULT_PASS_S = 1200
 RANK = {"low": 0, "medium": 1, "high": 2}
 RETRY_STATUS = {500, 502, 503, 529}
 SCHEMA = {
@@ -720,6 +721,11 @@ class Forge:
     def issue_comments(self):
         return kit.gh_pages(f"repos/{self.repo}/issues/{self.number}/comments?per_page=100")
 
+    def issue_posts(self, number):
+        """The comments on another issue of the repository, the one that collects lows: read back when a
+        comment there failed without an answer, to see whether it landed (lows)."""
+        return kit.gh_pages(f"repos/{self.repo}/issues/{number}/comments?per_page=100")
+
     def thread(self, head, thread):
         """Post one thread on its first anchor the forge accepts; a plain note is the last resort, and
         the caller counts it as not posted: it is not a thread, so no check holds the merge for it.
@@ -758,8 +764,8 @@ class Forge:
         """The low findings as (the findings of a part, a post of that part): each part goes first
         as a note on the pull request, which a later run reads back as already reported, and right
         after that as a comment on the issue that collects lows, opened on the first part when none
-        is open; a comment the forge refuses withdraws its note (post_part). The parts are the
-        caller's posts, so a refusal loses one part, not every low."""
+        is open; a comment that fails withdraws its note, unless the issue, read back, shows that it
+        landed (post_part). The parts are the caller's posts, so a refusal loses one part, not every low."""
         issue = []  # the issue's number, once it is known
 
         def collecting():
@@ -778,21 +784,34 @@ class Forge:
         def post_part(part):
             # The note first: its marker is what a later run reads back as reported, so a part whose
             # note the forge refuses is posted nowhere and comes again. When the comment on the issue
-            # is refused after the note landed, the note is rewritten without its marker, so that the
+            # fails after the note landed, the note is rewritten without its marker, so that the
             # part comes again too instead of standing recorded on the pull request and missing from
-            # the issue; a rewrite that is refused as well is said, and the part is then in this log only.
+            # the issue; a rewrite that fails as well is said, and the part is then in this log only.
+            # A refusal is an answer: nothing landed. A timeout, a 5xx, a lost connection or an answer
+            # nobody could read (kit.Unanswered, or no kit.Refused at all) is none: the comment may have
+            # landed, so the issue is read back first, and a comment that is there stands, with its note.
             number = collecting()
+            body = collected(part)
             answer = self.note(noted(part, number))
             try:
-                self.post(f"issues/{number}/comments", {"body": collected(part)})
-            except Exception:  # a refusal or a timeout (kit.Unanswered is a Refused), a connection error, an answer nobody could
-                # read: whatever ended the post after the note landed, the note is withdrawn, and the error goes on
+                self.post(f"issues/{number}/comments", {"body": body})
+            except Exception as e:
+                landed = None  # unknown until the issue says
+                if not isinstance(e, kit.Refused) or isinstance(e, kit.Unanswered):
+                    try:
+                        landed = any(c.get("body") == body for c in self.issue_posts(number))
+                    except Exception as read:
+                        print(f"  whether the comment on #{number} landed could not be read ({public(str(read))[:200]})")
+                if landed:
+                    print(f"  the comment on #{number} landed although its answer did not arrive: the note stands")
+                    return f"issue {number}"
+                why = "failed" if landed is False else "failed or got no answer, and the issue could not be read back"
                 withdrawn = (f"**Automated review**: a note of {len(part)} low findings on `{head[:8]}` was withdrawn, because "
-                             f"their comment on #{number} failed; the next run reviews their file again, and their text is in "
+                             f"their comment on #{number} {why}; the next run reviews their file again, and their text is in "
                              f"the log of this run.")
                 try:
                     self.post(f"issues/comments/{answer['id']}", {"body": withdrawn}, method="PATCH")
-                except (kit.Refused, KeyError, TypeError) as again:
+                except Exception as again:  # whatever ended the rewrite is said, and the comment's own error goes on
                     print(f"  the note of this part could not be withdrawn ({public(str(again))[:200]}): the part is recorded on the "
                           f"pull request as reported and is missing from #{number}; its text is in this log")
                 raise
@@ -1038,7 +1057,7 @@ def review(argv):
             try:
                 where = post()
                 print(f"  posted {len(posted)} findings at {where}")
-                told_any = told_any or where != "plain note"
+                told_any = True  # a post landed, a plain note included: the findings are on the pull request
                 if where == "plain note":
                     # not a thread: no check holds the merge for these findings, and the note carries no marker,
                     # so the next run posts them again; the run ends red like one whose posts were refused

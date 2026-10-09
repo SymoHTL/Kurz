@@ -60,8 +60,8 @@ STILL = ("the head is still the finding's commit: nothing was pushed since, or t
          "the pull request yet; run the plan again")  # the forge names the old head for a moment after a push
 ON_HEAD = ("the finding sits on the pushed head: nothing was pushed since it; its edit answers it, or on tool, "
            "workflow or hook code also a reply")
-REPLIED = ("a person wrote in it: read and answer the reply; the finding still needs its edit, or on tool, "
-           "workflow or hook code a reply, before it is resolved by hand")
+REPLIED = ("a person wrote in it: read and answer the reply, then resolve it by hand once its edit, or on tool, "
+           "workflow or hook code a reply, answers the finding")
 BOTS = {"github-actions", "github-actions[bot]"}  # the Actions token's login, as GraphQL and as REST spell it
 THREADS = """query($owner: String!, $name: String!, $pr: Int!, $after: String) {
   repository(owner: $owner, name: $name) { pullRequest(number: $pr) {
@@ -736,10 +736,10 @@ def self_test():
         sent.append(args)
         return {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}}
 
-    got(lambda: fetch_threads("o/0123", 7, threads_once))
+    fetched = got(lambda: fetch_threads("o/0123", 7, threads_once))  # kept: a crash in the call must fail the case
     flags = {a: sent[0][n - 1] for n, a in enumerate(sent[0]) if a in ("owner=o", "name=0123", "pr=7")} if sent else {}
     cases.append(("threads: owner and name go as strings, so an all-digit name stays a name; the number goes typed",
-                  flags == {"owner=o": "-f", "name=0123": "-f", "pr=7": "-F"}, repr(flags)))
+                  fetched == [] and flags == {"owner=o": "-f", "name=0123": "-f", "pr=7": "-F"}, repr((fetched, flags))))
     out = got(lambda: run_gate("breadth", "o/n", 1, lambda path: pr, listed([commit], [])))
     cases.append(("breadth: a pull request that lists no files is refused", type(out) is kit.Refused and "no files" in str(out), repr(out)))
     moved = {"filename": "knowledge/walk.md", "previous_filename": ".claude/skills/change-walk/SKILL.md", "status": "renamed"}

@@ -49,14 +49,17 @@ LINK = r"\]\(((?:knowledge|guides)/[^)#]+\.md)(?:#[^)]*)?\)"  # an #anchor is st
 REFERENCE = re.compile(r"(?<![\w/.-])((?:knowledge|guides)/[A-Za-z0-9._-]+\.md)")
 # A link as a store file writes it, relative to itself or from the root with a "/": inline, `[text](target)`,
 # with a title in double quotes, single quotes or parentheses, or with the target in angle brackets (a
-# target with a space); or reference-style, `[name]: target`, where a footnote `[^1]:` is no link. The
-# target is read percent-decoded, as GitHub reads it.
-INLINE = re.compile(r"\]\((?:<([^>\n]*)>|([^)\s]+))(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\)")
-DEFINED = re.compile(r"^[ \t]{0,3}\[(?!\^)[^\]]+\]:[ \t]*(\S+)", re.M)
-# code spans of one or two backticks and fences of backticks or tildes: GitHub shows a link there as text.
-# An indented code block is not taken out: a link shape there is read as a link.
-CODE = re.compile(r"```.*?```|~~~.*?~~~|``[^`\n].*?``|`[^`\n]*`", re.S)
-URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")  # https:, mailto: and the like: not a file of this tree
+# target with a space), where a bare target may hold one level of balanced parentheses; or
+# reference-style, `[name]: target` or `[name]: <target>`, where a footnote `[^1]:` is no link. The
+# target is read percent-decoded, without its `#anchor` and its `?query`, as GitHub reads it; a target
+# that starts with `//` is another host, like one with a scheme.
+INLINE = re.compile(r"\]\((?:<([^>\n]*)>|((?:[^()\s]|\([^()\s]*\))+))(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\)")
+DEFINED = re.compile(r"^[ \t]{0,3}\[(?!\^)[^\]]+\]:[ \t]*(?:<([^>\n]*)>|(\S+))", re.M)
+# code spans of one or two backticks, which GitHub ends at a blank line and lets run over one line break,
+# and fences of backticks or tildes: GitHub shows a link there as text. An indented code block is not
+# taken out: a link shape there is read as a link.
+CODE = re.compile(r"```.*?```|~~~.*?~~~|``(?:[^`\n]|\n(?![ \t]*\n)|`(?!`))*?``|`(?:[^`\n]|\n(?![ \t]*\n))*`", re.S)
+URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:|//")  # https:, mailto:, //host and the like: not a file of this tree
 
 
 def expiry(rel, fm, today):
@@ -106,8 +109,9 @@ def link_errors(root, rel, body, files):
     directory, the root included."""
     errors, prose = [], CODE.sub("", body)
     inline = [bracketed or bare for bracketed, bare in INLINE.findall(prose)]
-    for raw in sorted(set(inline) | set(DEFINED.findall(prose))):
-        written = raw.split("#", 1)[0]  # the target as the file spells it, without the anchor
+    defined = [bracketed or bare for bracketed, bare in DEFINED.findall(prose)]
+    for raw in sorted(set(inline) | set(defined)):
+        written = re.split(r"[#?]", raw, maxsplit=1)[0]  # the target as the file spells it, without the anchor and the query
         target = urllib.parse.unquote(written)
         if not target or URL.match(target):
             continue  # an anchor of this page, or https:, mailto: and the like
@@ -382,6 +386,21 @@ def cases_in(base):
         "a reference-style link is a link": (
             tree({**good, k + "r.md": ok(4) + "see [it][1]\n\n[1]: gone.md\n"}),
             "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a reference-style target in angle brackets is read as GitHub reads it": (
+            tree({**good, k + "r.md": ok(4) + "see [it][1]\n\n[1]: <../tools/my note.txt>\n", "tools/my note.txt": "x\n"}), None),
+        "a bare target with balanced parentheses is one target": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../tools/notes_(old).md)\n", "tools/notes_(old).md": "x\n"}), None),
+        "a query string is dropped before the lookup, as GitHub drops it": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../CLAUDE.md?plain=1#L3)\n", "CLAUDE.md": "rules\n"}), None),
+        "a target that starts with two slashes is another host, not a file of this tree": (
+            tree({**good, k + "r.md": ok(4) + "see [x](//example.com/page.md)\n"}), None),
+        "a two-backtick span ends at a blank line, so a link after a stray pair of backticks is read": (
+            tree({**good, k + "r.md": ok(4) + "a stray `` here\n\nsee [it](gone.md)\n\nand `` there\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a one-backtick span runs over one line break of its paragraph, where GitHub still shows a link shape as text": (
+            tree({**good, k + "r.md": ok(4) + "write `[it](gone.md)\nas text` here\n"}), None),
+        # the recorded mutation is a case-insensitive listing, red on every file system; a plain os.path lookup
+        # in its place would be red only where the file system ignores case (Windows, macOS), which CI does not
         "a link spelled in another case than the file is broken on the page, whatever the file system says": (
             tree({**good, k + "r.md": ok(4) + "see [it](../tools/X.py)\n", "tools/x.py": "code\n"}),
             "knowledge/r.md links ../tools/X.py, which resolves to tools/X.py: no such file in this spelling"),

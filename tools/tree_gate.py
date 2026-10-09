@@ -141,6 +141,21 @@ def pushed_tags(stdin_text, cwd=None):
     return [sha for sha in shas if set(sha) != {"0"} and kit.run(["git", "cat-file", "-t", sha], cwd=cwd).strip() == "tag"]
 
 
+def pushed_odd(stdin_text, cwd=None):
+    """Errors for the pushed objects that are neither a commit nor a tag: a ref aimed straight at a
+    blob or a tree (`git push origin <blob>:refs/tags/x`) publishes an object no check reads, as a
+    tag of one does (check_tag), and rev-list lists no commit for it, so the push would end clean."""
+    errors = []
+    for line in stdin_text.splitlines():
+        parts = line.split()
+        if len(parts) == 4 and set(parts[1]) != {"0"}:
+            kind = kit.run(["git", "cat-file", "-t", parts[1]], cwd=cwd).strip()
+            if kind not in ("commit", "tag"):
+                errors.append(f"{parts[2]} ({parts[1][:8]}): points at a {kind or 'nothing'}, not a commit or a tag: "
+                              "what it publishes is read by no check")
+    return errors
+
+
 def pushed_refs(stdin_text):
     """The names a push publishes: the remote ref of every line that publishes something. A deletion
     publishes no name."""
@@ -177,6 +192,7 @@ def check_commit(sha, cwd=None):
         mode = kit.run(["git", "--literal-pathspecs", "ls-tree", "-z", sha, "--", path], cwd=cwd).split(" ", 1)[0]
         if mode in ("120000", "160000"):  # a link or a submodule: what is published is no file, as working_tree() refuses
             errors += [f"{sha[:8]} {e}" for e in [check_path(path)] if e]
+            errors += [f"{sha[:8]} {e}" for e in check_text(f"{path} (name)", path)]  # the name is published like a file's
             errors.append(f"{sha[:8]} {path}: not a regular file (a link or a submodule)")
             continue
         blob = kit.run(["git", "show", f"{sha}:{path}"], cwd=cwd, binary=True)  # as stored: decoding it here would hide a file that is not UTF-8
@@ -188,9 +204,10 @@ def within(target, root, exists=os.path.exists, same=os.path.samefile):
     """The path of `target` inside `root` ("." for the root itself), or None when it lies outside.
     Decided by identity: each existing ancestor of the target is compared with the root by the file
     system, so a path spelled in another case where the file system ignores case (Windows, macOS)
-    is inside, as the file it writes is. The path comes back as realpath returns it: existing parts
-    in the case the file system stores, the rest as written, never lower-cased, so the allowlist is
-    never matched against a lower-cased spelling."""
+    is inside, as the file it writes is. The path comes back as realpath returns it: on Windows with
+    its existing parts in the case the file system stores, elsewhere as written (realpath resolves
+    links there and keeps the spelling), never lower-cased, so the allowlist is never matched against
+    a lower-cased spelling."""
     full = os.path.realpath(target)
     path = full
     while True:
@@ -225,13 +242,13 @@ def hook(raw):
 
 
 def self_test():
-    # every directory of the suite, and one beside the checkout for what must lie outside it wherever the
-    # temporary directory is (the red-proof replay puts it inside); a removal that fails is said, not raised
-    with kit.scratch("tree-gate-") as base, kit.scratch("tree-gate-outside-", dir=os.path.dirname(kit.ROOT)) as beside:
-        return cases_in(base, beside)
+    # every directory of the suite under one temporary directory, which lies outside the checkout (the
+    # red-proof replay points it beside its copy); a removal that fails is said, not raised
+    with kit.scratch("tree-gate-") as base:
+        return cases_in(base)
 
 
-def cases_in(base, beside):
+def cases_in(base):
     ok_files = {f"knowledge/e{n}.md": b"fact\n" for n in range(5)}
     # Built by concatenation, so this file never holds a string its own scan would refuse.
     secrets = {"gitlab-token": "glpat-" + "A" * 16, "github-token": "ghp_" + "a" * 36,
@@ -365,9 +382,10 @@ def cases_in(base, beside):
                          commit("credited\n\nCo-authored-by: Someone <123+someone@" + "users.noreply.github.com>",
                                 {"knowledge/e.md": b"fact\n"}),
                          link("knowledge/d.md", "D:" + "/work/notes"),
-                         gitlink("sub", git("rev-list", "--max-parents=0", "HEAD"))))
+                         gitlink("sub", git("rev-list", "--max-parents=0", "HEAD")),
+                         link("knowledge/host-10.1." + "2.3.md", "x")))  # the address in two parts, so that this file holds none
     if isinstance(built, tuple):
-        _, clean, message, lexer, binary, deletion, quiet, credited, linked, submodule = built
+        _, clean, message, lexer, binary, deletion, quiet, credited, linked, submodule, named_link = built
         of = lambda sha: got(lambda: check_commit(sha, cwd=repo))
         has = lambda errors, needle: isinstance(errors, list) and any(needle in e for e in errors)
         cases.append(("pre-push: a clean commit passes", of(clean) == [], of(clean)))
@@ -382,6 +400,8 @@ def cases_in(base, beside):
                       has(of(linked), "knowledge/d.md: not a regular file"), of(linked)))
         cases.append(("pre-push: a co-author's GitHub no-reply address in a trailer passes", of(credited) == [], of(credited)))
         cases.append(("pre-push: a submodule is refused, as in the working tree", has(of(submodule), "sub: not a regular file"), of(submodule)))
+        cases.append(("pre-push: the name of a link or a submodule is scanned, like a file's",
+                      has(of(named_link), "(name): machine-bound string (ip-address)"), of(named_link)))
         git("update-ref", "refs/remotes/origin/main", clean)
         git("update-ref", "refs/remotes/other/main", deletion)
         line = f"refs/heads/main {deletion} refs/heads/main {clean}"
@@ -445,9 +465,12 @@ def cases_in(base, beside):
                                input=stdin_text, cwd=repo,
                                capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
             return p.returncode, p.stdout + p.stderr
+        tree_sha = git("rev-parse", f"{clean}^{{tree}}")
         codes = got(lambda: (pre_push(f"refs/heads/side {fresh} refs/heads/side {'0' * 40}\n"), pre_push(line + "\n"),
                              pre_push("not four fields\n"), pre_push(f"refs/tags/v1 {tag} refs/tags/v1 {'0' * 40}\n"),
-                             pre_push(f"refs/heads/host-10.1." + f"2.3 {fresh} refs/heads/host-10.1." + f"2.3 {'0' * 40}\n")))
+                             pre_push(f"refs/heads/host-10.1." + f"2.3 {fresh} refs/heads/host-10.1." + f"2.3 {'0' * 40}\n"),
+                             pre_push(f"refs/tags/raw {note} refs/tags/raw {'0' * 40}\n"),
+                             pre_push(f"refs/tags/rawtree {tree_sha} refs/tags/rawtree {'0' * 40}\n")))
         ended = lambda n, code, needle: isinstance(codes, tuple) and codes[n][0] == code and needle in codes[n][1]
         cases.append(("pre-push: the script ends in 0 for a clean push, and says what it scanned", ended(0, 0, "ref names about to be published, 0 errors"), codes))
         cases.append(("pre-push: the script ends in 1 for a push that holds a refused commit, and names the commit's defect",
@@ -457,11 +480,13 @@ def cases_in(base, beside):
                       ended(3, 1, "(tag message): machine-bound string (drive-path)"), codes))
         cases.append(("pre-push: the script ends in 1 for a ref whose name holds a machine-bound string, and names the ref",
                       ended(4, 1, "(ref name): machine-bound string (ip-address)"), codes))
+        cases.append(("pre-push: a ref aimed straight at a blob or a tree is refused: rev-list lists no commit for it, and what it publishes is read by no check",
+                      ended(5, 1, "refs/tags/raw (") and ended(5, 1, "points at a blob") and ended(6, 1, "points at a tree"), codes))
     cases.append(("pre-push: the throwaway repository was built", isinstance(built, tuple), built))
 
     call = lambda path: json.dumps({"tool_name": "Write", "tool_input": {"file_path": path}})
     inside = lambda rel: os.path.join(kit.ROOT, *rel.split("/"))
-    outside = os.path.join(beside, "x.cs")  # outside the checkout, whatever the temporary directory is
+    outside = os.path.join(base, "x.cs")  # outside the checkout: the temporary directory, beside the replay's copy
     for name, raw, want in [
         ("hook: compiler source inside the repo is denied", call(inside("src/Lexer.cs")), 2),
         ("hook: the design record is allowed", call(inside("kurz-design.md")), 0),
@@ -546,7 +571,7 @@ def main(argv):
             commits = pushed_commits(remote, stdin_text)
             tags, refs = pushed_tags(stdin_text), pushed_refs(stdin_text)
             errors = ([e for sha in commits for e in check_commit(sha)] + [e for sha in tags for e in check_tag(sha)]
-                      + [e for ref in refs for e in check_text(f"{ref} (ref name)", ref)])
+                      + [e for ref in refs for e in check_text(f"{ref} (ref name)", ref)] + pushed_odd(stdin_text))
             scanned = f"{len(commits)} commits, {len(tags)} annotated tags and {len(refs)} ref names about to be published"
         else:
             files, special = working_tree()

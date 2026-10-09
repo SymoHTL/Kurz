@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-09
-digest: 20bac4317b32a0d45ae8b1bbd5efac09b362e336679a9c9cb5d1dc4fa323fa1b
+digest: 731b253cf3f81bc3e143097336c11710e58a4636893f789b7d78443b2ca787a5
 ttl_days: 60
 metadata:
   type: reference
@@ -57,17 +57,17 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
 | `tools/gates.py` | 33 | 23 |
-| `tools/kit.py` | 20 | 16 |
+| `tools/kit.py` | 21 | 17 |
 | `tools/lint_ci.py` | 89 | 89 |
-| `tools/lint_knowledge.py` | 83 | 67 |
-| `tools/lint_reference.py` | 75 | 79 |
-| `tools/merge_pr.py` | 146 | 130 |
-| `tools/pr_gates.py` | 95 | 95 |
-| `tools/quality_evidence.py` | 34 | 37 |
+| `tools/lint_knowledge.py` | 89 | 73 |
+| `tools/lint_reference.py` | 77 | 81 |
+| `tools/merge_pr.py` | 146 | 131 |
+| `tools/pr_gates.py` | 95 | 97 |
+| `tools/quality_evidence.py` | 37 | 40 |
 | `tools/red_proof.py` | 31 | 29 |
-| `tools/review/review.py` | 256 | 228 |
-| `tools/tree_gate.py` | 103 | 75 |
-| **total** | 965 | 868 |
+| `tools/review/review.py` | 260 | 231 |
+| `tools/tree_gate.py` | 105 | 78 |
+| **total** | 983 | 889 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -112,7 +112,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 33 |
 | of them proposed | 12 |
 | of them open | 0 |
-| Corpus cases, none of them run | 238 |
+| Corpus cases, none of them run | 239 |
 | Compile-error ids | 46 |
 | Run-time error ids | 5 |
 <!-- /generated:reference -->
@@ -121,19 +121,23 @@ nothing in this repository executes Kurz.
 
 Findings above low are counted from the markers in the reviewer's threads, lows from the markers of
 the notes it leaves on the pull request, one note per part it posts; the issue that collects them is
-not read. A merge over red is counted from the record that the merge tool posts. Only pull requests
-and hazard issues that someone who may write here opened are counted, and only posts of the Actions
-token and of those people: anyone can open a pull request or an issue on, or comment in, a public
-repository.
+not read. A merge over red is counted from the record that the merge tool posts. A pull request
+counts when someone who may write here opened it or when it was merged, a hazard issue when such a
+person opened it or put the hazard label on it, and a post only from such a person or the Actions
+token; who may write here is the collaborators list with push access, not a record's
+`author_association`. The reason: anyone can open a pull request or an issue on, or comment in, a
+public repository (the GitHub docs, read 2026-10-09: "Creating an issue" says people with read
+access can create one, which a public repository gives everyone; "Creating a pull request from a
+fork" says write access to the head branch is enough, which a fork gives).
 
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened | 7 |
+| Pull requests opened by a writer, or merged | 7 |
 | Pull requests merged | 6 |
 | Merged over red, with a recorded waiver | 4 |
 | Review findings posted: high | 40 |
-| Review findings posted: medium | 487 |
-| Review findings posted: low | 556 |
+| Review findings posted: medium | 500 |
+| Review findings posted: low | 619 |
 | Open HAZARD issues | 14 |
 <!-- /generated:forge -->

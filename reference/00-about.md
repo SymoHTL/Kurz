@@ -355,13 +355,14 @@ print(-0.0)
 print(1.0 / z)
 ```
 
-### A15 (proposed) A private `Text()` used by `print` inside its class
+### A15 (proposed) A private `Text()` used by `print` or an interpolation inside its class
 
-`print` of an instance inside the class reaches `Text()` the way a use from outside does,
-through the text of the value and not as a call of the member, so a `Text()` without `pub` is
-`not-visible` there too (A9 for the use from outside). The owner's choice of 2026-10-03 (A9)
-covered the inheritance and the `pub`, not the place of the use, and the record says nothing of
-it: this reading is proposed, and the case stands on it.
+`print` of an instance inside the class, and an interpolation of one there (L6), reach `Text()`
+the way a use from outside does, through the text of the value and not as a call of the member,
+so a `Text()` without `pub` is `not-visible` there too (A9 for the use from outside). The owner's
+choice of 2026-10-03 (A9) covered the inheritance and the `pub`, not the place of the use, and
+the record says nothing of it: this reading is proposed, and the cases stand on it, one for
+`print` and one for an interpolation.
 
 Case: [classes/text-private-inside.kz](../corpus/classes/text-private-inside.kz)
 ```kurz
@@ -370,6 +371,19 @@ class Counter(int Count) {
 
     pub void Show() {
         print(Counter(2))
+    }
+}
+
+Counter(1).Show()
+```
+
+Case: [classes/text-private-inside-interpolation.kz](../corpus/classes/text-private-inside-interpolation.kz)
+```kurz
+class Counter(int Count) {
+    string Text() => "counter {Count}"
+
+    pub void Show() {
+        print("{Counter(2)}")
     }
 }
 

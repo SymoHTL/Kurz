@@ -83,7 +83,7 @@ sections:
       - Where this batch shows the rule a case names - an expected output, error identifier or error line that does not follow from that rule.
       - A case that tests several rules at once, so that a failure does not say which rule broke.
       - An error case that could pass for the wrong reason - it contains a second defect besides the one it names.
-      - A case whose expectation depends on the order of a map's entries (M10), on an address or on timing.
+      - A case whose expectation depends on something no rule fixes, such as the order of a map's entries (M10), an address, timing, a hash value or a random number.
       - Where this batch shows a rule and the list of changed files shows its cases - only a happy-path case, none at the limits the rule names.
       - Library, runtime or compiler code dressed as a case. A case is a small program with an expectation.
 

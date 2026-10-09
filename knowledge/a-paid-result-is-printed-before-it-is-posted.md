@@ -56,8 +56,10 @@ the only copy of their result was held back until a write to a rate-limited serv
   ends red (`failed`).
 - Reporting a failure never raises: each write goes through the paced post, which waits out the
   rate limit while waits are left, and whatever it raises is printed.
-- Low findings are no longer comments on the pull request, twenty at a time; they are collected
-  on one issue.
+- Low findings open no thread. They are collected on one issue, in parts: each part goes first
+  as a note on the pull request, which the next run reads back as reported, then as a comment on
+  the issue; when that comment fails and the issue, read back, does not show it, the note is
+  withdrawn, so that the part comes again instead of standing recorded and missing.
 
 The general shape: when a step that costs money or time is followed by a step that can be
 refused, the result is made durable (a log, a file) between the two.

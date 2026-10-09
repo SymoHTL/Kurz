@@ -142,7 +142,7 @@ Each line names a trap; its evidence is in the entry it links.
   the run red: FAIL, BROKEN or NOT RUN, or PARTLY on a gate that is not listed (the docstring of
   `tools/gates.py` is the one definition). A red `pr-title` or `pr-breadth` is fixed by editing
   the title or the description, which runs the job again; the others by a push. `judgment step`
-- `review` pending: no review of this head has finished. Look for a running `review` run in the
+- `review` pending: no review of this head posted a status. Look for a running `review` run in the
   Actions list before a dispatch: a new run cancels it, and both are billed. A Draft and a pull
   request from outside are reviewed on demand: `gh workflow run review.yml -f pr=N`.
   `judgment step`
@@ -151,10 +151,10 @@ Each line names a trap; its evidence is in the entry it links.
   Dispatch the review as above. The policy that allows the event is the owner's setting:
   HAZARD (#10).
 - `review` pending on a Ready pull request whose head carries the label `reviewed-<that head's
-  sha>`: by design, the review of that head ran off the pipeline, which posts no status; the
-  merge needs the owner's approval for that head (`--over-red`). Any other
-  head is reviewed by the run its event starts, a push to the Ready pull request or the Ready of a
-  head pushed during the Draft; a head whose run did not start gets a dispatch. Gate: `ci-config`
+  sha>`: the job skips the Ready event of such a head by design, because its review ran off the
+  pipeline, which posts no status; the merge needs the owner's approval for that head
+  (`--over-red`). An unlabelled head current at Ready is reviewed by the Ready's run, a head pushed
+  after Ready by its push's run; a head whose run did not start gets a dispatch. Gate: `ci-config`
   pins the clause; asking the approval is a `judgment step`.
 - A review run that failed (the status says `error`): read the run's last line,
   `REVIEW DID NOT COMPLETE (kind)`. `usage-limit`: wait for the reset, do not run it again now.
@@ -265,8 +265,8 @@ Gate: review rule "rules for sessions".
   pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
   given again for the new state, or not at all). What changes between that reading and the
-  merge call is caught by nobody, and nothing stops another merge or push in that window: HAZARD
-  (#27). Exit 3 means it was not read back as active, so it may still
+  moment the tool restores the ruleset is caught by nobody, and nothing stops another merge or
+  push in that window: HAZARD (#27). Exit 3 means it was not read back as active, so it may still
   be off: say so at once, read it back and restore it as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
   HAZARD (#3): the session holds the owner's token, so the permission classifier and this rule
   are the only guards on the approval.
@@ -336,7 +336,7 @@ Gate: review rule "rules for sessions".
 |---|---|
 | what may exist in the tree, and no credential or machine-bound string in files and commit messages (`tree`, the pre-push hook) | future plans stay out (#2) |
 | merge checks on `main` (ruleset; `merge-checks` asserts it on every run and is red while it is off) | per-item approval for a merge over red (#3), and the window in which the ruleset is off (#27) |
-| every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout (#4) |
+| every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout, a push with `--no-verify` (#4) |
 | workflow facts (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |

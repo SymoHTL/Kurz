@@ -46,8 +46,8 @@ flowchart TD
         G1["self-tests: a tool self-test fails, ran no case or contradicts its exit code;
         a tool has no self-test or no recorded red proof; a recorded mutation
         no longer turns its one named case red; fewer tools than the floor. The replay runs each
-        self-test, green and mutated, in a copy of the tree with its temporary files under that copy,
-        which goes when the check is done; a copy that could not be removed is named.
+        self-test, green and mutated, in a copy of the tree, with its temporary files beside that copy,
+        outside the tree a suite reads; both go when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]
         G2["tree: disallowed path, credential, machine-bound string, conflict marker,
         non-UTF-8 file, a link or a submodule, fewer files than the floor.
@@ -57,7 +57,7 @@ flowchart TD
         G3["knowledge: broken INDEX link, entry without INDEX line, hook or frontmatter;
         a store file named in an entry, CLAUDE.md, the review rules or a skill that does not exist;
         a link in a store file (inline or reference-style, outside code, percent-decoded) that, resolved from that
-        file in its exact spelling, reaches no entry or file or leaves the repository;
+        file in its exact spelling, reaches no entry, file or directory, or leaves the repository;
         nested entry;
         LIVING entry without diagram or update triggers, fewer living entries than their floor;
         expired or future-dated numbers, a TTL over 90 days; a generated block that is empty, or a page
@@ -67,7 +67,7 @@ flowchart TD
         a decided, assumed or proposed rule with neither a case nor a reason;
         a case on an open rule; a sample that differs from its corpus file;
         a code block that is neither a case sample nor marked text, or that is never closed;
-        a fence indented or made of tildes, which the lint would not read;
+        a fence indented or made of tildes outside a code block, which the lint would not read (inside one it is content);
         a corpus header that cannot be read or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
         a row that reads as an error id outside a table headed id, rules, meaning;
@@ -128,8 +128,9 @@ flowchart TD
         R3["findings: high and medium become threads on the pull request, per file,
         and block through thread resolution, not through the job.
         Lows are collected on the open issue labelled review-lows, in parts, each part a note on the pull request
-        first and then a comment on the issue; a part whose post is refused is printed in the log, its note withdrawn
-        when the comment was refused, its file reviewed again by the next run, and the run ends red;
+        first and then a comment on the issue; a part whose post failed is printed in the log, its note withdrawn
+        when the comment failed for any reason and the issue, read back, does not show it, its file reviewed again
+        by the next run, and the run ends red;
         they block nothing: judgment step"]
         R4["the workflow starts at all: GitHub's default rule may block pull_request_target here (whether it
         enforces or only evaluates was not known on 2026-10-02); the owner's event policy allows
@@ -158,7 +159,8 @@ flowchart TD
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
         a title or description the title gate refuses, an option it does not know.
         A merge by the button or gh pr merge still meets M1, but not the head pin, the auto-merge check,
-        the answered findings, the comparison with the live rules or the title gate: HAZARD issue 14"]
+        the comparison with the live rules, or the re-check of the title gate and of the answered findings
+        at the moment of the merge: HAZARD issue 14"]
         M3["merge_pr.py --over-red: ruleset off for one merge, restored and read back;
         while it is off nothing on the server holds any pull request or a push to main, so the checks
         and the threads are read again once it is off, and a change that reading finds merges nothing (exit 1,
@@ -195,7 +197,8 @@ flowchart TD
 - `tools/red_proof.py` or the shape of `tools/red_proofs.json` changes: G1.
 - `tools/tree_gate.py`, `.claude/settings.json` (the hook command), `.githooks/pre-push` change:
   W1, P1, G2.
-- `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals) changes: W1, P1, G2, G6.
+- `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals) changes: P1, G2, G6 and M2;
+  W1 reads paths only, so a pattern reaches it nowhere.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.
