@@ -9,7 +9,9 @@ case and exits 0; a tool with no recorded red proof; an entry whose anchor does 
 once in its file, or whose file cannot be read; an entry whose `expect` does not name exactly one
 case of the unmutated self-test, or names one that is already red; a mutation that no longer turns
 that case red (the gate went soft, or the proof went stale); an entry for a tool that does not
-exist; fewer than FLOOR tools.
+exist; fewer than FLOOR tools; a ledger that is not written as `--format` writes it (one entry per
+line, two spaces in, text as it is), since a ledger written back another way differs on every
+line, and the review reads and bills the whole file as a change.
 
 An entry: {"tool": path of the tool, "file": the file to break (default: the tool), "anchor": text
 that occurs exactly once, "replacement": what it becomes, "expect": the name of the case that must
@@ -87,6 +89,25 @@ def failed(out, green):
     return red
 
 
+def canonical(ledger):
+    """The ledger's one form: one entry per line, two spaces in, text as it is (no escaped characters),
+    so that a diff shows the entries that changed. A ledger written back another way (an indent, escaped
+    text) differs on every line, and a review reads and bills the whole file as a change (2026-10-09)."""
+    return "[\n" + ",\n".join("  " + json.dumps(e, ensure_ascii=False) for e in ledger) + "\n]\n"
+
+
+def format_ledger(root):
+    """Rewrite the ledger in its form; True when the file changed."""
+    path = os.path.join(root, LEDGER)
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    want = canonical(json.loads(text))
+    if want != text:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(want)
+    return want != text
+
+
 def check(root, floor=FLOOR):
     """(errors, {tool: {"cases": n, "proofs": n}})."""
     errors, stats, green = [], {}, {}
@@ -95,9 +116,14 @@ def check(root, floor=FLOOR):
         errors.append(f"only {len(tools)} tools found under tools/, floor is {floor}: is this the right tree?")
     try:
         with open(os.path.join(root, LEDGER), encoding="utf-8") as f:
-            ledger = json.load(f)
+            text = f.read()
+        ledger = json.loads(text)
     except (OSError, ValueError) as e:
         return errors + [f"{LEDGER} cannot be read: {type(e).__name__}"], stats
+    if text != canonical(ledger):
+        errors.append(f"{LEDGER} is not written one entry per line, two spaces in, text as it is: a ledger written back "
+                      f"another way differs on every line, and the review reads and bills the whole file; "
+                      f"`py -3 tools/red_proof.py --format` writes it in its form")
     for tool in tools:
         stats[tool] = {"cases": 0, "proofs": sum(e.get("tool") == tool for e in ledger)}
         if not SELF_TEST.search(kit.read(os.path.join(root, tool))):
@@ -200,7 +226,7 @@ def cases_in(base):
     def tree(files, ledger):
         root = tempfile.mkdtemp(dir=base)
         os.mkdir(os.path.join(root, "tools"))
-        for name, text in {**files, "red_proofs.json": json.dumps(ledger)}.items():
+        for name, text in {**files, "red_proofs.json": canonical(ledger)}.items():
             with open(os.path.join(root, "tools", name), "w", encoding="utf-8") as f:
                 f.write(text)
         return root
@@ -239,10 +265,24 @@ def cases_in(base):
     with open(os.path.join(broken, LEDGER), "w", encoding="utf-8") as f:
         f.write("[")
     trees["a ledger that is not JSON"] = (broken, "cannot be read")
+    reformatted = tree({"toy.py": toy}, [proof])
+    with open(os.path.join(reformatted, LEDGER), "w", encoding="utf-8") as f:
+        json.dump([proof], f, indent=1)  # the same entries, every line different: what a one-off script wrote on 2026-10-09
+    trees["a ledger written another way is refused, with the option that writes it in its form"] = (reformatted, "not written one entry per line")
     cases = []
     for name, (root, needle) in trees.items():
         errors, _ = check(root, floor=1)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
+    changed = format_ledger(reformatted)
+    errors, _ = check(reformatted, floor=1)
+    cases.append(("--format writes the ledger in its form, after which the check passes, and a second run changes nothing",
+                  changed and not errors and not format_ledger(reformatted) and kit.read(os.path.join(reformatted, LEDGER)) == canonical([proof]),
+                  (changed, errors)))
+    two = [proof, {**proof, "expect": "adds \u00e9"}]
+    cases.append(("the form is one entry per line, two spaces in, text as it is, so a diff shows the entries that changed",
+                  canonical(two) == '[\n  {"tool": "tools/toy.py", "anchor": "return a + b", "replacement": "return a - b", "expect": "adds"},\n'
+                                    '  {"tool": "tools/toy.py", "anchor": "return a + b", "replacement": "return a - b", "expect": "adds \u00e9"}\n]\n',
+                  canonical(two)))
     root = tree({"toy.py": toy}, [proof])
     errors, _ = check(root, floor=1)  # no error: the replay did write the mutation before it restored the file
     cases.append(("the mutation is written before the self-test runs, and the file is restored after it",
@@ -303,6 +343,9 @@ def cases_in(base):
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
+    if "--format" in sys.argv:
+        print(f"{LEDGER}: " + ("rewritten in its form" if format_ledger(kit.ROOT) else "already in its form"))
+        sys.exit(0)
     errors, stats = replay()
     for tool, s in stats.items():
         print(f"{tool}: {s['cases']} self-test cases, {s['proofs']} red proofs")

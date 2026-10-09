@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-09
-digest: 731b253cf3f81bc3e143097336c11710e58a4636893f789b7d78443b2ca787a5
+digest: 9918645f73324cef58742d3bf22b567e87d149fdaf2d9c251506eb7b2d48c25a
 ttl_days: 60
 metadata:
   type: reference
@@ -64,10 +64,10 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/merge_pr.py` | 146 | 131 |
 | `tools/pr_gates.py` | 95 | 97 |
 | `tools/quality_evidence.py` | 37 | 40 |
-| `tools/red_proof.py` | 31 | 29 |
+| `tools/red_proof.py` | 34 | 33 |
 | `tools/review/review.py` | 260 | 231 |
 | `tools/tree_gate.py` | 105 | 78 |
-| **total** | 983 | 889 |
+| **total** | 986 | 893 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -75,13 +75,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 30 |
+| Entries in INDEX.md | 31 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 8 |
+| tagged TRAP | 9 |
 | Review rule sections | 11 |
 | Review rules | 64 |
 <!-- /generated:store -->

@@ -24,7 +24,11 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
 - `py -3 tools/<tool>.py --self-test` runs one tool's cases. A changed decision needs a case, and
   the case needs an entry in `tools/red_proofs.json` naming the mutation that turns it red.
   Gate: `self-tests` replays every recorded mutation and fails when one no longer turns its named
-  case red. A decision that has no case is invisible to it: review rule "tools".
+  case red. A decision that has no case is invisible to it: review rule "tools". The ledger is
+  written one entry per line, two spaces in, text as it is, as `py -3 tools/red_proof.py --format`
+  writes it: a ledger written back another way differs on every line, and the review reads and
+  bills the whole file as a change ([knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md](knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md)).
+  Gate: `self-tests`.
 - `py -3 tools/lint_reference.py --sync` rewrites every sample in `reference/` from its corpus
   file. Change the `.kz` file, then sync: a sample edited by hand is red until it is overwritten.
   Gate: `reference`.
