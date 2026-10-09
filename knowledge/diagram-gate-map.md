@@ -122,7 +122,8 @@ flowchart TD
         Any workflow run of this repository can post the same status: HAZARD issue 11"]
         R3["findings: high and medium become threads on the pull request, per file,
         and block through thread resolution, not through the job.
-        Lows are collected on the open issue labelled review-lows and block nothing: judgment step"]
+        Lows are collected on the open issue labelled review-lows, in parts, each part its own post, so a refused
+        post loses one part; they block nothing: judgment step"]
         R4["the workflow starts at all: GitHub's default rule may block pull_request_target here (whether it
         enforces or only evaluates was not known on 2026-10-02); the owner's event policy allows the event
         since 2026-10-03. Nothing asserts the policy: HAZARD issue 10"]

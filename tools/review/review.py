@@ -63,9 +63,9 @@ WORKERS = 3
 # and a body that many, so a rendered thread stays well below it.
 THREAD_FINDINGS, TITLE_CHARS, BODY_CHARS = 20, 200, 2000
 COMMENT_CHARS = 65_536  # the forge's limit on a comment body; what is posted is sized against it, rendered
-# Low findings open no thread. They are collected on the open issue with this label, and the pull
-# request gets a note that lists them without their bodies: this many fit one comment.
-LOWS_LABEL, NOTE_FINDINGS = "review-lows", 150
+# Low findings open no thread. They are collected, in parts, on the open issue with this label, and
+# the pull request gets a note per part that lists them without their bodies.
+LOWS_LABEL = "review-lows"
 # A review off the pipeline posts no status, and the run the forge starts on its own when the pull
 # request goes Ready would spend the seat on the same head again: a completed off-pipeline review
 # labels the pull request `reviewed-<head sha>`, and the workflow's job skips the Ready event of a
@@ -77,7 +77,10 @@ LOWS_LABEL, NOTE_FINDINGS = "review-lows", 150
 # error (lint_ci pins the job's name). A label write the forge refuses ends the run red: Ready
 # would start the paid run.
 LOCAL_LABEL = "reviewed-"  # followed by the 40 hex digits of the head: 49 characters, under the forge's 50
-POST_MARGIN_S = 300  # kept back from the job timeout for posting
+# Kept back from the job timeout for posting: the rate-limit waits below, once each, and WRITES_S
+# for the writes themselves, PACE_S and a round trip for each of about 30. A run that posts more
+# runs into the job's timeout; what it posted stands, and the log holds the rest.
+POST_MARGIN_S, WRITES_S = 300, 60
 # The forge blocks an account that creates content too fast (its secondary rate limit; 40 posts
 # in a row were enough on 2026-10-02, and its documentation asks for a second between writes).
 # Writes are paced, and a write
@@ -92,7 +95,10 @@ ENV_KEEP = {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "HOME", "USERP
             "XDG_CACHE_HOME", "XDG_STATE_HOME"}
 LOGIN = {"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"}
 SHAPES = {**kit.SECRETS, **kit.MACHINE}
-DEFAULT_PASS_S = 300  # a pass is assumed to take this long until one was measured
+# A pass is assumed to take this long until one was measured; measured passes took 379 to 1149 s.
+# The estimate decides only whether a pass may still start, and a run's first passes start with the
+# whole budget: by the time it runs short, the passes before were measured (Budget.observe).
+DEFAULT_PASS_S = 300
 RANK = {"low": 0, "medium": 1, "high": 2}
 RETRY_STATUS = {500, 502, 503, 529}
 SCHEMA = {
@@ -180,6 +186,8 @@ def header_paths(block):
         quoted = re.fullmatch(r'("a/(?:[^"\\]|\\.)*") ("b/(?:[^"\\]|\\.)*")', first)
         if quoted:
             old, new = ((unquote(q) or "  ")[2:] or None for q in quoted.groups())
+            if old != new:
+                return None  # two paths and no rename lines: unreadable, as in the unquoted branch
         else:
             old = new = first[2:2 + (len(first) - 5) // 2]
             if first != f"a/{old} b/{new}":
@@ -266,7 +274,12 @@ def load_rules(text):
         sections = kit.load_yaml(text)["sections"]
         names = [s["name"] for s in sections]
         for s in sections:
-            if not (s.get("always") is True or (isinstance(s.get("files"), list) and s["files"])):
+            if "always" in s and not isinstance(s["always"], bool):
+                raise ValueError(f"section {s['name']} has always: {s['always']!r}, which is neither true nor false")
+            files = s.get("files")
+            if files is not None and not (isinstance(files, list) and files and all(isinstance(g, str) and g.strip() for g in files)):
+                raise ValueError(f"section {s['name']} has files that are not a list of patterns")
+            if not (s.get("always") is True or files):
                 raise ValueError(f"section {s['name']} has neither files nor always: true")
             if not s["rules"] or not all(isinstance(r, str) and r.strip() for r in s["rules"]):
                 raise ValueError(f"section {s['name']} has no usable rules")
@@ -336,9 +349,9 @@ def fresh_suffix(*texts):
 # --- the model call ---------------------------------------------------------------------------
 
 def valid_finding(f, paths):
-    return (isinstance(f, dict) and f.get("file") in paths
+    return (isinstance(f, dict) and isinstance(f.get("file"), str) and f["file"] in paths
             and isinstance(f.get("line"), int) and not isinstance(f.get("line"), bool) and f["line"] >= 1
-            and f.get("severity") in RANK
+            and isinstance(f.get("severity"), str) and f["severity"] in RANK
             and all(isinstance(f.get(k), str) and f[k].strip() for k in ("title", "body")))
 
 
@@ -736,22 +749,30 @@ class Forge:
         return sorted(i["number"] for i in open_issues if "pull_request" not in i)  # the endpoint lists pull requests too
 
     def lows(self, head, findings):
-        """Put low findings on the issue that collects them, opened here when none is open, and
-        leave on the pull request the notes a later run reads back as already reported. Returns
-        the number of the issue."""
-        open_issues = self.lows_issues()
-        issue = open_issues[0] if open_issues else self.post("issues", {
-            "title": "Low findings of the automated review", "labels": [LOWS_LABEL],
-            "body": "The automated review collects its low findings here instead of opening a thread for each. They are fixed "
-                    "together. Close this issue when they are: the next review that finds a low opens a new one."})["number"]
+        """The low findings as (the findings of a part, a post of that part): each part goes on the
+        issue that collects lows, opened on the first post when none is open, and right after that
+        as a note on the pull request, which a later run reads back as already reported. The parts
+        are the caller's posts, so a refusal loses one part, not every low."""
+        issue = []  # the issue's number, once it is known
+
+        def collecting():
+            if not issue:
+                open_issues = self.lows_issues()
+                issue.append(open_issues[0] if open_issues else self.post("issues", {
+                    "title": "Low findings of the automated review", "labels": [LOWS_LABEL],
+                    "body": "The automated review collects its low findings here instead of opening a thread for each. They are fixed "
+                            "together. Close this issue when they are: the next review that finds a low opens a new one."})["number"])
+            return issue[0]
+
+        def post_part(part):
+            number = collecting()
+            self.post(f"issues/{number}/comments", {"body": collected(part)})
+            self.note(f"**Automated review**: {len(part)} low findings on `{head[:8]}` are collected in #{number}. They do not "
+                      f"hold this pull request; a push that is needed anyway fixes them too.\n\n{listed(part, head)}")
+            return f"issue {number}"
+
         collected = lambda part: render({"findings": part, "lows": (self.number, head)})
-        noted = lambda part: (f"**Automated review**: {len(part)} low findings on `{head[:8]}` are collected in #{issue}. They do not "
-                              f"hold this pull request; a push that is needed anyway fixes them too.\n\n{listed(part, head)}")
-        for part in in_parts(findings, collected):
-            self.post(f"issues/{issue}/comments", {"body": collected(part)})
-        for part in in_parts(findings, noted, NOTE_FINDINGS):
-            self.note(noted(part))
-        return issue
+        return [(part, lambda part=part: post_part(part)) for part in in_parts(findings, collected)]
 
     def save_state(self, comment_id, body):
         if comment_id:
@@ -831,17 +852,19 @@ def review(argv):
 
     def stop(kind, detail):
         """Say that the review did not complete, here and on the pull request, and return the exit
-        code. Each write is tried once and whatever it raises is printed, never raised: a failure
-        to report a failure must not start the reporting again."""
+        code. Each write goes through the forge's post(), which waits out the forge's rate limit
+        while the run has a wait left; whatever a write raises is printed, never raised: a failure
+        to report a failure must not start the reporting again. An oversized diff gets no note
+        here: the skip note, posted once per reason, says it."""
         detail = harmless(public(detail))
         print(f"REVIEW DID NOT COMPLETE ({kind}): {detail}")
         if kind == "usage-limit":
             print("A usage limit is not a crash: retry after the reset the message names, not now.")
         if head and me and not dry:
-            key = note_wanted(notes, "failed", sha=head)
+            key = note_wanted(notes, "failed", sha=head) if kind != "oversized" else None
             writes = [lambda: forge.note(f"**Automated review did not complete** on `{head[:8]}` ({kind}): {detail[:500]}\n\n"
-                                         f"This pull request is not reviewed.\n\n{marker('note', key)}")] if key else []
-            if in_ci:
+                                         f"What it posted before stands; the rest is in the log of the run.\n\n{marker('note', key)}")] if key else []
+            if in_ci and not local:  # a run off the pipeline posts no status, completed or not
                 writes.append(lambda: forge.status(head, "error", f"review did not complete: {kind}"))
             for write in writes:
                 try:
@@ -861,12 +884,13 @@ def review(argv):
                                 f"its head would also count for a pull request of that head into {branch}, whose diff nobody "
                                 f"reviewed. Retarget it, or review it off the pipeline (--local), which posts no status")
         head, me = pr["head"]["sha"], forge.me()
+        # the notes first: a stop below posts its failure note once per head, which needs the ones already there
+        issue_comments, review_comments = forge.issue_comments(), forge.review_comments()
+        notes = [payload for _, payload in marked(issue_comments, me, NOTE_MARK)]
         if pr["state"] != "open":
             return stop("closed", "the pull request is not open")
         if in_ci and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
             return stop("credential", "CLAUDE_CODE_OAUTH_TOKEN is not set as a repository secret")
-        issue_comments, review_comments = forge.issue_comments(), forge.review_comments()
-        notes = [payload for _, payload in marked(issue_comments, me, NOTE_MARK)]
 
         rules_text, rules_from = forge.rules(branch), f"the default branch ({branch})"
         if rules_text is None:
@@ -897,7 +921,8 @@ def review(argv):
         with open(os.path.abspath(__file__), "rb") as f, open(os.path.join(os.path.dirname(HERE), "kit.py"), "rb") as k:
             parts = {"review.py": f.read(), "kit.py": k.read(), "rules": rules_text.encode()}
         script = parts["review.py"] + parts["kit.py"]
-        # the ids `git hash-object` gives these bytes: comparable with `git ls-tree` on the reviewed head
+        # the ids `git hash-object` gives these bytes: comparable with `git ls-tree` on the commit the run's
+        # checkout held, and on the default branch for the rules; not on the reviewed head, whose code this is not
         blobs = ", ".join(f"{name} `{hashlib.sha1(b'blob %d' % len(data) + bytes(1) + data).hexdigest()[:12]}`" for name, data in parts.items())
         key = cache_key(script, rules_text, pr["title"], pr["body"], bounds)
         states = marked(issue_comments, me, STATE_MARK)
@@ -909,7 +934,8 @@ def review(argv):
         if unread:
             return stop("failed", f"{len(unread)} files of the diff are in no batch and in no replay: {', '.join(sorted(unread))[:300]}")
         reported = [{**f, "stale": f.get("sha") != head} for c, fs in marked(review_comments + issue_comments, me, FINDINGS_MARK)
-                    for f in fs if isinstance(f, dict) and f.get("severity") in RANK and isinstance(f.get("line"), int)]
+                    for f in fs if isinstance(f, dict) and isinstance(f.get("file"), str) and isinstance(f.get("title"), str)
+                    and isinstance(f.get("severity"), str) and f["severity"] in RANK and isinstance(f.get("line"), int)]
         print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache, "
               f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}")
         for path in sorted(replay):
@@ -977,7 +1003,7 @@ def review(argv):
         unposted, lost = set(), 0
         lows = [f for f in findings if f["severity"] == "low"]
         posts = [(thread["findings"], lambda thread=thread: forge.thread(head, thread)) for thread in plan_posts(findings, anchors, head)]
-        posts += [(lows, lambda: f"issue {forge.lows(head, lows)}")] if lows else []
+        posts += forge.lows(head, lows) if lows else []  # one post per part: a refusal loses that part, not every low
         for n, (posted, post) in enumerate(posts):
             try:
                 where = post()
@@ -1013,10 +1039,11 @@ def review(argv):
         forge.save_state(state_comment and state_comment["id"],
                          f"Automated review state for `{head[:8]}`: {summary}. {len(replay)} files replayed.\n\n"
                          f"{marker('state', {'v': 1, 'key': key, 'head': head, 'files': cached})}")
+        also = f" The review did not complete either ({incomplete[0]}): {incomplete[1]}." if incomplete else ""
         if unposted:
             return stop("failed", f"{lost} findings on {', '.join(sorted(unposted))} could not be posted as threads. Their text is in "
                                   f"the log of this run; those files are not stored as reviewed, so the next run reviews them "
-                                  f"again. Found: {summary}")
+                                  f"again. Found: {summary}.{also}")
         if incomplete:
             return stop(incomplete[0], f"{incomplete[1]}. Posted so far: {summary}")
         if in_ci and not local:
@@ -1044,7 +1071,8 @@ def review(argv):
         return 0
     except ReviewError as e:
         return stop(e.kind, e.detail)
-    except Exception as e:  # never silent: whatever broke, this is a review that did not complete
+    except Exception as e:  # every exception is a review that did not complete; a cancel or a kill ends the process
+        # with no note (knowledge/a-cancel-does-not-beat-the-runner.md)
         return stop("failed", f"{type(e).__name__}: {e}")
 
 
