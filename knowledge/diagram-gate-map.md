@@ -15,7 +15,8 @@ NOT RUN, N/A) are defined once, in the docstring of `tools/gates.py`.
 flowchart TD
     subgraph W["Write time: one agent session"]
         W1["write-time hook, tree_gate.py --hook:
-        denies a Write or Edit to a path the design phase does not allow, and every call
+        denies a Write or Edit to a path the allowlist does not hold (the compiler under compiler/ is held
+        since 2026-10-09), and every call
         the gate could not judge; inside or outside the repository is decided by the file system's
         identity of directories, so a path spelled in another case is inside where case is ignored.
         It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
