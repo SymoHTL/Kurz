@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-08
-digest: 9dd6c995b17a0d678af894e468cbdb9bad0c94290cebea5ac53038087345402f
+generated: 2026-10-09
+digest: f1f428cf869aa4f32dec31558f19fe89e8558a28e5ea3a6b24af561c2771d19a
 ttl_days: 60
 metadata:
   type: reference
@@ -39,12 +39,12 @@ defined in its docstring.
 | `self-tests` | every run | a tool's self-test fails, ran no case or contradicts its own exit code; a tool has no self-test or no recorded red proof; a recorded mutation no longer turns its one named case red |
 | `tree` | every run | a path the design phase does not allow; a credential-shaped or machine-bound string; a merge-conflict marker; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor |
 | `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
-| `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; fewer rules or cases than the floors |
+| `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an error-table row that does not read as one; a design record that cannot be read; fewer rules or cases than the floors |
 | `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path or branch filter; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; a workflow without facts |
 | `merge-checks` | every run | the rules active on main differ from tools/ruleset.json or carry a parameter that file does not name, the ruleset is not active, it has bypass actors, or auto-merge is allowed; PARTLY where the token cannot read the last two |
 | `pr-title` | pull requests | a workflow-skip literal, a credential-shaped or machine-bound string or a conflict marker in the title, the description or a commit message of the branch: each of them can become the squash commit on main |
 | `pr-breadth` | pull requests | more than 15 files, or a change to the quality infrastructure, without a Blast radius section |
-| `pr-findings` | pull requests | a review finding that is unresolved, or resolved without the edit (or, on tool code, the reply) that answers it |
+| `pr-findings` | pull requests | a review finding that is unresolved, or resolved without the edit (or, on tool, workflow or hook code, the reply) that answers it |
 | `push-hook` | local runs | this clone would publish without the tree gate: core.hooksPath is not .githooks |
 <!-- /generated:gates -->
 
@@ -58,16 +58,16 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 |---|---|---|
 | `tools/gates.py` | 33 | 23 |
 | `tools/kit.py` | 17 | 13 |
-| `tools/lint_ci.py` | 84 | 84 |
-| `tools/lint_knowledge.py` | 61 | 44 |
-| `tools/lint_reference.py` | 56 | 58 |
-| `tools/merge_pr.py` | 134 | 116 |
-| `tools/pr_gates.py` | 86 | 85 |
-| `tools/quality_evidence.py` | 28 | 27 |
-| `tools/red_proof.py` | 29 | 26 |
-| `tools/review/review.py` | 239 | 205 |
-| `tools/tree_gate.py` | 81 | 51 |
-| **total** | 848 | 732 |
+| `tools/lint_ci.py` | 88 | 88 |
+| `tools/lint_knowledge.py` | 70 | 54 |
+| `tools/lint_reference.py` | 67 | 70 |
+| `tools/merge_pr.py` | 139 | 123 |
+| `tools/pr_gates.py` | 94 | 93 |
+| `tools/quality_evidence.py` | 30 | 32 |
+| `tools/red_proof.py` | 30 | 28 |
+| `tools/review/review.py` | 249 | 217 |
+| `tools/tree_gate.py` | 93 | 63 |
+| **total** | 910 | 804 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -75,13 +75,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 28 |
+| Entries in INDEX.md | 29 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 6 |
+| tagged TRAP | 7 |
 | Review rule sections | 11 |
 | Review rules | 64 |
 <!-- /generated:store -->
@@ -112,7 +112,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 33 |
 | of them proposed | 11 |
 | of them open | 0 |
-| Corpus cases, none of them run | 232 |
+| Corpus cases, none of them run | 236 |
 | Compile-error ids | 46 |
 | Run-time error ids | 5 |
 <!-- /generated:reference -->
@@ -129,10 +129,10 @@ a pull request on, or comment in, a public repository.
 | Forge | Count |
 |---|---|
 | Pull requests opened | 6 |
-| Pull requests merged | 5 |
+| Pull requests merged | 6 |
 | Merged over red, with a recorded waiver | 4 |
 | Review findings posted: high | 37 |
 | Review findings posted: medium | 422 |
-| Review findings posted: low | 444 |
-| Open HAZARD issues | 11 |
+| Review findings posted: low | 457 |
+| Open HAZARD issues | 13 |
 <!-- /generated:forge -->
