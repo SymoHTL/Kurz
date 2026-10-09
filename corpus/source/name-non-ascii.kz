@@ -2,4 +2,4 @@
 // rules: L9
 
 zähler = 1
-print(zähler)
+print(1)

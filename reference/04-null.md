@@ -350,13 +350,14 @@ the use is fine, and a second use after a call takes a variable of its own. A ca
 expression that runs code the function does not see: a call of a function or a method, a
 constructor, an interpolation or `print` of a class instance (its `Text()`, A5), and `==` on class
 instances that name their fields (K5). A declaration is not an assignment; an assignment into any
-path is one (whether assigning a value whose type has no `null` narrows the path again, as C#'s flow
-analysis reads it, is open: the record, section 14; the case assigns a value that may be null).
-Reading a field, `.Bytes` and `.Count` on a value, and `==` on values are none of them. *(this list
-is proposed)* `print` is a call like any other. C# keeps such a path narrowed across the call (the
-.NET SDK 10.0.204, 2026-10-08: no warning for a use after a call that sets the field to null, CS8602
-for an unchecked use), which its analysis can afford because it only warns; here an unchecked use is
-an error (N2), so the narrowing ends where the promise would end.
+path is one, and one that assigns a value whose type has no `null` narrows the path again, as this
+rule says above with the owner's choice of 2026-10-09, while the case
+`null/narrowed-field-after-assignment.kz` assigns a value that may be null. Reading a field,
+`.Bytes` and `.Count` on a value, and `==` on values are none of them. *(this list is proposed)*
+`print` is a call like any other. C# keeps such a path narrowed across the call (the .NET SDK
+10.0.204, 2026-10-08: no warning for a use after a call that sets the field to null, CS8602 for an
+unchecked use), which its analysis can afford because it only warns; here an unchecked use is an
+error (N2), so the narrowing ends where the promise would end.
 
 Case: [null/narrowed-field.kz](../corpus/null/narrowed-field.kz)
 ```kurz

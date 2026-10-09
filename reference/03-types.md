@@ -582,9 +582,9 @@ computed in a signed `int` and can overflow it. The wrapping operators `+%`, `-%
 not promote: they compute in the wider of their operand types and wrap there, so that an 8-bit
 checksum is `a +% b` on two `byte`s, where a promoted `+%` would need a mask on every narrow
 checksum (the owner, 2026-10-04, against promoting them; C# has no such operators). The cost: `a +
-b` and `a +% b` differ in type. Operands of different signedness are `sign-mix` (T9) whatever their
-widths, because no wider type holds both, and a literal operand takes the other operand's type, so
-that `sum +% 1` on a `byte` computes in `byte` (the owner, 2026-10-09).
+b` and `a +% b` differ in type. Under these operators, which do not promote, operands of different
+signedness are `sign-mix` (T9) whatever their widths, and a literal operand takes the other
+operand's type, so that `sum +% 1` on a `byte` computes in `byte` (the owner, 2026-10-09).
 
 Case: [types/wrapping-narrow.kz](../corpus/types/wrapping-narrow.kz)
 ```kurz

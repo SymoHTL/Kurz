@@ -8,7 +8,9 @@ an id of its own for the parentheses, which would put a special case into the pa
 spelling). The braces are always required, and the block opens on the line of the condition: a
 statement in place of the block, and a `{` on the next line, which L2 ends the statement before and
 L4 does not continue it to, are the compile error `braces-required` (the owner, 2026-10-09, against
-continuing the statement onto the `{`, a fourth exception to L2).
+continuing the statement onto the `{`, a fourth exception to L2). Both are reported on the line of
+the condition, where the block should have opened, which is the line the case with the `{` on its
+own line expects.
 
 Case: [control/if.kz](../corpus/control/if.kz)
 ```kurz

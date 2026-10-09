@@ -120,8 +120,8 @@ hexadecimal, binary or suffixed literal before a unit, T21 two code points in a 
 an operator declaration. Each is the compile error `syntax`, one id for every text that no rule of
 this reference gives a meaning, reported on the line where the text stops making sense. A more exact
 id can replace it for a construct whose rule names one. The owner confirmed the one id on
-2026-10-09, in round 13, against an id of its own for a `match` on a set of flags (question 20) and
-for the shapes of `"""` (question 4).
+2026-10-09, in round 13, against an id of its own for a `match` on a set of flags and for the shapes
+of `"""`.
 
 Case: [control/c-style-for.kz](../corpus/control/c-style-for.kz)
 ```kurz

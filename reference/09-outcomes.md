@@ -369,9 +369,10 @@ Remove(2) else {
 
 ### O11 (decided, §6) A child's stack and the process's heap
 
-An actor that exhausts its stack dies as it does for any exception (O6): with a `Reason` of the
-runtime's `data` type (O7), the exception `stack-overflow` at the call that did not fit, and its
-parent lives. An allocation that fails ends the whole process with the exit code 1 and a line on
+An actor that exhausts its stack dies as it does for any exception (O6), with a `Reason` of the
+runtime's `data` type (O7), and its parent lives. *(proposed: the id of that exception,
+`stack-overflow`, and its line, the call that did not fit; the record names neither, and the case
+stands on both)* An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the heap is shared and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value

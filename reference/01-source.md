@@ -171,13 +171,13 @@ print(_count2)
 Case: [source/name-non-ascii.kz](../corpus/source/name-non-ascii.kz)
 ```kurz
 zähler = 1
-print(zähler)
+print(1)
 ```
 
 Case: [source/name-at.kz](../corpus/source/name-at.kz)
 ```kurz
-@class = 1
-print(@class)
+@total = 1
+print(1)
 ```
 
 ### L10 (assumed, §4) The type of an integer literal
@@ -296,13 +296,12 @@ print(equal)
 
 The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, `bool`, `string`, `char`,
-`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names and
-follow them while they are proposed there. Using one as a name is `reserved-word` (L12), as it
-is in C# for the first fourteen, which are keywords there; the four time types C# does not
-reserve. The owner chose this on 2026-10-04, against ordinary names that a declaration hides in
-its block, under which `long(x)` (T10) would have two readings in one program; the cost is that
-nothing can be called `string`, and that a ported program with a local called `duration` or
-`timestamp` has to rename it.
+`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names, which the
+owner decided on 2026-10-09. Using one as a name is `reserved-word` (L12), as it is in C# for the
+first fourteen, which are keywords there; the four time types C# does not reserve. The owner chose
+this on 2026-10-04, against ordinary names that a declaration hides in its block, under which
+`long(x)` (T10) would have two readings in one program; the cost is that nothing can be called
+`string`, and that a ported program with a local called `duration` or `timestamp` has to rename it.
 
 Case: [source/type-name-as-name.kz](../corpus/source/type-name-as-name.kz)
 ```kurz
@@ -346,6 +345,16 @@ print(text)
 Case: [source/multi-line-string-one-line.kz](../corpus/source/multi-line-string-one-line.kz)
 ```kurz
 text = """abc"""
+print(text)
+```
+
+Case: [source/multi-line-string-blank-line.kz](../corpus/source/multi-line-string-blank-line.kz)
+```kurz
+text = """
+    a
+  
+    b
+    """
 print(text)
 ```
 
