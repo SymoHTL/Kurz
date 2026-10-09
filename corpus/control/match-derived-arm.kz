@@ -1,0 +1,21 @@
+// expect: output
+// | admin 2
+// | user Bea
+// | none
+// rules: C4
+
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+void Show(User | NotFound u) {
+    match u {
+        Admin a => print("admin {a.Level}")
+        User x => print("user {x.Name}")
+        NotFound => print("none")
+    }
+}
+
+Show(Admin("Ann", 2))
+Show(User("Bea"))
+Show(NotFound)

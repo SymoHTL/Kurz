@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-09
-digest: 6aa4bbe21a961b9757bafe1e362b1cbf3cb4922ea4b8e20ba6232da508b9f4f1
+generated: 2026-10-10
+digest: 5565409279930f00d0d9177fb20edb353b1c434fc4143af0a41cb103e8ccd30c
 ttl_days: 60
 metadata:
   type: reference
@@ -94,8 +94,8 @@ A statement marked *(assumed)* was proposed and not objected to; it is not a dec
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 47 |
-| Open questions | 7 |
+| Statements marked *(assumed)* | 53 |
+| Open questions | 6 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -107,14 +107,14 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 181 |
-| of them decided | 136 |
-| of them assumed | 33 |
-| of them proposed | 12 |
+| Rules in the reference | 182 |
+| of them decided | 143 |
+| of them assumed | 39 |
+| of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 239 |
-| Compile-error ids | 46 |
-| Run-time error ids | 5 |
+| Corpus cases, none of them run | 270 |
+| Compile-error ids | 51 |
+| Run-time error ids | 6 |
 <!-- /generated:reference -->
 
 ## The forge

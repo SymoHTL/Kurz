@@ -1,0 +1,9 @@
+// expect: output
+// | 1s 500ms
+// | 30min
+// | 1536
+// rules: L14
+
+print(1.5s)
+print(0.5h)
+print(1.5kb)

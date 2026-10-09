@@ -66,8 +66,14 @@ print(Twice(1))
 
 ### O4 (decided, §5) Keeping all cases
 
-A call is not unwrapped when it is the subject of a `match`, or when its result goes into a
-variable with a written union type.
+A call is not unwrapped when it is the subject of a `match`, or when its result goes into a variable
+with a written union type. A written type holds every case the call can return: `int | NotFound
+result = Find(id)` with a `Find` that can also return `Invalid` is `type-mismatch` (T1), as an
+assignment in C# must fit its type; the other cases are kept by naming them, or handled by a `match`
+(the owner, 2026-10-09, against a written type as a filter that lets the missing cases leave the
+function as O2 says, under which a declaration ends the function on some paths without a word; the
+cost is that a function with five cases forces a five-case type on every variable that keeps its
+result).
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -93,6 +99,28 @@ data NotFound
 int | NotFound Find(int id) {
     if id == 1 {
         return 10
+    }
+    return NotFound
+}
+
+int | NotFound result = Find(1)
+match result {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/keep-partial-type.kz](../corpus/outcomes/keep-partial-type.kz)
+```kurz
+data NotFound
+data Invalid
+
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
     }
     return NotFound
 }
@@ -337,4 +365,24 @@ Remove(1) else {
 Remove(2) else {
     NotFound => print("none")
 }
+```
+
+### O11 (decided, §6) A child's stack and the process's heap
+
+An actor that exhausts its stack dies as it does for any exception (O6): with a `Reason` of the
+runtime's `data` type (O7), the exception `stack-overflow` at the call that did not fit, and its
+parent lives. An allocation that fails ends the whole process with the exit code 1 and a line on
+standard error, because the heap is shared and no actor can run on (the owner, 2026-10-09, against
+both ending the process, under which one runaway recursion in a worker takes the server down, and
+against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value
+when nothing can be allocated; the cost is a guard page per actor stack, and a program that cannot
+recover from memory pressure). The case runs at the top level, which is the root actor, so the
+exception ends the program (O6); the allocation failure has no case, since no case can ask for
+memory that does not exist.
+
+Case: [outcomes/stack-overflow.kz](../corpus/outcomes/stack-overflow.kz)
+```kurz
+int Down(int n) => Down(n + 1) + 1
+
+print(Down(0))
 ```
