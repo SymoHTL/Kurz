@@ -39,7 +39,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Skills | `.claude/skills/change-walk` and `.claude/skills/design-round`. |
 | Hooks for shapes that already cost | One: writing to a path the tree does not hold, set up after code was written in the design phase on 2026-10-01 (the phase ended on 2026-10-09; the hook stays). `.claude/settings.json` calls `tools/tree_gate.py --hook` for the Write and Edit tools of a session. It does not hold a write made through a shell command, or a hook the harness cut off at its timeout (HAZARD #4). The pre-push hook is the same gate before a push, in a clone that switched it on (HAZARD #4 where it is off). The CI gate `tree` runs on each `pull_request` type that `gates.yml` lists (opened, synchronize, reopened, ready_for_review, edited) and on every push to `main`, after the push has published; a branch without a pull request, and a head commit with a skip literal, get no run. |
 | The tools law | `tools/red_proof.py` and `tools/red_proofs.json` (gate `self-tests`). |
-| Pipeline jobs | Two workflows: `gates.yml` with the one job `gates`, which runs `tools/gates.py`, and `review.yml` with the job `review-run`, which runs the reviewer. See "Gates" below for which of the method's jobs exist. |
+| Pipeline jobs | Three workflows: `gates.yml` with the one job `gates`, which runs `tools/gates.py`; `review.yml` with the job `review-run`, which runs the reviewer; and `compiler-windows.yml` with the job `compiler-windows`, which runs the gate `compiler-tests` on Windows and is not a required check (HAZARD #30). See "Gates" below for which of the method's jobs exist. |
 | CI configuration is code | `tools/lint_ci.py` (gate `ci-config`): each fact is broken in the real workflow file by its self-test. |
 | Test-quality clauses | The "Tests" section of `CLAUDE.md`, cut down to what a tree of tools can break; see "Not implemented". |
 | Automated reviewer | `tools/review/review.py`, `.review/review-rules.yaml`, `.github/workflows/review.yml`. |
@@ -50,7 +50,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Agent operations (isolation, notes file, owner queue, worktrees) | Outside this repository. Nothing here depends on it. |
 | Living diagrams | Four entries tagged LIVING in `INDEX.md`; the lint requires each to have a diagram and its update triggers, and at least four of them to exist. |
 | Living guides | This guide and the evidence guide. The tree gate keeps both portable. The evidence guide's numbers are generated, carry a digest that a hand edit breaks, and expire: when the TTL runs out, `knowledge` is red on every pull request and on `main`, whatever the change touches, until a pull request regenerates the page with `tools/quality_evidence.py`. That tool refuses while a self-test or the reference lint is red and needs a login that can read the forge; so once the TTL has run out, a red reference blocks the only way back to green until it is fixed. |
-| Not in the method: the product is a language definition | `reference/` (rules with an id and a status), `corpus/` (one case per file) and `tools/lint_reference.py` (gate `reference`), which keeps the two consistent in shape. Nothing runs a case (HAZARD #1). |
+| Not in the method: the product is a language definition | `reference/` (rules with an id and a status), `corpus/` (one case per file) and `tools/lint_reference.py` (gate `reference`), which keeps the two consistent in shape. Nothing runs a case (HAZARD #1); the compiler's test suite reads every case through its front end and checks the reported errors against the header, which proves the front end and the header's shape, not the expectation. |
 | Product rules: the decisions a diff must respect (section 7.5 of the guide's 2026-10-07 version) | The design record `kurz-design.md` and `reference/`: one statement per decision, the owner's choice with its date and the options it was chosen against, *(assumed)* and *(proposed)* for what the owner has not decided, and `open` rules for the forks. The reviewer carries the rule "design record", which flags a decision without the owner's choice behind it, as the guide's reviewer carries the product rules. The corpus holds the cases; the gate `reference` checks their shape and that every sample is a case, and nothing runs one (HAZARD #1): whether a rule gets a case, and whether its expectation is right, are judgment steps. The product pass, the product acceptance and the knowledge-scout hook are not here; see "Not implemented". |
 
 ## Gates
@@ -68,11 +68,13 @@ The gates, with what turns each one red, are printed in the evidence guide's gen
 the picture is `knowledge/diagram-gate-map.md`. Of the jobs the method lists:
 
 - **Exist here:** the knowledge lint, the secret scan (part of the tree gate), title hygiene, the breadth gate, the
-  review, the reviewer's own unit suite (run with every other self-test), and the verdict idea,
-  which here is the runner itself.
-- **Have nothing to check:** compile, unit, end-to-end, UI quality, migration drift, coverage,
-  the complexity ratchet, the secrets gate for deploy directories, the deploy lane. There is no
-  product code, no database and no deployment.
+  review, the reviewer's own unit suite (run with every other self-test), the compiler's build and
+  unit suite (gate `compiler-tests`: in `gates` on Linux, in `compiler-windows` on Windows), and the
+  verdict idea, which here is the runner itself.
+- **Have nothing to check:** end-to-end, UI quality, migration drift, coverage, the complexity
+  ratchet, the secrets gate for deploy directories, the deploy lane. The compiler is a library with
+  a unit suite and no coverage collector (the owner's choice, 2026-10-10); there is no database and
+  no deployment.
 
 GitHub's own secret scanning and push protection are enabled for this repository
 (`security_and_analysis` in the answer of `gh api repos/<owner>/<name>`, read 2026-10-02). They

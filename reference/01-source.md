@@ -9,9 +9,14 @@ is not valid UTF-8 is one compile error, `invalid-source`, at the line of the fi
 encoded surrogate is one, since it is not valid UTF-8. A byte-order mark at the start of the file is
 skipped, because Windows editors write one (the owner, 2026-10-09, against refusing the mark too,
 under which a file saved by Notepad does not compile; the cost is one accepted form of a file that
-is not pure UTF-8). The error has no case: a corpus file is read as UTF-8 by the lint and by every
-gate, so no case can be a file that is not, and the id stands here and not in the table of chapter
-12, which lists the ids cases expect.
+is not pure UTF-8). The two-byte line break that Windows editors write is read as one line break
+wherever it stands, inside a `"""` block too, so the same program compiles and prints the same text
+whichever editor saved it (the owner, 2026-10-10, against reading the two bytes as written, under
+which the text of a block depends on the editor; the cost is that a literal holds the two-byte line
+break only through its escapes). The error has no case: a corpus file is read as UTF-8 by the lint and by
+every gate, so no case can be a file that is not, and the id stands here and not in the table of
+chapter 12, which lists the ids cases expect. The line break has no case either: the repository
+stores every file with line feeds alone.
 
 Case: [source/utf8-literal.kz](../corpus/source/utf8-literal.kz)
 ```kurz

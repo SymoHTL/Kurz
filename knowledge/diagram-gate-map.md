@@ -77,6 +77,12 @@ flowchart TD
         an error-table row that does not read as one; a design record, a chapter or a corpus file that cannot be
         read, missing or not UTF-8, named with what went unchecked;
         fewer rules or cases than the floors"]
+        G10["compiler-tests: the compiler under compiler/ does not build, or a unit test fails;
+        no test summary line at all, fewer passed tests than the floor, a skipped test;
+        a restore outside the lock files (locked mode), an SDK other than the one compiler/global.json pins;
+        dotnet missing or out of time. Read: the output of dotnet test, one summary per test project, summed.
+        Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's errors
+        against each header and runs no program"]
         G4["ci-config: a pinned fact of a workflow changed. Both: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
@@ -89,7 +95,10 @@ flowchart TD
         a second job.
         review.yml: an if, a checkout ref, a concurrency group or permissions other than the pinned ones,
         no start-time step first, the budget anywhere but on the review step,
-        a CLI that is not at an exact version. A third workflow file.
+        a CLI that is not at an exact version.
+        compiler-windows.yml: another label than the versioned Windows one, an if, a wider token, a second job,
+        a checkout that keeps the credential, no SDK step or one with a version typed in the workflow,
+        an env on the compiler step; gates.yml carries the same SDK fact. A workflow file without facts here.
         The image's python3, node, gh and git are pinned by nothing: HAZARD issue 15"]
         G5["merge-checks: live rules on main differ from tools/ruleset.json
         or carry a parameter that file does not name, ruleset not active,
@@ -111,6 +120,10 @@ flowchart TD
         with the reason, a person's reply in the thread and a head the forge still shows as the
         finding's commit among them (self-tests).
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]
+    end
+    subgraph C["CI: workflow compiler-windows, on the same events as the job gates"]
+        C1["job compiler-windows: the gate compiler-tests (G10) on the versioned Windows runner label.
+        Not a required check of the ruleset: a red run holds no merge. HAZARD issue 30"]
     end
     subgraph R["CI: workflow review, pull_request_target and dispatch"]
         R1["job review-run: red when the review did not complete. The last line names the kind:
@@ -193,6 +206,7 @@ flowchart TD
     end
     W --> P --> G --> M
     P --> R --> M
+    P --> C
     L -.-> P
 ```
 
@@ -208,6 +222,9 @@ flowchart TD
   whose replay runs every suite in it; `kit.message_text` changes: P1 and G6, which read commit and tag messages
   through it.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
+- `tools/compiler_gate.py` changes (the command, the floor, a verdict): G10 and C1. `compiler/global.json`,
+  a lock file or `compiler/NuGet.config` changes what the gate restores: G10.
+- `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.
 - `.github/workflows/review.yml`, `tools/review/review.py` or `.review/review-rules.yaml`

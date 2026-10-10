@@ -46,7 +46,8 @@ starts with a header and an empty line; the rest is the program.
 // rules: T5
 ```
 
-The ids of both kinds are listed in chapter 12. No compiler exists, so nothing runs these files. `tools/lint_reference.py` keeps the
+The ids of both kinds are listed in chapter 12. Nothing runs these files: the compiler's test suite reads each one and checks the
+errors its front end reports against the header, and no tool runs a program. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.
 
@@ -54,7 +55,9 @@ by reading it against the rules, and by the review.
 
 ### A1 (assumed, §8) `print`
 
-`print(value)` writes the text of the value and a line break to standard output. The corpus needs
+`print(value)` writes the text of the value and a line break to standard output; the line break
+is one line feed on every platform (the owner, 2026-10-10, against the platform's own line ending,
+under which the output of a program differs by the machine that runs it). The corpus needs
 one way to show a result, and the record's samples use this word. The naming of the standard
 library is open (record, section 14), so the word can change.
 

@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-10
-digest: 6d63b0ae8176895c4d6fad2993c6ede3cd4cf98cd8ae59ac932aaed1b3bbe5d5
+digest: 6a63e71638d6e8acbe5e1913caff76ffcbe3ca6fcfabcbae886e13e4e1e14986
 ttl_days: 60
 metadata:
   type: reference
@@ -40,7 +40,8 @@ defined in its docstring.
 | `tree` | every run | a path the allowlist does not hold; a credential-shaped or machine-bound string or a merge-conflict marker, in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name of every annotated tag and of each tag it points at, and a tag or a ref that points straight at a blob or a tree |
 | `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the repository; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
 | `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an error-table row that does not read as one, or a row that reads as one outside an error table; a design record, a chapter or a corpus file that cannot be read, named with what went unchecked; fewer rules or cases than the floors |
-| `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a job in a container or beside services; the credential anywhere but the env of the job's last step; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request or a push trigger not limited to main; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; a workflow without facts |
+| `compiler-tests` | every run | the compiler under compiler/ does not build, or a unit test fails; no test summary was printed, fewer tests passed than the floor, or a test was skipped; the restore is not the one the lock files pin (locked mode) or the SDK not the one global.json pins; the dotnet command is missing or ran out of time |
+| `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a job in a container or beside services; the credential anywhere but the env of the job's last step; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request or a push trigger not limited to main; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; the compiler job on another label than its versioned Windows one, an SDK step that does not take its version from compiler/global.json; a workflow without facts |
 | `merge-checks` | every run | the rules active on main differ from tools/ruleset.json or carry a parameter that file does not name, the ruleset is not active, it has bypass actors, or auto-merge is allowed; PARTLY where the token cannot read the last two |
 | `pr-title` | pull requests | a workflow-skip literal, a credential-shaped or machine-bound string or a conflict marker in the title, the description or a commit message of the branch: each of them can become the squash commit on main |
 | `pr-breadth` | pull requests | more than 15 files, or a change to the quality infrastructure, without a Blast radius section |
@@ -56,9 +57,10 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:self-tests -->
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
+| `tools/compiler_gate.py` | 12 | 11 |
 | `tools/gates.py` | 33 | 23 |
 | `tools/kit.py` | 22 | 19 |
-| `tools/lint_ci.py` | 89 | 89 |
+| `tools/lint_ci.py` | 116 | 116 |
 | `tools/lint_knowledge.py` | 91 | 74 |
 | `tools/lint_reference.py` | 77 | 81 |
 | `tools/merge_pr.py` | 148 | 133 |
@@ -66,8 +68,8 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 264 | 239 |
-| `tools/tree_gate.py` | 116 | 86 |
-| **total** | 1011 | 921 |
+| `tools/tree_gate.py` | 117 | 87 |
+| **total** | 1051 | 960 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -75,13 +77,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 31 |
+| Entries in INDEX.md | 32 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 9 |
+| tagged TRAP | 10 |
 | Review rule sections | 12 |
 | Review rules | 69 |
 <!-- /generated:store -->
@@ -133,11 +135,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 8 |
-| Pull requests merged | 6 |
-| Merged over red, with a recorded waiver | 4 |
+| Pull requests opened by a writer, or merged | 9 |
+| Pull requests merged | 7 |
+| Merged over red, with a recorded waiver | 5 |
 | Review findings posted: high | 40 |
 | Review findings posted: medium | 518 |
 | Review findings posted: low | 687 |
-| Open HAZARD issues | 14 |
+| Open HAZARD issues | 15 |
 <!-- /generated:forge -->

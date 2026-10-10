@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Unit facts of the two workflows. A one-token YAML fact that nothing compiles gets a check here:
-- both: actions pinned by commit SHA, the hosted runner named by its versioned label (the forge
+"""Unit facts of the three workflows. A one-token YAML fact that nothing compiles gets a check here:
+- all: actions pinned by commit SHA, the hosted runner named by its versioned label (the forge
   offers no digest for a hosted image), a timeout on every job, pip with
   --require-hashes, no job or step that may fail quietly (`continue-on-error`), no step-level `if`,
   no reusable-workflow job, no job in a container or beside services, no `defaults` and no step
@@ -10,7 +10,8 @@
 - gates.yml: runs on a pull request's opening, every push to it, its reopening, its Ready and every edit
   of its title or description (PR_TYPES), and on pushes to main alone, with no path filter and no filter on pull_request; exactly one job,
   `gates`, with no `if` (a
-  skipped job reports success to a required check); read-only token; no secret; the last step runs
+  skipped job reports success to a required check); read-only token; no secret; one SDK step, which
+  takes its version from compiler/global.json and nothing else; the last step runs
   the full gate runner and carries nothing but its name, env and run.
   Not covered by any trigger: a review that posts its findings and a thread that is resolved start
   no run, so the `gates` check of a head is the verdict of the moment it ran (tools/pr_gates.py);
@@ -24,7 +25,12 @@
   pinned to an exact version and proven by running it; the one credential secret is read; the
   last step runs the reviewer and carries nothing but its name, env and run.
   A copy of review.yml on another branch can drop every one of these, and a dispatch on that branch
-  runs the copy with this repository's token (HAZARD #11); the lint of that branch is its own copy.
+  runs the copy with this repository's token (HAZARD #11); the lint of that branch is its own copy;
+- compiler-windows.yml: the same events as gates.yml, no filter; exactly one job, `compiler-windows`,
+  with no `if`, on the versioned Windows label, with a timeout; a token that reads and nothing more;
+  no secret; one checkout that keeps no credential, one SDK step from compiler/global.json; the last
+  step runs the compiler gate with no env and carries nothing but its name and run. The job is not a
+  required check of the ruleset.
 `--self-test` breaks each fact in the real files, one token at a time, and expects its error."""
 import os
 import re
@@ -37,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
 
 WORKFLOWS = ".github/workflows"
-FILES = ["gates.yml", "review.yml"]
+FILES = ["compiler-windows.yml", "gates.yml", "review.yml"]
 PR_TYPES = {"opened", "synchronize", "reopened", "ready_for_review", "edited"}
 REVIEW_TYPES = ["opened", "synchronize", "reopened", "ready_for_review"]
 REVIEW_IF = ("(github.event_name == 'workflow_dispatch' && "
@@ -105,7 +111,7 @@ def secret_errors(name, data, allowed):
     return errors
 
 
-def common(name, text, data, secrets):
+def common(name, text, data, secrets, runner="ubuntu-24.04"):
     errors = []
     # the parsed steps, not the text: a flow-style step or a quoted key is a step too
     for used in [str(s["uses"]) for job in data["jobs"].values() for s in (job.get("steps") or []) if "uses" in s]:
@@ -135,8 +141,8 @@ def common(name, text, data, secrets):
                 errors.append(f"{name}: job {jid} has a step that checks out or fetches by hand: that can be pull-request code")
         if "container" in job or "services" in job:
             errors.append(f"{name}: job {jid} runs in a container or beside services: their images are pinned by no fact")
-        if job.get("runs-on") != "ubuntu-24.04":
-            errors.append(f"{name}: job {jid} runner image is not pinned to ubuntu-24.04")
+        if job.get("runs-on") != runner:
+            errors.append(f"{name}: job {jid} runner image is not pinned to {runner}")
         if "timeout-minutes" not in job:
             errors.append(f"{name}: job {jid} has no timeout")
         if "continue-on-error" in job or any("continue-on-error" in s for s in steps):
@@ -166,13 +172,21 @@ def deciding_step(name, steps, command, what, env_keys):
     return errors, last
 
 
-def gates_facts(text):
-    name = "gates.yml"
-    try:
-        data, on = parse(text)
-    except (yaml.YAMLError, ValueError) as e:
-        return unreadable(name, e)
-    errors = common(name, text, data, set())
+SDK_WITH = {"global-json-file": "compiler/global.json"}
+
+
+def sdk_step_errors(name, steps):
+    """Exactly one SDK step, and it takes the version from compiler/global.json and nothing else: a
+    version typed here, a channel or a second SDK is a toolchain nobody pinned in one place."""
+    sdk = [s for s in steps if str(s.get("uses", "")).startswith("actions/setup-dotnet@")]
+    if len(sdk) != 1 or (sdk[0].get("with") or {}) != SDK_WITH:
+        return [f"{name}: the SDK step must be one actions/setup-dotnet step whose `with` is exactly {SDK_WITH}"]
+    return []
+
+
+def pr_push_errors(name, on):
+    """The events of a job that must run on every pull request event and every push to main, unfiltered."""
+    errors = []
     if set(on) != {"pull_request", "push"}:
         errors.append(f"{name}: triggers are {sorted(map(str, on))}, expected pull_request and push")
     pr, push = on.get("pull_request") or {}, on.get("push") or {}
@@ -182,6 +196,16 @@ def gates_facts(text):
         errors.append(f"{name}: push must be limited to the branch main")
     if set(pr) - {"types"} or set(push) - {"branches"}:
         errors.append(f"{name}: a path filter or branch filter can skip the gates")
+    return errors
+
+
+def gates_facts(text):
+    name = "gates.yml"
+    try:
+        data, on = parse(text)
+    except (yaml.YAMLError, ValueError) as e:
+        return unreadable(name, e)
+    errors = common(name, text, data, set()) + pr_push_errors(name, on)
     if data.get("permissions") != {"contents": "read", "pull-requests": "read"}:
         errors.append(f"{name}: permissions must be exactly contents: read, pull-requests: read")
     if list(data["jobs"]) != ["gates"]:
@@ -189,11 +213,38 @@ def gates_facts(text):
     job = data["jobs"].get("gates") or {}
     if "if" in job:
         errors.append(f"{name}: the job gates may be skipped (`if`), and a skipped job reports success")
+    errors += sdk_step_errors(name, job.get("steps") or [])
     step, last = deciding_step(name, job.get("steps") or [], '"$RUNNER_TEMP/venv/bin/python" tools/gates.py', "gates", {"GH_TOKEN", "PR_NUMBER"})
     errors += step
     if (last.get("env") or {}).get("PR_NUMBER") != "${{ github.event.pull_request.number }}":
         errors.append(f"{name}: the gates step needs PR_NUMBER from the pull request event")
     return errors
+
+
+def compiler_facts(text):
+    name = "compiler-windows.yml"
+    try:
+        data, on = parse(text)
+    except (yaml.YAMLError, ValueError) as e:
+        return unreadable(name, e)
+    errors = common(name, text, data, set(), runner="windows-2025") + pr_push_errors(name, on)
+    if data.get("permissions") != {"contents": "read"}:
+        errors.append(f"{name}: permissions must be exactly contents: read")
+    if list(data["jobs"]) != ["compiler-windows"]:
+        errors.append(f"{name}: jobs must be exactly [compiler-windows]")
+    job = data["jobs"].get("compiler-windows") or {}
+    if "if" in job:
+        errors.append(f"{name}: the job compiler-windows may be skipped (`if`), and a skipped job reports success")
+    steps = job.get("steps") or []
+    checkouts = [s.get("with") or {} for s in steps if "actions/checkout@" in str(s.get("uses", ""))]
+    if len(checkouts) != 1:
+        errors.append(f"{name}: expected exactly one checkout, found {len(checkouts)}")
+    for with_ in checkouts:
+        if with_.get("persist-credentials") is not False:
+            errors.append(f"{name}: the checkout must set persist-credentials: false")
+    errors += sdk_step_errors(name, steps)
+    step, _ = deciding_step(name, steps, "python tools/compiler_gate.py", "compiler", set())
+    return errors + step
 
 
 def review_facts(text):
@@ -255,7 +306,7 @@ def lint(root):
         listed = sorted(os.listdir(os.path.join(root, WORKFLOWS)))
     except OSError as e:
         return [f"{WORKFLOWS} cannot be listed: {type(e).__name__}"], 0
-    for fname, facts in (("gates.yml", gates_facts), ("review.yml", review_facts)):
+    for fname, facts in (("compiler-windows.yml", compiler_facts), ("gates.yml", gates_facts), ("review.yml", review_facts)):
         try:
             text = kit.read(os.path.join(root, WORKFLOWS, fname))
         except OSError as e:
@@ -269,6 +320,9 @@ def lint(root):
 
 
 PLAIN_JOB = "  extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: echo ok\n"
+SDK = ("      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0\n"
+       "        with:\n"
+       "          global-json-file: compiler/global.json\n")
 START = '        run: echo "REVIEW_STARTED=$(date +%s)" >> "$GITHUB_ENV"\n'
 SECRET = "          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n"
 # (file, case, anchor that occurs exactly once, replacement, text the error must contain)
@@ -290,9 +344,9 @@ MUTATIONS = [
      '          python3 -m venv "$RUNNER_TEMP/venv"\n          pip -q install pyyaml\n', "--require-hashes"),
     ("gates.yml", "pipx without hashes", '          python3 -m venv "$RUNNER_TEMP/venv"\n',
      '          python3 -m venv "$RUNNER_TEMP/venv"\n          pipx install pyyaml\n', "--require-hashes"),
-    ("gates.yml", "a job-level permissions grant", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    permissions: write-all\n",
+    ("gates.yml", "a job-level permissions grant", "    timeout-minutes: 25\n", "    timeout-minutes: 25\n    permissions: write-all\n",
      "sets its own permissions"),
-    ("gates.yml", "a job-level env", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    env:\n      BASH_ENV: x\n", "sets `env`"),
+    ("gates.yml", "a job-level env", "    timeout-minutes: 25\n", "    timeout-minutes: 25\n    env:\n      BASH_ENV: x\n", "sets `env`"),
     ("gates.yml", "a workflow-level env", "\njobs:\n", "\nenv:\n  BASH_ENV: x\n\njobs:\n", "the workflow sets `env`"),
     ("gates.yml", "a shell file sourced before the gates step", "          GH_TOKEN: ${{ github.token }}\n",
      "          GH_TOKEN: ${{ github.token }}\n          BASH_ENV: x\n", "env must be exactly"),
@@ -311,11 +365,11 @@ MUTATIONS = [
     ("gates.yml", "a default shell for every step", "\njobs:\n", "\ndefaults:\n  run:\n    shell: true {0}\n\njobs:\n", "the workflow sets `defaults`"),
     ("gates.yml", "a default shell for the job", "  gates:\n    runs-on:", "  gates:\n    defaults:\n      run:\n        shell: true {0}\n    runs-on:",
      "job gates sets `defaults`"),
-    ("gates.yml", "no timeout", "    timeout-minutes: 15\n", "", "no timeout"),
+    ("gates.yml", "no timeout", "    timeout-minutes: 25\n", "", "no timeout"),
     ("gates.yml", "a write token", "pull-requests: read", "pull-requests: write", "permissions"),
     ("gates.yml", "continue-on-error", "      - name: Run every gate\n", "      - name: Run every gate\n        continue-on-error: true\n",
      "uses continue-on-error"),
-    ("gates.yml", "a job that may fail quietly", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    continue-on-error: true\n",
+    ("gates.yml", "a job that may fail quietly", "    timeout-minutes: 25\n", "    timeout-minutes: 25\n    continue-on-error: true\n",
      "uses continue-on-error"),
     ("gates.yml", "a step that can be skipped", "      - name: Run every gate\n", "      - name: Run every gate\n        if: always()\n",
      "step that may be skipped"),
@@ -384,8 +438,46 @@ MUTATIONS = [
     ("review.yml", "the credential on the step that installs the CLI", "      - name: Install the Claude CLI, proven by running it\n",
      "      - name: Install the Claude CLI, proven by running it\n        env:\n"
      "          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n", "a secret is read"),
-    ("gates.yml", "a job in a container", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    container: python:3\n",
+    ("gates.yml", "a job in a container", "    timeout-minutes: 25\n", "    timeout-minutes: 25\n    container: python:3\n",
      "container or beside services"),
+    ("gates.yml", "no SDK step", SDK, "", "SDK step"),
+    ("gates.yml", "the SDK step takes a version typed here", "          global-json-file: compiler/global.json\n",
+     "          dotnet-version: 10.0.x\n", "SDK step"),
+    ("gates.yml", "a second SDK step", SDK, SDK + SDK, "SDK step"),
+    ("compiler-windows.yml", "edits no longer re-run the compiler job", "ready_for_review, edited]", "ready_for_review]", "pull_request types"),
+    ("compiler-windows.yml", "a path filter", "    branches: [main]\n", "    branches: [main]\n    paths: ['compiler/**']\n", "path filter"),
+    ("compiler-windows.yml", "another trigger", "    branches: [main]\n", "    branches: [main]\n  workflow_dispatch:\n", "triggers are"),
+    ("compiler-windows.yml", "pushes to another branch count as main", "    branches: [main]\n", "    branches: [main, next]\n", "push must be limited"),
+    ("compiler-windows.yml", "the job can be skipped", "  compiler-windows:\n    runs-on:", "  compiler-windows:\n    if: github.actor != 'x'\n    runs-on:",
+     "may be skipped"),
+    ("compiler-windows.yml", "a floating runner image", "runs-on: windows-2025", "runs-on: windows-latest", "runner image"),
+    ("compiler-windows.yml", "the Linux label on the Windows job", "runs-on: windows-2025", "runs-on: ubuntu-24.04", "runner image"),
+    ("compiler-windows.yml", "an action by tag", "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7", "not pinned"),
+    ("compiler-windows.yml", "no timeout", "    timeout-minutes: 25\n", "", "no timeout"),
+    ("compiler-windows.yml", "a write token", "  contents: read\n", "  contents: write\n", "permissions"),
+    ("compiler-windows.yml", "a wider token", "  contents: read\n", "  contents: read\n  pull-requests: read\n", "permissions"),
+    ("compiler-windows.yml", "a second job of its own", "\njobs:\n", "\njobs:\n" + PLAIN_JOB.replace("ubuntu-24.04", "windows-2025"),
+     "jobs must be exactly [compiler-windows]"),
+    ("compiler-windows.yml", "the token stays in the checkout", "persist-credentials: false", "persist-credentials: true", "persist-credentials"),
+    ("compiler-windows.yml", "no checkout", "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n        with:\n"
+     "          persist-credentials: false\n", "", "exactly one checkout"),
+    ("compiler-windows.yml", "no SDK step", SDK, "", "SDK step"),
+    ("compiler-windows.yml", "the SDK step takes a version typed here", "          global-json-file: compiler/global.json\n",
+     "          dotnet-version: 10.0.x\n", "SDK step"),
+    ("compiler-windows.yml", "the gate runs with a flag", "run: python tools/compiler_gate.py", "run: python tools/compiler_gate.py --self-test",
+     "must be the compiler step"),
+    ("compiler-windows.yml", "a swallowed failure", "run: python tools/compiler_gate.py", "run: python tools/compiler_gate.py || true",
+     "must be the compiler step"),
+    ("compiler-windows.yml", "an env on the compiler step", "      - name: Build and test the compiler\n",
+     "      - name: Build and test the compiler\n        env:\n          DOTNET_ROOT: x\n", "env must be exactly"),
+    ("compiler-windows.yml", "a shell of its own", "      - name: Build and test the compiler\n",
+     "      - name: Build and test the compiler\n        shell: bash\n", "own shell or working directory"),
+    ("compiler-windows.yml", "a step that can be skipped", "      - name: Build and test the compiler\n",
+     "      - name: Build and test the compiler\n        if: always()\n", "step that may be skipped"),
+    ("compiler-windows.yml", "continue-on-error", "      - name: Build and test the compiler\n",
+     "      - name: Build and test the compiler\n        continue-on-error: true\n", "uses continue-on-error"),
+    ("compiler-windows.yml", "a secret in the compiler job", "      - name: Build and test the compiler\n",
+     "      - name: Build and test the compiler\n        env:\n          KEY: ${{ secrets.DEPLOY_KEY }}\n", "a secret is read"),
     ("review.yml", "a service beside the review", "    timeout-minutes: 90\n",
      "    timeout-minutes: 90\n    services:\n      cache:\n        image: redis\n", "container or beside services"),
     ("review.yml", "an optional pull request number", "        required: true\n", "        required: false\n", "must be required"),
@@ -406,7 +498,7 @@ def self_test():
 
 
 def cases_in(base):
-    facts = {"gates.yml": gates_facts, "review.yml": review_facts}
+    facts = {"compiler-windows.yml": compiler_facts, "gates.yml": gates_facts, "review.yml": review_facts}
     real = {f: kit.read(os.path.join(kit.ROOT, WORKFLOWS, f)) for f in facts}
     cases = [(f"the real {f} is clean", not facts[f](real[f]), facts[f](real[f])) for f in facts]
     for fname, case, old, new, needle in MUTATIONS:
@@ -428,14 +520,14 @@ def cases_in(base):
                 f.write(real.get(fname, real["gates.yml"]))
         return root
 
-    for name, root, needle in [("lint: the two real workflows are clean", tree(FILES), None),
-                               ("lint: a third workflow is unchecked configuration", tree(FILES + ["extra.yml"]), "without facts"),
+    for name, root, needle in [("lint: the real workflows are clean", tree(FILES), None),
+                               ("lint: a workflow without facts is unchecked configuration", tree(FILES + ["extra.yml"]), "without facts"),
                                ("lint: a missing workflow is an error", tree(["gates.yml"]), "review.yml: cannot be read"),
                                ("lint: no workflows directory is an error", tempfile.mkdtemp(dir=base), "cannot be listed")]:
         errors, read = lint(root)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
         if needle is None:
-            cases.append(("lint: the count on the clean tree is of both workflows, so a capped count shows", read == len(FILES), read))
+            cases.append(("lint: the count on the clean tree is of every workflow, so a capped count shows", read == len(FILES), read))
         if needle and "review.yml" in needle:
             cases.append(("lint: the count is of the workflows read, not of the ones expected", read == 1, read))
     return kit.report(cases)

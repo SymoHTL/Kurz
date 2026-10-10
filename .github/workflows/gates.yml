@@ -17,11 +17,14 @@ jobs:
   # are pinned by tools/lint_ci.py.
   gates:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          global-json-file: compiler/global.json
       - name: Install pinned dependencies
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
