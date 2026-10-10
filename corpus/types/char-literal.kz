@@ -1,0 +1,13 @@
+// expect: output
+// | a
+// | true
+// | false
+// | true
+// rules: T21
+
+c = 'a'
+print(c)
+print(c == 'a')
+for d in "ab".Chars {
+    print(d == 'b')
+}

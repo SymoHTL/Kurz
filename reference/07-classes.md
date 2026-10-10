@@ -109,9 +109,14 @@ print(Root(1, "Ann", 2) == Root(2, "Bea", 2))
 
 ### K5 (decided, §4) Equality by named fields
 
-A class can replace the equality of K4 by naming the fields that count. Two instances are then
-equal when those fields are equal, and the hash is derived from the same fields, so the two
-cannot disagree. Nothing else overrides equality: a class brings no comparison code of its own.
+A class can replace the equality of K4 by naming the fields that count. Two instances are then equal
+when those fields are equal, and the hash is derived from the same fields, so the two cannot
+disagree. Nothing else overrides equality: a class brings no comparison code of its own. There are
+no operator declarations: `+` on two instances is a method, `a.Add(b)`, and `operator` is no core
+word (L18), so a declaration of one is `syntax` (E4); a method named `Equals` is an ordinary member
+and changes nothing about `==`, which stays K4's and this rule's (the owner, 2026-10-09, against
+C#'s operator declarations with `==`, `!=` and the comparisons excluded; the cost is that a vector
+type reads as `a.Add(b).Scale(2)`).
 
 Case: [classes/equality-named.kz](../corpus/classes/equality-named.kz)
 ```kurz
@@ -124,6 +129,27 @@ print(a == b)
 print(a == c)
 b.Name = "Ann"
 print(a == b)
+```
+
+Case: [classes/operator-declaration.kz](../corpus/classes/operator-declaration.kz)
+```kurz
+class Vec(int X) {
+    pub static Vec operator +(Vec a, Vec b) => Vec(a.X + b.X)
+}
+
+print(Vec(1).X)
+```
+
+Case: [classes/equals-member.kz](../corpus/classes/equals-member.kz)
+```kurz
+class User(int Id, mut int Hits) {
+    pub bool Equals(User other) => Id == other.Id
+}
+
+a = User(1, 0)
+b = User(1, 0)
+print(a == b)
+print(a.Equals(b))
 ```
 
 ### K6 (decided, §4) Single inheritance and interfaces
@@ -155,30 +181,36 @@ print(d.Sound())
 
 ### K7 (decided, §4) The body of a class
 
-Class bodies follow C#. A class names its base class and its interfaces after `:`, the base
-class first. An interface is declared with `interface` and lists the signatures of its methods;
-they are visible wherever the interface is, and a method that implements one is `pub`. Between
-the braces of a class, a field is written `Type name`, with `mut` in front when it can be
-assigned and its first value after `=`, and a method is written as a function (chapter 8).
-Further constructors, `static` members and `override` are written as in C#. What a further
-constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
-method that a derived class overrides is marked `virtual` in the base and `override` in the
-derived class, as in C#: `override` on a method that the nearest base class declaring it marks
-neither `virtual` nor `override` is the compile error `override-without-virtual`, and a method of
-a derived class with the name and the parameters of a base method, without `override`, is
-`hides-member`, where C# hides it with a warning and offers `new`, which has no counterpart here
-(the owner, 2026-10-04, against every method being overridable without a marker, which would
-differ from C# and make the compiler prove where a call is not virtual). As in C#, an `override`
-can be overridden again further down, the whole chain of bases is searched for the method, the
-parameters are compared by type and order and not by name (D11), a base method the derived class
-cannot see (F9) is hidden by nothing, and a method of an interface the class implements (K6) is
-no base method and takes no `override`. *(assumed: the last three readings, and that `override`
-with no base method at all is `override-without-virtual` as well; proposed on 2026-10-07, when
-the review found the holes)* The cost of an error where C# warns: adding a method to a base class
-breaks every derived class, in every package, that already has a method of that name and those
-parameters. *(proposed: there is no `sealed`, so every override can be overridden again; and an
-override has the return type of the method it overrides, where C# 9 allows a more derived class
-type)* There is no property syntax until something needs it.
+Class bodies follow C#. A class names its base class and its interfaces after `:`, the base class
+first. An interface is declared with `interface` and lists the signatures of its methods; they are
+visible wherever the interface is, and a method that implements one is written `pub`, as C# demands
+`public`: a class that names an interface and lacks one of its methods is the compile error
+`missing-member`, at the class, with the message naming the method, and a method that is there
+without `pub` is `interface-method-private`, at the method (the owner, 2026-10-09, against `pub`
+implied by the interface, under which a method that looks private is public, and against one id for
+both mistakes). Between the braces of a class, a field is written `Type name`, with `mut` in front
+when it can be assigned and its first value after `=`, and a method is written as a function
+(chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
+further constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
+method that a derived class overrides is marked `virtual` in the base and `override` in the derived
+class, as in C#: `override` on a method that the nearest base class declaring it marks neither
+`virtual` nor `override` is the compile error `override-without-virtual`, and a method of a derived
+class with the name and the parameters of a base method, without `override`, is `hides-member`,
+where C# hides it with a warning and offers `new`, which has no counterpart here (the owner,
+2026-10-04, against every method being overridable without a marker, which would differ from C# and
+make the compiler prove where a call is not virtual). As in C#, an `override` can be overridden
+again further down, the whole chain of bases is searched for the method, the parameters are compared
+by type and order and not by name (D11), a base method the derived class cannot see (F9) is hidden
+by nothing, and a method of an interface the class implements (K6) is no base method and takes no
+`override`. *(assumed: the last three readings, and that `override` with no base method at all is
+`override-without-virtual` as well; proposed on 2026-10-07, when the review found the holes)* The
+cost of an error where C# warns: adding a method to a base class breaks every derived class, in
+every package, that already has a method of that name and those parameters. There is no `sealed`, so
+every override can be overridden again, and an override has the return type of the method it
+overrides, where C# 9 allows a more derived class type: an override whose return type differs is the
+compile error `override-return-type`, at the method (the owner, 2026-10-09, against `type-mismatch`
+at the method's line, whose message would name no override). There is no property syntax until
+something needs it.
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
 ```kurz
@@ -228,6 +260,45 @@ class Dog : Animal {
 print(Dog().Sound())
 ```
 
+Case: [classes/interface-missing-member.kz](../corpus/classes/interface-missing-member.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    pub string Text() => "dot"
+}
+
+print(Dot().Text())
+```
+
+Case: [classes/interface-method-private.kz](../corpus/classes/interface-method-private.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    int Area() => 1
+}
+
+print("dot")
+```
+
+Case: [classes/override-return-type.kz](../corpus/classes/override-return-type.kz)
+```kurz
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    pub override int Sound() => 1
+}
+
+print(Dog().Sound())
+```
+
 ### K18 (decided, §4, §6) What a `static` field may hold
 
 A `static` field exists once for the program, so it holds an immutable value only: `static
@@ -271,24 +342,23 @@ print(Registry.Zero.Count)
 A constructor, and only a constructor, may assign each field without `mut` once, before its body
 ends, as C# lets a constructor set a `readonly` field; a second assignment there is
 `assign-immutable` like one anywhere else. A further constructor of a class with a primary
-constructor calls the primary one first, with `: this(...)` as C# 12 requires, and a class
-without a primary constructor has C#'s constructors. The owner chose this on 2026-10-03, against
-a class with a primary constructor having no further constructor, which would have made a second
-way to build an instance a static method or a second class; the cost is the flow analysis that
-proves "once, before the end". The rest the owner decided on 2026-10-04, against C#'s rules, under
-which a constructor assigns any number of times and an unassigned field gets the type's zero
-value, `default(T)`, which Kurz has nowhere else: the once is per instance. A field that the primary
-constructor or an `=` in the body (K7) sets is assigned by no constructor; a field without `mut`
-and without `=` is assigned exactly once on every path of every constructor that does not chain,
-and a constructor that leaves it unassigned on a path, or reads it first, is the compile error
-`field-unassigned`, as is such a field in a class with a primary constructor, which a call of
-that constructor would leave unset. *(proposed: a `mut` field without `=` is assigned on every path
-of such a constructor as well, any number of times, and left unassigned on a path it is
-`field-unassigned` too, because Kurz has no zero value it could hold)* The call of the primary one
-is direct; a further constructor
-without it is `constructor-must-chain`. A constructor written in the body is private without
-`pub`, as every member is (F9); the primary constructor, and the empty constructor of a class
-without one, are visible wherever the class is.
+constructor calls the primary one first, with `: this(...)` as C# 12 requires, and a class without a
+primary constructor has C#'s constructors. The owner chose this on 2026-10-03, against a class with
+a primary constructor having no further constructor, which would have made a second way to build an
+instance a static method or a second class; the cost is the flow analysis that proves "once, before
+the end". The rest the owner decided on 2026-10-04, against C#'s rules, under which a constructor
+assigns any number of times and an unassigned field gets the type's zero value, `default(T)`, which
+Kurz has nowhere else: the once is per instance. A field that the primary constructor or an `=` in
+the body (K7) sets is assigned by no constructor; a field without `mut` and without `=` is assigned
+exactly once on every path of every constructor that does not chain, and a constructor that leaves
+it unassigned on a path, or reads it first, is the compile error `field-unassigned`, as is such a
+field in a class with a primary constructor, which a call of that constructor would leave unset. A
+`mut` field without `=` is assigned on every path of such a constructor as well, any number of
+times, and left unassigned on a path it is `field-unassigned` too, because Kurz has no zero value it
+could hold (the owner, 2026-10-09). The call of the primary one is direct; a further constructor
+without it is `constructor-must-chain`. A constructor written in the body is private without `pub`,
+as every member is (F9); the primary constructor, and the empty constructor of a class without one,
+are visible wherever the class is.
 
 Case: [classes/further-constructor.kz](../corpus/classes/further-constructor.kz)
 ```kurz
@@ -373,13 +443,14 @@ y.Name = "b"
 print(x == y)
 ```
 
-### K15 (proposed) The form of the `equal by` clause
+### K15 (assumed, §4) The form of the `equal by` clause
 
 The clause names one or more fields of the class, with `, ` between them: `equal by Id, Kind`. It
-stands after the primary constructor and after the `: Base` part (K6, K10), before a body in
-braces. It can name a field of the primary constructor, a field declared in the body and a field
-of the base (K13 says what the base contributes). A name that is not a field of the class is the
-compile error `equal-by-unknown`.
+stands after the primary constructor and after the `: Base` part (K6, K10), before a body in braces.
+It can name a field of the primary constructor, a field declared in the body and a field of the base
+(K13 says what the base contributes). A name that is not a field of the class is the compile error
+`equal-by-unknown`. The owner accepted this reading by its id on 2026-10-09, in round 13, without
+its text shown, so it is assumed and not decided.
 
 Case: [classes/equality-two-fields.kz](../corpus/classes/equality-two-fields.kz)
 ```kurz
@@ -489,14 +560,15 @@ print(a.Name)
 print(a.Level)
 ```
 
-### K17 (proposed) A parameter that clashes with a field of the base
+### K17 (assumed, §4) A parameter that clashes with a field of the base
 
 A parameter that has the name of a field of the base and another type (`class Admin(int Name) :
-User("x")`) would give the class two fields of one name; a parameter that has the name and the
-type of a base field but is not what the base receives (`class Admin(string Name, int Level) :
+User("x")`) would give the class two fields of one name; a parameter that has the name and the type
+of a base field but is not what the base receives (`class Admin(string Name, int Level) :
 User("guest")`) would be a field the base sets to something else. Both are the compile error
-`base-field-clash`, as a C# record rejects a positional parameter that does not match the
-inherited member it names.
+`base-field-clash`, as a C# record rejects a positional parameter that does not match the inherited
+member it names. The owner accepted this reading by its id on 2026-10-09, in round 13, without its
+text shown, so it is assumed and not decided.
 
 Case: [classes/inherit-field-clash.kz](../corpus/classes/inherit-field-clash.kz)
 ```kurz

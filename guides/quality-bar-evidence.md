@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-09
-digest: 6aa4bbe21a961b9757bafe1e362b1cbf3cb4922ea4b8e20ba6232da508b9f4f1
+generated: 2026-10-10
+digest: 6d63b0ae8176895c4d6fad2993c6ede3cd4cf98cd8ae59ac932aaed1b3bbe5d5
 ttl_days: 60
 metadata:
   type: reference
@@ -37,7 +37,7 @@ defined in its docstring.
 | Gate | Runs on | What turns it red |
 |---|---|---|
 | `self-tests` | every run | a tool's self-test fails, ran no case or contradicts its own exit code; a tool has no self-test or no recorded red proof; a recorded mutation no longer turns its one named case red |
-| `tree` | every run | a path the design phase does not allow; a credential-shaped or machine-bound string or a merge-conflict marker, in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name of every annotated tag and of each tag it points at, and a tag or a ref that points straight at a blob or a tree |
+| `tree` | every run | a path the allowlist does not hold; a credential-shaped or machine-bound string or a merge-conflict marker, in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name of every annotated tag and of each tag it points at, and a tag or a ref that points straight at a blob or a tree |
 | `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the repository; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
 | `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an error-table row that does not read as one, or a row that reads as one outside an error table; a design record, a chapter or a corpus file that cannot be read, named with what went unchecked; fewer rules or cases than the floors |
 | `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a job in a container or beside services; the credential anywhere but the env of the job's last step; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request or a push trigger not limited to main; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; a workflow without facts |
@@ -66,8 +66,8 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 264 | 239 |
-| `tools/tree_gate.py` | 107 | 82 |
-| **total** | 1002 | 917 |
+| `tools/tree_gate.py` | 116 | 86 |
+| **total** | 1011 | 921 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -82,8 +82,8 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
 | tagged TRAP | 9 |
-| Review rule sections | 11 |
-| Review rules | 64 |
+| Review rule sections | 12 |
+| Review rules | 69 |
 <!-- /generated:store -->
 
 ## The design record
@@ -94,8 +94,8 @@ A statement marked *(assumed)* was proposed and not objected to; it is not a dec
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 47 |
-| Open questions | 7 |
+| Statements marked *(assumed)* | 53 |
+| Open questions | 6 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -107,14 +107,14 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 181 |
-| of them decided | 136 |
-| of them assumed | 33 |
-| of them proposed | 12 |
+| Rules in the reference | 182 |
+| of them decided | 143 |
+| of them assumed | 39 |
+| of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 239 |
-| Compile-error ids | 46 |
-| Run-time error ids | 5 |
+| Corpus cases, none of them run | 271 |
+| Compile-error ids | 51 |
+| Run-time error ids | 6 |
 <!-- /generated:reference -->
 
 ## The forge
@@ -133,7 +133,7 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 7 |
+| Pull requests opened by a writer, or merged | 8 |
 | Pull requests merged | 6 |
 | Merged over red, with a recorded waiver | 4 |
 | Review findings posted: high | 40 |

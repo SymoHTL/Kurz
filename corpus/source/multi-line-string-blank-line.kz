@@ -1,0 +1,12 @@
+// expect: output
+// | a
+// | 
+// | b
+// rules: L13
+
+text = """
+    a
+  
+    b
+    """
+print(text)

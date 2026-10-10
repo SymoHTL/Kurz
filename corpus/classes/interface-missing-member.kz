@@ -1,0 +1,12 @@
+// expect: error missing-member at 8
+// rules: K7
+
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    pub string Text() => "dot"
+}
+
+print(Dot().Text())

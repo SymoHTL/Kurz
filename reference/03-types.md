@@ -15,9 +15,12 @@ print(x)
 
 ### T2 (decided, §4) Number types
 
-The integer types are `sbyte`, `byte`, `short`, `ushort`, `int` (32 bits), `uint`, `long`
-(64 bits) and `ulong`. The others are `float`, `double` and `decimal`. Each has the size its name
-has in C#.
+The integer types are `sbyte`, `byte`, `short`, `ushort`, `int` (32 bits), `uint`, `long` (64 bits)
+and `ulong`. The others are `float`, `double` and `decimal`. Each has the size its name has in C#.
+C#'s `nint` and `nuint` are not among them: a size or an index is an `int` or a `long` (the owner,
+2026-10-09, against pointer-sized types whose width follows the target, under which
+`constant-overflow` (T6) would depend on the target and a value of that type could not be sent
+between machines without naming a width; the cost is that ported interop code writes `long`).
 
 Case: [types/long.kz](../corpus/types/long.kz)
 ```kurz
@@ -63,13 +66,29 @@ print(x)
 
 ### T6 (decided, §4) A constant that overflows is an error
 
-An expression made only of literals whose result leaves the range of its type is the compile
-error `constant-overflow`.
+An expression made only of literals whose result leaves the range of its type is the compile error
+`constant-overflow`. Under `+%`, `-%` and `*%` (T12) such an expression folds to the wrapped value
+instead, as the operator promises for every value: `2147483647 +% 1` is `-2147483648`. A conversion
+(T10) written on a constant that does not fit its target, `byte(300)`, is `constant-overflow`, as C#
+refuses a constant cast that does not fit (the owner, 2026-10-09, against both being
+`constant-overflow`, under which a checksum written on literals does not compile, and against both
+computing, under which `byte(300)` is `44` and a value is lost without a word, which T20 refuses
+when the program runs; the cost is a constant folder that knows two kinds of operator).
 
 Case: [types/constant-overflow.kz](../corpus/types/constant-overflow.kz)
 ```kurz
 x = 2147483647 + 1
 print(x)
+```
+
+Case: [types/constant-wrap.kz](../corpus/types/constant-wrap.kz)
+```kurz
+print(2147483647 +% 1)
+```
+
+Case: [types/constant-conversion-overflow.kz](../corpus/types/constant-conversion-overflow.kz)
+```kurz
+print(byte(300))
 ```
 
 ### T7 (decided, §4) No implicit narrowing
@@ -247,9 +266,12 @@ print(Lower(-2))
 ### T12 (decided, §4) The wrapping operators
 
 `+%`, `-%` and `*%` add, subtract and multiply as `+`, `-` and `*` do, and wrap around when the
-result leaves the range of its type.
+result leaves the range of its type. They have the precedence of `+`, `-` and `*`. *(assumed:
+proposed on 2026-10-09 and not objected to)* What they do to a constant expression is T6.
 
 Case: [types/wrapping.kz](../corpus/types/wrapping.kz)
+
+Case: [types/constant-wrap.kz](../corpus/types/constant-wrap.kz)
 
 ### T13 (decided, §4) Durations and timestamps
 
@@ -285,21 +307,21 @@ Show(90min)
 
 ### T29 (decided, §4) The wider pair: `longduration` and `longtimestamp`
 
-Beside the 64-bit pair of T24 stand `longduration` and `longtimestamp`: 128 bits with the same
-step of one nanosecond, for a calendar or an archive that reaches before 1677 or after 2262. A
-`duration` widens into a `longduration` and a `timestamp` into a `longtimestamp` without a word
-(T8), a conversion the other way is written out and checked as T20 says, and the texts are A12's.
-What T13 says of the narrow pair holds for the wide one, and an operation between the two pairs
-widens the narrow operand and has the wide type, as `i + l` has `long` (T8), so that
-`longtimestamp - timestamp` is a `longduration`. *(assumed: the mixed operations; proposed on
-2026-10-07, when the review found the hole)* The owner chose this on 2026-10-04, against a 64-bit
-pair with a millisecond step, in which nothing below a millisecond exists, and against a type of
-the library, which has no literal (L14); the cost is 128-bit arithmetic and a second name for
-every operation on time in the library. *(proposed: the names, which stand to the narrow pair as
-`long` stands to `int`; and the type of a literal, which follows the integer literal of L10: a
-duration literal is a `duration`, or a `longduration` when its value does not fit one, and where
-a type is written or expected it takes that type if the value fits, so that a literal beyond both
-ranges is `constant-overflow` (T6))*
+Beside the 64-bit pair of T24 stand `longduration` and `longtimestamp`: 128 bits with the same step
+of one nanosecond, for a calendar or an archive that reaches before 1677 or after 2262. A `duration`
+widens into a `longduration` and a `timestamp` into a `longtimestamp` without a word (T8), a
+conversion the other way is written out and checked as T20 says, and the texts are A12's. What T13
+says of the narrow pair holds for the wide one, and an operation between the two pairs widens the
+narrow operand and has the wide type, as `i + l` has `long` (T8), so that `longtimestamp -
+timestamp` is a `longduration`. (the mixed operations were proposed on 2026-10-07, when the review
+found the hole, and decided by the owner on 2026-10-09) The owner chose this on 2026-10-04, against
+a 64-bit pair with a millisecond step, in which nothing below a millisecond exists, and against a
+type of the library, which has no literal (L14); the cost is 128-bit arithmetic and a second name
+for every operation on time in the library. The names stand to the narrow pair as `long` stands to
+`int`, and the type of a literal follows the integer literal of L10: a duration literal is a
+`duration`, or a `longduration` when its value does not fit one, and where a type is written or
+expected it takes that type if the value fits, so that a literal beyond both ranges is
+`constant-overflow` (T6) (the owner, 2026-10-09, confirming both readings).
 
 Case: [types/longduration-parameter.kz](../corpus/types/longduration-parameter.kz)
 ```kurz
@@ -342,14 +364,14 @@ print(Divide(10, 2))
 print(Divide(10, 0))
 ```
 
-### T25 (proposed) Division by zero, in detail
+### T25 (decided, §4) Division by zero, in detail
 
 `%` by zero raises `divide-by-zero`, as `/` by zero does: both are the same instruction of the
 machine, and C# throws the same exception for both. A floating-point division by zero does not
-raise: it yields an infinity, or NaN for `0.0 / 0.0`, as IEEE 754 and C# have it. A division or
-a remainder of literals by the literal `0`, which T6 would otherwise fold at compile time, is the
-compile error `constant-divide-by-zero`, as C# reports it, because such a program can never run
-to the line after it.
+raise: it yields an infinity, or NaN for `0.0 / 0.0`, as IEEE 754 and C# have it. A division or a
+remainder of literals by the literal `0`, which T6 would otherwise fold at compile time, is the
+compile error `constant-divide-by-zero`, as C# reports it, because such a program can never run to
+the line after it. The owner confirmed this reading on 2026-10-09, in round 13.
 
 Case: [types/constant-divide-by-zero.kz](../corpus/types/constant-divide-by-zero.kz)
 ```kurz
@@ -405,8 +427,11 @@ of C#, which is one UTF-16 unit and cannot hold every code point. The string sta
 whatever its `.Chars` are used for: they are decoded one at a time while the string is walked,
 and no second copy of the text is built. Four bytes are used only where a `char` is stored.
 
-A `char` has no literal in this reference. The case walks the `.Chars` of a string and prints
-each one (A8).
+A `char` literal is one code point between single quotes, `'a'`, with the escapes of L7 and L16;
+more than one code point between the quotes is the compile error `syntax` (E4) (the owner,
+2026-10-09, against no literal, under which every comparison of a character goes through `.Chars` or
+`char(97)`; the cost is a second quote in the lexer). The case of A8 walks the `.Chars` of a string
+and prints each one.
 
 Case: [values/text-more.kz](../corpus/values/text-more.kz)
 ```kurz
@@ -420,6 +445,22 @@ print(Access.Read | Access.Write)
 for c in "ab".Chars {
     print(c)
 }
+```
+
+Case: [types/char-literal.kz](../corpus/types/char-literal.kz)
+```kurz
+c = 'a'
+print(c)
+print(c == 'a')
+for d in "ab".Chars {
+    print(d == 'b')
+}
+```
+
+Case: [types/char-literal-two.kz](../corpus/types/char-literal-two.kz)
+```kurz
+c = 'ab'
+print(c)
 ```
 
 ### T17 (decided, §4) Generics
@@ -490,7 +531,7 @@ int AreaOf<T: Shape>(T item) => item.Area()
 print(AreaOf(5))
 ```
 
-### T27 (proposed) How type arguments are inferred
+### T27 (decided, §4) How type arguments are inferred
 
 A type argument that a call does not write is inferred from the arguments: a type parameter takes
 the one type that every argument in its positions has, after the conversions of this chapter (a
@@ -498,7 +539,8 @@ literal takes the type an argument of its position would take, L10). When the ar
 positions have different types, or no argument stands in one of its positions, the call is the
 compile error `cannot-infer`, and the type arguments are written. This is C#'s inference in Kurz's
 terms: C# would widen a `byte` to an `int` to make `Max(b, i)` an `int`, which T8 and T9 do not
-allow here, and C#'s inference has changed between its versions, so no version of it is named.
+allow here, and C#'s inference has changed between its versions, so no version of it is named. The
+owner confirmed this reading on 2026-10-09, in round 13.
 
 Case: [types/generic-cannot-infer.kz](../corpus/types/generic-cannot-infer.kz)
 ```kurz
@@ -533,16 +575,16 @@ unary `-`, `~`, `& | ^`, `<<`, `>>` and the comparisons, as in C#: `a + b` on tw
 `narrowing-conversion` (T7). A shift on such an operand has the width 32, and a negative count is
 masked as in C#, so `1 << -1` is `1 << 31`. Where the other operand is a `uint`, a `long` or a
 `ulong`, the narrow operand takes that type instead of `int`, as C#'s binary numeric promotion does
-(T9). The owner chose this on 2026-10-03, against computing
-in the operands' type, under which a program ported from C# computes other values without a word;
-the cost is that `byte c = a + b` needs `byte(a + b)`, and that the wrap of T4 never happens at 8
-or 16 bits, while `ushort * ushort` is computed in a signed `int` and can overflow it. The
-wrapping operators `+%`, `-%` and `*%` (T12) do not promote: they compute in the wider of their
-operand types and wrap there, so that an 8-bit checksum is `a +% b` on two `byte`s, where a
-promoted `+%` would need a mask on every narrow checksum (the owner, 2026-10-04, against promoting
-them; C# has no such operators). The cost: `a + b` and `a +% b` differ in type.
-*(proposed: operands of different signedness are `sign-mix` (T9) whatever their widths, because no wider type holds both, and a literal operand takes
-the other operand's type, so that `sum +% 1` on a `byte` computes in `byte`)*
+(T9). The owner chose this on 2026-10-03, against computing in the operands' type, under which a
+program ported from C# computes other values without a word; the cost is that `byte c = a + b` needs
+`byte(a + b)`, and that the wrap of T4 never happens at 8 or 16 bits, while `ushort * ushort` is
+computed in a signed `int` and can overflow it. The wrapping operators `+%`, `-%` and `*%` (T12) do
+not promote: they compute in the wider of their operand types and wrap there, so that an 8-bit
+checksum is `a +% b` on two `byte`s, where a promoted `+%` would need a mask on every narrow
+checksum (the owner, 2026-10-04, against promoting them; C# has no such operators). The cost: `a +
+b` and `a +% b` differ in type. Under these operators, which do not promote, operands of different
+signedness are `sign-mix` (T9) whatever their widths, and a literal operand takes the other
+operand's type, so that `sum +% 1` on a `byte` computes in `byte` (the owner, 2026-10-09).
 
 Case: [types/wrapping-narrow.kz](../corpus/types/wrapping-narrow.kz)
 ```kurz

@@ -87,6 +87,25 @@ sections:
       - Where this batch shows a rule and the list of changed files shows its cases - only a happy-path case, none at the limits the rule names.
       - Library, runtime or compiler code dressed as a case. A case is a small program with an expectation.
 
+  - name: compiler
+    files: ["compiler/*"]
+    rules:
+      - >-
+        A construct, an error id, a text, a conversion or an order of evaluation that no rule of the
+        reference states, implemented anyway. The compiler takes its picks from the reference; what the
+        reference lacks is a question for a design round, not a line of code
+        (knowledge/design-before-build.md).
+      - >-
+        An error the compiler reports whose id is not in the table of reference/12-errors.md, or
+        reported on a line other than the one the reference's E1 names.
+      - >-
+        A test that pins an error's message where the corpus pins an id and a line (E2), or an
+        expectation computed by the code under test.
+      - >-
+        A corpus case the compiler's tests skip, or a case header read in another shape than the one
+        reference/00-about.md states.
+      - A dependency, tool or runtime version that is not pinned exactly, or a build step that fetches what no file pins.
+
   - name: knowledge and guides
     files: ["knowledge/*", "guides/*", "INDEX.md"]
     rules:
@@ -123,7 +142,9 @@ sections:
       - A self-test that cannot fail - a negative assertion without a positive control, an all() over a collection that can be empty, an expectation computed by the code under test.
       - An invented fixture where the real payload was available, or a fixture edited away from what the platform sent without saying so.
       - A captured payload that holds none of the thing a case reads (an empty list) with no floor in the case over it.
-      - Code that lexes, parses, type-checks, interprets or generates Kurz. The design phase allows none.
+      - >-
+        Code under tools/ that lexes, parses, type-checks, interprets or generates Kurz: that is the
+        compiler's, under compiler/, and a second copy drifts from it.
 
   # The next two sections cover every surface their rules can be broken on.
   - name: gates and the rules that name them

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What may exist in this public tree. Fails on: a path the design phase does not allow, a
+"""What may exist in this public tree. Fails on: a path the allowlist does not hold, a
 credential-shaped string, a machine-bound string (drive or profile path, private IP address,
 e-mail address) in a file or in its name, a merge-conflict marker, a file that is not UTF-8 text,
 a listed entry that is not a regular file (a link, a submodule), or a scan of fewer than FLOOR
@@ -43,23 +43,26 @@ except Exception:  # only exit 2 blocks a hook call: a kit that is broken must n
 
 # Every other rule is satisfied by finding nothing; a scan of the wrong directory prints "0 errors".
 FLOOR = 5
-# What the design phase allows, as full-path patterns. Anything else is refused.
+# What this tree holds, as full-path patterns; anything else is refused. The compiler lives under
+# compiler/ since the owner said build on 2026-10-09; its build outputs (bin/, obj/) are ignored by
+# .gitignore and refused here when they are not.
 ALLOWED = [
     r"CLAUDE\.md", r"INDEX\.md", r"README\.md", r"LICENSE(?:\.md)?", r"kurz-design\.md",
     r"\.gitattributes", r"\.gitignore",
     r"knowledge/[^/]+\.md", r"guides/[^/]+\.md",
     r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz",
     r"tools/(?:[^/]+/)*[^/]+\.(?:py|json|txt)",
+    r"compiler/(?:[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
     r"\.review/[^/]+\.yaml", r"\.github/workflows/[^/]+\.yml", r"\.githooks/pre-push",
     r"\.claude/settings\.json", r"\.claude/skills/[^/]+/SKILL\.md",
 ]
-PHASE = ("design phase: this tree holds the design record, the reference, the corpus, the knowledge store "
-         "and the quality tools. No compiler, runtime or library code until the owner says build (CLAUDE.md)")
+HOLDS = ("this tree holds the design record, the reference, the corpus, the knowledge store, the quality tools "
+         "and the compiler under compiler/, admitted when the owner said build on 2026-10-09; nothing else (CLAUDE.md)")
 
 
 def check_path(path):
     """The reason a path is refused, or None."""
-    return None if any(re.fullmatch(p, path) for p in ALLOWED) else f"{path}: not allowed here - {PHASE}"
+    return None if any(re.fullmatch(p, path) for p in ALLOWED) else f"{path}: not allowed here - {HOLDS}"
 
 
 def check_text(where, text):
@@ -286,7 +289,10 @@ def cases_in(base):
     expect("floor catches an empty scan", {}, "floor")
     four = {f"knowledge/e{n}.md": b"fact\n" for n in range(4)}
     cases.append(("floor: four files are below the gate's own floor", any("floor" in e for e in scan(four)), scan(four)))
-    expect("compiler source is refused", {**ok_files, "Program.cs": b"class P {}\n"}, "Program.cs: not allowed")
+    expect("a source file outside compiler/ is refused", {**ok_files, "Program.cs": b"class P {}\n"}, "Program.cs: not allowed")
+    expect("compiler source under compiler/ is allowed", {**ok_files, "compiler/Kurz.Compiler/Lexer.cs": b"class L {}\n"}, None)
+    expect("a build output under compiler/ is refused",
+           {**ok_files, "compiler/Kurz.Compiler/bin/Debug/Kurz.dll": b"MZ\n"}, "Kurz.dll: not allowed")
     expect("Kurz library code outside the corpus is refused", {**ok_files, "src/list.kz": b"x = 1\n"}, "not allowed")
     expect("nested knowledge entry is refused", {**ok_files, "knowledge/sub/x.md": b"x\n"}, "not allowed")
     expect("a binary file is refused", {**ok_files, "tools/x.py": b"\xff\xfe\x00"}, "not UTF-8")
@@ -306,7 +312,9 @@ def cases_in(base):
                   check_text("m", kit.message_text(plain)) == ["m: machine-bound string (email)"], check_text("m", kit.message_text(plain))))
     for path in ("CLAUDE.md", "kurz-design.md", "reference/03-values.md", "corpus/values/with/path-write.kz",
                  "tools/review/review.py", "tools/review/fixtures/a.json", ".github/workflows/gates.yml",
-                 ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push"):
+                 ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push",
+                 "compiler/Kurz.sln", "compiler/Kurz.Compiler/Kurz.Compiler.csproj", "compiler/Kurz.Compiler/Lexer.cs",
+                 "compiler/global.json", "compiler/README.md", "compiler/.editorconfig"):
         cases.append((f"allowed path: {path}", check_path(path) is None, check_path(path)))
     for label, value in secrets.items():  # one plant per pattern; the error must name that pattern
         expect(f"secret: {label}", {**ok_files, "guides/g.md": value.encode()}, f"credential-shaped string ({label})")
@@ -391,7 +399,7 @@ def cases_in(base):
         cases.append(("pre-push: a clean commit passes", of(clean) == [], of(clean)))
         cases.append(("pre-push: a machine-bound string in a commit message is refused",
                       has(of(message), "(message): machine-bound string (drive-path)"), of(message)))
-        cases.append(("pre-push: a path the design phase does not allow is refused", has(of(lexer), "src/Lexer.cs: not allowed"), of(lexer)))
+        cases.append(("pre-push: a path the allowlist does not hold is refused", has(of(lexer), "src/Lexer.cs: not allowed"), of(lexer)))
         cases.append(("pre-push: a file that is not UTF-8 is seen as it is stored", has(of(binary), "knowledge/c.md: not UTF-8 text"), of(binary)))
         cases.append(("pre-push: a deleted file is not scanned", of(deletion) == [], of(deletion)))
         cases.append(("pre-push: a workflow-skip literal in a commit message is refused",
@@ -494,7 +502,8 @@ def cases_in(base):
     inside = lambda rel: os.path.join(kit.ROOT, *rel.split("/"))
     outside = os.path.join(base, "x.cs")  # outside the checkout: the temporary directory, beside the replay's copy
     for name, raw, want in [
-        ("hook: compiler source inside the repo is denied", call(inside("src/Lexer.cs")), 2),
+        ("hook: a source file outside compiler/ is denied", call(inside("src/Lexer.cs")), 2),
+        ("hook: compiler source under compiler/ is allowed", call(inside("compiler/Kurz.Compiler/Lexer.cs")), 0),
         ("hook: the design record is allowed", call(inside("kurz-design.md")), 0),
         ("hook: a corpus case is allowed", call(inside("corpus/values/a.kz")), 0),
         ("hook: a file outside the repo is not this gate's business", call(outside), 0),

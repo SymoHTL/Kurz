@@ -1,0 +1,12 @@
+// expect: error interface-method-private at 9
+// rules: K7
+
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    int Area() => 1
+}
+
+print("dot")

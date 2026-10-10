@@ -2,8 +2,15 @@
 
 ### C1 (decided, §8) `if`
 
-`if condition { }`. There are no parentheses around the condition, and the braces are always
-required. A statement in place of the block is the compile error `braces-required`.
+`if condition { }`. The condition needs no parentheses, and `if (x > 5) {` compiles all the same,
+since an expression in parentheses is an expression like any other (the owner, 2026-10-09, against
+an id of its own for the parentheses, which would put a special case into the parser for one
+spelling). The braces are always required, and the block opens on the line of the condition: a
+statement in place of the block, and a `{` on the next line, which L2 ends the statement before and
+L4 does not continue it to, are the compile error `braces-required` (the owner, 2026-10-09, against
+continuing the statement onto the `{`, a fourth exception to L2). Both are reported on the line of
+the condition, where the block should have opened, which is the line the case with the `{` on its
+own line expects.
 
 Case: [control/if.kz](../corpus/control/if.kz)
 ```kurz
@@ -17,6 +24,23 @@ Case: [control/braces-required.kz](../corpus/control/braces-required.kz)
 ```kurz
 x = 7
 if x > 5 print(x)
+```
+
+Case: [control/if-parenthesized.kz](../corpus/control/if-parenthesized.kz)
+```kurz
+x = 7
+if (x > 5) {
+    print("big")
+}
+```
+
+Case: [control/brace-next-line.kz](../corpus/control/brace-next-line.kz)
+```kurz
+x = 7
+if x > 5
+{
+    print("big")
+}
 ```
 
 ### C2 (assumed, §8) `else`
@@ -55,9 +79,14 @@ if x {
 
 ### C4 (decided, §5) `match`
 
-`match value { Case name => ... }` runs the arm whose case the value is. An arm names a case
-type, optionally followed by a name for the value as that type. O8 says which arms have to be
-there, and C9 what else an arm can test.
+`match value { Case name => ... }` runs the arm whose case the value is. An arm names a case type,
+optionally followed by a name for the value as that type. O8 says which arms have to be there, and
+C9 what else an arm can test. When a value fits several arms, the first arm in source order whose
+type the value is runs, as C#'s `switch` does; an arm may name a class or a `data` type derived from
+a case (D6, K6), `Admin` where the case is `User`; and an arm that can never run, because an earlier
+arm covers its type, is the compile error `unreachable-arm` (the owner, 2026-10-09, against arms
+that name cases only, under which a `match` cannot tell an `Admin` from a `User`; the cost is a row
+in the table and a subtype check per arm).
 
 Case: [data/union.kz](../corpus/data/union.kz)
 ```kurz
@@ -73,6 +102,42 @@ void Describe(Circle | Square shape) {
 
 Describe(Circle(2))
 Describe(Square(3))
+```
+
+Case: [control/match-derived-arm.kz](../corpus/control/match-derived-arm.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+void Show(User | NotFound u) {
+    match u {
+        Admin a => print("admin {a.Level}")
+        User x => print("user {x.Name}")
+        NotFound => print("none")
+    }
+}
+
+Show(Admin("Ann", 2))
+Show(User("Bea"))
+Show(NotFound)
+```
+
+Case: [control/match-unreachable-arm.kz](../corpus/control/match-unreachable-arm.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+void Show(User | NotFound u) {
+    match u {
+        User x => print("user {x.Name}")
+        Admin a => print("admin {a.Level}")
+        NotFound => print("none")
+    }
+}
+
+Show(Admin("Ann", 2))
 ```
 
 ### C5 (assumed, §8) `while`
@@ -160,12 +225,16 @@ holds no number and runs the block zero times. The C form with three parts,
 `for (i = 0; i < n; i++)`, does not exist.
 
 A range never counts down, and a range whose end lies below its start is an error, not an empty
-range. That holds for both forms: `3..2` and `3..<2` are errors, `3..<3` is not. It is the
-compile error `reversed-range` when both ends are expressions made only of literals, and an
-exception `reversed-range-at-run-time` where the range is evaluated otherwise, before the first
-round of a loop over it (E3). `for i in 1..n` therefore throws when `n` is 0; a loop that may run
-zero times is written with `..<`. The C form with three parts is the compile error `syntax`, as is
-every other text no rule gives a meaning (E4).
+range. That holds for both forms: `3..2` and `3..<2` are errors, `3..<3` is not. It is the compile
+error `reversed-range` when both ends are expressions made only of literals, and an exception
+`reversed-range-at-run-time` where the range is evaluated otherwise, before the first round of a
+loop over it (E3). `for i in 1..n` therefore throws when `n` is 0; a loop that may run zero times is
+written with `..<`. The C form with three parts is the compile error `syntax`, as is every other
+text no rule gives a meaning (E4). The range and its loop variable have the common type of the two
+ends, found as `+` finds it (T8, T9, T28): `0..<n` with a `long` `n` is a range of `long`, and ends
+with no common type are `sign-mix` (T9) (the owner, 2026-10-09, against a range that is always
+`int`, under which a loop over a `long` range is written by hand; the cost is that the loop
+variable's type follows the end, which a reader finds at the declaration of `n`).
 
 Case: [control/range-empty.kz](../corpus/control/range-empty.kz)
 ```kurz
@@ -208,6 +277,32 @@ xs.Add(4)
 xs.Add(5)
 for i in 0..<xs.Count {
     print(xs[i])
+}
+```
+
+Case: [control/range-long.kz](../corpus/control/range-long.kz)
+```kurz
+long n = 3
+for i in 0..<n {
+    print(i)
+}
+```
+
+Case: [control/range-long-narrows.kz](../corpus/control/range-long-narrows.kz)
+```kurz
+long n = 3
+for i in 0..<n {
+    int x = i
+    print(x)
+}
+```
+
+Case: [control/range-sign-mix.kz](../corpus/control/range-sign-mix.kz)
+```kurz
+int a = 0
+uint n = 3
+for i in a..<n {
+    print(i)
 }
 ```
 
