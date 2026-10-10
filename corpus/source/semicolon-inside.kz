@@ -1,0 +1,4 @@
+// expect: error syntax at 4
+// rules: L5
+
+print(1; 2)

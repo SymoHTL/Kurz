@@ -1,0 +1,5 @@
+// expect: output
+// | Infinity
+// rules: T6, T10
+
+print(float(1e300))

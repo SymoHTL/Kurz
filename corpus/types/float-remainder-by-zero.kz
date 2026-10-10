@@ -1,0 +1,7 @@
+// expect: output
+// | NaN
+// rules: T25
+
+double Rest(double a, double b) => a % b
+
+print(Rest(1.0, 0.0))

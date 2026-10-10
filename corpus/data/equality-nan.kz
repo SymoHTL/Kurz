@@ -1,0 +1,9 @@
+// expect: output
+// | true
+// rules: D3
+
+data Point(double X, double Y)
+
+double z = 0.0
+nan = z / z
+print(Point(nan, 0.0) == Point(nan, 0.0))

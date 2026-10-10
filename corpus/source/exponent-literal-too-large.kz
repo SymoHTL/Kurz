@@ -1,0 +1,6 @@
+// expect: error constant-overflow at 4
+// rules: L11
+
+x = 1e400
+print(x)
+// a literal outside the range of the type it takes is the error whatever that type (T6, L11); a floating-point expression that overflows would fold to an infinity instead

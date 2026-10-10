@@ -25,7 +25,15 @@ Case: [data/declare.kz](../corpus/data/declare.kz)
 
 ### D3 (decided, §4) Equal by content
 
-Two values of a `data` type are equal when their fields are equal.
+Two values of a `data` type are equal when their fields are equal. The fields compare as the fields of
+a C# record do: `Point(nan, 0.0) == Point(nan, 0.0)` is `true`, every `data` value equals itself, and a key
+of a `Map` is found again, while `==` on a `double` field alone says `false` for NaN, as in C# (the
+owner, 2026-10-09, against the field's `==`, under which such a value is unequal to itself and cannot
+be found in a map). Each field compares by the equality Kurz gives its type, a class field by K4 or
+K5, and NaN equal to NaN is the one thing taken from C#'s `Equals`, which holds for a `double` among
+the named fields of K5 as well; a method a class names `Equals` plays no part (K5) (the owner,
+2026-10-10, confirming the reading proposed after the review of round 13, and the NaN field under
+K5).
 
 Case: [data/equality.kz](../corpus/data/equality.kz)
 ```kurz
@@ -33,6 +41,15 @@ data Point(int X, int Y)
 
 print(Point(1, 2) == Point(1, 2))
 print(Point(1, 2) == Point(2, 1))
+```
+
+Case: [data/equality-nan.kz](../corpus/data/equality-nan.kz)
+```kurz
+data Point(double X, double Y)
+
+double z = 0.0
+nan = z / z
+print(Point(nan, 0.0) == Point(nan, 0.0))
 ```
 
 ### D4 (decided, §4) Immutable
@@ -78,6 +95,42 @@ print(b.Id)
 ### D6 (decided, §4) A `data` type may inherit from another
 
 A value of the derived type can be used wherever the base type is required.
+
+Case: [control/match-unreachable-arm.kz](../corpus/control/match-unreachable-arm.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+void Show(User | NotFound u) {
+    match u {
+        User x => print("user {x.Name}")
+        Admin a => print("admin {a.Level}")
+        NotFound => print("none")
+    }
+}
+
+Show(Admin("Ann", 2))
+```
+
+Case: [control/match-derived-arm.kz](../corpus/control/match-derived-arm.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+void Show(User | NotFound u) {
+    match u {
+        Admin a => print("admin {a.Level}")
+        User x => print("user {x.Name}")
+        NotFound => print("none")
+    }
+}
+
+Show(Admin("Ann", 2))
+Show(User("Bea"))
+Show(NotFound)
+```
 
 Case: [data/inherit.kz](../corpus/data/inherit.kz)
 ```kurz
@@ -154,6 +207,18 @@ position precede unnamed ones)* A name that matches no parameter, a parameter th
 arguments, and a parameter without a default that gets none are the compile error
 `argument-mismatch` *(proposed)*.
 
+Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
+```kurz
+int Log(string s, int v) {
+    print(s)
+    return v
+}
+
+int Add(int a, int b) => a + b
+
+print(Add(b: Log("b", 2), a: Log("a", 1)))
+```
+
 Case: [data/default-and-named.kz](../corpus/data/default-and-named.kz)
 ```kurz
 data Item(int ProductId, int Count = 1)
@@ -222,14 +287,16 @@ Show(Plan.Pro)
 
 ### D13 (decided, §4) Flags
 
-`flags Access { Read, Write, Run }` declares a type whose values are sets of the listed names.
-It gives what `[Flags]` and `HasFlag` give in C#. Each name is one bit, and the compiler numbers
-the bits in order unless the declaration writes the number (D19). A name alone, `Access.Read`,
-is the set that holds that name. `set.Has(Access.Read)` is `true` when the set holds the name. A
-set is not one case, so a `match` cannot list it case by case. *(proposed: such a `match` is the
-compile error `syntax` (E4), the id the reference has for text no rule gives a meaning; a parser
-cannot tell it from a `match` on an enum, so the check is the type checker's, and an id of its
-own is a question for a design round)* How sets are combined is D17; the
+`flags Access { Read, Write, Run }` declares a type whose values are sets of the listed names. It
+gives what `[Flags]` and `HasFlag` give in C#. Each name is one bit, and the compiler numbers the
+bits in order unless the declaration writes the number (D19). A name alone, `Access.Read`, is the
+set that holds that name. `set.Has(Access.Read)` is `true` when the set holds the name. A set is not
+one case, so a `match` cannot list it case by case. Such a `match` is the compile error `syntax`
+(E4), the one id for text no rule gives a meaning; a parser cannot tell it from a `match` on an
+enum, so the check is the type checker's (the owner, 2026-10-09, against an id of its own,
+`match-on-flags`, the rejected option). The error is at the line of the `match`, as the case
+expects, the line E4 gives every error only the type checker can see (the owner, 2026-10-10,
+confirming the reading proposed after the review of round 13). How sets are combined is D17; the
 case tests a set of one name.
 
 Case: [data/flags.kz](../corpus/data/flags.kz)
@@ -239,6 +306,17 @@ flags Access { Read, Write, Run }
 p = Access.Read
 print(p.Has(Access.Read))
 print(p.Has(Access.Write))
+```
+
+Case: [data/flags-match.kz](../corpus/data/flags-match.kz)
+```kurz
+flags Access { Read, Write, Run }
+
+p = Access.Read
+match p {
+    Access.Read => print("read")
+    else => print("other")
+}
 ```
 
 ### D14 (decided, §8) The fields of a primary constructor can be read from outside
@@ -345,13 +423,14 @@ match Plan.From(7) {
 }
 ```
 
-### D20 (proposed) Numbers that do not fit the shape of D18
+### D20 (assumed, §4) Numbers that do not fit the shape of D18
 
 A declaration that writes the same number for two values, one that writes a number for some values
 and not for all, and a use of `.Number` or `From` on an `enum` whose declaration writes no number
-are the compile error `enum-number`. The alternative, C#'s, lets two values share a number and
-makes them equal, which gives `From` a value nobody can predict; the error keeps D12's "a value has
-a number only where one is written" simple.
+are the compile error `enum-number`. The alternative, C#'s, lets two values share a number and makes
+them equal, which gives `From` a value nobody can predict; the error keeps D12's "a value has a
+number only where one is written" simple. The owner accepted this reading by its id on 2026-10-09,
+in round 13, without its text shown, so it is assumed and not decided.
 
 Case: [data/enum-number-twice.kz](../corpus/data/enum-number-twice.kz)
 ```kurz

@@ -1,0 +1,18 @@
+// expect: error cannot-infer at 18
+// rules: T27
+
+class Animal {
+    pub string Text() => "animal"
+}
+
+class Dog : Animal {
+    pub int Legs() => 4
+}
+
+class Cat : Animal {
+    pub int Lives() => 9
+}
+
+T Pick<T>(T a, T b) => a
+
+print(Pick(Dog(), Cat()))

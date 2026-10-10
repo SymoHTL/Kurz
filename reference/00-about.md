@@ -30,7 +30,9 @@ then the rule changes its status here.
 ## Cases
 
 Every sample in this reference is a file of the conformance corpus, under `corpus/`. A file
-starts with a header and an empty line; the rest is the program.
+starts with a header and an empty line; the rest is the program. A chapter shows a file's sample once,
+under the first `Case:` line that names it; a later rule of the same chapter that the case names
+carries the `Case:` line alone.
 
 ```text
 // expect: output                     the program compiles, runs and prints exactly these lines
@@ -195,20 +197,19 @@ print(Counter(1))
 
 ### A10 (decided, §8) Printing through an interface or a type parameter
 
-`print(x)` with a value whose static type is an interface (K6) compiles when the interface
-declares `string Text()`, and is `no-text` otherwise; with a type parameter (T19) it compiles when
-the parameter is limited to an interface that declares it, and is `no-text` otherwise, whatever
-the call passes. A type meets such a limit when it has a text: every value with a derived text
-(A3, A4, A8, A11 to A14), a class that declares or inherits a `pub Text()` (A5, A9), and a value
-whose interface or type parameter has a text by the sentence before, without naming the interface
-(the owner, 2026-10-04, against an interface a class has to name). *(proposed: the match holds
-only for an interface whose only member is `string Text()`, the one the standard library declares;
-an interface that declares more is met by naming it, because a type that has a text does not have
-its other members)* The owner
-chose the rule on 2026-10-03, against a check for each instantiation of a generic function, which
-would have reported an error at a call site for a line inside another function; the cost is that
-a generic function that prints its argument needs the limit, and that the standard library would
-declare one interface for it.
+`print(x)` with a value whose static type is an interface (K6) compiles when the interface declares
+`string Text()`, and is `no-text` otherwise; with a type parameter (T19) it compiles when the
+parameter is limited to an interface that declares it, and is `no-text` otherwise, whatever the call
+passes. A type meets such a limit when it has a text: every value with a derived text (A3, A4, A8,
+A11 to A14), a class that declares or inherits a `pub Text()` (A5, A9), and a value whose interface
+or type parameter has a text by the sentence before, without naming the interface (the owner,
+2026-10-04, against an interface a class has to name). The match holds only for an interface whose
+only member is `string Text()`, the one a standard library would declare; an interface that declares
+more is met by naming it, because a type that has a text does not have its other members. *(assumed:
+the reference's reading, accepted by its id on 2026-10-09 without its text shown)* The owner chose the rule on 2026-10-03, against a check for each instantiation of a
+generic function, which would have reported an error at a call site for a line inside another
+function; the cost is that a generic function that prints its argument needs the limit, and that the
+standard library would declare one interface for it.
 
 Case: [classes/text-through-interface.kz](../corpus/classes/text-through-interface.kz)
 ```kurz
@@ -298,10 +299,12 @@ for c in "ab".Chars {
 }
 ```
 
-### A11 (proposed) The text of a `float`
+### A11 (assumed, §8) The text of a `float`
 
 A `float` shows the shortest digits that read back as the same `float`, not the digits of the
-`double` it would widen to: `0.1f` shows `0.1`, as C# prints it, and not `0.10000000149011612`.
+`double` it would widen to: `0.1f` shows `0.1`, as C# prints it, and not `0.10000000149011612`. The
+owner accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is
+assumed and not decided.
 
 Case: [values/text-float.kz](../corpus/values/text-float.kz)
 ```kurz
@@ -309,12 +312,32 @@ print(0.1f)
 print(2.5f)
 ```
 
-### A12 (proposed) The text of a duration
+### A12 (assumed, §8) The text of a duration
 
-A duration shows its value split into the units of L14 from the largest down, each unit at most
-once and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and a
-value below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A negative
-duration shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`.
+A duration shows its value split into the units of L14 from the largest down, each unit at most once
+and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and the remainder
+below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A remainder
+below a millisecond shows its microseconds and nanoseconds the same way, `1s 250us` and `1us 500ns`,
+when no formatting is chosen (the owner, 2026-10-10, against rounding or cutting to milliseconds); a
+formatting that can be chosen is a question the record lists (section 14), as is whether `us` and
+`ns` are units of a literal (L14). A negative duration
+shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. The owner
+accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is assumed
+and not decided; that it is the remainder below a second that shows in milliseconds came from the
+review of 2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)*
+
+Case: [values/text-duration-sub-millisecond.kz](../corpus/values/text-duration-sub-millisecond.kz)
+```kurz
+print(1.00025s)
+print(0.0000015s)
+```
+
+Case: [source/unit-literal-fraction.kz](../corpus/source/unit-literal-fraction.kz)
+```kurz
+print(1.5s)
+print(0.5h)
+print(1.5kb)
+```
 
 Case: [values/text-duration.kz](../corpus/values/text-duration.kz)
 ```kurz
@@ -324,11 +347,12 @@ print(-90min)
 print(3600s)
 ```
 
-### A13 (proposed) The text of a set of flags
+### A13 (assumed, §8) The text of a set of flags
 
-The names show in the order of their declaration, whatever the order in which the set was
-combined, and the empty set (D17) shows `None`: `Access.Write | Access.Read` shows
-`Read | Write`.
+The names show in the order of their declaration, whatever the order in which the set was combined,
+and the empty set (D17) shows `None`: `Access.Write | Access.Read` shows `Read | Write`. The owner
+accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is assumed
+and not decided.
 
 Case: [values/text-flags.kz](../corpus/values/text-flags.kz)
 ```kurz
@@ -338,13 +362,16 @@ print(Access.Write | Access.Read)
 print(Access.None)
 ```
 
-### A14 (proposed) Which C# a `double` prints like
+### A14 (assumed, §8) Which C# a `double` prints like
 
 "What C# prints" is what .NET Core 3.0 and later print with the invariant culture, which is the
-shortest digits that read back as the same number (A4), with `.` as the separator: an exponent
-form from `1E+15` up and below `1E-05`, `-0` for a negative zero, `Infinity` and `-Infinity` for
-the infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0`
-for a negative zero, a `∞` sign, a `,`), and none of that is meant.
+shortest digits that read back as the same number (A4), with `.` as the separator: an exponent form
+from `1E+15` up and from `1E-05` down, `-0` for a negative zero, `Infinity` and `-Infinity` for the
+infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0` for a
+negative zero, a `∞` sign, a `,`), and none of that is meant. The owner accepted this reading by its
+id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided; that the
+exponent form starts at `1E-05` itself came from the review of 2026-10-10, and was not put to the
+owner by its text. *(assumed: that sentence)*
 
 Case: [values/text-double-special.kz](../corpus/values/text-double-special.kz)
 ```kurz
@@ -355,14 +382,14 @@ print(-0.0)
 print(1.0 / z)
 ```
 
-### A15 (proposed) A private `Text()` used by `print` or an interpolation inside its class
+### A15 (decided, §8) A private `Text()` used by `print` or an interpolation inside its class
 
-`print` of an instance inside the class, and an interpolation of one there (L6), reach `Text()`
-the way a use from outside does, through the text of the value and not as a call of the member,
-so a `Text()` without `pub` is `not-visible` there too (A9 for the use from outside). The owner's
-choice of 2026-10-03 (A9) covered the inheritance and the `pub`, not the place of the use, and
-the record says nothing of it: this reading is proposed, and the cases stand on it, one for
-`print` and one for an interpolation.
+`print` of an instance inside the class, and an interpolation of one there (L6), reach `Text()` the
+way a use from outside does, through the text of the value and not as a call of the member, so a
+`Text()` without `pub` is `not-visible` there too (A9 for the use from outside). The owner's choice
+of 2026-10-03 (A9) covered the inheritance and the `pub`, not the place of the use; the owner
+decided this reading on 2026-10-09, in round 13, against one under which a private `Text()` has two
+meanings. The cases: one for `print` and one for an interpolation.
 
 Case: [classes/text-private-inside.kz](../corpus/classes/text-private-inside.kz)
 ```kurz

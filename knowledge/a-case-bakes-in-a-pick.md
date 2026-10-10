@@ -56,8 +56,8 @@ not. Once sixty cases use it, it is the language. The v0 compiler failed the sam
   CS8602. Its analysis can afford that because it only warns; here an unchecked use is an error,
   so that part of "full C#" became rule N9, open with three options; the owner decided on
   2026-10-03 that such a path stays narrowed only up to the next call and the next assignment,
-  and whether an assignment of a value whose type has no `null` narrows it again is still open
-  (the record, section 14, since 2026-10-09).
+  and whether an assignment of a value whose type has no `null` narrows it again was open from
+  2026-10-09 until the owner decided the same day, in round 13, that it does (the record, section 4; the reference's N9).
 - The cases for an answer are written around the forks they meet, as the first ones were. The
   new forks are questions for the next round, not picks to fold into this one.
 - When writing a sample for the record, expect the same thing: a sample decides more than the

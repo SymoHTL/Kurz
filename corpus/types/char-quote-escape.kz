@@ -1,0 +1,6 @@
+// expect: output
+// | '
+// rules: T21
+
+c = '\''
+print(c)

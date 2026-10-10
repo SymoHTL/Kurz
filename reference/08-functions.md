@@ -160,13 +160,17 @@ No case: it takes several files, and a case of the corpus is a single file.
 
 ### F11 (decided, §4) Function types and what a lambda captures
 
-The type of a function value is written with an arrow: the parameter types between brackets,
-`=>`, and the result type, as in `(int) => bool`. A lambda reads the variables around it and
-cannot assign them: assigning one is the compile error `capture-assign`. So is every change of a
-captured variable: an assignment into a path from it (M4), a `mut` method called on it or on a
-path from it (M5), and passing it as a `mut` argument (M7); the lambda holds a copy (F15), and a
-change to the copy would be lost or, through a class instance on the path, would not be a change
-of the copy at all. *(proposed: the record speaks of assigning)*
+The type of a function value is written with an arrow: the parameter types between brackets, `=>`,
+and the result type, as in `(int) => bool`. A lambda reads the variables around it and cannot assign
+them: assigning one is the compile error `capture-assign`. So is every change of a captured
+variable: an assignment into a path from it (M4), a `mut` method called on it or on a path from it
+(M5), and passing it as a `mut` argument (M7); the lambda holds a copy (F15), and a change to the
+copy would be lost or, through a class instance on the path, would not be a change of the copy at
+all. *(proposed: the record speaks of assigning)* The result type of a function type may be `void`,
+`(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
+nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
+objected to)* A lambda whose body is a call with a `void` success, `x => print(x)`, is a lambda with
+a `void` result and no use of the call as a value (O10) (the owner, 2026-10-10).
 
 Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
 ```kurz
@@ -199,14 +203,53 @@ print(big.Count)
 print(total)
 ```
 
+Case: [functions/function-type-void.kz](../corpus/functions/function-type-void.kz)
+```kurz
+void Run((int) => void f) {
+    f(1)
+}
+
+Run(x => print(x))
+// the lambda's body is a call with a void success: a void lambda, and no use of the call as a value (F11)
+```
+
 ### F12 (decided, §8) Overloads, default values, named arguments
 
 Functions may share a name when their parameters differ: in their number, or in the type of a
-parameter at the same place. Names, default values and the `mut` marker (M7) make no difference,
-so `Fill(List<int>)` next to `Fill(mut List<int>)` is the compile error `duplicate-function`, and a
+parameter at the same place. Names, default values and the `mut` marker (M7) make no difference, so
+`Fill(List<int>)` next to `Fill(mut List<int>)` is the compile error `duplicate-function`, and a
 call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of the other. A
 parameter can have a default value, and an argument can be passed by name (D11). Which function a
-call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)*
+call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)* Arguments are
+evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
+order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it (C# also
+takes `default` and `new S()` for a value type `S`, which the record does not name), and one that is
+not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
+`type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
+2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
+
+Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
+```kurz
+int Log(string s, int v) {
+    print(s)
+    return v
+}
+
+int Add(int a, int b) => a + b
+
+print(Add(b: Log("b", 2), a: Log("a", 1)))
+```
+
+Case: [functions/default-not-constant.kz](../corpus/functions/default-not-constant.kz)
+```kurz
+string Pick() => "hi"
+
+void Greet(string name, string word = Pick()) {
+    print("{word} {name}")
+}
+
+Greet("Ann")
+```
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
 ```kurz
@@ -358,24 +401,26 @@ if email != null {
 
 ### F16 (decided, §4) A top-level function that reads a top-level variable
 
-A function declared at the top level (F5) reads no top-level variable: what it needs comes
-through its parameters, and a top-level variable's name read in its body is `unknown-name`
-(V10), as if the variable were declared in another block. The name stays reserved inside the
-function: on the left of `=`, or in any other declaration there, it is `redeclared` (V9), so a
-function meant to reset the program's counter does not declare a local instead (the owner,
-2026-10-04, against a local that `unused-variable` (V5) reports unless the body reads it
-afterwards, and that compiles when it does; the cost is that the function cannot reuse the name,
-and that a top-level variable added later turns every top-level function that already declares
-that name into a compile error). *(proposed: a parameter of the function, a parameter of a lambda
-inside it and a loop variable are declarations in this sense and `redeclared` too, and every
-variable declared outside a function reserves its name, whether it is declared above or below the
-function (F6) and at any depth of the top-level code)* The owner chose the rule on 2026-10-03,
-against
-reading the variable at the call as a C# local function does, which would have given two kinds of
-function two views of a captured variable (F15), and against taking the value at the function's
-declaration as a lambda does, which a function declared above the variable (F6) could never see;
-the cost is that a counter or a table of the program is passed into every function, or made a
-field of a class.
+A function declared at the top level (F5) reads no top-level variable: what it needs comes through
+its parameters, and a top-level variable's name read in its body is `unknown-name` (V10), as if the
+variable were declared in another block. The name stays reserved inside the function: on the left of
+`=`, or in any other declaration there, it is `redeclared` (V9), so a function meant to reset the
+program's counter does not declare a local instead (the owner, 2026-10-04, against a local that
+`unused-variable` (V5) reports unless the body reads it afterwards, and that compiles when it does;
+the cost is that the function cannot reuse the name, and that a top-level variable added later turns
+every top-level function that already declares that name into a compile error). A parameter of the
+function, a parameter of a lambda inside it and a loop variable are declarations in this sense and
+`redeclared` too, and every variable declared outside a function reserves its name, whether it is
+declared above or below the function (F6) and at any depth of the top-level code. *(assumed: the
+reference's reading, accepted by its id on 2026-10-09 without its text shown)* In `count = count + 1` inside such a function the one error is `redeclared`, for the
+declaration on the left, which the compiler reads first to learn whether the line declares; the read
+on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
+read first, whose message points at the read while the fix is the whole line). The owner chose the
+rule on 2026-10-03, against reading the variable at the call as a C# local function does, which
+would have given two kinds of function two views of a captured variable (F15), and against taking
+the value at the function's declaration as a lambda does, which a function declared above the
+variable (F6) could never see; the cost is that a counter or a table of the program is passed into
+every function, or made a field of a class.
 
 Case: [functions/top-level-function-reads-no-variable.kz](../corpus/functions/top-level-function-reads-no-variable.kz)
 ```kurz
@@ -406,5 +451,17 @@ mut count = 0
 int Next(int count) => count + 1
 
 count = Next(count)
+print(count)
+```
+
+Case: [functions/top-level-name-assigned-and-read.kz](../corpus/functions/top-level-name-assigned-and-read.kz)
+```kurz
+mut count = 0
+
+void Bump() {
+    count = count + 1
+}
+
+Bump()
 print(count)
 ```

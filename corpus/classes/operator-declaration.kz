@@ -1,0 +1,8 @@
+// expect: error syntax at 5
+// rules: K5
+
+class Vec(int X) {
+    pub Vec operator +(Vec a, Vec b) => Vec(a.X + b.X)
+}
+
+print(Vec(1).X)

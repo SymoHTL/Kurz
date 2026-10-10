@@ -1,0 +1,6 @@
+// expect: throws divide-by-zero at 4
+// rules: T25
+
+decimal Rest(decimal a, decimal b) => a / b
+
+print(Rest(1m, 0m))

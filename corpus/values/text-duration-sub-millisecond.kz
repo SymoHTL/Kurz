@@ -1,0 +1,7 @@
+// expect: output
+// | 1s 250us
+// | 1us 500ns
+// rules: A12, L14
+
+print(1.00025s)
+print(0.0000015s)

@@ -1,0 +1,6 @@
+// expect: output
+// | 0.5
+// rules: L17
+
+double d = 1 / 2
+print(d)

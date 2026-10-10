@@ -1,0 +1,9 @@
+// expect: error braces-required at 5
+// rules: C1
+
+mut i = 0
+while i < 3
+{
+    i = i + 1
+}
+print(i)

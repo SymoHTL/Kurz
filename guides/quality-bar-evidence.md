@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-09
-digest: 6aa4bbe21a961b9757bafe1e362b1cbf3cb4922ea4b8e20ba6232da508b9f4f1
+generated: 2026-10-10
+digest: 571fbe1626d0121a986dbe0dc442c7c4fabcab59f877310540819731d8434e5d
 ttl_days: 60
 metadata:
   type: reference
@@ -75,27 +75,32 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 31 |
+| Entries in INDEX.md | 32 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 9 |
+| tagged TRAP | 10 |
 | Review rule sections | 11 |
 | Review rules | 64 |
 <!-- /generated:store -->
 
 ## The design record
 
-A statement marked *(assumed)* was proposed and not objected to; it is not a decision.
+A statement marked *(assumed)* was proposed and not objected to, or, where the marker carries the
+date of a review, proposed after that review and not yet confirmed by the owner; neither is a
+decision. The counts are of every occurrence of the marker's text and of the top-level bullets of
+section 14, not of rules or of questions: one marker can cover several readings, one bullet several
+questions, a marker whose statement turns decided leaves the count, and a marker quoted in prose
+counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-counts-as-one.md)).
 
 <!-- generated:design -->
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 47 |
-| Open questions | 7 |
+| Occurrences of the marker *(assumed)* | 57 |
+| Bullets of the Open section | 8 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -107,14 +112,14 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 181 |
-| of them decided | 136 |
-| of them assumed | 33 |
-| of them proposed | 12 |
+| Rules in the reference | 182 |
+| of them decided | 142 |
+| of them assumed | 40 |
+| of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 239 |
-| Compile-error ids | 46 |
-| Run-time error ids | 5 |
+| Corpus cases, none of them run | 319 |
+| Compile-error ids | 52 |
+| Run-time error ids | 6 |
 <!-- /generated:reference -->
 
 ## The forge
@@ -133,11 +138,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 7 |
-| Pull requests merged | 6 |
-| Merged over red, with a recorded waiver | 4 |
-| Review findings posted: high | 40 |
-| Review findings posted: medium | 518 |
-| Review findings posted: low | 687 |
-| Open HAZARD issues | 14 |
+| Pull requests opened by a writer, or merged | 10 |
+| Pull requests merged | 7 |
+| Merged over red, with a recorded waiver | 5 |
+| Review findings posted: high | 53 |
+| Review findings posted: medium | 627 |
+| Review findings posted: low | 807 |
+| Open HAZARD issues | 15 |
 <!-- /generated:forge -->

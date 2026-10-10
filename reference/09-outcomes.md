@@ -66,8 +66,16 @@ print(Twice(1))
 
 ### O4 (decided, §5) Keeping all cases
 
-A call is not unwrapped when it is the subject of a `match`, or when its result goes into a
-variable with a written union type.
+A call is not unwrapped when it is the subject of a `match`, or when its result goes into a variable
+with a written union type. A written union type holds every case the call can return: `int | NotFound
+result = Find(id)` with a `Find` that can also return `Invalid` is `type-mismatch` (T1), as an
+assignment in C# must fit its type; the other cases are kept by naming them, or handled by a `match`
+(the owner, 2026-10-09, against a written type as a filter that lets the missing cases leave the
+function as O2 says, under which a declaration ends the function on some paths without a word; the
+cost is that a function with five cases forces a five-case type on every variable that keeps its
+result). A written type that is the success case itself, `User?` for a call that returns
+`User? | DbError`, names no other case and is unwrapped as O2 says; one that names any case beyond the
+success case names them all (the owner, 2026-10-10, confirming the reading proposed after the review of round 13).
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -93,6 +101,28 @@ data NotFound
 int | NotFound Find(int id) {
     if id == 1 {
         return 10
+    }
+    return NotFound
+}
+
+int | NotFound result = Find(1)
+match result {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/keep-partial-type.kz](../corpus/outcomes/keep-partial-type.kz)
+```kurz
+data NotFound
+data Invalid
+
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
     }
     return NotFound
 }
@@ -337,4 +367,28 @@ Remove(1) else {
 Remove(2) else {
     NotFound => print("none")
 }
+```
+
+### O11 (decided, §6) A child's stack and the process's heap
+
+An actor that exhausts its stack dies as it does for any exception (O6), with a `Reason` of the
+runtime's `data` type (O7); its parent lives under `on crash restart` and `on crash stop`, and crashes
+too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
+process exits with the exit code 1 (O6). The exception is
+`stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
+reference's reading, on which the case stands). An allocation that fails ends the whole process with the exit code 1 and a line on
+standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
+both ending the process, under which one runaway recursion in a worker takes the server down, and
+against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value
+when nothing can be allocated; the cost is a guard page per actor stack, a stack probe in every frame larger than that page so
+that no frame steps past it, a signal stack per thread for the handler that turns the fault into the
+exception, and a program that cannot recover from memory pressure). The case runs at the top level, which is the root actor, so the
+exception ends the program (O6); the allocation failure has no case, since no case can ask for
+memory that does not exist.
+
+Case: [outcomes/stack-overflow.kz](../corpus/outcomes/stack-overflow.kz)
+```kurz
+int Down(int n) => Down(n) + 1
+
+print(Down(0))
 ```

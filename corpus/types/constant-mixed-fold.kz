@@ -1,0 +1,7 @@
+// expect: output
+// | 3.5
+// | 2.5
+// rules: L17
+
+print(1 + 2.5)
+print(10 / 4.0)

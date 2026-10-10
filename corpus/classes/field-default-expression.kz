@@ -1,0 +1,13 @@
+// expect: output
+// | 3
+// rules: K7
+
+int Three() => 3
+
+class Box {
+    int size = Three()
+
+    pub int Size() => size
+}
+
+print(Box().Size())

@@ -1,0 +1,10 @@
+// expect: output
+// | 1
+// rules: F11
+
+void Run((int) => void f) {
+    f(1)
+}
+
+Run(x => print(x))
+// the lambda's body is a call with a void success: a void lambda, and no use of the call as a value (F11)

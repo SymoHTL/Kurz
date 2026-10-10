@@ -1,0 +1,8 @@
+// expect: output
+// | hello
+// rules: L13
+
+print("""
+    hello
+    """)
+// code may follow the closing quotes on their line (L13): the ) closes the call

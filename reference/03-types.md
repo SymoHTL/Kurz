@@ -15,9 +15,12 @@ print(x)
 
 ### T2 (decided, §4) Number types
 
-The integer types are `sbyte`, `byte`, `short`, `ushort`, `int` (32 bits), `uint`, `long`
-(64 bits) and `ulong`. The others are `float`, `double` and `decimal`. Each has the size its name
-has in C#.
+The integer types are `sbyte`, `byte`, `short`, `ushort`, `int` (32 bits), `uint`, `long` (64 bits)
+and `ulong`. The others are `float`, `double` and `decimal`. Each has the size its name has in C#.
+C#'s `nint` and `nuint` are not among them: a size or an index is an `int` or a `long` (the owner,
+2026-10-09, against pointer-sized types whose width follows the target, under which
+`constant-overflow` (T6) would depend on the target and a value of that type could not be sent
+between machines without naming a width; the cost is that ported interop code writes `long`).
 
 Case: [types/long.kz](../corpus/types/long.kz)
 ```kurz
@@ -63,13 +66,53 @@ print(x)
 
 ### T6 (decided, §4) A constant that overflows is an error
 
-An expression made only of literals whose result leaves the range of its type is the compile
-error `constant-overflow`.
+An expression made only of literals whose result leaves the range of its type is the compile error
+`constant-overflow`. Under `+%`, `-%` and `*%` (T12) such an expression folds to the wrapped value
+instead, as the operator promises for every value: `2147483647 +% 1` is `-2147483648`. A conversion
+(T10) written on a constant that does not fit its target, `byte(300)`, is `constant-overflow`, as C#
+refuses a constant cast that does not fit (the owner, 2026-10-09, against both being
+`constant-overflow`, under which a checksum written on literals does not compile, and against both
+computing, under which `byte(300)` is `44` and a value is lost without a word, which T20 refuses
+when the program runs; the cost is a constant folder that knows two kinds of operator). Each
+operator of a constant expression folds by its own rule, and the written or expected type reaches
+the fold (L17): `2147483647 + 1 +% 0` is `constant-overflow` at the `+`, and `byte b = 255 +% 1` is
+`0`. An overflowing constant expression is the error for the integer types and `decimal` alone: one of
+`float` or `double` folds to the value IEEE 754 gives it, an infinity or NaN included, as C# folds it
+(T25). A literal whose value lies outside the range of the type it takes is the error whatever that
+type, a duration (T29) included: `1e400` or `3.5e38f` is `constant-overflow`, as C# refuses such a
+literal, and one that rounds to zero or to a subnormal is that value, as there (L11). A constant fits
+the target of a written integer conversion when its value, the fraction dropped, lies in the target's
+range: `int(2.5)` is `2`, and `int(1e10)`, `int(1.0 / 0.0)` and a NaN are `constant-overflow` (the
+owner, 2026-10-10, confirming the readings proposed after the review of round 13). A written
+conversion to a floating-point type folds as IEEE 754 has it, to an infinity beyond the range and with
+rounding, never the error: `float(1e300)` is an infinity (the owner, 2026-10-10).
+
+Case: [types/conversion-float-infinity.kz](../corpus/types/conversion-float-infinity.kz)
+```kurz
+print(float(1e300))
+```
+
+Case: [types/constant-wrap-in-written-type.kz](../corpus/types/constant-wrap-in-written-type.kz)
+```kurz
+byte b = 255 +% 1
+print(b)
+```
 
 Case: [types/constant-overflow.kz](../corpus/types/constant-overflow.kz)
 ```kurz
 x = 2147483647 + 1
 print(x)
+```
+
+Case: [types/constant-wrap.kz](../corpus/types/constant-wrap.kz)
+```kurz
+print(2147483647 +% 1)
+```
+
+Case: [types/constant-conversion-overflow.kz](../corpus/types/constant-conversion-overflow.kz)
+```kurz
+print(byte(300))
+// 300 lies outside the range of byte, so the written conversion of the constant is the error (T6)
 ```
 
 ### T7 (decided, §4) No implicit narrowing
@@ -156,6 +199,13 @@ print(u + i)
 `int(value)` converts a number to an `int`. The name of every number type can be used this way.
 It is how a value is put into a narrower type (T7) and how a signed and an unsigned value meet
 (T9).
+
+Case: [types/conversion-reaches-literals.kz](../corpus/types/conversion-reaches-literals.kz)
+```kurz
+print(long(2147483647 + 1))
+```
+
+Case: [types/conversion-float-infinity.kz](../corpus/types/conversion-float-infinity.kz)
 
 Case: [types/conversion.kz](../corpus/types/conversion.kz)
 ```kurz
@@ -247,9 +297,17 @@ print(Lower(-2))
 ### T12 (decided, §4) The wrapping operators
 
 `+%`, `-%` and `*%` add, subtract and multiply as `+`, `-` and `*` do, and wrap around when the
-result leaves the range of its type.
+result leaves the range of its type. `+%` and `-%` have the precedence of `+` and `-`, and `*%` that of `*` *(assumed: proposed on
+2026-10-09 and not objected to)*, and the associativity of those operators as well (the owner,
+2026-10-10). What they do to a constant expression is T6.
 
 Case: [types/wrapping.kz](../corpus/types/wrapping.kz)
+
+Case: [types/wrapping-precedence.kz](../corpus/types/wrapping-precedence.kz)
+```kurz
+print(1 +% 2 * 3)
+// +% has the precedence and the associativity of + (T12), so the product is formed first
+```
 
 ### T13 (decided, §4) Durations and timestamps
 
@@ -285,21 +343,23 @@ Show(90min)
 
 ### T29 (decided, §4) The wider pair: `longduration` and `longtimestamp`
 
-Beside the 64-bit pair of T24 stand `longduration` and `longtimestamp`: 128 bits with the same
-step of one nanosecond, for a calendar or an archive that reaches before 1677 or after 2262. A
-`duration` widens into a `longduration` and a `timestamp` into a `longtimestamp` without a word
-(T8), a conversion the other way is written out and checked as T20 says, and the texts are A12's.
-What T13 says of the narrow pair holds for the wide one, and an operation between the two pairs
-widens the narrow operand and has the wide type, as `i + l` has `long` (T8), so that
-`longtimestamp - timestamp` is a `longduration`. *(assumed: the mixed operations; proposed on
-2026-10-07, when the review found the hole)* The owner chose this on 2026-10-04, against a 64-bit
-pair with a millisecond step, in which nothing below a millisecond exists, and against a type of
-the library, which has no literal (L14); the cost is 128-bit arithmetic and a second name for
-every operation on time in the library. *(proposed: the names, which stand to the narrow pair as
-`long` stands to `int`; and the type of a literal, which follows the integer literal of L10: a
-duration literal is a `duration`, or a `longduration` when its value does not fit one, and where
-a type is written or expected it takes that type if the value fits, so that a literal beyond both
-ranges is `constant-overflow` (T6))*
+Beside the 64-bit pair of T24 stand `longduration` and `longtimestamp`: 128 bits with the same step
+of one nanosecond, for a calendar or an archive that reaches before 1677 or after 2262. A `duration`
+widens into a `longduration` and a `timestamp` into a `longtimestamp` without a word (T8), a
+conversion the other way is written out and checked as T20 says, and the texts are A12's. What T13
+says of the narrow pair holds for the wide one, and an operation between the two pairs widens the
+narrow operand and has the wide type, as `i + l` has `long` (T8), so that `longtimestamp -
+timestamp` is a `longduration`. *(assumed: the mixed operations, proposed on 2026-10-07, when the review found the hole, and
+accepted with T29 by its id on 2026-10-09 without the text shown)* The owner chose the wide pair with
+the nanosecond step on 2026-10-04, against
+a 64-bit pair with a millisecond step, in which nothing below a millisecond exists, and against a
+type of the library, which has no literal (L14); the cost is 128-bit arithmetic and a second name
+for every operation on time in the library. The names stand to the narrow pair as `long` stands to
+`int`, and the type of a literal follows the integer literal of L10: a duration literal is a
+`duration`, or a `longduration` when its value does not fit one, and where a type is written or
+expected it takes that type if the value fits, so that a literal beyond both ranges is
+`constant-overflow` (T6). *(assumed: the names and the type of a literal, the reference's readings under
+T29, accepted by its id on 2026-10-09 without their text shown)*
 
 Case: [types/longduration-parameter.kz](../corpus/types/longduration-parameter.kz)
 ```kurz
@@ -324,8 +384,8 @@ print(duration(l))
 
 ### T14 (assumed, §4) Out of range and division by zero
 
-An index that is out of range raises the exception `index-out-of-range`, and a division by zero
-`divide-by-zero` (E3). What `%` by zero, a floating-point division by zero and a division of
+An index that is out of range raises the exception `index-out-of-range`, and a division by zero, of
+integers or of `decimal`, `divide-by-zero` (E3). What `%` by zero, a floating-point division by zero and a division of
 literals by the literal zero do is T25.
 
 Case: [types/index-out-of-range.kz](../corpus/types/index-out-of-range.kz)
@@ -342,14 +402,43 @@ print(Divide(10, 2))
 print(Divide(10, 0))
 ```
 
-### T25 (proposed) Division by zero, in detail
+### T25 (decided, §4) Division by zero, in detail
 
 `%` by zero raises `divide-by-zero`, as `/` by zero does: both are the same instruction of the
 machine, and C# throws the same exception for both. A floating-point division by zero does not
-raise: it yields an infinity, or NaN for `0.0 / 0.0`, as IEEE 754 and C# have it. A division or
-a remainder of literals by the literal `0`, which T6 would otherwise fold at compile time, is the
-compile error `constant-divide-by-zero`, as C# reports it, because such a program can never run
-to the line after it.
+raise: it yields an infinity, or NaN for `0.0 / 0.0`, as IEEE 754 and C# have it, and a
+floating-point `%` by zero yields NaN, as there; `decimal` raises as the integers do, as C# throws
+for it (the owner, 2026-10-10). A division or a remainder
+of literals by the literal `0`, `10 / 0`, which T6 would otherwise fold at compile time, is the compile
+error `constant-divide-by-zero`, because that division can never succeed. The owner
+confirmed this reading on 2026-10-10, in round 14; round 13 had not asked it, and the rule had
+credited 2026-10-09 in error. On the same day the owner confirmed the reach of the error, which reads
+that sentence for the integer types and `decimal`: it is for a divisor that is a constant zero whatever the dividend, `x / 0` with a run-time
+`x` and `1 / (1 - 1)` with a folded divisor included, as C# reports a constant divisor of zero; it is
+for the integer types and `decimal`, as there, so `1m / 0m` is the error too; and a floating-point
+division by a constant zero, `1.0 / 0`, is no error and yields the infinity or NaN above, as there
+(the owner, 2026-10-10, confirming the reading proposed after the review of round 13).
+
+Case: [types/float-remainder-by-zero.kz](../corpus/types/float-remainder-by-zero.kz)
+```kurz
+double Rest(double a, double b) => a % b
+
+print(Rest(1.0, 0.0))
+```
+
+Case: [types/decimal-divide-by-zero.kz](../corpus/types/decimal-divide-by-zero.kz)
+```kurz
+decimal Rest(decimal a, decimal b) => a / b
+
+print(Rest(1m, 0m))
+```
+
+Case: [types/constant-zero-divisor.kz](../corpus/types/constant-zero-divisor.kz)
+```kurz
+int x = 5
+print(x / 0)
+// a constant zero divisor is the error whatever the dividend (T25)
+```
 
 Case: [types/constant-divide-by-zero.kz](../corpus/types/constant-divide-by-zero.kz)
 ```kurz
@@ -405,8 +494,38 @@ of C#, which is one UTF-16 unit and cannot hold every code point. The string sta
 whatever its `.Chars` are used for: they are decoded one at a time while the string is walked,
 and no second copy of the text is built. Four bytes are used only where a `char` is stored.
 
-A `char` has no literal in this reference. The case walks the `.Chars` of a string and prints
-each one (A8).
+A `char` literal is one code point between single quotes, `'a'`, with the escapes of L7 and L16;
+more than one code point between the quotes is the compile error `syntax` (E4) (the owner,
+2026-10-09, against no literal, under which every comparison of a character goes through `.Chars` or
+`char(97)`; the cost is a second quote in the lexer). Anything but exactly one code point between the quotes is
+`syntax`, the empty `''` included, as C# refuses it; the quote itself is written `\'`, as in C#, and a
+bare `'` between the quotes ends the literal, so `'''` is an empty literal followed by a quote that
+opens one that never closes, and `syntax` (the owner, 2026-10-10, confirming the reading proposed after the review of round 13). A `{` between the quotes is the character and needs no `\{` (the owner, 2026-10-10). The case of
+A8 walks the `.Chars` of a string and prints each one.
+
+Case: [types/char-brace.kz](../corpus/types/char-brace.kz)
+```kurz
+c = '{'
+print(c)
+```
+
+Case: [types/char-literal-triple.kz](../corpus/types/char-literal-triple.kz)
+```kurz
+c = '''
+print(c)
+```
+
+Case: [types/char-literal-empty.kz](../corpus/types/char-literal-empty.kz)
+```kurz
+c = ''
+print(c)
+```
+
+Case: [types/char-quote-escape.kz](../corpus/types/char-quote-escape.kz)
+```kurz
+c = '\''
+print(c)
+```
 
 Case: [values/text-more.kz](../corpus/values/text-more.kz)
 ```kurz
@@ -420,6 +539,22 @@ print(Access.Read | Access.Write)
 for c in "ab".Chars {
     print(c)
 }
+```
+
+Case: [types/char-literal.kz](../corpus/types/char-literal.kz)
+```kurz
+c = 'a'
+print(c)
+print(c == 'a')
+d = 'b'
+print(d == c)
+print(d == 'b')
+```
+
+Case: [types/char-literal-two.kz](../corpus/types/char-literal-two.kz)
+```kurz
+c = 'ab'
+print(c)
 ```
 
 ### T17 (decided, §4) Generics
@@ -490,7 +625,7 @@ int AreaOf<T: Shape>(T item) => item.Area()
 print(AreaOf(5))
 ```
 
-### T27 (proposed) How type arguments are inferred
+### T27 (decided, §4) How type arguments are inferred
 
 A type argument that a call does not write is inferred from the arguments: a type parameter takes
 the one type that every argument in its positions has, after the conversions of this chapter (a
@@ -498,7 +633,39 @@ literal takes the type an argument of its position would take, L10). When the ar
 positions have different types, or no argument stands in one of its positions, the call is the
 compile error `cannot-infer`, and the type arguments are written. This is C#'s inference in Kurz's
 terms: C# would widen a `byte` to an `int` to make `Max(b, i)` an `int`, which T8 and T9 do not
-allow here, and C#'s inference has changed between its versions, so no version of it is named.
+allow here, and C#'s inference has changed between its versions, so no version of it is named. The
+owner confirmed this reading on 2026-10-10, in round 14; round 13 had not asked it, and the rule had
+credited 2026-10-09 in error. A literal argument takes the type the other arguments in the
+parameter's positions fix, so `Pick(small, 1)` with a `byte` infers `byte`; two instances of
+different classes with one base are `cannot-infer`, since no common base is searched for (the owner,
+2026-10-10).
+
+Case: [types/generic-cannot-infer-classes.kz](../corpus/types/generic-cannot-infer-classes.kz)
+```kurz
+class Animal {
+    pub string Text() => "animal"
+}
+
+class Dog : Animal {
+    pub int Legs() => 4
+}
+
+class Cat : Animal {
+    pub int Lives() => 9
+}
+
+T Pick<T>(T a, T b) => a
+
+print(Pick(Dog(), Cat()))
+```
+
+Case: [types/generic-literal-argument.kz](../corpus/types/generic-literal-argument.kz)
+```kurz
+T Pick<T>(T a, T b) => a
+
+byte small = 7
+print(Pick(small, 1))
+```
 
 Case: [types/generic-cannot-infer.kz](../corpus/types/generic-cannot-infer.kz)
 ```kurz
@@ -533,16 +700,24 @@ unary `-`, `~`, `& | ^`, `<<`, `>>` and the comparisons, as in C#: `a + b` on tw
 `narrowing-conversion` (T7). A shift on such an operand has the width 32, and a negative count is
 masked as in C#, so `1 << -1` is `1 << 31`. Where the other operand is a `uint`, a `long` or a
 `ulong`, the narrow operand takes that type instead of `int`, as C#'s binary numeric promotion does
-(T9). The owner chose this on 2026-10-03, against computing
-in the operands' type, under which a program ported from C# computes other values without a word;
-the cost is that `byte c = a + b` needs `byte(a + b)`, and that the wrap of T4 never happens at 8
-or 16 bits, while `ushort * ushort` is computed in a signed `int` and can overflow it. The
-wrapping operators `+%`, `-%` and `*%` (T12) do not promote: they compute in the wider of their
-operand types and wrap there, so that an 8-bit checksum is `a +% b` on two `byte`s, where a
-promoted `+%` would need a mask on every narrow checksum (the owner, 2026-10-04, against promoting
-them; C# has no such operators). The cost: `a + b` and `a +% b` differ in type.
-*(proposed: operands of different signedness are `sign-mix` (T9) whatever their widths, because no wider type holds both, and a literal operand takes
-the other operand's type, so that `sum +% 1` on a `byte` computes in `byte`)*
+(T9). The owner chose this on 2026-10-03, against computing in the operands' type, under which a
+program ported from C# computes other values without a word; the cost is that `byte c = a + b` needs
+`byte(a + b)`, and that the wrap of T4 never happens at 8 or 16 bits, while `ushort * ushort` is
+computed in a signed `int` and can overflow it. The wrapping operators `+%`, `-%` and `*%` (T12) do
+not promote: they compute in the wider of their operand types and wrap there, so that an 8-bit
+checksum is `a +% b` on two `byte`s, where a promoted `+%` would need a mask on every narrow
+checksum (the owner, 2026-10-04, against promoting them; C# has no such operators). The cost: `a +
+b` and `a +% b` differ in type. Under these operators, which do not promote, operands of different
+signedness are `sign-mix` (T9) whatever their widths, and a literal operand takes the other
+operand's type, so that `sum +% 1` on a `byte` computes in `byte` (the owner, 2026-10-09). A literal
+that does not fit that type, `sum +% 300` on a `byte`, is `constant-overflow` (T6), as a literal that
+does not fit the type it takes is wherever it stands (L17) (the owner, 2026-10-10, confirming the reading proposed after the review of round 13).
+
+Case: [types/wrap-literal-too-big.kz](../corpus/types/wrap-literal-too-big.kz)
+```kurz
+byte sum = 1
+print(sum +% 300)
+```
 
 Case: [types/wrapping-narrow.kz](../corpus/types/wrapping-narrow.kz)
 ```kurz

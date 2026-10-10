@@ -1,0 +1,6 @@
+// expect: throws stack-overflow at 4
+// rules: O11
+
+int Down(int n) => Down(n) + 1
+
+print(Down(0))
