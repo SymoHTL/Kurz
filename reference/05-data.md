@@ -25,11 +25,13 @@ Case: [data/declare.kz](../corpus/data/declare.kz)
 
 ### D3 (decided, §4) Equal by content
 
-Two values of a `data` type are equal when their fields are equal. The fields compare as C# compares
-the fields of a record, with `Equals`, under which NaN equals NaN: `Point(nan, 0.0) == Point(nan,
-0.0)` is `true`, every value equals itself, and a key of a `Map` is found again, while `==` on a
-`double` field alone says `false` for NaN, as in C# (the owner, 2026-10-09, against the field's
-`==`, under which such a value is unequal to itself and cannot be found in a map).
+Two values of a `data` type are equal when their fields are equal. The fields compare as the fields of
+a C# record do: `Point(nan, 0.0) == Point(nan, 0.0)` is `true`, every value equals itself, and a key
+of a `Map` is found again, while `==` on a `double` field alone says `false` for NaN, as in C# (the
+owner, 2026-10-09, against the field's `==`, under which such a value is unequal to itself and cannot
+be found in a map). Each field compares by the equality Kurz gives its type, a class field by K4 or
+K5, and NaN equal to NaN is the one thing taken from C#'s `Equals`; a method a class names `Equals`
+plays no part (K5). *(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [data/equality.kz](../corpus/data/equality.kz)
 ```kurz
@@ -243,7 +245,8 @@ set that holds that name. `set.Has(Access.Read)` is `true` when the set holds th
 one case, so a `match` cannot list it case by case. Such a `match` is the compile error `syntax`
 (E4), the one id for text no rule gives a meaning; a parser cannot tell it from a `match` on an
 enum, so the check is the type checker's (the owner, 2026-10-09, against an id of its own,
-`match-on-flags`, which E4 lets a more exact message take if this one proves too generic). How sets
+`match-on-flags`, the rejected option). The error is at the line of the `match`, as the case
+expects. *(assumed: proposed on 2026-10-10, after the review of round 13)* How sets
 are combined is D17; the case tests a set of one name.
 
 Case: [data/flags.kz](../corpus/data/flags.kz)

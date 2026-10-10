@@ -1,0 +1,5 @@
+// expect: output
+// | 7
+// rules: T12
+
+print(1 +% 2 * 3)

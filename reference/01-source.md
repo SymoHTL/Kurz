@@ -212,7 +212,15 @@ operand of such an operator whose other operand has a type: with `uint u`, the `
 `uint`, which keeps T9 out of ordinary arithmetic, and the `100` of `sbyte low = -100` takes `sbyte`
 with its sign. C# converts the constant `int` instead, which Kurz cannot do across signedness (T9);
 this is the smallest rule that lets the cases of T3 and T9 stand. The owner confirmed this reading
-on 2026-10-09, in round 13.
+on 2026-10-09, in round 13. The promotion of narrow operands (chapter 3) is for the operands of a
+run-time operation; an expression of literals is folded in the written or expected type when its
+result fits it, so `sbyte low = -100` and `byte c = 200 + 50` compile, and one whose result does not
+fit is `constant-overflow` (T6). *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [source/constant-does-not-fit.kz](../corpus/source/constant-does-not-fit.kz)
+```kurz
+byte c = 200 + 100
+```
 
 Case: [source/literal-takes-operand-type.kz](../corpus/source/literal-takes-operand-type.kz)
 ```kurz
@@ -368,7 +376,11 @@ not fall on a whole nanosecond, or on a whole byte before `kb`, `mb` and `gb`, i
 `inexact-literal`; a hexadecimal, a binary or a suffixed literal before a unit is `syntax` (E4) (the
 owner, 2026-10-09, against a decimal integer alone, under which one and a half seconds is written
 `1500ms`; the cost is a row in the error table and a decimal-to-nanosecond conversion in the
-compiler). The type of a duration literal is T29's.
+compiler). The type of a duration literal is T29's. A number with an exponent (L11) before a unit is
+`syntax` as well, since the number is a decimal integer or a decimal fraction and nothing else; and
+the unit is read before any suffix of L11, the longest unit that matches, so `1ms` is a millisecond
+and not `1m` followed by `s`, and only a suffix the writer spells before a unit, `1Ums`, is `syntax`.
+*(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [source/unit-literals.kz](../corpus/source/unit-literals.kz)
 ```kurz

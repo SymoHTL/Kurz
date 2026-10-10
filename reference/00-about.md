@@ -313,8 +313,10 @@ print(2.5f)
 ### A12 (assumed, §8) The text of a duration
 
 A duration shows its value split into the units of L14 from the largest down, each unit at most once
-and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and a value
-below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A negative duration
+and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and the remainder
+below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. What a remainder
+below a millisecond shows, `1s 250us` or `1500ns`, is a question for a design round (the record,
+section 14). A negative duration
 shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. The owner
 accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is assumed
 and not decided.
@@ -346,7 +348,7 @@ print(Access.None)
 
 "What C# prints" is what .NET Core 3.0 and later print with the invariant culture, which is the
 shortest digits that read back as the same number (A4), with `.` as the separator: an exponent form
-from `1E+15` up and below `1E-05`, `-0` for a negative zero, `Infinity` and `-Infinity` for the
+from `1E+15` up and from `1E-05` down, `-0` for a negative zero, `Infinity` and `-Infinity` for the
 infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0` for a
 negative zero, a `∞` sign, a `,`), and none of that is meant. The owner accepted this reading by its
 id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided.

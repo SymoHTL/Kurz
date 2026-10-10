@@ -231,10 +231,11 @@ error `reversed-range` when both ends are expressions made only of literals, and
 loop over it (E3). `for i in 1..n` therefore throws when `n` is 0; a loop that may run zero times is
 written with `..<`. The C form with three parts is the compile error `syntax`, as is every other
 text no rule gives a meaning (E4). The range and its loop variable have the common type of the two
-ends, found as `+` finds it (T8, T9, T28): `0..<n` with a `long` `n` is a range of `long`, and ends
-with no common type are `sign-mix` (T9) (the owner, 2026-10-09, against a range that is always
-`int`, under which a loop over a `long` range is written by hand; the cost is that the loop
-variable's type follows the end, which a reader finds at the declaration of `n`).
+ends, found as `+` finds it (T8, T9, T28): `0..<n` with a `long` `n` is a range of `long`, and integer
+ends with no common type, a signed with an unsigned one, are `sign-mix` (T9) (the owner, 2026-10-09,
+against a range that is always `int`, under which a loop over a `long` range is written by hand; the
+cost is that the loop variable's type follows the end, which a reader finds at the declaration of
+`n`). An end that is not an integer is `type-mismatch` (T1). *(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [control/range-empty.kz](../corpus/control/range-empty.kz)
 ```kurz
@@ -294,6 +295,12 @@ long n = 3
 for i in 0..<n {
     int x = i
     print(x)
+}
+```
+
+Case: [control/range-end-not-integer.kz](../corpus/control/range-end-not-integer.kz)
+```kurz
+for i in 0..<1.5 {
 }
 ```
 

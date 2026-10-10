@@ -15,11 +15,11 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or `.Number` and `From` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
 | `unknown-name` | V10, F16 | a name that is not visible at this place, a top-level variable read inside a top-level function included |
-| `type-mismatch` | T1, T13, T19, N6, C3, O4 | a value of one type where another type is required, a written union type that lists only some of a call's cases included (O4) |
+| `type-mismatch` | T1, T13, T19, N6, C3, O4, K5, C8 | a value of one type where another type is required, a written union type that lists only some of a call's cases (O4), an operator on two class instances (K5) and a range end that is no integer (C8) included |
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
 | `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance, or an interpolation of one, whose `Text()` is not `pub`, from outside its class (A9); the same inside the class is A15's reading |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
-| `constant-overflow` | T6, L10 | an expression of literals whose result leaves the range of its type, or a literal that fits no integer type |
+| `constant-overflow` | T6, L10, L17, T28 | an expression of literals whose result leaves the range of its type, or a literal that fits no integer type; a literal that does not fit the type written for it (L17) or the other operand's under a wrapping operator (T28) |
 | `constant-divide-by-zero` | T25 | a division or remainder of literals by the literal `0` |
 | `narrowing-conversion` | T7, T28, C8 | a wider integer type put into a narrower one without a conversion, whatever the signedness, the `int` of a promoted operation and the loop variable of a range of a wider type (C8) included |
 | `sign-mix` | T9, T23, C8 | an operation between a signed and an unsigned integer, the two ends of a range (C8) included, that C# joins through `long` or refuses (`uint` or `ulong` with a signed type), or a value put where a type of the other signedness and at least its width is required, into which it does not widen |
@@ -73,7 +73,7 @@ the range of the loop.
 | `divide-by-zero` | T14, T25 | an integer division or remainder by zero |
 | `index-out-of-range` | T14, M9 | an index outside the collection |
 | `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |
-| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the call that did not fit |
+| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the call that did not fit (the id and the line are O11's proposed reading, not a decision) |
 
 ## The rules of this chapter
 

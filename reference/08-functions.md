@@ -220,7 +220,8 @@ call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of t
 parameter can have a default value, and an argument can be passed by name (D11). Which function a
 call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)* Arguments are
 evaluated from left to right, as in C#, and a default value is a constant expression, as C#
-requires. *(assumed: proposed on 2026-10-09 and not objected to)*
+requires. *(assumed: proposed on 2026-10-09 and not objected to)* Which compile error a default that
+is not constant is, the record does not say: a question for a design round (the record, section 14).
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
 ```kurz

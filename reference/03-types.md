@@ -271,7 +271,10 @@ proposed on 2026-10-09 and not objected to)* What they do to a constant expressi
 
 Case: [types/wrapping.kz](../corpus/types/wrapping.kz)
 
-Case: [types/constant-wrap.kz](../corpus/types/constant-wrap.kz)
+Case: [types/wrapping-precedence.kz](../corpus/types/wrapping-precedence.kz)
+```kurz
+print(1 +% 2 * 3)
+```
 
 ### T13 (decided, §4) Durations and timestamps
 
@@ -368,10 +371,13 @@ print(Divide(10, 0))
 
 `%` by zero raises `divide-by-zero`, as `/` by zero does: both are the same instruction of the
 machine, and C# throws the same exception for both. A floating-point division by zero does not
-raise: it yields an infinity, or NaN for `0.0 / 0.0`, as IEEE 754 and C# have it. A division or a
-remainder of literals by the literal `0`, which T6 would otherwise fold at compile time, is the
-compile error `constant-divide-by-zero`, as C# reports it, because such a program can never run to
-the line after it. The owner confirmed this reading on 2026-10-09, in round 13.
+raise: it yields an infinity, or NaN for `0.0 / 0.0`, as IEEE 754 and C# have it. An integer division or
+remainder of literals whose divisor folds to zero, `10 / 0` as much as `1 / (1 - 1)`, which T6 would
+otherwise fold at compile time, is the compile error `constant-divide-by-zero`, as C# reports an
+integer constant divisor of zero, because such a program can never run to the line after it; a
+floating-point one yields the infinity or NaN above. The owner confirmed this reading on 2026-10-09,
+in round 13, for a literal divisor; that a divisor folded from literals counts the same is
+*(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [types/constant-divide-by-zero.kz](../corpus/types/constant-divide-by-zero.kz)
 ```kurz
@@ -430,7 +436,8 @@ and no second copy of the text is built. Four bytes are used only where a `char`
 A `char` literal is one code point between single quotes, `'a'`, with the escapes of L7 and L16;
 more than one code point between the quotes is the compile error `syntax` (E4) (the owner,
 2026-10-09, against no literal, under which every comparison of a character goes through `.Chars` or
-`char(97)`; the cost is a second quote in the lexer). The case of A8 walks the `.Chars` of a string
+`char(97)`; the cost is a second quote in the lexer). The quote itself is written `\'`, as in C#, and
+a bare `'` between the quotes ends the literal, so `'''` is `syntax`. *(assumed: proposed on 2026-10-10, after the review of round 13)* The case of A8 walks the `.Chars` of a string
 and prints each one.
 
 Case: [values/text-more.kz](../corpus/values/text-more.kz)
@@ -584,7 +591,15 @@ checksum is `a +% b` on two `byte`s, where a promoted `+%` would need a mask on 
 checksum (the owner, 2026-10-04, against promoting them; C# has no such operators). The cost: `a +
 b` and `a +% b` differ in type. Under these operators, which do not promote, operands of different
 signedness are `sign-mix` (T9) whatever their widths, and a literal operand takes the other
-operand's type, so that `sum +% 1` on a `byte` computes in `byte` (the owner, 2026-10-09).
+operand's type, so that `sum +% 1` on a `byte` computes in `byte` (the owner, 2026-10-09). A literal
+that does not fit that type, `sum +% 300` on a `byte`, is `constant-overflow` (T6), as a literal that
+does not fit a written type is (L17). *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [types/wrap-literal-too-big.kz](../corpus/types/wrap-literal-too-big.kz)
+```kurz
+byte sum = 1
+print(sum +% 300)
+```
 
 Case: [types/wrapping-narrow.kz](../corpus/types/wrapping-narrow.kz)
 ```kurz

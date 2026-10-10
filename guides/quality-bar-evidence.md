@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-10
-digest: aff02f68f85119d25f42ae6dcdf8d1fddddbf390501dbf2d7f3db6973f9371c2
+digest: f37b1b2a81895b7ae181422cc4ba9cf52fd114491fe673b217da94791bd398d3
 ttl_days: 60
 metadata:
   type: reference
@@ -88,14 +88,17 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 
 ## The design record
 
-A statement marked *(assumed)* was proposed and not objected to; it is not a decision.
+A statement marked *(assumed)* was proposed and not objected to; it is not a decision. The counts
+are of the markers and of the top-level bullets of section 14, not of rules or of questions: one
+marker can cover several readings, one bullet several questions, and a marker whose statement turns
+decided leaves the count.
 
 <!-- generated:design -->
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 53 |
-| Open questions | 6 |
+| Statements marked *(assumed)* | 64 |
+| Open questions | 9 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -112,7 +115,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 39 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 271 |
+| Corpus cases, none of them run | 276 |
 | Compile-error ids | 51 |
 | Run-time error ids | 6 |
 <!-- /generated:reference -->
@@ -133,11 +136,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 8 |
-| Pull requests merged | 6 |
-| Merged over red, with a recorded waiver | 4 |
+| Pull requests opened by a writer, or merged | 10 |
+| Pull requests merged | 7 |
+| Merged over red, with a recorded waiver | 5 |
 | Review findings posted: high | 40 |
-| Review findings posted: medium | 518 |
-| Review findings posted: low | 687 |
-| Open HAZARD issues | 14 |
+| Review findings posted: medium | 546 |
+| Review findings posted: low | 730 |
+| Open HAZARD issues | 15 |
 <!-- /generated:forge -->

@@ -67,7 +67,7 @@ print(Twice(1))
 ### O4 (decided, §5) Keeping all cases
 
 A call is not unwrapped when it is the subject of a `match`, or when its result goes into a variable
-with a written union type. A written type holds every case the call can return: `int | NotFound
+with a written union type. A written union type holds every case the call can return: `int | NotFound
 result = Find(id)` with a `Find` that can also return `Invalid` is `type-mismatch` (T1), as an
 assignment in C# must fit its type; the other cases are kept by naming them, or handled by a `match`
 (the owner, 2026-10-09, against a written type as a filter that lets the missing cases leave the
@@ -373,7 +373,7 @@ An actor that exhausts its stack dies as it does for any exception (O6), with a 
 runtime's `data` type (O7), and its parent lives. *(proposed: the id of that exception,
 `stack-overflow`, and its line, the call that did not fit; the record names neither, and the case
 stands on both)* An allocation that fails ends the whole process with the exit code 1 and a line on
-standard error, because the heap is shared and no actor can run on (the owner, 2026-10-09, against
+standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value
 when nothing can be allocated; the cost is a guard page per actor stack, and a program that cannot

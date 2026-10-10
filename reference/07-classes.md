@@ -116,7 +116,15 @@ no operator declarations: `+` on two instances is a method, `a.Add(b)`, and `ope
 word (L18), so a declaration of one is `syntax` (E4); a method named `Equals` is an ordinary member
 and changes nothing about `==`, which stays K4's and this rule's (the owner, 2026-10-09, against
 C#'s operator declarations with `==`, `!=` and the comparisons excluded; the cost is that a vector
-type reads as `a.Add(b).Scale(2)`).
+type reads as `a.Add(b).Scale(2)`). `a + b` on two instances is `type-mismatch` (T1), the error of an
+operator on operands it has no meaning for. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [classes/operator-on-instances.kz](../corpus/classes/operator-on-instances.kz)
+```kurz
+class Vec(int X)
+
+print(Vec(1) + Vec(2))
+```
 
 Case: [classes/equality-named.kz](../corpus/classes/equality-named.kz)
 ```kurz
@@ -188,7 +196,9 @@ visible wherever the interface is, and a method that implements one is written `
 `missing-member`, at the class, with the message naming the method, and a method that is there
 without `pub` is `interface-method-private`, at the method (the owner, 2026-10-09, against `pub`
 implied by the interface, under which a method that looks private is public, and against one id for
-both mistakes). Between the braces of a class, a field is written `Type name`, with `mut` in front
+both mistakes). A method implements an interface method when its name, its parameter types in their
+order and its return type are the interface's; a `pub` method inherited from the base class counts,
+as in C#. *(assumed: proposed on 2026-10-10, after the review of round 13)* Between the braces of a class, a field is written `Type name`, with `mut` in front
 when it can be assigned and its first value after `=`, and a method is written as a function
 (chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
 further constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
@@ -355,7 +365,8 @@ it unassigned on a path, or reads it first, is the compile error `field-unassign
 field in a class with a primary constructor, which a call of that constructor would leave unset. A
 `mut` field without `=` is assigned on every path of such a constructor as well, any number of
 times, and left unassigned on a path it is `field-unassigned` too, because Kurz has no zero value it
-could hold (the owner, 2026-10-09). The call of the primary one is direct; a further constructor
+could hold (the owner, 2026-10-09). In a class with a primary constructor, which assigns no such
+field, a `mut` field without `=` is `field-unassigned` as a field without `mut` is. *(assumed: proposed on 2026-10-10, after the review of round 13)* The call of the primary one is direct; a further constructor
 without it is `constructor-must-chain`. A constructor written in the body is private without `pub`,
 as every member is (F9); the primary constructor, and the empty constructor of a class without one,
 are visible wherever the class is.
