@@ -19,8 +19,8 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
 | `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance, or an interpolation of one, whose `Text()` is not `pub`, from outside its class (A9); the same inside the class is A15's reading |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
-| `constant-overflow` | T6, L10, L17, T28 | an expression of literals whose result leaves the range of its type, or a literal that fits no integer type; a literal that does not fit the type written for it (L17) or the other operand's under a wrapping operator (T28) |
-| `constant-divide-by-zero` | T25 | a division or remainder of literals by the literal `0` |
+| `constant-overflow` | T6, L10, L11, L17, T28 | an operation of a constant expression whose result leaves the range of its type (T6), a literal that fits no integer type (L10), a floating-point literal outside its type's range (L11), a literal that does not fit the type it takes, written for it (L10, L17) or the other operand's (L17, T28) |
+| `constant-divide-by-zero` | T25 | an integer or `decimal` division or remainder by a constant zero, a literal or folded from literals |
 | `narrowing-conversion` | T7, T28, C8 | a wider integer type put into a narrower one without a conversion, whatever the signedness, the `int` of a promoted operation and the loop variable of a range of a wider type (C8) included |
 | `sign-mix` | T9, T23, C8 | an operation between a signed and an unsigned integer, the two ends of a range (C8) included, that C# joins through `long` or refuses (`uint` or `ulong` with a signed type), or a value put where a type of the other signedness and at least its width is required, into which it does not widen |
 | `string-index` | T15 | an index applied to a string instead of to `.Bytes` or `.Chars` |
@@ -53,7 +53,7 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |
 | `constructor-must-chain` | K14 | a further constructor of a class with a primary constructor that does not call it |
 | `field-unassigned` | K14 | a field without `mut` and without `=` that a constructor leaves unassigned on a path or reads first, or such a field in a class with a primary constructor |
-| `syntax` | E4, L9, L11, L13, L14, T21, K5, D13 | text that no rule gives a meaning: the C `for` with three parts, `else` on a line of its own, an arm after `else`, a call with a `void` success used as a value, a name with a character outside ASCII or an `@` name (L9), a suffix with a lower-case `l` (L11), `"""` with text beside it on its line (L13), a hexadecimal, binary or suffixed literal before a unit (L14), two code points in a `char` literal (T21), an operator declaration (K5), a `match` on a set of flags (D13) |
+| `syntax` | E4, L9, L11, L13, L14, T21, K5, D13 | text that no rule gives a meaning: the C `for` with three parts, `else` on a line of its own, an arm after `else`, a call with a `void` success used as a value, a name with a character outside ASCII or an `@` name (L9), a suffix with a lower-case `l` or an integer suffix after a fraction or an exponent (L11), `"""` with text beside it on its line (L13), a hexadecimal, binary, suffixed literal or one with an exponent before a unit (L14), anything but one code point in a `char` literal (T21), an operator declaration (K5), a `match` on a set of flags (D13) |
 | `inexact-literal` | L14 | a decimal fraction before a unit that does not fall on a whole nanosecond, or on a whole byte before `kb`, `mb` and `gb` |
 | `missing-member` | K7 | a class that names an interface and lacks one of its methods, at the class |
 | `interface-method-private` | K7 | a method that implements a method of an interface the class names, without `pub`, at the method |
@@ -84,7 +84,9 @@ file. The line is the one that holds the offending construct. For `unused-variab
 declaration; for `reference-cycle` it is the first declaration, in source order, of a class on the
 path. A construct over several lines reports the line of the smallest part that is wrong: an
 argument its own line, a binary operator its operator's line; only an error of the whole reports the
-first line. *(assumed: proposed on 2026-10-09 and not objected to)*
+first line. *(assumed: proposed on 2026-10-09 and not objected to)* A block that is missing, or that
+opens on the next line, is an error of the whole construct, so it is reported on the construct's first
+line, the line of the condition (C1). *(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 No case: every corpus case that expects an error shows it.
 
@@ -112,14 +114,17 @@ No case: every case that expects an exception names its id and its line.
 
 ### E4 (decided, §8) One id for text no rule gives a meaning
 
-Several rules rule a construct out without naming its error: C8 the three-part `for`, C2 an `else`
-on a line of its own, C9 an arm after `else`, D13 a `match` that lists a set of flags case by case,
-O10 a call with a `void` success used as a value, L9 a name with a character outside ASCII or an `@`
-name, L11 a suffix with a lower-case `l`, L13 a `"""` with text beside it on its line, L14 a
-hexadecimal, binary or suffixed literal before a unit, T21 two code points in a `char` literal, K5
-an operator declaration. Each is the compile error `syntax`, one id for every text that no rule of
-this reference gives a meaning, reported on the line where the text stops making sense. A more exact
-id can replace it for a construct whose rule names one. The owner confirmed the one id on
+Several rules rule a construct out, some without naming its error and some naming this one: C8 the
+three-part `for`, C2 an `else` on a line of its own, C9 an arm after `else`, D13 a `match` on a set
+of flags, O10 a call with a `void` success used as a value, L9 a name with a character outside ASCII
+or an `@` name, L11 a suffix with a lower-case `l` or an integer suffix after a fraction or an
+exponent, L13 a `"""` with text beside it on its line, L14 a hexadecimal, binary or suffixed literal
+or one with an exponent before a unit, T21 anything but one code point in a `char` literal, `''` and
+`'''` included, K5 an operator declaration. Each is the compile error `syntax`, one id for every text
+that no rule of this reference gives a meaning, reported on the line where the text stops making
+sense, the line of the first token no rule accepts. Where the construct's rule names an id of its
+own, that id is reported and not `syntax`. *(assumed: the token and the precedence of the rule's own
+id, proposed on 2026-10-10, after the review of round 13)* The owner confirmed the one id on
 2026-10-09, in round 13, against an id of its own for a `match` on a set of flags and for the shapes
 of `"""`.
 

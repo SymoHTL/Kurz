@@ -1,5 +1,5 @@
 // expect: error constant-overflow at 4
-// rules: L17
+// rules: L10
 
-byte c = 200 + 100
+byte c = 300
 print(c)

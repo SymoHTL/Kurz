@@ -1,0 +1,5 @@
+// expect: error syntax at 4
+// rules: T21
+
+c = ''
+print(c)

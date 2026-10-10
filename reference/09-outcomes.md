@@ -73,7 +73,9 @@ assignment in C# must fit its type; the other cases are kept by naming them, or 
 (the owner, 2026-10-09, against a written type as a filter that lets the missing cases leave the
 function as O2 says, under which a declaration ends the function on some paths without a word; the
 cost is that a function with five cases forces a five-case type on every variable that keeps its
-result).
+result). A written type that is the success case itself, `User?` for a call that returns
+`User? | DbError`, names no other case and is unwrapped as O2 says; one that names any case beyond the
+success case names them all. *(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -370,9 +372,11 @@ Remove(2) else {
 ### O11 (decided, §6) A child's stack and the process's heap
 
 An actor that exhausts its stack dies as it does for any exception (O6), with a `Reason` of the
-runtime's `data` type (O7), and its parent lives. *(proposed: the id of that exception,
+runtime's `data` type (O7); its parent lives under `on crash restart` and `on crash stop`, and crashes
+too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
+process exits with the exit code 1 (O6). *(proposed: the id of that exception,
 `stack-overflow`, and its line, the call that did not fit; the record names neither, and the case
-stands on both)* An allocation that fails ends the whole process with the exit code 1 and a line on
+stands on both; the record lists the question in section 14)* An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value

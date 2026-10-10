@@ -2,7 +2,7 @@
 // rules: K5
 
 class Vec(int X) {
-    pub static Vec operator +(Vec a, Vec b) => Vec(a.X + b.X)
+    pub Vec operator +(Vec a, Vec b) => Vec(a.X + b.X)
 }
 
 print(Vec(1).X)

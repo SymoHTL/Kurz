@@ -1,0 +1,7 @@
+// expect: output
+// | hello
+// rules: L13
+
+print("""
+    hello
+    """)

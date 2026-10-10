@@ -26,7 +26,7 @@ Case: [data/declare.kz](../corpus/data/declare.kz)
 ### D3 (decided, §4) Equal by content
 
 Two values of a `data` type are equal when their fields are equal. The fields compare as the fields of
-a C# record do: `Point(nan, 0.0) == Point(nan, 0.0)` is `true`, every value equals itself, and a key
+a C# record do: `Point(nan, 0.0) == Point(nan, 0.0)` is `true`, every `data` value equals itself, and a key
 of a `Map` is found again, while `==` on a `double` field alone says `false` for NaN, as in C# (the
 owner, 2026-10-09, against the field's `==`, under which such a value is unequal to itself and cannot
 be found in a map). Each field compares by the equality Kurz gives its type, a class field by K4 or
@@ -47,7 +47,6 @@ data Point(double X, double Y)
 
 double z = 0.0
 nan = z / z
-print(nan == nan)
 print(Point(nan, 0.0) == Point(nan, 0.0))
 ```
 
@@ -94,6 +93,25 @@ print(b.Id)
 ### D6 (decided, §4) A `data` type may inherit from another
 
 A value of the derived type can be used wherever the base type is required.
+
+Case: [control/match-derived-arm.kz](../corpus/control/match-derived-arm.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+void Show(User | NotFound u) {
+    match u {
+        Admin a => print("admin {a.Level}")
+        User x => print("user {x.Name}")
+        NotFound => print("none")
+    }
+}
+
+Show(Admin("Ann", 2))
+Show(User("Bea"))
+Show(NotFound)
+```
 
 Case: [data/inherit.kz](../corpus/data/inherit.kz)
 ```kurz

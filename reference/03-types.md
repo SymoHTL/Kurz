@@ -73,7 +73,22 @@ instead, as the operator promises for every value: `2147483647 +% 1` is `-214748
 refuses a constant cast that does not fit (the owner, 2026-10-09, against both being
 `constant-overflow`, under which a checksum written on literals does not compile, and against both
 computing, under which `byte(300)` is `44` and a value is lost without a word, which T20 refuses
-when the program runs; the cost is a constant folder that knows two kinds of operator).
+when the program runs; the cost is a constant folder that knows two kinds of operator). Each
+operator of a constant expression folds by its own rule, and the written or expected type reaches
+the fold (L17): `2147483647 + 1 +% 0` is `constant-overflow` at the `+`, and `byte b = 255 +% 1` is
+`0`. The error is for the integer types and `decimal`: a constant expression of `float` or `double`
+folds to the value IEEE 754 gives it, an infinity or NaN included, as C# folds it (T25), while a
+floating-point literal whose value lies outside its type's range, `1e400` or `3.5e38f`, is
+`constant-overflow`, as C# refuses such a literal, and one that rounds to zero or to a subnormal is
+that value, as there (L11). A constant fits the target of a written conversion when the conversion
+would lose nothing by T20: `int(2.5)` is `2`, since a dropped fraction is no loss, and `int(1e10)`,
+`int(1.0 / 0.0)` and a NaN are `constant-overflow`. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [types/constant-wrap-in-written-type.kz](../corpus/types/constant-wrap-in-written-type.kz)
+```kurz
+byte b = 255 +% 1
+print(b)
+```
 
 Case: [types/constant-overflow.kz](../corpus/types/constant-overflow.kz)
 ```kurz
@@ -266,8 +281,8 @@ print(Lower(-2))
 ### T12 (decided, §4) The wrapping operators
 
 `+%`, `-%` and `*%` add, subtract and multiply as `+`, `-` and `*` do, and wrap around when the
-result leaves the range of its type. They have the precedence of `+`, `-` and `*`. *(assumed:
-proposed on 2026-10-09 and not objected to)* What they do to a constant expression is T6.
+result leaves the range of its type. `+%` and `-%` have the precedence and the associativity of `+` and `-`, and `*%` those of `*`.
+*(assumed: proposed on 2026-10-09 and not objected to)* What they do to a constant expression is T6.
 
 Case: [types/wrapping.kz](../corpus/types/wrapping.kz)
 
@@ -316,15 +331,17 @@ widens into a `longduration` and a `timestamp` into a `longtimestamp` without a 
 conversion the other way is written out and checked as T20 says, and the texts are A12's. What T13
 says of the narrow pair holds for the wide one, and an operation between the two pairs widens the
 narrow operand and has the wide type, as `i + l` has `long` (T8), so that `longtimestamp -
-timestamp` is a `longduration`. (the mixed operations were proposed on 2026-10-07, when the review
-found the hole, and decided by the owner on 2026-10-09) The owner chose this on 2026-10-04, against
+timestamp` is a `longduration`. *(assumed: the mixed operations, proposed on 2026-10-07, when the review found the hole, and
+accepted with T29 by its id on 2026-10-09 without the text shown)* The owner chose the wide pair with
+the nanosecond step on 2026-10-04, against
 a 64-bit pair with a millisecond step, in which nothing below a millisecond exists, and against a
 type of the library, which has no literal (L14); the cost is 128-bit arithmetic and a second name
 for every operation on time in the library. The names stand to the narrow pair as `long` stands to
 `int`, and the type of a literal follows the integer literal of L10: a duration literal is a
 `duration`, or a `longduration` when its value does not fit one, and where a type is written or
 expected it takes that type if the value fits, so that a literal beyond both ranges is
-`constant-overflow` (T6) (the owner, 2026-10-09, confirming both readings).
+`constant-overflow` (T6). *(assumed: the names and the type of a literal, the reference's readings under
+T29, accepted by its id on 2026-10-09 without their text shown)*
 
 Case: [types/longduration-parameter.kz](../corpus/types/longduration-parameter.kz)
 ```kurz
@@ -371,13 +388,21 @@ print(Divide(10, 0))
 
 `%` by zero raises `divide-by-zero`, as `/` by zero does: both are the same instruction of the
 machine, and C# throws the same exception for both. A floating-point division by zero does not
-raise: it yields an infinity, or NaN for `0.0 / 0.0`, as IEEE 754 and C# have it. An integer division or
-remainder of literals whose divisor folds to zero, `10 / 0` as much as `1 / (1 - 1)`, which T6 would
-otherwise fold at compile time, is the compile error `constant-divide-by-zero`, as C# reports an
-integer constant divisor of zero, because such a program can never run to the line after it; a
-floating-point one yields the infinity or NaN above. The owner confirmed this reading on 2026-10-09,
-in round 13, for a literal divisor; that a divisor folded from literals counts the same is
+raise: it yields an infinity, or NaN for `0.0 / 0.0`, as IEEE 754 and C# have it. A division or a remainder
+of literals by the literal `0`, `10 / 0`, which T6 would otherwise fold at compile time, is the compile
+error `constant-divide-by-zero`, because such a program can never run to the line after it. The owner
+confirmed this reading on 2026-10-09, in round 13. The error reaches further than the confirmed
+sentence: it is for a divisor that is a constant zero whatever the dividend, `x / 0` with a run-time
+`x` and `1 / (1 - 1)` with a folded divisor included, as C# reports a constant divisor of zero; it is
+for the integer types and `decimal`, as there, so `1m / 0m` is the error too; and a floating-point
+division by a constant zero, `1.0 / 0`, is no error and yields the infinity or NaN above, as there.
 *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [types/constant-zero-divisor.kz](../corpus/types/constant-zero-divisor.kz)
+```kurz
+int x = 5
+print(x / 0)
+```
 
 Case: [types/constant-divide-by-zero.kz](../corpus/types/constant-divide-by-zero.kz)
 ```kurz
@@ -436,9 +461,29 @@ and no second copy of the text is built. Four bytes are used only where a `char`
 A `char` literal is one code point between single quotes, `'a'`, with the escapes of L7 and L16;
 more than one code point between the quotes is the compile error `syntax` (E4) (the owner,
 2026-10-09, against no literal, under which every comparison of a character goes through `.Chars` or
-`char(97)`; the cost is a second quote in the lexer). The quote itself is written `\'`, as in C#, and
-a bare `'` between the quotes ends the literal, so `'''` is `syntax`. *(assumed: proposed on 2026-10-10, after the review of round 13)* The case of A8 walks the `.Chars` of a string
+`char(97)`; the cost is a second quote in the lexer). Anything but exactly one code point between the quotes is
+`syntax`, the empty `''` included, as C# refuses it; the quote itself is written `\'`, as in C#, and a
+bare `'` between the quotes ends the literal, so `'''` is an empty literal followed by a quote that
+opens one that never closes, and `syntax`. *(assumed: proposed on 2026-10-10, after the review of round 13)* The case of A8 walks the `.Chars` of a string
 and prints each one.
+
+Case: [types/char-literal-triple.kz](../corpus/types/char-literal-triple.kz)
+```kurz
+c = '''
+print(c)
+```
+
+Case: [types/char-literal-empty.kz](../corpus/types/char-literal-empty.kz)
+```kurz
+c = ''
+print(c)
+```
+
+Case: [types/char-quote-escape.kz](../corpus/types/char-quote-escape.kz)
+```kurz
+c = '\''
+print(c)
+```
 
 Case: [values/text-more.kz](../corpus/values/text-more.kz)
 ```kurz
@@ -459,9 +504,9 @@ Case: [types/char-literal.kz](../corpus/types/char-literal.kz)
 c = 'a'
 print(c)
 print(c == 'a')
-for d in "ab".Chars {
-    print(d == 'b')
-}
+d = 'b'
+print(d == c)
+print(d == 'b')
 ```
 
 Case: [types/char-literal-two.kz](../corpus/types/char-literal-two.kz)
@@ -593,7 +638,7 @@ b` and `a +% b` differ in type. Under these operators, which do not promote, ope
 signedness are `sign-mix` (T9) whatever their widths, and a literal operand takes the other
 operand's type, so that `sum +% 1` on a `byte` computes in `byte` (the owner, 2026-10-09). A literal
 that does not fit that type, `sum +% 300` on a `byte`, is `constant-overflow` (T6), as a literal that
-does not fit a written type is (L17). *(assumed: proposed on 2026-10-10, after the review of round 13)*
+does not fit the type it takes is wherever it stands (L17). *(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [types/wrap-literal-too-big.kz](../corpus/types/wrap-literal-too-big.kz)
 ```kurz

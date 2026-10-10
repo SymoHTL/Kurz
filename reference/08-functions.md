@@ -219,9 +219,12 @@ parameter at the same place. Names, default values and the `mut` marker (M7) mak
 call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of the other. A
 parameter can have a default value, and an argument can be passed by name (D11). Which function a
 call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)* Arguments are
-evaluated from left to right, as in C#, and a default value is a constant expression, as C#
-requires. *(assumed: proposed on 2026-10-09 and not objected to)* Which compile error a default that
-is not constant is, the record does not say: a question for a design round (the record, section 14).
+evaluated from left to right, as in C#, and a default value is a constant expression and nothing else;
+C# requires that of a parameter's default alone and also takes `default` and `new S()` for a value
+type `S`, which the record does not name. *(assumed: proposed on 2026-10-09 and not objected to)*
+Which compile error a default that is not constant is, `type-mismatch` (T1), `syntax` (E4) or an id of
+its own, the record does not say: a fork the record lists as a question with those options (section
+14); this rule is not `open`, because its cases stand on the rest of it and none has such a default.
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
 ```kurz
@@ -383,8 +386,8 @@ the cost is that the function cannot reuse the name, and that a top-level variab
 every top-level function that already declares that name into a compile error). A parameter of the
 function, a parameter of a lambda inside it and a loop variable are declarations in this sense and
 `redeclared` too, and every variable declared outside a function reserves its name, whether it is
-declared above or below the function (F6) and at any depth of the top-level code (the owner,
-2026-10-09). In `count = count + 1` inside such a function the one error is `redeclared`, for the
+declared above or below the function (F6) and at any depth of the top-level code. *(assumed: the
+reference's reading, accepted by its id on 2026-10-09 without its text shown)* In `count = count + 1` inside such a function the one error is `redeclared`, for the
 declaration on the left, which the compiler reads first to learn whether the line declares; the read
 on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
 read first, whose message points at the read while the fix is the whole line). The owner chose the

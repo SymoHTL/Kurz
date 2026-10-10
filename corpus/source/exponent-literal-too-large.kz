@@ -1,0 +1,5 @@
+// expect: error constant-overflow at 4
+// rules: L11
+
+x = 1e400
+print(x)

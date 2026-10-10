@@ -9,8 +9,9 @@ spelling). The braces are always required, and the block opens on the line of th
 statement in place of the block, and a `{` on the next line, which L2 ends the statement before and
 L4 does not continue it to, are the compile error `braces-required` (the owner, 2026-10-09, against
 continuing the statement onto the `{`, a fourth exception to L2). Both are reported on the line of
-the condition, where the block should have opened, which is the line the case with the `{` on its
-own line expects.
+the condition, where the block should have opened: a block that is missing or opens on the next line
+is an error of the whole `if`, which E1 reports on its first line, and the case with the `{` on its
+own line expects that line. *(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [control/if.kz](../corpus/control/if.kz)
 ```kurz
@@ -232,10 +233,11 @@ loop over it (E3). `for i in 1..n` therefore throws when `n` is 0; a loop that m
 written with `..<`. The C form with three parts is the compile error `syntax`, as is every other
 text no rule gives a meaning (E4). The range and its loop variable have the common type of the two
 ends, found as `+` finds it (T8, T9, T28): `0..<n` with a `long` `n` is a range of `long`, and integer
-ends with no common type, a signed with an unsigned one, are `sign-mix` (T9) (the owner, 2026-10-09,
+ends for which `+` is `sign-mix` (T9) are `sign-mix` too (the owner, 2026-10-09,
 against a range that is always `int`, under which a loop over a `long` range is written by hand; the
 cost is that the loop variable's type follows the end, which a reader finds at the declaration of
-`n`). An end that is not an integer is `type-mismatch` (T1). *(assumed: proposed on 2026-10-10, after the review of round 13)*
+`n`). An end whose type is no integer type, `0..<1.5` or `0..2.0` whatever its value, is `type-mismatch`
+(T1). *(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [control/range-empty.kz](../corpus/control/range-empty.kz)
 ```kurz
@@ -301,6 +303,7 @@ for i in 0..<n {
 Case: [control/range-end-not-integer.kz](../corpus/control/range-end-not-integer.kz)
 ```kurz
 for i in 0..<1.5 {
+    print(i)
 }
 ```
 

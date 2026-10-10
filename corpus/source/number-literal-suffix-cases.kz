@@ -1,0 +1,9 @@
+// expect: output
+// | 1
+// | 1
+// | 7
+// rules: L11
+
+print(1L)
+print(1UL)
+print(7uL)

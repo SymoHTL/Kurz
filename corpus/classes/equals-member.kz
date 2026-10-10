@@ -1,7 +1,7 @@
 // expect: output
 // | false
 // | true
-// rules: K5
+// rules: K5, K4
 
 class User(int Id, mut int Hits) {
     pub bool Equals(User other) => Id == other.Id

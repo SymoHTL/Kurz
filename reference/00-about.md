@@ -202,9 +202,9 @@ passes. A type meets such a limit when it has a text: every value with a derived
 A11 to A14), a class that declares or inherits a `pub Text()` (A5, A9), and a value whose interface
 or type parameter has a text by the sentence before, without naming the interface (the owner,
 2026-10-04, against an interface a class has to name). The match holds only for an interface whose
-only member is `string Text()`, the one the standard library declares; an interface that declares
-more is met by naming it, because a type that has a text does not have its other members (the owner,
-2026-10-09). The owner chose the rule on 2026-10-03, against a check for each instantiation of a
+only member is `string Text()`, the one a standard library would declare; an interface that declares
+more is met by naming it, because a type that has a text does not have its other members. *(assumed:
+the reference's reading, accepted by its id on 2026-10-09 without its text shown)* The owner chose the rule on 2026-10-03, against a check for each instantiation of a
 generic function, which would have reported an error at a call site for a line inside another
 function; the cost is that a generic function that prints its argument needs the limit, and that the
 standard library would declare one interface for it.
@@ -315,11 +315,20 @@ print(2.5f)
 A duration shows its value split into the units of L14 from the largest down, each unit at most once
 and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and the remainder
 below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. What a remainder
-below a millisecond shows, `1s 250us` or `1500ns`, is a question for a design round (the record,
-section 14). A negative duration
+below a millisecond shows, rounded or cut to milliseconds or shown in microseconds and nanoseconds
+(`1s 250us`, `1500ns`), is a fork the record lists as a question (section 14); this rule is not
+`open`, because its cases stand on the rest of it and none shows such a remainder. A negative duration
 shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. The owner
 accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is assumed
-and not decided.
+and not decided; that it is the remainder below a second that shows in milliseconds came from the
+review of 2026-10-10. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [source/unit-literal-fraction.kz](../corpus/source/unit-literal-fraction.kz)
+```kurz
+print(1.5s)
+print(0.5h)
+print(1.5kb)
+```
 
 Case: [values/text-duration.kz](../corpus/values/text-duration.kz)
 ```kurz
@@ -351,7 +360,8 @@ shortest digits that read back as the same number (A4), with `.` as the separato
 from `1E+15` up and from `1E-05` down, `-0` for a negative zero, `Infinity` and `-Infinity` for the
 infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0` for a
 negative zero, a `∞` sign, a `,`), and none of that is meant. The owner accepted this reading by its
-id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided.
+id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided; that the
+exponent form starts at `1E-05` itself came from the review of 2026-10-10. *(assumed: proposed on 2026-10-10, after the review of round 13)*
 
 Case: [values/text-double-special.kz](../corpus/values/text-double-special.kz)
 ```kurz

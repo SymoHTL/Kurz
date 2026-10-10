@@ -1,0 +1,5 @@
+// expect: error constant-overflow at 5
+// rules: L17
+
+byte b = 1
+print(b + 300)

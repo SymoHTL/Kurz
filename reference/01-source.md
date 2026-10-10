@@ -7,9 +7,9 @@ points written in it, as they are written, without normalization: the case below
 literal as written, and the string cases of T15 and T16 count its characters and bytes. A file that
 is not valid UTF-8 is one compile error, `invalid-source`, at the line of the first bad byte; an
 encoded surrogate is one, since it is not valid UTF-8. A byte-order mark at the start of the file is
-skipped, because Windows editors write one (the owner, 2026-10-09, against refusing the mark too,
-under which a file saved by Notepad does not compile; the cost is one accepted form of a file that
-is not pure UTF-8). The error has no case: a corpus file is read as UTF-8 by the lint and by every
+skipped, because some Windows editors and tools write one (the owner, 2026-10-09, against refusing
+the mark too, under which a file saved with the mark does not compile; the cost is one accepted
+leading code point that is not part of the text). The error has no case: a corpus file is read as UTF-8 by the lint and by every
 gate, so no case can be a file that is not, and the id stands here and not in the table of chapter
 12, which lists the ids cases expect.
 
@@ -149,7 +149,7 @@ print(yes)
 print(no)
 ```
 
-### L9 (decided, §8) Names
+### L9 (assumed, §8) Names
 
 A name starts with a letter or `_` and continues with letters, digits and `_`. A letter is one of
 ASCII's, `a` to `z` and `A` to `Z`: a name that holds any other character, an umlaut included, is
@@ -157,7 +157,9 @@ the compile error `syntax` (E4), and C#'s `@` names do not exist (the owner, 202
 Unicode letter as C# allows, under which a Latin and a Cyrillic `a` are two names nobody can tell
 apart, and against `@keyword` names, a second spelling C# has for interop, which Kurz has no rule
 for; the cost is that a C# program with an umlaut in a name is edited). Upper and lower case are
-different.
+different. The owner chose the letter set; the rest of the form, the start with a letter or `_`,
+the letters, digits and `_` after it and the two cases, is the record's assumption, so the rule is
+assumed.
 
 Case: [source/names.kz](../corpus/source/names.kz)
 ```kurz
@@ -186,7 +188,16 @@ An integer literal without a suffix has the type `int`, or `long` when its value
 `int`, or `ulong` when it does not fit a `long`, as in C#; a literal that fits no integer type is
 the compile error `constant-overflow` (T6). A suffix (L11) gives the literal the type the suffix
 names. Where a type is written or expected, the literal takes that type if its value fits, as a
-constant does in C#; how far an expected type reaches is L17. How a literal is written is L11.
+constant does in C#, and is `constant-overflow` (T6) when it does not, `byte c = 300`, never an `int`
+narrowed (T7); how far an expected type reaches is L17, which also carries the reading that a literal
+which does not fit the type it takes is that error wherever it stands. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+How a literal is written is L11.
+
+Case: [source/literal-does-not-fit.kz](../corpus/source/literal-does-not-fit.kz)
+```kurz
+byte c = 300
+print(c)
+```
 
 Case: [source/literal-too-large.kz](../corpus/source/literal-too-large.kz)
 ```kurz
@@ -207,19 +218,39 @@ print(huge)
 
 A type that is written or expected reaches every literal of an expression that is made only of
 literals and the operators of T18 and T22, so `long big = 2147483647 + 1` is a `long` and not
-`constant-overflow` (T6), as C# treats a constant expression. It also reaches a literal that is one
+`constant-overflow` (T6); C# folds `2147483647 + 1` as an `int` and refuses it whatever the written
+type, so Kurz departs from C# here. It also reaches a literal that is one
 operand of such an operator whose other operand has a type: with `uint u`, the `1` of `u + 1` is a
 `uint`, which keeps T9 out of ordinary arithmetic, and the `100` of `sbyte low = -100` takes `sbyte`
 with its sign. C# converts the constant `int` instead, which Kurz cannot do across signedness (T9);
 this is the smallest rule that lets the cases of T3 and T9 stand. The owner confirmed this reading
 on 2026-10-09, in round 13. The promotion of narrow operands (chapter 3) is for the operands of a
-run-time operation; an expression of literals is folded in the written or expected type when its
-result fits it, so `sbyte low = -100` and `byte c = 200 + 50` compile, and one whose result does not
-fit is `constant-overflow` (T6). *(assumed: proposed on 2026-10-10, after the review of round 13)*
+run-time operation. A constant expression is folded in the type its literals take, one operation at
+a time, each operation by the rule of its own operator: under `+ - * / %` an operation whose result
+leaves the type is `constant-overflow` (T6), under `+%`, `-%` and `*%` it wraps in that type (T12).
+So `sbyte low = -100` and `byte c = 200 + 50` compile, `byte c = 200 + 100` is the error, and so is
+`byte c = 200 + 100 - 100`, whose result would fit but whose first sum does not; `byte b = 255 +% 1`
+is `0`, and `2147483647 + 1 +% 0` is the error at the `+`. A literal that does not fit the type it
+takes is `constant-overflow` wherever it stands: `byte c = 300` (L10), never an `int` narrowed (T7),
+and `b + 300` with a `byte` `b`, whose `300` takes `byte` by the sentence above, as much as
+`sum +% 300` (T28); the cost is that `b * 1000` on a `byte` is written `int(b) * 1000`. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [source/constant-intermediate-overflow.kz](../corpus/source/constant-intermediate-overflow.kz)
+```kurz
+byte c = 200 + 100 - 100
+print(c)
+```
+
+Case: [source/literal-operand-too-big.kz](../corpus/source/literal-operand-too-big.kz)
+```kurz
+byte b = 1
+print(b + 300)
+```
 
 Case: [source/constant-does-not-fit.kz](../corpus/source/constant-does-not-fit.kz)
 ```kurz
 byte c = 200 + 100
+print(c)
 ```
 
 Case: [source/literal-takes-operand-type.kz](../corpus/source/literal-takes-operand-type.kz)
@@ -235,11 +266,40 @@ print(big)
 Number literals take every form C# gives them: decimal digits; hexadecimal digits after `0x` and
 binary digits after `0b`, where `_` may also stand directly after the prefix (`0x_FF`); `_` between
 digits, which changes nothing; a fraction after a `.` and an exponent after `e` or `E` (`1e3`,
-`2.5E-3`), each of which makes the literal a `double`; and the suffixes of C# (`L`, `U`, `UL` in
-either order, `f`, `d`, `m`) in upper or lower case, with the meaning they have there, except that a
-suffix holding a lower-case `l` is the compile error `syntax` (E4), because `1l` reads as `11`,
-where C# only warns (the owner, 2026-10-09, against the forms listed before this round alone, under
-which `1e-9` is written out in full; the cost is that the lexer is C#'s).
+`2.5E-3`), each of which makes a literal without a suffix a `double`; and the suffixes of C# (`L`,
+`U`, `UL` in either order, `f`, `d`, `m`), each letter in upper or lower case, so `7uL` is a `ulong`
+and `1e3f` a `float`, with the meaning they have there, except that a suffix holding a lower-case `l`
+is the compile error `syntax` (E4), because `1l` reads as `11`, where C# only warns (the owner,
+2026-10-09, against the forms listed before this round alone, under which `1e-9` is written out in
+full; the cost is that the lexer is C#'s). An integer suffix after a fraction or an exponent, `1.5U`,
+is no form C# gives, so it is `syntax` (E4). A floating-point literal whose value lies outside its
+type's range, `1e400`, is `constant-overflow`, and one that rounds to zero or a subnormal is that
+value (T6). *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [source/exponent-literal-too-large.kz](../corpus/source/exponent-literal-too-large.kz)
+```kurz
+x = 1e400
+print(x)
+```
+
+Case: [source/number-literal-fraction-suffix.kz](../corpus/source/number-literal-fraction-suffix.kz)
+```kurz
+x = 1.5U
+print(x)
+```
+
+Case: [source/number-literal-ul-suffix.kz](../corpus/source/number-literal-ul-suffix.kz)
+```kurz
+x = 1ul
+print(x)
+```
+
+Case: [source/number-literal-suffix-cases.kz](../corpus/source/number-literal-suffix-cases.kz)
+```kurz
+print(1L)
+print(1UL)
+print(7uL)
+```
 
 Case: [source/number-literals.kz](../corpus/source/number-literals.kz)
 ```kurz
@@ -253,11 +313,11 @@ print(half < 1.0)
 
 Case: [source/number-literal-forms.kz](../corpus/source/number-literal-forms.kz)
 ```kurz
-print(1e3)
-print(2.5E-3)
+print(1e3 == 1000.0)
+print(2.5E-3 == 0.0025)
 print(0x_FF)
 print(0b_101)
-print(1.5e2)
+print(1.5e2 == 150.0)
 print(7u)
 ```
 
@@ -304,8 +364,8 @@ print(equal)
 
 The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, `bool`, `string`, `char`,
-`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names, which the
-owner decided on 2026-10-09. Using one as a name is `reserved-word` (L12), as it is in C# for the
+`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names, which T29 marks
+*(assumed)*, accepted by the rule's id on 2026-10-09. Using one as a name is `reserved-word` (L12), as it is in C# for the
 first fourteen, which are keywords there; the four time types C# does not reserve. The owner chose
 this on 2026-10-04, against ordinary names that a declaration hides in its block, under which
 `long(x)` (T10) would have two readings in one program; the cost is that nothing can be called
@@ -330,7 +390,17 @@ after an opening `"""` and text before a closing one are the compile error `synt
 2026-10-09, against a one-line form holding `abc`, in which a `"` is an ordinary character, as C# 11
 has it, and against an id of its own for the malformed shapes; what the one-line form would buy, a
 `"` without a backslash, the escape of L7 gives). What `{` and `\` mean inside the block is L15; the
-cases hold neither.
+cases hold neither. Only characters other than whitespace count as text beside a `"""`, as in C# 11:
+trailing spaces after the opening and the indentation before the closing are no error. Code may
+follow the closing `"""` on its line, `""")` closing a call, as C# 11 allows: "on a line of its own"
+is about what stands before it. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [source/multi-line-string-in-call.kz](../corpus/source/multi-line-string-in-call.kz)
+```kurz
+print("""
+    hello
+    """)
+```
 
 Case: [source/multi-line-string.kz](../corpus/source/multi-line-string.kz)
 ```kurz
@@ -381,6 +451,16 @@ compiler). The type of a duration literal is T29's. A number with an exponent (L
 the unit is read before any suffix of L11, the longest unit that matches, so `1ms` is a millisecond
 and not `1m` followed by `s`, and only a suffix the writer spells before a unit, `1Ums`, is `syntax`.
 *(assumed: proposed on 2026-10-10, after the review of round 13)*
+
+Case: [source/unit-literal-inexact-bytes.kz](../corpus/source/unit-literal-inexact-bytes.kz)
+```kurz
+print(1.3kb)
+```
+
+Case: [source/unit-literal-exponent.kz](../corpus/source/unit-literal-exponent.kz)
+```kurz
+print(1e3ms)
+```
 
 Case: [source/unit-literals.kz](../corpus/source/unit-literals.kz)
 ```kurz
