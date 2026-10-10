@@ -1,5 +1,5 @@
 // expect: error unreachable-arm at 11
-// rules: C4
+// rules: C4, D6
 
 data User(string Name)
 data Admin(int Level) : User

@@ -61,8 +61,8 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
 
 ## 3. Review
 
-A review run spends the owner's Claude seat: a pass reports 0.19 to 0.27 USD in CI (the top
-rounded up from 0.264) and 1.3 to
+A review run spends the owner's Claude seat: a pass reports 0.19 to 0.44 USD in CI (the top seen on
+2026-10-10, on a pull request of record and reference text) and 1.3 to
 1.8 USD off the pipeline, and takes 6 to 19 minutes (`knowledge/what-a-review-pass-costs.md`), at
 least two passes per batch of the diff. A run in CI, the one
 Ready or a push starts or a dispatch, starts without a question to the owner: the question before
@@ -70,7 +70,7 @@ every run, set on 2026-10-02 after the first bills, was retired by the owner on 
 it stalled every round for a run that had cost 1.42 to 1.94 USD by then (1.04 to 2.47 in the ten
 runs measured to 2026-10-08; the upper bound at the pass cap, `MAX_PASSES` in
 `tools/review/review.py`, batches times five passes times
-0.27 USD, is about 1.35 USD per batch); the bill is named in the report. A run off the
+0.44 USD, is 2.2 USD per batch); the bill is named in the report. A run off the
 pipeline, at local prices, starts after the owner said go to the bill named. `judgment step`
 Count the batches on the head that will be reviewed, with
 `py -3 tools/review/review.py --pr <N> --plan`, which pays nothing; never take them from an

@@ -30,7 +30,9 @@ then the rule changes its status here.
 ## Cases
 
 Every sample in this reference is a file of the conformance corpus, under `corpus/`. A file
-starts with a header and an empty line; the rest is the program.
+starts with a header and an empty line; the rest is the program. A chapter shows a file's sample once,
+under the first `Case:` line that names it; a later rule of the same chapter that the case names
+carries the `Case:` line alone.
 
 ```text
 // expect: output                     the program compiles, runs and prints exactly these lines
@@ -314,14 +316,21 @@ print(2.5f)
 
 A duration shows its value split into the units of L14 from the largest down, each unit at most once
 and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and the remainder
-below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. What a remainder
-below a millisecond shows, rounded or cut to milliseconds or shown in microseconds and nanoseconds
-(`1s 250us`, `1500ns`), is a fork the record lists as a question (section 14); this rule is not
-`open`, because its cases stand on the rest of it and none shows such a remainder. A negative duration
+below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A remainder
+below a millisecond shows its microseconds and nanoseconds the same way, `1s 250us` and `1us 500ns`,
+when no formatting is chosen (the owner, 2026-10-10, against rounding or cutting to milliseconds); a
+formatting that can be chosen is a question the record lists (section 14), as is whether `us` and
+`ns` are units of a literal (L14). A negative duration
 shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. The owner
 accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is assumed
 and not decided; that it is the remainder below a second that shows in milliseconds came from the
-review of 2026-10-10. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+review of 2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)*
+
+Case: [values/text-duration-sub-millisecond.kz](../corpus/values/text-duration-sub-millisecond.kz)
+```kurz
+print(1.00025s)
+print(0.0000015s)
+```
 
 Case: [source/unit-literal-fraction.kz](../corpus/source/unit-literal-fraction.kz)
 ```kurz
@@ -361,7 +370,8 @@ from `1E+15` up and from `1E-05` down, `-0` for a negative zero, `Infinity` and 
 infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0` for a
 negative zero, a `∞` sign, a `,`), and none of that is meant. The owner accepted this reading by its
 id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided; that the
-exponent form starts at `1E-05` itself came from the review of 2026-10-10. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+exponent form starts at `1E-05` itself came from the review of 2026-10-10, and was not put to the
+owner by its text. *(assumed: that sentence)*
 
 Case: [values/text-double-special.kz](../corpus/values/text-double-special.kz)
 ```kurz

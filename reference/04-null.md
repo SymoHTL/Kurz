@@ -341,10 +341,13 @@ N3 narrows a path of fields. A path whose every step is a field of a `data` valu
 is neither `mut` nor `weak`, changes only through what the function itself does to it (N7). Two
 kinds of path can change behind its back: one through a `mut` field of a class instance, which a
 call can assign through another reference (K2), and one through a `weak` reference, whose target a
-call or an assignment can free (R3). Such a path is narrowed by a test (N7); the path through a `mut` field, and only it, also by an
-assignment of a value whose type has no `null`, `acc.Email = "x"`, as C#'s flow analysis reads it (the
-owner, 2026-10-09, against narrowing by a test only, under which a line that just set the field cannot
-use it); a `weak` reference is narrowed by a test only (R3). The narrowing lasts only up to the
+call or an assignment can free (R3). Such a path is narrowed by a test (N7); a path with no `weak` reference in it, and only such a path,
+also by an assignment of a value whose type has no `null`, `acc.Email = "x"`, as C#'s flow analysis
+reads it (the owner, 2026-10-09, against narrowing by a test only, under which a line that just set
+the field cannot use it); a path with a `weak` reference anywhere in it, the reference itself or a
+`weak mut` field assigned as `node.Parent = Node()`, is narrowed by a test only (R3) (the owner,
+2026-10-10, against narrowing such a field by the assignment as a `mut` field is, after which
+nothing strong need hold the target). The narrowing lasts only up to the
 next call and the next assignment, in the order the program runs them: a test directly followed by
 the use is fine, and a second use after a call takes a variable of its own. A call is every
 expression that runs code the function does not see: a call of a function or a method, a

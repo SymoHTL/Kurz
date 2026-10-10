@@ -3,3 +3,4 @@
 
 x = 1ul
 print(x)
+// a suffix with a lower-case l is syntax (L11), since 1l reads as 11; the other letters take either case

@@ -83,8 +83,8 @@ def block_design(root):
         raise kit.Refused("kurz-design.md has no Open section")
     return table(["Design record", "Count"], [
         ("Sections", len(re.findall(r"^## \d+\. ", text, re.M))),
-        ("Statements marked *(assumed)*", len(re.findall(r"\*\(assumed", text))),
-        ("Open questions", len(re.findall(r"^- ", open_section.group(1), re.M))),
+        ("Occurrences of the marker *(assumed)*", len(re.findall(r"\*\(assumed", text))),
+        ("Bullets of the Open section", len(re.findall(r"^- ", open_section.group(1), re.M))),
     ])
 
 
@@ -308,7 +308,7 @@ def cases_in(base):
                   all(row in str(store) for row in ("| Entries in INDEX.md | 2 |", "| tagged LIVING | 1 |", "| Review rule sections | 1 |", "| Review rules | 2 |")), store))
     design = got(block_design, root)
     cases.append(("design: sections, assumed statements and open questions are counted",
-                  all(row in str(design) for row in ("| Sections | 2 |", "| Statements marked *(assumed)* | 1 |", "| Open questions | 2 |")), design))
+                  all(row in str(design) for row in ("| Sections | 2 |", "| Occurrences of the marker *(assumed)* | 1 |", "| Bullets of the Open section | 2 |")), design))
     with open(os.path.join(root, "kurz-design.md"), "w", encoding="utf-8") as f:
         f.write("## 1. Types\n\nx\n")
     design = got(block_design, root)

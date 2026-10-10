@@ -1,0 +1,8 @@
+// expect: output
+// | 7
+// rules: T27
+
+T Pick<T>(T a, T b) => a
+
+byte small = 7
+print(Pick(small, 1))

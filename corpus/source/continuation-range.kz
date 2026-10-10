@@ -1,0 +1,10 @@
+// expect: output
+// | 1
+// | 2
+// | 3
+// rules: L4, C8
+
+for i in 1..
+    3 {
+    print(i)
+}

@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-10
-digest: 316ee76d29049c17fa73069581949301389bd10dc0722d19c7a46dce053b77f0
+digest: 571fbe1626d0121a986dbe0dc442c7c4fabcab59f877310540819731d8434e5d
 ttl_days: 60
 metadata:
   type: reference
@@ -75,30 +75,32 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 31 |
+| Entries in INDEX.md | 32 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 9 |
+| tagged TRAP | 10 |
 | Review rule sections | 11 |
 | Review rules | 64 |
 <!-- /generated:store -->
 
 ## The design record
 
-A statement marked *(assumed)* was proposed and not objected to; it is not a decision. The counts
-are of the markers and of the top-level bullets of section 14, not of rules or of questions: one
-marker can cover several readings, one bullet several questions, and a marker whose statement turns
-decided leaves the count.
+A statement marked *(assumed)* was proposed and not objected to, or, where the marker carries the
+date of a review, proposed after that review and not yet confirmed by the owner; neither is a
+decision. The counts are of every occurrence of the marker's text and of the top-level bullets of
+section 14, not of rules or of questions: one marker can cover several readings, one bullet several
+questions, a marker whose statement turns decided leaves the count, and a marker quoted in prose
+counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-counts-as-one.md)).
 
 <!-- generated:design -->
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 73 |
-| Open questions | 9 |
+| Occurrences of the marker *(assumed)* | 57 |
+| Bullets of the Open section | 8 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -115,8 +117,8 @@ nothing in this repository executes Kurz.
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 291 |
-| Compile-error ids | 51 |
+| Corpus cases, none of them run | 319 |
+| Compile-error ids | 52 |
 | Run-time error ids | 6 |
 <!-- /generated:reference -->
 
@@ -139,8 +141,8 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Pull requests opened by a writer, or merged | 10 |
 | Pull requests merged | 7 |
 | Merged over red, with a recorded waiver | 5 |
-| Review findings posted: high | 42 |
-| Review findings posted: medium | 576 |
-| Review findings posted: low | 761 |
+| Review findings posted: high | 53 |
+| Review findings posted: medium | 627 |
+| Review findings posted: low | 807 |
 | Open HAZARD issues | 15 |
 <!-- /generated:forge -->

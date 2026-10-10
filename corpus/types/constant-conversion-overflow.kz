@@ -2,3 +2,4 @@
 // rules: T6
 
 print(byte(300))
+// 300 lies outside the range of byte, so the written conversion of the constant is the error (T6)

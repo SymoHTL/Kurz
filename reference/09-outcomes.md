@@ -75,7 +75,7 @@ function as O2 says, under which a declaration ends the function on some paths w
 cost is that a function with five cases forces a five-case type on every variable that keeps its
 result). A written type that is the success case itself, `User?` for a call that returns
 `User? | DbError`, names no other case and is unwrapped as O2 says; one that names any case beyond the
-success case names them all. *(assumed: proposed on 2026-10-10, after the review of round 13)*
+success case names them all (the owner, 2026-10-10, confirming the reading proposed after the review of round 13).
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -374,21 +374,21 @@ Remove(2) else {
 An actor that exhausts its stack dies as it does for any exception (O6), with a `Reason` of the
 runtime's `data` type (O7); its parent lives under `on crash restart` and `on crash stop`, and crashes
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
-process exits with the exit code 1 (O6). *(proposed: the id of that exception,
-`stack-overflow`, and its line, the call that did not fit; the record names neither, and the case
-stands on both; the record lists the question in section 14)* An allocation that fails ends the whole process with the exit code 1 and a line on
+process exits with the exit code 1 (O6). The exception is
+`stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
+reference's reading, on which the case stands). An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value
-when nothing can be allocated; the cost is a guard page per actor stack, and a program that cannot
-recover from memory pressure). The case runs at the top level, which is the root actor, so the
+when nothing can be allocated; the cost is a guard page per actor stack, a stack probe in every frame larger than that page so
+that no frame steps past it, a signal stack per thread for the handler that turns the fault into the
+exception, and a program that cannot recover from memory pressure). The case runs at the top level, which is the root actor, so the
 exception ends the program (O6); the allocation failure has no case, since no case can ask for
 memory that does not exist.
 
 Case: [outcomes/stack-overflow.kz](../corpus/outcomes/stack-overflow.kz)
 ```kurz
-int Down(int n) => Down(n + 1) + 1
+int Down(int n) => Down(n) + 1
 
 print(Down(0))
-// the id and the line this case expects are the proposed reading of O11 (the record, section 14)
 ```

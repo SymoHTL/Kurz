@@ -1,0 +1,15 @@
+// expect: error unreachable-arm at 9
+// rules: C4, C9
+
+data NotFound(int Id)
+
+void Show(int | NotFound v) {
+    match v {
+        int x => print(x)
+        0 => print("zero")
+        NotFound n => print(n.Id)
+    }
+}
+
+int value = 0
+Show(value)

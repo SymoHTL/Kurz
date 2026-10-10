@@ -3,3 +3,4 @@
 
 byte b = 1
 print(b + 300)
+// the 300 takes byte from b (L17) and does not fit it: the error, as a literal that does not fit the type it takes is wherever it stands

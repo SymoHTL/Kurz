@@ -169,7 +169,8 @@ copy would be lost or, through a class instance on the path, would not be a chan
 all. *(proposed: the record speaks of assigning)* The result type of a function type may be `void`,
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
-objected to)*
+objected to)* A lambda whose body is a call with a `void` success, `x => print(x)`, is a lambda with
+a `void` result and no use of the call as a value (O10) (the owner, 2026-10-10).
 
 Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
 ```kurz
@@ -209,6 +210,7 @@ void Run((int) => void f) {
 }
 
 Run(x => print(x))
+// the lambda's body is a call with a void success: a void lambda, and no use of the call as a value (F11)
 ```
 
 ### F12 (decided, §8) Overloads, default values, named arguments
@@ -219,12 +221,35 @@ parameter at the same place. Names, default values and the `mut` marker (M7) mak
 call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of the other. A
 parameter can have a default value, and an argument can be passed by name (D11). Which function a
 call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)* Arguments are
-evaluated from left to right, as in C#, and a default value is a constant expression and nothing else;
-C# requires that of a parameter's default alone and also takes `default` and `new S()` for a value
-type `S`, which the record does not name. *(assumed: proposed on 2026-10-09 and not objected to)*
-Which compile error a default that is not constant is, `type-mismatch` (T1), `syntax` (E4) or an id of
-its own, the record does not say: a fork the record lists as a question with those options (section
-14); this rule is not `open`, because its cases stand on the rest of it and none has such a default.
+evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
+order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it (C# also
+takes `default` and `new S()` for a value type `S`, which the record does not name), and one that is
+not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
+`type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
+2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
+
+Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
+```kurz
+int Log(string s, int v) {
+    print(s)
+    return v
+}
+
+int Add(int a, int b) => a + b
+
+print(Add(b: Log("b", 2), a: Log("a", 1)))
+```
+
+Case: [functions/default-not-constant.kz](../corpus/functions/default-not-constant.kz)
+```kurz
+string Pick() => "hi"
+
+void Greet(string name, string word = Pick()) {
+    print("{word} {name}")
+}
+
+Greet("Ann")
+```
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
 ```kurz

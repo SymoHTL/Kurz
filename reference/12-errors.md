@@ -2,7 +2,8 @@
 
 The errors the corpus cases expect. An id is what a corpus header names: `// expect: error <id> at
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
-raises when it runs (E3). The two tables share one namespace of ids.
+raises when it runs (E3). The two tables share one namespace of ids. An id that no case can expect stands in its rule and not
+here: `invalid-source` (L1), since the tools read every case as UTF-8.
 
 ## Compile errors
 
@@ -15,11 +16,11 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or `.Number` and `From` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
 | `unknown-name` | V10, F16 | a name that is not visible at this place, a top-level variable read inside a top-level function included |
-| `type-mismatch` | T1, T13, T19, N6, C3, O4, K5, C8 | a value of one type where another type is required, a written union type that lists only some of a call's cases (O4), an operator on two class instances (K5) and a range end that is no integer (C8) included |
+| `type-mismatch` | T1, T13, T19, N6, C3, O4, K5, C8 | a value of one type where another type is required, a written union type that lists only some of a call's cases (O4), an arithmetic operator on two class instances (K5) and a range end that is no integer (C8) included |
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
 | `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance, or an interpolation of one, whose `Text()` is not `pub`, from outside its class (A9); the same inside the class is A15's reading |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
-| `constant-overflow` | T6, L10, L11, L17, T28 | an operation of a constant expression whose result leaves the range of its type (T6), a literal that fits no integer type (L10), a floating-point literal outside its type's range (L11), a literal that does not fit the type it takes, written for it (L10, L17) or the other operand's (L17, T28) |
+| `constant-overflow` | T6, L10, L11, L17, T28 | an operation of a constant expression of an integer or `decimal` type whose result leaves the range of its type (T6), a literal that fits no integer type (L10), a literal outside the range of its type, a floating-point one (L11) or a duration included, or one that does not fit the type it takes, written for it (L10, L17) or the other operand's (L17, T28), and a written integer conversion of a constant whose value lies outside the target (T6) |
 | `constant-divide-by-zero` | T25 | an integer or `decimal` division or remainder by a constant zero, a literal or folded from literals |
 | `narrowing-conversion` | T7, T28, C8 | a wider integer type put into a narrower one without a conversion, whatever the signedness, the `int` of a promoted operation and the loop variable of a range of a wider type (C8) included |
 | `sign-mix` | T9, T23, C8 | an operation between a signed and an unsigned integer, the two ends of a range (C8) included, that C# joins through `long` or refuses (`uint` or `ulong` with a signed type), or a value put where a type of the other signedness and at least its width is required, into which it does not widen |
@@ -29,19 +30,19 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `mut-at-call` | M7 | an argument for a `mut` parameter without `mut` in front of it, `mut` in front of an argument whose parameter is not `mut`, or one variable passed as `mut` twice |
 | `unlisted-case` | O3, O9 | a case that would leave a function whose return type does not list it |
 | `match-not-exhaustive` | O8, C9, D12 | a `match` that lists neither every case nor an `else` arm |
-| `braces-required` | C1 | a statement where a block between braces is required |
+| `braces-required` | C1 | a block that a construct requires, replaced by a statement or opened on the next line, at the line where the construct's header ends |
 | `reference-cycle` | R2, R4, R8, R9 | a class that can reach itself through strong fields, one of them `mut` |
 | `weak-not-nullable` | R5 | a `weak` type written without its `?` |
 | `weak-value` | R5 | `weak` in front of a type whose values are not instances of a class |
 | `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file |
-| `semicolon` | L5 | a `;`: a statement ends where its line ends |
+| `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
 | `reversed-range` | C8 | a range between literals whose end lies below its start |
 | `ambiguous-call` | F13 | a call that fits more than one function, none of them exactly |
-| `cannot-infer` | T27, F7 | a call of a generic function whose type arguments are neither written nor inferable from its arguments |
+| `cannot-infer` | T27, F7 | a call of a generic function whose type arguments are neither written nor inferable from its arguments, two instances of different classes with one base in one parameter's positions included |
 | `equal-by-unknown` | K15 | an `equal by` clause that names something that is not a field of the class |
-| `base-field-clash` | K17 | a parameter with a base field's name and another type, or with its name and type while the base receives something else |
+| `base-field-clash` | K17 | a parameter with a base field's name and another type, in the explicit form (K17) or the short one (K16), or with its name and type while the base receives something else |
 | `no-text` | A4, A7, A10 | the text of an instance of a class that neither declares nor inherits a `Text()` (A9), of a value that holds one, or of a value whose interface or type parameter declares none |
 | `block-indentation` | L13 | a line of a `"""` block that is indented less than the closing line |
 | `throw-needs-value` | O7 | a bare `throw` anywhere but in an arm of `else` |
@@ -52,13 +53,14 @@ raises when it runs (E3). The two tables share one namespace of ids.
 | `hides-member` | K7 | a method of a derived class with the name and the parameter types, in order, of a base method it can see, without `override` |
 | `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |
 | `constructor-must-chain` | K14 | a further constructor of a class with a primary constructor that does not call it |
-| `field-unassigned` | K14 | a field without `mut` and without `=` that a constructor leaves unassigned on a path or reads first, or such a field in a class with a primary constructor |
-| `syntax` | E4, L9, L11, L13, L14, T21, K5, D13 | text that no rule gives a meaning: the C `for` with three parts, `else` on a line of its own, an arm after `else`, a call with a `void` success used as a value, a name with a character outside ASCII or an `@` name (L9), a suffix with a lower-case `l` or an integer suffix after a fraction or an exponent (L11), `"""` with text beside it on its line (L13), a hexadecimal, binary, suffixed literal or one with an exponent before a unit (L14), anything but one code point in a `char` literal (T21), an operator declaration (K5), a `match` on a set of flags (D13) |
+| `field-unassigned` | K14 | a field without `=`, `mut` or not, that a constructor leaves unassigned on a path or reads before its first assignment, or such a field in a class with a primary constructor |
+| `syntax` | E4, L5, L9, L11, L12, L13, L14, T21, K5, D13 | text that no rule gives a meaning: the C `for` with three parts, `else` on a line of its own, an arm after `else`, a call with a `void` success used as a value, a name with a character outside ASCII or an `@` name (L9), a suffix with a lower-case `l` or an integer suffix after a fraction or an exponent (L11), text after an opening `"""` or before a closing one, or `""""` at the end of a line (L13), a hexadecimal, binary, suffixed literal or one with an exponent before a unit (L14), anything but one code point in a `char` literal (T21), an operator declaration (K5), a `match` on a set of flags (D13), a `;` where no statement ends (L5), a core word where an expression, an untyped lambda parameter or the name of a named argument stands (L12) |
 | `inexact-literal` | L14 | a decimal fraction before a unit that does not fall on a whole nanosecond, or on a whole byte before `kb`, `mb` and `gb` |
-| `missing-member` | K7 | a class that names an interface and lacks one of its methods, at the class |
+| `missing-member` | K7 | a class that names an interface and lacks one of its methods, a method inherited without `pub` not counting, at the class |
 | `interface-method-private` | K7 | a method that implements a method of an interface the class names, without `pub`, at the method |
-| `unreachable-arm` | C4 | an arm of a `match` that can never run, because an earlier arm covers its type |
+| `unreachable-arm` | C4, C9 | an arm of a `match` that can never run: an earlier arm covers its type, a literal arm follows the arm of its type, or `else` follows arms that cover every case (C9) |
 | `override-return-type` | K7 | an `override` whose return type differs from the overridden method's, at the method |
+| `default-not-constant` | F12 | a parameter's default value that is not a constant expression, at the parameter |
 
 ## Run-time errors
 
@@ -70,10 +72,10 @@ the range of the loop.
 |---|---|---|
 | `thrown` | O5, O6, O7 | a `throw` statement of the program ran |
 | `overflow` | T5, T20, T26, T29 | arithmetic that left the range of its type, or a conversion that lost its value, in a test build |
-| `divide-by-zero` | T14, T25 | an integer division or remainder by zero |
+| `divide-by-zero` | T14, T25 | an integer or `decimal` division or remainder by zero |
 | `index-out-of-range` | T14, M9 | an index outside the collection |
 | `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |
-| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the call that did not fit (the id and the line are O11's proposed reading, not a decision) |
+| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the call that did not fit |
 
 ## The rules of this chapter
 
@@ -85,8 +87,11 @@ declaration; for `reference-cycle` it is the first declaration, in source order,
 path. A construct over several lines reports the line of the smallest part that is wrong: an
 argument its own line, a binary operator its operator's line; only an error of the whole reports the
 first line. *(assumed: proposed on 2026-10-09 and not objected to)* A block that is missing, or that
-opens on the next line, is an error of the whole construct, so it is reported on the construct's first
-line, the line of the condition (C1). *(assumed: proposed on 2026-10-10, after the review of round 13)*
+opens on the next line, is an error of the whole construct, reported where the construct's header
+ends, the line where the block should have opened: for an `if` the last line of its condition, for
+the other constructs the line C1 names (the owner, 2026-10-10, confirming the reading proposed after
+the review of round 13); where the error is only the type checker's, or a closer is missing at the end of
+the file, E4 names the line.
 
 No case: every corpus case that expects an error shows it.
 
@@ -118,15 +123,26 @@ Several rules rule a construct out, some without naming its error and some namin
 three-part `for`, C2 an `else` on a line of its own, C9 an arm after `else`, D13 a `match` on a set
 of flags, O10 a call with a `void` success used as a value, L9 a name with a character outside ASCII
 or an `@` name, L11 a suffix with a lower-case `l` or an integer suffix after a fraction or an
-exponent, L13 a `"""` with text beside it on its line, L14 a hexadecimal, binary or suffixed literal
-or one with an exponent before a unit, T21 anything but one code point in a `char` literal, `''` and
-`'''` included, K5 an operator declaration. Each is the compile error `syntax`, one id for every text
+exponent, L13 text after an opening `"""` or before a closing one, L14 a hexadecimal, binary or suffixed
+literal or one with an exponent before a unit, T21 anything but one code point in a `char` literal,
+`''` and `'''` included, K5 an operator declaration, L5 a `;` where no statement ends, L12 a core word
+where an expression, an untyped lambda parameter or the name of a named argument stands. Each is the compile error `syntax`, one id for every text
 that no rule of this reference gives a meaning, reported on the line where the text stops making
 sense, the line of the first token no rule accepts. Where the construct's rule names an id of its
-own, that id is reported and not `syntax`. *(assumed: the token and the precedence of the rule's own
-id, proposed on 2026-10-10, after the review of round 13)* The owner confirmed the one id on
-2026-10-09, in round 13, against an id of its own for a `match` on a set of flags and for the shapes
-of `"""`.
+own, that id is reported and not `syntax`. The one id for a `match` on a set of flags and for the shapes of `"""` is the owner's choice of
+2026-10-09, in round 13, in the answers on D13 and L13, against an id of its own for each; this rule
+as a whole, which round 13 had not asked about and which the record had credited to 2026-10-09 in
+error, the owner confirmed on 2026-10-10, in round 14, with the token and the precedence of the rule's
+own id, proposed after the review of round 13. An error that only the type checker can see, D13's `match` on a set of flags and
+O10's call with a `void` success used as a value, is reported at the line of the construct (the owner,
+2026-10-10). A `)`, `]` or `}` missing at the end of the file is reported at the last line that holds
+code, a `"""` block that is never closed at its opening line, and an interpolation that no `}` closes
+on its line at the line of its `{` (the owner, 2026-10-10, confirming the front end's readings).
+
+Case: [source/unclosed-paren.kz](../corpus/source/unclosed-paren.kz)
+```kurz
+print((1 + 2)
+```
 
 Case: [control/c-style-for.kz](../corpus/control/c-style-for.kz)
 ```kurz

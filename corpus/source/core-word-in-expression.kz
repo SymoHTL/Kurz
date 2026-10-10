@@ -1,0 +1,4 @@
+// expect: error syntax at 4
+// rules: L12
+
+print(if)

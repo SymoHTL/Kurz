@@ -30,8 +30,10 @@ a C# record do: `Point(nan, 0.0) == Point(nan, 0.0)` is `true`, every `data` val
 of a `Map` is found again, while `==` on a `double` field alone says `false` for NaN, as in C# (the
 owner, 2026-10-09, against the field's `==`, under which such a value is unequal to itself and cannot
 be found in a map). Each field compares by the equality Kurz gives its type, a class field by K4 or
-K5, and NaN equal to NaN is the one thing taken from C#'s `Equals`; a method a class names `Equals`
-plays no part (K5). *(assumed: proposed on 2026-10-10, after the review of round 13)*
+K5, and NaN equal to NaN is the one thing taken from C#'s `Equals`, which holds for a `double` among
+the named fields of K5 as well; a method a class names `Equals` plays no part (K5) (the owner,
+2026-10-10, confirming the reading proposed after the review of round 13, and the NaN field under
+K5).
 
 Case: [data/equality.kz](../corpus/data/equality.kz)
 ```kurz
@@ -93,6 +95,23 @@ print(b.Id)
 ### D6 (decided, §4) A `data` type may inherit from another
 
 A value of the derived type can be used wherever the base type is required.
+
+Case: [control/match-unreachable-arm.kz](../corpus/control/match-unreachable-arm.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+void Show(User | NotFound u) {
+    match u {
+        User x => print("user {x.Name}")
+        Admin a => print("admin {a.Level}")
+        NotFound => print("none")
+    }
+}
+
+Show(Admin("Ann", 2))
+```
 
 Case: [control/match-derived-arm.kz](../corpus/control/match-derived-arm.kz)
 ```kurz
@@ -188,6 +207,18 @@ position precede unnamed ones)* A name that matches no parameter, a parameter th
 arguments, and a parameter without a default that gets none are the compile error
 `argument-mismatch` *(proposed)*.
 
+Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
+```kurz
+int Log(string s, int v) {
+    print(s)
+    return v
+}
+
+int Add(int a, int b) => a + b
+
+print(Add(b: Log("b", 2), a: Log("a", 1)))
+```
+
 Case: [data/default-and-named.kz](../corpus/data/default-and-named.kz)
 ```kurz
 data Item(int ProductId, int Count = 1)
@@ -264,8 +295,9 @@ one case, so a `match` cannot list it case by case. Such a `match` is the compil
 (E4), the one id for text no rule gives a meaning; a parser cannot tell it from a `match` on an
 enum, so the check is the type checker's (the owner, 2026-10-09, against an id of its own,
 `match-on-flags`, the rejected option). The error is at the line of the `match`, as the case
-expects. *(assumed: proposed on 2026-10-10, after the review of round 13)* How sets
-are combined is D17; the case tests a set of one name.
+expects, the line E4 gives every error only the type checker can see (the owner, 2026-10-10,
+confirming the reading proposed after the review of round 13). How sets are combined is D17; the
+case tests a set of one name.
 
 Case: [data/flags.kz](../corpus/data/flags.kz)
 ```kurz

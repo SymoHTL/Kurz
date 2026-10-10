@@ -99,8 +99,8 @@ Each line names a trap; its evidence is in the entry it links.
    2026-10-02, was retired by the owner on 2026-10-07 after it had stalled every round; the bill
    is counted before the run and named in the report after it. A run off the pipeline spends the
    seat at local prices and starts only after the owner said go to a bill that was named. The
-   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.27 USD,
-   the top rounded up from 0.264,
+   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.44 USD,
+   the top seen on 2026-10-10,
    off the pipeline about 1.3 to 1.8 USD, measured in
    [knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)), with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
