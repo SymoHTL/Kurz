@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The compiler as a library: source text, lexer, parser and the syntax tree. The command-line
+       program and the tests reference it. -->
+  <PropertyGroup>
+    <RootNamespace>Kurz.Compiler</RootNamespace>
+    <AssemblyName>Kurz.Compiler</AssemblyName>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kurz.Compiler.Tests" />
+  </ItemGroup>
+
+</Project>

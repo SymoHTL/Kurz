@@ -1,0 +1,10 @@
+// expect: error syntax at 7
+// rules: D13
+
+flags Access { Read, Write, Run }
+
+p = Access.Read
+match p {
+    Access.Read => print("read")
+    else => print("other")
+}

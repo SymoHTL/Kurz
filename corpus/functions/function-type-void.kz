@@ -1,0 +1,9 @@
+// expect: output
+// | 1
+// rules: F11
+
+void Run((int) => void f) {
+    f(1)
+}
+
+Run(x => print(x))

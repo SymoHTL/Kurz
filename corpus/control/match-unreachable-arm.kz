@@ -1,0 +1,16 @@
+// expect: error unreachable-arm at 11
+// rules: C4
+
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+void Show(User | NotFound u) {
+    match u {
+        User x => print("user {x.Name}")
+        Admin a => print("admin {a.Level}")
+        NotFound => print("none")
+    }
+}
+
+Show(Admin("Ann", 2))

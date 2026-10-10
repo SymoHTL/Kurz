@@ -1,13 +1,22 @@
 # 1. Source text
 
-### L1 (decided, §1) Files
+### L1 (decided, §1, §8) Files
 
-A source file has the extension `.kz`. *(proposed: a source file is read as UTF-8, and a string
-literal holds the code points written in it, as they are written, without normalization; the
-case below prints such a literal as written, and the string cases of T15 and T16 count its
-characters and bytes)* What a file that is not valid UTF-8, a byte-order mark at its start or an
-encoded surrogate does, and which error id each of them has, is open (the record, section 14):
-nothing here decides it.
+A source file has the extension `.kz`. It is read as UTF-8, and a string literal holds the code
+points written in it, as they are written, without normalization: the case below prints such a
+literal as written, and the string cases of T15 and T16 count its characters and bytes. A file that
+is not valid UTF-8 is one compile error, `invalid-source`, at the line of the first bad byte; an
+encoded surrogate is one, since it is not valid UTF-8. A byte-order mark at the start of the file is
+skipped, because Windows editors write one (the owner, 2026-10-09, against refusing the mark too,
+under which a file saved by Notepad does not compile; the cost is one accepted form of a file that
+is not pure UTF-8). The two-byte line break that Windows editors write is read as one line break
+wherever it stands, inside a `"""` block too, so the same program compiles and prints the same text
+whichever editor saved it (the owner, 2026-10-10, against reading the two bytes as written, under
+which the text of a block depends on the editor; the cost is that a literal holds the two-byte line
+break only through its escapes). The error has no case: a corpus file is read as UTF-8 by the lint and by
+every gate, so no case can be a file that is not, and the id stands here and not in the table of
+chapter 12, which lists the ids cases expect. The line break has no case either: the repository
+stores every file with line feeds alone.
 
 Case: [source/utf8-literal.kz](../corpus/source/utf8-literal.kz)
 ```kurz
@@ -145,10 +154,15 @@ print(yes)
 print(no)
 ```
 
-### L9 (assumed, §8) Names
+### L9 (decided, §8) Names
 
-A name starts with a letter or `_` and continues with letters, digits and `_`, as in C#. Upper
-and lower case are different.
+A name starts with a letter or `_` and continues with letters, digits and `_`. A letter is one of
+ASCII's, `a` to `z` and `A` to `Z`: a name that holds any other character, an umlaut included, is
+the compile error `syntax` (E4), and C#'s `@` names do not exist (the owner, 2026-10-09, against any
+Unicode letter as C# allows, under which a Latin and a Cyrillic `a` are two names nobody can tell
+apart, and against `@keyword` names, a second spelling C# has for interop, which Kurz has no rule
+for; the cost is that a C# program with an umlaut in a name is edited). Upper and lower case are
+different.
 
 Case: [source/names.kz](../corpus/source/names.kz)
 ```kurz
@@ -157,6 +171,18 @@ Total = 2
 print(total + Total)
 _count2 = 7
 print(_count2)
+```
+
+Case: [source/name-non-ascii.kz](../corpus/source/name-non-ascii.kz)
+```kurz
+zähler = 1
+print(1)
+```
+
+Case: [source/name-at.kz](../corpus/source/name-at.kz)
+```kurz
+@total = 1
+print(1)
 ```
 
 ### L10 (assumed, §4) The type of an integer literal
@@ -182,15 +208,16 @@ print(big)
 print(huge)
 ```
 
-### L17 (proposed) How far an expected type reaches
+### L17 (decided, §4) How far an expected type reaches
 
 A type that is written or expected reaches every literal of an expression that is made only of
 literals and the operators of T18 and T22, so `long big = 2147483647 + 1` is a `long` and not
-`constant-overflow` (T6), as C# treats a constant expression. It also reaches a literal that is
-one operand of such an operator whose other operand has a type: with `uint u`, the `1` of `u + 1`
-is a `uint`, which keeps T9 out of ordinary arithmetic, and the `100` of `sbyte low = -100`
-takes `sbyte` with its sign. C# converts the constant `int` instead, which Kurz cannot do across
-signedness (T9); this is the smallest rule that lets the cases of T3 and T9 stand.
+`constant-overflow` (T6), as C# treats a constant expression. It also reaches a literal that is one
+operand of such an operator whose other operand has a type: with `uint u`, the `1` of `u + 1` is a
+`uint`, which keeps T9 out of ordinary arithmetic, and the `100` of `sbyte low = -100` takes `sbyte`
+with its sign. C# converts the constant `int` instead, which Kurz cannot do across signedness (T9);
+this is the smallest rule that lets the cases of T3 and T9 stand. The owner confirmed this reading
+on 2026-10-09, in round 13.
 
 Case: [source/literal-takes-operand-type.kz](../corpus/source/literal-takes-operand-type.kz)
 ```kurz
@@ -202,10 +229,14 @@ print(big)
 
 ### L11 (decided, §4) Number literals
 
-Number literals are written as in C#: decimal digits; hexadecimal digits after `0x` and binary
-digits after `0b`; `_` between digits, which changes nothing; a fraction after a `.`, which makes
-the literal a `double`; and the suffixes of C# (`L`, `U`, `UL`, `f`, `d`, `m`) with the meaning
-they have there.
+Number literals take every form C# gives them: decimal digits; hexadecimal digits after `0x` and
+binary digits after `0b`, where `_` may also stand directly after the prefix (`0x_FF`); `_` between
+digits, which changes nothing; a fraction after a `.` and an exponent after `e` or `E` (`1e3`,
+`2.5E-3`), each of which makes the literal a `double`; and the suffixes of C# (`L`, `U`, `UL` in
+either order, `f`, `d`, `m`) in upper or lower case, with the meaning they have there, except that a
+suffix holding a lower-case `l` is the compile error `syntax` (E4), because `1l` reads as `11`,
+where C# only warns (the owner, 2026-10-09, against the forms listed before this round alone, under
+which `1e-9` is written out in full; the cost is that the lexer is C#'s).
 
 Case: [source/number-literals.kz](../corpus/source/number-literals.kz)
 ```kurz
@@ -215,6 +246,22 @@ print(1_000_000)
 print(4_000_000_000L)
 half = 0.5
 print(half < 1.0)
+```
+
+Case: [source/number-literal-forms.kz](../corpus/source/number-literal-forms.kz)
+```kurz
+print(1e3)
+print(2.5E-3)
+print(0x_FF)
+print(0b_101)
+print(1.5e2)
+print(7u)
+```
+
+Case: [source/number-literal-l-suffix.kz](../corpus/source/number-literal-l-suffix.kz)
+```kurz
+x = 1l
+print(x)
 ```
 
 ### L12 (decided, §8) Reserved words
@@ -254,13 +301,12 @@ print(equal)
 
 The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, `bool`, `string`, `char`,
-`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names and
-follow them while they are proposed there. Using one as a name is `reserved-word` (L12), as it
-is in C# for the first fourteen, which are keywords there; the four time types C# does not
-reserve. The owner chose this on 2026-10-04, against ordinary names that a declaration hides in
-its block, under which `long(x)` (T10) would have two readings in one program; the cost is that
-nothing can be called `string`, and that a ported program with a local called `duration` or
-`timestamp` has to rename it.
+`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names, which the
+owner decided on 2026-10-09. Using one as a name is `reserved-word` (L12), as it is in C# for the
+first fourteen, which are keywords there; the four time types C# does not reserve. The owner chose
+this on 2026-10-04, against ordinary names that a declaration hides in its block, under which
+`long(x)` (T10) would have two readings in one program; the cost is that nothing can be called
+`string`, and that a ported program with a local called `duration` or `timestamp` has to rename it.
 
 Case: [source/type-name-as-name.kz](../corpus/source/type-name-as-name.kz)
 ```kurz
@@ -270,13 +316,18 @@ print(1)
 
 ### L13 (decided, §8) A string over several lines
 
-A string that holds line breaks is written as a raw string literal is in C# 11. It opens with
-`"""` at the end of a line and closes with `"""` on a line of its own. The text starts on the
-line after the opening and ends before the closing line; neither of those two line breaks
-belongs to it. The indentation of the closing line is removed from every line of the text. A
-line of the text that does not start with that indentation is the compile error
-`block-indentation`; an empty line is exempt. An ordinary literal ends on the line it starts on.
-What `{` and `\` mean inside the block is L15; the cases hold neither.
+A string that holds line breaks is written as a raw string literal is in C# 11. It opens with `"""`
+at the end of a line and closes with `"""` on a line of its own. The text starts on the line after
+the opening and ends before the closing line; neither of those two line breaks belongs to it. The
+indentation of the closing line is removed from every line of the text. A line of the text that does
+not start with that indentation is the compile error `block-indentation`; a line that holds only
+whitespace is exempt and is an empty line of the text, as in C# 11. An ordinary literal ends on the
+line it starts on. `"""` opens a block only at the end of a line: `"""abc"""` on one line, text
+after an opening `"""` and text before a closing one are the compile error `syntax` (E4) (the owner,
+2026-10-09, against a one-line form holding `abc`, in which a `"` is an ordinary character, as C# 11
+has it, and against an id of its own for the malformed shapes; what the one-line form would buy, a
+`"` without a backslash, the escape of L7 gives). What `{` and `\` mean inside the block is L15; the
+cases hold neither.
 
 Case: [source/multi-line-string.kz](../corpus/source/multi-line-string.kz)
 ```kurz
@@ -296,16 +347,55 @@ text = """
 print(text)
 ```
 
+Case: [source/multi-line-string-one-line.kz](../corpus/source/multi-line-string-one-line.kz)
+```kurz
+text = """abc"""
+print(text)
+```
+
+Case: [source/multi-line-string-blank-line.kz](../corpus/source/multi-line-string-blank-line.kz)
+```kurz
+text = """
+    a
+  
+    b
+    """
+print(text)
+```
+
 ### L14 (decided, §4) Literals with a unit
 
-A number directly followed by a unit is a duration or a size. The list of units is fixed: `ms`,
-`s`, `min`, `h` and `days` make a duration (T13); `kb`, `mb` and `gb` make a number of bytes, an
-integer literal (L10) in steps of 1024.
+A number directly followed by a unit is a duration or a size. The list of units is fixed: `ms`, `s`,
+`min`, `h` and `days` make a duration (T13); `kb`, `mb` and `gb` make a number of bytes, an integer
+literal (L10) in steps of 1024. The number is a decimal integer or a decimal fraction, with `_`
+between its digits: `1.5s` is 1500 ms, `0.5h` is 30 min and `1.5kb` is 1536. A fraction that does
+not fall on a whole nanosecond, or on a whole byte before `kb`, `mb` and `gb`, is the compile error
+`inexact-literal`; a hexadecimal, a binary or a suffixed literal before a unit is `syntax` (E4) (the
+owner, 2026-10-09, against a decimal integer alone, under which one and a half seconds is written
+`1500ms`; the cost is a row in the error table and a decimal-to-nanosecond conversion in the
+compiler). The type of a duration literal is T29's.
 
 Case: [source/unit-literals.kz](../corpus/source/unit-literals.kz)
 ```kurz
 print(2kb)
 print(1mb)
+```
+
+Case: [source/unit-literal-fraction.kz](../corpus/source/unit-literal-fraction.kz)
+```kurz
+print(1.5s)
+print(0.5h)
+print(1.5kb)
+```
+
+Case: [source/unit-literal-inexact.kz](../corpus/source/unit-literal-inexact.kz)
+```kurz
+print(0.0000000001s)
+```
+
+Case: [source/unit-literal-hex.kz](../corpus/source/unit-literal-hex.kz)
+```kurz
+print(0x10ms)
 ```
 
 ### L15 (decided, §8) What is special inside a `"""` block

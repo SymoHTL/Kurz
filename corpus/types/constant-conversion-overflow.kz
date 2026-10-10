@@ -1,0 +1,4 @@
+// expect: error constant-overflow at 4
+// rules: T6
+
+print(byte(300))
