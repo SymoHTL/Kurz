@@ -1,11 +1,11 @@
 ---
 name: a-paid-result-is-printed-before-it-is-posted
-description: Postmortems of 2026-10-02 and 2026-10-03 - the first full review posted 40 comments in a row, GitHub's secondary rate limit refused the rest, and 88 findings that existed only in memory were lost with about 45 USD of passes behind them; a result that cost money is written to the log in full before the first post, and posts are paced one second apart with a wait on that refusal
+description: Postmortems of 2026-10-02 and 2026-10-03 - the first full review posted 40 comments in a row, GitHub's secondary rate limit refused the rest, and 88 findings that existed only in memory were lost with about 45 USD of passes at list price behind them, an estimate from 30 passes; a result that cost money is written to the log in full before the first post, and posts are paced one second apart with a wait on that refusal
 metadata:
   type: feedback
 ---
 
-On 2026-10-02 the first full review of pull request 8 ran 30 passes and found 294 defects. It
+On 2026-10-02 the first full review of pull request 8 ran 30 passes and reported 294 findings. It
 then posted them: one comment per file for the high and medium findings, and the lows in comments
 of twenty. After 40 posts without a pause the forge answered the 41st with
 
@@ -54,9 +54,13 @@ the only copy of their result was held back until a write to a rate-limited serv
 - A post that still fails is printed as `NOT POSTED` with the file, line and title of each
   finding. Its files are not stored as reviewed, so the next run reviews them again, and the run
   ends red (`failed`).
-- Reporting a failure tries each write once and never raises.
-- Low findings are no longer comments on the pull request, twenty at a time; they are collected
-  on one issue. A large review writes far fewer posts.
+- Reporting a failure never raises: each write goes through the paced post, which waits out the
+  rate limit while waits are left, and whatever it raises is printed.
+- Low findings open no thread. They are collected on one issue, in parts: each part goes first
+  as a note on the pull request, which the next run reads back as reported, then as a comment on
+  the issue; when that comment is refused, or fails otherwise and the issue, read back, does not
+  show it, the note is withdrawn, so that the part comes again instead of standing recorded and
+  missing; a note that got no answer is read back on the pull request the same way.
 
 The general shape: when a step that costs money or time is followed by a step that can be
 refused, the result is made durable (a log, a file) between the two.

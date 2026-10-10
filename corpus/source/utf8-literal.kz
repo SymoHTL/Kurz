@@ -1,0 +1,5 @@
+// expect: output
+// | aä
+// rules: L1
+
+print("aä")

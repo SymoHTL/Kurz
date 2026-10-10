@@ -5,7 +5,8 @@
 There are no lifetimes, no borrow annotations and no garbage collector. The compiler inserts
 reference counts and removes most of them at compile time.
 
-No case: it changes how a program runs, not what it prints.
+No case: what a program prints of it, when a `weak` reference finds its instance freed, the
+cases of R3 show.
 
 ### R2 (decided, §3) A possible reference cycle is an error
 

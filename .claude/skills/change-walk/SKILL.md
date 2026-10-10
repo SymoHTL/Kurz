@@ -48,40 +48,51 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
    Gate: the pre-push hook; HAZARD (#4) where it is off. The author and committer address of
    the commits is published too and read by no gate: HAZARD (#12).
 3. `gh pr create --draft --title "<title>" --body-file <file>`. The description says what and why.
-   If the change touches `tools/`, `.github/`, `.review/`, `.claude/` or `.githooks/`, or more
-   than 15 files, it has a `## Blast radius` section naming what can break and who reads it.
-   Gates: `pr-title`, `pr-breadth`.
-4. The `gates` job runs on every push and on every edit of the title or description. Red: open
+   If the change touches `tools/`, `.github/`, `.review/`, `.claude/`, `.githooks/`, `CLAUDE.md`
+   or `.gitattributes`, or more than 15 files, it has a `## Blast radius` section naming what can
+   break and who reads it.
+   Gates: `pr-title`, `pr-breadth` (the directories are its `INFRA` list and the two files its
+   `INFRA_FILES`, in `tools/pr_gates.py`, each with a case).
+4. The `gates` job runs on every push, on every edit of the title or description and on the Ready
+   event (the `pull_request` types in `gates.yml`). Red: open
    the log, read the `=== gates` table at its end, fix the first row that is FAIL, BROKEN or
    NOT RUN, or PARTLY on a gate other than `merge-checks`. No run at all on a head: a merge
    conflict, or a skip literal in the head commit. Gate: the required check `gates`.
 
 ## 3. Review
 
-A review run spends the owner's Claude seat: a pass reports 0.19 to 0.27 USD in CI and 1.3 to
-1.8 USD off the pipeline, and takes 6 to 18 minutes (`knowledge/what-a-review-pass-costs.md`), at
+A review run spends the owner's Claude seat: a pass reports 0.19 to 0.27 USD in CI (the top
+rounded up from 0.264) and 1.3 to
+1.8 USD off the pipeline, and takes 6 to 19 minutes (`knowledge/what-a-review-pass-costs.md`), at
 least two passes per batch of the diff. A run in CI, the one
 Ready or a push starts or a dispatch, starts without a question to the owner: the question before
 every run, set on 2026-10-02 after the first bills, was retired by the owner on 2026-10-07 because
 it stalled every round for a run that had cost 1.42 to 1.94 USD by then (1.04 to 2.47 in the ten
-runs measured to 2026-10-08; the upper bound at the pass cap, batches times ten passes times
-0.27 USD, is about 2.7 USD per batch); the bill is named in the report. A run off the
+runs measured to 2026-10-08; the upper bound at the pass cap, `MAX_PASSES` in
+`tools/review/review.py`, batches times five passes times
+0.27 USD, is about 1.35 USD per batch); the bill is named in the report. A run off the
 pipeline, at local prices, starts after the owner said go to the bill named. `judgment step`
 Count the batches on the head that will be reviewed, with
 `py -3 tools/review/review.py --pr <N> --plan`, which pays nothing; never take them from an
-earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
+earlier run. Gate: `self-tests` for the plan (it calls no model and posts nothing); counting on
+the head that will be reviewed is a `judgment step`.
 
 1. Iterate in Draft. A Draft, and a pull request from outside, is reviewed only on demand:
    `gh workflow run review.yml -f pr=<N>`, without `--ref`, so that it runs on the default
-   branch. Gate: the job's `if` refuses another ref, pinned by `ci-config`; a copy of the
+   branch, and only while no review run of this pull request is in progress: a new run cancels
+   it, and the cancelled run is still a bill; looking for a run in progress is a `judgment step`.
+   Gate: the job's `if` refuses another ref, pinned by `ci-config`; a copy of the
    workflow on another branch can drop it: HAZARD (#11).
-2. When the description is final, mark it Ready once: `gh pr ready <N>`. Where the forge starts
+2. When the description is final and no review run of this pull request is in progress (the run
+   Ready starts cancels it, and the cancelled run is still a bill), mark it Ready:
+   `gh pr ready <N>`. Where the forge starts
    the workflow, that starts the review, with the workflow, the reviewer and the rules of the
    default branch. When the review ran off the pipeline instead (the last bullet of step 3, while
    the pull request was still a Draft), wait until `gh pr view <N> --json labels` shows
-   `reviewed-<sha>` for the head you mark Ready: the job then skips that Ready event, while any
-   other head, pushed before or after Ready, is reviewed by the run its event starts. Never mark
-   Ready meaning to cancel the run: a run that started is a bill, cancelled or not
+   `reviewed-<sha>` for the head you mark Ready: the job then skips that Ready event, while an
+   unlabelled head current when you mark Ready is reviewed by the Ready's run, a head pushed
+   after Ready by its push's run, and an earlier Draft head only by a dispatch, or by a run off
+   the pipeline, which posts no status. Never mark Ready meaning to cancel the run: a run that started is a bill, cancelled or not
    (`knowledge/a-cancel-does-not-beat-the-runner.md`). Gate: `ci-config` pins the clause that
    skips the Ready event of the labelled head; the decision to mark Ready is a `judgment step`.
    Whether the run starts is the event policy: HAZARD (#10). An edit of the title or the
@@ -108,8 +119,8 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
      landed, and posts no status (a label write the forge refuses ends the run with
      `REVIEW DID NOT COMPLETE (failed)`: add the label by hand before Ready): the merge then needs
      the owner's approval for that pull request and head. Run it while the pull request is a
-     Draft, before step 2. HAZARD (#3). When the owner caps the bill, add `--passes <N>`: a batch
-     then gets at most N passes, and the note names the limit.
+     Draft, before step 2. HAZARD (#3). When the owner caps the bill, add `--passes <passes>`: a
+     batch then gets at most that many passes, and the note names the limit.
 4. Read every thread before fixing anything. Every thread, with its first comment:
    `gh api graphql --paginate -f owner=<owner> -f name=<name> -F pr=<N> -f query='query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { reviewThreads(first: 50, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { isResolved path comments(first: 1) { nodes { body } } } } } } }'`
    What is still unanswered: `py -3 tools/pr_gates.py findings --pr <N>`. Gate: `pr-findings`.
@@ -125,20 +136,24 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    the edits answered, mark it Ready:
    `py -3 tools/pr_gates.py resolve --pr <N> --head <the pushed commit>` prints which threads the head's edits answer and
    which stay open and why (a person's thread, a reviewer post that names no file, a finding whose
-   commit is gone, a file that did not change, a thread in which a person wrote, or a head the
-   pull request still shows as the finding's commit right after the push, where `--head` refuses
-   the run until the forge shows the pushed commit: run it again), and `--go` resolves the former
+   commit is gone, a file that did not change, a thread in which a person wrote, or a finding that
+   sits on the pushed head, which no second run clears: nothing was pushed since it, so it needs
+   its edit, or on tool, workflow or hook code its reply, like a file that did not change), and
+   `--go` resolves the former; while the pull request shows another head than the one given as
+   `--head`, the tool refuses: run it again
    (`knowledge/resolve-what-the-edit-answered.md`). A person's thread is theirs; a reviewer post
-   that names no file is read, what it asks is answered by an edit or a reply, and the thread is
+   that names no file is read and answered as the thread rule says for the file the thread sits
+   on, by an edit, or on tool, workflow or hook code also by a reply, and the thread is
    resolved by hand; a thread in which a person wrote gets its reply to the person and, on a file
    outside tool, workflow and hook code, still its edit before it is resolved by hand, unless the
    post is the owner's decision to make, which holds until decided; a thread on tool,
    workflow or hook code whose file did not change gets its reply and is resolved by hand; a file that did not change elsewhere means
    the round's push missed a fix, and that fix is the next round's one push; a finding whose commit
    is gone cannot be proven answered by an edit and holds the merge until the owner decides. The `gates` run
-   of the push saw the threads open, and an edit of the description after the review is text the
+   of the push may have seen the threads open, since it reads them when it reaches `pr-findings`,
+   before or after `--go`, and an edit of the description after the review is text the
    review never read (HAZARD #13): the walk is to mark the pull request Draft before the push,
-   resolve, then Ready, so the one review and the gates run on the head with its threads resolved. Each push is a new head
+   resolve, then Ready, whose event starts the one review and a `gates` run on the head with its threads resolved. Each push is a new head
    that needs its own review. Never push to cancel a running review; a push to a Ready pull
    request does cancel it. `judgment step`
 
@@ -156,7 +171,8 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
    the ruleset off for the one merge, restores it and reads it back. While it is off nothing on
    the server holds any other pull request or a push to `main`. HAZARD (#3): the approval is the
    caller's statement; the tool cannot verify it.
-   - Exit 3: the ruleset is still off. Say so at once, then switch it back on and check it:
+   - Exit 3: the ruleset was not read back as active, so it may still be off. Say so at once,
+     then switch it back on and check it:
      `gh api repos/<owner>/<name>/rulesets --jq '.[] | "\(.id) \(.name) \(.enforcement)"'`,
      `gh api -X PUT repos/<owner>/<name>/rulesets/<id> -f enforcement=active`,
      `py -3 tools/merge_pr.py --assert-settings`. Gate: `merge-checks` is red until it is back.
@@ -171,4 +187,5 @@ earlier run. Gate: `self-tests` (a plan calls no model and posts nothing).
 A defect that reached `main` is answered in one pull request with: the rule and its gate in
 `CLAUDE.md`, a knowledge entry with its `INDEX.md` line, and the gate map. Never a private note.
 Gate: review rule "every pull request", for a lesson the description names while no changed file
-records it.
+records it; that the rule, the entry with its INDEX line and the gate map all landed is a
+`judgment step`.

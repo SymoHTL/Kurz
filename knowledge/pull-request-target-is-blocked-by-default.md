@@ -59,5 +59,9 @@ attempted by that day, because the default branch has no review workflow before 
   default; only a `restrict_action_events` rule that lists an event allows it. The policy is read
   with `GET /repos/{owner}/{repo}/actions/policies/{id}` and replaced whole with `PUT` on the
   same path (`name` and `enforcement` are required). Nothing asserts the policy (HAZARD #10).
+- Read again on 2026-10-09 through `GET /repos/{owner}/{repo}/actions/policies/{id}`: the policy is
+  active (its `enforcement` field; created on 2026-10-03), and its one `restrict_action_events` rule
+  allows `pull_request_target` and `workflow_dispatch` for `.github/workflows/review.yml`. The row
+  of `guides/quality-bar.md` on the pipeline's permission cites this reading.
 - Do not switch the review to `pull_request` to get around the block. That event runs the
   workflow file of the pull request itself, so a pull request could rewrite its own review.

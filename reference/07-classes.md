@@ -464,6 +464,9 @@ class Admin(int Level) : User
 a = Admin(Level: 3)
 print(a.Name)
 print(a.Level)
+b = Admin("Bea", 2)
+print(b.Name)
+print(b.Level)
 ```
 
 ### K11 (decided, §4) A parameter that is passed on to the base

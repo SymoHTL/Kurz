@@ -5,8 +5,9 @@
   gates.py [--pr N]    locally: the same gates; without --pr the pull-request gates print NOT RUN
 
 A gate ends as PASS, PARTLY, FAIL, BROKEN, NOT RUN or N/A.
-FAIL     the gate found what it exists to find. Red.
-BROKEN   the gate could not start. Red, in CI and locally: nothing was checked.
+FAIL     the gate found what it exists to find, or its tool crashed or could not be opened: any
+         exit but 0 and kit.PARTLY. Red.
+BROKEN   the gate's process could not start. Red, in CI and locally: nothing was checked.
 NOT RUN  a pull-request gate, and no pull request is known. Red in CI. Locally it is loud and does
          not fail the run, because a branch has no pull request before it is pushed.
 PARTLY   the gate found nothing wrong in what it could read and named what it could not read (its
@@ -33,21 +34,29 @@ GATES = [
      "a tool's self-test fails, ran no case or contradicts its own exit code; a tool has no self-test or no recorded red proof; "
      "a recorded mutation no longer turns its one named case red"),
     ("tree", ["tools/tree_gate.py"], "always",
-     "a path the design phase does not allow; a credential-shaped or machine-bound string; a merge-conflict marker; "
-     "a file that is not UTF-8 text; a link or a submodule; fewer files than the floor"),
+     "a path the design phase does not allow; a credential-shaped or machine-bound string or a merge-conflict marker, "
+     "in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a "
+     "push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name "
+     "of every annotated tag and of each tag it points at, and a tag or a ref that points straight at a blob or a tree"),
     ("knowledge", ["tools/lint_knowledge.py"], "always",
      "an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, "
-     "in CLAUDE.md or in a skill that does not exist; a nested entry; a LIVING entry without diagram or update triggers; "
+     "in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the "
+     "repository; a nested entry; a LIVING entry without diagram or update triggers; "
      "expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; "
      "fewer entries or living diagrams than their floors"),
     ("reference", ["tools/lint_reference.py"], "always",
      "a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with "
-     "neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a corpus header that "
-     "cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; "
+     "neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is "
+     "neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that "
+     "cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an "
+     "error-table row that does not read as one, or a row that reads as one outside an error table; a design record, a "
+     "chapter or a corpus file that cannot be read, named with what went unchecked; "
      "fewer rules or cases than the floors"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "
-     "a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path or branch filter; a wider token; "
+     "a job in a container or beside services; the credential anywhere but the env of the job's last step; "
+     "a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request "
+     "or a push trigger not limited to main; a wider token; "
      "a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the "
      "pinned one; a workflow without facts"),
     ("merge-checks", ["tools/merge_pr.py", "--assert-settings"], "always",
@@ -59,7 +68,7 @@ GATES = [
     ("pr-breadth", ["tools/pr_gates.py", "breadth"], "pr",
      "more than 15 files, or a change to the quality infrastructure, without a Blast radius section"),
     ("pr-findings", ["tools/pr_gates.py", "findings"], "pr",
-     "a review finding that is unresolved, or resolved without the edit (or, on tool code, the reply) that answers it"),
+     "a review finding that is unresolved, or resolved without the edit (or, on tool, workflow or hook code, the reply) that answers it"),
     ("push-hook", ["tools/gates.py", "--check-push-hook"], "local",
      "this clone would publish without the tree gate: core.hooksPath is not .githooks"),
 ]

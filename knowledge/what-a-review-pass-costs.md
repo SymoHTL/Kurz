@@ -1,6 +1,6 @@
 ---
 name: what-a-review-pass-costs
-description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 18 minutes, whatever the model and effort; per pass about 1.4 to 1.8 USD at list price on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD; in CI a pass reports 0.19 to 0.27 USD (ten runs, 2026-10-07 and 2026-10-08). A run in CI starts without a question to the owner since 2026-10-07; a run off the pipeline waits for the owner's go-ahead to the bill named
+description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 19 minutes, whatever the model and effort; per pass about 1.3 to 1.8 USD at list price (2026-10-02 and 2026-10-07) on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD; in CI a pass reports 0.19 to 0.27 USD (ten runs, 2026-10-07 and 2026-10-08; the top rounded up from 0.264). A run in CI starts without a question to the owner since 2026-10-07; a run off the pipeline waits for the owner's go-ahead to the bill named
 metadata:
   type: reference
 ---
@@ -87,8 +87,9 @@ What follows from it:
   the first bills, was retired by the owner on 2026-10-07, when the runs in CI had cost 1.42 to
   1.94 USD: it had stalled every round for a run of that size. The ten runs measured to
   2026-10-08 cost 1.04 to 2.47 USD (a two-pass run of one batch would be about half a USD);
-  the upper bound at the pass cap is batches times ten passes times 0.27 USD, the highest
-  measured rounded up, about 2.7 USD per batch: 5.4 USD for two batches, 13.5 for five.
+  the upper bound at the pass cap is batches times five passes (the cap a batch, `MAX_PASSES`
+  in tools/review/review.py) times 0.27 USD, the highest measured rounded up, about 1.35 USD
+  per batch: 2.7 USD for two batches, 6.75 for five.
   The bill is counted
   before the run and named in the report after it. A run off
   the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go
@@ -100,7 +101,8 @@ What follows from it:
   run's first line: a run off the pipeline that names more batches than the plan did is stopped,
   because the go-ahead covered the plan; a run in CI is reported with the count it names.
   Gate: `self-tests` for the plan; the rest is a `judgment step`.
-- Low findings do not keep a review going: a batch converges when a pass adds nothing above low,
+- Low findings do not keep a review going: a batch converges when a pass after the first adds
+  nothing above low (with `--passes 1`, when its only pass does; the audit note names that limit),
   and lows are collected on the issue labelled `review-lows` instead of threads. They are fixed
   together, or with a push that is needed anyway (the owner's decision, 2026-10-02).
 - The replay cache is keyed on the reviewer (`review.py`, `tools/kit.py`), the rules, the model,

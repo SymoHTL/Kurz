@@ -3,11 +3,13 @@
 - both: actions pinned by commit SHA, the hosted runner named by its versioned label (the forge
   offers no digest for a hosted image), a timeout on every job, pip with
   --require-hashes, no job or step that may fail quietly (`continue-on-error`), no step-level `if`,
-  no reusable-workflow job, no `defaults` and no step with a shell or a working directory of its
-  own, no expression inside a `run:` value (a value reaches a script through `env:`), a secret only
-  as plain `secrets.<NAME>` in a step's `env:`, no key twice in one mapping;
-- gates.yml: runs on every push to a pull request, on every edit of its title or description, and
-  on pushes to main, with no path or branch filter; exactly one job, `gates`, with no `if` (a
+  no reusable-workflow job, no job in a container or beside services, no `defaults` and no step
+  with a shell or a working directory of its own, no expression inside a `run:` value (a value
+  reaches a script through `env:`), a secret only as plain `secrets.<NAME>` in the `env:` of the
+  job's last step, no key twice in one mapping;
+- gates.yml: runs on a pull request's opening, every push to it, its reopening, its Ready and every edit
+  of its title or description (PR_TYPES), and on pushes to main alone, with no path filter and no filter on pull_request; exactly one job,
+  `gates`, with no `if` (a
   skipped job reports success to a required check); read-only token; no secret; the last step runs
   the full gate runner and carries nothing but its name, env and run.
   Not covered by any trigger: a review that posts its findings and a thread that is resolved start
@@ -26,7 +28,6 @@
 `--self-test` breaks each fact in the real files, one token at a time, and expects its error."""
 import os
 import re
-import shutil
 import sys
 import tempfile
 
@@ -68,20 +69,22 @@ def unreadable(name, e):
 
 
 def strings(node, path=()):
-    """(the keys that lead to it, the text) of every string in parsed YAML."""
+    """(the keys that lead to it, the text) of every string in parsed YAML; an item of a list is
+    named by its index."""
     if isinstance(node, dict):
         for key, value in node.items():
             yield from strings(value, path + (str(key),))
     elif isinstance(node, list):
-        for value in node:
-            yield from strings(value, path + ("[]",))
+        for n, value in enumerate(node):
+            yield from strings(value, path + (str(n),))
     elif isinstance(node, str):
         yield path, node
 
 
 def secret_errors(name, data, allowed):
-    """A secret may only be read as `${{ secrets.<NAME> }}`, alone, as the value of a variable in a
-    step's `env:`, and only the names in `allowed`, each of which must be read."""
+    """A secret may only be read as `${{ secrets.<NAME> }}`, alone, as the value of a variable in the
+    `env:` of a job's last step, the one that decides, and only the names in `allowed`, each of which
+    must be read. A step before it, an install among them, never holds the credential."""
     errors, read = [], set()
     for path, value in strings(data):
         # the whole value, not what a non-greedy match of `}}` leaves: a literal `}}` inside the expression
@@ -89,12 +92,14 @@ def secret_errors(name, data, allowed):
         if not ((path and path[-1] == "if") or "${{" in value) or not re.search(r"\bsecrets\b", value, re.I):
             continue
         plain = re.fullmatch(r"\$\{\{\s*secrets\.(\w+)\s*\}\}", value)
-        in_env = len(path) == 6 and path[0] == "jobs" and path[2:5] == ("steps", "[]", "env")
+        steps = ((data.get("jobs") or {}).get(path[1]) or {}).get("steps") if len(path) == 6 else None
+        last = isinstance(steps, list) and path[3] == str(len(steps) - 1)
+        in_env = len(path) == 6 and path[0] == "jobs" and path[2] == "steps" and last and path[4] == "env"
         if plain and in_env and plain.group(1) in allowed:
             read.add(plain.group(1))
         else:
             errors.append(f"{name}: a secret is read at {'.'.join(path)}: only {sorted(allowed) or 'no secret'} may be read, "
-                          f"as plain `secrets.<NAME>` in a step's env")
+                          f"as plain `secrets.<NAME>` in the env of the job's last step")
     if read != set(allowed):
         errors.append(f"{name}: the secrets read must be exactly {sorted(allowed)}, found {sorted(read)}")
     return errors
@@ -128,6 +133,8 @@ def common(name, text, data, secrets):
                 errors.append(f"{name}: job {jid} has a step that writes GITHUB_ENV or GITHUB_PATH: only the start-time line may")
             if re.search(r"\b(?:git\s+(?:checkout|fetch|pull|switch)|gh\s+pr\s+checkout)\b", run):
                 errors.append(f"{name}: job {jid} has a step that checks out or fetches by hand: that can be pull-request code")
+        if "container" in job or "services" in job:
+            errors.append(f"{name}: job {jid} runs in a container or beside services: their images are pinned by no fact")
         if job.get("runs-on") != "ubuntu-24.04":
             errors.append(f"{name}: job {jid} runner image is not pinned to ubuntu-24.04")
         if "timeout-minutes" not in job:
@@ -242,19 +249,23 @@ def review_facts(text):
 
 
 def lint(root):
-    errors = []
+    """(errors, how many workflow files were read)."""
+    errors, read = [], 0
     try:
         listed = sorted(os.listdir(os.path.join(root, WORKFLOWS)))
     except OSError as e:
-        return [f"{WORKFLOWS} cannot be listed: {type(e).__name__}"]
+        return [f"{WORKFLOWS} cannot be listed: {type(e).__name__}"], 0
     for fname, facts in (("gates.yml", gates_facts), ("review.yml", review_facts)):
         try:
-            errors += facts(kit.read(os.path.join(root, WORKFLOWS, fname)))
+            text = kit.read(os.path.join(root, WORKFLOWS, fname))
         except OSError as e:
             errors.append(f"{fname}: cannot be read: {type(e).__name__}")
+            continue
+        read += 1
+        errors += facts(text)
     if listed != FILES:
         errors.append(f"workflows are {listed}: a workflow without facts here is unchecked configuration")
-    return errors
+    return errors, read
 
 
 PLAIN_JOB = "  extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: echo ok\n"
@@ -356,7 +367,8 @@ MUTATIONS = [
     ("review.yml", "the dispatch input in a shell line", START, '        run: echo "${{ inputs.pr }}" >> "$GITHUB_ENV"\n', "interpolates"),
     ("review.yml", "the whole event in a shell line", START, '        run: echo "${{ toJSON(github.event) }}" >> "$GITHUB_ENV"\n', "interpolates"),
     ("review.yml", "an env value in a shell line", START, '        run: echo "${{ env.TITLE }}" >> "$GITHUB_ENV"\n', "interpolates"),
-    ("review.yml", "parallel reviews of one pull request", "cancel-in-progress: true", "cancel-in-progress: false", "job's concurrency"),
+    ("review.yml", "a push lets the review of a superseded head run to its end", "cancel-in-progress: true", "cancel-in-progress: false",
+     "job's concurrency"),
     ("review.yml", "dispatched reviews share one group", "      group: review-${{ github.event.pull_request.number || inputs.pr }}\n",
      "      group: review-${{ github.event.pull_request.number }}\n", "job's concurrency"),
     ("review.yml", "a skipped run cancels a running review", "\njobs:\n",
@@ -369,6 +381,13 @@ MUTATIONS = [
      "          fetch-depth: 0\n          token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n", "a secret is read"),
     ("review.yml", "the credential in a shell line", START, '        run: echo "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"\n', "a secret is read"),
     ("review.yml", "no credential at all", SECRET, "", "secrets read must be exactly"),
+    ("review.yml", "the credential on the step that installs the CLI", "      - name: Install the Claude CLI, proven by running it\n",
+     "      - name: Install the Claude CLI, proven by running it\n        env:\n"
+     "          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n", "a secret is read"),
+    ("gates.yml", "a job in a container", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    container: python:3\n",
+     "container or beside services"),
+    ("review.yml", "a service beside the review", "    timeout-minutes: 90\n",
+     "    timeout-minutes: 90\n    services:\n      cache:\n        image: redis\n", "container or beside services"),
     ("review.yml", "an optional pull request number", "        required: true\n", "        required: false\n", "must be required"),
     ("review.yml", "the review step runs with a flag", "tools/review/review.py'", "tools/review/review.py --local'", "must be the review step"),
     ("review.yml", "the review step does not know its pull request", "          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}\n", "",
@@ -382,6 +401,11 @@ MUTATIONS = [
 
 
 def self_test():
+    with kit.scratch("lint-ci-") as base:  # every tree of the suite; a removal that fails is said, not raised
+        return cases_in(base)
+
+
+def cases_in(base):
     facts = {"gates.yml": gates_facts, "review.yml": review_facts}
     real = {f: kit.read(os.path.join(kit.ROOT, WORKFLOWS, f)) for f in facts}
     cases = [(f"the real {f} is clean", not facts[f](real[f]), facts[f](real[f])) for f in facts]
@@ -397,7 +421,7 @@ def self_test():
     cases.append(("a key that occurs twice is refused, not read as its last value", any("occurs twice" in e for e in twice), twice))
 
     def tree(files):
-        root = tempfile.mkdtemp()
+        root = tempfile.mkdtemp(dir=base)
         os.makedirs(os.path.join(root, WORKFLOWS))
         for fname in files:
             with open(os.path.join(root, WORKFLOWS, fname), "w", encoding="utf-8", newline="\n") as f:
@@ -407,18 +431,21 @@ def self_test():
     for name, root, needle in [("lint: the two real workflows are clean", tree(FILES), None),
                                ("lint: a third workflow is unchecked configuration", tree(FILES + ["extra.yml"]), "without facts"),
                                ("lint: a missing workflow is an error", tree(["gates.yml"]), "review.yml: cannot be read"),
-                               ("lint: no workflows directory is an error", tempfile.mkdtemp(), "cannot be listed")]:
-        errors = lint(root)
+                               ("lint: no workflows directory is an error", tempfile.mkdtemp(dir=base), "cannot be listed")]:
+        errors, read = lint(root)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
-        shutil.rmtree(root, ignore_errors=True)
+        if needle is None:
+            cases.append(("lint: the count on the clean tree is of both workflows, so a capped count shows", read == len(FILES), read))
+        if needle and "review.yml" in needle:
+            cases.append(("lint: the count is of the workflows read, not of the ones expected", read == 1, read))
     return kit.report(cases)
 
 
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
-    errors = lint(kit.ROOT)
+    errors, read = lint(kit.ROOT)
     for e in errors:
         print("ERROR:", e)
-    print(f"ci lint: {len(FILES)} workflows, {len(errors)} errors")
+    print(f"ci lint: {read} workflows read, {len(errors)} errors")
     sys.exit(1 if errors else 0)

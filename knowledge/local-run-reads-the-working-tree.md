@@ -5,7 +5,7 @@ metadata:
   type: reference
 ---
 
-What each run reads, as the tools stand on 2026-10-02:
+What each run reads, as the tools stand on 2026-10-09:
 
 - A local `py -3 tools/gates.py` reads the files on disk. The tree gate lists them with
   `git ls-files --cached --others --exclude-standard`: tracked files as they are in the working
@@ -16,15 +16,17 @@ What each run reads, as the tools stand on 2026-10-02:
 
 Seen on 2026-10-01, in the first `gates` run of pull request 8: the gate `tree` was red on
 `tools/__pycache__/`, a directory of bytecode that Python had written while the earlier gates
-imported their modules. The interpreter that the tools were written with was set never to write
-bytecode, so no local run had ever seen that directory. It is ignored in `.gitignore` since then,
+imported their modules. The local runs had bytecode writing switched off (PYTHONDONTWRITEBYTECODE),
+the runner's interpreter did not, so no local run had seen that directory. It is ignored in `.gitignore` since then,
 and the proof replay writes none ([[stale-bytecode-hides-a-mutation]]).
 
 **How to apply:** when a verdict differs between a local run and CI, compare what was read before
 comparing the code. `judgment step`
 
-- `git status --porcelain --untracked-files=all` prints every file that the local run read and
-  the commit does not hold, or holds in another version. A new fixture, a new knowledge entry or
+- `git status --porcelain --untracked-files=all --ignored` prints every file that the local run
+  may have read and the commit does not hold, or holds in another version; `tools/lint_knowledge.py`,
+  `tools/lint_reference.py` and `tools/red_proof.py` walk their directories with `os.listdir` and
+  `os.walk` (read on 2026-10-09), so they read ignored files too. A new fixture, a new knowledge entry or
   a new tool that was never staged passes here and is missing there: an INDEX link to a missing
   file, a tool without its red proof, a self-test that cannot find its payload.
 - The reverse, red only in CI on a path nobody wrote: something the job created. Ignore it in

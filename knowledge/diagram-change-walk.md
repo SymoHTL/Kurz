@@ -1,6 +1,6 @@
 ---
 name: diagram-change-walk
-description: Living diagram - the walk one change takes from a branch to main, in the order the gates bite, with every place it bounces back; the procedure itself is the skill change-walk
+description: Living diagram - the walk one change takes from a branch to main, in the order the gates bite, with the places where the gates, the review and the merge send it back; the procedure itself is the skill change-walk
 metadata:
   type: reference
 ---
@@ -37,13 +37,18 @@ flowchart TD
     Read the table at the end of the log and fix the first row that turned the run red:
     pr-title and pr-breadth by editing the title or the description, the rest by one push.
     No run at all on a head: a merge conflict, or a skip literal in the head commit"]
-    E --> F["mark Ready once, with the description final.
+    E --> F["mark Ready with the description final; after a review round node I marks it Ready again.
     The review is the default branch's workflow, reviewer and rules, with the diff as data.
-    Whether the forge starts it is the event policy: HAZARD issue 10"]
+    Whether the forge starts it is the event policy: HAZARD issue 10.
+    An edit of the title or the description after the review is text the review never read:
+    dispatch it again, HAZARD issue 13"]
     F --> G{"review status on this head?"}
-    G -- "pending: a Draft, a pull request from outside, or a Ready one with no run" --> P["start the review on this head:
-    gh workflow run review.yml -f pr=N, on the default branch. A run costs the owner's seat,
-    so the owner says go first: judgment step. A dispatch on another ref: HAZARD issue 11"]
+    G -- "pending: still a Draft" --> F
+    G -- "pending: a pull request from outside, or a Ready one with no run" --> P["start the review on this head:
+    gh workflow run review.yml -f pr=N, on the default branch, while no run of it is in progress. A run costs the owner's seat;
+    it starts without a question (the owner retired the question on 2026-10-07, after it had stalled every round:
+    CLAUDE.md, Tests, item 6) and the bill is named in the report: judgment step.
+    A dispatch on another ref: HAZARD issue 11"]
     P --> G
     G -- "error: did not complete" --> H["read the run's last line, REVIEW DID NOT COMPLETE (kind).
     Gate: the status stays error, so the ruleset holds the merge.
@@ -59,8 +64,9 @@ flowchart TD
     with --passes N a batch gets at most N passes and the note names the limit.
     The merge then needs the owner's approval for this head: judgment step, HAZARD issue 3"]
     O --> I
-    G -- "success" --> I["read every thread; fix each finding in its file; then resolve; then push once.
-    On tool and workflow code a finding that does not hold, or that a HAZARD issue records,
+    G -- "success" --> I["read every thread; fix each finding in its file; mark Draft; push once;
+    read the plan of pr_gates.py resolve --pr N --head SHA, then resolve with --go; mark Ready again.
+    On tool, workflow and hook code a finding that does not hold, or that a HAZARD issue records,
     is answered by a reply that says so: judgment step. On every other file only the edit counts.
     Low findings are collected on the issue labelled review-lows: they are fixed together,
     or with a push that is needed anyway. Gate: pr-findings"]
@@ -70,8 +76,13 @@ flowchart TD
     J -- "yes" --> K["py -3 tools/merge_pr.py PR SHA: merges exactly that head, squash.
     Gate: the ruleset. The merge button skips what only the tool checks: HAZARD issue 14"]
     J -- "red for a cause outside the change" --> N["the owner approves this pull request and head:
-    merge_pr.py --over-red. The ruleset is off for that one merge: nothing else may merge or push meanwhile.
-    Exit 3: still off, say so at once. Exit 6: post the waiver record by hand.
+    merge_pr.py --over-red. The ruleset is off for that one merge, and nothing stops another merge or push
+    in that window (HAZARD issue 27).
+    Exit 1 with REFUSED: the checks or the threads changed between the tool's first reading and its reading
+    after the ruleset went off (what changed before the tool started is the owner's to see); the ruleset is restored and
+    nothing merged; the owner approves the new state again, or not at all.
+    Exit 3: not read back as on; say so at once and switch it back on with the skill's commands,
+    merge-checks is red until it is back. Exit 6: post the waiver record by hand.
     Judgment step, HAZARD issue 3"]
     N --> L
     K --> L["delete the branch. The gates job runs on main: red when a gate of subgraph G fails there.
@@ -91,5 +102,8 @@ flowchart TD
 - `tools/ruleset.json` changes: nodes A, J and K.
 - `tools/pr_gates.py` changes a pull-request gate: nodes D and I.
 - `tools/gates.py` changes a verdict or the gate list: nodes B2, E and L.
-- `tools/tree_gate.py`, `.claude/settings.json` or `.githooks/pre-push` changes: nodes B1 and C.
-- A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 14) closes or opens: that node.
+- `tools/tree_gate.py`, `.claude/settings.json` or `.githooks/pre-push` changes: nodes B1 and C;
+  a change to any pattern of `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals)
+  reaches nodes C and D, which scan the tree, the pushed commits, the title, the description and every commit
+  message through them, and not B1: the write-time hook reads the path alone.
+- A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 13, 14, 27) closes or opens: that node.

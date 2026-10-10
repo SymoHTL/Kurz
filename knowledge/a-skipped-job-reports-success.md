@@ -39,16 +39,21 @@ How this repository is built around it:
   on the branch that carried the fix (issue #5 closed). The merge tool, which
   reads the same status, has to read it from the endpoint that names its creator:
   [[the-combined-status-drops-the-creator]]. What stays ungated: the acceptance was seen once and
-  nothing re-checks it (it fails closed: a status the ruleset stopped accepting leaves the merge
+  nothing re-checks it, HAZARD #24 (it fails closed: a status the ruleset stopped accepting leaves the merge
   pending), and any workflow run of this repository can post a status of that name:
   HAZARD #11, see [[the-review-runs-the-default-branch]].
 - A head with no `gates` run at all, and the check pending, is one of the two cases above: look
   for a merge conflict first, then for a skip literal in the head commit's message.
 - A skip literal can also reach `main`, where it would skip the gates run on the merge commit.
-  The squash commit is written from the title and the description by the merge tool, and from
-  the commit messages by a merge through the button. So `tools/pr_gates.py title` (the gate
+  The squash commit is written from the title and the description by the merge tool, and by a
+  squash through the button from the commit's or the pull request's title and the commit messages,
+  which is what this repository's settings say (`squash_merge_commit_title` COMMIT_OR_PR_TITLE and
+  `squash_merge_commit_message` COMMIT_MESSAGES, read 2026-10-09 with `gh api repos/OWNER/REPO`),
+  plus whatever is typed into its dialog, which no gate reads
+  (HAZARD #14). So `tools/pr_gates.py title` (the gate
   `pr-title`) refuses a skip literal in the title, in the description and in every commit message
   of the branch, the merge tool checks the title and the description again at the merge, and the
-  pre-push hook refuses one in a commit message before it is published. `pr-title` cannot report
+  pre-push hook, in a clone that switched it on (HAZARD #4 where it is off), refuses one in a
+  commit message before it is published. `pr-title` cannot report
   a literal in the head commit, because its own job does not start then: that is the pending
   check above.

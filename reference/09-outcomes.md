@@ -228,14 +228,15 @@ Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
 alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
-`throw-needs-value`: there is no value it could mean. *(proposed)* The record marks as
-*(assumed)* that the runtime adds the place and the chain id to what was thrown. When a
-supervisor reads it as the `Reason` of a crashed child, its type is the union of everything the
+`throw-needs-value`: there is no value it could mean. *(proposed)* When a supervisor reads what
+was thrown as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
 that carries the text and the place, and against limiting `throw` to `data` values and text). The
 run-time errors of chapter 12 are values of one `data` type of the runtime, a member of every
 such union in every build; the place and the chain id are fields of the `Crashed` case beside
-`Reason`; a thrown class instance is moved out of the dying child's heap into the supervisor's
+`Reason`, which is this reference's reading of the record's *(assumed)* sentence that the runtime adds
+them to what was thrown: they travel with the crash, not inside the thrown value; a
+thrown class instance is moved out of the dying child's heap into the supervisor's
 with everything it reaches, which is the cost, paid once per such crash (the owner, 2026-10-04,
 against a compile error for a thrown class instance). The supervisors
 themselves are outside this reference. The bare `throw` of an `else` arm is the `throw` that

@@ -2,9 +2,17 @@
 
 ### L1 (decided, §1) Files
 
-A source file has the extension `.kz`.
+A source file has the extension `.kz`. *(proposed: a source file is read as UTF-8, and a string
+literal holds the code points written in it, as they are written, without normalization; the
+case below prints such a literal as written, and the string cases of T15 and T16 count its
+characters and bytes)* What a file that is not valid UTF-8, a byte-order mark at its start or an
+encoded surrogate does, and which error id each of them has, is open (the record, section 14):
+nothing here decides it.
 
-No case: it is a property of the file name, and every file in the corpus has it.
+Case: [source/utf8-literal.kz](../corpus/source/utf8-literal.kz)
+```kurz
+print("aä")
+```
 
 ### L2 (decided, §8) A newline ends a statement
 
@@ -76,7 +84,7 @@ print(a); print(a + 1)
 
 ### L6 (decided, §8) Interpolation is always on
 
-Inside a string literal, `{expression}` is replaced by the text (A2 to A8) of the expression's value.
+Inside a string literal, `{expression}` is replaced by the text (A2 to A15) of the expression's value.
 
 Case: [source/interpolation.kz](../corpus/source/interpolation.kz)
 ```kurz
@@ -304,7 +312,8 @@ print(1mb)
 
 Inside a `"""` block (L13), `{expression}` is replaced (L6) and `\` starts an escape (L7), as in
 every other literal. A brace that starts no interpolation is written `\{`. This is where the
-block leaves the raw string of C#, which does neither unless it is marked with `$`. A `"` inside
+block leaves the raw string of C#, which never treats `\` as an escape and replaces
+`{expression}` only when it is marked with `$`. A `"` inside
 the block is an ordinary character, as it is there, and needs no `\`.
 
 Case: [source/multi-line-string-interpolation.kz](../corpus/source/multi-line-string-interpolation.kz)

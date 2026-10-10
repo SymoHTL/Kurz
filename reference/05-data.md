@@ -17,8 +17,9 @@ print(u.Name)
 
 ### D2 (assumed, §4) Making a value
 
-A value is made by the type's name followed by the arguments in order. There is no `new`; every
-sample in the record is written this way.
+A value is made by the type's name followed by the arguments, in order or by name and with
+defaults (D11); a type without fields is its bare name (D8). There is no `new`; every sample in
+the record is written this way.
 
 Case: [data/declare.kz](../corpus/data/declare.kz)
 
@@ -95,7 +96,9 @@ print(NameOf(a))
 ### D7 (decided, §4) How `data` inheritance is written
 
 `data Admin(int Level) : User` declares a `data` type that inherits from `User`. Its constructor
-takes the fields of the base first, then its own.
+takes the fields of the base first, then its own. A field of the base with a default keeps its
+place, so a call that leaves it out names the arguments after it (D11), as K16 says of the same
+form for a class.
 
 Case: [data/inherit.kz](../corpus/data/inherit.kz)
 
@@ -223,7 +226,10 @@ Show(Plan.Pro)
 It gives what `[Flags]` and `HasFlag` give in C#. Each name is one bit, and the compiler numbers
 the bits in order unless the declaration writes the number (D19). A name alone, `Access.Read`,
 is the set that holds that name. `set.Has(Access.Read)` is `true` when the set holds the name. A
-set is not one case, so a `match` cannot list it case by case. How sets are combined is D17; the
+set is not one case, so a `match` cannot list it case by case. *(proposed: such a `match` is the
+compile error `syntax` (E4), the id the reference has for text no rule gives a meaning; a parser
+cannot tell it from a `match` on an enum, so the check is the type checker's, and an id of its
+own is a question for a design round)* How sets are combined is D17; the
 case tests a set of one name.
 
 Case: [data/flags.kz](../corpus/data/flags.kz)
@@ -320,8 +326,8 @@ directions are members of the type. `Plan.Pro.Number` is the number of a value. 
 is the value of a number, and its result is `Plan | Invalid`: a number that no value has is an
 outcome (O1), not an exception. The record marks as *(assumed)* that a declaration writes a
 number for every value or for none, that the number is an `int`, and that `Invalid` is the type
-that input from outside yields (record, section 13); it is a `data` type without fields (D8), so an
-arm names it bare, and the reference does not declare it because the standard library will. The
+that input from outside yields (record, section 13); an arm names it as it names any case type
+(C4), and the reference does not declare it because the standard library will. The
 case declares no `Invalid` for that reason. What a declaration that breaks the shape gets is D20.
 
 Case: [data/enum-number.kz](../corpus/data/enum-number.kz)

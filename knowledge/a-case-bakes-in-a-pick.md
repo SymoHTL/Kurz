@@ -1,24 +1,26 @@
 ---
 name: a-case-bakes-in-a-pick
-description: Writing the first conformance cases (2026-10-02) needed rules the design record never states and met forks nobody had chosen; a runnable case fixes a spelling and a meaning, so the reference marks such rules proposed or open and the lint refuses a case on an open rule
+description: Writing the first conformance cases (2026-10-02) needed rules the design record did not state then and met forks nobody had chosen; a runnable case fixes a spelling and a meaning, so the reference marks such rules proposed or open and the lint refuses a case on an open rule
 metadata:
   type: feedback
 ---
 
 The design record was written as decisions with illustrative samples. When the sequential core
 was written down rule by rule on 2026-10-02, with one small program per rule, the cases needed
-more than the record holds. 33 of the first 121 rules were things the record never states: that
+more than the record held. 33 of the first 121 rules were things the record did not state then: that
 `print` exists, that a block body ends with `return`, where a variable is visible, what "used"
 means for the unused-variable error, that `match` has to list every case. 24 more were forks the
 record left open or contradicted itself on: two samples used `;` although section 8 says there
 are no semicolons, one sample wrote a `weak` type with `?` and without, a range was written
 `0..150` and nobody had said whether the end is included.
 
-The owner answered all of them the same day, in one round. Writing the cases for those answers
-met seven new forks (how a set of flags is written, which overload a call picks, how a class
-with a primary constructor inherits) and needed two more rules the record does not state. The
-answers to those nine met nine forks again and one more unstated rule, the answers to those
-met four, and the answers to the four met none. It repeats with every batch of cases until the
+The owner answered all of them the same day, in one round (round 7). Writing the cases for those
+answers met seven new forks (how a set of flags is written, which overload a call picks, how a
+class with a primary constructor inherits) and needed two more rules the record did not state;
+round 8 answered those nine the same evening. The answers met nine forks again and one more
+unstated rule (round 9, the same night), the answers to those met four (round 10, 2026-10-03),
+and on 2026-10-03 the answers to the four met none, until the review of that day found the gaps
+that rounds 11 (2026-10-03) and 12 (2026-10-04) answered. It repeats with every batch of cases until the
 forks run out, and each fork is narrower than the answer it came from: after "a class names the
 fields that count" the fork is how it names them.
 
@@ -49,9 +51,13 @@ not. Once sixty cases use it, it is the language. The v0 compiler failed the sam
 - An answer by reference ("everything C# does") is decided for what carries over. Where the
   other language leans on something this one does not have, that part is contradicted in the
   reply and becomes an `open` rule with its options. C# keeps a null check on `user.Email` valid
-  across a call that can assign the field, because its analysis only warns; here an unchecked
-  use is an error, so that part of "full C#" became rule N9, open with three options, and was
-  decided by the owner in the next round.
+  across a call that can assign the field: built with the .NET SDK 10.0.204 on 2026-10-08, a use
+  of the field after a call that sets it to null got no warning, and an unchecked use got
+  CS8602. Its analysis can afford that because it only warns; here an unchecked use is an error,
+  so that part of "full C#" became rule N9, open with three options; the owner decided on
+  2026-10-03 that such a path stays narrowed only up to the next call and the next assignment,
+  and whether an assignment of a value whose type has no `null` narrows it again is still open
+  (the record, section 14, since 2026-10-09).
 - The cases for an answer are written around the forks they meet, as the first ones were. The
   new forks are questions for the next round, not picks to fold into this one.
 - When writing a sample for the record, expect the same thing: a sample decides more than the

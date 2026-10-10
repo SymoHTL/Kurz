@@ -10,6 +10,8 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 
 ## Build & Test
 
+The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
+
 - `py -3 tools/gates.py` runs every gate; `--pr N` adds the pull-request gates. CI runs the same
   file with `python3`. A gate ends as PASS, PARTLY, FAIL, BROKEN, NOT RUN or N/A; the docstring of
   `tools/gates.py` is the one definition of what each verdict does to the run. FAIL and BROKEN
@@ -22,7 +24,11 @@ are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, rev
 - `py -3 tools/<tool>.py --self-test` runs one tool's cases. A changed decision needs a case, and
   the case needs an entry in `tools/red_proofs.json` naming the mutation that turns it red.
   Gate: `self-tests` replays every recorded mutation and fails when one no longer turns its named
-  case red. A decision that has no case is invisible to it: review rule "tools".
+  case red. A decision that has no case is invisible to it: review rule "tools". The ledger is
+  written one entry per line, two spaces in, text as it is, as `py -3 tools/red_proof.py --format`
+  writes it: a ledger written back another way differs on every line, and the review reads and
+  bills the whole file as a change ([knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md](knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md)).
+  Gate: `self-tests`.
 - `py -3 tools/lint_reference.py --sync` rewrites every sample in `reference/` from its corpus
   file. Change the `.kz` file, then sync: a sample edited by hand is red until it is overwritten.
   Gate: `reference`.
@@ -94,6 +100,7 @@ Each line names a trap; its evidence is in the entry it links.
    is counted before the run and named in the report after it. A run off the pipeline spends the
    seat at local prices and starts only after the owner said go to a bill that was named. The
    bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.27 USD,
+   the top rounded up from 0.264,
    off the pipeline about 1.3 to 1.8 USD, measured in
    [knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)), with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
@@ -130,7 +137,7 @@ Each line names a trap; its evidence is in the entry it links.
   statuses, can post it. HAZARD (#11). The pinned check accepts this status: seen once, on
   2026-10-07, when pull request 22 was mergeable on it alone and merged with no waiver through the
   fixed copy of the merge tool on the branch that carried the fix (#5, closed); nothing re-checks
-  the platform on that, and it fails closed: a status the ruleset stopped accepting leaves the
+  the platform on that, HAZARD (#24), and it fails closed: a status the ruleset stopped accepting leaves the
   merge pending, never open. The tool reads the status from the list of statuses, an endpoint that names
   the creator, which the combined status does not ([knowledge/the-combined-status-drops-the-creator.md](knowledge/the-combined-status-drops-the-creator.md)).
   Gate: `self-tests` for the tool's read of the captured status; the platform's acceptance is a
@@ -139,17 +146,19 @@ Each line names a trap; its evidence is in the entry it links.
   the run red: FAIL, BROKEN or NOT RUN, or PARTLY on a gate that is not listed (the docstring of
   `tools/gates.py` is the one definition). A red `pr-title` or `pr-breadth` is fixed by editing
   the title or the description, which runs the job again; the others by a push. `judgment step`
-- `review` pending: nothing reviewed this head. A Draft and a pull request from outside are
-  reviewed on demand: `gh workflow run review.yml -f pr=N`. `judgment step`
+- `review` pending: no review of this head posted a status. Look for a running `review` run in the
+  Actions list before a dispatch: a new run cancels it, and both are billed. A Draft and a pull
+  request from outside are reviewed on demand: `gh workflow run review.yml -f pr=N`.
+  `judgment step`
 - `review` pending on a Ready pull request, and no `review` run in the Actions list at all:
   [knowledge/pull-request-target-is-blocked-by-default.md](knowledge/pull-request-target-is-blocked-by-default.md).
   Dispatch the review as above. The policy that allows the event is the owner's setting:
   HAZARD (#10).
 - `review` pending on a Ready pull request whose head carries the label `reviewed-<that head's
-  sha>`: the job skipped the Ready event by design, because the off-pipeline review of that head
-  posted no status; the merge needs the owner's approval for that head (`--over-red`). Any other
-  head is reviewed by the run its event starts, a push to the Ready pull request or the Ready of a
-  head pushed during the Draft; a head whose run did not start gets a dispatch. Gate: `ci-config`
+  sha>`: the job skips the Ready event of such a head by design, because its review ran off the
+  pipeline, which posts no status; the merge needs the owner's approval for that head
+  (`--over-red`). An unlabelled head current at Ready is reviewed by the Ready's run, a head pushed
+  after Ready by its push's run; a head whose run did not start gets a dispatch. Gate: `ci-config`
   pins the clause; asking the approval is a `judgment step`.
 - A review run that failed (the status says `error`): read the run's last line,
   `REVIEW DID NOT COMPLETE (kind)`. `usage-limit`: wait for the reset, do not run it again now.
@@ -225,8 +234,8 @@ Gate: review rule "rules for sessions".
 
 ### A public repository
 
-- **Future plans stay out**: what gets built when, steps, milestones, schedules, which program
-  comes first, when the compiler is rewritten. Not in a file, a commit message, a branch name, a
+- **Future plans stay out**: what gets built when, steps, milestones, schedules, the order in
+  which parts are built, when a part is replaced. Not in a file, a commit message, a branch name, a
   pull request, an issue. That the design holds a thing is not a plan; when it gets built is. The
   plan is kept outside this repository (2026-10-01). HAZARD (#2): no gate before the push; the
   reviewer flags a plan in the files, the title and the description afterwards, and reads no
@@ -237,8 +246,12 @@ Gate: review rule "rules for sessions".
   commit messages; `pr-title` for the title, the description and the commit messages of the
   branch; review rule "every pull request" for names. The author and committer address of a
   commit is read by no gate: HAZARD (#12).
-- **A push cannot be taken back.** A history rewrite leaves the old commits reachable on GitHub.
+- **A push cannot be taken back.** A history rewrite leaves the old commits reachable on GitHub
+  ([knowledge/a-force-push-does-not-unpublish.md](knowledge/a-force-push-does-not-unpublish.md)).
   Run the gates before the push, not after. Gate: the pre-push hook; HAZARD (#4) where it is off.
+- **A false positive of the pre-push hook is fixed in the tree gate's patterns** (`tools/kit.py`,
+  `tools/tree_gate.py`) with a case and its red proof, never by `git push --no-verify`.
+  HAZARD (#4): nothing stops the flag.
 
 ### Git, pull requests & merging
 
@@ -253,8 +266,12 @@ Gate: review rule "rules for sessions".
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
   head**, passed as `--over-red`. An approval is never standing. The tool switches the whole
   ruleset off for the one merge and restores it; while it is off nothing on the server holds any
-  pull request or any push to `main`. Exit 3 means it is still off: say so at once and restore it
-  as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
+  pull request or any push to `main`, so the tool reads the checks and the threads again once it
+  is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
+  given again for the new state, or not at all). What changes between that reading and the
+  moment the tool restores the ruleset is caught by nobody, and nothing stops another merge or
+  push in that window: HAZARD (#27). Exit 3 means it was not read back as active, so it may still
+  be off: say so at once, read it back and restore it as the skill `change-walk` says; `merge-checks` is red on every run until it is back.
   HAZARD (#3): the session holds the owner's token, so the permission classifier and this rule
   are the only guards on the approval.
 - **One push per review round.** Read every thread, fix everything, mark the pull request Draft,
@@ -295,8 +312,9 @@ Gate: review rule "rules for sessions".
 
 ### Knowledge
 
-- **Facts are routed by kind.** A rule with its gate: this file. A durable lesson, trap or recipe:
-  one file in `knowledge/` plus its `INDEX.md` line, in the same pull request. In-flight state:
+- **Facts are routed by kind.** A rule with its gate: this file. A durable lesson, trap or short
+  recipe: one file in `knowledge/` plus its `INDEX.md` line, in the same pull request; a procedure
+  longer than about fifteen lines: a skill in `.claude/skills/`. In-flight state:
   issues. A fact bound to one machine or one person: private agent memory, never here.
   Gate: `knowledge` for the store's shape; routing itself is a `judgment step`.
 - **A postmortem lands as a rule here with its gate, a knowledge entry and its `INDEX.md` line**,
@@ -321,13 +339,13 @@ Gate: review rule "rules for sessions".
 | Enforced by a mechanism | Only by instruction (HAZARD) |
 |---|---|
 | what may exist in the tree, and no credential or machine-bound string in files and commit messages (`tree`, the pre-push hook) | future plans stay out (#2) |
-| merge checks on `main` (ruleset; `merge-checks` asserts it on every run and is red while it is off) | per-item approval for a merge over red, and the window in which the ruleset is off (#3) |
-| every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout (#4) |
+| merge checks on `main` (ruleset; `merge-checks` asserts it on every run and is red while it is off) | per-item approval for a merge over red (#3), and the window in which the ruleset is off (#27) |
+| every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout, a push with `--no-verify` (#4) |
 | workflow facts (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
-| the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing |
+| the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
@@ -336,3 +354,4 @@ Gate: review rule "rules for sessions".
 | | the gates job judging a pull request with the pull request's own gates (#16) |
 | | a review that stopped at the pass cap posting `success` (#17) |
 | | the evidence digest, which a recomputed hash passes (#18) |
+| | GitHub push protection staying on (#25) |

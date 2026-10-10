@@ -1,0 +1,88 @@
+[
+  {
+    "url": "https://api.github.com/repos/SymoHTL/Kurz/issues/27",
+    "repository_url": "https://api.github.com/repos/SymoHTL/Kurz",
+    "labels_url": "https://api.github.com/repos/SymoHTL/Kurz/issues/27/labels{/name}",
+    "comments_url": "https://api.github.com/repos/SymoHTL/Kurz/issues/27/comments",
+    "events_url": "https://api.github.com/repos/SymoHTL/Kurz/issues/27/events",
+    "html_url": "https://github.com/SymoHTL/Kurz/issues/27",
+    "id": 5781219796,
+    "node_id": "I_kwDOU3tPGc8AAAABWJZp1A",
+    "number": 27,
+    "title": "HAZARD: the ruleset is off for everyone while a merge over red runs",
+    "user": {
+      "login": "SymoHTL",
+      "id": 54981573,
+      "node_id": "MDQ6VXNlcjU0OTgxNTcz",
+      "avatar_url": "https://avatars.githubusercontent.com/u/54981573?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/SymoHTL",
+      "html_url": "https://github.com/SymoHTL",
+      "followers_url": "https://api.github.com/users/SymoHTL/followers",
+      "following_url": "https://api.github.com/users/SymoHTL/following{/other_user}",
+      "gists_url": "https://api.github.com/users/SymoHTL/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/SymoHTL/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/SymoHTL/subscriptions",
+      "organizations_url": "https://api.github.com/users/SymoHTL/orgs",
+      "repos_url": "https://api.github.com/users/SymoHTL/repos",
+      "events_url": "https://api.github.com/users/SymoHTL/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/SymoHTL/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "labels": [
+      {
+        "id": 12499544643,
+        "node_id": "LA_kwDOU3tPGc8AAAAC6QfqQw",
+        "url": "https://api.github.com/repos/SymoHTL/Kurz/labels/hazard",
+        "name": "hazard",
+        "color": "B60205",
+        "default": false,
+        "description": "A rule that has no gate yet",
+        "archived_at": null,
+        "archived_by": null
+      }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-09T16:16:45Z",
+    "updated_at": "2026-10-09T16:16:45Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "OWNER",
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+      "total": 0,
+      "completed": 0,
+      "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+      "blocked_by": 0,
+      "total_blocked_by": 0,
+      "blocking": 0,
+      "total_blocking": 0
+    },
+    "body": "`tools/merge_pr.py --over-red` switches the whole ruleset of `main` off for the one merge and restores it. While it is off, nothing on the server holds any pull request or any push to `main`: the tool reads the checks and the threads a second time once the ruleset is off and merges nothing when they changed, but what changes between that second reading and the merge call, and any other merge or push in that window, is caught by nobody. The window is a few seconds long and is named in `CLAUDE.md` (Git, pull requests & merging) and in `knowledge/diagram-gate-map.md` (node M3).\n\n**Closes when:** a merge over red no longer switches the ruleset off for everyone, for example through a bypass the forge grants to one merge of one head, or when the ruleset is no longer the only thing that holds `main`.\n",
+    "closed_by": null,
+    "reactions": {
+      "url": "https://api.github.com/repos/SymoHTL/Kurz/issues/27/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/SymoHTL/Kurz/issues/27/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+  }
+]

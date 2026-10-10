@@ -16,9 +16,7 @@ with `gh api repos/<owner>/<name>/rules/branches/main` (the answer is kept as
   requests": when Copilot opens a pull request that is not attributed to a person, the rule asks
   for one more approval than the number configured. It is on by default, for new and for existing
   rulesets. The published REST description did not list the parameter on that day.
-- Maintainers of other repositories report that it made pull requests opened by an app identity
-  wait for an approval although zero approvals were required. In a repository with one person
-  nobody could give that approval. That was not seen here: pull request 8, opened with the owner's
+- Whether it holds a pull request here was not seen: pull request 8, opened with the owner's
   login and holding a commit co-authored by Claude, asked for no review while it was a Draft.
 
 What follows from it:

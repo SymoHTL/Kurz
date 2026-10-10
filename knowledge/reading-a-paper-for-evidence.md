@@ -23,6 +23,5 @@ that states it was read in the source itself. How that was done on 2026-10-01:
    when no measurement of Kurz itself exists.
 
 **Why:** a remembered benchmark is usually right about the direction and wrong about the size or
-the conditions. In that session the same technique measured "within 10%" in one paper and "19%
-faster on one CPU, about equal on another" in a later one; both are in the record, each with its
-source.
+the conditions. In that session the same technique came out differently in two papers; both
+figures are in section 3 of kurz-design.md, each with its workload, its baseline and its source.

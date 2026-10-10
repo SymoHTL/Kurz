@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Lint for the knowledge store: knowledge/, guides/ and INDEX.md. Fails on: an INDEX link to a
 missing file, a store file no INDEX line links to, a path of a store file that does not exist,
-written in an entry, in CLAUDE.md or in a skill, an INDEX line without a hook after its em dash,
+written in an entry, in CLAUDE.md, in the review rules or in a skill, a link in a store file (inline
+or reference-style, to a file of any kind, read outside code spans and fences and percent-decoded)
+that, resolved from that file as GitHub resolves it and in its exact spelling, reaches no entry, no file or
+directory, or leaves the repository,
+an INDEX line without a hook after its em dash,
 an entry whose frontmatter lacks a non-empty name, description or metadata.type, a nested or
 non-.md file under knowledge/ or guides/, an entry tagged LIVING without a mermaid block or an
 "Update triggers" section, a LIVING tag that is not the bare word, a scan that found fewer than
@@ -13,15 +17,17 @@ or a page the tool never wrote), and on a missing `ttl_days:`.
 The real tree is also checked for what the rules above are satisfied without: CLAUDE.md, a skill
 file in every skill directory and at least one skill, LIVING_FLOOR living entries, and the
 evidence guide with its blocks. Reports without failing: [[wikilinks]] that resolve to nothing,
-the days every TTL has left, and a TTL in its last week. Credentials, machine-bound strings and
+the days a TTL that has not run out has left, and a TTL in its last week. Credentials, machine-bound strings and
 conflict markers are the tree gate's job (tools/tree_gate.py), for the whole tree.
 `--self-test` plants one case per rule, plus precision cases that must stay clean."""
 import datetime
 import hashlib
 import os
+import posixpath
 import re
 import sys
 import tempfile
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
@@ -41,6 +47,19 @@ META_TYPE = re.compile(r"^metadata:[ \t]*\n(?:[ \t]+\S.*\n)*?[ \t]+type:[ \t]*" 
 LINK = r"\]\(((?:knowledge|guides)/[^)#]+\.md)(?:#[^)]*)?\)"  # an #anchor is still a link
 # The path of a store file, as prose, rules and skills write it: in a link or in backticks.
 REFERENCE = re.compile(r"(?<![\w/.-])((?:knowledge|guides)/[A-Za-z0-9._-]+\.md)")
+# A link as a store file writes it, relative to itself or from the root with a "/": inline, `[text](target)`,
+# with a title in double quotes, single quotes or parentheses, or with the target in angle brackets (a
+# target with a space), where a bare target may hold one level of balanced parentheses; or
+# reference-style, `[name]: target` or `[name]: <target>`, where a footnote `[^1]:` is no link. The
+# target is read percent-decoded, without its `#anchor` and its `?query`, as GitHub reads it; a target
+# that starts with `//` is another host, like one with a scheme.
+INLINE = re.compile(r"\]\((?:<([^>\n]*)>|((?:[^()\s]|\([^()\s]*\))+))(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\)")
+DEFINED = re.compile(r"^[ \t]{0,3}\[(?!\^)[^\]]+\]:[ \t]*(?:<([^>\n]*)>|(\S+))", re.M)
+# code spans of one or two backticks, which GitHub ends at a blank line and lets run over one line break,
+# and fences of backticks or tildes: GitHub shows a link there as text. An indented code block is not
+# taken out: a link shape there is read as a link.
+CODE = re.compile(r"```.*?```|~~~.*?~~~|``(?:[^`\n]|\n(?![ \t]*\n)|`(?!`))*?``|`(?:[^`\n]|\n(?![ \t]*\n))*`", re.S)
+URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:|//")  # https:, mailto:, //host and the like: not a file of this tree
 
 
 def expiry(rel, fm, today):
@@ -64,7 +83,50 @@ def expiry(rel, fm, today):
     left = days - (today - made).days
     if left <= 0:
         errors.append(f"{rel}: numbers expired {-left} days ago: regenerate them (tools/quality_evidence.py)")
+        return errors, []
     return errors, [f"{rel}: numbers expire in {left} days" + (": regenerate soon" if left <= 7 else "")]
+
+
+def exists_exactly(root, path):
+    """True when `path` is under `root` in exactly this spelling, part by part. GitHub resolves a link
+    case-sensitively, the file systems of Windows and macOS do not, so os.path.isfile would pass a
+    link here that is broken on the page."""
+    here = root
+    for part in path.split("/"):
+        if not os.path.isdir(here) or part not in os.listdir(here):
+            return False
+        here = os.path.join(here, part)
+    return True
+
+
+def link_errors(root, rel, body, files):
+    """Errors for the links of one store file, resolved as GitHub resolves them: from the file's own
+    directory, or from the root when the target starts with "/", percent-decoded, in the exact
+    spelling, and read outside code spans and fences, where GitHub shows a link as text (INLINE,
+    DEFINED and CODE say which shapes). REFERENCE reads only the spelling from the root, which the
+    rules and the skills use; inside the store a link is written relative to its file. A link into
+    the store must reach an entry or the store directory itself, a link out of it a file or a
+    directory, the root included."""
+    errors, prose = [], CODE.sub("", body)
+    inline = [bracketed or bare for bracketed, bare in INLINE.findall(prose)]
+    defined = [bracketed or bare for bracketed, bare in DEFINED.findall(prose)]
+    for raw in sorted(set(inline) | set(defined)):
+        written = re.split(r"[#?]", raw, maxsplit=1)[0]  # the target as the file spells it, without the anchor and the query
+        target = urllib.parse.unquote(written)
+        if not target or URL.match(written):  # as written: an encoded colon or slash is no scheme and no host
+            continue  # an anchor of this page, or https:, mailto: and the like
+        rooted = target.startswith("/")
+        path = posixpath.normpath(target.lstrip("/") if rooted else posixpath.join(posixpath.dirname(rel), target))
+        if path == "." or path in STORE:
+            continue  # the root, or a store directory itself: GitHub lists a directory
+        if path == ".." or path.startswith("../"):
+            errors.append(f"{rel} links {written}, which leaves the repository")
+        elif path.split("/")[0] in STORE:
+            if path not in files:
+                errors.append(f"{rel} links {written}, which resolves to {path}: no entry of the store")
+        elif not exists_exactly(root, path):
+            errors.append(f"{rel} links {written}, which resolves to {path}: no such file or directory in this spelling")
+    return errors
 
 
 def digest(text):
@@ -151,6 +213,7 @@ def lint(root, floor=FLOOR, today=None, whole=True):
     names, links = set(), []
     for rel in sorted(files):
         body = kit.read(os.path.join(root, rel))
+        errors += link_errors(root, rel, body, files)
         m = re.match(r"---\n(.*?)\n---\n", body, re.S)
         fm = m.group(1) if m else ""
         # [ \t]*, not \s*: an empty `name:` must not borrow the next line's key as its value.
@@ -170,8 +233,18 @@ def lint(root, floor=FLOOR, today=None, whole=True):
 
 def self_test():
     """Each rule against a tree built to break it. A rule that never fired here is not a gate."""
+    with kit.scratch("lint-knowledge-") as base:  # a removal that fails is said, not raised
+        return cases_in(base)
+
+
+def cases_in(base):
+    """The cases of self_test, each tree a directory under `base`; `base` also holds a file beside
+    the trees, for the link that leaves its repository."""
+    with open(os.path.join(base, "outside.md"), "w", encoding="utf-8") as handle:
+        handle.write("beside every tree\n")
+
     def tree(entries, index=None):
-        root = tempfile.mkdtemp()
+        root = tempfile.mkdtemp(dir=base)
         for store in STORE:
             os.mkdir(os.path.join(root, store))
         for rel, body in entries.items():
@@ -232,6 +305,10 @@ def self_test():
             "frontmatter"),
         'description: "" is empty': (
             tree({**good, k + "q.md": '---\nname: q\ndescription: ""\nmetadata:\n  type: project\n---\n'}), "frontmatter"),
+        'name: "" is empty': (
+            tree({**good, k + "nq.md": '---\nname: ""\ndescription: d\nmetadata:\n  type: project\n---\n'}), "frontmatter"),
+        "type: null is empty": (
+            tree({**good, k + "tn.md": "---\nname: tn\ndescription: d\nmetadata:\n  type: null\n---\n"}), "frontmatter"),
         "type: after another metadata key": (
             tree({**good, k + "v.md": "---\nname: v\ndescription: d\nmetadata:\n  local_reason: x\n  type: user\n---\n"}), None),
         "LIVING without a diagram": (tree(good, index=good_index[:2] + ["- [e2](knowledge/e2.md) LIVING — hook"]),
@@ -271,6 +348,79 @@ def self_test():
         "a skill names a store file that is not there": (
             tree({**good, ".claude/skills/walk/SKILL.md": "the picture is `knowledge/gone.md`\n"}, index=good_index),
             ".claude/skills/walk/SKILL.md names knowledge/gone.md"),
+        "a link relative to its entry that leads nowhere": (
+            tree({**good, k + "r.md": ok(4) + "see [it](gone.md)\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a link rooted at / that resolves, to a file outside the store, is clean": (
+            tree({**good, k + "r.md": ok(4) + "see [it](/tools/x.md)\n", "tools/x.md": "x\n"}), None),
+        "a link rooted at / that leads nowhere": (
+            tree({**good, k + "r.md": ok(4) + "see [it](/guides/gone.md#part)\n"}),
+            "knowledge/r.md links /guides/gone.md, which resolves to guides/gone.md: no entry of the store"),
+        "a link to a nested file reaches no entry": (
+            tree({**good, k + "sub/x.md": ok(5), k + "r.md": ok(4) + "see [it](sub/x.md)\n"}),
+            "knowledge/r.md links sub/x.md, which resolves to knowledge/sub/x.md: no entry of the store"),
+        "a link from a guide up to a root file that is not there": (
+            tree({**good, "guides/g.md": ok(5) + "see [the rules](../CLAUDE.md)\n"}),
+            "guides/g.md links ../CLAUDE.md, which resolves to CLAUDE.md: no such file or directory in this spelling"),
+        "a link to a file that is not Markdown, which is not there": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../tools/gone.py)\n"}),
+            "knowledge/r.md links ../tools/gone.py, which resolves to tools/gone.py: no such file or directory in this spelling"),
+        "a link with a title is a link": (
+            tree({**good, k + "r.md": ok(4) + "see [it](gone.md \"the title\")\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a link with a single-quoted title is a link": (
+            tree({**good, k + "r.md": ok(4) + "see [it](gone.md 'the title')\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a link with a parenthesized title is a link": (
+            tree({**good, k + "r.md": ok(4) + "see [it](gone.md (the title))\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a target in angle brackets, with a space, resolves": (
+            tree({**good, k + "r.md": ok(4) + "see [it](<../tools/my note.txt>)\n", "tools/my note.txt": "x\n"}), None),
+        "a target in angle brackets that leads nowhere is refused": (
+            tree({**good, k + "r.md": ok(4) + "see [it](<gone.md>)\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a footnote definition is no link": (
+            tree({**good, k + "r.md": ok(4) + "a claim[^1]\n\n[^1]: The forge says so\n"}), None),
+        "a link to the root or to a store directory itself reaches a directory GitHub lists": (
+            tree({**good, k + "r.md": ok(4) + "see [up](../), [here](./) and [root](/)\n"}), None),
+        "a link shape in a tilde fence or in a two-backtick span is text, not a link": (
+            tree({**good, k + "r.md": ok(4) + "write ``[it](gone.md)`` as in\n\n~~~\n[it](gone.md)\n~~~\n"}), None),
+        "a reference-style link is a link": (
+            tree({**good, k + "r.md": ok(4) + "see [it][1]\n\n[1]: gone.md\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a reference-style target in angle brackets is read as GitHub reads it": (
+            tree({**good, k + "r.md": ok(4) + "see [it][1]\n\n[1]: <../tools/my note.txt>\n", "tools/my note.txt": "x\n"}), None),
+        "an encoded colon is no scheme: the target is decoded for the lookup alone, and a missing file is refused": (
+            tree({**good, k + "r.md": ok(4) + "see [it](a%3Ab.md)\n"}), "no entry of the store"),
+        "a bare target with balanced parentheses is one target": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../tools/notes_(old).md)\n", "tools/notes_(old).md": "x\n"}), None),
+        "a query string is dropped before the lookup, as GitHub drops it": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../CLAUDE.md?plain=1#L3)\n", "CLAUDE.md": "rules\n"}), None),
+        "a target that starts with two slashes is another host, not a file of this tree": (
+            tree({**good, k + "r.md": ok(4) + "see [x](//example.com/page.md)\n"}), None),
+        "a two-backtick span ends at a blank line, so a link after a stray pair of backticks is read": (
+            tree({**good, k + "r.md": ok(4) + "a stray `` here\n\nsee [it](gone.md)\n\nand `` there\n"}),
+            "knowledge/r.md links gone.md, which resolves to knowledge/gone.md: no entry of the store"),
+        "a one-backtick span runs over one line break of its paragraph, where GitHub still shows a link shape as text": (
+            tree({**good, k + "r.md": ok(4) + "write `[it](gone.md)\nas text` here\n"}), None),
+        # the recorded mutation is a case-insensitive listing, red on every file system; a plain os.path lookup
+        # in its place would be red only where the file system ignores case (Windows, macOS), which CI does not
+        "a link spelled in another case than the file is broken on the page, whatever the file system says": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../tools/X.py)\n", "tools/x.py": "code\n"}),
+            "knowledge/r.md links ../tools/X.py, which resolves to tools/X.py: no such file or directory in this spelling"),
+        "a link shape inside a code span or a fence is text, not a link": (
+            tree({**good, k + "r.md": ok(4) + "write `[it](gone.md)`, as in\n\n```text\n[it](gone.md)\n```\n"}), None),
+        "a percent-encoded target is decoded before the lookup": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../tools/my%20note.txt) and [that](e%30.md)\n", "tools/my note.txt": "x\n"}), None),
+        # base/outside.md is there, so the link reaches a file; what refuses it is the rule on leaving the
+        # repository, and the message checked is that rule's (the lookup would say "no such file")
+        "a link that leaves the repository": (
+            tree({**good, k + "r.md": ok(4) + "see [it](../../outside.md)\n"}),
+            "knowledge/r.md links ../../outside.md, which leaves the repository"),
+        "relative links that resolve are clean": (
+            tree({**good, k + "r.md": ok(4) + "see [a](e0.md#part), [b](../guides/g.md), [c](../CLAUDE.md), [d](/knowledge/e1.md),"
+                  " [e](./e2.md) and [web](https://example.com/x.md)\n", "guides/g.md": ok(5), "CLAUDE.md": "rules\n"},
+                 index=good_index + ["- [r](knowledge/r.md) — hook", "- [g](guides/g.md) — hook"]), None),
         "naming store files that exist is clean": (
             tree({**good, k + "r.md": ok(4) + "see knowledge/e0.md\n", "CLAUDE.md": "read `knowledge/e1.md`\n",
                   ".claude/skills/walk/SKILL.md": "and knowledge/e2.md\n"}, index=good_index + ["- [r](knowledge/r.md) — hook"]), None),
@@ -315,6 +465,11 @@ def self_test():
         else:
             hit = any(needle in e for e in errors) if needle else not errors and not warnings
         results.append((label, hit, f"errors={errors} warnings={warnings}"))
+    errors, warnings = lint(tree({**good, "guides/g.md": ok(5, "ttl_days: 30\ngenerated: 2026-08-20\n")}), floor=3, today=today,
+                            whole=False)
+    results.append(("an expired page gets no 'expire in' warning",
+                    any("expired 12 days ago" in e for e in errors) and not any("expire in" in w for w in warnings),
+                    f"errors={errors} warnings={warnings}"))
     errors, _ = lint(tree(good), today=today)
     results.append(("left to its defaults the lint demands the whole tree and the real floor",
                     any("CLAUDE.md is missing" in e for e in errors) and any("floor is 5" in e for e in errors), errors))

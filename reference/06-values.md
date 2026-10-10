@@ -166,7 +166,8 @@ No case: actors are outside this reference; that collections are values is shown
 ### M9 (assumed, §4, §5) The collections the corpus uses
 
 `List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method; `Count` is the number
-of items; `list[i]` is the item at position `i`, counted from 0; `Where(test)` is the list of
+of items; `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
+or beyond raises `index-out-of-range` (T14); `Where(test)` is the list of
 items that pass the test. `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the
 record's samples use. The naming of the standard library is open (record, section 14).
@@ -186,6 +187,13 @@ mut ages = Map<string, int>()
 ages["Ann"] = 31
 print(ages["Ann"] ?? 0)
 print(ages["Bea"] ?? 0)
+```
+
+Case: [values/list-index-out-of-range.kz](../corpus/values/list-index-out-of-range.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+print(xs[1])
 ```
 
 ### M10 (decided, §4) The order of a map's entries

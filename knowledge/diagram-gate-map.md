@@ -16,21 +16,27 @@ flowchart TD
     subgraph W["Write time: one agent session"]
         W1["write-time hook, tree_gate.py --hook:
         denies a Write or Edit to a path the design phase does not allow, and every call
-        the gate could not judge. The command falls back to python3 without the py launcher.
+        the gate could not judge; inside or outside the repository is decided by the file system's
+        identity of directories, so a path spelled in another case is inside where case is ignored.
+        It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
         Not held: a write through a shell command, a hook cut off at its timeout. HAZARD issue 4"]
     end
     subgraph P["Push time: this clone and the forge"]
         P1["pre-push hook, tree_gate.py --pre-push:
-        refuses the push when a commit about to be published holds a credential, a machine-bound string,
-        a conflict marker, a disallowed path or a file that is not UTF-8 text,
-        or when its message holds one of the first three or a workflow-skip literal.
+        refuses the push when a commit about to be published holds, in a file or in its name, a credential,
+        a machine-bound string or a conflict marker, or holds a disallowed path, a file that is not UTF-8 text
+        or a link or a submodule, when its message holds one of the first three or a workflow-skip literal
+        (a GitHub no-reply address passes in a trailer line only, in a tag's message too), when the message of an
+        annotated tag it pushes, or of a tag that one points at, holds one of the first three, when a tag points at a
+        blob or a tree, when a ref is aimed straight at a blob or a tree, or when the name of a ref it publishes,
+        or the name in a tag's own header, holds one of them.
         Off until core.hooksPath is set: HAZARD issue 4"]
         P2["future plans in a commit: no gate before the push. HAZARD issue 2"]
-        P3["author and committer name and e-mail: published with every commit, read by no gate.
-        HAZARD issue 12"]
+        P3["author and committer name and e-mail, published with every commit, and the tagger of an annotated tag:
+        read by no gate. HAZARD issue 12"]
         P4["GitHub push protection: the forge refuses a push that holds a secret of a pattern it knows.
         Enabled, read 2026-10-02 from the repository's security_and_analysis.
-        No gate asserts that it stays on: judgment step"]
+        No gate asserts that it stays on: HAZARD issue 25"]
     end
     subgraph G["CI: job gates, on every pull request event and on a push to main"]
         G0["the run is red on a FAIL, a BROKEN, a NOT RUN,
@@ -40,14 +46,21 @@ flowchart TD
         The job runs the pull request's own copy of every gate: HAZARD issue 16"]
         G1["self-tests: a tool self-test fails, ran no case or contradicts its exit code;
         a tool has no self-test or no recorded red proof; a recorded mutation
-        no longer turns its one named case red; fewer tools than the floor.
+        no longer turns its one named case red; fewer tools than the floor; a ledger written back in
+        another form than its one (one entry per line, two spaces in, text as it is; --format writes it). The replay runs each
+        self-test, green and mutated, in a copy of the tree, with its temporary files beside that copy,
+        outside the tree a suite reads; both go when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]
         G2["tree: disallowed path, credential, machine-bound string, conflict marker,
         non-UTF-8 file, a link or a submodule, fewer files than the floor.
         A shape counts after the letter of a newline or tab escape too, as a value begins a line in JSON;
-        before a push every path of a commit but a deletion is read, a file turned into a link included"]
+        before a push every path of a commit but a deletion is read, and a file turned into a link is refused;
+        a file's name is scanned like its content"]
         G3["knowledge: broken INDEX link, entry without INDEX line, hook or frontmatter;
-        a store file named in an entry, CLAUDE.md, the review rules or a skill that does not exist; nested entry;
+        a store file named in an entry, CLAUDE.md, the review rules or a skill that does not exist;
+        a link in a store file (inline or reference-style, outside code, percent-decoded) that, resolved from that
+        file in its exact spelling, reaches no entry, file or directory, or leaves the repository;
+        nested entry;
         LIVING entry without diagram or update triggers, fewer living entries than their floor;
         expired or future-dated numbers, a TTL over 90 days; a generated block that is empty, or a page
         whose digest is stale: a number, the generated date or the TTL edited by hand
@@ -55,17 +68,24 @@ flowchart TD
         G9["reference: a rule without id, status or the record section it cites;
         a decided, assumed or proposed rule with neither a case nor a reason;
         a case on an open rule; a sample that differs from its corpus file;
+        a code block that is neither a case sample nor marked text, or that is never closed;
+        a fence indented or made of tildes outside a code block, which the lint would not read (inside one it is content);
         a corpus header that cannot be read or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
+        a row that reads as an error id outside a table headed id, rules, meaning;
+        an error-table row that does not read as one; a design record, a chapter or a corpus file that cannot be
+        read, missing or not UTF-8, named with what went unchecked;
         fewer rules or cases than the floors"]
         G4["ci-config: a pinned fact of a workflow changed. Both: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
-        continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but a
-        step's env (in any case, behind any literal), a workflow- or job-level env, a job-level permissions grant,
+        continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
+        env of the job's last step (in any case, behind any literal), a workflow- or job-level env, a job-level
+        permissions grant, a job in a container or beside services,
         a step that writes GITHUB_ENV or GITHUB_PATH, a step that checks out or fetches by hand,
         the deciding step with any env key but the pinned ones, a key twice in one mapping.
         gates.yml: an if on the job (a skipped job reports success to the required check),
-        a path or branch filter, a wider token, a second job.
+        a path filter, any filter on pull_request, a push trigger for any branch but main, a wider token,
+        a second job.
         review.yml: an if, a checkout ref, a concurrency group or permissions other than the pinned ones,
         no start-time step first, the budget anywhere but on the review step,
         a CLI that is not at an exact version. A third workflow file.
@@ -85,7 +105,7 @@ flowchart TD
         (tools, workflows, review rules, skills, hooks, CLAUDE.md, .gitattributes; a file moved out of it counts),
         without a Blast radius section"]
         G8["pr-findings: a review thread unresolved, or resolved without the edit that answers it;
-        on tool, workflow and hook code a written reply also answers. The tool's resolve command plans
+        on tool, workflow and hook code a written reply also answers. The resolve command of tools/pr_gates.py plans
         the reviewer's threads whose files all changed since the finding's commit, resolves them with --go, and leaves the rest open
         with the reason, a person's reply in the thread and a head the forge still shows as the
         finding's commit among them (self-tests).
@@ -103,16 +123,24 @@ flowchart TD
         at the pass cap it says NOT converged, and is success all the same: HAZARD issue 17.
         Draft, outside pull request, the Ready event of a head labelled reviewed- plus its own sha, no run:
         stays pending; a skipped job reports a check named review-run, never this status.
-        It satisfied the ruleset's pinned app on 2026-10-07 (issue 5 closed; a fact seen once, re-checked by nothing,
+        It satisfied the ruleset's pinned app on 2026-10-07 (issue 5 closed; a fact seen once, re-checked by nothing: HAZARD issue 24,
         failing closed: a status the ruleset stopped accepting leaves the merge pending);
         the merge tool reads it from the list of statuses, the endpoint that names the creator, which the combined
         status drops (self-tests: the read of the captured status).
         Any workflow run of this repository can post the same status: HAZARD issue 11"]
         R3["findings: high and medium become threads on the pull request, per file,
         and block through thread resolution, not through the job.
-        Lows are collected on the open issue labelled review-lows and block nothing: judgment step"]
-        R4["the workflow starts at all: GitHub's default policy blocks pull_request_target in a public repository
-        unless an Actions event policy allows it. Nothing asserts the policy: HAZARD issue 10"]
+        Lows are collected on the open issue labelled review-lows, in parts, each part a note on the pull request
+        first and then a comment on the issue; a part whose post failed is printed in the log, its note withdrawn
+        when the comment was refused, or failed otherwise and the issue, read back, does not show it (a note that
+        got no answer is read back on the pull request the same way, and one that landed goes on), its file
+        reviewed again by the next run, and the run ends red;
+        they block nothing: judgment step"]
+        R4["the workflow starts at all: GitHub's default rule may block pull_request_target here (whether it
+        enforces or only evaluates was not known on 2026-10-02); the owner's event policy allows
+        pull_request_target and workflow_dispatch for .github/workflows/review.yml, active since 2026-10-03
+        (read 2026-10-09 from the repository's Actions policies, gh api repos/OWNER/REPO/actions/policies).
+        Nothing asserts the policy: HAZARD issue 10"]
         R5["review rules, .review/review-rules.yaml of the default branch: one section per surface.
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).
         The reviewer is a model that is given one batch of the diff: it can miss a defect, it cannot
@@ -134,10 +162,16 @@ flowchart TD
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
         a title or description the title gate refuses, an option it does not know.
-        A merge by the button or gh pr merge gets none of this: HAZARD issue 14"]
+        A merge by the button or gh pr merge still meets M1, but not the head pin, the auto-merge check,
+        the comparison with the live rules, or the re-check of the title gate and of the answered findings
+        at the moment of the merge: HAZARD issue 14"]
         M3["merge_pr.py --over-red: ruleset off for one merge, restored and read back;
-        while it is off nothing on the server holds any pull request or a push to main.
-        Exit 3 when the gate stayed off, exit 6 when the waiver record is missing.
+        while it is off nothing on the server holds any pull request or a push to main, so the checks
+        and the threads are read again once it is off, and a change that reading finds merges nothing (exit 1,
+        the gate restored); what changes between that reading and the restore of the ruleset, the merge call
+        included, is caught by nobody, so the window is narrowed, not closed, and nothing stops another merge
+        or push in it: HAZARD issue 27.
+        Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
@@ -168,6 +202,10 @@ flowchart TD
 - `tools/red_proof.py` or the shape of `tools/red_proofs.json` changes: G1.
 - `tools/tree_gate.py`, `.claude/settings.json` (the hook command), `.githooks/pre-push` change:
   W1, P1, G2.
+- `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals) changes: P1, G2, G6 and M2;
+  W1 reads paths only, so a pattern reaches it nowhere. `kit.scratch` or `kit.writable_then_retry` changes: G1,
+  whose replay runs every suite in it; `kit.message_text` changes: P1 and G6, which read commit and tag messages
+  through it.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.

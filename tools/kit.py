@@ -6,8 +6,10 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,20 +29,33 @@ MACHINE = {
     # a drive letter and its separator, also the doubled backslash of JSON and of string literals;
     # `x://` is left alone, it starts a URL
     "drive-path": r"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?!/)",
-    # a user's directory: Windows seen from a POSIX shell, from WSL or from Cygwin, macOS, Linux.
+    # a user's directory: Windows seen from a POSIX shell, from WSL or from Cygwin, macOS, Linux, root's.
     # /home/runner is the hosted CI runner's and names nobody.
-    "profile-path": r"(?:(?<![A-Za-z0-9])|(?<=\\[ntr]))(?:(?:/(?:mnt|cygdrive))?/(?:[a-z]/)?Users/|/home/(?!runner\b))[A-Za-z0-9]",
+    "profile-path": r"(?:(?<![A-Za-z0-9])|(?<=\\[ntr]))(?:(?:/(?:mnt|cygdrive))?/(?:[a-z]/)?Users/|/home/(?!runner\b)|/root/)[A-Za-z0-9]",
     # four dotted numbers that are not loopback, also at the end of a sentence; write a four-part
     # version as v1.0.0.0
     "ip-address": r"(?:(?<![\w.])|(?<=\\[ntr]))(?!127\.)(?!0\.0\.0\.0(?!\d))(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)",
     # the private ranges of IPv6: unique local and link-local addresses
     "ip6-address": r"(?i:(?<![\w:])(?:f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):[0-9a-f]{0,4}:)",
-    # not the documentation domains, not the two public no-reply addresses commit trailers carry,
-    # and not the user part of an SSH remote
+    # not the documentation domains, not the public no-reply address of Claude's commit trailers,
+    # and not the user part of an SSH remote. A GitHub no-reply address names an account: it passes
+    # only in a trailer line of a commit or tag message (message_text below)
     "email": r"(?<![A-Za-z0-9._%+-])(?!noreply@anthropic\.com\b)(?!git@github\.com:)[A-Za-z0-9._%+-]+"
-             r"@(?!example\.(?:com|org|net)\b)(?!users\.noreply\.github\.com\b)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}",
+             r"@(?!example\.(?:com|org|net)\b)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}",
 }
 CONFLICT = re.compile(r"^(<<<<<<< |>>>>>>> )", re.M)
+# A trailer line that names a co-author or a signer by the GitHub no-reply address of an account. The
+# forge writes such lines into a squash, and the line publishes no more than the author line of the
+# same commit does, which no gate reads (HAZARD #12). Anywhere else the address is machine-bound.
+# Only the address is taken out (message_text); the rest of the line is scanned like the message.
+NOREPLY_TRAILER = re.compile(r"(?im)^((?:co-authored-by|signed-off-by):[^<\n]*<)[A-Za-z0-9+._-]+@users\.noreply\.github\.com(>[ \t]*)$")
+
+
+def message_text(message):
+    """A commit or tag message as the patterns read it: the GitHub no-reply address is taken out of
+    every trailer line of NOREPLY_TRAILER, and the rest of the line stays, so that a machine-bound
+    string in the name part is still found."""
+    return NOREPLY_TRAILER.sub(r"\1\2", message)
 # What makes the forge start no workflow for a commit. On main that is a commit nothing gated.
 SKIP_LITERALS = [r"\[skip ci\]", r"\[ci skip\]", r"\[no ci\]", r"\[skip actions\]", r"\[actions skip\]",
                  r"^skip-checks:[ \t]*true[ \t]*$"]
@@ -133,6 +148,40 @@ def skip_literal(text):
 def read(path):
     with open(path, encoding="utf-8", newline="") as f:
         return f.read().replace("\r\n", "\n")
+
+
+def writable_then_retry(function, path, exc):
+    """shutil.rmtree's onexc for scratch: a read-only file, as git stores its objects, is made writable
+    and the removal tried once more; what still fails is left to the check after the removal. Only a
+    removal is retried: on POSIX the walk calls this for os.open or os.scandir too, on a directory it
+    cannot open, and those take other arguments, so they are left to that check as well."""
+    if function not in (os.unlink, os.remove, os.rmdir):
+        return
+    try:
+        os.chmod(path, 0o700)
+        function(path)
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def scratch(prefix):
+    """A temporary directory for a suite or a replay, in the temporary directory of the system (which
+    the red-proof replay points beside its copy), removed on exit, on the way out of a block that
+    raises as well. A removal that fails
+    (Windows holds a file of a fresh git repository open for a moment) is said on stderr with the
+    path, never raised: a leftover copy must not turn a green run red or hide a red one, and must
+    not stay unseen."""
+    path = tempfile.mkdtemp(prefix=prefix)
+    try:
+        yield path
+    finally:
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=writable_then_retry)
+        else:  # before 3.12 the handler is onerror, called with (function, path, exc_info); nothing here runs there
+            shutil.rmtree(path, onerror=lambda function, where, info: writable_then_retry(function, where, info[1]))
+        if os.path.exists(path):
+            print(f"WARNING: could not remove {path}: left behind", file=sys.stderr)
 
 
 def load_yaml(text):
@@ -228,6 +277,55 @@ def self_test():
         codes = (report([]), report([("a", True, "")]), report([("a", True, ""), ("b", False, "why")]))
     cases.append(("report: no case at all is a failure, and so is one failed case", codes == (1, 0, 1), codes))
     cases.append(("report: the summary line counts cases and failures", "2 cases, 1 failed" in said.getvalue(), said.getvalue()[-80:]))
+    with scratch("kit-scratch-") as path:
+        there = os.path.isdir(path)
+    cases.append(("scratch: the directory is there inside the block and gone after it", there and not os.path.exists(path), path))
+    try:
+        with scratch("kit-scratch-") as raised:
+            raise ValueError("inside")
+    except ValueError as e:
+        escaped = e
+    cases.append(("scratch: a block that raises has its directory removed too, and the exception goes on",
+                  isinstance(escaped, ValueError) and not os.path.exists(raised), raised))
+    real_rmtree, warned, raised = shutil.rmtree, io.StringIO(), None
+    try:
+        shutil.rmtree = lambda path, ignore_errors=False, **kw: None  # a removal that does nothing: the directory stays
+        with contextlib.redirect_stderr(warned), scratch("kit-scratch-") as kept:
+            pass
+    except Exception as e:  # the block must end quietly: a removal that failed is said, never raised
+        raised = e
+    finally:
+        shutil.rmtree = real_rmtree
+    stayed = os.path.isdir(kept)
+    real_rmtree(kept, ignore_errors=True)
+    handled, probe = None, tempfile.mkdtemp(prefix="kit-scratch-")  # a directory that exists, as the walk names one
+    try:
+        writable_then_retry(os.open, probe, PermissionError("cannot open"))
+    except Exception as e:  # the handler must raise nothing, whatever the walk called it for
+        handled = e
+    finally:
+        os.rmdir(probe)
+    cases.append(("scratch: the retry handler leaves a call that is no removal alone (os.open, for a directory the walk cannot open), and raises nothing",
+                  handled is None, repr(handled)))
+    locked = tempfile.mkdtemp(prefix="kit-scratch-")
+    stored = os.path.join(locked, "object")
+    with open(stored, "w", encoding="utf-8") as f:
+        f.write("x")
+    os.chmod(stored, 0o400)  # read-only, as git stores its objects
+    retried = None
+    try:
+        writable_then_retry(os.unlink, stored, PermissionError("read-only"))
+    except Exception as e:
+        retried = e
+    removed = not os.path.exists(stored)
+    if not removed:  # under a mutation: leave nothing behind
+        os.chmod(stored, 0o600)
+        os.unlink(stored)
+    os.rmdir(locked)
+    cases.append(("scratch: the retry handler makes a read-only file writable and removes it, as git stores its objects, and raises nothing",
+                  removed and retried is None, (removed, repr(retried))))
+    cases.append(("scratch: a removal that fails is said on stderr with the path, and nothing is raised",
+                  stayed and f"WARNING: could not remove {kept}" in warned.getvalue() and raised is None, (warned.getvalue(), repr(raised))))
     return report(cases)
 
 

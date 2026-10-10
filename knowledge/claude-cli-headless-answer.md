@@ -50,4 +50,5 @@ The fixtures, each with its source and date, are listed in `tools/fixtures/SOURC
 never on `subtype`. A usage limit cannot be provoked on purpose; the unit suite edits the real
 error payload for that case and says so. A credential that is missing altogether is not an answer
 of the CLI here: the reviewer refuses to start in CI without the login variable. When the CLI
-version in `.github/workflows/review.yml` is bumped, probe again and replace the fixtures.
+version in `.github/workflows/review.yml` is bumped, or the pinned model (`MODEL` in
+`tools/review/review.py`) changes, probe again and replace the fixtures.

@@ -57,7 +57,8 @@ conversation. What was asked and answered in chat can only be a judgment step.
 ## 3. Land
 
 1. The record takes the walk in the skill `change-walk`: branch, gates, Draft, review, merge with
-   the tool. One round is one pull request. Gate: the ruleset.
+   the tool. One round is one pull request. Gate: the ruleset for the pull request; one round per
+   pull request is a `judgment step`; a merge by the button instead of the tool: HAZARD (#14).
 2. The description traces every item recorded as decided to the owner's choice: the question's
    number or name, and the answer that was given. An item without that trace is a finding.
    Gate: review rule "design record".

@@ -28,7 +28,6 @@ print(big + 1)
 ### T3 (decided, §4) Signed and unsigned
 
 `sbyte`, `short`, `int` and `long` are signed. `byte`, `ushort`, `uint` and `ulong` are unsigned.
-Together they are the integer types of C#.
 
 Case: [types/unsigned.kz](../corpus/types/unsigned.kz)
 ```kurz
@@ -310,6 +309,17 @@ void Show(longduration d) {
 
 duration span = 90min
 Show(span)
+```
+
+A `longduration` is narrowed to a `duration` only by a written conversion, which T20 checks like any
+other: in the case below the sum is two hundred thousand days, beyond the narrow range, so `duration(l)`
+raises `overflow` in a test build.
+
+Case: [types/longduration-wide.kz](../corpus/types/longduration-wide.kz)
+```kurz
+longduration a = 100000days
+longduration l = a + a
+print(duration(l))
 ```
 
 ### T14 (assumed, §4) Out of range and division by zero

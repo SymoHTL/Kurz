@@ -19,9 +19,9 @@ What follows from it:
 - "All threads resolved", "required checks must pass" and "no direct push to the default branch"
   cannot be enforced by the server on a private repository of a free account. A merge tool and an
   instruction are all that is left, and neither stops a person with a merge button.
-- Secret scanning with push protection is likewise on by default for a public repository (seen in
-  `security_and_analysis` on 2026-10-01, and again on 2026-10-02 with `gh api repos/<owner>/<name>`)
-  and is a paid feature for a private one. No gate asserts that it stays on.
+- Secret scanning with push protection was enabled here (`security_and_analysis`, read on
+  2026-10-01 and again on 2026-10-02 with `gh api repos/<owner>/<name>`). No gate asserts that it
+  stays on: HAZARD #25.
 - The decision here was to make the repository public. The price is that everything pushed is
   published at once: see [[a-force-push-does-not-unpublish]].
 

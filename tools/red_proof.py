@@ -9,11 +9,14 @@ case and exits 0; a tool with no recorded red proof; an entry whose anchor does 
 once in its file, or whose file cannot be read; an entry whose `expect` does not name exactly one
 case of the unmutated self-test, or names one that is already red; a mutation that no longer turns
 that case red (the gate went soft, or the proof went stale); an entry for a tool that does not
-exist; fewer than FLOOR tools.
+exist; fewer than FLOOR tools; a ledger that is not written as `--format` writes it (one entry per
+line, two spaces in, text as it is), since a ledger written back another way differs on every
+line, and the review reads and bills the whole file as a change.
 
 An entry: {"tool": path of the tool, "file": the file to break (default: the tool), "anchor": text
 that occurs exactly once, "replacement": what it becomes, "expect": the name of the case that must
 fail, or a part of it that no other case shares}."""
+import glob
 import json
 import os
 import re
@@ -43,13 +46,21 @@ def tools_in(root):
 
 
 def self_test_of(root, tool):
-    """(exit code, output) of one tool's self-test, run inside `root`. No bytecode is written: Python
-    takes a cached module for current when the source has the same size and the same second of
-    modification, so two equally long mutations of a shared module read as the first one."""
+    """(exit code, output) of one tool's self-test, run inside `root`, with its temporary files beside
+    `root`, in `tmp` next to it: what a mutant leaves behind (a mutation that disables a removal does)
+    goes with the directory the replay removes, instead of piling up in the system's temporary
+    directory, and lies outside the copy a suite reads as the tree; the directory is one for the
+    whole replay, so a suite that lists its temporary directory can see what an earlier one left
+    there. A directory that cannot be made is a failed run (99), like a process that could
+    not start. No bytecode is written: Python takes a cached module for current when the source has
+    the same size and the same second of modification, so two equally long mutations of a shared
+    module read as the first one."""
+    scratch = os.path.join(os.path.dirname(root), "tmp")
     try:
+        os.makedirs(scratch, exist_ok=True)
         p = subprocess.run([sys.executable, os.path.join(root, tool), "--self-test"], cwd=root, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=600,
-                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch})
     except (OSError, subprocess.TimeoutExpired) as e:
         return 99, f"{type(e).__name__}: {e}"
     return p.returncode, p.stdout + p.stderr
@@ -79,6 +90,32 @@ def failed(out, green):
     return red
 
 
+def canonical(ledger):
+    """The ledger's one form: one entry per line, two spaces in, text as it is (no escaped characters),
+    so that a diff shows the entries that changed. A ledger written back another way (an indent, escaped
+    text) differs on every line, and a review reads and bills the whole file as a change (2026-10-09)."""
+    return "[\n" + ",\n".join("  " + json.dumps(e, ensure_ascii=False) for e in ledger) + "\n]\n"
+
+
+def format_ledger(root):
+    """Rewrite the ledger in its form; True when the file changed. The text is written beside the
+    ledger and moved over it, so a write that fails leaves the ledger as it was; a ledger that
+    cannot be read is a refusal that names it, never a traceback."""
+    path = os.path.join(root, LEDGER)
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        want = canonical(json.loads(text))
+    except (OSError, ValueError) as e:
+        raise kit.Refused(f"{LEDGER} cannot be read: {type(e).__name__}: {e}")
+    if want != text:
+        fd, fresh = tempfile.mkstemp(prefix="red_proofs.", suffix=".json", dir=os.path.dirname(path))
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(want)
+        os.replace(fresh, path)
+    return want != text
+
+
 def check(root, floor=FLOOR):
     """(errors, {tool: {"cases": n, "proofs": n}})."""
     errors, stats, green = [], {}, {}
@@ -87,9 +124,14 @@ def check(root, floor=FLOOR):
         errors.append(f"only {len(tools)} tools found under tools/, floor is {floor}: is this the right tree?")
     try:
         with open(os.path.join(root, LEDGER), encoding="utf-8") as f:
-            ledger = json.load(f)
+            text = f.read()
+        ledger = json.loads(text)
     except (OSError, ValueError) as e:
         return errors + [f"{LEDGER} cannot be read: {type(e).__name__}"], stats
+    if text != canonical(ledger):
+        errors.append(f"{LEDGER} is not written one entry per line, two spaces in, text as it is: a ledger written back "
+                      f"another way differs on every line, and the review reads and bills the whole file; "
+                      f"`py -3 tools/red_proof.py --format` writes it in its form")
     for tool in tools:
         stats[tool] = {"cases": 0, "proofs": sum(e.get("tool") == tool for e in ledger)}
         if not SELF_TEST.search(kit.read(os.path.join(root, tool))):
@@ -141,14 +183,27 @@ def check(root, floor=FLOOR):
     return errors, stats
 
 
-def copy_of_tree():
-    """A scratch copy of the repository, so that a mutation never touches the working tree."""
-    tmp = tempfile.mkdtemp(prefix="red-proof-")
-    shutil.copytree(kit.ROOT, os.path.join(tmp, "tree"), ignore=shutil.ignore_patterns(".git", "__pycache__"))
-    return os.path.join(tmp, "tree")
+def copy_of_tree(into):
+    """A copy of the repository under `into`, so that a mutation never touches the working tree."""
+    target = os.path.join(into, "tree")
+    shutil.copytree(kit.ROOT, target, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+    return target
+
+
+def replay():
+    """check() on a scratch copy of the repository, which is removed afterwards, whatever check() ended
+    in; a removal that fails is said with the path, never raised (kit.scratch)."""
+    with kit.scratch("red-proof-") as tmp:
+        return check(copy_of_tree(tmp))
 
 
 def self_test():
+    with kit.scratch("red-proof-cases-") as base:
+        return cases_in(base)
+
+
+def cases_in(base):
+    """The cases of self_test, every tree a directory under `base`."""
     toy = ('import sys\n'
            'def add(a, b):\n    return a + b\n'
            'if __name__ == "__main__":\n'
@@ -177,9 +232,9 @@ def self_test():
     assert quiet != toy and lying != toy and late != toy
 
     def tree(files, ledger):
-        root = tempfile.mkdtemp()
+        root = tempfile.mkdtemp(dir=base)
         os.mkdir(os.path.join(root, "tools"))
-        for name, text in {**files, "red_proofs.json": json.dumps(ledger)}.items():
+        for name, text in {**files, "red_proofs.json": canonical(ledger)}.items():
             with open(os.path.join(root, "tools", name), "w", encoding="utf-8") as f:
                 f.write(text)
         return root
@@ -218,13 +273,72 @@ def self_test():
     with open(os.path.join(broken, LEDGER), "w", encoding="utf-8") as f:
         f.write("[")
     trees["a ledger that is not JSON"] = (broken, "cannot be read")
+    reformatted = tree({"toy.py": toy}, [proof])
+    with open(os.path.join(reformatted, LEDGER), "w", encoding="utf-8") as f:
+        json.dump([proof], f, indent=1)  # the same entries, every line different: what a one-off script wrote on 2026-10-09
+    trees["a ledger written another way is refused, with the option that writes it in its form"] = (reformatted, "not written one entry per line")
     cases = []
     for name, (root, needle) in trees.items():
         errors, _ = check(root, floor=1)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
+    changed = format_ledger(reformatted)
+    errors, _ = check(reformatted, floor=1)
+    cases.append(("--format writes the ledger in its form, after which the check passes, and a second run changes nothing",
+                  changed and not errors and not format_ledger(reformatted) and kit.read(os.path.join(reformatted, LEDGER)) == canonical([proof]),
+                  (changed, errors)))
+    unreadable = tree({"toy.py": toy}, [proof])
+    with open(os.path.join(unreadable, LEDGER), "w", encoding="utf-8") as f:
+        f.write("[")
+    refused = None
+    try:
+        format_ledger(unreadable)
+    except Exception as e:
+        refused = e
+    cases.append(("--format on a ledger that is not JSON is a refusal that names it, and the file is left as it is",
+                  isinstance(refused, kit.Refused) and "cannot be read" in str(refused) and kit.read(os.path.join(unreadable, LEDGER)) == "[",
+                  repr(refused)))
+    two = [proof, {**proof, "expect": "adds \u00e9"}]
+    cases.append(("the form is one entry per line, two spaces in, text as it is, so a diff shows the entries that changed",
+                  canonical(two) == '[\n  {"tool": "tools/toy.py", "anchor": "return a + b", "replacement": "return a - b", "expect": "adds"},\n'
+                                    '  {"tool": "tools/toy.py", "anchor": "return a + b", "replacement": "return a - b", "expect": "adds \u00e9"}\n]\n',
+                  canonical(two)))
     root = tree({"toy.py": toy}, [proof])
-    check(root, floor=1)
-    cases.append(("the mutated file is restored", kit.read(os.path.join(root, "tools", "toy.py")) == toy, ""))
+    errors, _ = check(root, floor=1)  # no error: the replay did write the mutation before it restored the file
+    cases.append(("the mutation is written before the self-test runs, and the file is restored after it",
+                  not errors and kit.read(os.path.join(root, "tools", "toy.py")) == toy, errors))
+    # a self-test that leaves a temporary directory behind on purpose, as a mutant that disables a removal does
+    leaky = toy.replace("import sys\n", "import sys, tempfile\n").replace(
+        "        ok = add(1, 1) == 2\n", "        tempfile.mkdtemp(prefix=\"red-proof-leak-\")\n        ok = add(1, 1) == 2\n")
+    assert leaky != toy
+    root = tree({"toy.py": leaky}, [proof])
+    errors, _ = check(root, floor=1)
+    outside = glob.glob(os.path.join(tempfile.gettempdir(), "red-proof-leak-*"))
+    for leaked in outside:  # not under this suite's directory: removed here, so that a red case leaves nothing behind
+        shutil.rmtree(leaked, ignore_errors=True)
+    beside = glob.glob(os.path.join(os.path.dirname(root), "tmp", "red-proof-leak-*"))
+    under = glob.glob(os.path.join(root, "**", "red-proof-leak-*"), recursive=True)
+    cases.append(("a self-test's temporary files are made beside the copy, one run green and one mutated, none under the copy a suite reads and none in the system's own",
+                  not errors and len(beside) == 2 and not under and not outside, (errors, beside, under, outside)))
+    seen = []
+
+    def small_copy(into):
+        target = os.path.join(into, "tree")
+        os.mkdir(target)
+        return target
+
+    def noting_check(tree_root, floor=FLOOR):
+        seen.append(tree_root if os.path.isdir(tree_root) else None)
+        return [], {}
+
+    g = globals()
+    saved = g["check"], g["copy_of_tree"]
+    g["check"], g["copy_of_tree"] = noting_check, small_copy
+    try:
+        replayed = replay()
+    finally:
+        g["check"], g["copy_of_tree"] = saved
+    cases.append(("a replay removes the copy it checked",
+                  replayed == ([], {}) and len(seen) == 1 and bool(seen[0]) and not os.path.exists(os.path.dirname(seen[0])), seen))
     errors, _ = check(tree({"toy.py": toy}, [proof]))
     cases.append(("one tool is below the real floor", any("floor is" in e for e in errors), errors))
     here = tools_in(kit.ROOT)
@@ -248,7 +362,14 @@ def self_test():
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
-    errors, stats = check(copy_of_tree())
+    if "--format" in sys.argv:
+        try:
+            print(f"{LEDGER}: " + ("rewritten in its form" if format_ledger(kit.ROOT) else "already in its form"))
+        except kit.Refused as e:
+            print(f"REFUSED, nothing written: {e}")
+            sys.exit(1)
+        sys.exit(0)
+    errors, stats = replay()
     for tool, s in stats.items():
         print(f"{tool}: {s['cases']} self-test cases, {s['proofs']} red proofs")
     for e in errors:

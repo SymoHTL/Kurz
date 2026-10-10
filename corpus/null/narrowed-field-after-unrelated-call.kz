@@ -1,0 +1,16 @@
+// expect: error nullable-unchecked at 14
+// rules: N9
+
+class Account(mut string? Email)
+
+void Log() {
+    print("log")
+}
+
+acc = Account("a")
+if acc.Email != null {
+    n = acc.Email.Bytes.Count
+    Log()
+    m = acc.Email.Bytes.Count
+    print(n + m)
+}

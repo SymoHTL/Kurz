@@ -50,5 +50,6 @@ the thing under test can fail no case about it.
   and from which head each payload came. Gate: review rule "tools" for the floor; the re-capture
   is a `judgment step` (CLAUDE.md, Tests item 1).
 - Issue #5 is closed by this: the ruleset accepted the status for the pinned app, seen once on
-  2026-10-07 and re-checked by nothing. HAZARD #11 stays: any workflow run of this repository can
+  2026-10-07, re-checked by nothing (HAZARD #24) and failing closed: a status the ruleset stopped
+  accepting leaves the merge pending. HAZARD #11 stays: any workflow run of this repository can
   post the status.

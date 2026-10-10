@@ -1,0 +1,13 @@
+// expect: error nullable-unchecked at 11
+// rules: N9
+
+class Account(mut string? Email)
+
+string? other = null
+mut acc = Account("a")
+if acc.Email != null {
+    n = acc.Email.Bytes.Count
+    acc.Email = other
+    m = acc.Email.Bytes.Count
+    print(n + m)
+}

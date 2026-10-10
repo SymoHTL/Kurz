@@ -1,0 +1,38 @@
+[
+  {
+    "id": 32891231211,
+    "node_id": "LE_lADOU3tPGc8AAAABWJZp1M8AAAAHqHhb6w",
+    "url": "https://api.github.com/repos/SymoHTL/Kurz/issues/events/32891231211",
+    "actor": {
+      "login": "SymoHTL",
+      "id": 54981573,
+      "node_id": "MDQ6VXNlcjU0OTgxNTcz",
+      "avatar_url": "https://avatars.githubusercontent.com/u/54981573?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/SymoHTL",
+      "html_url": "https://github.com/SymoHTL",
+      "followers_url": "https://api.github.com/users/SymoHTL/followers",
+      "following_url": "https://api.github.com/users/SymoHTL/following{/other_user}",
+      "gists_url": "https://api.github.com/users/SymoHTL/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/SymoHTL/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/SymoHTL/subscriptions",
+      "organizations_url": "https://api.github.com/users/SymoHTL/orgs",
+      "repos_url": "https://api.github.com/users/SymoHTL/repos",
+      "events_url": "https://api.github.com/users/SymoHTL/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/SymoHTL/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "event": "labeled",
+    "commit_id": null,
+    "commit_url": null,
+    "created_at": "2026-10-09T16:16:46Z",
+    "label": {
+      "name": "hazard",
+      "color": "B60205"
+    },
+    "intent": null,
+    "performed_via_github_app": null
+  }
+]
