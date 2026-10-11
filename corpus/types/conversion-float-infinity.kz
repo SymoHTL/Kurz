@@ -1,5 +1,6 @@
 // expect: output
-// | Infinity
+// | true
 // rules: T6, T10
 
-print(float(1e300))
+f = float(1e300)
+print(f == f * 2)

@@ -99,8 +99,8 @@ Each line names a trap; its evidence is in the entry it links.
    2026-10-02, was retired by the owner on 2026-10-07 after it had stalled every round; the bill
    is counted before the run and named in the report after it. A run off the pipeline spends the
    seat at local prices and starts only after the owner said go to a bill that was named. The
-   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.44 USD,
-   the top seen on 2026-10-10,
+   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.52 USD,
+   the mean of a pass in the dearest run seen, 0.5119 on 2026-10-10, rounded up,
    off the pipeline about 1.3 to 1.8 USD, measured in
    [knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)), with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
@@ -290,6 +290,14 @@ Gate: review rule "rules for sessions".
   a thread answered by a reply is resolved by hand
   ([knowledge/resolve-what-the-edit-answered.md](knowledge/resolve-what-the-edit-answered.md)).
   Gate: `pr-findings`.
+- **The acceptance judge's table is a comment on the pull request, and the description names no
+  verdict.** The review reads a verdict in the description as a claim of approval: on 2026-10-10 one
+  head drew eight high findings for its "overall: pass" (the owner's choice of 2026-10-11, against
+  changing the review rule). The judge reads the tree that becomes the head, nothing is committed
+  after its last reading, and the acceptance text names that commit
+  ([knowledge/the-judged-tree-is-the-committed-tree.md](knowledge/the-judged-tree-is-the-committed-tree.md)).
+  Gate: review rule "every pull request" for the verdict; the order of judging and committing is a
+  `judgment step`.
 - **Low findings open no thread and hold no merge** (the owner's decision, 2026-10-02). The
   reviewer collects them on the open issue labelled `review-lows`, where they are fixed together.
   A push that is needed anyway fixes the lows of its pull request too. A pull request needs no

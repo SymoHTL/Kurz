@@ -47,20 +47,33 @@ when its line ends in a binary operator, a comma or `=>`; and when the next line
 so that a chain of calls can be broken before the dot. Nothing else continues a statement. A
 block between braces holds statements of its own, each on its line, also when the block stands
 inside an open bracket, as the body of a lambda does. The record marks as *(assumed)* that the
-`=` of an assignment counts as a binary operator here. In detail (the owner, 2026-10-10, confirming
-the front end's readings): a line that starts with `?.` continues the statement as one that starts
+`=` of an assignment counts as a binary operator here. In detail, each a reading of one of the three exceptions (the owner,
+2026-10-10): a line that starts with `?.` continues the statement as one that starts
 with `.` does, and empty lines and comment lines between the statement and that line do not end it; a
 line break inside the braces of an `enum`, `flags` or `with` body and inside the `< >` of type
 arguments or type parameters does not end the statement, as one inside parentheses does not; a line
 break after the `:` of a base list continues the declaration; a line that ends in the `|` of a type or
 in `..` or `..<` continues on the next; and a trailing comma is accepted in an `enum` or `flags` body
-and refused in the braces of `with`.
+and refused in the braces of `with`, where it is `syntax` (E4). A line that starts with `.` directly
+followed by a digit starts a statement with a fraction literal (L11) and continues nothing (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
+Case: [source/with-trailing-comma.kz](../corpus/source/with-trailing-comma.kz)
+```kurz
+data User(int Id, string Name)
+
+a = User(1, "Ann")
+b = a with { Name = "Bea", }
+print(b.Name)
+```
 Case: [source/continuation-range.kz](../corpus/source/continuation-range.kz)
 ```kurz
 for i in 1..
     3 {
     print(i)
+}
+for j in 1..<
+    3 {
+    print(j)
 }
 ```
 
@@ -95,8 +108,7 @@ There is no `;`: not at the end of a line and not between two statements. A `;` 
 or follows a statement, outside a string and a comment, is the compile error `semicolon`, one for a
 run of them, and the statement after it parses on its own; a `;` anywhere else, inside parentheses,
 brackets or an interpolation, or where an operand, a name, a member, a parameter or an arm is
-expected, is `syntax` (E4), the three-part `for` of C8 included (the owner, 2026-10-10, confirming
-the front end's reading). A line holds one statement, and a block that is
+expected, is `syntax` (E4), the three-part `for` of C8 included (the owner, 2026-10-10). A line holds one statement, and a block that is
 written on one line holds at most one.
 
 Case: [source/semicolon-inside.kz](../corpus/source/semicolon-inside.kz)
@@ -145,8 +157,9 @@ or before a `u`, `U` or `x` that is not followed by the digits it takes (`\u12`,
 on 2026-10-03, against L7's five alone, which would have put `\r` and `\0` into the library; the
 cost is one more thing a lexer has to carry. *(assumed: the version; the `\e` that C# 13 added is
 `unknown-escape` under it)* A `\u`, `\U` or `\x` whose digits name a surrogate, U+D800 to U+DFFF,
-or a value beyond U+10FFFF is `unknown-escape` too, since a UTF-8 string cannot hold a lone
-surrogate (L1) (the owner, 2026-10-10, confirming the front end's reading).
+or a value beyond U+10FFFF is `unknown-escape` too, since a string holds code points and not UTF-16
+units (L1, T16) (the owner, 2026-10-10); a pair of such escapes that C# would join, `\uD83D\uDE00`,
+is the error at the first, and `\U0001F600` writes the code point (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
 Case: [source/escape-surrogate.kz](../corpus/source/escape-surrogate.kz)
 ```kurz
@@ -221,7 +234,8 @@ An integer literal without a suffix has the type `int`, or `long` when its value
 2026-10-10, confirming the ladder); a literal that fits no integer type is the compile error
 `constant-overflow` (T6). A suffix (L11) gives the literal the type the suffix
 names. Where an integer type is written or expected, the literal takes that type, as a constant does in
-C#, and is `constant-overflow` (T6) when its value does not fit it, `byte c = 300`, never an `int`
+C# (the record marks this sentence *(assumed)*, which keeps the rule assumed), and is
+`constant-overflow` (T6) when its value does not fit it, `byte c = 300`, never an `int`
 narrowed (T7); where the written type is no number type, `string s = 300`, the literal is
 `type-mismatch` (T1), and a floating-point or `decimal` written type reaches it as L17 says. How far
 a written or expected type reaches is L17, which also carries the reading that a literal which does
@@ -265,7 +279,7 @@ operand of such an operator whose other operand has a type: with `uint u`, the `
 `uint`, which keeps T9 out of ordinary arithmetic, and the `100` of `sbyte low = -100` takes `sbyte`
 with its sign. C# converts the constant `int` instead, which Kurz cannot do across signedness (T9);
 this is the smallest rule that lets the cases of T3 and T9 stand. The owner confirmed this reading
-on 2026-10-10, in round 14; round 13 had not asked it, and the rule had credited 2026-10-09 in error. The promotion of narrow operands (chapter 3) is for the operands of a
+on 2026-10-10, in round 14; round 13 had not asked it. The promotion of narrow operands (chapter 3) is for the operands of a
 run-time operation. A constant expression is folded in the type its literals take, one operation at
 a time, each operation by the rule of its own operator: under `+ - * / %` an operation whose result
 leaves an integer or `decimal` type is `constant-overflow` (T6), where a floating-point one folds to
@@ -275,15 +289,24 @@ So `sbyte low = -100` and `byte c = 200 + 50` compile, `byte c = 200 + 100` is t
 is `0`, and `2147483647 + 1 +% 0`, with no written type and so in `int`, is the error at the `+`. A literal that does not fit the type it
 takes is `constant-overflow` wherever it stands: `byte c = 300` (L10), never an `int` narrowed (T7),
 and `b + 300` with a `byte` `b`, whose `300` takes `byte` by the sentence above, as much as
-`sum +% 300` (T28); the cost is that `b * 1000` on a `byte` is written `int(b) * 1000` (the owner, 2026-10-10, confirming the reading proposed after the review of round 13). A written conversion (T10) is such a written type and reaches the literals inside it, so
-`long(2147483647 + 1)` is `2147483648`; a `-` written directly before a literal belongs to the
-literal, so `sbyte x = -128` and `int x = -2147483648` compile; a written floating-point type reaches
+`sum +% 300` (T28); the cost is that `b * 1000` on a `byte` is written `int(b) * 1000` (the owner, 2026-10-10, confirming the reading proposed after the review of round 13). A written conversion (T10) reaches the integer literals inside it, so `long(2147483647 + 1)` is
+`2147483648`, while a fraction or exponent literal inside it keeps its own type and the conversion
+applies to the folded value, so `float(1e300)` is an infinity (T6) and `int(2.5)` is `2` (the owner, 2026-10-11, confirming the reading proposed after the review of round 14); a `-` written directly before a literal, with no operand before the `-`, belongs to the
+literal, so `sbyte x = -128` and `int x = -2147483648` compile and `n-1` stays a subtraction; a written floating-point or `decimal` type reaches
 integer literals too, so `double d = 1 / 2` is `0.5`, where C# divides the integers first; a fraction
 or exponent literal beside an operand of an integer type keeps its type, and the operand widens to it
 (T8), so `b + 1.5` with a `byte` is a `double`; and literals of different types in one constant
 expression fold in the type `+` finds for them at run time (T8, T9), so `1 + 2.5` is `3.5` (the owner,
-2026-10-10).
+2026-10-10). Under a written or expected type every literal takes it first (above), so `float f = 1 + 2.5`
+is `3.5` as a `float` and `float f = 1e300` is `constant-overflow` (T6), and a fraction literal under a
+written integer type, `int i = 1 + 2.5`, is
+`type-mismatch` (T1), as `string s = 300` is (L10) (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
+Case: [types/constant-wrap-in-written-type.kz](../corpus/types/constant-wrap-in-written-type.kz)
+```kurz
+byte b = 255 +% 1
+print(b)
+```
 Case: [types/constant-mixed-fold.kz](../corpus/types/constant-mixed-fold.kz)
 ```kurz
 print(1 + 2.5)
@@ -305,6 +328,7 @@ print(d)
 Case: [types/conversion-reaches-literals.kz](../corpus/types/conversion-reaches-literals.kz)
 ```kurz
 print(long(2147483647 + 1))
+// the target of the conversion reaches the integer literals inside it (L17), so the sum is folded as a long
 ```
 
 Case: [source/literal-minimum.kz](../corpus/source/literal-minimum.kz)
@@ -424,8 +448,9 @@ as a name reports the one error at its declaration, and a use of it afterwards n
 where an expression stands, `print(if)`, an untyped lambda parameter that is a core word,
 `by => by.Id`, and a core word as the name of a named argument, `f(by: 1)`, are `syntax` (E4), where
 the typed parameter `(int by)` is `reserved-word`; and `match` starts a match when a token that can
-start a value follows it, and is a name otherwise, so `match.Add(1)` is a call (the owner,
-2026-10-10, confirming the front end's readings).
+start a value follows it, and is read as a name otherwise, so `match.Add(1)` and `print(match)` parse
+as a call and a name, with the `reserved-word` error at the declaration of that name, or
+`unknown-name` (V10) where none declared it (the owner, 2026-10-10).
 
 Case: [source/core-word-in-expression.kz](../corpus/source/core-word-in-expression.kz)
 ```kurz
@@ -491,12 +516,12 @@ has it, and against an id of its own for the malformed shapes; what the one-line
 cases hold neither. Only characters other than whitespace count as text beside a `"""`, as in C# 11:
 trailing spaces after the opening and the indentation before the closing are no error. Code may
 follow the closing `"""` on its line, `""")` closing a call, as C# 11 allows: "on a line of its own"
-is about what stands before it (the owner, 2026-10-10, confirming the reading proposed after the review of round 13). There is no block that opens with four or more quotes, as C# 11 has: `""""` at the end of
+is about what stands before it (the owner, 2026-10-10, confirming the reading proposed after the review of round 13). There is no block that opens with four or more quotes, which C# 11 allows: `""""` at the end of
 a line is `syntax` (E4) (the owner, 2026-10-10). A lone carriage return, one that no line feed
 follows, is an ordinary character inside a literal, except at the end of a line of the block, where
 every trailing one is dropped with the line's end, and whitespace outside a literal, so a file whose
-lines end in a carriage return alone is one line (the owner, 2026-10-10, confirming the front end's
-reading).
+lines end in a carriage return alone is one line, which does not compile as its writer meant; the cost
+is nothing, since no current editor writes those line ends (the owner, 2026-10-10).
 
 Case: [source/multi-line-string-four-quotes.kz](../corpus/source/multi-line-string-four-quotes.kz)
 ```kurz
@@ -552,7 +577,7 @@ print(text)
 
 A number directly followed by a unit is a duration or a size. The list of units is fixed: `ms`, `s`,
 `min`, `h` and `days` make a duration (T13); `kb`, `mb` and `gb` make a number of bytes, an integer
-literal (L10) in steps of 1024. The number is a decimal integer or a decimal fraction, with `_`
+literal (L10) in steps of 1024. The number is a decimal integer or a decimal fraction in the forms of L11, `.5h` included, with `_`
 between its digits: `1.5s` is 1500 ms, `0.5h` is 30 min and `1.5kb` is 1536. A fraction that does
 not fall on a whole nanosecond, or on a whole byte before `kb`, `mb` and `gb`, is the compile error
 `inexact-literal`; a hexadecimal, a binary or a suffixed literal before a unit is `syntax` (E4) (the

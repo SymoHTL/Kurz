@@ -3,4 +3,4 @@
 // rules: T12
 
 print(1 +% 2 * 3)
-// +% has the precedence and the associativity of + (T12), so the product is formed first
+// +% has the precedence of + (T12), so the product is formed first; with one operator of each level the associativity plays no part

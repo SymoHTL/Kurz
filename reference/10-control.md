@@ -9,16 +9,21 @@ spelling). The braces are always required, and the block opens on the line of th
 statement in place of the block, and a `{` on the next line, which L2 ends the statement before and
 L4 does not continue it to, are the compile error `braces-required` (the owner, 2026-10-09, against
 continuing the statement onto the `{`, a fourth exception to L2). Both are reported where the block should have
-opened, the line where the condition ends, its last line when it runs over several lines: a block
-that is missing or opens on the next line is an error of the whole `if`, which E1 reports where the
-header ends, and the case with the `{` on its own line expects that line (the owner, 2026-10-10, confirming the reading proposed after the review
-of round 13). The same error, at the line where the header ends, is raised wherever a block that a
-construct takes opens on the next line or is replaced by a statement: the body of a function outside
-a type body or of a constructor, at the first line of its signature; the body of a `while` or a `for`;
-the arms of a `match` or of the `else` after a call; an `else` or `raw` block; and the body of a
-`class`, `data`, `interface`, `enum` or `flags` or the braces of `with`. A method signature inside a
-type body that ends its line is the bodiless form of an interface member (K7), so its `{` on the next
-line is `syntax` (E4) (the owner, 2026-10-10, confirming the front end's readings).
+opened, the line where the condition ends: a block that is missing or opens on the next line is an
+error of the whole `if`, which E1 reports on the line of the condition, and the case with the `{` on
+its own line expects that line (the owner, 2026-10-10, confirming the reading proposed after the
+review of round 13); for a condition over several lines that is its last line, where the two readings
+the owner confirmed, the construct's first line and the line where its header ends, part (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). The same error is raised wherever a block that a construct takes opens on the next line or is
+replaced by a statement, at the line where the block should have opened: the last line of the header
+of a `while` or a `for`, the line of the `match` or of the call an `else` follows, the line of the
+word `else` or `raw`, the line of the name or the word for the body of a `class`, `data`, `interface`,
+`enum` or `flags` or the braces of `with`, and the first line of the signature for the body of a
+function outside a type body or of a constructor. The list names the constructs this reference has
+cases or rules for; the rule holds for every other block of the record, an `attempt` or `retry` block,
+an actor body and the block of `every ... run` among them, at the line where the words before the
+block end. A method signature inside a type body that ends its
+line is the bodiless form of an interface member (K7), so its `{` on the next line is `syntax` (E4)
+(the owner, 2026-10-10).
 
 Case: [control/brace-next-line-while.kz](../corpus/control/brace-next-line-while.kz)
 ```kurz
@@ -105,7 +110,11 @@ a case (D6, K6), `Admin` where the case is `User`; and an arm that can never run
 arm covers its type, is the compile error `unreachable-arm` (the owner, 2026-10-09, against arms
 that name cases only, under which a `match` cannot tell an `Admin` from a `User`; the cost is a row
 in the table and a subtype check per arm). An `else` arm after arms that cover every case, and a
-literal arm (C9) after the arm of its type, are `unreachable-arm` too (the owner, 2026-10-10).
+literal arm (C9) after the arm of its type, are `unreachable-arm` too (the owner, 2026-10-10). A literal
+arm after an arm with the same literal is `unreachable-arm` as well, as C# reports a pattern an
+earlier one handles; an arm that names a type that is no case of the union and derived from none,
+`string s` in a `match` over `Yes | No`, is `type-mismatch` (T1) at the arm, as C# refuses a pattern
+of a type the value cannot have (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
 Case: [control/match-unreachable-literal.kz](../corpus/control/match-unreachable-literal.kz)
 ```kurz
@@ -294,6 +303,10 @@ Case: [source/continuation-range.kz](../corpus/source/continuation-range.kz)
 for i in 1..
     3 {
     print(i)
+}
+for j in 1..<
+    3 {
+    print(j)
 }
 ```
 

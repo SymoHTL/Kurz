@@ -76,6 +76,9 @@ cost is that a function with five cases forces a five-case type on every variabl
 result). A written type that is the success case itself, `User?` for a call that returns
 `User? | DbError`, names no other case and is unwrapped as O2 says; one that names any case beyond the
 success case names them all (the owner, 2026-10-10, confirming the reading proposed after the review of round 13).
+A written type the success case converts to, `long` for an `int` success or `User?` for a `User`
+success, counts as the success case itself: the call unwraps and the value widens as in an assignment
+(the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -380,9 +383,10 @@ reference's reading, on which the case stands). An allocation that fails ends th
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value
-when nothing can be allocated; the cost is a guard page per actor stack, a stack probe in every frame larger than that page so
-that no frame steps past it, a signal stack per thread for the handler that turns the fault into the
-exception, and a program that cannot recover from memory pressure). The case runs at the top level, which is the root actor, so the
+when nothing can be allocated; the cost is a guard page per actor stack and a program that cannot recover from memory pressure; the
+stack probe in every frame larger than that page, so that no frame steps past it, and the signal stack
+per thread for the handler that turns the fault into the exception the owner added to the cost on
+2026-10-10). The case runs at the top level, which is the root actor, so the
 exception ends the program (O6); the allocation failure has no case, since no case can ask for
 memory that does not exist.
 

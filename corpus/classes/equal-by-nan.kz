@@ -1,9 +1,9 @@
 // expect: output
 // | true
-// rules: K5
+// rules: K5, D3
 
-class Point(double X, double Y) equal by X, Y
+class Point(double X, double Y, mut int Hits) equal by X, Y
 
 double z = 0.0
 nan = z / z
-print(Point(nan, 0.0) == Point(nan, 0.0))
+print(Point(nan, 0.0, 0) == Point(nan, 0.0, 1))

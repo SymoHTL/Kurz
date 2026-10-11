@@ -170,7 +170,11 @@ all. *(proposed: the record speaks of assigning)* The result type of a function 
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
 objected to)* A lambda whose body is a call with a `void` success, `x => print(x)`, is a lambda with
-a `void` result and no use of the call as a value (O10) (the owner, 2026-10-10).
+a `void` result and no use of the call as a value (O10) (the owner, 2026-10-10). The `=>` of a function
+type reaches to the end of the type, so `(int) => int | NotFound` returns the union, and a union of a
+function type and another type is written `((int) => int) | NotFound`, as the nullable one is; such a
+lambda under a function type whose result is not `void`, `(int) => int`, is `type-mismatch` (T1) at
+the lambda, since its result is `void` where an `int` is required (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
 Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
 ```kurz
@@ -222,9 +226,10 @@ call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of t
 parameter can have a default value, and an argument can be passed by name (D11). Which function a
 call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)* Arguments are
 evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
-order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it (C# also
-takes `default` and `new S()` for a value type `S`, which the record does not name), and one that is
-not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
+order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
+value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
+folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14) (C# also takes `default` and `new S()` for a value type `S`, which the record does not
+name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
 2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
 

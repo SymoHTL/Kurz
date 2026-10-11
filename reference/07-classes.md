@@ -50,7 +50,8 @@ print(b.Count)
 
 ### K4 (decided, §4) Equality
 
-A class with `mut` fields compares by identity. A class without them compares by content. Across
+A class with `mut` fields compares by identity. A class without them compares by content, each field
+by the equality Kurz gives its type, a `double` or `float` with NaN equal to NaN as under D3 and K5. Across
 inheritance (K6, K10) K13 holds.
 
 Case: [classes/equals-member.kz](../corpus/classes/equals-member.kz)
@@ -130,16 +131,17 @@ and changes nothing about `==`, which stays K4's and this rule's (the owner, 202
 C#'s operator declarations with `==`, `!=` and the comparisons excluded; the cost is that a vector
 type reads as `a.Add(b).Scale(2)`). `a + b` on two instances is `type-mismatch` (T1), the error of an
 arithmetic operator on operands it has no meaning for (the owner, 2026-10-10, confirming the reading
-proposed after the review of round 13). A `double` among the named fields compares as a field of a
-`data` value does (D3), NaN equal to NaN (the owner, 2026-10-10).
+proposed after the review of round 13). A `double` or `float` among the named fields compares as a field of a
+`data` value does (D3), NaN equal to NaN (the owner, 2026-10-10); under K4's content equality it
+compares the same way.
 
 Case: [classes/equal-by-nan.kz](../corpus/classes/equal-by-nan.kz)
 ```kurz
-class Point(double X, double Y) equal by X, Y
+class Point(double X, double Y, mut int Hits) equal by X, Y
 
 double z = 0.0
 nan = z / z
-print(Point(nan, 0.0) == Point(nan, 0.0))
+print(Point(nan, 0.0, 0) == Point(nan, 0.0, 1))
 ```
 
 Case: [classes/operator-on-instances.kz](../corpus/classes/operator-on-instances.kz)
@@ -212,10 +214,16 @@ implied by the interface, under which a method that looks private is public, and
 both mistakes). A method implements an interface method when its name, its parameter types in their
 order and its return type are the interface's; a `pub` method inherited from the base class counts,
 as in C# (the owner, 2026-10-10, confirming the reading proposed after the review of round 13); one
-inherited without `pub` does not count, and the class is `missing-member` (the owner, 2026-10-10).
+inherited without `pub` does not count, and the class is `missing-member` (the owner, 2026-10-10); it
+implements the interface with a `pub` method of its own, which hides nothing, since a base method the
+class cannot see is hidden by nothing (below).
 Between the braces of a class, a field is written `Type name`, with `mut` in front when it can be
-assigned and its first value after `=`, which may be any expression, as in C# (the owner, 2026-10-10;
-a parameter's default is a constant, F12), and a method is written as a function (chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
+assigned and its first value after `=`, which may be any expression (the owner, 2026-10-10, against a constant, which F12 keeps for a
+parameter's default): it may read the parameters of the primary constructor, the fields declared above
+it and functions outside the class, and is evaluated in declaration order before the body of a
+constructor runs, as C# evaluates an initializer, which refuses an instance member there; a field
+declared below it, a method of the class or `this` is `unknown-name` (V10); the cost is that such a
+default runs at every construction, which a constant one does not (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). A method is written as a function (chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
 further constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
 method that a derived class overrides is marked `virtual` in the base and `override` in the derived
 class, as in C#: `override` on a method that the nearest base class declaring it marks neither
@@ -588,12 +596,22 @@ The short form of K10 follows the primary constructor of the base, and is the co
 `no-primary-constructor` when the base has none (K6's `Animal`), whatever further constructors
 it has. A listed parameter with a base field's name and type is that field, as K11 says for the
 explicit form, and with another type it is K17's error (the owner, 2026-10-10, confirming the
-reference's reading, which the record had not carried). The defaults of the base keep their
+reference's reading, which the record had not carried). Such a parameter stands where the base's
+constructor has it, among the base's fields in their order and before the class's own parameters; one
+listed out of that order is `base-field-clash` (K17) too (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). The defaults of the base keep their
 place, so the class's own parameters come after them, and a call that leaves one out names the
 rest (D11). The owner chose this on 2026-10-03, against taking the empty constructor when the
 base has no primary one, which would have given one form two readings; the cost is that such a
 base forces the explicit form.
 
+Case: [classes/inherit-short-field-clash.kz](../corpus/classes/inherit-short-field-clash.kz)
+```kurz
+class User(string Name)
+
+class Admin(int Name) : User
+
+print(Admin("Ann", 1).Name)
+```
 Case: [classes/inherit-no-primary-constructor.kz](../corpus/classes/inherit-no-primary-constructor.kz)
 ```kurz
 class Animal {

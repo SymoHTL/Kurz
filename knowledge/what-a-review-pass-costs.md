@@ -1,6 +1,6 @@
 ---
 name: what-a-review-pass-costs
-description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 19 minutes, whatever the model and effort; per pass about 1.3 to 1.8 USD at list price (2026-10-02 and 2026-10-07) on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD; in CI a pass reports 0.19 to 0.27 USD (ten runs, 2026-10-07 and 2026-10-08; the top rounded up from 0.264) and 0.44 USD on a pull request of record and reference text (2026-10-10, 37 passes for 16.26 USD). A run in CI starts without a question to the owner since 2026-10-07; a run off the pipeline waits for the owner's go-ahead to the bill named
+description: Measured on 2026-10-02 - one review pass over a 30k-character batch thinks 60k to 120k tokens and takes 6 to 19 minutes, whatever the model and effort; per pass about 1.3 to 1.8 USD at list price (2026-10-02 and 2026-10-07) on claude-opus-5-5, 3.5 to 4.3 on claude-fable-5-1; the first full review of a 20-batch pull request was 30 passes and about 45 USD; in CI a pass reports 0.19 to 0.27 USD (ten runs, 2026-10-07 and 2026-10-08; the top rounded up from 0.264) and up to 0.52 USD on a pull request of record and reference text, the mean of a pass in the dearest run seen, 0.5119, rounded up (2026-10-10: 37 passes for 16.26 USD, then 36 passes for 18.43 USD; the report names no price per pass). A run in CI starts without a question to the owner since 2026-10-07; a run off the pipeline waits for the owner's go-ahead to the bill named
 metadata:
   type: reference
 ---
@@ -66,9 +66,10 @@ What follows from it:
   20 minutes. In CI a pass reported 0.19 to 0.27 USD on 2026-10-07 and 2026-10-08 (ten runs:
   1.94 USD for 10 passes, 1.42 for 6, 1.04 for 4, 1.85 for 7, 2.47 for 10, 1.80 for 8, 1.91 for 8,
   2.11 for 8, 2.04 for 8, 2.42 for 11; the highest, 1.85 for 7, is 0.264 a pass, rounded up to
-  0.27); on 2026-10-10 a run of 37 passes over the nine batches of a pull request of record and
-  reference text reported 16.26 USD, 0.44 a pass, so the price of a pass in CI depends on what the
-  batch holds, and 0.44 is the top seen; off the pipeline a pass on the pinned model reported 1.34 USD on
+  0.27); on 2026-10-10 two runs over a pull request of record and reference text reported 16.26 USD for
+  37 passes over nine batches and 18.43 USD for 36 passes over twelve, 0.4395 and 0.5119 a pass as means
+  of a run, rounded up to 0.44 and 0.52, and the report names no price per pass, so the dearest single pass is not known; why these
+  runs cost more per pass than the ten before them was not established; off the pipeline a pass on the pinned model reported 1.34 USD on
   2026-10-07, just under the 1.4 to 1.8 USD a pass measured off the pipeline on 2026-10-02 (above).
   Why the two places report prices this far apart was not
   established.
@@ -90,8 +91,9 @@ What follows from it:
   1.94 USD: it had stalled every round for a run of that size. The ten runs measured to
   2026-10-08 cost 1.04 to 2.47 USD (a two-pass run of one batch would be about half a USD);
   the upper bound at the pass cap is batches times five passes (the cap a batch, `MAX_PASSES`
-  in tools/review/review.py) times 0.44 USD, the highest measured, 2.2 USD per batch: 4.4 USD for
-  two batches, 11 for five.
+  in tools/review/review.py) times 0.52 USD, the mean of a pass in the dearest run seen, rounded up (a bound on the mean, not
+  on the dearest pass, which the report does not show), 2.6 USD per batch: 5.2 USD for two batches,
+  13 for five.
   The bill is counted
   before the run and named in the report after it. A run off
   the pipeline (`--local`) spends the seat at local prices and starts only after the owner said go

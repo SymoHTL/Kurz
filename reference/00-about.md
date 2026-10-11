@@ -279,8 +279,8 @@ print(b)
 ### A8 (assumed, §8) The text of the remaining values
 
 A `float` shows what a `double` shows (A4), in the sense of A11. A `decimal` shows the digits it
-holds. A `char` shows its character. A duration shows its value in the units of L14: `1h 30min`,
-split as A12 says. A set of flags (D13) shows its names with ` | ` between them, in the order of
+holds. A `char` shows its character. A duration shows its value split into units, `1h 30min`, as A12
+says. A set of flags (D13) shows its names with ` | ` between them, in the order of
 A13. A `double` without a fraction, one that needs an exponent and one that is no number show what
 C# prints for them: `1`, `1E+21`, `NaN`; which C# that is, and what the other special values show,
 is A14.
@@ -314,17 +314,19 @@ print(2.5f)
 
 ### A12 (assumed, §8) The text of a duration
 
-A duration shows its value split into the units of L14 from the largest down, each unit at most once
+A duration shows its value split into units from `days` down, those of L14 and the two below a
+millisecond named below, each unit at most once
 and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and the remainder
 below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A remainder
 below a millisecond shows its microseconds and nanoseconds the same way, `1s 250us` and `1us 500ns`,
 when no formatting is chosen (the owner, 2026-10-10, against rounding or cutting to milliseconds); a
 formatting that can be chosen is a question the record lists (section 14), as is whether `us` and
 `ns` are units of a literal (L14). A negative duration
-shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. The owner
+shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. A size is an integer (L14) and shows its digits, `1.5kb`
+as `1536`, which the case of L14 shown below prints as well. The owner
 accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is assumed
 and not decided; that it is the remainder below a second that shows in milliseconds came from the
-review of 2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)*
+first review of 2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)*
 
 Case: [values/text-duration-sub-millisecond.kz](../corpus/values/text-duration-sub-millisecond.kz)
 ```kurz
@@ -366,12 +368,13 @@ print(Access.None)
 
 "What C# prints" is what .NET Core 3.0 and later print with the invariant culture, which is the
 shortest digits that read back as the same number (A4), with `.` as the separator: an exponent form
-from `1E+15` up and from `1E-05` down, `-0` for a negative zero, `Infinity` and `-Infinity` for the
+for a nonzero magnitude of `1E+15` or more or below `1E-04`, so that `1E-05` is the first power of
+ten it shows and `0.0001` the last without it, `0` for zero, `-0` for a negative zero, `Infinity` and `-Infinity` for the
 infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0` for a
 negative zero, a `∞` sign, a `,`), and none of that is meant. The owner accepted this reading by its
 id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided; that the
-exponent form starts at `1E-05` itself came from the review of 2026-10-10, and was not put to the
-owner by its text. *(assumed: that sentence)*
+exponent form starts below `1E-04`, at `1E-05` for the powers of ten, came from the first review of
+2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)*
 
 Case: [values/text-double-special.kz](../corpus/values/text-double-special.kz)
 ```kurz

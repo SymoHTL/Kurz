@@ -307,7 +307,7 @@ def cases_in(base):
     cases.append(("store: entries, tags, sections and rules are counted",
                   all(row in str(store) for row in ("| Entries in INDEX.md | 2 |", "| tagged LIVING | 1 |", "| Review rule sections | 1 |", "| Review rules | 2 |")), store))
     design = got(block_design, root)
-    cases.append(("design: sections, assumed statements and open questions are counted",
+    cases.append(("design: sections, marker occurrences and Open bullets are counted",
                   all(row in str(design) for row in ("| Sections | 2 |", "| Occurrences of the marker *(assumed)* | 1 |", "| Bullets of the Open section | 2 |")), design))
     with open(os.path.join(root, "kurz-design.md"), "w", encoding="utf-8") as f:
         f.write("## 1. Types\n\nx\n")

@@ -3,3 +3,4 @@
 // rules: L17, T10
 
 print(long(2147483647 + 1))
+// the target of the conversion reaches the integer literals inside it (L17), so the sum is folded as a long
