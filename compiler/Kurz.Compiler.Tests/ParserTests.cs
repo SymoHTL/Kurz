@@ -5,7 +5,8 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The parser against chapters 1, 2, 5, 7, 8 and 10 of the reference. A tree is pinned as the one
+/// The parser against chapters 1 to 12 of the reference: the forms of chapters 1 to 11, the ids and
+/// lines of chapter 12. A tree is pinned as the one
 /// line <see cref="SyntaxPrinter"/> writes for it; an error by its id and its line (E2).
 /// </summary>
 public sealed class ParserTests
@@ -67,8 +68,14 @@ public sealed class ParserTests
     [InlineData("print(n +% 1 *% 2)", "(call print (+% n (*% (int 1) (int 2))))")]
     [InlineData("print(a == b != c)", "(call print (!= (== a b) c))")]
     [InlineData("print(1 < 2 == true)", "(call print (== (< (int 1) (int 2)) true))")]
-    public void Operators_have_the_precedence_of_c_sharp(string program, string tree)
+    [InlineData("print(1..n + 1)", "(call print (.. (int 1) (+ n (int 1))))")]
+    [InlineData("print(1..n << 1)", "(call print (.. (int 1) (<< n (int 1))))")]
+    [InlineData("print(a < 1..n)", "(call print (< a (.. (int 1) n)))")]
+    [InlineData("print(1..n == r)", "(call print (== (.. (int 1) n) r))")]
+    public void Operators_bind_as_t18_t22_t12_and_n4_say(string program, string tree)
     {
+        // T18, T22 and T12: "the precedence they have in C#", `+%` and `-%` with `+` and `-`, `*%` with `*`; N4: `??` as in C#;
+        // where a range binds is a reading (README), pinned by the last four cases: below `+ - << >>`, above the comparisons
         Assert.Equal(tree, Tree(program));
     }
 
@@ -112,6 +119,8 @@ public sealed class ParserTests
     [Fact]
     public void An_else_on_a_line_of_its_own_is_syntax_at_its_line_and_the_branch_still_parses()
     {
+        // C2: `else` follows the closing brace on its line; one on a line of its own is `syntax`, which E4 lists (decided), and the
+        // branch parses so that the one error stands
         var (tree, diagnostics) = Parse("if a {\n    print(1)\n}\nelse {\n    print(2)\n}");
         Assert.Equal([(ErrorIds.Syntax, 4)], diagnostics.Items.Select(d => (d.Id, d.Line)));
         Assert.Equal("(if a {(call print (int 1))} else {(call print (int 2))})", SyntaxPrinter.Print(tree));
@@ -161,7 +170,7 @@ public sealed class ParserTests
     }
 
     [Fact]
-    public void A_core_word_that_begins_no_statement_is_read_as_a_name_where_an_expression_stands()
+    public void A_declared_core_word_outside_the_seventeen_is_used_without_a_second_error()
     {
         // the front end reports nothing: whether the name is declared is the checker's to say (L12 against E1, a round's question)
         Assert.Equal("(call print equal)", Tree("print(equal)"));
@@ -273,7 +282,7 @@ public sealed class ParserTests
     [InlineData("raw")]
     [InlineData("use")]
     [InlineData("with")]
-    public void A_word_that_starts_a_statement_or_a_declaration_is_syntax_where_an_expression_stands(string word)
+    public void Each_of_the_seventeen_statement_words_is_syntax_where_an_expression_stands(string word)
     {
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors($"print({word})"));
     }
@@ -301,6 +310,10 @@ public sealed class ParserTests
     [InlineData("value = Find(2) else\n{\n    else => 0\n}", 1)]
     public void Braces_required_is_raised_wherever_a_block_opens_on_the_next_line(string program, int line)
     {
+        // C1 names the line for each construct: the last line of the header of a `while` or a `for`, and of an `if`'s condition; the
+        // line of the `match` or of the call an `else` follows; the line of the word `else` or `raw`; the line of the name or the word
+        // for a type body or the braces of `with`; and the first line of the signature for a function outside a type body or a
+        // constructor (the owner, 2026-10-10 and 2026-10-11)
         Assert.Equal([(ErrorIds.BracesRequired, line)], Errors(program));
     }
 
@@ -324,6 +337,7 @@ public sealed class ParserTests
     [Fact]
     public void A_line_that_starts_with_a_conditional_member_access_continues_the_statement()
     {
+        // L4: a line that starts with `?.` continues the statement as one that starts with `.` does (the owner, 2026-10-10)
         Assert.Equal("(assign-or-declare x (?. a b))", Tree("x = a\n    ?.b"));
     }
 
@@ -343,6 +357,7 @@ public sealed class ParserTests
     [InlineData("data Pair<\n    A, B>(A First, B Second)")]
     public void A_line_break_inside_the_braces_of_a_type_body_or_inside_angle_brackets_continues(string program)
     {
+        // L4: a line break inside the braces of an enum, flags or with body and inside the `< >` of type arguments or type parameters does not end the statement (the owner, 2026-10-10)
         var (tree, diagnostics) = Parse(program);
         Assert.Empty(diagnostics.Items);
         Assert.NotEmpty(tree.Statements);
@@ -355,6 +370,8 @@ public sealed class ParserTests
     [InlineData("flags F { A, B, }")]
     public void A_base_list_colon_and_a_function_type_arrow_continue_and_an_enum_body_takes_a_trailing_comma(string program)
     {
+        // L4: a line break after the `:` of a base list continues the declaration, a line that ends in `=>` continues, and a
+        // trailing comma is accepted in an enum or flags body (the owner, 2026-10-10)
         var (tree, diagnostics) = Parse(program);
         Assert.Empty(diagnostics.Items);
         Assert.NotEmpty(tree.Statements);
@@ -366,6 +383,7 @@ public sealed class ParserTests
     [InlineData("f(by: 1)")]
     public void A_trailing_comma_in_with_and_a_core_word_as_an_untyped_parameter_or_an_argument_name_are_syntax(string program)
     {
+        // L4: a trailing comma in the braces of `with` is `syntax` (the owner, 2026-10-10); L12: the untyped lambda parameter and the named argument
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));
     }
 
@@ -385,6 +403,7 @@ public sealed class ParserTests
     [Fact]
     public void A_line_that_ends_in_a_carriage_return_alone_runs_on()
     {
+        // L13: a lone carriage return is whitespace outside a literal (the owner, 2026-10-10), so both statements stand on line 1, and the second is text the first cannot take
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("a = 1\rb = 2"));
     }
 
@@ -395,6 +414,7 @@ public sealed class ParserTests
     [InlineData("if x {\n    print(1)\n\n", 2)]
     public void A_closer_missing_at_the_end_of_the_file_is_reported_at_the_last_line_with_code(string program, int line)
     {
+        // E4: a `)`, `]` or `}` missing at the end of the file is reported at the last line that holds code (the owner, 2026-10-10)
         Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
     }
 
@@ -509,8 +529,6 @@ public sealed class ParserTests
     {
         // pinned as they are, so that a fix to one of them shows
         Assert.Equal([(ErrorIds.BracesRequired, 1), (ErrorIds.BracesRequired, 1)], Errors("if x print(1) else print(2)"));
-        Assert.Equal([(ErrorIds.ReservedWord, 1)], Errors("x.match(1)"));
-        Assert.Empty(Errors("x.match"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("s = \"\"\"\n    {f(\"}\")}\n    \"\"\""));
         Assert.Equal([(ErrorIds.UnknownEscape, 1), (ErrorIds.Syntax, 1)], Errors("x = \"a\\"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("x = \"\"\"\n    a\n"));
@@ -534,6 +552,8 @@ public sealed class ParserTests
     [Fact]
     public void A_variable_named_match_before_a_bracket_is_a_name()
     {
+        // L12: `match` starts a match when a token that can start a value follows it; no value of this reference starts with `[`
+        // (M9 builds a list with `List<int>()`), so this is the name, indexed
         var (tree, diagnostics) = Parse("print(match[0])");
         Assert.Empty(diagnostics.Items);
         Assert.Single(tree.Statements);
@@ -542,6 +562,8 @@ public sealed class ParserTests
     [Fact]
     public void A_method_signature_that_ends_its_line_is_the_bodiless_form_so_a_brace_on_the_next_line_is_syntax()
     {
+        // C1 and the error table: a method signature inside a type body that ends its line is the bodiless form of an interface
+        // member (K7), so its `{` on the next line is `syntax` at that line (the owner, 2026-10-10)
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("class A {\n    pub void F()\n    {\n    }\n}"));
     }
 
@@ -573,8 +595,11 @@ public sealed class ParserTests
     [InlineData("void")]
     [InlineData("weak")]
     [InlineData("int")]
-    public void A_core_word_that_starts_no_statement_is_a_name_where_an_expression_stands(string word)
+    public void A_core_word_outside_the_seventeen_statement_words_is_a_name_where_an_expression_stands(string word)
     {
+        // a reading of L12 against E1 (README; a question for a design round): the seventeen words that begin a statement form,
+        // pinned in the theory above, are `syntax` where an expression stands; every other core word, the modifiers, `void`, `weak`
+        // and the type names among them, stands as a name there, so that a declared one is used without a second error
         Assert.Equal($"(assign-or-declare x {word})", Tree($"x = {word}"));
     }
 
@@ -681,7 +706,7 @@ public sealed class ParserTests
     [InlineData("class Key(int Id, string Kind, mut int Hits) equal by Id, Kind", "(class Key(int Id, string Kind, mut int Hits) equal by Id, Kind)")]
     [InlineData("class Pet(weak Owner? Keeper)", "(class Pet(weak Owner? Keeper))")]
     [InlineData("class Button(string Name, mut () => void OnClick)", "(class Button(string Name, mut () => void OnClick))")]
-    [InlineData("class Dog : Animal, Named {\n    pub string Name() => \"Rex\"\n}", "(class Dog : Animal : Named {(function pub string Name() => (string \"Rex\"))})")]
+    [InlineData("class Dog : Animal, Named {\n    pub string Name() => \"Rex\"\n}", "(class Dog : Animal, Named {(function pub string Name() => (string \"Rex\"))})")]
     [InlineData("enum Plan { Free, Pro }", "(enum Plan {Free, Pro})")]
     [InlineData("enum Plan { Free = 1, Pro = 2 }", "(enum Plan {Free = (int 1), Pro = (int 2)})")]
     [InlineData("flags Access { Read, Write, Run }", "(flags Access {Read, Write, Run})")]
@@ -773,11 +798,134 @@ public sealed class ParserTests
     [Fact]
     public void A_binary_operator_reports_the_line_of_the_operator()
     {
-        var (tree, _) = Parse("total = 1 +\n    2");
+        // E1: a binary operator reports its operator's line; the left operand stands on the line before it, so a node that took the operand's line would fail
+        var (tree, _) = Parse("total = (1\n    + 2)");
         var declaration = Assert.IsType<AssignOrDeclare>(tree.Statements[0]);
-        var sum = Assert.IsType<BinaryExpression>(declaration.Value);
-        Assert.Equal(1, sum.Line);
+        var sum = Assert.IsType<BinaryExpression>(Assert.IsType<ParenthesizedExpression>(declaration.Value).Inner);
+        Assert.Equal(2, sum.Line);
+        Assert.Equal(1, sum.Left.Line);
         Assert.Equal(2, sum.Right.Line);
+    }
+
+    [Fact]
+    public void A_stray_else_without_a_block_is_one_syntax_and_the_next_statement_parses()
+    {
+        // C2, E4: the stray `else` is `syntax`; with no block and no `if` after it, the statement is given up under that one error (E1)
+        var (after, first) = Parse("if a {\n}\nelse print(1)\nprint(2)");
+        Assert.Equal([(ErrorIds.Syntax, 3)], first.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal("(call print (int 2))", SyntaxPrinter.Print(after));
+        var (alone, second) = Parse("else print(1)\nprint(2)");
+        Assert.Equal([(ErrorIds.Syntax, 1)], second.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal("(call print (int 2))", SyntaxPrinter.Print(alone));
+    }
+
+    [Fact]
+    public void A_range_chains_with_nothing()
+    {
+        // the reading on C8 (README): a range has two ends, so a third is text no rule gives a meaning (E4)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("x = 1..2..3"));
+    }
+
+    [Fact]
+    public void A_function_declared_inside_a_block_parses_as_one_at_the_top_level_does()
+    {
+        // the reading on F1 (README): the reference places functions in a file (F5) and in a type body (K7) and says nothing of a block
+        Assert.Equal("(function void F() {(function int G() => (int 1)) (call print (call G))})", Tree("void F() {\n    int G() => 1\n    print(G())\n}"));
+    }
+
+    [Fact]
+    public void A_hole_with_more_than_one_expression_is_syntax_at_its_line()
+    {
+        // L6: a hole holds one expression; the error names the line of the token that is not part of it (E1), which is the hole's line, since a hole does not span lines
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("x = 1\nprint(\"{a b}\")"));
+    }
+
+    [Fact]
+    public void A_modifier_written_twice_is_syntax()
+    {
+        // a shape E4 covers by its general clause (README): K7 says class bodies follow C#, which refuses a modifier written twice, and
+        // text no rule gives a meaning is `syntax`
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class A {\n    pub pub int x = 1\n}"));
+    }
+
+    [Fact]
+    public void A_field_without_a_written_type_is_a_field_with_its_modifiers()
+    {
+        // a reading (README): V2's form, which speaks of variables, read in a type body as a field without a written type; K7 shows a
+        // field as `Type name`, and the record's actor bodies write `mut users = Map<int, User>()`
+        Assert.Equal("(class A {(field mut count (int 0)) (field pub mut total (int 1))})", Tree("class A {\n    mut count = 0\n    pub mut total = 1\n}"));
+    }
+
+    [Theory]
+    [InlineData("pub int x = 1", "(declare pub int x (int 1))")]
+    [InlineData("static mut y = 2", "(mut-declare static y (int 2))")]
+    [InlineData("void F() {\n    override int x = 1\n}", "(function void F() {(declare override int x (int 1))})")]
+    [InlineData("pub class X {\n}", "(class pub X)")]
+    [InlineData("static data D(int X)", "(data static D(int X))")]
+    public void Every_modifier_written_stays_on_the_declaration_for_the_checker(string program, string tree)
+    {
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("xs.Map<int>(f)", "(call (. xs Map)<int> f)")]
+    [InlineData("f(a < b, c > (d))", "(call f (call a<b, c> d))")]
+    [InlineData("print(a < b, c > d)", "(call print (< a b), (> c d))")]
+    public void Type_arguments_follow_a_member_access_too_and_are_told_from_comparisons_as_in_c_sharp(string program, string tree)
+    {
+        // T19: a call names its type arguments. How they are told from comparisons is a reading (README): T17 writes generic types
+        // as in C#, and C# reads `<` ... `>` as a type-argument list when `(` follows the `>`; the reference does not state the rule
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void An_enum_or_flags_type_has_no_type_parameters()
+    {
+        // a shape E4 covers by its general clause (README): D12 and D13 give an enum and a flags type a name and a body and no type
+        // parameters, so type parameters there are text no rule gives a meaning
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("enum E<T> { A }"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("flags F<T> { A }"));
+    }
+
+    [Fact]
+    public void A_second_question_mark_on_a_type_is_syntax()
+    {
+        // a shape E4 covers by its general clause (README): N1 gives a type one `?`, so a second is text no rule gives a meaning
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("int? ? x = 1"));
+    }
+
+    [Theory]
+    [InlineData("void Run((int) => int | NotFound f) {\n}", "(function void Run((int) => (int | NotFound) f) {})")]
+    [InlineData("((int) => int) | NotFound g = null", "(declare ((int) => int) | NotFound g null)")]
+    public void The_arrow_of_a_function_type_reaches_to_the_end_of_the_type(string program, string tree)
+    {
+        // F11: `(int) => int | NotFound` returns the union, and a union of a function type and another type is written
+        // `((int) => int) | NotFound` (the owner, 2026-10-11)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void The_printer_keeps_a_type_parameter_limit_and_parenthesizes_a_union_inside_a_type()
+    {
+        Assert.Equal("(data Box<T: Shape>(T Item))", Tree("data Box<T: Shape>(T Item)"));
+        Assert.Equal("(declare (A | B)? x null)", Tree("(A | B)? x = null"));
+    }
+
+    [Fact]
+    public void A_comment_inside_an_interpolation_is_syntax()
+    {
+        // L3: a comment runs to the end of its line, which an interpolation (L6) does not reach: text no rule gives a meaning (E4)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(\"{x // note}\")"));
+    }
+
+    [Fact]
+    public void A_core_word_after_a_dot_is_a_member_name_without_a_second_error()
+    {
+        // L12: the one error is the declaration's (E1), so a use through a member access adds none, with `(` after it or not, a type name too
+        Assert.Empty(Errors("x.match(1)"));
+        Assert.Empty(Errors("x.match"));
+        Assert.Empty(Errors("x.int"));
+        Assert.Equal("(call (. x if))", Tree("x.if()"));
     }
 
     [Fact]

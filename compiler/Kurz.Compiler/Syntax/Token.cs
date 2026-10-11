@@ -10,7 +10,7 @@ public enum TokenKind
     /// <summary>A name (L9).</summary>
     Name,
 
-    /// <summary>A core word (L18) or the name of a built-in type (L19); <see cref="Token.Text"/> holds it.</summary>
+    /// <summary>A core word, reserved by L12 and listed in L18, or the name of a built-in type (L19); <see cref="Token.Text"/> holds it.</summary>
     Keyword,
 
     /// <summary>An integer literal (L11); <see cref="Token.Value"/> is an <see cref="IntegerLiteralValue"/>.</summary>
@@ -71,7 +71,7 @@ public enum TokenKind
     /// <summary>A <c>;</c>, which L5 rules out; the parser reports it.</summary>
     Semicolon,
 
-    /// <summary>Text no rule gives a meaning (E4). The lexer has reported <c>syntax</c> for it.</summary>
+    /// <summary>Text no rule gives a meaning, whose one id is <c>syntax</c> (E4). The lexer has reported it, or another id stands for the text already (an escape in a <c>char</c> literal); the parser passes the token over without a second error (E1).</summary>
     Bad,
 }
 

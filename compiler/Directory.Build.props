@@ -1,7 +1,11 @@
 <Project>
 
   <!-- Shared by every project under compiler/. The SDK is pinned in global.json; the packages in
-       Directory.Packages.props, each at an exact version, and the restore is locked to the lock files. -->
+       Directory.Packages.props, each at an exact version in NuGet's bracket form, and the lock files
+       beside each project record the resolved graph: the gate's command line locks the restore to them
+       (-p:RestoreLockedMode=true), a plain dotnet test rewrites them. The audit is off: it reads the
+       current advisory database from the network, which no file pins, and a new advisory would turn a
+       head nothing changed red. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>14.0</LangVersion>
@@ -15,7 +19,7 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <NuGetAudit>true</NuGetAudit>
+    <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
 
 </Project>

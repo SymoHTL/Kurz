@@ -51,7 +51,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Living diagrams | Four entries tagged LIVING in `INDEX.md`; the lint requires each to have a diagram and its update triggers, and at least four of them to exist. |
 | Living guides | This guide and the evidence guide. The tree gate keeps both portable. The evidence guide's numbers are generated, carry a digest that a hand edit breaks, and expire: when the TTL runs out, `knowledge` is red on every pull request and on `main`, whatever the change touches, until a pull request regenerates the page with `tools/quality_evidence.py`. That tool refuses while a self-test or the reference lint is red and needs a login that can read the forge; so once the TTL has run out, a red reference blocks the only way back to green until it is fixed. |
 | Not in the method: the product is a language definition | `reference/` (rules with an id and a status), `corpus/` (one case per file) and `tools/lint_reference.py` (gate `reference`), which keeps the two consistent in shape. Nothing runs a case (HAZARD #1); the compiler's test suite reads every case through its front end and checks the reported errors against the header, which proves the front end and the header's shape, not the expectation. |
-| Product rules: the decisions a diff must respect (section 7.5 of the guide's 2026-10-07 version) | The design record `kurz-design.md` and `reference/`: one statement per decision, the owner's choice with its date and the options it was chosen against, *(assumed)* and *(proposed)* for what the owner has not decided, and `open` rules for the forks. The reviewer carries the rule "design record", which flags a decision without the owner's choice behind it, as the guide's reviewer carries the product rules. The corpus holds the cases; the gate `reference` checks their shape and that every sample is a case, and nothing runs one (HAZARD #1): whether a rule gets a case, and whether its expectation is right, are judgment steps. The product pass, the product acceptance and the knowledge-scout hook are not here; see "Not implemented". |
+| Product rules: the decisions a diff must respect (section 7.5 of the guide's 2026-10-07 version) | The design record `kurz-design.md` and `reference/`: one statement per decision, the owner's choice with its date and the options it was chosen against, *(assumed)* and *(proposed)* for what the owner has not decided, and `open` rules for the forks. The reviewer carries the rule "design record", which flags a decision without the owner's choice behind it, as the guide's reviewer carries the product rules. The corpus holds the cases; the gate `reference` checks their shape and that every sample is a case, and nothing runs one (HAZARD #1): whether a rule gets a case, and whether its expectation is right, are judgment steps. The product pass and the knowledge-scout hook are not here, and the product acceptance is not a mechanism of this repository: the acceptance judge runs as an agent of the author's session before a pull request leaves Draft, and its table is a comment on the pull request (`CLAUDE.md`, "Git, pull requests & merging"); see "Not implemented". |
 
 ## Gates
 
@@ -71,10 +71,11 @@ the picture is `knowledge/diagram-gate-map.md`. Of the jobs the method lists:
   review, the reviewer's own unit suite (run with every other self-test), the compiler's build and
   unit suite (gate `compiler-tests`: in `gates` on Linux, in `compiler-windows` on Windows), and the
   verdict idea, which here is the runner itself.
-- **Have nothing to check:** end-to-end, UI quality, migration drift, coverage, the complexity
-  ratchet, the secrets gate for deploy directories, the deploy lane. The compiler is a library with
-  a unit suite and no coverage collector (the owner's choice, 2026-10-10); there is no database and
+- **Have nothing to check:** end-to-end, UI quality, migration drift, the complexity ratchet, the
+  secrets gate for deploy directories, the deploy lane: there is no user interface, no database and
   no deployment.
+- **Not measured:** coverage. The compiler is a library with a unit suite, and no coverage
+  collector runs; no decision records that, so it is the state of the tools and not a choice.
 
 GitHub's own secret scanning and push protection are enabled for this repository
 (`security_and_analysis` in the answer of `gh api repos/<owner>/<name>`, read 2026-10-02). They
@@ -204,10 +205,14 @@ changes in the same pull request.
 - **Running the corpus.** Nothing in this repository executes Kurz. The reference lint checks the
   shape of a case and that the reference shows it unchanged; whether an expected output or error
   is right is decided by reading and by the review (HAZARD #1).
-- **The product pass, the product acceptance and the knowledge-scout hook** (section 7.5 of the
-  guide's 2026-10-07 version). They judge a change to a product's surfaces, for users who pay, see
-  and change things. This repository has no product surface; its questions to the owner are design
-  questions, asked by the skill `design-round` before anything is derived from them.
+- **The product pass and the knowledge-scout hook** (section 7.5 of the guide's 2026-10-07
+  version). They judge a change to a product's surfaces, for users who pay, see and change things.
+  This repository has no product surface; its questions to the owner are design questions, asked
+  by the skill `design-round` before anything is derived from them. The product acceptance of the
+  same section is not a mechanism here either: the acceptance judge is an agent of the author's
+  session, run before a pull request leaves Draft, and its table is a comment on the pull request
+  (`CLAUDE.md`, "Git, pull requests & merging"); nothing in this repository runs it or holds a
+  merge to it.
 - **Agent-behaviour plugins.** The guide's 2026-10-07 version installs none; its section 13 says why
   the two it once used were removed. Nothing here depends on one. The one `ponytail:` comment in
   `tools/` names a shortcut's ceiling and its upgrade path.

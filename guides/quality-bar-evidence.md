@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-11
-digest: b61d20945b254e18b4dbb3b5ab92a27075aa48d807478e14142a917d5feadaf1
+digest: 6bc5ab9ce0964347102eb84eec516ad1f4d01899dde2ac77181885bd0493a26f
 ttl_days: 60
 metadata:
   type: reference
@@ -57,7 +57,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:self-tests -->
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
-| `tools/compiler_gate.py` | 12 | 11 |
+| `tools/compiler_gate.py` | 17 | 17 |
 | `tools/gates.py` | 33 | 23 |
 | `tools/kit.py` | 22 | 19 |
 | `tools/lint_ci.py` | 116 | 116 |
@@ -69,7 +69,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 264 | 239 |
 | `tools/tree_gate.py` | 124 | 100 |
-| **total** | 1058 | 973 |
+| **total** | 1063 | 979 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -144,8 +144,8 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Pull requests opened by a writer, or merged | 10 |
 | Pull requests merged | 9 |
 | Merged over red, with a recorded waiver | 6 |
-| Review findings posted: high | 65 |
-| Review findings posted: medium | 696 |
-| Review findings posted: low | 897 |
+| Review findings posted: high | 67 |
+| Review findings posted: medium | 735 |
+| Review findings posted: low | 959 |
 | Open HAZARD issues | 15 |
 <!-- /generated:forge -->

@@ -4,7 +4,7 @@
     "net10.0": {
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
-        "requested": "[17.14.0, )",
+        "requested": "[17.14.0, 17.14.0]",
         "resolved": "17.14.0",
         "contentHash": "rTtdOm6C96q9QgP3mS8nUGPGPh5Xm2HnBYJggNmNrJ3LDmX9lJuUIgnJEfvX6wSQY4swUMiCcIXd3OkjhYCgtw==",
         "dependencies": {
@@ -14,7 +14,7 @@
       },
       "xunit": {
         "type": "Direct",
-        "requested": "[2.9.3, )",
+        "requested": "[2.9.3, 2.9.3]",
         "resolved": "2.9.3",
         "contentHash": "TlXQBinK35LpOPKHAqbLY4xlEen9TBafjs0V5KnA4wZsoQLQJiirCR4CbIXvOH8NzkW4YeJKP5P/Bnrodm0h9Q==",
         "dependencies": {
@@ -25,7 +25,7 @@
       },
       "xunit.runner.visualstudio": {
         "type": "Direct",
-        "requested": "[3.0.2, )",
+        "requested": "[3.0.2, 3.0.2]",
         "resolved": "3.0.2",
         "contentHash": "oXbusR6iPq0xlqoikjdLvzh+wQDkMv9If58myz9MEzldS4nIcp442Btgs2sWbYWV+caEluMe2pQCZ0hUZgPiow=="
       },

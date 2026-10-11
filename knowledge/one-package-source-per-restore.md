@@ -14,9 +14,12 @@ package, and `TreatWarningsAsErrors` made the warning an error. The second sourc
 configured in the user profile of the machine, for another project; nothing in the repository
 named it. A clean clone on a machine without that feed would have built.
 
-NuGet reads every `NuGet.config` from the project directory up to the drive root, then the one in
-the user profile, and merges their sources. A build is therefore green or red by the machine it
-runs on, unless the repository says which sources count.
+NuGet reads every `NuGet.config` from the project directory up to the root of the drive or file
+system, then the user's and the computer's config files, and merges their sources (the NuGet
+documentation, "Common NuGet configurations",
+https://learn.microsoft.com/en-us/nuget/consume-packages/configuring-nuget-behavior, read on
+2026-10-12). A build is therefore green or red by the machine it runs on, unless the repository
+says which sources count.
 
 ## How to apply
 
@@ -27,7 +30,9 @@ runs on, unless the repository says which sources count.
   `packages.lock.json` beside each project (`RestorePackagesWithLockFile`), and the gate restores
   in locked mode (`-p:RestoreLockedMode=true`): a package the lock files do not name fails the
   restore instead of being resolved anew.
-- Gate: `compiler-tests` runs the locked restore on every gates run; `tree` admits
-  `compiler/NuGet.config` by name (`tools/tree_gate.py`, with its red proof), so the file cannot
-  be dropped for a machine-wide setting without the tree gate seeing a path it does not hold
-  when a second config appears elsewhere under `compiler/`.
+- Gate: `compiler-tests` refuses to run while `compiler/NuGet.config` is missing, lacks the
+  `<clear />` or maps no package to a source (`tools/compiler_gate.py`, three cases with their red
+  proofs), and runs the locked restore on every gates run; `tree` admits the file by name
+  (`tools/tree_gate.py`) and would refuse a second config elsewhere under `compiler/`. An allowlist
+  cannot see a deletion: before the gate read the file, dropping it left every gate green on a
+  runner with one source.

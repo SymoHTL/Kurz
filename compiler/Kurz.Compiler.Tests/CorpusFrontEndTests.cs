@@ -9,8 +9,9 @@ namespace Kurz.Compiler.Tests;
 /// Every file of the corpus through the lexer and the parser. A case that expects an error the front
 /// end reports (<c>syntax</c>, <c>semicolon</c>, <c>reserved-word</c>, <c>braces-required</c>,
 /// <c>unknown-escape</c>, <c>block-indentation</c>) gets exactly that error at that line; every
-/// other case gets none from the front end. No case is skipped: a case the front end cannot judge
-/// fails here.
+/// other case gets none from the front end. No case is skipped. One case, <c>data/flags-match.kz</c>, expects a
+/// <c>syntax</c> that only the type checker can raise (D13, E4): it is checked to parse with no diagnostic, and its
+/// expectation is the checker's; a <c>not supported</c> on any case fails it.
 /// </summary>
 public sealed class CorpusFrontEndTests
 {
@@ -95,7 +96,7 @@ public sealed class CorpusFrontEndTests
     }
 
     [Fact]
-    public void The_front_end_finds_the_errors_of_at_least_the_floor_of_error_cases()
+    public void At_least_the_floor_of_cases_expect_an_error_of_the_front_end()
     {
         var found = 0;
         foreach (var relativePath in CaseFiles())
@@ -114,7 +115,7 @@ public sealed class CorpusFrontEndTests
     [Theory]
     [InlineData("// expect: output\n// | 9\n// rules: V1\n\nx = 4\nprint(x + 5)\n", Expectation.Output, null, 0, 1, null, 5)]
     [InlineData("// expect: error assign-immutable at 6\n// rules: V7\n\nx = 4\nprint(x)\nx = 5\n", Expectation.Error, "assign-immutable", 6, 0, null, 4)]
-    [InlineData("// expect: throws overflow at 6\n// | 1\n// build: test\n// rules: T5\n\nprint(1)\nprint(2147483647 + x)\n", Expectation.Throws, "overflow", 6, 1, BuildKind.Test, 6)]
+    [InlineData("// expect: throws overflow at 7\n// | 1\n// build: test\n// rules: T5\n\nprint(1)\nprint(2147483647 + x)\n", Expectation.Throws, "overflow", 7, 1, BuildKind.Test, 6)]
     public void A_header_in_its_shape_is_read(string text, Expectation expectation, string? id, int line, int outputLines, BuildKind? build, int bodyLine)
     {
         var header = CaseHeader.Parse(text, out var problem);

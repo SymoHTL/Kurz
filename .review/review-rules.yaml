@@ -98,7 +98,8 @@ sections:
         round, not a line of code (knowledge/design-before-build.md).
       - >-
         Where this batch shows the error table or the row of an id - an error the compiler reports whose
-        id is not in the table of reference/12-errors.md; and an error reported on a line other than the
+        id is neither in the table of reference/12-errors.md nor named by the reference rule that raises it
+        and keeps it out of the table (L1's invalid-source); and an error reported on a line other than the
         one this batch's own tests or comments name as the line E1 gives it.
       - >-
         A test that pins an error's message where the corpus pins an id and a line (E2), or an

@@ -5,7 +5,7 @@ namespace Kurz.Compiler;
 /// of the reference's table (chapter 12): its id and its line are what a corpus case pins (E1, E2),
 /// and its message is free. <see cref="DiagnosticKind.NotSupported"/> names a construct the reference
 /// states and this compiler does not implement: it carries no id, so it can never pass for an error
-/// a case expects, and a program that gets one is not judged.
+/// a case expects; a corpus case that gets one fails its theory, and nothing produces the kind.
 /// </summary>
 public enum DiagnosticKind
 {
@@ -26,7 +26,7 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
 
     public bool IsError => Kind == DiagnosticKind.Error;
 
-    /// <summary>The line as the command line prints it, after the file name: <c>4: error syntax: ...</c>.</summary>
+    /// <summary>The diagnostic as one line: <c>4: error syntax: ...</c>, or <c>4: not supported: ...</c>.</summary>
     public override string ToString() =>
         IsError ? $"{Line}: error {Id}: {Message}" : $"{Line}: not supported: {Message}";
 }
@@ -52,9 +52,10 @@ public sealed class DiagnosticBag
 }
 
 /// <summary>
-/// The ids of the error table in reference/12-errors.md, spelled as the table spells them. A compile
-/// error the compiler reports carries one of these, and a run-time error of a produced program one
-/// of the run-time ids.
+/// The ids of the error table in reference/12-errors.md, spelled as the table spells them, and the one
+/// id a rule names and keeps out of the table, L1's <c>invalid-source</c>: the table lists the ids a
+/// corpus case can expect, and no case can be a file that is not UTF-8. A compile error the compiler
+/// reports carries one of these, and a run-time error of a produced program one of the run-time ids.
 /// </summary>
 public static class ErrorIds
 {
@@ -111,7 +112,7 @@ public static class ErrorIds
     public const string UnreachableArm = "unreachable-arm";
     public const string OverrideReturnType = "override-return-type";
 
-    /// <summary>L1: named in the rule and not in the table, because no corpus file can be a file that is not UTF-8.</summary>
+    /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";
 
     // run-time errors

@@ -16,7 +16,7 @@ internal static class SyntaxPrinter
     public static string Print(Statement statement) => statement switch
     {
         Block b => $"{{{string.Join(" ", b.Statements.Select(Print))}}}",
-        VariableDeclaration v => $"({(v.Mut ? "mut-" : "")}declare {Type(v.Type)}{v.Name} {Print(v.Value)})",
+        VariableDeclaration v => $"({(v.Mut ? "mut-" : "")}declare {Mods(v.Modifiers & ~Modifiers.Mut)}{Type(v.Type)}{v.Name} {Print(v.Value)})",
         AssignOrDeclare a => $"(assign-or-declare {a.Name} {Print(a.Value)})",
         Assignment a => $"(assign {Print(a.Target)} {Print(a.Value)})",
         ExpressionStatement e => Print(e.Expression),
@@ -39,31 +39,28 @@ internal static class SyntaxPrinter
 
     private static string Function(FunctionDeclaration f)
     {
-        var typeParameters = f.TypeParameters.Count == 0 ? "" : "<" + string.Join(", ", f.TypeParameters.Select(p => p.Limit is null ? p.Name : $"{p.Name}: {Type(p.Limit)}".TrimEnd())) + ">";
+        var typeParameters = TypeParameters(f.TypeParameters);
         var body = f.ExpressionBody is not null ? " => " + Print(f.ExpressionBody) : f.BlockBody is not null ? " " + Print(f.BlockBody) : "";
         return $"(function {Mods(f.Modifiers)}{Type(f.ReturnType)}{f.Name}{typeParameters}({Parameters(f.Parameters)}){body})";
     }
 
+    /// <summary>Type parameters with their limits, <c>&lt;T, U: Shape&gt;</c>, so that a limit the parser dropped shows; nothing for none.</summary>
+    private static string TypeParameters(IReadOnlyList<TypeParameter> parameters) =>
+        parameters.Count == 0 ? "" : "<" + string.Join(", ", parameters.Select(p => p.Limit is null ? p.Name : $"{p.Name}: {Type(p.Limit)}".TrimEnd())) + ">";
+
     private static string TypeDeclaration(TypeDeclaration t)
     {
-        var sb = new StringBuilder("(").Append(t.Kind.ToString().ToLowerInvariant()).Append(' ').Append(t.Name);
-        if (t.TypeParameters.Count > 0)
-        {
-            sb.Append('<').Append(string.Join(", ", t.TypeParameters.Select(p => p.Name))).Append('>');
-        }
+        var sb = new StringBuilder("(").Append(t.Kind.ToString().ToLowerInvariant()).Append(' ').Append(Mods(t.Modifiers)).Append(t.Name).Append(TypeParameters(t.TypeParameters));
 
         if (t.PrimaryConstructor is not null)
         {
             sb.Append('(').Append(Parameters(t.PrimaryConstructor)).Append(')');
         }
 
-        foreach (var b in t.Bases)
+        if (t.Bases.Count > 0)
         {
-            sb.Append(" : ").Append(Type(b.Type).TrimEnd());
-            if (b.Arguments is not null)
-            {
-                sb.Append('(').Append(Arguments(b.Arguments)).Append(')');
-            }
+            // one list after the colon, so that `: A, B` and a chain of colons the parser might accept print differently
+            sb.Append(" : ").Append(string.Join(", ", t.Bases.Select(b => Type(b.Type).TrimEnd() + (b.Arguments is null ? "" : "(" + Arguments(b.Arguments) + ")"))));
         }
 
         if (t.EqualBy.Count > 0)
@@ -107,10 +104,12 @@ internal static class SyntaxPrinter
     {
         null => "",
         NamedType n => n.Name + (n.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", n.TypeArguments.Select(a => Type(a).TrimEnd())) + ">") + " ",
-        NullableType { Inner: FunctionType } n => "(" + Type(n.Inner).TrimEnd() + ")? ",
+        // a union or a function type inside another type is parenthesized, so that each tree prints as itself: `(A | B)?` against
+        // `A | B?`, `((int) => int) | B` against `(int) => (int | B)`
+        NullableType { Inner: FunctionType or UnionType } n => "(" + Type(n.Inner).TrimEnd() + ")? ",
         NullableType n => Type(n.Inner).TrimEnd() + "? ",
-        UnionType u => string.Join(" | ", u.Cases.Select(c => Type(c).TrimEnd())) + " ",
-        FunctionType f => "(" + string.Join(", ", f.Parameters.Select(p => Type(p).TrimEnd())) + ") => " + Type(f.Result),
+        UnionType u => string.Join(" | ", u.Cases.Select(c => c is FunctionType ? "(" + Type(c).TrimEnd() + ")" : Type(c).TrimEnd())) + " ",
+        FunctionType f => "(" + string.Join(", ", f.Parameters.Select(p => Type(p).TrimEnd())) + ") => " + (f.Result is UnionType ? "(" + Type(f.Result).TrimEnd() + ") " : Type(f.Result)),
         WeakType w => "weak " + Type(w.Inner),
         VoidType => "void ",
         _ => throw new InvalidOperationException(type.GetType().Name),

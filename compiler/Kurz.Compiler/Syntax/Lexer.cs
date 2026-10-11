@@ -14,7 +14,8 @@ public sealed class Lexer
 {
     private readonly SourceText source;
     private readonly string text;
-    private readonly int end;
+    private int end; // the end of the lexer's text: the file's, a hole's (L6), or a block line's while that line is read (L13)
+    private readonly bool inHole;
     private readonly DiagnosticBag diagnostics;
     private readonly List<Token> tokens = [];
     private int position;
@@ -32,6 +33,7 @@ public sealed class Lexer
         this.diagnostics = diagnostics;
         position = start;
         this.end = end;
+        inHole = start != 0 || end != source.Text.Length;
     }
 
     private char Current => position < end ? text[position] : '\0';
@@ -50,12 +52,22 @@ public sealed class Lexer
                 Add(TokenKind.Newline, position, 1);
                 position++;
             }
-            else if (c is ' ' or '\t' or '\r' or '\f' or '\v')
+            else if (c is ' ' or '\t' or '\r')
             {
+                // a space, a tab, and a lone carriage return, which L13 reads as whitespace outside a literal (the owner, 2026-10-10);
+                // a form feed or a vertical tab is text no rule gives a meaning (E4), read as such below
                 position++;
             }
             else if (c == '/' && Peek() == '/')
             {
+                if (inHole)
+                {
+                    // L3: a comment runs to the end of its line, which an interpolation (L6) does not reach; text no rule gives a meaning (E4)
+                    Bad(position, end - position, "a `//` comment cannot stand inside an interpolation");
+                    position = end;
+                    continue;
+                }
+
                 while (!AtEnd && Current != '\n')
                 {
                     position++;
@@ -102,8 +114,42 @@ public sealed class Lexer
 
     private static bool IsNamePart(char c) => IsNameStart(c) || IsAsciiDigit(c);
 
-    /// <summary>A character that would be part of a word in a wider alphabet: a letter or digit outside ASCII, or C#'s `@`.</summary>
-    private static bool IsForeignWordPart(char c) => c == '@' || (c > 127 && (char.IsLetterOrDigit(c) || char.IsSurrogate(c) || CharUnicodeInfo.GetUnicodeCategory(c) is UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.ConnectorPunctuation));
+    /// <summary>
+    /// The text at <paramref name="at"/> would be part of a word in a wider alphabet: a letter, a digit or a
+    /// combining mark outside ASCII, a surrogate pair that encodes a letter or a digit, or C#'s `@`. A
+    /// symbol, an emoji among them, is none of these: it is text no rule gives a meaning (E4).
+    /// </summary>
+    private bool IsForeignWordPartAt(int at)
+    {
+        var c = text[at];
+        if (c == '@')
+        {
+            return true;
+        }
+
+        if (c <= 127)
+        {
+            return false;
+        }
+
+        if (char.IsSurrogate(c))
+        {
+            return char.IsHighSurrogate(c) && at + 1 < end && char.IsLowSurrogate(text[at + 1]) && char.IsLetterOrDigit(text, at);
+        }
+
+        return char.IsLetterOrDigit(c) || CharUnicodeInfo.GetUnicodeCategory(c) is UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.ConnectorPunctuation;
+    }
+
+    private bool AtForeignWordPart => !AtEnd && IsForeignWordPartAt(position);
+
+    /// <summary>Past the rest of a word that holds a character outside ASCII (L9), a surrogate pair as one character.</summary>
+    private void SkipForeignWord()
+    {
+        while (!AtEnd && (IsNamePart(Current) || AtForeignWordPart))
+        {
+            position += char.IsHighSurrogate(Current) ? 2 : 1;
+        }
+    }
 
     private int LineAt(int offset) => source.LineOf(offset);
 
@@ -123,6 +169,9 @@ public sealed class Lexer
 
         tokens.Add(new Token(TokenKind.Bad, text.Substring(start, Math.Min(length, end - start)), line, start));
     }
+
+    /// <summary>A token the parser passes over, for text whose error another id reported already (an escape in a <c>char</c> literal): no second error (E1).</summary>
+    private void PassOver(int start, int length) => tokens.Add(new Token(TokenKind.Bad, text.Substring(start, Math.Min(length, end - start)), LineAt(start), start));
 
     /// <summary>
     /// After an error inside a <c>"""</c> block: passes over the rest of the block, up to and including the
@@ -157,14 +206,10 @@ public sealed class Lexer
             position++;
         }
 
-        if (!AtEnd && IsForeignWordPart(Current))
+        if (AtForeignWordPart)
         {
             // L9: a letter is one of ASCII's. The whole word is one `syntax`, not a name and a stray character.
-            while (!AtEnd && (IsNamePart(Current) || IsForeignWordPart(Current)))
-            {
-                position++;
-            }
-
+            SkipForeignWord();
             Bad(start, position - start, "a name holds ASCII letters, digits and `_` only");
             return;
         }
@@ -194,6 +239,12 @@ public sealed class Lexer
             ReadDigits(digits, 10, allowLeadingUnderscore: false);
             if (Current == '.' && IsAsciiDigit(Peek()))
             {
+                if (position > start && text[position - 1] == '_')
+                {
+                    FailNumber(start, "a `_` stands between digits (L11), not before the `.` of a fraction");
+                    return;
+                }
+
                 isReal = true;
                 digits.Append('.');
                 position++;
@@ -202,6 +253,12 @@ public sealed class Lexer
 
             if (Current is 'e' or 'E' && (IsAsciiDigit(Peek()) || (Peek() is '+' or '-' && IsAsciiDigit(Peek(2)))))
             {
+                if (position > start && text[position - 1] == '_')
+                {
+                    FailNumber(start, "a `_` stands between digits (L11), not before the exponent");
+                    return;
+                }
+
                 isReal = true;
                 digits.Append('e');
                 position++;
@@ -217,16 +274,13 @@ public sealed class Lexer
 
         if (position > start && text[position - 1] == '_')
         {
-            Bad(start, position - start, "a `_` stands between digits, not at the end of a number");
+            Bad(start, position - start, "a `_` stands between digits (L11), not at the end of a number");
             return;
         }
 
         // what follows the digits directly: a suffix, a unit, or text no rule gives a meaning
         var tailStart = position;
-        while (!AtEnd && (IsNamePart(Current) || IsForeignWordPart(Current)))
-        {
-            position++;
-        }
+        SkipForeignWord();
 
         var tail = text[tailStart..position];
         if (tail.Length == 0)
@@ -254,13 +308,14 @@ public sealed class Lexer
             return;
         }
 
-        if (tail.Contains('l', StringComparison.Ordinal))
+        var upper = tail.ToUpperInvariant();
+        if (upper is "L" or "UL" or "LU" && tail.Contains('l', StringComparison.Ordinal))
         {
+            // L11: a suffix holding a lower-case `l` is `syntax`, because `1l` reads as `11`; any other tail gets the message below
             Bad(start, position - start, "the suffix `L` is written in upper case: `1l` reads as `11`");
             return;
         }
 
-        var upper = tail.ToUpperInvariant();
         if (!isReal && upper is "U" or "L" or "UL" or "LU")
         {
             Add(TokenKind.IntegerLiteral, start, position - start, new IntegerLiteralValue(digits.ToString(), radix, upper == "LU" ? "UL" : upper));
@@ -274,6 +329,17 @@ public sealed class Lexer
         }
 
         Bad(start, position - start, $"`{tail}` is neither a suffix nor a unit of a number");
+    }
+
+    /// <summary>A number form no rule gives a meaning (L11, E4): the rest of the literal, a fraction, an exponent and a tail included, goes with the one error.</summary>
+    private void FailNumber(int start, string why)
+    {
+        while (!AtEnd && (IsNamePart(Current) || (Current == '.' && IsAsciiDigit(Peek())) || (Current is '+' or '-' && text[position - 1] is 'e' or 'E')))
+        {
+            position++;
+        }
+
+        Bad(start, position - start, why);
     }
 
     /// <summary>Reads digits of the radix with `_` between them into the builder. False when there was none.</summary>
@@ -367,13 +433,9 @@ public sealed class Lexer
         };
         if (kind == TokenKind.Bad)
         {
-            if (IsForeignWordPart(c))
+            if (AtForeignWordPart)
             {
-                while (!AtEnd && (IsNamePart(Current) || IsForeignWordPart(Current)))
-                {
-                    position++;
-                }
-
+                SkipForeignWord();
                 Bad(start, position - start, "a name holds ASCII letters, digits and `_` only");
                 return;
             }
@@ -392,12 +454,13 @@ public sealed class Lexer
         var start = position;
         position++; // the opening quote
         var points = new List<int>();
+        var failed = false;
         while (!AtEnd && Current != '\'' && Current != '\n')
         {
             var point = ReadCharacter(out var ok);
             if (!ok)
             {
-                // unknown-escape is reported; the literal is read on so that one error stands
+                failed = true; // the error is reported; the literal is read to its end, and nothing else is said about it (E1)
                 point = '?';
             }
 
@@ -411,6 +474,12 @@ public sealed class Lexer
         }
 
         position++; // the closing quote
+        if (failed)
+        {
+            PassOver(start, position - start);
+            return;
+        }
+
         if (points.Count != 1)
         {
             Bad(start, position - start, points.Count == 0 ? "a `char` literal holds one code point" : "a `char` literal holds one code point, not several");
@@ -423,8 +492,11 @@ public sealed class Lexer
     /// <summary>
     /// Reads one code point of a string or char literal at the current position: a plain character,
     /// a surrogate pair, or an escape (L7, L16). An escape no rule gives a meaning is
-    /// <c>unknown-escape</c> at its line; <paramref name="ok"/> is false then and the position has
-    /// moved past the backslash and the character after it.
+    /// <c>unknown-escape</c> at its line, and a lone surrogate <c>syntax</c>; <paramref name="ok"/> is
+    /// false then, and the position stands after what the error covers: the backslash and the
+    /// character after it (both chars of an escaped surrogate pair), the hex digits a <c>\u</c>,
+    /// <c>\U</c> or <c>\x</c> read and a second surrogate escape that goes with the first, or, for a
+    /// backslash at the end of a line, on the line break.
     /// </summary>
     private int ReadCharacter(out bool ok)
     {
@@ -437,6 +509,15 @@ public sealed class Lexer
                 var pair = char.ConvertToUtf32(c, Peek());
                 position += 2;
                 return pair;
+            }
+
+            if (char.IsSurrogate(c))
+            {
+                // a lone surrogate is no code point (L1); a file cannot hold one, since the bytes would not be UTF-8, so this is text from no file
+                diagnostics.Error(ErrorIds.Syntax, LineAt(position), "a lone surrogate is no character of a literal");
+                position++;
+                ok = false;
+                return '?';
             }
 
             position++;
@@ -502,14 +583,47 @@ public sealed class Lexer
         var value = long.Parse(text.AsSpan(start, count), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
         if (value > 0x10FFFF || value is >= 0xD800 and <= 0xDFFF)
         {
-            // beyond U+10FFFF is what C# refuses too; a surrogate alone is no code point a UTF-8 string can hold (L1)
+            // L16: digits that name a surrogate or a value beyond U+10FFFF are `unknown-escape` (the owner, 2026-10-10), and a pair of
+            // surrogate escapes that C# would join is the error at the first (the owner, 2026-10-11): a second one directly after goes with it
             diagnostics.Error(ErrorIds.UnknownEscape, LineAt(escapeStart), $"`{text[escapeStart..position]}` names no code point");
+            if (value is >= 0xD800 and <= 0xDFFF)
+            {
+                SkipSurrogateEscape();
+            }
+
             ok = false;
             return '?';
         }
 
         ok = true;
         return (int)value;
+    }
+
+    /// <summary>Past a <c>\u</c>, <c>\U</c> or <c>\x</c> escape at the cursor whose digits name a surrogate, which the error of the escape before it covers (L16); otherwise nothing moves.</summary>
+    private void SkipSurrogateEscape()
+    {
+        if (Current != '\\' || Peek() is not ('u' or 'U' or 'x'))
+        {
+            return;
+        }
+
+        var (min, max) = Peek() switch
+        {
+            'u' => (4, 4),
+            'U' => (8, 8),
+            _ => (1, 4),
+        };
+        var digitsStart = position + 2;
+        var p = digitsStart;
+        while (p < end && p - digitsStart < max && IsDigitOf(text[p], 16))
+        {
+            p++;
+        }
+
+        if (p - digitsStart >= min && long.Parse(text.AsSpan(digitsStart, p - digitsStart), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture) is >= 0xD800 and <= 0xDFFF)
+        {
+            position = p;
+        }
     }
 
     private void LexString()
@@ -644,12 +758,24 @@ public sealed class Lexer
 
         if (AtEnd || Current != '\n')
         {
-            // L13: text beside the opening quotes. The whole literal, up to the next `"""`, is one error.
-            var close = text.IndexOf("\"\"\"", afterOpen, StringComparison.Ordinal);
-            position = close >= 0 && close < end ? close + 3 : end;
+            // L13: text beside the opening quotes is one `syntax`. `"""abc"""` on one line ends at its closing quotes; a block
+            // whose opening line holds text is passed over up to its closing line, as a block with an error inside it is
+            var lineEnd = text.IndexOf('\n', afterOpen, end - afterOpen);
+            lineEnd = lineEnd < 0 ? end : lineEnd;
+            var close = text.IndexOf("\"\"\"", afterOpen, lineEnd - afterOpen, StringComparison.Ordinal);
+            if (close >= 0)
+            {
+                position = close + 3;
+            }
+            else
+            {
+                position = lineEnd;
+                SkipToClosingLine();
+            }
+
             while (!AtEnd && Current == '"')
             {
-                position++; // a closing line of four or more quotes goes with the one error
+                position++; // `""""` at the end of the line, and a closing line of four or more quotes, go with the one error (L13)
             }
 
             Bad(start, position - start, "`\"\"\"` opens a block only at the end of a line; a one-line string is written with `\"`");
@@ -717,7 +843,7 @@ public sealed class Lexer
             }
             else
             {
-                diagnostics.Error(ErrorIds.BlockIndentation, LineAt(offset), "a line of a `\"\"\"` block starts with the indentation of its closing line");
+                diagnostics.Error(ErrorIds.BlockIndentation, LineAt(offset), "a line of a `\"\"\"` block must start with the indentation of its closing line (L13)");
                 var trimmed = content.TrimStart(' ', '\t');
                 offset += content.Length - trimmed.Length; // the content is read from where it starts, so a hole on the line stays whole
                 content = trimmed;
@@ -727,6 +853,7 @@ public sealed class Lexer
             var saved = (position, end: this.end);
             position = offset;
             var lineEnd = offset + content.Length;
+            end = lineEnd; // an escape of this line cannot read into the next line or the closing quotes
             var ok = true;
             while (position < lineEnd)
             {
@@ -772,7 +899,7 @@ public sealed class Lexer
                 }
             }
 
-            position = saved.position;
+            (position, end) = saved;
             if (!ok)
             {
                 // E1: the error is on the line of the brace, though the token covers the whole block

@@ -122,6 +122,10 @@ public sealed class LexerTests
     [InlineData("print(1x)")]
     [InlineData("print(1_)")]
     [InlineData("print(0x)")]
+    [InlineData("print(1_.5)")]
+    [InlineData("print(1_e5)")]
+    [InlineData("print(1.5_e3)")]
+    [InlineData("print(3kilo)")]
     public void A_number_form_no_rule_gives_a_meaning_is_syntax(string program)
     {
         Assert.Equal((ErrorIds.Syntax, 1), OnlyError(program));
@@ -163,8 +167,9 @@ public sealed class LexerTests
     [InlineData("\"\\0\\a\\b\\f\\r\\v\\'\\\\\"", "\0\a\b\f\r\v'\\")]
     [InlineData("\"a } b\"", "a } b")]
     [InlineData("\"aä😀\"", "aä😀")]
-    public void Escapes_of_c_sharp_mean_what_they_mean_there(string program, string text)
+    public void Escapes_of_c_sharp_12_mean_what_they_mean_there(string program, string text)
     {
+        // L7 and L16: the escapes of C# 12 (the owner, 2026-10-03); the `\e` of C# 13 is `unknown-escape` under L16's assumed version
         var token = Single(program);
         var value = Assert.IsType<StringLiteralValue>(token.Value);
         Assert.Equal(text, value.PlainText);
@@ -186,6 +191,8 @@ public sealed class LexerTests
     [InlineData("c = '\\😀'")]
     public void An_escape_no_rule_gives_a_meaning_is_unknown_escape(string program)
     {
+        // L16: a backslash before any other character, or before `u`, `U` or `x` without their digits; digits that name a surrogate,
+        // U+D800 to U+DFFF, or a value beyond U+10FFFF (the owner, 2026-10-10); and `\e`, which C# 13 added after L16's C# 12 list (assumed)
         Assert.Equal((ErrorIds.UnknownEscape, 1), OnlyError(program));
     }
 
@@ -219,14 +226,16 @@ public sealed class LexerTests
     [Fact]
     public void A_closing_line_of_four_quotes_is_syntax_at_that_line()
     {
-        // L13: the block closes at its three quotes, and the fourth opens a one-line literal that nothing closes
+        // a reading L13 leaves open (README; a question for a design round): L13 names four quotes at the end of a line only; here the
+        // block closes at its three quotes and the fourth opens a one-line literal that nothing closes
         Assert.Equal((ErrorIds.Syntax, 3), OnlyError("text = \"\"\"\n    abc\n    \"\"\"\""));
     }
 
     [Fact]
     public void Bad_tokens_with_no_readable_token_between_them_are_one_syntax()
     {
-        // E1: one error for a run of text no rule gives a meaning; a readable token between two bad ones makes two
+        // a reading E1 leaves open (README; a question for a design round): E1 asks one error per text and does not say where one run
+        // of bad text ends; here a readable token between two bad ones makes two errors
         Assert.Equal([(ErrorIds.Syntax, 1)], Lex("c = 'ab' 'cd'").Diagnostics.Items.Select(d => (d.Id, d.Line)));
         Assert.Equal([(ErrorIds.Syntax, 1), (ErrorIds.Syntax, 1)], Lex("c = 'ab' + 'cd'").Diagnostics.Items.Select(d => (d.Id, d.Line)));
     }
@@ -241,15 +250,102 @@ public sealed class LexerTests
     }
 
     [Fact]
-    public void A_block_that_is_never_closed_is_syntax_at_its_opening_line()
+    public void A_block_that_is_never_closed_is_syntax_at_its_opening_line_and_takes_the_rest_of_the_file()
     {
         Assert.Equal((ErrorIds.Syntax, 1), OnlyError("text = \"\"\"\n    abc\n"));
+        // the shape the README lists as low, pinned as it is: the code after the block goes with it
+        var (tokens, diagnostics) = Lex("text = \"\"\"\n    abc\nprint(text)\n");
+        Assert.Equal([(ErrorIds.Syntax, 1)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.DoesNotContain(tokens, t => t.Kind == TokenKind.Name && t.Text == "print");
     }
 
     [Fact]
     public void Text_before_a_closing_triple_quote_on_a_content_line_is_syntax_at_that_line()
     {
-        Assert.Equal((ErrorIds.Syntax, 2), OnlyError("text = \"\"\"\n    abc\"\"\"\nprint(text)"));
+        // the README's low shape, pinned as it is: with no line that starts with three quotes after it, the rest of the file goes with the block
+        var (tokens, diagnostics) = Lex("text = \"\"\"\n    abc\"\"\"\nprint(text)");
+        Assert.Equal([(ErrorIds.Syntax, 2)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.DoesNotContain(tokens, t => t.Kind == TokenKind.Name && t.Text == "print");
+    }
+
+    [Fact]
+    public void Text_beside_the_opening_quotes_is_syntax_at_the_opening_line_and_the_code_after_the_literal_is_read()
+    {
+        // L13: `\"\"\"abc\"\"\"` on one line ends at its closing quotes, and a block whose opening line holds text is passed over up
+        // to its closing line, as a block with an error inside it is; the code after either is read
+        var (oneLine, first) = Lex("s = \"\"\"hi\"\"\"\nprint(1)");
+        Assert.Equal([(ErrorIds.Syntax, 1)], first.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal(2, oneLine.Single(t => t.Kind == TokenKind.Name && t.Text == "print").Line);
+        var (block, second) = Lex("s = \"\"\"hi\nprint(1)\nt = \"\"\"\n    a\n    \"\"\"\nnext = 1");
+        Assert.Equal([(ErrorIds.Syntax, 1)], second.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal(6, block.Single(t => t.Kind == TokenKind.Name && t.Text == "next").Line);
+        Assert.DoesNotContain(block, t => t.Kind == TokenKind.Name && t.Text == "print");
+    }
+
+    [Fact]
+    public void Text_beside_the_opening_quotes_with_no_closing_line_takes_the_rest_of_the_file()
+    {
+        // the README's low shape, pinned as it is: text or a fourth quote beside the opening quotes, and no line that starts with three
+        // quotes after it, so the rest of the file goes with the one error
+        var (text, first) = Lex("s = \"\"\"hi\nprint(1)\n");
+        Assert.Equal([(ErrorIds.Syntax, 1)], first.Items.Select(d => (d.Id, d.Line)));
+        Assert.DoesNotContain(text, t => t.Kind == TokenKind.Name && t.Text == "print");
+        var (quote, second) = Lex("x = \"\"\"\"\nprint(1)\n");
+        Assert.Equal([(ErrorIds.Syntax, 1)], second.Items.Select(d => (d.Id, d.Line)));
+        Assert.DoesNotContain(quote, t => t.Kind == TokenKind.Name && t.Text == "print");
+    }
+
+    [Fact]
+    public void A_form_feed_or_a_vertical_tab_is_text_no_rule_gives_a_meaning()
+    {
+        // a shape E4 covers by its general clause (README): L13 names the lone carriage return as whitespace outside a literal, and a
+        // form feed and a vertical tab no rule names
+        Assert.Equal((ErrorIds.Syntax, 1), OnlyError("a = 1\fb"));
+        Assert.Equal((ErrorIds.Syntax, 2), OnlyError("a = 1\n\vb = 2"));
+    }
+
+    [Fact]
+    public void A_pair_of_surrogate_escapes_is_one_unknown_escape_at_the_first()
+    {
+        // L16: a pair of such escapes that C# would join is the error at the first (the owner, 2026-10-11); two apart are two errors
+        Assert.Equal([(ErrorIds.UnknownEscape, 1)], Lex("print(\"\\uD83D\\uDE00\")").Diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal([(ErrorIds.UnknownEscape, 1), (ErrorIds.UnknownEscape, 1)], Lex("print(\"\\uD800 \\uD800\")").Diagnostics.Items.Select(d => (d.Id, d.Line)));
+    }
+
+    [Fact]
+    public void A_failed_escape_in_a_char_literal_is_its_one_error()
+    {
+        // E1: the escape's error stands alone; the literal is read to its closing quote, and the parser passes it over
+        Assert.Equal((ErrorIds.UnknownEscape, 1), OnlyError("c = '\\uZZZZ'"));
+        Assert.Equal((ErrorIds.UnknownEscape, 1), OnlyError("c = '\\q'"));
+    }
+
+    [Fact]
+    public void A_lone_surrogate_in_a_literal_is_syntax()
+    {
+        // L1: a lone surrogate is no code point; a file cannot hold one (its bytes would not be UTF-8), a program text from no file can
+        Assert.Equal((ErrorIds.Syntax, 1), OnlyError("s = \"a\uD800b\""));
+        Assert.Equal((ErrorIds.Syntax, 1), OnlyError("c = '\uDC00'"));
+    }
+
+    [Fact]
+    public void An_emoji_is_no_part_of_a_word_where_a_letter_outside_ascii_is()
+    {
+        // L9: a letter outside ASCII makes the whole word one `syntax`; a symbol is text of its own (E4), and the name after it is a name
+        var emoji = Meaningful("x = \U0001F600b");
+        Assert.Equal([TokenKind.Name, TokenKind.Assign, TokenKind.Bad, TokenKind.Name], emoji.Select(t => t.Kind));
+        var letter = Meaningful("x = \U0001D400b");
+        Assert.Equal([TokenKind.Name, TokenKind.Assign, TokenKind.Bad], letter.Select(t => t.Kind));
+    }
+
+    [Fact]
+    public void An_escape_left_unfinished_at_the_end_of_a_block_line_is_one_error_and_the_next_line_is_text()
+    {
+        // L15, L16: the escape reads no further than its line, and the block goes on after it
+        var (tokens, diagnostics) = Lex("text = \"\"\"\n    a\\x\n    b\n    \"\"\"\nprint(text)");
+        Assert.Equal([(ErrorIds.UnknownEscape, 2)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal(5, tokens.Single(t => t.Kind == TokenKind.Name && t.Text == "print").Line);
+        Assert.Equal("a\nb", Assert.IsType<StringLiteralValue>(tokens.Single(t => t.Kind == TokenKind.StringLiteral).Value).PlainText);
     }
 
     [Fact]
@@ -261,6 +357,7 @@ public sealed class LexerTests
     [Fact]
     public void A_lone_carriage_return_is_an_ordinary_character_in_a_literal_and_dropped_at_the_end_of_a_block_line()
     {
+        // L13: an ordinary character inside a literal, except at the end of a block line, where every trailing one is dropped (the owner, 2026-10-10)
         Assert.Equal("a\rb", Assert.IsType<StringLiteralValue>(Single("\"a\rb\"").Value).PlainText);
         Assert.Equal("a\rb", Assert.IsType<StringLiteralValue>(Single("\"\"\"\n    a\rb\n    \"\"\"").Value).PlainText);
         Assert.Equal("a", Assert.IsType<StringLiteralValue>(Single("\"\"\"\n    a\r\r\n    \"\"\"").Value).PlainText);
@@ -271,6 +368,7 @@ public sealed class LexerTests
     [Fact]
     public void A_lone_carriage_return_outside_a_literal_is_whitespace()
     {
+        // L13: whitespace outside a literal, so a file whose lines end in a carriage return alone is one line (the owner, 2026-10-10)
         var (tokens, diagnostics) = Lex("a = 1\rb = 2");
         Assert.Empty(diagnostics.Items);
         Assert.DoesNotContain(tokens, t => t.Kind == TokenKind.Newline);
@@ -420,6 +518,7 @@ public sealed class LexerTests
     public void A_windows_line_break_reads_as_a_line_break()
     {
         var (tokens, _) = Lex("a = 1\r\nprint(a)\r\n");
+        Assert.DoesNotContain('\r', SourceText.FromString("crlf.kz", "a = 1\r\nprint(a)\r\n").Text); // L1: the two bytes are one line break; unfolded, the carriage return would stay in the text
         Assert.Equal(2, tokens.Single(t => t.Kind == TokenKind.Name && t.Text == "print").Line);
         Assert.DoesNotContain(tokens, t => t.Text.Contains('\r', StringComparison.Ordinal));
     }

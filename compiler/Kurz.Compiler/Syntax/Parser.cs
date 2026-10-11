@@ -4,11 +4,13 @@ namespace Kurz.Compiler.Syntax;
 
 /// <summary>
 /// Builds the syntax tree of one file from its tokens. A line break ends a statement (L2) except
-/// inside an open <c>(</c> or <c>[</c>, after a binary operator, a comma, <c>=</c> or <c>=></c>,
-/// and before a line that starts with <c>.</c> (L4); a block between braces holds statements of its
+/// inside an open <c>(</c>, <c>[</c> or the <c>&lt; &gt;</c> of type arguments, after a binary
+/// operator, a comma, <c>=</c>, <c>=&gt;</c> or the <c>:</c> of a base list, and before a line that
+/// starts with the <c>.</c> or <c>?.</c> of a member access, where a line that starts with a fraction
+/// literal such as <c>.5</c> starts a statement (L4); a block between braces holds statements of its
 /// own, each on its line, also inside an open bracket. Text no rule gives a meaning is the one
-/// error <c>syntax</c> (E4), reported on the line where the text stops making sense; after it the
-/// rest of the statement is skipped, so one statement yields one error.
+/// error <c>syntax</c> (E4), reported on the line where the text stops making sense, and a case
+/// holds one error (E1): after it the rest of the statement is skipped.
 /// </summary>
 public sealed class Parser
 {
@@ -39,7 +41,7 @@ public sealed class Parser
     {
         var tokens = new Lexer(source, diagnostics).Lex();
         var parser = new Parser(source, tokens, diagnostics);
-        var statements = parser.ParseStatementsUntil(TokenKind.EndOfFile, topLevel: true);
+        var statements = parser.ParseStatementsUntil(TokenKind.EndOfFile);
         return new ProgramSyntax(statements);
     }
 
@@ -189,7 +191,7 @@ public sealed class Parser
         return Advance();
     }
 
-    /// <summary>A closing <c>&gt;</c> of type arguments; a <c>&gt;&gt;</c> closes two lists, so its first half is taken and the second left.</summary>
+    /// <summary>A closing <c>&gt;</c> of type arguments; a <c>&gt;&gt;</c> closes two lists, so its first half is taken and the second left, as C# reads <c>List&lt;List&lt;int&gt;&gt;</c> (T17: generic types are written as in C#).</summary>
     private void ExpectGreater()
     {
         if (At(TokenKind.Greater))
@@ -354,7 +356,7 @@ public sealed class Parser
 
     // ---- statements ----------------------------------------------------------------------------
 
-    private List<Statement> ParseStatementsUntil(TokenKind closer, bool topLevel)
+    private List<Statement> ParseStatementsUntil(TokenKind closer)
     {
         var saved = suppressNewlines;
         var savedBraces = openBraces;
@@ -379,7 +381,7 @@ public sealed class Parser
             var startIndex = index;
             try
             {
-                var statement = ParseStatement(topLevel);
+                var statement = ParseStatement();
                 statements.Add(statement);
                 EndStatement();
             }
@@ -482,7 +484,7 @@ public sealed class Parser
         }
     }
 
-    private Statement ParseStatement(bool topLevel)
+    private Statement ParseStatement()
     {
         var token = Current;
         if (token.Kind == TokenKind.Keyword && Peek().Kind == TokenKind.Assign)
@@ -506,24 +508,27 @@ public sealed class Parser
                 case "break": Advance(); return new BreakStatement(token.Line);
                 case "continue": Advance(); return new ContinueStatement(token.Line);
                 case "return": Advance(); return new ReturnStatement(token.Line, EndsStatement() ? null : ParseExpression());
-                case "throw": Advance(); return new ThrowStatement(token.Line, EndsStatement() ? null : ParseExpression());
+                case "throw":
+                    // O7: `throw` takes a value, and stands bare in an arm of `else`; a bare one anywhere else is the checker's `throw-needs-value`
+                    Advance();
+                    return new ThrowStatement(token.Line, EndsStatement() ? null : ParseExpression());
                 case "raw": Advance(); return new RawBlock(token.Line, ParseBlockAfter(token.Line, "the `raw` block"));
                 case "use": return ParseUse();
                 case "data": case "class": case "interface": case "enum": case "flags":
                     return ParseTypeDeclaration(Modifiers.None);
                 case "else":
-                    // C2: `else` follows the closing brace on its line; here it stands alone
+                    // C2: `else` follows the closing brace on its line; one on a line of its own is `syntax` (E4 lists it; decided)
                     ReportSyntax(token.Line, "`else` follows the closing brace of the `if` block on the same line");
                     Advance();
-                    return ParseElseClause();
+                    return ParseStrayElseClause(token.Line);
                 case "pub": case "prot": case "static": case "mut": case "virtual": case "override": case "void": case "weak":
-                    return ParseDeclaration(topLevel, typeName: null);
+                    return ParseDeclaration(typeName: null);
                 case "true": case "false": case "null": case "this":
                     break; // an expression
                 default:
                     if (CoreWords.TypeNames.Contains(token.Text))
                     {
-                        return ParseDeclaration(topLevel, typeName: null);
+                        return ParseDeclaration(typeName: null);
                     }
 
                     break;
@@ -541,7 +546,7 @@ public sealed class Parser
             }
 
             Statement? declaration = null;
-            if (Try(() => declaration = ParseDeclaration(topLevel, typeName: null)))
+            if (Try(() => declaration = ParseDeclaration(typeName: null)))
             {
                 return declaration!;
             }
@@ -549,9 +554,10 @@ public sealed class Parser
 
         if (token.Kind == TokenKind.LeftParen)
         {
-            // a function whose return type is a function type: `(int) => int Make()`
+            // F1 with F11: a declaration whose type is a function type, `(int) => int Make()` or `(int) => int f = ...`, starts
+            // with `(` as an expression does, so the declaration is tried first, speculatively like one with a user type
             Statement? declaration = null;
-            if (Try(() => declaration = ParseDeclaration(topLevel, typeName: null)))
+            if (Try(() => declaration = ParseDeclaration(typeName: null)))
             {
                 return declaration!;
             }
@@ -561,6 +567,8 @@ public sealed class Parser
         if (At(TokenKind.Assign))
         {
             var assign = Advance();
+            // V8: a name on the left declares or assigns (above); M4: a path; M9: an index, `map[key] = value`; any other left side
+            // is text no rule gives a meaning (E4)
             if (expression is not (MemberAccess or IndexExpression))
             {
                 throw new ParseError(assign.Line, "only a variable, a path or an index can be assigned");
@@ -599,7 +607,7 @@ public sealed class Parser
 
         if (At(TokenKind.Newline) && PeekPastNewlines().Kind == TokenKind.LeftBrace)
         {
-            Report(ErrorIds.BracesRequired, line, $"the block of {what} opens on the line of its condition");
+            Report(ErrorIds.BracesRequired, line, $"the block of {what} opens on its line, not on the next (C1)");
             SkipNewlines();
             return ParseBlock();
         }
@@ -610,7 +618,7 @@ public sealed class Parser
             return new Block(line, [], line);
         }
 
-        var statement = ParseStatement(topLevel: false);
+        var statement = ParseStatement();
         return new Block(line, [statement], statement.Line);
     }
 
@@ -645,7 +653,7 @@ public sealed class Parser
     private Block ParseBlock()
     {
         var open = Expect(TokenKind.LeftBrace, "`{`");
-        var statements = ParseStatementsUntil(TokenKind.RightBrace, topLevel: false);
+        var statements = ParseStatementsUntil(TokenKind.RightBrace);
         var saved = suppressNewlines;
         suppressNewlines = 0;
         var close = Expect(TokenKind.RightBrace, "`}`");
@@ -657,7 +665,8 @@ public sealed class Parser
     {
         var keyword = Advance();
         var condition = ParseExpression();
-        // C1, E1: a missing block is reported on the line where the condition ends, where the block should have opened
+        // C1: the block opens where the condition ends, so a block that is missing or opens on the next line is `braces-required`
+        // at the condition's last line (the owner, 2026-10-10 and 2026-10-11); a statement in its place is read as the block's one statement
         var then = ParseBlockAfter(tokens[index - 1].Line, "`if`");
         Statement? elseClause = null;
         if (AtKeyword("else"))
@@ -667,10 +676,11 @@ public sealed class Parser
         }
         else if (At(TokenKind.Newline) && PeekPastNewlines().IsKeyword("else") && !ElseStartsAnArm())
         {
+            // C2, E4: `else` on a line of its own is `syntax` at its line; the branch still parses, so that the one error stands
             SkipNewlines();
             var token = Advance();
             ReportSyntax(token.Line, "`else` follows the closing brace of the `if` block on the same line");
-            elseClause = ParseElseClause();
+            elseClause = ParseStrayElseClause(token.Line);
         }
 
         return new IfStatement(keyword.Line, condition, then, elseClause);
@@ -686,11 +696,22 @@ public sealed class Parser
         return ParseBlockAfter(tokens[index - 1].Line, "`else`");
     }
 
+    /// <summary>The clause of a stray <c>else</c>, whose <c>syntax</c> is reported: a block or an <c>if</c> parses; anything else is given up under that one error (E1).</summary>
+    private Statement ParseStrayElseClause(int line)
+    {
+        if (At(TokenKind.LeftBrace) || AtKeyword("if"))
+        {
+            return ParseElseClause();
+        }
+
+        throw new ParseError(line, "`else` takes a block") { Reported = true };
+    }
+
     private WhileStatement ParseWhile()
     {
         var keyword = Advance();
         var condition = ParseExpression();
-        return new WhileStatement(keyword.Line, condition, ParseBlockAfter(tokens[index - 1].Line, "`while`"));
+        return new WhileStatement(keyword.Line, condition, ParseBlockAfter(tokens[index - 1].Line, "`while`")); // C1: the last line of the header
     }
 
     private ForInStatement ParseFor()
@@ -762,10 +783,10 @@ public sealed class Parser
                 var pattern = ParsePattern();
                 Expect(TokenKind.Arrow, "`=>`");
                 SkipNewlines();
-                var body = At(TokenKind.LeftBrace) ? ParseBlock() : ParseStatement(topLevel: false);
+                var body = At(TokenKind.LeftBrace) ? ParseBlock() : ParseStatement();
                 if (sawElse)
                 {
-                    ReportSyntax(armLine, "no arm follows `else`, which matches whatever the arms before it did not (C9)");
+                    ReportSyntax(armLine, "no arm follows `else`, which matches whatever the arms before it did not (C9); an arm after it is `syntax` (E4)");
                 }
 
                 sawElse |= pattern is ElsePattern;
@@ -792,17 +813,20 @@ public sealed class Parser
             return new ElsePattern(token.Line);
         }
 
+        // C9: an arm names a literal, `true`, `false` or `null`, with a `-` before a number
         if (token.Kind is TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.StringLiteral or TokenKind.CharLiteral
             or TokenKind.UnitLiteral or TokenKind.Minus || token.IsKeyword("true") || token.IsKeyword("false") || token.IsKeyword("null"))
         {
             return new ValuePattern(token.Line, ParseUnary());
         }
 
+        // D12, D13: a value by its path, `Plan.Free`
         if ((token.Kind == TokenKind.Name || token.Kind == TokenKind.Keyword) && Peek().Kind == TokenKind.Dot)
         {
             return new ValuePattern(token.Line, ParsePostfix());
         }
 
+        // C4: an arm names a case type, optionally followed by a name for the value as that type; a bare name is a type, never a constant
         var type = ParseType();
         string? binding = null;
         if (At(TokenKind.Name))
@@ -841,6 +865,7 @@ public sealed class Parser
 
             if ((modifiers & flag) != 0)
             {
+                // K7: class bodies follow C#, which refuses a modifier written twice (CS1004); text no rule gives a meaning is `syntax` (E4)
                 throw new ParseError(Current.Line, $"`{Current.Text}` is written twice");
             }
 
@@ -856,7 +881,7 @@ public sealed class Parser
     /// in a type body a field, a method or a constructor (K7, K14). <paramref name="typeName"/> is the
     /// name of the type whose body is parsed, or null outside one.
     /// </summary>
-    private Statement ParseDeclaration(bool topLevel, string? typeName)
+    private Statement ParseDeclaration(string? typeName)
     {
         var start = Current;
         var modifiers = ParseModifiers();
@@ -865,13 +890,17 @@ public sealed class Parser
             return ParseTypeDeclaration(modifiers);
         }
 
-        // `mut x = 1`: a declaration without a type
-        if (modifiers == Modifiers.Mut && (At(TokenKind.Name) || At(TokenKind.Keyword)) && Peek().Kind == TokenKind.Assign)
+        // `mut x = 1`: a declaration without a written type (V2); in a type body a field without one, as the record's actor bodies
+        // write `mut users = Map<int, User>()`. The modifiers beside `mut` stay on the node: which of them apply is the checker's.
+        if ((modifiers & Modifiers.Mut) != 0 && (At(TokenKind.Name) || At(TokenKind.Keyword)) && Peek().Kind == TokenKind.Assign)
         {
             var name = ExpectName("the name of the variable");
             Advance(); // `=`
             SkipNewlines();
-            return new VariableDeclaration(start.Line, true, null, name.Text, ParseExpression());
+            var untypedValue = ParseExpression();
+            return typeName is null
+                ? new VariableDeclaration(start.Line, modifiers, null, name.Text, untypedValue)
+                : new FieldDeclaration(start.Line, modifiers, null, name.Text, untypedValue);
         }
 
         // a constructor: the type's own name before `(`
@@ -903,7 +932,7 @@ public sealed class Parser
             SkipNewlines();
             var value = ParseExpression();
             return typeName is null
-                ? new VariableDeclaration(start.Line, (modifiers & Modifiers.Mut) != 0, type, declared.Text, value)
+                ? new VariableDeclaration(start.Line, modifiers, type, declared.Text, value) // every modifier written stays on the node (the checker judges them)
                 : new FieldDeclaration(start.Line, modifiers, type, declared.Text, value);
         }
 
@@ -915,11 +944,11 @@ public sealed class Parser
 
         if (typeName is not null && EndsStatement())
         {
-            // K7: `int x` in a class body, a field a constructor assigns
+            // K7, K14: `int x` in a class body, a field a constructor assigns; whether another kind of body may hold one is the checker's
             return new FieldDeclaration(start.Line, modifiers, type, declared.Text, null);
         }
 
-        throw Fail(topLevel ? "`=` with the variable's value, or the parameters of a function" : "`=` with the variable's value");
+        throw Fail("`=` with the variable's value, or the parameters of a function");
     }
 
     private FunctionDeclaration ParseFunctionRest(int line, Modifiers modifiers, TypeSyntax returnType, Token name, string? typeName)
@@ -939,13 +968,14 @@ public sealed class Parser
 
         if (typeName is not null && EndsStatement())
         {
-            // the signature of an interface method (K7)
+            // K7, C1: a signature that ends its line inside a type body is the bodiless form of an interface member, so a `{` on the
+            // next line is `syntax` at its line (the owner, 2026-10-10); whether this kind of body may hold the form is the checker's
             return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, null);
         }
 
         if (At(TokenKind.Newline) && PeekPastNewlines().Kind == TokenKind.LeftBrace)
         {
-            Report(ErrorIds.BracesRequired, line, "the body of a function opens on the line of its signature");
+            Report(ErrorIds.BracesRequired, line, "the body of a function opens on the line of its signature"); // C1: the signature's first line, for a function outside a type body
             SkipNewlines();
             return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, ParseBlock());
         }
@@ -969,7 +999,7 @@ public sealed class Parser
             TypeSyntax? limit = null;
             if (Match(TokenKind.Colon))
             {
-                limit = ParseType();
+                limit = ParseCoreType(); // T19: a limit names an interface
             }
 
             result.Add(new TypeParameter(name.Line, name.Text, limit));
@@ -1023,7 +1053,6 @@ public sealed class Parser
 
     private TypeDeclaration ParseTypeDeclaration(Modifiers modifiers)
     {
-        _ = modifiers;
         var keyword = Advance();
         var kind = keyword.Text switch
         {
@@ -1034,7 +1063,13 @@ public sealed class Parser
             _ => TypeDeclarationKind.Flags,
         };
         var name = ExpectName("the name of the type");
-        var typeParameters = ParseTypeParameters();
+        if (kind is TypeDeclarationKind.Enum or TypeDeclarationKind.Flags && At(TokenKind.Less))
+        {
+            // D12, D13 give an enum and a flags type a name and a body; type parameters there are text no rule gives a meaning (E4)
+            throw new ParseError(name.Line, "an `enum` or `flags` type has no type parameters");
+        }
+
+        var typeParameters = ParseTypeParameters(); // T19: a generic type lists its type parameters after its name
         IReadOnlyList<Parameter>? primary = null;
         var bases = new List<BaseSpecifier>();
         var equalBy = new List<string>();
@@ -1051,7 +1086,7 @@ public sealed class Parser
             {
                 do
                 {
-                    SkipNewlines();
+                    SkipNewlines(); // L4: a line break after the `:` of a base list, or after its comma, continues the declaration
                     var baseType = ParseType();
                     IReadOnlyList<Argument>? arguments = At(TokenKind.LeftParen) ? ParseArguments() : null;
                     bases.Add(new BaseSpecifier(baseType.Line, baseType, arguments));
@@ -1105,16 +1140,17 @@ public sealed class Parser
 
                     values.Add(new EnumMember(member.Line, member.Text, number));
                 }
-                while (Match(TokenKind.Comma) && !At(TokenKind.RightBrace));
+                while (Match(TokenKind.Comma) && !At(TokenKind.RightBrace)); // L4: a trailing comma is accepted in an enum or flags body
             }
 
+            // an empty body parses; whether a type without a value is allowed is the checker's (D12)
             suppressNewlines--;
             SkipNewlines();
             Expect(TokenKind.RightBrace, "`}`");
             openBraces--; // after the `}`: an error at the `}` leaves the brace for recovery to close
         }
 
-        return new TypeDeclaration(keyword.Line, kind, name.Text, typeParameters, primary, bases, equalBy, members, values);
+        return new TypeDeclaration(keyword.Line, modifiers, kind, name.Text, typeParameters, primary, bases, equalBy, members, values);
     }
 
     private List<Statement> ParseTypeBody(string typeName, int line)
@@ -1134,7 +1170,7 @@ public sealed class Parser
             var startIndex = index;
             try
             {
-                members.Add(ParseDeclaration(topLevel: false, typeName));
+                members.Add(ParseDeclaration(typeName));
                 EndStatement();
             }
             catch (ParseError e)
@@ -1177,8 +1213,9 @@ public sealed class Parser
         }
 
         var type = ParseCoreType();
-        while (At(TokenKind.Question))
+        if (At(TokenKind.Question))
         {
+            // N1: `T?`; a second `?` is text no rule gives a meaning, which the caller's next expectation reports (E4)
             var question = Advance();
             type = new NullableType(question.Line, type);
         }
@@ -1203,12 +1240,14 @@ public sealed class Parser
                 while (Match(TokenKind.Comma));
             }
 
-            Expect(TokenKind.RightParen, "`)`");
             suppressNewlines--;
+            Expect(TokenKind.RightParen, "`)`");
             if (Match(TokenKind.Arrow))
             {
                 SkipNewlines(); // L4: a trailing `=>` continues, a function type's as much as a lambda's
-                return new FunctionType(token.Line, parameters, ParseNonUnionType());
+                // F11: the `=>` of a function type reaches to the end of the type, so `(int) => int | NotFound` returns the union, and a
+                // union of a function type and another type is written `((int) => int) | NotFound` (the owner, 2026-10-11)
+                return new FunctionType(token.Line, parameters, ParseType());
             }
 
             if (parameters.Count == 1)
@@ -1266,6 +1305,10 @@ public sealed class Parser
         return left;
     }
 
+    // The levels, lowest first, as C# binds them: T18 (`+ - * / %`, the comparisons, `&& ||`), T22 (`& | ^ << >>`) and T12 (`+% -%`
+    // with `+ -`, `*%` with `*`) give the operators "the precedence they have in C#", and N4's `??` sits below `||`, grouping to the
+    // right (ParseCoalesce), as there; comparisons and equality chain to the left as there. Where `..` and `..<` bind is a reading
+    // C8 leaves open (README): below `+ -` and above the comparisons, so `1..n + 1` runs to `n + 1`, and a range chains with nothing.
     private static readonly TokenKind[][] BinaryLevels =
     [
         [TokenKind.BarBar],
@@ -1334,9 +1377,9 @@ public sealed class Parser
             if (At(TokenKind.Dot) || At(TokenKind.QuestionDot))
             {
                 var dot = Advance();
-                var member = At(TokenKind.Keyword) && Peek().Kind != TokenKind.LeftParen && !CoreWords.TypeNames.Contains(Current.Text)
-                    ? Advance()
-                    : ExpectName("a member name");
+                // L12: a core word after the dot is a member name, `match.Add(1)`, `x.match(1)` and `x.int` alike; the one error is the
+                // declaration's, so no `reserved-word` is added at the use (E1)
+                var member = At(TokenKind.Keyword) ? Advance() : ExpectName("a member name");
                 expression = new MemberAccess(dot.Line, expression, member.Text, dot.Kind == TokenKind.QuestionDot);
                 continue;
             }
@@ -1347,7 +1390,10 @@ public sealed class Parser
                 continue;
             }
 
-            if (At(TokenKind.Less) && expression is NameExpression)
+            // T19: a call names its type arguments, `First<int>(xs)` and `xs.Map<int>(f)` alike. Told from comparisons as C# tells
+            // them (T17, "as in C#"): the reading as a type-argument list wins when `(` follows the `>`, so `f(a < b, c > (d))` is
+            // the call `a<b, c>(d)`, and `a < b, c > d` is two comparisons
+            if (At(TokenKind.Less) && expression is NameExpression or MemberAccess)
             {
                 List<TypeSyntax>? typeArguments = null;
                 if (Try(() =>
@@ -1582,7 +1628,7 @@ public sealed class Parser
             var expression = inner.ParseExpression();
             if (!inner.At(TokenKind.EndOfFile))
             {
-                throw new ParseError(hole.Line, $"an interpolation holds one expression; found {inner.Current}");
+                throw new ParseError(inner.Current.Line, $"an interpolation holds one expression; found {inner.Current}"); // E1: the line of that token
             }
 
             segments.Add(new HoleSegment(expression));

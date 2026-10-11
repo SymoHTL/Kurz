@@ -190,7 +190,8 @@ the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
 `.github/workflows/` runs both, and the compiler's Windows job. `compiler/` is the compiler's
 directory, the one directory the tree gate's allowlist was widened by for it: there it admits
 `.cs`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and `.editorconfig` files outside
-`bin/`, `obj/` and dot-directories, and C# sources and project files nowhere else (since pull
+`bin/`, `obj/` and dot-directories, plus `compiler/NuGet.config` by name, and C# sources and
+project files nowhere else (since pull
 request 29 retired the design-phase rule, after the owner said build on 2026-10-09). It holds the
 library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Corpus/`
 reads a case header), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through
