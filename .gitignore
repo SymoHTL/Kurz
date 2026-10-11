@@ -1,3 +1,5 @@
 __pycache__/
+# Build outputs under compiler/ are not tracked, so the tree gate in CI and in the pre-push hook never
+# scans them; its pattern refuses a bin/ or obj/ segment under compiler/ itself, in all three places it runs.
 compiler/**/bin/
 compiler/**/obj/
