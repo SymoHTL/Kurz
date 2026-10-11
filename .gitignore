@@ -1,1 +1,7 @@
 __pycache__/
+# Build outputs and IDE or tool state under compiler/ stay out of a normal add, spelled as written here. A
+# forced add, or another spelling of the segment, tracks, publishes and scans such a path, and the tree gate's
+# pattern refuses a bin/, obj/ or dot-directory segment under compiler/ in any case, in all three places it runs.
+compiler/**/bin/
+compiler/**/obj/
+compiler/**/.*/

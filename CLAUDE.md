@@ -1,8 +1,11 @@
 # CLAUDE.md — Kurz
 
-Kurz is a programming language in its design phase. This repository is **public**. It holds the
-design record, the language reference with its conformance corpus, a knowledge store and the
-quality tools that gate them. Nothing here compiles Kurz, and nothing runs the corpus.
+Kurz is a programming language. This repository is **public**. It holds the design record, the
+language reference with its conformance corpus, a knowledge store, the quality tools that gate
+them, and `compiler/`, the one directory the tree gate admits for the compiler's files since the
+change that retired the design-phase rule (pull request 29), after the owner said build on 2026-10-09.
+The quality tools compile nothing and run no corpus case; nothing here runs the corpus (HAZARD #1), and
+`compiler/` is where a compiler of Kurz is admitted.
 
 Load [INDEX.md](INDEX.md) first and open an entry when its hook matches the task. Long procedures
 are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, review, merge) and
@@ -177,7 +180,11 @@ rule, each rule with an id and a status, and `corpus/` holds its cases: one smal
 file, with what it prints or the error it raises. `knowledge/` and `guides/` hold what a later
 session must know; `INDEX.md` is their index. `tools/` holds the gates (one runner, `gates.py`),
 the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
-`.github/workflows/` runs both. The map of every gate is
+`.github/workflows/` runs both. `compiler/` is the compiler's directory, the one directory the
+tree gate's allowlist was widened by for it: there it admits `.cs`, `.csproj`, `.sln`, `.props`,
+`.targets`, `.json`, `.md` and `.editorconfig` files outside `bin/`, `obj/` and dot-directories, and
+C# sources and project files nowhere else (since pull request 29 retired the design-phase rule, after the owner said
+build on 2026-10-09). The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
 ## Critical Rules
@@ -202,11 +209,18 @@ Gate: review rule "rules for sessions".
   read against the rules of its section before it goes in
   ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
   HAZARD (#1); the review rule "design record" flags the shapes it can see in one batch.
-- **Design phase means brainstorming, not building.** No compiler, runtime or library code until
-  the owner says build. On 2026-10-01 a v0 compiler was built after asking only for a name and a
-  toolchain; every pick in it was void. Gate: `tree` (CI), the pre-push hook, and the write-time
-  hook for the Write and Edit tools. A write through a shell command, and a hook cut off at its
-  timeout, pass the write-time hook: HAZARD (#4).
+- **Retired by pull request 29, after the owner said build on 2026-10-09: "Design phase means
+  brainstorming, not building."** The owner said build on 2026-10-09, after design round 13; the rule
+  held until that change merged, and its gate stays with a widened allowlist. The rule had held since 2026-10-01, when a v0
+  compiler was built after asking only for a name and a toolchain, and every pick in it was void
+  ([knowledge/design-before-build.md](knowledge/design-before-build.md)). What stays: the tree
+  gate admits C# sources and project files only under `compiler/`, with `.json`, `.md` and
+  `.editorconfig` files there, outside `bin/`, `obj/` and dot-directories; compiler code written as an allowed file elsewhere, a `.py` under `tools/`, is left to the
+  review rule "tools"; and a pick the record does not
+  hold is a question for a design round before it is a line of code (the next rule). Gate: `tree`
+  (CI), the pre-push hook and the write-time hook for the paths; a pick made in code is review
+  rule "compiler". A write through a shell command, and a hook cut off at its timeout, pass the
+  write-time hook: HAZARD (#4).
 - **The big design choices are asked before anything is derived from them.** The same incident;
   the procedure is the skill `design-round`. `judgment step`
 - **A design round is numbered questions**, each with its options, what every option costs and a

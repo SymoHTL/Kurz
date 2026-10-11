@@ -34,7 +34,7 @@ GATES = [
      "a tool's self-test fails, ran no case or contradicts its own exit code; a tool has no self-test or no recorded red proof; "
      "a recorded mutation no longer turns its one named case red"),
     ("tree", ["tools/tree_gate.py"], "always",
-     "a path the design phase does not allow; a credential-shaped or machine-bound string or a merge-conflict marker, "
+     "a path the allowlist does not hold; a credential-shaped or machine-bound string or a merge-conflict marker, "
      "in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a "
      "push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name "
      "of every annotated tag and of each tag it points at, and a tag or a ref that points straight at a blob or a tree"),
