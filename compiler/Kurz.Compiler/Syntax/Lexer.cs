@@ -61,9 +61,9 @@ public sealed class Lexer
                     position++;
                 }
             }
-            else if (IsAsciiDigit(c))
+            else if (IsAsciiDigit(c) || (c == '.' && IsAsciiDigit(Peek())))
             {
-                LexNumber();
+                LexNumber(); // L11: `.5` is a fraction literal; `..` is read as an operator before this, so `1..5` is a range
             }
             else if (IsNameStart(c))
             {
@@ -115,13 +115,18 @@ public sealed class Lexer
     /// <summary>Text no rule gives a meaning: one <c>syntax</c> at <paramref name="line"/>, and a token the parser passes over.</summary>
     private void Bad(int start, int length, string why, int line)
     {
-        diagnostics.Error(ErrorIds.Syntax, line, why);
+        // E1: a run of text no rule gives a meaning is one error, so a bad token right after another on its line adds none (`'''`)
+        if (tokens.Count == 0 || tokens[^1].Kind != TokenKind.Bad || tokens[^1].Line != line)
+        {
+            diagnostics.Error(ErrorIds.Syntax, line, why);
+        }
+
         tokens.Add(new Token(TokenKind.Bad, text.Substring(start, Math.Min(length, end - start)), line, start));
     }
 
     /// <summary>
     /// After an error inside a <c>"""</c> block: passes over the rest of the block, up to and including the
-    /// line that starts with <c>"""</c>, so that the block's text is not read as code.
+    /// closing <c>"""</c>, so that the block's text is not read as code; what follows the quotes on their line is (L13).
     /// </summary>
     private void SkipToClosingLine()
     {
@@ -134,8 +139,11 @@ public sealed class Lexer
                 position++;
             }
 
-            if (text[lineStart..position].TrimStart(' ', '\t').StartsWith("\"\"\"", StringComparison.Ordinal))
+            var line = text[lineStart..position];
+            var stripped = line.TrimStart(' ', '\t');
+            if (stripped.StartsWith("\"\"\"", StringComparison.Ordinal))
             {
+                position = lineStart + (line.Length - stripped.Length) + 3;
                 return;
             }
         }
@@ -639,6 +647,11 @@ public sealed class Lexer
             // L13: text beside the opening quotes. The whole literal, up to the next `"""`, is one error.
             var close = text.IndexOf("\"\"\"", afterOpen, StringComparison.Ordinal);
             position = close >= 0 && close < end ? close + 3 : end;
+            while (!AtEnd && Current == '"')
+            {
+                position++; // a closing line of four or more quotes goes with the one error
+            }
+
             Bad(start, position - start, "`\"\"\"` opens a block only at the end of a line; a one-line string is written with `\"`");
             return;
         }
@@ -668,14 +681,8 @@ public sealed class Lexer
             if (stripped.StartsWith("\"\"\"", StringComparison.Ordinal))
             {
                 indentation = line[..(line.Length - stripped.Length)];
-                var rest = stripped[3..].TrimEnd(' ', '\t', '\r');
-                if (rest.Length > 0)
-                {
-                    // L13, E1: the text stops making sense on the closing line; the block before it gets no token
-                    Bad(lineStart, position - lineStart, "the closing `\"\"\"` stands on a line of its own");
-                    return;
-                }
-
+                // L13: "on a line of its own" is about what stands before the closing quotes; code may follow them, `""")` closing a call
+                position = lineStart + indentation.Length + 3;
                 closed = true;
                 break;
             }
@@ -779,7 +786,7 @@ public sealed class Lexer
             }
         }
 
-        // the position is past the closing line already
+        // the position is right after the closing quotes; the rest of their line is read as code
         FlushText(parts, buffer);
         Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts));
     }

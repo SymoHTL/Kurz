@@ -46,6 +46,9 @@ public sealed class Parser
     private sealed class ParseError(int line, string message) : Exception(message)
     {
         public int Line { get; } = line;
+
+        /// <summary>The error reached the bag under its own id already (C1's <c>braces-required</c>); the statement is given up without a <c>syntax</c>.</summary>
+        public bool Reported { get; init; }
     }
 
     // ---- tokens --------------------------------------------------------------------------------
@@ -337,7 +340,11 @@ public sealed class Parser
         suppressNewlines = suppression;
         openBraces = 0;
         FlushPending(); // what a committed declaration reported before it failed
-        ReportSyntax(error.Line, error.Message);
+        if (!error.Reported)
+        {
+            ReportSyntax(error.Line, error.Message);
+        }
+
         Recover(open, braces);
         if (index == startIndex && !At(TokenKind.EndOfFile))
         {
@@ -608,8 +615,8 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// The <c>{</c> of a body that opens on the line of its construct: one on the next line is <c>braces-required</c> at the
-    /// construct's line, and the body still parses (the reading of C1 the README names).
+    /// The <c>{</c> of a body that opens on the line of its construct (C1): one on the next line is <c>braces-required</c> at the
+    /// construct's line, and the body still parses; one that is missing altogether is the same error there, and the statement is given up.
     /// </summary>
     private void ExpectOpeningBrace(int line, string what)
     {
@@ -619,7 +626,13 @@ public sealed class Parser
             SkipNewlines();
         }
 
-        Expect(TokenKind.LeftBrace, "`{`");
+        if (!At(TokenKind.LeftBrace))
+        {
+            Report(ErrorIds.BracesRequired, line, $"{what} takes a block between braces");
+            throw new ParseError(line, $"{what} takes a block between braces") { Reported = true };
+        }
+
+        Advance();
     }
 
     private bool BraceOnNextLine() => At(TokenKind.Newline) && PeekPastNewlines().Kind == TokenKind.LeftBrace;
@@ -712,7 +725,9 @@ public sealed class Parser
             }
             else
             {
-                throw Fail($"the arms of {what} between braces");
+                // C1: arms that are missing, or a statement in their place, are an error of the whole construct at its line (the record, 2026-10-10)
+                Report(ErrorIds.BracesRequired, line, $"the arms of {what} stand between braces");
+                throw new ParseError(line, $"the arms of {what} stand between braces") { Reported = true };
             }
         }
 

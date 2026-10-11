@@ -229,7 +229,8 @@ public sealed class ParserTests
     [Fact]
     public void A_value_after_a_variable_named_match_reads_as_a_match_expression()
     {
-        Assert.Equal([(ErrorIds.ReservedWord, 1), (ErrorIds.Syntax, 2)], Errors("match = 1\nprint(match - 1)"));
+        // L12: `-` can start a value, so this is a match expression (the record, 2026-10-10), and its missing arms are C1's error
+        Assert.Equal([(ErrorIds.ReservedWord, 1), (ErrorIds.BracesRequired, 2)], Errors("match = 1\nprint(match - 1)"));
     }
 
     [Theory]
@@ -490,19 +491,22 @@ public sealed class ParserTests
     }
 
     [Theory]
-    [InlineData("match x print(1)")]
-    [InlineData("b = a with print(1)")]
-    [InlineData("enum E")]
-    public void A_construct_that_takes_no_statement_in_place_of_its_braces_is_syntax(string program)
+    [InlineData("match x print(1)", 1)]
+    [InlineData("b = a with print(1)", 1)]
+    [InlineData("enum E", 1)]
+    [InlineData("match x\nprint(1)", 1)]
+    [InlineData("flags F\nprint(1)", 1)]
+    public void Braces_that_are_missing_altogether_are_braces_required_at_the_line_of_the_construct(string program, int line)
     {
-        Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));
+        // C1: a block that is missing is an error of the whole construct, at the line where it should have opened (the record, 2026-10-10)
+        Assert.Equal([(ErrorIds.BracesRequired, line)], Errors(program));
     }
 
     [Fact]
     public void The_shapes_the_readme_lists_as_low_give_the_errors_it_says()
     {
         // pinned as they are, so that a fix to one of them shows
-        Assert.Equal([(ErrorIds.BracesRequired, 1), (ErrorIds.Syntax, 1)], Errors("if x print(1) else print(2)"));
+        Assert.Equal([(ErrorIds.BracesRequired, 1), (ErrorIds.BracesRequired, 1)], Errors("if x print(1) else print(2)"));
         Assert.Equal([(ErrorIds.ReservedWord, 1)], Errors("x.match(1)"));
         Assert.Empty(Errors("x.match"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("s = \"\"\"\n    {f(\"}\")}\n    \"\"\""));

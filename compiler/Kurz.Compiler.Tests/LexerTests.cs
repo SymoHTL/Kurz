@@ -83,6 +83,7 @@ public sealed class LexerTests
     [InlineData("2.5E-3", "2.5e-3", "")]
     [InlineData("1.5e2", "1.5e2", "")]
     [InlineData("0.5", "0.5", "")]
+    [InlineData(".5", ".5", "")]
     [InlineData("0.5f", "0.5", "f")]
     [InlineData("1.50m", "1.50", "m")]
     [InlineData("3d", "3", "d")]
@@ -200,9 +201,27 @@ public sealed class LexerTests
     }
 
     [Fact]
-    public void Text_after_the_closing_quotes_of_a_block_is_syntax_at_the_closing_line()
+    public void Code_may_follow_the_closing_quotes_of_a_block_on_their_line()
     {
-        Assert.Equal((ErrorIds.Syntax, 3), OnlyError("text = \"\"\"\n    abc\n    \"\"\" tail"));
+        // L13: "on a line of its own" is about what stands before the closing quotes (the record, 2026-10-10)
+        var (tokens, diagnostics) = Lex("print(\"\"\"\n    abc\n    \"\"\")\nnext = 1");
+        Assert.Empty(diagnostics.Items);
+        var meaningful = tokens.Where(t => t.Kind is not TokenKind.Newline and not TokenKind.EndOfFile).ToList();
+        Assert.Equal(
+            [TokenKind.Name, TokenKind.LeftParen, TokenKind.StringLiteral, TokenKind.RightParen, TokenKind.Name, TokenKind.Assign, TokenKind.IntegerLiteral],
+            meaningful.Select(t => t.Kind));
+        Assert.Equal("abc", Assert.IsType<StringLiteralValue>(meaningful[2].Value).PlainText);
+        Assert.Equal(3, meaningful[3].Line);
+        Assert.Equal(4, meaningful[4].Line);
+    }
+
+    [Fact]
+    public void A_block_that_opens_with_four_quotes_is_syntax_at_its_opening_line_alone()
+    {
+        // L13: there is no block of four or more quotes (the record, 2026-10-10); the closing line of four goes with the one error
+        var (tokens, diagnostics) = Lex("text = \"\"\"\"\n    abc\n    \"\"\"\"\nprint(text)");
+        Assert.Equal([(ErrorIds.Syntax, 1)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal(4, tokens.Single(t => t.Kind == TokenKind.Name && t.Text == "print").Line);
     }
 
     [Fact]
@@ -269,6 +288,11 @@ public sealed class LexerTests
         var (tokens, diagnostics) = Lex("text = \"\"\"\n    abc\"\"\"\n    more\n    \"\"\"\nprint(text)");
         Assert.Equal([(ErrorIds.Syntax, 2)], diagnostics.Items.Select(d => (d.Id, d.Line)));
         Assert.Equal(5, tokens.Single(t => t.Kind == TokenKind.Name && t.Text == "print").Line);
+        // the code after the closing quotes is read after the error too
+        var (tokens2, diagnostics2) = Lex("print(\"\"\"\n    abc\"\"\"\n    \"\"\")\nnext = 1");
+        Assert.Equal([(ErrorIds.Syntax, 2)], diagnostics2.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal(3, tokens2.Single(t => t.Kind == TokenKind.RightParen).Line);
+        Assert.Equal(4, tokens2.Single(t => t.Kind == TokenKind.Name && t.Text == "next").Line);
     }
 
     [Fact]
@@ -309,6 +333,10 @@ public sealed class LexerTests
     [InlineData("'ä'", 228)]
     [InlineData("'😀'", 0x1F600)]
     [InlineData("'\\u0041'", 65)]
+    [InlineData("'{'", 123)]
+    [InlineData("'\\''", 39)]
+    [InlineData("'\t'", 9)]
+    [InlineData("'\"'", 34)]
     public void A_char_literal_is_one_code_point(string program, int codePoint)
     {
         var token = Single(program);
@@ -320,6 +348,8 @@ public sealed class LexerTests
     [InlineData("c = 'ab'")]
     [InlineData("c = ''")]
     [InlineData("c = 'a")]
+    [InlineData("c = '''")]
+    [InlineData("c = '\n")]
     public void A_char_literal_with_another_count_of_code_points_is_syntax(string program)
     {
         Assert.Equal((ErrorIds.Syntax, 1), OnlyError(program));
