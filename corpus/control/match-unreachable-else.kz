@@ -1,0 +1,15 @@
+// expect: error unreachable-arm at 11
+// rules: C4, C9
+
+data Yes(int Count)
+data No(string Why)
+
+void Show(Yes | No v) {
+    match v {
+        Yes y => print(y.Count)
+        No n => print(n.Why)
+        else => print("other")
+    }
+}
+
+Show(Yes(1))

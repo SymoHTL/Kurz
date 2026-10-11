@@ -1,0 +1,6 @@
+// expect: throws divide-by-zero at 4
+// rules: T25
+
+decimal Divide(decimal a, decimal b) => a / b
+
+print(Divide(1m, 0m))

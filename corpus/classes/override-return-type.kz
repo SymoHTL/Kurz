@@ -1,0 +1,12 @@
+// expect: error override-return-type at 9
+// rules: K7
+
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    pub override int Sound() => 1
+}
+
+print(Dog().Sound())

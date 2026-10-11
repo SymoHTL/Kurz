@@ -1,0 +1,5 @@
+// expect: error syntax at 5
+// rules: E4
+
+print((1 + 2)
+    + 3

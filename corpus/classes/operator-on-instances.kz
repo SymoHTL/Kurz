@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 6
+// rules: K5
+
+class Vec(int X)
+
+print(Vec(1) + Vec(2))

@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 4
+// rules: C8
+
+for i in 0..<1.5 {
+    print(i)
+}

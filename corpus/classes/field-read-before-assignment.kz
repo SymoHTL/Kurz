@@ -1,0 +1,15 @@
+// expect: error field-unassigned at 8
+// rules: K14
+
+class Counter {
+    mut int hits
+
+    pub Counter() {
+        print(hits)
+        hits = 0
+    }
+
+    pub int Hits() => hits
+}
+
+print(Counter().Hits())

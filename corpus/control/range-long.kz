@@ -1,0 +1,10 @@
+// expect: output
+// | 0
+// | 1
+// | 2
+// rules: C8
+
+long n = 3
+for i in 0..<n {
+    print(i)
+}

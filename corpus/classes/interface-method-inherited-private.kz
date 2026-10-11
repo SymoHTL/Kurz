@@ -1,0 +1,16 @@
+// expect: error missing-member at 12
+// rules: K7
+
+interface Shape {
+    int Area()
+}
+
+class Base {
+    int Area() => 1
+}
+
+class Dot : Base, Shape {
+    pub int Size() => 2
+}
+
+print(Dot().Size())

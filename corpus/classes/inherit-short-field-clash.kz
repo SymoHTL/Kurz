@@ -1,0 +1,8 @@
+// expect: error base-field-clash at 6
+// rules: K16
+
+class User(string Name)
+
+class Admin(int Name) : User
+
+print(Admin("Ann", 1).Name)

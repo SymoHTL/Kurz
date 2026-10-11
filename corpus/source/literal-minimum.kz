@@ -1,0 +1,9 @@
+// expect: output
+// | -128
+// | -2147483648
+// rules: L17
+
+sbyte x = -128
+int y = -2147483648
+print(x)
+print(y)

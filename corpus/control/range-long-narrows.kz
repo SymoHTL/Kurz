@@ -1,0 +1,8 @@
+// expect: error narrowing-conversion at 6
+// rules: C8
+
+long n = 3
+for i in 0..<n {
+    int x = i
+    print(x)
+}

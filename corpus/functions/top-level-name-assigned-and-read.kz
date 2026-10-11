@@ -1,0 +1,11 @@
+// expect: error redeclared at 7
+// rules: F16
+
+mut count = 0
+
+void Bump() {
+    count = count + 1
+}
+
+Bump()
+print(count)

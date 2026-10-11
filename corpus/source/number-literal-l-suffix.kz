@@ -1,0 +1,5 @@
+// expect: error syntax at 4
+// rules: L11
+
+x = 1l
+print(x)

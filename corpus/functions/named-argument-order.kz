@@ -1,0 +1,14 @@
+// expect: output
+// | b
+// | a
+// | 3
+// rules: F12, D11
+
+int Log(string s, int v) {
+    print(s)
+    return v
+}
+
+int Add(int a, int b) => a + b
+
+print(Add(b: Log("b", 2), a: Log("a", 1)))

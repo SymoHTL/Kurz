@@ -1,0 +1,9 @@
+// expect: output
+// | 1
+// rules: N9
+
+class Account(mut string? Email)
+
+mut acc = Account(null)
+acc.Email = "x"
+print(acc.Email.Bytes.Count)
