@@ -169,7 +169,12 @@ copy would be lost or, through a class instance on the path, would not be a chan
 all. *(proposed: the record speaks of assigning)* The result type of a function type may be `void`,
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
-objected to)*
+objected to)* A lambda whose body is a call with a `void` success, `x => print(x)`, is a lambda with
+a `void` result and no use of the call as a value (O10) (the owner, 2026-10-10). The `=>` of a function
+type reaches to the end of the type, so `(int) => int | NotFound` returns the union, and a union of a
+function type and another type is written `((int) => int) | NotFound`, as the nullable one is; such a
+lambda under a function type whose result is not `void`, `(int) => int`, is `type-mismatch` (T1) at
+the lambda, since its result is `void` where an `int` is required (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
 Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
 ```kurz
@@ -209,6 +214,7 @@ void Run((int) => void f) {
 }
 
 Run(x => print(x))
+// the lambda's body is a call with a void success: a void lambda, and no use of the call as a value (F11)
 ```
 
 ### F12 (decided, §8) Overloads, default values, named arguments
@@ -219,8 +225,36 @@ parameter at the same place. Names, default values and the `mut` marker (M7) mak
 call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of the other. A
 parameter can have a default value, and an argument can be passed by name (D11). Which function a
 call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)* Arguments are
-evaluated from left to right, as in C#, and a default value is a constant expression, as C#
-requires. *(assumed: proposed on 2026-10-09 and not objected to)*
+evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
+order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
+value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
+folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14) (C# also takes `default` and `new S()` for a value type `S`, which the record does not
+name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
+`type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
+2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
+
+Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
+```kurz
+int Log(string s, int v) {
+    print(s)
+    return v
+}
+
+int Add(int a, int b) => a + b
+
+print(Add(b: Log("b", 2), a: Log("a", 1)))
+```
+
+Case: [functions/default-not-constant.kz](../corpus/functions/default-not-constant.kz)
+```kurz
+string Pick() => "hi"
+
+void Greet(string name, string word = Pick()) {
+    print("{word} {name}")
+}
+
+Greet("Ann")
+```
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
 ```kurz
@@ -382,8 +416,8 @@ the cost is that the function cannot reuse the name, and that a top-level variab
 every top-level function that already declares that name into a compile error). A parameter of the
 function, a parameter of a lambda inside it and a loop variable are declarations in this sense and
 `redeclared` too, and every variable declared outside a function reserves its name, whether it is
-declared above or below the function (F6) and at any depth of the top-level code (the owner,
-2026-10-09). In `count = count + 1` inside such a function the one error is `redeclared`, for the
+declared above or below the function (F6) and at any depth of the top-level code. *(assumed: the
+reference's reading, accepted by its id on 2026-10-09 without its text shown)* In `count = count + 1` inside such a function the one error is `redeclared`, for the
 declaration on the left, which the compiler reads first to learn whether the line declares; the read
 on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
 read first, whose message points at the read while the fix is the whole line). The owner chose the

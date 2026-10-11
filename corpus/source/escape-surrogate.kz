@@ -1,0 +1,6 @@
+// expect: error unknown-escape at 4
+// rules: L16
+
+s = "\uD800"
+print(s)
+// a string holds code points and not UTF-16 units, so an escape that names a surrogate is the error (L16)

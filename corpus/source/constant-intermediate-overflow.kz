@@ -1,0 +1,6 @@
+// expect: error constant-overflow at 4
+// rules: L17
+
+byte c = 200 + 100 - 100
+print(c)
+// folded one operation at a time in byte (L17): 200 + 100 leaves the type before the - would bring the result back

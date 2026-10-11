@@ -1,0 +1,5 @@
+// expect: error constant-overflow at 5
+// rules: T28
+
+byte sum = 1
+print(sum +% 300)

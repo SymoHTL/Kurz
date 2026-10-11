@@ -1,0 +1,10 @@
+// expect: error default-not-constant at 6
+// rules: F12
+
+string Pick() => "hi"
+
+void Greet(string name, string word = Pick()) {
+    print("{word} {name}")
+}
+
+Greet("Ann")

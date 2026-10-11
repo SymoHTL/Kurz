@@ -1,0 +1,10 @@
+// expect: error braces-required at 6
+// rules: C1
+
+x = 7
+if x > 5 &&
+    x < 10
+{
+    print(x)
+}
+// the condition runs over two lines, so the missing block is reported at its last line (C1, the owner's choice of 2026-10-11)

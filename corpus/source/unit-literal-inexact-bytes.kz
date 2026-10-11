@@ -1,0 +1,4 @@
+// expect: error inexact-literal at 4
+// rules: L14
+
+print(1.3kb)

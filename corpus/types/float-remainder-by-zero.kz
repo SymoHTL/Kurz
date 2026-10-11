@@ -1,0 +1,8 @@
+// expect: output
+// | true
+// rules: T25, T14
+
+double Rest(double a, double b) => a % b
+
+r = Rest(1.0, 0.0)
+print(r != r)
