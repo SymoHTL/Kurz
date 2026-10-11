@@ -1,0 +1,6 @@
+// expect: output
+// | 2.5
+// rules: L17
+
+byte b = 1
+print(b + 1.5)

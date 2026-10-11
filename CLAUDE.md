@@ -2,8 +2,10 @@
 
 Kurz is a programming language. This repository is **public**. It holds the design record, the
 language reference with its conformance corpus, a knowledge store, the quality tools that gate
-them, and the compiler under `compiler/`, admitted since 2026-10-09, when the owner said build.
-The quality tools compile nothing and run no corpus case: that is the compiler's.
+them, and `compiler/`, the one directory the tree gate admits for the compiler's files since the
+change that retired the design-phase rule (pull request 29), after the owner said build on 2026-10-09.
+The quality tools compile nothing and run no corpus case; nothing here runs the corpus (HAZARD #1), and
+`compiler/` is where a compiler of Kurz is admitted.
 
 Load [INDEX.md](INDEX.md) first and open an entry when its hook matches the task. Long procedures
 are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, review, merge) and
@@ -107,8 +109,8 @@ Each line names a trap; its evidence is in the entry it links.
    2026-10-02, was retired by the owner on 2026-10-07 after it had stalled every round; the bill
    is counted before the run and named in the report after it. A run off the pipeline spends the
    seat at local prices and starts only after the owner said go to a bill that was named. The
-   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.27 USD,
-   the top rounded up from 0.264,
+   bill is batches times passes times the price of a pass where it runs (in CI 0.19 to 0.52 USD,
+   the mean of a pass in the dearest run seen, 0.5119 on 2026-10-10, rounded up,
    off the pipeline about 1.3 to 1.8 USD, measured in
    [knowledge/what-a-review-pass-costs.md](knowledge/what-a-review-pass-costs.md)), with the batches from
    `py -3 tools/review/review.py --pr N --plan` on the head that will be reviewed; a run in CI
@@ -186,10 +188,13 @@ file, with what it prints or the error it raises. `knowledge/` and `guides/` hol
 session must know; `INDEX.md` is their index. `tools/` holds the gates (one runner, `gates.py`),
 the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
 `.github/workflows/` runs both, and the compiler's Windows job. `compiler/` is the compiler's
-directory, the one place the tree gate admits C# sources and project files (since 2026-10-09):
-the library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it,
-`Corpus/` reads a case header), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus
-case through the front end, and `compiler/README.md`. The map of every gate is
+directory, the one directory the tree gate's allowlist was widened by for it: there it admits
+`.cs`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and `.editorconfig` files outside
+`bin/`, `obj/` and dot-directories, and C# sources and project files nowhere else (since pull
+request 29 retired the design-phase rule, after the owner said build on 2026-10-09). It holds the
+library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Corpus/`
+reads a case header), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through
+the front end, and `compiler/README.md`. The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
 ## Critical Rules
@@ -214,11 +219,14 @@ Gate: review rule "rules for sessions".
   read against the rules of its section before it goes in
   ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
   HAZARD (#1); the review rule "design record" flags the shapes it can see in one batch.
-- **Retired on 2026-10-09: "Design phase means brainstorming, not building."** The owner said
-  build on 2026-10-09, after design round 13. The rule had held since 2026-10-01, when a v0
+- **Retired by pull request 29, after the owner said build on 2026-10-09: "Design phase means
+  brainstorming, not building."** The owner said build on 2026-10-09, after design round 13; the rule
+  held until that change merged, and its gate stays with a widened allowlist. The rule had held since 2026-10-01, when a v0
   compiler was built after asking only for a name and a toolchain, and every pick in it was void
   ([knowledge/design-before-build.md](knowledge/design-before-build.md)). What stays: the tree
-  gate admits compiler code under `compiler/` and nowhere else, and a pick the record does not
+  gate admits C# sources and project files only under `compiler/`, with `.json`, `.md` and
+  `.editorconfig` files there, outside `bin/`, `obj/` and dot-directories; compiler code written as an allowed file elsewhere, a `.py` under `tools/`, is left to the
+  review rule "tools"; and a pick the record does not
   hold is a question for a design round before it is a line of code (the next rule). Gate: `tree`
   (CI), the pre-push hook and the write-time hook for the paths; a pick made in code is review
   rule "compiler". A write through a shell command, and a hook cut off at its timeout, pass the
@@ -306,6 +314,14 @@ Gate: review rule "rules for sessions".
   a thread answered by a reply is resolved by hand
   ([knowledge/resolve-what-the-edit-answered.md](knowledge/resolve-what-the-edit-answered.md)).
   Gate: `pr-findings`.
+- **The acceptance judge's table is a comment on the pull request, and the description names no
+  verdict.** The review reads a verdict in the description as a claim of approval: on 2026-10-10 one
+  head drew eight high findings for its "overall: pass" (the owner's choice of 2026-10-11, against
+  changing the review rule). The judge reads the tree that becomes the head, nothing is committed
+  after its last reading, and the acceptance text names that commit
+  ([knowledge/the-judged-tree-is-the-committed-tree.md](knowledge/the-judged-tree-is-the-committed-tree.md)).
+  Gate: review rule "every pull request" for the verdict; the order of judging and committing is a
+  `judgment step`.
 - **Low findings open no thread and hold no merge** (the owner's decision, 2026-10-02). The
   reviewer collects them on the open issue labelled `review-lows`, where they are fixed together.
   A push that is needed anyway fixes the lows of its pull request too. A pull request needs no

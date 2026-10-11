@@ -30,7 +30,9 @@ then the rule changes its status here.
 ## Cases
 
 Every sample in this reference is a file of the conformance corpus, under `corpus/`. A file
-starts with a header and an empty line; the rest is the program.
+starts with a header and an empty line; the rest is the program. A chapter shows a file's sample once,
+under the first `Case:` line that names it; a later rule of the same chapter that the case names
+carries the `Case:` line alone.
 
 ```text
 // expect: output                     the program compiles, runs and prints exactly these lines
@@ -205,9 +207,9 @@ passes. A type meets such a limit when it has a text: every value with a derived
 A11 to A14), a class that declares or inherits a `pub Text()` (A5, A9), and a value whose interface
 or type parameter has a text by the sentence before, without naming the interface (the owner,
 2026-10-04, against an interface a class has to name). The match holds only for an interface whose
-only member is `string Text()`, the one the standard library declares; an interface that declares
-more is met by naming it, because a type that has a text does not have its other members (the owner,
-2026-10-09). The owner chose the rule on 2026-10-03, against a check for each instantiation of a
+only member is `string Text()`, the one a standard library would declare; an interface that declares
+more is met by naming it, because a type that has a text does not have its other members. *(assumed:
+the reference's reading, accepted by its id on 2026-10-09 without its text shown)* The owner chose the rule on 2026-10-03, against a check for each instantiation of a
 generic function, which would have reported an error at a call site for a line inside another
 function; the cost is that a generic function that prints its argument needs the limit, and that the
 standard library would declare one interface for it.
@@ -280,8 +282,8 @@ print(b)
 ### A8 (assumed, §8) The text of the remaining values
 
 A `float` shows what a `double` shows (A4), in the sense of A11. A `decimal` shows the digits it
-holds. A `char` shows its character. A duration shows its value in the units of L14: `1h 30min`,
-split as A12 says. A set of flags (D13) shows its names with ` | ` between them, in the order of
+holds. A `char` shows its character. A duration shows its value split into units, `1h 30min`, as A12
+says. A set of flags (D13) shows its names with ` | ` between them, in the order of
 A13. A `double` without a fraction, one that needs an exponent and one that is no number show what
 C# prints for them: `1`, `1E+21`, `NaN`; which C# that is, and what the other special values show,
 is A14.
@@ -315,12 +317,33 @@ print(2.5f)
 
 ### A12 (assumed, §8) The text of a duration
 
-A duration shows its value split into the units of L14 from the largest down, each unit at most once
-and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and a value
-below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A negative duration
-shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. The owner
+A duration shows its value split into units from `days` down, those of L14 and the two below a
+millisecond named below, each unit at most once
+and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows `1h`, and the remainder
+below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A remainder
+below a millisecond shows its microseconds and nanoseconds the same way, `1s 250us` and `1us 500ns`,
+when no formatting is chosen (the owner, 2026-10-10, against rounding or cutting to milliseconds); a
+formatting that can be chosen is a question the record lists (section 14), as is whether `us` and
+`ns` are units of a literal (L14). A negative duration
+shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. A size is an integer (L14) and shows its digits, `1.5kb`
+as `1536`, which the case of L14 shown below prints as well. The owner
 accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is assumed
-and not decided.
+and not decided; that it is the remainder below a second that shows in milliseconds came from the
+first review of 2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)*
+
+Case: [values/text-duration-sub-millisecond.kz](../corpus/values/text-duration-sub-millisecond.kz)
+```kurz
+print(1.00025s)
+print(0.0000015s)
+// with no formatting chosen, the remainder below a millisecond shows in microseconds and nanoseconds (A12, the owner's choice of 2026-10-10)
+```
+
+Case: [source/unit-literal-fraction.kz](../corpus/source/unit-literal-fraction.kz)
+```kurz
+print(1.5s)
+print(0.5h)
+print(1.5kb)
+```
 
 Case: [values/text-duration.kz](../corpus/values/text-duration.kz)
 ```kurz
@@ -349,10 +372,13 @@ print(Access.None)
 
 "What C# prints" is what .NET Core 3.0 and later print with the invariant culture, which is the
 shortest digits that read back as the same number (A4), with `.` as the separator: an exponent form
-from `1E+15` up and below `1E-05`, `-0` for a negative zero, `Infinity` and `-Infinity` for the
+for a nonzero magnitude of `1E+15` or more or below `1E-04`, so that `1E-05` is the first power of
+ten it shows and `0.0001` the last without it, `0` for zero, `-0` for a negative zero, `Infinity` and `-Infinity` for the
 infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0` for a
 negative zero, a `∞` sign, a `,`), and none of that is meant. The owner accepted this reading by its
-id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided.
+id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided; that the
+exponent form starts below `1E-04`, at `1E-05` for the powers of ten, came from the first review of
+2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)*
 
 Case: [values/text-double-special.kz](../corpus/values/text-double-special.kz)
 ```kurz

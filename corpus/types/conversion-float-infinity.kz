@@ -1,0 +1,6 @@
+// expect: output
+// | true
+// rules: T6, T10
+
+f = float(1e300)
+print(f == f * 2)

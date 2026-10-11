@@ -8,9 +8,43 @@ an id of its own for the parentheses, which would put a special case into the pa
 spelling). The braces are always required, and the block opens on the line of the condition: a
 statement in place of the block, and a `{` on the next line, which L2 ends the statement before and
 L4 does not continue it to, are the compile error `braces-required` (the owner, 2026-10-09, against
-continuing the statement onto the `{`, a fourth exception to L2). Both are reported on the line of
-the condition, where the block should have opened, which is the line the case with the `{` on its
-own line expects.
+continuing the statement onto the `{`, a fourth exception to L2). Both are reported where the block should have
+opened, the line where the condition ends: a block that is missing or opens on the next line is an
+error of the whole `if`, which E1 reports on the line of the condition, and the case with the `{` on
+its own line expects that line (the owner, 2026-10-10, confirming the reading proposed after the
+review of round 13); for a condition over several lines that is its last line, where the two readings
+the owner confirmed, the construct's first line and the line where its header ends, part (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). The same error is raised wherever a block that a construct takes opens on the next line or is
+replaced by a statement, at the line where the block should have opened: the last line of the header
+of a `while` or a `for`, the line of the `match` or of the call an `else` follows, the line of the
+word `else` or `raw`, the line of the name or the word for the body of a `class`, `data`, `interface`,
+`enum` or `flags` or the braces of `with`, and the first line of the signature for the body of a
+function outside a type body or of a constructor. The list names the constructs this reference has
+cases or rules for; the rule holds for every other block of the record, an `attempt` or `retry` block,
+an actor body and the block of `every ... run` among them, at the line where the words before the
+block end. A method signature inside a type body that ends its
+line is the bodiless form of an interface member (K7), so its `{` on the next line is `syntax` (E4)
+(the owner, 2026-10-10).
+
+Case: [control/brace-next-line-if-multiline.kz](../corpus/control/brace-next-line-if-multiline.kz)
+```kurz
+x = 7
+if x > 5 &&
+    x < 10
+{
+    print(x)
+}
+// the condition runs over two lines, so the missing block is reported at its last line (C1, the owner's choice of 2026-10-11)
+```
+Case: [control/brace-next-line-while.kz](../corpus/control/brace-next-line-while.kz)
+```kurz
+mut i = 0
+while i < 3
+{
+    i = i + 1
+}
+print(i)
+// the block of a `while` opens on the next line: the error stands at the line where the header ends (C1)
+```
 
 Case: [control/if.kz](../corpus/control/if.kz)
 ```kurz
@@ -86,7 +120,45 @@ type the value is runs, as C#'s `switch` does; an arm may name a class or a `dat
 a case (D6, K6), `Admin` where the case is `User`; and an arm that can never run, because an earlier
 arm covers its type, is the compile error `unreachable-arm` (the owner, 2026-10-09, against arms
 that name cases only, under which a `match` cannot tell an `Admin` from a `User`; the cost is a row
-in the table and a subtype check per arm).
+in the table and a subtype check per arm). An `else` arm after arms that cover every case, and a
+literal arm (C9) after the arm of its type, are `unreachable-arm` too (the owner, 2026-10-10). A literal
+arm after an arm with the same literal is `unreachable-arm` as well, as C# reports a pattern an
+earlier one handles; an arm that names a type that is no case of the union and derived from none,
+`string s` in a `match` over `Yes | No`, is `type-mismatch` (T1) at the arm, as C# refuses a pattern
+of a type the value cannot have (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
+
+Case: [control/match-unreachable-literal.kz](../corpus/control/match-unreachable-literal.kz)
+```kurz
+data NotFound(int Id)
+
+void Show(int | NotFound v) {
+    match v {
+        int x => print(x)
+        0 => print("zero")
+        NotFound n => print(n.Id)
+    }
+}
+
+int value = 0
+Show(value)
+// the arm `0 =>` can never run, because the arm `int x` above it takes every int (C4, C9)
+```
+
+Case: [control/match-unreachable-else.kz](../corpus/control/match-unreachable-else.kz)
+```kurz
+data Yes(int Count)
+data No(string Why)
+
+void Show(Yes | No v) {
+    match v {
+        Yes y => print(y.Count)
+        No n => print(n.Why)
+        else => print("other")
+    }
+}
+
+Show(Yes(1))
+```
 
 Case: [data/union.kz](../corpus/data/union.kz)
 ```kurz
@@ -231,10 +303,24 @@ error `reversed-range` when both ends are expressions made only of literals, and
 loop over it (E3). `for i in 1..n` therefore throws when `n` is 0; a loop that may run zero times is
 written with `..<`. The C form with three parts is the compile error `syntax`, as is every other
 text no rule gives a meaning (E4). The range and its loop variable have the common type of the two
-ends, found as `+` finds it (T8, T9, T28): `0..<n` with a `long` `n` is a range of `long`, and ends
-with no common type are `sign-mix` (T9) (the owner, 2026-10-09, against a range that is always
-`int`, under which a loop over a `long` range is written by hand; the cost is that the loop
-variable's type follows the end, which a reader finds at the declaration of `n`).
+ends, found as `+` finds it (T8, T9, T28): `0..<n` with a `long` `n` is a range of `long`, and integer
+ends for which `+` is `sign-mix` (T9) are `sign-mix` too (the owner, 2026-10-09,
+against a range that is always `int`, under which a loop over a `long` range is written by hand; the
+cost is that the loop variable's type follows the end, which a reader finds at the declaration of
+`n`). An end whose type is no integer type, `0..<1.5` or `0..2.0` whatever its value, is `type-mismatch`
+(T1) (the owner, 2026-10-10, confirming the reading proposed after the review of round 13).
+
+Case: [source/continuation-range.kz](../corpus/source/continuation-range.kz)
+```kurz
+for i in 1..
+    3 {
+    print(i)
+}
+for j in 1..<
+    3 {
+    print(j)
+}
+```
 
 Case: [control/range-empty.kz](../corpus/control/range-empty.kz)
 ```kurz
@@ -297,6 +383,13 @@ for i in 0..<n {
 }
 ```
 
+Case: [control/range-end-not-integer.kz](../corpus/control/range-end-not-integer.kz)
+```kurz
+for i in 0..<1.5 {
+    print(i)
+}
+```
+
 Case: [control/range-sign-mix.kz](../corpus/control/range-sign-mix.kz)
 ```kurz
 int a = 0
@@ -316,6 +409,10 @@ written or expected, each arm's value has to fit it (T1), and where none is, the
 have one type, or the `match` is the compile error `type-mismatch`, as a C# switch expression
 without a natural type is. *(proposed: against a union of the arms' types, which no other
 expression forms on its own)* An arm has no patterns over fields and no conditions.
+
+Case: [control/match-unreachable-literal.kz](../corpus/control/match-unreachable-literal.kz)
+
+Case: [control/match-unreachable-else.kz](../corpus/control/match-unreachable-else.kz)
 
 Case: [control/match-literal.kz](../corpus/control/match-literal.kz)
 ```kurz

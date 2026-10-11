@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-10
-digest: 6a63e71638d6e8acbe5e1913caff76ffcbe3ca6fcfabcbae886e13e4e1e14986
+generated: 2026-10-11
+digest: b61d20945b254e18b4dbb3b5ab92a27075aa48d807478e14142a917d5feadaf1
 ttl_days: 60
 metadata:
   type: reference
@@ -68,8 +68,8 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 264 | 239 |
-| `tools/tree_gate.py` | 117 | 87 |
-| **total** | 1051 | 960 |
+| `tools/tree_gate.py` | 124 | 100 |
+| **total** | 1058 | 973 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -77,27 +77,33 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 32 |
+| Entries in INDEX.md | 35 |
 | tagged (untagged) | 2 |
 | tagged HARD | 14 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 10 |
+| tagged TRAP | 13 |
 | Review rule sections | 12 |
 | Review rules | 69 |
 <!-- /generated:store -->
 
 ## The design record
 
-A statement marked *(assumed)* was proposed and not objected to; it is not a decision.
+A statement marked *(assumed)* is one the owner has not decided: proposed and not objected to,
+accepted by a rule's id without its text, or, where the marker carries the date of a review, proposed
+after that review and not yet confirmed by the owner; the record's status line defines the kinds, and
+none is a decision. The counts are of every occurrence of the marker's text and of the top-level bullets of
+section 14, not of rules or of questions: one marker can cover several readings, one bullet several
+questions, a marker whose statement turns decided leaves the count, and a marker quoted in prose
+counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-counts-as-one.md)).
 
 <!-- generated:design -->
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Statements marked *(assumed)* | 53 |
-| Open questions | 6 |
+| Occurrences of the marker *(assumed)* | 58 |
+| Bullets of the Open section | 8 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -110,12 +116,12 @@ nothing in this repository executes Kurz.
 | Reference and corpus | Count |
 |---|---|
 | Rules in the reference | 182 |
-| of them decided | 143 |
-| of them assumed | 39 |
+| of them decided | 142 |
+| of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 271 |
-| Compile-error ids | 51 |
+| Corpus cases, none of them run | 322 |
+| Compile-error ids | 52 |
 | Run-time error ids | 6 |
 <!-- /generated:reference -->
 
@@ -135,11 +141,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 9 |
-| Pull requests merged | 7 |
-| Merged over red, with a recorded waiver | 5 |
-| Review findings posted: high | 40 |
-| Review findings posted: medium | 518 |
-| Review findings posted: low | 687 |
+| Pull requests opened by a writer, or merged | 10 |
+| Pull requests merged | 9 |
+| Merged over red, with a recorded waiver | 6 |
+| Review findings posted: high | 65 |
+| Review findings posted: medium | 696 |
+| Review findings posted: low | 897 |
 | Open HAZARD issues | 15 |
 <!-- /generated:forge -->

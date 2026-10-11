@@ -91,19 +91,22 @@ sections:
     files: ["compiler/*"]
     rules:
       - >-
-        A construct, an error id, a text, a conversion or an order of evaluation that no rule of the
-        reference states, implemented anyway. The compiler takes its picks from the reference; what the
-        reference lacks is a question for a design round, not a line of code
-        (knowledge/design-before-build.md).
+        Where this batch quotes or cites the reference rule a construct rests on - a construct, an error id,
+        a text, a conversion or an order of evaluation that the cited rule does not state, implemented
+        anyway; and a construct this batch implements with no rule cited for it in a comment or a test. The
+        compiler takes its picks from the reference; what the reference lacks is a question for a design
+        round, not a line of code (knowledge/design-before-build.md).
       - >-
-        An error the compiler reports whose id is not in the table of reference/12-errors.md, or
-        reported on a line other than the one the reference's E1 names.
+        Where this batch shows the error table or the row of an id - an error the compiler reports whose
+        id is not in the table of reference/12-errors.md; and an error reported on a line other than the
+        one this batch's own tests or comments name as the line E1 gives it.
       - >-
         A test that pins an error's message where the corpus pins an id and a line (E2), or an
         expectation computed by the code under test.
       - >-
-        A corpus case the compiler's tests skip, or a case header read in another shape than the one
-        reference/00-about.md states.
+        Where this batch shows the compiler's test runner and the list of changed files shows the corpus -
+        a corpus case the tests skip; and a case header read in another shape than the one this batch
+        cites from reference/00-about.md.
       - A dependency, tool or runtime version that is not pinned exactly, or a build step that fetches what no file pins.
 
   - name: knowledge and guides

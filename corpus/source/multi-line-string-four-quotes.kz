@@ -1,0 +1,7 @@
+// expect: error syntax at 4
+// rules: L13
+
+text = """"
+    abc
+    """"
+print(text)
