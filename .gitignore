@@ -1,7 +1,7 @@
 __pycache__/
-# Build outputs and IDE or tool state under compiler/ are not tracked, so the tree gate in CI and in the
-# pre-push hook never scans them; its pattern refuses a bin/, obj/ or dot-directory segment under
-# compiler/ itself, in all three places it runs.
+# Build outputs and IDE or tool state under compiler/ stay out of a normal add. A forced add tracks, publishes
+# and scans such a path, and the tree gate's pattern refuses a bin/, obj/ or dot-directory segment under
+# compiler/ in all three places it runs.
 compiler/**/bin/
 compiler/**/obj/
 compiler/**/.*/

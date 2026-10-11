@@ -13,7 +13,9 @@ secret with a fresh date. The next review run ended after three seconds with
 an empty secret from a set one.
 
 What to do: read the value into a variable with a masked prompt, refuse to continue when its length
-is zero, and only then pipe it into `gh secret set`. A `credential` ending of the review run is the
-sign: on 2026-10-10 run 38080825216 ended that way after three seconds with the empty value. After the
+is zero, and only then pipe it into `gh secret set`. A `credential` ending of the review run points
+at the credential and no further: the reviewer reports an empty value under that kind as it does a
+wrong or expired one, so the ending cannot tell the two apart, and the length check is what rules an
+empty value out. On 2026-10-10 run 38080825216 ended that way after three seconds with the empty value. After the
 secret was set again no run started by itself, and a dispatch (`gh workflow run review.yml -f pr=N`)
 started the next one.

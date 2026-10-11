@@ -46,15 +46,15 @@ FLOOR = 5
 # What this tree holds, as full-path patterns; anything else is refused. compiler/ is admitted for the
 # compiler's .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files since the change
 # that retired the design-phase rule, after the owner said build on 2026-10-09; a bin/, obj/ or dot-directory
-# segment under it (build outputs, IDE and tool state) is refused whatever the extension, and .gitignore
-# keeps those out of the tree.
+# segment under it (build outputs, IDE and tool state) is refused whatever the extension and whatever the
+# case of the segment, and .gitignore keeps those out of a normal add.
 ALLOWED = [
     r"CLAUDE\.md", r"INDEX\.md", r"README\.md", r"LICENSE(?:\.md)?", r"kurz-design\.md",
     r"\.gitattributes", r"\.gitignore",
     r"knowledge/[^/]+\.md", r"guides/[^/]+\.md",
     r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz",
     r"tools/(?:[^/]+/)*[^/]+\.(?:py|json|txt)",
-    r"compiler/(?:(?!bin/|obj/|\.)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
+    r"compiler/(?:(?!(?i:bin|obj)/|\.)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
     r"\.review/[^/]+\.yaml", r"\.github/workflows/[^/]+\.yml", r"\.githooks/pre-push",
     r"\.claude/settings\.json", r"\.claude/skills/[^/]+/SKILL\.md",
 ]
@@ -302,6 +302,10 @@ def cases_in(base):
            {**ok_files, "compiler/Kurz.Compiler/bin/Debug/Kurz.Compiler.deps.json": b"{}\n"}, "Kurz.Compiler.deps.json: not allowed")
     expect("IDE state under a dot-directory under compiler/ is refused",
            {**ok_files, "compiler/.vs/Kurz/v17/DocumentLayout.json": b"{}\n"}, "DocumentLayout.json: not allowed")
+    expect("a non-admitted extension under compiler/ outside bin/ and obj/ is refused",
+           {**ok_files, "compiler/tool.exe": b"MZ\n"}, "tool.exe: not allowed")
+    expect("a build output under Bin/ in another case is refused",
+           {**ok_files, "compiler/Kurz.Compiler/Bin/Debug/Kurz.Compiler.deps.json": b"{}\n"}, "Kurz.Compiler.deps.json: not allowed")
     expect("Kurz library code outside the corpus is refused", {**ok_files, "src/list.kz": b"x = 1\n"}, "not allowed")
     expect("nested knowledge entry is refused", {**ok_files, "knowledge/sub/x.md": b"x\n"}, "not allowed")
     expect("a binary file is refused", {**ok_files, "tools/x.py": b"\xff\xfe\x00"}, "not UTF-8")
