@@ -54,26 +54,34 @@ that sit under a rule by its id. Every one is pinned by a test.
   `throw`, `data`, `class`, `interface`, `enum`, `flags`, `raw`, `use`, `with`) is `syntax` at its
   line there, as the record's `print(if)` is; every other core word (`equal`, `by`, the modifiers,
   `void`, `weak`, the type names) is read as a name there, so `print(equal)` after `equal = 1` adds
-  no error and the declaration carries the one error, as E1 asks. By L12's letter the use would be
+  no error and the declaration carries the one error, as E1 asks; an untyped lambda parameter and
+  the name of a named argument that are core words are `syntax`, as the record decides, whatever
+  the word. By L12's letter the use would be
   an error too, and an undeclared `print(equal)` gets no error from the front end: the checker's
   name lookup says what it says about any unknown name.
 - C1: `else` on a line of its own after the closing brace of an `if` is `syntax` at its line, and
   the branch still parses.
+- L13: a closing line of four quotes closes the block at its three and opens a one-line literal
+  that nothing closes, so it is `syntax` at that line, where the record speaks of four quotes at the
+  end of a line only.
+- E1: bad tokens with no readable token between them are one `syntax` on their line, so
+  `c = 'ab' 'cd'` is one error and `c = 'ab' + 'cd'` two; E1 says one error for text no rule gives a
+  meaning and does not say where one run ends.
 - Recovery (no rule id): after an error the parser skips the rest of the statement, which is the
   rest of its line once every parenthesis, bracket and brace the statement opened is closed again,
   and a block the statement opened, with an `else` clause after it, so that the next statement
   parses on its own; a line the lexer already flagged gets no second `syntax` from the parser,
-  inside an interpolation too, and a run of text the lexer cannot read is one `syntax` on its
-  line. After a stray `"""` in a block the lexer passes over the rest of the block, up to the
+  inside an interpolation too. After a stray `"""` in a block the lexer passes over the rest of the block, up to the
   closing `"""`, so that the block's text is not read as code, and reads what follows the
   closing quotes on their line as code.
 
-Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
+Seven shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
 and takes arms of its own; `x.match(1)` reports `reserved-word` at the use while `x.match` does not; the interpolation
 scan inside a `"""` block counts braces only and does not pass over a string literal nested in a
 hole, as the one-line scan does; a `\` as the last character of an unterminated one-line literal is
 `unknown-escape` beside the literal's `syntax`; a `"""` block that is never closed takes the
-rest of the file with it, under its one `syntax`; and a `class`, `data` or `interface` body whose
+rest of the file with it, under its one `syntax`, and so does a block whose content line holds `"""`
+before text when no line that starts with `"""` follows; and a `class`, `data` or `interface` body whose
 `}` is missing reads the top-level statements after it as members, one `syntax` per line of them
 before the `syntax` of the missing brace. Each is pinned as it is, so that a fix shows.

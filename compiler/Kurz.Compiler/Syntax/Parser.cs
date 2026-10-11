@@ -620,6 +620,11 @@ public sealed class Parser
     /// </summary>
     private void ExpectOpeningBrace(int line, string what)
     {
+        if (At(TokenKind.LeftBrace) && index > 0 && tokens[index - 1].Kind == TokenKind.Newline)
+        {
+            Report(ErrorIds.BracesRequired, line, $"{what} opens on its own line"); // the line break was passed over inside parentheses or brackets (L4)
+        }
+
         if (BraceOnNextLine())
         {
             Report(ErrorIds.BracesRequired, line, $"{what} opens on its own line");
@@ -716,6 +721,12 @@ public sealed class Parser
     /// <summary>The arms of a <c>match</c> or of a postfix <c>else</c>, one per line between braces.</summary>
     private List<MatchArm> ParseArms(int line, string what)
     {
+        if (At(TokenKind.LeftBrace) && index > 0 && tokens[index - 1].Kind == TokenKind.Newline)
+        {
+            // C1 inside parentheses or brackets: the line break before the brace was passed over (L4), and the arms still open on the next line
+            Report(ErrorIds.BracesRequired, line, $"the arms of {what} open on its line");
+        }
+
         if (!At(TokenKind.LeftBrace))
         {
             if (At(TokenKind.Newline) && PeekPastNewlines().Kind == TokenKind.LeftBrace)

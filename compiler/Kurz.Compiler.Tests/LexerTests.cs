@@ -104,6 +104,7 @@ public sealed class LexerTests
     [InlineData("100000days", "100000", "days")]
     [InlineData("1500ms", "1500", "ms")]
     [InlineData("0.0000000001s", "0.0000000001", "s")]
+    [InlineData(".5h", ".5", "h")]
     public void Unit_literals_keep_their_number_and_unit(string program, string number, string unit)
     {
         var token = Single(program);
@@ -213,6 +214,21 @@ public sealed class LexerTests
         Assert.Equal("abc", Assert.IsType<StringLiteralValue>(meaningful[2].Value).PlainText);
         Assert.Equal(3, meaningful[3].Line);
         Assert.Equal(4, meaningful[4].Line);
+    }
+
+    [Fact]
+    public void A_closing_line_of_four_quotes_is_syntax_at_that_line()
+    {
+        // L13: the block closes at its three quotes, and the fourth opens a one-line literal that nothing closes
+        Assert.Equal((ErrorIds.Syntax, 3), OnlyError("text = \"\"\"\n    abc\n    \"\"\"\""));
+    }
+
+    [Fact]
+    public void Bad_tokens_with_no_readable_token_between_them_are_one_syntax()
+    {
+        // E1: one error for a run of text no rule gives a meaning; a readable token between two bad ones makes two
+        Assert.Equal([(ErrorIds.Syntax, 1)], Lex("c = 'ab' 'cd'").Diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal([(ErrorIds.Syntax, 1), (ErrorIds.Syntax, 1)], Lex("c = 'ab' + 'cd'").Diagnostics.Items.Select(d => (d.Id, d.Line)));
     }
 
     [Fact]

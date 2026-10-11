@@ -293,6 +293,8 @@ public sealed class ParserTests
     [InlineData("interface I\n{\n}", 1)]
     [InlineData("enum E\n{\n    A\n}", 1)]
     [InlineData("flags F\n{\n    A\n}", 1)]
+    [InlineData("print(match x\n{\n    1 => 2\n})", 1)]
+    [InlineData("b = f(a with\n{ X = 1 })", 1)]
     [InlineData("b = a with\n{\n    X = 1\n}", 1)]
     [InlineData("void F() {\n    int G()\n    {\n    }\n}", 2)]
     [InlineData("Job F()\n{\n}", 1)]
@@ -513,7 +515,20 @@ public sealed class ParserTests
         Assert.Equal([(ErrorIds.UnknownEscape, 1), (ErrorIds.Syntax, 1)], Errors("x = \"a\\"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("x = \"\"\"\n    a\n"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("x = \"\"\"\n    a\nprint(1 +)\n")); // the rest of the file goes with the block
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("x = \"\"\"\n    a\"\"\"\nprint(1 +)\n")); // so does the rest after a closing quote inside a content line with no closing line after it
         Assert.Equal([(ErrorIds.Syntax, 3), (ErrorIds.Syntax, 4), (ErrorIds.Syntax, 4)], Errors("class A {\n    int x = 1\nprint(1)\nprint(2)\n"));
+    }
+
+    [Fact]
+    public void A_line_that_starts_with_a_fraction_literal_starts_a_statement_and_continues_nothing()
+    {
+        // L4, L11: `.` directly followed by a digit is a literal, not the `.` that continues a statement (the record, 2026-10-11)
+        var (tree, diagnostics) = Parse("x = 1\n.5");
+        Assert.Empty(diagnostics.Items);
+        Assert.Equal(2, tree.Statements.Count);
+        var (tree2, diagnostics2) = Parse("x = 1\n.ToString()");
+        Assert.Empty(diagnostics2.Items);
+        Assert.Single(tree2.Statements);
     }
 
     [Fact]
