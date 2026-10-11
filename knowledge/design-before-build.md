@@ -1,6 +1,6 @@
 ---
 name: design-before-build
-description: Postmortem of 2026-10-01 - a v0 compiler was built before the big design choices were asked; the owner said build on 2026-10-09, and the change that retired the rule (pull request 29) widened the tree gate's allowlist by compiler/, for the compiler's .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files outside bin/ and obj/, and nothing else; compiler code hidden under tools/ is left to the review
+description: Postmortem of 2026-10-01 - a v0 compiler was built before the big design choices were asked; the owner said build on 2026-10-09, and the change that retired the rule (pull request 29) widened the tree gate's allowlist by compiler/, for the compiler's .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files outside bin/, obj/ and dot-directories, and nothing else; compiler code hidden under tools/ is left to the review
 metadata:
   type: feedback
 ---
@@ -20,7 +20,7 @@ argue against. The cost was a session's worth of work thrown away, and the owner
 record, the reference, the corpus, the knowledge store and the quality tools, and nothing else; the
 owner said build on 2026-10-09, after design round 13, and that change widened the allowlist by
 `compiler/`, where it admits `.cs`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and
-`.editorconfig` files outside `bin/` and `obj/`, and nowhere else. The gate is
+`.editorconfig` files outside `bin/`, `obj/` and dot-directories, and nowhere else. The gate is
 `tools/tree_gate.py`, and its allowlist is a rule about paths. It runs in three places, and only the first always holds:
 
 - In CI (`tree`), on every push that starts the workflow. That is after the push has published.

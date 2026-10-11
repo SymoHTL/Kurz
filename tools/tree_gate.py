@@ -45,20 +45,22 @@ except Exception:  # only exit 2 blocks a hook call: a kit that is broken must n
 FLOOR = 5
 # What this tree holds, as full-path patterns; anything else is refused. compiler/ is admitted for the
 # compiler's .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files since the change
-# that retired the design-phase rule, after the owner said build on 2026-10-09; a bin/ or obj/ segment
-# under it is refused whatever the extension, and .gitignore keeps those build outputs out of the tree.
+# that retired the design-phase rule, after the owner said build on 2026-10-09; a bin/, obj/ or dot-directory
+# segment under it (build outputs, IDE and tool state) is refused whatever the extension, and .gitignore
+# keeps those out of the tree.
 ALLOWED = [
     r"CLAUDE\.md", r"INDEX\.md", r"README\.md", r"LICENSE(?:\.md)?", r"kurz-design\.md",
     r"\.gitattributes", r"\.gitignore",
     r"knowledge/[^/]+\.md", r"guides/[^/]+\.md",
     r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz",
     r"tools/(?:[^/]+/)*[^/]+\.(?:py|json|txt)",
-    r"compiler/(?:(?!bin/|obj/)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
+    r"compiler/(?:(?!bin/|obj/|\.)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
     r"\.review/[^/]+\.yaml", r"\.github/workflows/[^/]+\.yml", r"\.githooks/pre-push",
     r"\.claude/settings\.json", r"\.claude/skills/[^/]+/SKILL\.md",
 ]
-HOLDS = ("this tree holds the design record, the reference, the corpus, the knowledge store, the quality tools "
-         "and the compiler's source, project and text files under compiler/, outside bin/ and obj/; nothing else (CLAUDE.md)")
+HOLDS = ("this tree holds the design record, the reference, the corpus, the knowledge store, the quality tools, "
+         "the compiler's source, project and text files under compiler/ (outside bin/, obj/ and dot-directories) "
+         "and the repository's own readme, licence, git, session and skill files; the list is ALLOWED in tools/tree_gate.py (CLAUDE.md)")
 
 
 def check_path(path):
@@ -296,6 +298,10 @@ def cases_in(base):
            {**ok_files, "compiler/Kurz.Compiler/bin/Debug/Kurz.dll": b"MZ\n"}, "Kurz.dll: not allowed")
     expect("a build output with an admitted extension under compiler/ is refused",
            {**ok_files, "compiler/Kurz.Compiler/obj/project.assets.json": b"{}\n"}, "project.assets.json: not allowed")
+    expect("a build output under bin/ with an admitted extension is refused",
+           {**ok_files, "compiler/Kurz.Compiler/bin/Debug/Kurz.Compiler.deps.json": b"{}\n"}, "Kurz.Compiler.deps.json: not allowed")
+    expect("IDE state under a dot-directory under compiler/ is refused",
+           {**ok_files, "compiler/.vs/Kurz/v17/DocumentLayout.json": b"{}\n"}, "DocumentLayout.json: not allowed")
     expect("Kurz library code outside the corpus is refused", {**ok_files, "src/list.kz": b"x = 1\n"}, "not allowed")
     expect("nested knowledge entry is refused", {**ok_files, "knowledge/sub/x.md": b"x\n"}, "not allowed")
     expect("a binary file is refused", {**ok_files, "tools/x.py": b"\xff\xfe\x00"}, "not UTF-8")

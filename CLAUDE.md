@@ -181,7 +181,7 @@ session must know; `INDEX.md` is their index. `tools/` holds the gates (one runn
 the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
 `.github/workflows/` runs both. `compiler/` is the compiler's directory, the one place the tree
 gate admits `.cs`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and `.editorconfig` files,
-outside `bin/` and `obj/` (since pull request 29 retired the design-phase rule, after the owner said
+outside `bin/`, `obj/` and dot-directories (since pull request 29 retired the design-phase rule, after the owner said
 build on 2026-10-09). The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
@@ -212,8 +212,8 @@ Gate: review rule "rules for sessions".
   and its gate held until that change merged. The rule had held since 2026-10-01, when a v0
   compiler was built after asking only for a name and a toolchain, and every pick in it was void
   ([knowledge/design-before-build.md](knowledge/design-before-build.md)). What stays: the tree
-  gate admits the compiler's source, project and text files only under `compiler/`, outside `bin/` and
-  `obj/`; compiler code written as an allowed file elsewhere, a `.py` under `tools/`, is left to the
+  gate admits the compiler's source, project and text files only under `compiler/`, outside `bin/`,
+  `obj/` and dot-directories; compiler code written as an allowed file elsewhere, a `.py` under `tools/`, is left to the
   review rule "tools"; and a pick the record does not
   hold is a question for a design round before it is a line of code (the next rule). Gate: `tree`
   (CI), the pre-push hook and the write-time hook for the paths; a pick made in code is review
