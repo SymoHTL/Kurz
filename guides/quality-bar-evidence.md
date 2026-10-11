@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-11
-digest: 8f38625246b1cbe09ea5c335c05a91ad280107e592330c5ce8277838fef07e8d
+digest: a5c20a0f1a83e2ddf75e93962117197b68c5b2519ab2bb7d2c95742e7fe0e38e
 ttl_days: 60
 metadata:
   type: reference
@@ -118,7 +118,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 321 |
+| Corpus cases, none of them run | 322 |
 | Compile-error ids | 52 |
 | Run-time error ids | 6 |
 <!-- /generated:reference -->

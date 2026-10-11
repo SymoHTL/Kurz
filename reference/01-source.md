@@ -165,6 +165,7 @@ Case: [source/escape-surrogate.kz](../corpus/source/escape-surrogate.kz)
 ```kurz
 s = "\uD800"
 print(s)
+// a string holds code points and not UTF-16 units, so an escape that names a surrogate is the error (L16)
 ```
 
 Case: [source/escapes-of-c-sharp.kz](../corpus/source/escapes-of-c-sharp.kz)
@@ -593,6 +594,7 @@ Case: [values/text-duration-sub-millisecond.kz](../corpus/values/text-duration-s
 ```kurz
 print(1.00025s)
 print(0.0000015s)
+// with no formatting chosen, the remainder below a millisecond shows in microseconds and nanoseconds (A12, the owner's choice of 2026-10-10)
 ```
 
 Case: [source/unit-literal-inexact-bytes.kz](../corpus/source/unit-literal-inexact-bytes.kz)

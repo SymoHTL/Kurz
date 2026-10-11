@@ -523,6 +523,7 @@ Case: [types/char-brace.kz](../corpus/types/char-brace.kz)
 ```kurz
 c = '{'
 print(c)
+// a `{` between the quotes is the character and needs no escape (T21)
 ```
 
 Case: [types/char-literal-triple.kz](../corpus/types/char-literal-triple.kz)

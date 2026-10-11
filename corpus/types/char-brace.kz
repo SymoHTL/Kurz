@@ -4,3 +4,4 @@
 
 c = '{'
 print(c)
+// a `{` between the quotes is the character and needs no escape (T21)

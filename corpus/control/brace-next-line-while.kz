@@ -7,3 +7,4 @@ while i < 3
     i = i + 1
 }
 print(i)
+// the block of a `while` opens on the next line: the error stands at the line where the header ends (C1)

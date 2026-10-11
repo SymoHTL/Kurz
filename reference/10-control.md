@@ -25,6 +25,16 @@ block end. A method signature inside a type body that ends its
 line is the bodiless form of an interface member (K7), so its `{` on the next line is `syntax` (E4)
 (the owner, 2026-10-10).
 
+Case: [control/brace-next-line-if-multiline.kz](../corpus/control/brace-next-line-if-multiline.kz)
+```kurz
+x = 7
+if x > 5 &&
+    x < 10
+{
+    print(x)
+}
+// the condition runs over two lines, so the missing block is reported at its last line (C1, the owner's choice of 2026-10-11)
+```
 Case: [control/brace-next-line-while.kz](../corpus/control/brace-next-line-while.kz)
 ```kurz
 mut i = 0
@@ -33,6 +43,7 @@ while i < 3
     i = i + 1
 }
 print(i)
+// the block of a `while` opens on the next line: the error stands at the line where the header ends (C1)
 ```
 
 Case: [control/if.kz](../corpus/control/if.kz)
@@ -130,6 +141,7 @@ void Show(int | NotFound v) {
 
 int value = 0
 Show(value)
+// the arm `0 =>` can never run, because the arm `int x` above it takes every int (C4, C9)
 ```
 
 Case: [control/match-unreachable-else.kz](../corpus/control/match-unreachable-else.kz)

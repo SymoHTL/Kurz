@@ -13,3 +13,4 @@ void Show(int | NotFound v) {
 
 int value = 0
 Show(value)
+// the arm `0 =>` can never run, because the arm `int x` above it takes every int (C4, C9)
