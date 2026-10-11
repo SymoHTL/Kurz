@@ -47,7 +47,8 @@ FLOOR = 5
 # compiler's .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files since the change
 # that retired the design-phase rule, after the owner said build on 2026-10-09; a bin/, obj/ or dot-directory
 # segment under it (build outputs, IDE and tool state) is refused whatever the extension and whatever the
-# case of the segment, and .gitignore keeps those out of a normal add.
+# case of the segment; .gitignore keeps them out of a normal add only as spelled there, and the gate alone
+# covers the other spellings.
 ALLOWED = [
     r"CLAUDE\.md", r"INDEX\.md", r"README\.md", r"LICENSE(?:\.md)?", r"kurz-design\.md",
     r"\.gitattributes", r"\.gitignore",

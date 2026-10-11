@@ -8,7 +8,7 @@ metadata:
 On 2026-10-10 the owner rotated the reviewer's token with a shell command that piped the value into
 `gh secret set`. The pipe carried nothing, the command succeeded, and `gh secret list` showed the
 secret with a fresh date. The next review run ended after three seconds with
-`REVIEW DID NOT COMPLETE (credential)`: the job's environment held the variable, empty. On that day
+`REVIEW DID NOT COMPLETE (credential)`. On that day
 `gh secret list` showed the name and the update date and nothing else, so the listing could not tell
 an empty secret from a set one.
 

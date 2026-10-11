@@ -17,8 +17,8 @@ argue against. The cost was a session's worth of work thrown away, and the owner
 "brainstorm" would be read as "ask".
 
 **How to apply:** until the change that retired the rule (pull request 29) the tree held the design
-record, the reference, the corpus, the knowledge store and the quality tools, and nothing else; the
-owner said build on 2026-10-09, after design round 13, and that change widened the allowlist by
+record, the reference, the corpus, the knowledge store, the quality tools and the repository's own
+readme, licence, git, session and skill files, and nothing else; the owner said build on 2026-10-09, after design round 13, and that change widened the allowlist by
 `compiler/`, where it admits `.cs`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and
 `.editorconfig` files outside `bin/`, `obj/` and dot-directories, and nowhere else. The gate is
 `tools/tree_gate.py`, and its allowlist is a rule about paths. It runs in three places, and only the first always holds:
