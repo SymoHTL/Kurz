@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-11
-digest: c0e7687445556e78fa9a0f65914dc1a1fcfae17e8708db4a61e2676b26f3ddc7
+digest: 06b619827c39d1e51653e18fbdfd11c009989c7436b27d8403a6c0f1f013173c
 ttl_days: 60
 metadata:
   type: reference
@@ -66,8 +66,8 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 264 | 239 |
-| `tools/tree_gate.py` | 116 | 86 |
-| **total** | 1011 | 921 |
+| `tools/tree_gate.py` | 119 | 94 |
+| **total** | 1014 | 929 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -142,8 +142,8 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Pull requests opened by a writer, or merged | 10 |
 | Pull requests merged | 8 |
 | Merged over red, with a recorded waiver | 6 |
-| Review findings posted: high | 64 |
-| Review findings posted: medium | 679 |
-| Review findings posted: low | 867 |
+| Review findings posted: high | 65 |
+| Review findings posted: medium | 690 |
+| Review findings posted: low | 877 |
 | Open HAZARD issues | 15 |
 <!-- /generated:forge -->

@@ -43,21 +43,22 @@ except Exception:  # only exit 2 blocks a hook call: a kit that is broken must n
 
 # Every other rule is satisfied by finding nothing; a scan of the wrong directory prints "0 errors".
 FLOOR = 5
-# What this tree holds, as full-path patterns; anything else is refused. The compiler lives under
-# compiler/ since the owner said build on 2026-10-09; its build outputs (bin/, obj/) are ignored by
-# .gitignore and refused here when they are not.
+# What this tree holds, as full-path patterns; anything else is refused. compiler/ is admitted for the
+# compiler's .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files since the change
+# that retired the design-phase rule, after the owner said build on 2026-10-09; a bin/ or obj/ segment
+# under it is refused whatever the extension, and .gitignore keeps those build outputs out of the tree.
 ALLOWED = [
     r"CLAUDE\.md", r"INDEX\.md", r"README\.md", r"LICENSE(?:\.md)?", r"kurz-design\.md",
     r"\.gitattributes", r"\.gitignore",
     r"knowledge/[^/]+\.md", r"guides/[^/]+\.md",
     r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz",
     r"tools/(?:[^/]+/)*[^/]+\.(?:py|json|txt)",
-    r"compiler/(?:[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
+    r"compiler/(?:(?!bin/|obj/)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
     r"\.review/[^/]+\.yaml", r"\.github/workflows/[^/]+\.yml", r"\.githooks/pre-push",
     r"\.claude/settings\.json", r"\.claude/skills/[^/]+/SKILL\.md",
 ]
 HOLDS = ("this tree holds the design record, the reference, the corpus, the knowledge store, the quality tools "
-         "and the compiler under compiler/, admitted when the owner said build on 2026-10-09; nothing else (CLAUDE.md)")
+         "and the compiler's source, project and text files under compiler/, outside bin/ and obj/; nothing else (CLAUDE.md)")
 
 
 def check_path(path):
@@ -293,6 +294,8 @@ def cases_in(base):
     expect("compiler source under compiler/ is allowed", {**ok_files, "compiler/Kurz.Compiler/Lexer.cs": b"class L {}\n"}, None)
     expect("a build output under compiler/ is refused",
            {**ok_files, "compiler/Kurz.Compiler/bin/Debug/Kurz.dll": b"MZ\n"}, "Kurz.dll: not allowed")
+    expect("a build output with an admitted extension under compiler/ is refused",
+           {**ok_files, "compiler/Kurz.Compiler/obj/project.assets.json": b"{}\n"}, "project.assets.json: not allowed")
     expect("Kurz library code outside the corpus is refused", {**ok_files, "src/list.kz": b"x = 1\n"}, "not allowed")
     expect("nested knowledge entry is refused", {**ok_files, "knowledge/sub/x.md": b"x\n"}, "not allowed")
     expect("a binary file is refused", {**ok_files, "tools/x.py": b"\xff\xfe\x00"}, "not UTF-8")
@@ -314,7 +317,8 @@ def cases_in(base):
                  "tools/review/review.py", "tools/review/fixtures/a.json", ".github/workflows/gates.yml",
                  ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push",
                  "compiler/Kurz.sln", "compiler/Kurz.Compiler/Kurz.Compiler.csproj", "compiler/Kurz.Compiler/Lexer.cs",
-                 "compiler/global.json", "compiler/README.md", "compiler/.editorconfig"):
+                 "compiler/global.json", "compiler/README.md", "compiler/.editorconfig",
+                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets"):
         cases.append((f"allowed path: {path}", check_path(path) is None, check_path(path)))
     for label, value in secrets.items():  # one plant per pattern; the error must name that pattern
         expect(f"secret: {label}", {**ok_files, "guides/g.md": value.encode()}, f"credential-shaped string ({label})")
