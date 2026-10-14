@@ -54,8 +54,10 @@ GATES = [
      "fewer rules or cases than the floors"),
     ("compiler-tests", ["tools/compiler_gate.py"], "always",
      "the compiler under compiler/ does not build, or a unit test fails; no test summary was printed, fewer tests passed than the "
-     "floor, or a test was skipped; the restore is not the one the lock files pin (locked mode) or the SDK not the one global.json "
-     "pins; the dotnet command is missing or ran out of time"),
+     "floor, a test was skipped, or the test command exited non-zero with no failed test; the restore is not the one the lock "
+     "files pin (locked mode) or the SDK not the one global.json pins, which the command reads from inside compiler/; "
+     "compiler/NuGet.config is missing, is not well-formed XML, does not open its package sources with a clear or maps no "
+     "package to a source; the dotnet command is missing or ran out of time"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "
      "a job in a container or beside services; the credential anywhere but the env of the job's last step; "

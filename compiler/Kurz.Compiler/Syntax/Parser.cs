@@ -4,13 +4,14 @@ namespace Kurz.Compiler.Syntax;
 
 /// <summary>
 /// Builds the syntax tree of one file from its tokens. A line break ends a statement (L2) except
-/// inside an open <c>(</c>, <c>[</c> or the <c>&lt; &gt;</c> of type arguments, after a binary
-/// operator, a comma, <c>=</c>, <c>=&gt;</c> or the <c>:</c> of a base list, and before a line that
-/// starts with the <c>.</c> or <c>?.</c> of a member access, where a line that starts with a fraction
-/// literal such as <c>.5</c> starts a statement (L4); a block between braces holds statements of its
-/// own, each on its line, also inside an open bracket. Text no rule gives a meaning is the one
-/// error <c>syntax</c> (E4), reported on the line where the text stops making sense, and a case
-/// holds one error (E1): after it the rest of the statement is skipped.
+/// inside an open <c>(</c>, <c>[</c>, the <c>&lt; &gt;</c> of type arguments or the braces of an
+/// <c>enum</c>, <c>flags</c> or <c>with</c> body, after a binary operator, a comma, <c>=</c>,
+/// <c>=&gt;</c> or the <c>:</c> of a base list, and before a line that starts with the <c>.</c> or
+/// <c>?.</c> of a member access, where a line that starts with a fraction literal such as <c>.5</c>
+/// starts a statement (L4); a block between braces holds statements of its own, each on its line,
+/// also inside an open bracket. Text no rule gives a meaning is the one error <c>syntax</c> (E4),
+/// reported on the line where the text stops making sense, and a case holds one error (E1): after
+/// it the rest of the statement is skipped.
 /// </summary>
 public sealed class Parser
 {
@@ -489,7 +490,8 @@ public sealed class Parser
         var token = Current;
         if (token.Kind == TokenKind.Keyword && Peek().Kind == TokenKind.Assign)
         {
-            // L12, L19: a core word as the name of a variable, `if = 1` as much as `equal = 1`
+            // L12, L19: a core word as the name of a variable, `if = 1` as much as `equal = 1`. The parser does not know whether the line
+            // declares or assigns (V8), so a second `equal = 2` gets the error again: an uneven shape the README lists
             var word = ExpectName("a name");
             Advance(); // the `=`
             SkipNewlines();
@@ -505,8 +507,8 @@ public sealed class Parser
                 case "for": return ParseFor();
                 case "match" when CanStartExpression(Peek().Kind): return ParseMatchStatement();
                 // `match` with no value after it is a variable of that name (L12), an expression statement below
-                case "break": Advance(); return new BreakStatement(token.Line);
-                case "continue": Advance(); return new ContinueStatement(token.Line);
+                case "break": Advance(); return new BreakStatement(token.Line); // C7
+                case "continue": Advance(); return new ContinueStatement(token.Line); // C7
                 case "return": Advance(); return new ReturnStatement(token.Line, EndsStatement() ? null : ParseExpression());
                 case "throw":
                     // O7: `throw` takes a value, and stands bare in an arm of `else`; a bare one anywhere else is the checker's `throw-needs-value`
@@ -522,16 +524,21 @@ public sealed class Parser
                     Advance();
                     return ParseStrayElseClause(token.Line);
                 case "pub": case "prot": case "static": case "mut": case "virtual": case "override": case "void": case "weak":
-                    return ParseDeclaration(typeName: null);
+                    if (TryDeclaration(out var modified))
+                    {
+                        return modified!;
+                    }
+
+                    break; // the reading on L12 (README): a core word read as a name where no declaration follows it, `mut.Add(1)` on a variable named `mut`
                 case "true": case "false": case "null": case "this":
                     break; // an expression
                 default:
-                    if (CoreWords.TypeNames.Contains(token.Text))
+                    if (CoreWords.TypeNames.Contains(token.Text) && TryDeclaration(out var typed))
                     {
-                        return ParseDeclaration(typeName: null);
+                        return typed!;
                     }
 
-                    break;
+                    break; // `int.Parse(s)`: the type's name as the target of a member access, read as a name (the reading on L12; T10 writes a conversion as a call of the type)
             }
         }
 
@@ -542,25 +549,20 @@ public sealed class Parser
                 Advance();
                 Advance();
                 SkipNewlines();
-                return new AssignOrDeclare(token.Line, token.Text, ParseExpression());
+                return new AssignOrDeclare(token.Line, token.Text, ParseExpression()); // V1, V8: a declaration or an assignment
             }
 
-            Statement? declaration = null;
-            if (Try(() => declaration = ParseDeclaration(typeName: null)))
+            if (TryDeclaration(out var named))
             {
-                return declaration!;
+                return named!; // a declaration whose type is a user type
             }
         }
 
-        if (token.Kind == TokenKind.LeftParen)
+        if (token.Kind == TokenKind.LeftParen && TryDeclaration(out var functionTyped))
         {
             // F1 with F11: a declaration whose type is a function type, `(int) => int Make()` or `(int) => int f = ...`, starts
             // with `(` as an expression does, so the declaration is tried first, speculatively like one with a user type
-            Statement? declaration = null;
-            if (Try(() => declaration = ParseDeclaration(typeName: null)))
-            {
-                return declaration!;
-            }
+            return functionTyped!;
         }
 
         var expression = ParseExpression();
@@ -583,6 +585,20 @@ public sealed class Parser
 
     private bool EndsStatement() => At(TokenKind.Newline) || At(TokenKind.EndOfFile) || At(TokenKind.RightBrace) || At(TokenKind.Semicolon);
 
+    /// <summary>
+    /// A declaration tried speculatively (<see cref="Try"/>), because its first token is also how an expression statement can
+    /// start: a plain name (a user type), a modifier or a built-in type's name, which the reading on L12 lets stand as a name,
+    /// or the `(` of a function type (F11). False, with the cursor back where it was, when it is no declaration.
+    /// </summary>
+    private bool TryDeclaration(out Statement? declaration)
+    {
+        Statement? parsed = null;
+        var ok = Try(() => parsed = ParseDeclaration(typeName: null));
+        declaration = parsed;
+        return ok;
+    }
+
+    /// <summary><c>use</c> brings in another folder or a package (F10), named by a dotted path as the record's <c>use net.http</c> is; a core word in the path is <c>reserved-word</c> (L12).</summary>
     private UseStatement ParseUse()
     {
         var use = Advance();
@@ -597,14 +613,21 @@ public sealed class Parser
 
     // ---- blocks and control flow ---------------------------------------------------------------
 
-    /// <summary>A block that must open on <paramref name="line"/> (C1): a line break before the brace, or no brace, is <c>braces-required</c>, and the body is read all the same.</summary>
-    private Block ParseBlockAfter(int line, string what)
+    /// <summary>
+    /// A block that must open on <paramref name="line"/> (C1): a line break before the brace, or no brace, is <c>braces-required</c>
+    /// there, and the body is read all the same. <paramref name="reported"/> says whether the error was reported, so that the
+    /// construct adds none for what follows it (E1). A statement in place of the block is read as the block's one statement
+    /// (recovery, README); what else stands on the line, a <c>;</c> or text after that statement, goes with the one error.
+    /// </summary>
+    private Block ParseBlockAfter(int line, string what, out bool reported)
     {
+        reported = false;
         if (At(TokenKind.LeftBrace))
         {
             return ParseBlock();
         }
 
+        reported = true;
         if (At(TokenKind.Newline) && PeekPastNewlines().Kind == TokenKind.LeftBrace)
         {
             Report(ErrorIds.BracesRequired, line, $"the block of {what} opens on its line, not on the next (C1)");
@@ -613,14 +636,35 @@ public sealed class Parser
         }
 
         Report(ErrorIds.BracesRequired, line, $"{what} takes a block between braces");
+        while (At(TokenKind.Semicolon))
+        {
+            Advance(); // `if x;`: the `;` goes with the missing block's error, not a `semicolon` of its own (E1)
+        }
+
         if (EndsStatement())
         {
             return new Block(line, [], line);
         }
 
-        var statement = ParseStatement();
-        return new Block(line, [statement], statement.Line);
+        try
+        {
+            var statement = ParseStatement();
+            if (!EndsStatement() && !AtKeyword("else"))
+            {
+                throw new ParseError(ErrorLine(), $"the rest of the line after {what} is given up");
+            }
+
+            return new Block(line, [statement], statement.Line);
+        }
+        catch (ParseError e) when (!e.Reported)
+        {
+            // `if x y {` or `if x = 1 {`: the text after the missing block is given up under the one `braces-required`, as
+            // ExpectOpeningBrace gives up a construct whose brace is missing
+            throw new ParseError(e.Line, e.Message) { Reported = true };
+        }
     }
+
+    private Block ParseBlockAfter(int line, string what) => ParseBlockAfter(line, what, out _);
 
     /// <summary>
     /// The <c>{</c> of a body that opens on the line of its construct (C1): one on the next line is <c>braces-required</c> at the
@@ -665,43 +709,57 @@ public sealed class Parser
     {
         var keyword = Advance();
         var condition = ParseExpression();
-        // C1: the block opens where the condition ends, so a block that is missing or opens on the next line is `braces-required`
-        // at the condition's last line (the owner, 2026-10-10 and 2026-10-11); a statement in its place is read as the block's one statement
-        var then = ParseBlockAfter(tokens[index - 1].Line, "`if`");
+        // C1: the block opens where the condition ends, and E1: a block that is missing or opens on the next line is an error of the
+        // whole `if`, reported on the line of its condition, its last line when the condition runs over several lines (the two rules
+        // record the owner's choices of 2026-10-10 and 2026-10-11); a statement in its place is read as the block's one statement
+        var then = ParseBlockAfter(tokens[index - 1].Line, "`if`", out var reported);
         Statement? elseClause = null;
         if (AtKeyword("else"))
         {
             Advance();
-            elseClause = ParseElseClause();
+            elseClause = ParseElseClause(reported);
         }
         else if (At(TokenKind.Newline) && PeekPastNewlines().IsKeyword("else") && !ElseStartsAnArm())
         {
-            // C2, E4: `else` on a line of its own is `syntax` at its line; the branch still parses, so that the one error stands
+            // C2, E4: `else` on a line of its own is `syntax` at its line; the branch still parses, so that the one error stands. An
+            // `if` whose block already drew `braces-required` adds none for it: the C# brace style, every brace on a line of its
+            // own, is one error per `if` (E1)
             SkipNewlines();
             var token = Advance();
-            ReportSyntax(token.Line, "`else` follows the closing brace of the `if` block on the same line");
+            if (!reported)
+            {
+                ReportSyntax(token.Line, "`else` follows the closing brace of the `if` block on the same line");
+            }
+
             elseClause = ParseStrayElseClause(token.Line);
         }
 
         return new IfStatement(keyword.Line, condition, then, elseClause);
     }
 
-    private Statement ParseElseClause()
+    /// <summary>The clause after <c>else</c> (C2): an <c>if</c>, or a block, whose <c>{</c> on the next line is <c>braces-required</c> at the line of the word <c>else</c> (C1) unless <paramref name="reported"/> says the construct has its one error already (E1).</summary>
+    private Statement ParseElseClause(bool reported)
     {
         if (AtKeyword("if"))
         {
             return ParseIf();
         }
 
+        if (reported && BraceOnNextLine())
+        {
+            SkipNewlines();
+            return ParseBlock();
+        }
+
         return ParseBlockAfter(tokens[index - 1].Line, "`else`");
     }
 
-    /// <summary>The clause of a stray <c>else</c>, whose <c>syntax</c> is reported: a block or an <c>if</c> parses; anything else is given up under that one error (E1).</summary>
+    /// <summary>The clause of a stray <c>else</c>, whose error is reported: a block, on this line or the next, or an <c>if</c> parses; anything else is given up under that one error (E1).</summary>
     private Statement ParseStrayElseClause(int line)
     {
-        if (At(TokenKind.LeftBrace) || AtKeyword("if"))
+        if (At(TokenKind.LeftBrace) || AtKeyword("if") || BraceOnNextLine())
         {
-            return ParseElseClause();
+            return ParseElseClause(reported: true);
         }
 
         throw new ParseError(line, "`else` takes a block") { Reported = true };
@@ -813,17 +871,37 @@ public sealed class Parser
             return new ElsePattern(token.Line);
         }
 
-        // C9: an arm names a literal, `true`, `false` or `null`, with a `-` before a number
-        if (token.Kind is TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.StringLiteral or TokenKind.CharLiteral
-            or TokenKind.UnitLiteral or TokenKind.Minus || token.IsKeyword("true") || token.IsKeyword("false") || token.IsKeyword("null"))
+        // C9: an arm names a literal, `true`, `false` or `null`; D12: a value by its path, `Plan.Free`. The front end takes a `-`
+        // before a number literal as part of it, as L17 reads the `-100` of `sbyte low = -100` as one literal with its sign. Nothing else is a value
+        // pattern: `-y`, `"a".Length` or `Plan.Free(1)` there is text no rule gives a meaning (E4)
+        if (token.Kind == TokenKind.Minus)
         {
-            return new ValuePattern(token.Line, ParseUnary());
+            Advance();
+            if (Current.Kind is not (TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.UnitLiteral))
+            {
+                throw new ParseError(token.Line, "an arm names a literal; `-` stands before a number literal only (C9)");
+            }
+
+            return new ValuePattern(token.Line, new UnaryExpression(token.Line, TokenKind.Minus, ParsePrimary()));
         }
 
-        // D12, D13: a value by its path, `Plan.Free`
+        if (token.Kind is TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.StringLiteral or TokenKind.CharLiteral
+            or TokenKind.UnitLiteral || token.IsKeyword("true") || token.IsKeyword("false") || token.IsKeyword("null"))
+        {
+            return new ValuePattern(token.Line, ParsePrimary());
+        }
+
         if ((token.Kind == TokenKind.Name || token.Kind == TokenKind.Keyword) && Peek().Kind == TokenKind.Dot)
         {
-            return new ValuePattern(token.Line, ParsePostfix());
+            var path = ParsePrimary();
+            while (At(TokenKind.Dot))
+            {
+                var dot = Advance();
+                var member = At(TokenKind.Keyword) ? Advance() : ExpectName("a member name");
+                path = new MemberAccess(dot.Line, path, member.Text, false);
+            }
+
+            return new ValuePattern(token.Line, path);
         }
 
         // C4: an arm names a case type, optionally followed by a name for the value as that type; a bare name is a type, never a constant
@@ -865,7 +943,9 @@ public sealed class Parser
 
             if ((modifiers & flag) != 0)
             {
-                // K7: class bodies follow C#, which refuses a modifier written twice (CS1004); text no rule gives a meaning is `syntax` (E4)
+                // a reading under E4's general clause (README; a question for a design round): no rule gives a modifier written twice a
+                // meaning, in a type body (K7: class bodies follow C#, which refuses it, CS1004) or outside one, and the id could be the
+                // checker's; the front end reports `syntax`
                 throw new ParseError(Current.Line, $"`{Current.Text}` is written twice");
             }
 
@@ -887,14 +967,17 @@ public sealed class Parser
         var modifiers = ParseModifiers();
         if (At(TokenKind.Keyword) && Current.Text is "data" or "class" or "interface" or "enum" or "flags")
         {
+            committed = true; // `pub class`: a type declaration, whatever follows; an error in its body is reported where it stands
             return ParseTypeDeclaration(modifiers);
         }
 
-        // `mut x = 1`: a declaration without a written type (V2); in a type body a field without one, as the record's actor bodies
-        // write `mut users = Map<int, User>()`. The modifiers beside `mut` stay on the node: which of them apply is the checker's.
+        // `mut x = 1`: a declaration without a written type (V2); in a type body a field without one, the reading on K7 with V2 the
+        // README lists (K7 shows a field as `Type name`, V2 speaks of variables, and the record's actor bodies write
+        // `mut users = Map<int, User>()`). The modifiers beside `mut` stay on the node: which of them apply is the checker's.
         if ((modifiers & Modifiers.Mut) != 0 && (At(TokenKind.Name) || At(TokenKind.Keyword)) && Peek().Kind == TokenKind.Assign)
         {
             var name = ExpectName("the name of the variable");
+            committed = true; // `mut name =`: a declaration, whatever follows
             Advance(); // `=`
             SkipNewlines();
             var untypedValue = ParseExpression();
@@ -968,19 +1051,15 @@ public sealed class Parser
 
         if (typeName is not null && EndsStatement())
         {
-            // K7, C1: a signature that ends its line inside a type body is the bodiless form of an interface member, so a `{` on the
-            // next line is `syntax` at its line (the owner, 2026-10-10); whether this kind of body may hold the form is the checker's
+            // C1, last sentence, which records the owner's choice of 2026-10-10: "A method signature inside a type body that ends its
+            // line is the bodiless form of an interface member (K7), so its `{` on the next line is `syntax` (E4)"; whether this kind
+            // of body may hold the form is the checker's
             return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, null);
         }
 
-        if (At(TokenKind.Newline) && PeekPastNewlines().Kind == TokenKind.LeftBrace)
-        {
-            Report(ErrorIds.BracesRequired, line, "the body of a function opens on the line of its signature"); // C1: the signature's first line, for a function outside a type body
-            SkipNewlines();
-            return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, ParseBlock());
-        }
-
-        throw Fail("`=>` with the function's result or its body between braces");
+        // C1: the body of a function outside a type body opens on the first line of its signature; one on the next line, one that
+        // is missing (E1: an error of the whole construct) or a statement in its place is `braces-required` there
+        return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, ParseBlockAfter(line, "the body of a function"));
     }
 
     private List<TypeParameter> ParseTypeParameters()
@@ -999,7 +1078,14 @@ public sealed class Parser
             TypeSyntax? limit = null;
             if (Match(TokenKind.Colon))
             {
-                limit = ParseCoreType(); // T19: a limit names an interface
+                // T19: a limit names an interface, so it is one type by name; a union, a function type or a type in parentheses there
+                // is text no rule gives a meaning (E4), whatever the parentheses
+                var limitToken = Current;
+                limit = ParseCoreType();
+                if (limit is not NamedType)
+                {
+                    throw new ParseError(limitToken.Line, "a type parameter's limit names an interface (T19)");
+                }
             }
 
             result.Add(new TypeParameter(name.Line, name.Text, limit));
@@ -1045,7 +1131,7 @@ public sealed class Parser
         Expression? defaultValue = null;
         if (Match(TokenKind.Assign))
         {
-            defaultValue = ParseExpression();
+            defaultValue = ParseExpression(); // D11, F12: a default value after the name, `int Count = 1`
         }
 
         return new Parameter(start.Line, mut, type, name.Text, defaultValue);
@@ -1073,17 +1159,18 @@ public sealed class Parser
         IReadOnlyList<Parameter>? primary = null;
         var bases = new List<BaseSpecifier>();
         var equalBy = new List<string>();
-        var members = new List<Statement>();
+        List<Statement>? members = null; // null where no body is written; an empty list for `{ }`
         var values = new List<EnumMember>();
         if (kind is TypeDeclarationKind.Data or TypeDeclarationKind.Class)
         {
             if (At(TokenKind.LeftParen))
             {
-                primary = ParseParameters(typesOptional: false);
+                primary = ParseParameters(typesOptional: false); // D1: a data type's primary constructor and its fields; K1: a class's
             }
 
             if (Match(TokenKind.Colon))
             {
+                // K6, K10: the base class and the interfaces after `:`, the base's arguments in the explicit form; D7: a data type's base
                 do
                 {
                     SkipNewlines(); // L4: a line break after the `:` of a base list, or after its comma, continues the declaration
@@ -1096,6 +1183,7 @@ public sealed class Parser
 
             if (MatchKeyword("equal"))
             {
+                // K8: the fields that count, named after the head, `equal by Id`; K15: one or more of them with a comma between
                 if (!MatchKeyword("by"))
                 {
                     throw Fail("`by`");
@@ -1140,7 +1228,7 @@ public sealed class Parser
 
                     values.Add(new EnumMember(member.Line, member.Text, number));
                 }
-                while (Match(TokenKind.Comma) && !At(TokenKind.RightBrace)); // L4: a trailing comma is accepted in an enum or flags body
+                while (Match(TokenKind.Comma) && !At(TokenKind.RightBrace)); // L4 (decided): "a trailing comma is accepted in an `enum` or `flags` body and refused in the braces of `with`" (the owner, 2026-10-10)
             }
 
             // an empty body parses; whether a type without a value is allowed is the checker's (D12)
@@ -1209,7 +1297,14 @@ public sealed class Parser
         if (AtKeyword("weak"))
         {
             var weak = Advance();
-            return new WeakType(weak.Line, ParseNonUnionType());
+            if (AtKeyword("weak"))
+            {
+                // a reading under E4's general clause (README; a question for a design round): R3 and R5 write one `weak` before a
+                // type, so a second is text no rule gives a meaning, as a second `?` is under N1; the id could be the checker's
+                throw new ParseError(Current.Line, "`weak` is written twice");
+            }
+
+            return new WeakType(weak.Line, ParseNonUnionType()); // R3, R5: `weak T?`
         }
 
         var type = ParseCoreType();
@@ -1246,7 +1341,8 @@ public sealed class Parser
             {
                 SkipNewlines(); // L4: a trailing `=>` continues, a function type's as much as a lambda's
                 // F11: the `=>` of a function type reaches to the end of the type, so `(int) => int | NotFound` returns the union, and a
-                // union of a function type and another type is written `((int) => int) | NotFound` (the owner, 2026-10-11)
+                // union of a function type and another type is written `((int) => int) | NotFound` (the rule records the owner's choice of
+                // 2026-10-11)
                 return new FunctionType(token.Line, parameters, ParseType());
             }
 
@@ -1308,7 +1404,8 @@ public sealed class Parser
     // The levels, lowest first, as C# binds them: T18 (`+ - * / %`, the comparisons, `&& ||`), T22 (`& | ^ << >>`) and T12 (`+% -%`
     // with `+ -`, `*%` with `*`) give the operators "the precedence they have in C#", and N4's `??` sits below `||`, grouping to the
     // right (ParseCoalesce), as there; comparisons and equality chain to the left as there. Where `..` and `..<` bind is a reading
-    // C8 leaves open (README): below `+ -` and above the comparisons, so `1..n + 1` runs to `n + 1`, and a range chains with nothing.
+    // C8 leaves open (README): below `+ -` and `<< >>` and above the comparisons, so `1..n + 1` runs to `n + 1` and `1..n << 1` to
+    // `n << 1`, and a range chains with nothing.
     private static readonly TokenKind[][] BinaryLevels =
     [
         [TokenKind.BarBar],
@@ -1355,6 +1452,7 @@ public sealed class Parser
 
     private Expression ParseUnary()
     {
+        // T18: `-` and `!`, T22: `~`, prefix operators that bind tighter than every binary operator, as in C#
         if (At(TokenKind.Minus) || At(TokenKind.Bang) || At(TokenKind.Tilde))
         {
             var op = Advance();
@@ -1377,8 +1475,8 @@ public sealed class Parser
             if (At(TokenKind.Dot) || At(TokenKind.QuestionDot))
             {
                 var dot = Advance();
-                // L12: a core word after the dot is a member name, `match.Add(1)`, `x.match(1)` and `x.int` alike; the one error is the
-                // declaration's, so no `reserved-word` is added at the use (E1)
+                // the reading on L12 (README; a question for a design round): a core word after the dot is a member name, `match.Add(1)`,
+                // `x.match(1)` and `x.int` alike, with no error at the use, so that the one error stays the declaration's (E1)
                 var member = At(TokenKind.Keyword) ? Advance() : ExpectName("a member name");
                 expression = new MemberAccess(dot.Line, expression, member.Text, dot.Kind == TokenKind.QuestionDot);
                 continue;
@@ -1390,9 +1488,11 @@ public sealed class Parser
                 continue;
             }
 
-            // T19: a call names its type arguments, `First<int>(xs)` and `xs.Map<int>(f)` alike. Told from comparisons as C# tells
-            // them (T17, "as in C#"): the reading as a type-argument list wins when `(` follows the `>`, so `f(a < b, c > (d))` is
-            // the call `a<b, c>(d)`, and `a < b, c > d` is two comparisons
+            // T19: a call names its type arguments, `First<int>(xs)` and `xs.Map<int>(f)` alike. How they are told from comparisons is
+            // a reading (README; a question for a design round): the list is kept when `(` follows the `>`, so `f(a < b, c > (d))` is
+            // the call `a<b, c>(d)` and `a < b, c > d` is two comparisons; C# (T17: generics as in C#) also keeps it before `)`, `]`,
+            // `,`, `.`, `?` and a few more, where this front end reads a comparison, since the reference has no form for a generic
+            // name that is not called
             if (At(TokenKind.Less) && expression is NameExpression or MemberAccess)
             {
                 List<TypeSyntax>? typeArguments = null;
@@ -1423,7 +1523,7 @@ public sealed class Parser
 
             if (At(TokenKind.LeftBracket))
             {
-                var open = Advance();
+                var open = Advance(); // M9: `list[i]`, `map[key]`
                 suppressNewlines++;
                 var indexValue = ParseExpression();
                 suppressNewlines--;
@@ -1434,14 +1534,14 @@ public sealed class Parser
 
             if (AtKeyword("with"))
             {
-                var with = Advance();
+                var with = Advance(); // D5: `value with { Field = expression }`; its braces open on the line of `with` (C1) and take no trailing comma (L4)
                 expression = new WithExpression(with.Line, expression, ParseFieldAssignments(with.Line));
                 continue;
             }
 
             if (AtKeyword("else") && expression is CallExpression)
             {
-                var elseKeyword = Advance();
+                var elseKeyword = Advance(); // O5: `call else { Case => ... }` handles the listed cases at the call, so only a call takes the postfix `else`
                 expression = new ElseExpression(elseKeyword.Line, expression, ParseArms(elseKeyword.Line, "`else`"));
                 continue;
             }
@@ -1490,7 +1590,10 @@ public sealed class Parser
                     Advance();
                 }
 
-                var mut = MatchKeyword("mut");
+                // M7: the caller writes `mut` in front of an argument for a `mut` parameter. A `mut` with nothing that can start an
+                // expression after it, `f(mut)` or `f(mut, 1)`, is a name (the reading on L12), so a variable of that name is used
+                // without a second error (E1)
+                var mut = AtKeyword("mut") && CanStartExpression(Peek().Kind) && MatchKeyword("mut");
                 arguments.Add(new Argument(start.Line, name, mut, ParseExpression()));
             }
             while (Match(TokenKind.Comma));
@@ -1525,7 +1628,7 @@ public sealed class Parser
                 Advance();
                 if (At(TokenKind.Arrow))
                 {
-                    Advance();
+                    Advance(); // F7: `x => ...`, a lambda written as in C#
                     return ParseLambdaBody(token.Line, [new Parameter(token.Line, false, null, token.Text, null)]);
                 }
 
@@ -1560,6 +1663,8 @@ public sealed class Parser
 
             case TokenKind.LeftParen:
             {
+                // F7: `(x, y) => ...` and `(int x, int y) => ...`, the parameters tried speculatively, since `(` also opens a
+                // parenthesized expression (C1)
                 List<Parameter>? parameters = null;
                 if (Try(() =>
                     {
@@ -1586,6 +1691,11 @@ public sealed class Parser
         }
     }
 
+    /// <summary>
+    /// The body of a lambda (F7): a block, or an expression. The reading on F7 with L4 and C1 (README; a question for a design
+    /// round): a <c>=&gt;</c> that ends its line continues the statement (L4), so the block or the expression may start on the
+    /// next line without C1's error, which names no line for a lambda's block.
+    /// </summary>
     private LambdaExpression ParseLambdaBody(int line, List<Parameter> parameters)
     {
         SkipNewlines();

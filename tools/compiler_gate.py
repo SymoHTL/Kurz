@@ -1,59 +1,76 @@
 #!/usr/bin/env python3
-"""Gate `compiler-tests`: builds the compiler under compiler/ and runs its unit tests, with the SDK
-that compiler/global.json pins and the packages that the lock files pin (a restore in locked mode
-refuses a package the lock files do not name), from the one package source compiler/NuGet.config
-names.
+"""Gate `compiler-tests`: builds the compiler under compiler/ and runs its unit tests, from inside
+compiler/, where the dotnet host reads the SDK pin of compiler/global.json (the host reads the
+working directory and its parents, not the directory of the solution it is given), with the
+packages that the lock files pin (a restore in locked mode refuses a package the lock files do not
+name), from the one package source compiler/NuGet.config names, and with the build servers off, so
+that no MSBuild node or compiler server outlives the command and holds its output open past the
+timeout.
 
   compiler_gate.py               build and test; exit 0 when every check passed
   compiler_gate.py --self-test
 
-Red when: compiler/NuGet.config is missing, does not clear the inherited package sources or maps
-no package to a source (knowledge/one-package-source-per-restore.md); the dotnet command is missing
-or the build fails (the output names the first errors); a test fails; a test was skipped (a skipped
-test is work nobody checked that reads as green); fewer tests passed than FLOOR, or no summary line
-was printed at all, so that a run that tested nothing cannot pass; the test command exited non-zero
-although no test failed (a project that did not build beside one that did); the test command ran
-out of time. The summary line is the one the test runner prints,
+Red when: compiler/NuGet.config is missing, is not well-formed XML, does not open its package
+sources with `<clear />` (the first child of `<packageSources>`, so that a clear inside a comment
+or inside another element does not count) or maps no package pattern to a source under
+`<packageSourceMapping>` (knowledge/one-package-source-per-restore.md); the dotnet command is
+missing or the build fails (the output names the first errors); a test fails; a test was skipped (a
+skipped test is work nobody checked that reads as green); fewer tests passed than FLOOR, or no
+summary line was printed at all, so that a run that tested nothing cannot pass; the test command
+exited non-zero although no test failed (a project that did not build beside one that did); the
+test command ran out of time. The summary line is the one the test runner prints,
 `Passed! - Failed: 0, Passed: N, Skipped: 0, Total: N`, one per test project, and the counts are
 summed over them."""
 import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
 
-SOLUTION = "compiler/Kurz.sln"
+CWD = "compiler"  # the working directory of the command: the dotnet host reads global.json from here and its parents, never from beside the solution
+SOLUTION = "Kurz.sln"  # relative to CWD
 CONFIG = "compiler/NuGet.config"
 FLOOR = 650  # below the tests the suites hold, above what is left without the corpus theory (over 300 of them): a run that lost a project or the corpus cannot pass
 TIMEOUT = 900  # seconds for restore, build and tests together
-COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreLockedMode=true"]
+COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreLockedMode=true", "--disable-build-servers"]
 SUMMARY = re.compile(r"^(Passed|Failed)!\s+-\s+Failed:\s+(\d+),\s+Passed:\s+(\d+),\s+Skipped:\s+(\d+),\s+Total:\s+(\d+)", re.M)
 ERROR_LINE = re.compile(r"^.*(?:error [A-Z]+\d+|error MSB\d+|error NU\d+).*$", re.M)
 
 
 def config_errors(root):
-    """What is wrong with the package-source config under root: missing, without the `<clear />` that
-    drops the machine's own sources, or without a mapping of packages to a source. An allowlist of
-    paths cannot see a deleted file, so the gate reads it."""
+    """What is wrong with the package-source config under root: missing, not well-formed XML, without
+    the `<clear />` that opens `<packageSources>` and drops the machine's own sources, or without a
+    package pattern mapped to a source. The file is read as XML, so that a clear inside a comment
+    or inside another element, and a mapping with nothing in it, do not pass. An allowlist of paths
+    cannot see a deleted file, so the gate reads it."""
     path = os.path.join(root, CONFIG)
     if not os.path.isfile(path):
         return [f"{CONFIG} is missing: a restore would read the machine's own package sources"]
-    text = kit.read(path)
+    try:
+        config = ET.fromstring(kit.read(path).encode("utf-8"))  # bytes: a text with an XML declaration is refused as a str
+    except ET.ParseError as e:
+        return [f"{CONFIG} is not well-formed XML: {e}"]
     errors = []
-    if "<clear />" not in text and "<clear/>" not in text:
-        errors.append(f"{CONFIG} does not clear the inherited package sources")
-    if "<packageSourceMapping>" not in text:
+    sources = config.find("packageSources")
+    first = None if sources is None else next(iter(sources), None)
+    if first is None or first.tag != "clear":
+        errors.append(f"{CONFIG} does not open its package sources with <clear />: the inherited sources would stay")
+    mapping = config.find("packageSourceMapping")
+    patterns = [] if mapping is None else mapping.findall("packageSource/package[@pattern]")
+    if not patterns:
         errors.append(f"{CONFIG} maps no package to its source")
     return errors
 
 
 def run_tests(cwd=None, timeout=TIMEOUT, run=subprocess.run):
-    """(exit code, combined output) of the test command. A command that cannot start or ran out of
-    time is a refusal (kit.Unanswered is a kit.Refused): nothing was proven."""
+    """(exit code, combined output) of the test command, run inside compiler/ unless cwd says
+    otherwise. A command that cannot start or ran out of time is a refusal (kit.Unanswered is a
+    kit.Refused): nothing was proven."""
     try:
-        p = run(COMMAND, cwd=cwd or kit.ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        p = run(COMMAND, cwd=cwd or os.path.join(kit.ROOT, CWD), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         raise kit.Unanswered(f"dotnet test: no answer within {timeout} s") from None
     except OSError as e:
@@ -111,8 +128,9 @@ RED = ("Failed!  - Failed:     5, Passed:    77, Skipped:     0, Total:    82, D
 BUILD_ERROR = ("  Determining projects to restore...\n"
                "compiler/Kurz.Compiler/Syntax/Lexer.cs(710,46): error CS0019: Operator '+' cannot be applied [compiler/Kurz.Compiler/Kurz.Compiler.csproj]\n"
                "Build FAILED.\n")
-CONFIG_TEXT = ("<configuration>\n  <packageSources>\n    <clear />\n    <add key=\"one\" value=\"https://example.invalid/v3/index.json\" />\n"
-               "  </packageSources>\n  <packageSourceMapping>\n    <packageSource key=\"one\"><package pattern=\"*\" /></packageSource>\n"
+CONFIG_TEXT = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- one source -->\n<configuration>\n  <packageSources>\n    <clear />\n"
+               "    <add key=\"one\" value=\"https://example.invalid/v3/index.json\" />\n"
+               "  </packageSources>\n  <packageSourceMapping>\n    <packageSource key=\"one\">\n      <package pattern=\"*\" />\n    </packageSource>\n"
                "  </packageSourceMapping>\n</configuration>\n")
 
 
@@ -135,6 +153,8 @@ def self_test():
     errors, counts = judge(0, GREEN + GREEN.replace("Passed:   704", "Passed:    10").replace("Total:   704", "Total:    10"))
     cases.append(("the counts are summed over the summaries", counts == (0, 714, 0, 714), counts))
     cases.append(("the command restores in locked mode and names the solution", "-p:RestoreLockedMode=true" in COMMAND and SOLUTION in COMMAND, COMMAND))
+    cases.append(("the command runs inside compiler/, where the SDK pin is read", CWD == "compiler" and "/" not in SOLUTION, (CWD, SOLUTION)))
+    cases.append(("the command disables the build servers, so that the timeout can end it", "--disable-build-servers" in COMMAND, COMMAND))
     try:
         run_tests(cwd=os.path.join(kit.ROOT, "no-such-directory-for-the-self-test"))
         cases.append(("a command that cannot start is refused", False, "no exception"))
@@ -153,15 +173,26 @@ def self_test():
         cases.append(("a missing package config is red", any("missing" in e for e in config_errors(root)), config_errors(root)))
         os.makedirs(os.path.join(root, "compiler"))
         path = os.path.join(root, CONFIG)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(CONFIG_TEXT)
-        cases.append(("a config that clears the sources and maps the packages passes", not config_errors(root), config_errors(root)))
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(CONFIG_TEXT.replace("    <clear />\n", ""))
-        cases.append(("a config without clear is red", any("clear" in e for e in config_errors(root)), config_errors(root)))
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(CONFIG_TEXT.replace("packageSourceMapping", "nothing"))
-        cases.append(("a config without a source mapping is red", any("maps no package" in e for e in config_errors(root)), config_errors(root)))
+
+        def config(text):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return config_errors(root)
+
+        errors = config(CONFIG_TEXT)
+        cases.append(("a config that clears the sources and maps the packages passes", not errors, errors))
+        errors = config(CONFIG_TEXT.replace("    <clear />\n", ""))
+        cases.append(("a config without clear is red", any("clear" in e for e in errors), errors))
+        errors = config(CONFIG_TEXT.replace("    <clear />\n", "").replace("</configuration>", "  <disabledPackageSources>\n    <clear />\n  </disabledPackageSources>\n</configuration>"))
+        cases.append(("a clear outside packageSources is red", any("clear" in e for e in errors), errors))
+        errors = config(CONFIG_TEXT.replace("<clear />", "<!-- <clear /> -->"))
+        cases.append(("a clear inside a comment is red", any("clear" in e for e in errors), errors))
+        errors = config(CONFIG_TEXT.replace("packageSourceMapping", "nothing"))
+        cases.append(("a config without a source mapping is red", any("maps no package" in e for e in errors), errors))
+        errors = config(re.sub(r"<packageSourceMapping>.*</packageSourceMapping>", "<packageSourceMapping></packageSourceMapping>", CONFIG_TEXT, flags=re.S))
+        cases.append(("an empty source mapping is red", any("maps no package" in e for e in errors), errors))
+        errors = config("<configuration>\n")
+        cases.append(("a config that is not XML is red", any("well-formed" in e for e in errors), errors))
     return kit.report(cases)
 
 

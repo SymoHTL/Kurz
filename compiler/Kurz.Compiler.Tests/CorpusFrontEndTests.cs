@@ -18,6 +18,9 @@ public sealed class CorpusFrontEndTests
     /// <summary>The corpus has more cases than this; a scan that finds fewer looked in the wrong place.</summary>
     private const int Floor = 250;
 
+    /// <summary>The corpus has more cases that expect an error of the front end than this; a count below it read the headers wrong.</summary>
+    private const int FrontEndErrorFloor = 15;
+
     private static readonly HashSet<string> FrontEndIds =
     [
         ErrorIds.Syntax, ErrorIds.Semicolon, ErrorIds.ReservedWord, ErrorIds.BracesRequired, ErrorIds.UnknownEscape, ErrorIds.BlockIndentation,
@@ -96,26 +99,29 @@ public sealed class CorpusFrontEndTests
     }
 
     [Fact]
-    public void At_least_the_floor_of_cases_expect_an_error_of_the_front_end()
+    public void At_least_the_front_end_error_floor_of_cases_expect_an_error_of_the_front_end()
     {
+        // the positive control of the theory above: its error branch runs for at least this many cases, read as the theory reads them
         var found = 0;
         foreach (var relativePath in CaseFiles())
         {
-            var text = File.ReadAllText(Path.Combine(Root, "corpus", relativePath));
-            var header = CaseHeader.Parse(text, out _)!;
-            if (header.Expectation == Expectation.Error && FrontEndIds.Contains(header.ErrorId!) && !CheckerSyntax.Contains(relativePath))
+            var source = SourceText.FromBytes(relativePath, File.ReadAllBytes(Path.Combine(Root, "corpus", relativePath)), out var invalid);
+            Assert.True(source is not null, $"{relativePath}: {invalid}");
+            var header = CaseHeader.Parse(source!.Text, out var problem);
+            Assert.True(header is not null, $"{relativePath}: {problem}");
+            if (header!.Expectation == Expectation.Error && FrontEndIds.Contains(header.ErrorId!) && !CheckerSyntax.Contains(relativePath))
             {
                 found++;
             }
         }
 
-        Assert.True(found >= 15, $"only {found} cases expect an error of the front end");
+        Assert.True(found >= FrontEndErrorFloor, $"only {found} cases expect an error of the front end");
     }
 
     [Theory]
     [InlineData("// expect: output\n// | 9\n// rules: V1\n\nx = 4\nprint(x + 5)\n", Expectation.Output, null, 0, 1, null, 5)]
     [InlineData("// expect: error assign-immutable at 6\n// rules: V7\n\nx = 4\nprint(x)\nx = 5\n", Expectation.Error, "assign-immutable", 6, 0, null, 4)]
-    [InlineData("// expect: throws overflow at 7\n// | 1\n// build: test\n// rules: T5\n\nprint(1)\nprint(2147483647 + x)\n", Expectation.Throws, "overflow", 7, 1, BuildKind.Test, 6)]
+    [InlineData("// expect: throws overflow at 8\n// | 1\n// build: test\n// rules: T5\n\nx = 1\nprint(x)\nprint(2147483647 + x)\n", Expectation.Throws, "overflow", 8, 1, BuildKind.Test, 6)]
     public void A_header_in_its_shape_is_read(string text, Expectation expectation, string? id, int line, int outputLines, BuildKind? build, int bodyLine)
     {
         var header = CaseHeader.Parse(text, out var problem);
@@ -130,7 +136,7 @@ public sealed class CorpusFrontEndTests
     [InlineData("// expect: output\n// rules: V1\nx = 4\n")]
     [InlineData("// expect: output\n// rules: V1\n\n")]
     [InlineData("// expect: error unused-variable at 5\n// | a\n// rules: V1\n\nx\n")]
-    [InlineData("// expect: throws overflow at 4\n// build: debug\n// rules: V1\n\nx\n")]
+    [InlineData("// expect: throws overflow at 5\n// build: debug\n// rules: V1\n\nx\n")]
     public void A_header_out_of_its_shape_is_refused(string text)
     {
         Assert.Null(CaseHeader.Parse(text, out var problem));

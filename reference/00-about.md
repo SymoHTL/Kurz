@@ -49,7 +49,8 @@ carries the `Case:` line alone.
 ```
 
 The ids of both kinds are listed in chapter 12. No tool runs a program or compares its output: the compiler's test suite parses each file and checks the errors of its
-front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header;
+front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
+except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13) and which the suite checks for no diagnostic;
 an error of the type checker is checked only by reading and by the review. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.

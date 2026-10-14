@@ -1,6 +1,6 @@
 namespace Kurz.Compiler.Syntax;
 
-/// <summary>The words a name cannot be: the core words of L18 and the names of the built-in types of L19.</summary>
+/// <summary>The words a declared name may not be (L12): the core words of L18 and the names of the built-in types of L19. What a use of one is, where no declaration drew the error, is the reading on L12 the README lists.</summary>
 public static class CoreWords
 {
     /// <summary>L18, the closed list of the sequential core.</summary>

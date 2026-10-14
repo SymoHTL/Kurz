@@ -11,7 +11,7 @@ skipped, because some Windows editors and tools write one (the owner, 2026-10-09
 the mark too, under which a file saved with the mark does not compile; the cost is one accepted
 leading code point that is not part of the text). The two-byte line break that Windows editors
 write is read as one line break wherever it stands, inside a `"""` block too, so the same program
-compiles and prints the same text whichever editor saved it (the owner, 2026-10-10, against reading
+compiles and prints the same text whether its lines end in a line feed or in the two-byte break (the owner, 2026-10-10, against reading
 the two bytes as written, under which the text of a block depends on the editor; the cost is that a
 literal holds the two-byte line break only through its escapes). A carriage return that no line feed follows is read as L13 says: an ordinary character inside a
 literal, dropped at the end of a line of a `"""` block, and whitespace outside a literal. The error `invalid-source` has no case: the lint and every gate read a corpus file as UTF-8, so a case that is

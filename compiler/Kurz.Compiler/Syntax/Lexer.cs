@@ -19,6 +19,7 @@ public sealed class Lexer
     private readonly DiagnosticBag diagnostics;
     private readonly List<Token> tokens = [];
     private int position;
+    private int lastReportedBad = -1; // the index of the last Bad token that reported its error; a token PassOver added is none
 
     public Lexer(SourceText source, DiagnosticBag diagnostics)
         : this(source, diagnostics, 0, source.Text.Length)
@@ -115,9 +116,10 @@ public sealed class Lexer
     private static bool IsNamePart(char c) => IsNameStart(c) || IsAsciiDigit(c);
 
     /// <summary>
-    /// The text at <paramref name="at"/> would be part of a word in a wider alphabet: a letter, a digit or a
-    /// combining mark outside ASCII, a surrogate pair that encodes a letter or a digit, or C#'s `@`. A
-    /// symbol, an emoji among them, is none of these: it is text no rule gives a meaning (E4).
+    /// The text at <paramref name="at"/> would be part of a word in a wider alphabet: a letter, a digit, a
+    /// combining mark or a connector punctuation outside ASCII, a surrogate pair that encodes a letter or a
+    /// digit, or C#'s `@`. A symbol, an emoji among them, is none of these: it is text of its own, which no
+    /// rule gives a meaning (E4), and the name after it is read as a name (a reading on L9, README).
     /// </summary>
     private bool IsForeignWordPartAt(int at)
     {
@@ -161,12 +163,15 @@ public sealed class Lexer
     /// <summary>Text no rule gives a meaning: one <c>syntax</c> at <paramref name="line"/>, and a token the parser passes over.</summary>
     private void Bad(int start, int length, string why, int line)
     {
-        // E1: a run of text no rule gives a meaning is one error, so a bad token right after another on its line adds none (`'''`)
-        if (tokens.Count == 0 || tokens[^1].Kind != TokenKind.Bad || tokens[^1].Line != line)
+        // E1: a run of text no rule gives a meaning is one error, so a bad token right after another on its line adds none (`'''`);
+        // a token PassOver added reported nothing, so the bad token after it is the first of its run
+        var continuesRun = tokens.Count > 0 && lastReportedBad == tokens.Count - 1 && tokens[^1].Line == line;
+        if (!continuesRun)
         {
             diagnostics.Error(ErrorIds.Syntax, line, why);
         }
 
+        lastReportedBad = tokens.Count;
         tokens.Add(new Token(TokenKind.Bad, text.Substring(start, Math.Min(length, end - start)), line, start));
     }
 
@@ -228,6 +233,7 @@ public sealed class Lexer
         {
             radix = Peek() is 'x' or 'X' ? 16 : 2;
             position += 2;
+            // L11: "`_` may also stand directly after the prefix (`0x_FF`)", where every other `_` stands between digits
             if (!ReadDigits(digits, radix, allowLeadingUnderscore: true))
             {
                 Bad(start, position - start, "a number needs digits after its prefix");
@@ -309,21 +315,34 @@ public sealed class Lexer
         }
 
         var upper = tail.ToUpperInvariant();
-        if (upper is "L" or "UL" or "LU" && tail.Contains('l', StringComparison.Ordinal))
+        if (upper is "U" or "L" or "UL" or "LU")
         {
-            // L11: a suffix holding a lower-case `l` is `syntax`, because `1l` reads as `11`; any other tail gets the message below
-            Bad(start, position - start, "the suffix `L` is written in upper case: `1l` reads as `11`");
-            return;
-        }
+            if (isReal)
+            {
+                // L11: an integer suffix after a fraction or an exponent is no form C# gives, so it is `syntax` (E4)
+                Bad(start, position - start, $"the integer suffix `{tail}` does not apply to a fraction or an exponent");
+                return;
+            }
 
-        if (!isReal && upper is "U" or "L" or "UL" or "LU")
-        {
+            if (tail.Contains('l', StringComparison.Ordinal))
+            {
+                // L11: a suffix holding a lower-case `l` is `syntax`, because `1l` reads as `11`
+                Bad(start, position - start, "the suffix `L` is written in upper case: `1l` reads as `11`");
+                return;
+            }
+
             Add(TokenKind.IntegerLiteral, start, position - start, new IntegerLiteralValue(digits.ToString(), radix, upper == "LU" ? "UL" : upper));
             return;
         }
 
-        if (radix == 10 && upper is "F" or "D" or "M")
+        if (upper is "F" or "D" or "M")
         {
+            if (radix != 10)
+            {
+                Bad(start, position - start, $"the suffix `{tail}` does not apply to a hexadecimal or binary literal");
+                return;
+            }
+
             Add(TokenKind.RealLiteral, start, position - start, new RealLiteralValue(digits.ToString(), upper.ToLowerInvariant()));
             return;
         }
@@ -457,11 +476,19 @@ public sealed class Lexer
         var failed = false;
         while (!AtEnd && Current != '\'' && Current != '\n')
         {
+            if (failed)
+            {
+                // E1: after the first failed escape the literal is read to its end and nothing else is said about it, so a second
+                // bad escape in `'\q\q'` adds no error
+                position += Current == '\\' && Peek() != '\n' && Peek() != '\0' ? 2 : 1;
+                continue;
+            }
+
             var point = ReadCharacter(out var ok);
             if (!ok)
             {
                 failed = true; // the error is reported; the literal is read to its end, and nothing else is said about it (E1)
-                point = '?';
+                continue;
             }
 
             points.Add(point);
@@ -469,7 +496,13 @@ public sealed class Lexer
 
         if (AtEnd || Current != '\'')
         {
-            Bad(start, position - start, "a `char` literal ends with `'` on its line");
+            if (failed)
+            {
+                PassOver(start, position - start); // the escape's error stands for the literal: an unterminated `'\q` adds no `syntax` (E1)
+                return;
+            }
+
+            Bad(start, position - start, "a `char` literal ends with `'` on its line (T21)");
             return;
         }
 
@@ -513,7 +546,8 @@ public sealed class Lexer
 
             if (char.IsSurrogate(c))
             {
-                // a lone surrogate is no code point (L1); a file cannot hold one, since the bytes would not be UTF-8, so this is text from no file
+                // a string holds code points (L1, T16), and a lone surrogate is none: text no rule gives a meaning (E4's general clause, a
+                // reading listed in the README); a file cannot hold one, since the bytes would not be UTF-8, so this is text from no file
                 diagnostics.Error(ErrorIds.Syntax, LineAt(position), "a lone surrogate is no character of a literal");
                 position++;
                 ok = false;
@@ -584,11 +618,12 @@ public sealed class Lexer
         if (value > 0x10FFFF || value is >= 0xD800 and <= 0xDFFF)
         {
             // L16: digits that name a surrogate or a value beyond U+10FFFF are `unknown-escape` (the owner, 2026-10-10), and a pair of
-            // surrogate escapes that C# would join is the error at the first (the owner, 2026-10-11): a second one directly after goes with it
+            // surrogate escapes that C# would join, a high surrogate followed by a low one, is the error at the first (the owner,
+            // 2026-10-11): the low one directly after goes with it; two escapes in another order are two errors
             diagnostics.Error(ErrorIds.UnknownEscape, LineAt(escapeStart), $"`{text[escapeStart..position]}` names no code point");
-            if (value is >= 0xD800 and <= 0xDFFF)
+            if (value is >= 0xD800 and <= 0xDBFF)
             {
-                SkipSurrogateEscape();
+                SkipLowSurrogateEscape();
             }
 
             ok = false;
@@ -599,8 +634,8 @@ public sealed class Lexer
         return (int)value;
     }
 
-    /// <summary>Past a <c>\u</c>, <c>\U</c> or <c>\x</c> escape at the cursor whose digits name a surrogate, which the error of the escape before it covers (L16); otherwise nothing moves.</summary>
-    private void SkipSurrogateEscape()
+    /// <summary>Past a <c>\u</c>, <c>\U</c> or <c>\x</c> escape at the cursor whose digits name a low surrogate, U+DC00 to U+DFFF, which C# would join with the high one before it, so the error of that one covers it (L16); otherwise nothing moves.</summary>
+    private void SkipLowSurrogateEscape()
     {
         if (Current != '\\' || Peek() is not ('u' or 'U' or 'x'))
         {
@@ -620,7 +655,7 @@ public sealed class Lexer
             p++;
         }
 
-        if (p - digitsStart >= min && long.Parse(text.AsSpan(digitsStart, p - digitsStart), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture) is >= 0xD800 and <= 0xDFFF)
+        if (p - digitsStart >= min && long.Parse(text.AsSpan(digitsStart, p - digitsStart), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture) is >= 0xDC00 and <= 0xDFFF)
         {
             position = p;
         }
@@ -638,6 +673,7 @@ public sealed class Lexer
         position++; // the opening quote
         var parts = new List<StringPart>();
         var buffer = new StringBuilder();
+        var failed = false;
         while (!AtEnd && Current != '"' && Current != '\n')
         {
             if (Current == '{')
@@ -657,10 +693,21 @@ public sealed class Lexer
             {
                 buffer.Append(char.ConvertFromUtf32(point));
             }
+            else
+            {
+                failed = true;
+            }
         }
 
         if (AtEnd || Current != '"')
         {
+            if (failed)
+            {
+                PassOver(start, position - start); // E1: the escape's error stands for the literal, `"a\` at the end of a line included
+                return;
+            }
+
+            // L13: an ordinary literal ends on the line it starts on, so one that does not is text no rule gives a meaning (E4)
             Bad(start, position - start, "a string literal ends with `\"` on its line; a string over several lines opens with `\"\"\"`");
             return;
         }
@@ -680,16 +727,18 @@ public sealed class Lexer
     }
 
     /// <summary>
-    /// Reads a hole from its `{` to the `}` that closes it, skipping nested brackets and nested
-    /// literals, and adds it as a <see cref="HolePart"/>. False after a `syntax` error, when the
-    /// literal has been given up.
+    /// Reads a hole from its `{` to the `}` that closes it, the brackets inside it matched by kind and the
+    /// nested literals passed over, and adds it as a <see cref="HolePart"/>. False after a `syntax` error,
+    /// when the literal has been given up: a `}` missing on the line, a hole with nothing in it, or a `)`
+    /// or `]` that closes no bracket of its kind.
     /// </summary>
     private bool ReadHole(List<StringPart> parts, int literalStart)
     {
         var open = position;
         position++; // the `{`
-        var depth = 1;
-        while (!AtEnd && depth > 0 && Current != '\n')
+        var closers = new Stack<char>();
+        closers.Push('}');
+        while (!AtEnd && Current != '\n')
         {
             var c = Current;
             if (c is '"' or '\'')
@@ -700,12 +749,18 @@ public sealed class Lexer
 
             if (c is '{' or '(' or '[')
             {
-                depth++;
+                closers.Push(c == '{' ? '}' : c == '(' ? ')' : ']');
             }
             else if (c is '}' or ')' or ']')
             {
-                depth--;
-                if (depth == 0)
+                if (closers.Peek() != c)
+                {
+                    Bad(literalStart, position + 1 - literalStart, $"`{c}` closes no open bracket inside the interpolation");
+                    return false;
+                }
+
+                closers.Pop();
+                if (closers.Count == 0)
                 {
                     break;
                 }
@@ -756,10 +811,18 @@ public sealed class Lexer
             position++;
         }
 
-        if (AtEnd || Current != '\n')
+        if (AtEnd)
+        {
+            // E4: a `"""` block that is never closed is `syntax` at its opening line; here the file ends on the opening quotes
+            Bad(start, position - start, "the `\"\"\"` block is never closed");
+            return;
+        }
+
+        if (Current != '\n')
         {
             // L13: text beside the opening quotes is one `syntax`. `"""abc"""` on one line ends at its closing quotes; a block
             // whose opening line holds text is passed over up to its closing line, as a block with an error inside it is
+            // (recovery under no rule, README)
             var lineEnd = text.IndexOf('\n', afterOpen, end - afterOpen);
             lineEnd = lineEnd < 0 ? end : lineEnd;
             var close = text.IndexOf("\"\"\"", afterOpen, lineEnd - afterOpen, StringComparison.Ordinal);
@@ -855,6 +918,7 @@ public sealed class Lexer
             var lineEnd = offset + content.Length;
             end = lineEnd; // an escape of this line cannot read into the next line or the closing quotes
             var ok = true;
+            string? why = null;
             while (position < lineEnd)
             {
                 if (Current == '{')
@@ -881,8 +945,12 @@ public sealed class Lexer
                         p++;
                     }
 
-                    if (p >= lineEnd || text[(holeOpen + 1)..p].Trim().Length == 0)
+                    var unclosed = p >= lineEnd;
+                    if (unclosed || text[(holeOpen + 1)..p].Trim().Length == 0)
                     {
+                        why = unclosed
+                            ? "a `{` inside a `\"\"\"` block opens an interpolation that `}` closes on the same line; a brace is written `\\{`"
+                            : "an interpolation holds an expression";
                         ok = false;
                         break;
                     }
@@ -902,8 +970,8 @@ public sealed class Lexer
             (position, end) = saved;
             if (!ok)
             {
-                // E1: the error is on the line of the brace, though the token covers the whole block
-                Bad(start, position - start, "a `{` inside a `\"\"\"` block opens an interpolation that `}` closes on the same line; a brace is written `\\{`", LineAt(offset));
+                // E1, E4: the error is on the line of the brace, though the token covers the whole block
+                Bad(start, position - start, why!, LineAt(offset));
                 return;
             }
 
@@ -918,16 +986,56 @@ public sealed class Lexer
         Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts));
     }
 
-    /// <summary>After an error inside a one-line literal: past its closing quote on this line, so that nothing inside it is read as code.</summary>
+    /// <summary>
+    /// After an error inside a one-line literal: past its closing quote on this line, the holes after the error and the
+    /// literals nested in them passed over as <see cref="ReadHole"/> would read them, so that nothing inside it is read as code.
+    /// </summary>
     private void SkipRestOfLiteral()
     {
         while (!AtEnd && Current != '"' && Current != '\n')
         {
+            if (Current == '{')
+            {
+                SkipHole();
+                continue;
+            }
+
             position += Current == '\\' && Peek() != '\n' && Peek() != '\0' ? 2 : 1;
         }
 
         if (!AtEnd && Current == '"')
         {
+            position++;
+        }
+    }
+
+    /// <summary>Past a hole at the cursor without a report: brackets counted, nested literals passed over; stops at the line's end.</summary>
+    private void SkipHole()
+    {
+        var depth = 0;
+        while (!AtEnd && Current != '\n')
+        {
+            var c = Current;
+            if (c is '"' or '\'')
+            {
+                SkipNestedLiteral(c);
+                continue;
+            }
+
+            if (c is '{' or '(' or '[')
+            {
+                depth++;
+            }
+            else if (c is '}' or ')' or ']')
+            {
+                depth--;
+                if (depth <= 0)
+                {
+                    position++;
+                    return;
+                }
+            }
+
             position++;
         }
     }

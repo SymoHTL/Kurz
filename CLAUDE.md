@@ -32,13 +32,17 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   writes it: a ledger written back another way differs on every line, and the review reads and
   bills the whole file as a change ([knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md](knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md)).
   Gate: `self-tests`.
-- `dotnet test compiler/Kurz.sln -c Release -p:RestoreLockedMode=true` builds the compiler and runs
-  its unit tests, with the SDK that `compiler/global.json` pins and the packages the lock files
-  pin; `compiler/README.md` says what the suites cover. `py -3 tools/compiler_gate.py` is that run
-  as the gate reads it: red on a failed test, a skipped test, fewer passed tests than its floor,
-  no summary line at all, or a restore outside the lock files. The same gate runs on Windows in
-  the workflow `compiler-windows`, which the ruleset does not require: a red Windows run holds no
-  merge (HAZARD #30). Gate: `compiler-tests`, in every gates run.
+- `cd compiler && dotnet test Kurz.sln -c Release -p:RestoreLockedMode=true --disable-build-servers`
+  builds the compiler and runs its unit tests, with the SDK that `compiler/global.json` pins (the
+  dotnet host reads it from the working directory, so the command runs inside `compiler/`) and the
+  packages the lock files pin; `compiler/README.md` says what the suites cover.
+  `py -3 tools/compiler_gate.py` is that run as the gate reads it: red when `compiler/NuGet.config`
+  is missing, is not well-formed XML, does not open its package sources with `<clear />` or maps no
+  package to a source; on a failed test, a skipped test, fewer passed tests than its floor, no
+  summary line at all, a non-zero exit with no failed test, a restore outside the lock files, a
+  missing `dotnet` or a run out of time. The same gate runs on Windows in the workflow
+  `compiler-windows`, which the ruleset does not require: a red Windows run holds no merge
+  (HAZARD #30). Gate: `compiler-tests`, in every gates run.
 - `py -3 tools/lint_reference.py --sync` rewrites every sample in `reference/` from its corpus
   file. Change the `.kz` file, then sync: a sample edited by hand is red until it is overwritten.
   Gate: `reference`.

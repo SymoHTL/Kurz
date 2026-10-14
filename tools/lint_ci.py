@@ -177,7 +177,8 @@ SDK_WITH = {"global-json-file": "compiler/global.json"}
 
 def sdk_step_errors(name, steps):
     """Exactly one SDK step, and it takes the version from compiler/global.json and nothing else: a
-    version typed here, a channel or a second SDK is a toolchain nobody pinned in one place."""
+    version typed here, a channel or a second SDK is a toolchain nobody pinned in one place. Counted
+    are actions/setup-dotnet steps: an SDK that a `run` step installs is not seen by this check."""
     sdk = [s for s in steps if str(s.get("uses", "")).startswith("actions/setup-dotnet@")]
     if len(sdk) != 1 or (sdk[0].get("with") or {}) != SDK_WITH:
         return [f"{name}: the SDK step must be one actions/setup-dotnet step whose `with` is exactly {SDK_WITH}"]

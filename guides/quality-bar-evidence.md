@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-11
-digest: 6bc5ab9ce0964347102eb84eec516ad1f4d01899dde2ac77181885bd0493a26f
+digest: 459d19c59eaa4ca65d645e81df2dbcc49d7f683b0fb40d62d5754d933b7a2ae9
 ttl_days: 60
 metadata:
   type: reference
@@ -40,7 +40,7 @@ defined in its docstring.
 | `tree` | every run | a path the allowlist does not hold; a credential-shaped or machine-bound string or a merge-conflict marker, in a file or in its name; a file that is not UTF-8 text; a link or a submodule; fewer files than the floor. Before a push, the same in every commit it publishes, in the name of every ref it publishes and in the message and the name of every annotated tag and of each tag it points at, and a tag or a ref that points straight at a blob or a tree |
 | `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the repository; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
 | `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an error-table row that does not read as one, or a row that reads as one outside an error table; a design record, a chapter or a corpus file that cannot be read, named with what went unchecked; fewer rules or cases than the floors |
-| `compiler-tests` | every run | the compiler under compiler/ does not build, or a unit test fails; no test summary was printed, fewer tests passed than the floor, or a test was skipped; the restore is not the one the lock files pin (locked mode) or the SDK not the one global.json pins; the dotnet command is missing or ran out of time |
+| `compiler-tests` | every run | the compiler under compiler/ does not build, or a unit test fails; no test summary was printed, fewer tests passed than the floor, a test was skipped, or the test command exited non-zero with no failed test; the restore is not the one the lock files pin (locked mode) or the SDK not the one global.json pins, which the command reads from inside compiler/; compiler/NuGet.config is missing, is not well-formed XML, does not open its package sources with a clear or maps no package to a source; the dotnet command is missing or ran out of time |
 | `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a job in a container or beside services; the credential anywhere but the env of the job's last step; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request or a push trigger not limited to main; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; the compiler job on another label than its versioned Windows one, an SDK step that does not take its version from compiler/global.json; a workflow without facts |
 | `merge-checks` | every run | the rules active on main differ from tools/ruleset.json or carry a parameter that file does not name, the ruleset is not active, it has bypass actors, or auto-merge is allowed; PARTLY where the token cannot read the last two |
 | `pr-title` | pull requests | a workflow-skip literal, a credential-shaped or machine-bound string or a conflict marker in the title, the description or a commit message of the branch: each of them can become the squash commit on main |
@@ -57,7 +57,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:self-tests -->
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
-| `tools/compiler_gate.py` | 17 | 17 |
+| `tools/compiler_gate.py` | 23 | 23 |
 | `tools/gates.py` | 33 | 23 |
 | `tools/kit.py` | 22 | 19 |
 | `tools/lint_ci.py` | 116 | 116 |
@@ -69,7 +69,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 264 | 239 |
 | `tools/tree_gate.py` | 124 | 100 |
-| **total** | 1063 | 979 |
+| **total** | 1069 | 985 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -145,7 +145,7 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Pull requests merged | 9 |
 | Merged over red, with a recorded waiver | 6 |
 | Review findings posted: high | 67 |
-| Review findings posted: medium | 735 |
-| Review findings posted: low | 959 |
+| Review findings posted: medium | 770 |
+| Review findings posted: low | 1026 |
 | Open HAZARD issues | 15 |
 <!-- /generated:forge -->

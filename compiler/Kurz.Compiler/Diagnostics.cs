@@ -2,8 +2,9 @@ namespace Kurz.Compiler;
 
 /// <summary>
 /// What the compiler says about a program. An <see cref="DiagnosticKind.Error"/> is a compile error
-/// of the reference's table (chapter 12): its id and its line are what a corpus case pins (E1, E2),
-/// and its message is free. <see cref="DiagnosticKind.NotSupported"/> names a construct the reference
+/// with an id of the reference's table (chapter 12) or L1's <c>invalid-source</c>, which the rule
+/// names and the table keeps out: the id and the line are what a corpus case pins (E1, E2), and the
+/// message is free. <see cref="DiagnosticKind.NotSupported"/> names a construct the reference
 /// states and this compiler does not implement: it carries no id, so it can never pass for an error
 /// a case expects; a corpus case that gets one fails its theory, and nothing produces the kind.
 /// </summary>

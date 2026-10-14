@@ -73,9 +73,9 @@ internal static class SyntaxPrinter
             sb.Append(" {").Append(string.Join(", ", t.Values.Select(v => v.Number is null ? v.Name : $"{v.Name} = {Print(v.Number)}"))).Append('}');
         }
 
-        if (t.Members.Count > 0)
+        if (t.Members is not null)
         {
-            sb.Append(" {").Append(string.Join(" ", t.Members.Select(Print))).Append('}');
+            sb.Append(" {").Append(string.Join(" ", t.Members.Select(Print))).Append('}'); // `{}` for a body with nothing in it, nothing for no body
         }
 
         return sb.Append(')').ToString();
@@ -95,7 +95,8 @@ internal static class SyntaxPrinter
     {
         ElsePattern => "else",
         ValuePattern v => Print(v.Value),
-        TypePattern t => Type(t.Type).TrimEnd() + (t.Binding is null ? "" : " " + t.Binding),
+        // a type pattern without a binding is marked, so that it never prints as the value pattern of a name
+        TypePattern t => t.Binding is null ? "(type " + Type(t.Type).TrimEnd() + ")" : Type(t.Type).TrimEnd() + " " + t.Binding,
         _ => throw new InvalidOperationException(pattern.GetType().Name),
     };
 
@@ -104,12 +105,14 @@ internal static class SyntaxPrinter
     {
         null => "",
         NamedType n => n.Name + (n.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", n.TypeArguments.Select(a => Type(a).TrimEnd())) + ">") + " ",
-        // a union or a function type inside another type is parenthesized, so that each tree prints as itself: `(A | B)?` against
-        // `A | B?`, `((int) => int) | B` against `(int) => (int | B)`
-        NullableType { Inner: FunctionType or UnionType } n => "(" + Type(n.Inner).TrimEnd() + ")? ",
+        // a union, a function type or a weak type inside another type is parenthesized, so that each tree prints as itself:
+        // `(A | B)?` against `A | B?`, `((int) => int) | B` against `(int) => (int | B)`, `(A | B) | C` against `A | (B | C)`,
+        // `weak (A | B)` against `weak A | B`
+        NullableType { Inner: FunctionType or UnionType or WeakType } n => "(" + Type(n.Inner).TrimEnd() + ")? ",
         NullableType n => Type(n.Inner).TrimEnd() + "? ",
-        UnionType u => string.Join(" | ", u.Cases.Select(c => c is FunctionType ? "(" + Type(c).TrimEnd() + ")" : Type(c).TrimEnd())) + " ",
+        UnionType u => string.Join(" | ", u.Cases.Select(c => c is FunctionType or UnionType ? "(" + Type(c).TrimEnd() + ")" : Type(c).TrimEnd())) + " ",
         FunctionType f => "(" + string.Join(", ", f.Parameters.Select(p => Type(p).TrimEnd())) + ") => " + (f.Result is UnionType ? "(" + Type(f.Result).TrimEnd() + ") " : Type(f.Result)),
+        WeakType { Inner: UnionType } w => "weak (" + Type(w.Inner).TrimEnd() + ") ",
         WeakType w => "weak " + Type(w.Inner),
         VoidType => "void ",
         _ => throw new InvalidOperationException(type.GetType().Name),

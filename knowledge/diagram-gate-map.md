@@ -224,8 +224,10 @@ flowchart TD
   whose replay runs every suite in it; `kit.message_text` changes: P1 and G6, which read commit and tag messages
   through it.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
-- `tools/compiler_gate.py` changes (the command, the floor, a verdict): G10 and C1. `compiler/global.json`,
-  a lock file or `compiler/NuGet.config` changes what the gate restores: G10.
+- `tools/compiler_gate.py` changes (the command, the floor, a verdict, the config check): G10 and C1.
+  `compiler/global.json` changes the SDK: G10, whose command reads it from inside `compiler/`, and C1, whose SDK
+  step installs it. A lock file, `compiler/Directory.Packages.props`, `compiler/Directory.Build.props` or
+  `compiler/NuGet.config` changes what the gate restores or builds: G10 and C1.
 - `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.
 - `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.

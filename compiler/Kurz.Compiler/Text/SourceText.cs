@@ -39,7 +39,7 @@ public sealed class SourceText
 
     public int LineCount => lineStarts.Length;
 
-    /// <summary>The source as a program text that was never a file: the tests build theirs this way. The two-byte line break is read as one here too (L1).</summary>
+    /// <summary>The source as a program text that was never a file: the tests build theirs this way. The one place the two-byte line break is read as one (L1); <see cref="FromBytes"/> comes through it.</summary>
     public static SourceText FromString(string name, string text) => new(name, text.Replace("\r\n", "\n", StringComparison.Ordinal));
 
     /// <summary>

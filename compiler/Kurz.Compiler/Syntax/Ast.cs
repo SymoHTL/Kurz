@@ -67,7 +67,7 @@ public sealed record NullLiteral(int Line) : Expression(Line);
 /// <summary>A name: a variable, a function, a type used as a value (D8) or as a conversion (T10).</summary>
 public sealed record NameExpression(int Line, string Name) : Expression(Line);
 
-/// <summary><c>this</c>: the instance inside a class body (K7, as in C#), or the primary constructor's call in <c>: this(...)</c> (K14).</summary>
+/// <summary><c>this</c>: the instance inside a class body (K7, as in C#). The <c>: this(...)</c> of a further constructor (K14) is no expression; its arguments are <see cref="ConstructorDeclaration.ThisArguments"/>.</summary>
 public sealed record ThisExpression(int Line) : Expression(Line);
 
 /// <summary><c>a.B</c>, or <c>a?.B</c> when <paramref name="Conditional"/> (N5). The line is the line of the dot.</summary>
@@ -211,7 +211,7 @@ public sealed record FunctionDeclaration(
     Expression? ExpressionBody,
     Block? BlockBody) : Statement(Line);
 
-/// <summary>A field written in a type body (K7): <c>mut int count = 0</c>, <c>pub static int Step = 2</c>, <c>int x</c>, or without a written type as V2 declares, <c>mut count = 0</c>.</summary>
+/// <summary>A field written in a type body (K7): <c>mut int count = 0</c>, <c>pub static int Step = 2</c>, <c>int x</c>, or <c>mut count = 0</c> without a written type, the reading on K7 with V2 (K7 shows a field as <c>Type name</c>; V2 declares a variable without one, and the record's actor bodies write the form).</summary>
 public sealed record FieldDeclaration(int Line, Modifiers Modifiers, TypeSyntax? Type, string Name, Expression? Value) : Statement(Line);
 
 /// <summary>A further constructor (K14): <c>pub Counter() : this(0) { }</c>.</summary>
@@ -235,8 +235,9 @@ public sealed record EnumMember(int Line, string Name, Expression? Number);
 /// <summary>
 /// <c>data</c>, <c>class</c>, <c>interface</c>, <c>enum</c> or <c>flags</c>. The primary constructor is
 /// null when none is written (a class without one, D8's bare <c>data</c> name). Members are the
-/// fields, methods and constructors of the body; values are the members of an enum or flags type.
-/// The modifiers written in front of the declaration stay on it for the checker to judge.
+/// fields, methods and constructors of the body, null where no body is written and an empty list
+/// for <c>{ }</c>; values are the members of an enum or flags type. The modifiers written in
+/// front of the declaration stay on it for the checker to judge.
 /// </summary>
 public sealed record TypeDeclaration(
     int Line,
@@ -247,7 +248,7 @@ public sealed record TypeDeclaration(
     IReadOnlyList<Parameter>? PrimaryConstructor,
     IReadOnlyList<BaseSpecifier> Bases,
     IReadOnlyList<string> EqualBy,
-    IReadOnlyList<Statement> Members,
+    IReadOnlyList<Statement>? Members,
     IReadOnlyList<EnumMember> Values) : Statement(Line);
 
 /// <summary>One file: its statements and declarations in source order (F5).</summary>
