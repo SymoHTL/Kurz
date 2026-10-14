@@ -56,6 +56,7 @@ ALLOWED = [
     r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz",
     r"tools/(?:[^/]+/)*[^/]+\.(?:py|json|txt)",
     r"compiler/(?:(?!(?i:bin|obj)/|\.)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
+    r"compiler/NuGet\.config",
     r"\.review/[^/]+\.yaml", r"\.github/workflows/[^/]+\.yml", r"\.githooks/pre-push",
     r"\.claude/settings\.json", r"\.claude/skills/[^/]+/SKILL\.md",
 ]
@@ -329,7 +330,7 @@ def cases_in(base):
                  ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push",
                  "compiler/Kurz.sln", "compiler/Kurz.Compiler/Kurz.Compiler.csproj", "compiler/Kurz.Compiler/Lexer.cs",
                  "compiler/global.json", "compiler/README.md", "compiler/.editorconfig",
-                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets"):
+                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets", "compiler/NuGet.config"):
         cases.append((f"allowed path: {path}", check_path(path) is None, check_path(path)))
     for label, value in secrets.items():  # one plant per pattern; the error must name that pattern
         expect(f"secret: {label}", {**ok_files, "guides/g.md": value.encode()}, f"credential-shaped string ({label})")

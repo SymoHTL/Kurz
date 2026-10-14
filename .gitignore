@@ -5,3 +5,4 @@ __pycache__/
 compiler/**/bin/
 compiler/**/obj/
 compiler/**/.*/
+compiler/**/TestResults/

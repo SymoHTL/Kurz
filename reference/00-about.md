@@ -48,7 +48,10 @@ carries the `Case:` line alone.
 // rules: T5
 ```
 
-The ids of both kinds are listed in chapter 12. No compiler exists, so nothing runs these files. `tools/lint_reference.py` keeps the
+The ids of both kinds are listed in chapter 12. No tool runs a program or compares its output: the compiler's test suite parses each file and checks the errors of its
+front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
+except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13) and which the suite checks for no diagnostic;
+an error of the type checker is checked only by reading and by the review. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.
 
@@ -56,7 +59,10 @@ by reading it against the rules, and by the review.
 
 ### A1 (assumed, §8) `print`
 
-`print(value)` writes the text of the value and a line break to standard output. The corpus needs
+`print(value)` writes the text of the value and a line break to standard output; the line break
+is one line feed on every platform (the owner, 2026-10-10, against the platform's own line ending,
+under which the output of a program differs by the machine that runs it; the cost is that a tool on
+Windows that expects the two-byte line break in a program's output reads bare line feeds). The corpus needs
 one way to show a result, and the record's samples use this word. The naming of the standard
 library is open (record, section 14), so the word can change.
 

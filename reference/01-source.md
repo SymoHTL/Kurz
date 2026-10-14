@@ -9,9 +9,15 @@ is not valid UTF-8 is one compile error, `invalid-source`, at the line of the fi
 encoded surrogate is one, since it is not valid UTF-8. A byte-order mark at the start of the file is
 skipped, because some Windows editors and tools write one (the owner, 2026-10-09, against refusing
 the mark too, under which a file saved with the mark does not compile; the cost is one accepted
-leading code point that is not part of the text). The error has no case: the lint and every gate read a corpus file as UTF-8, so a case that is
+leading code point that is not part of the text). The two-byte line break that Windows editors
+write is read as one line break wherever it stands, inside a `"""` block too, so the same program
+compiles and prints the same text whether its lines end in a line feed or in the two-byte break (the owner, 2026-10-10, against reading
+the two bytes as written, under which the text of a block depends on the editor; the cost is that a
+literal holds the two-byte line break only through its escapes). A carriage return that no line feed follows is read as L13 says: an ordinary character inside a
+literal, dropped at the end of a line of a `"""` block, and whitespace outside a literal. The error `invalid-source` has no case: the lint and every gate read a corpus file as UTF-8, so a case that is
 not would be refused by the tools as they stand, and the id stands here and not in the table of
-chapter 12, which lists the ids cases expect.
+chapter 12, which lists the ids cases expect. The line break has no case either: the repository
+stores every file with line feeds alone, and checks them out so on every platform (`.gitattributes`, `* text=auto eol=lf`), the Windows runner of the compiler's job included.
 
 Case: [source/utf8-literal.kz](../corpus/source/utf8-literal.kz)
 ```kurz

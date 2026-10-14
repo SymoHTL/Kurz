@@ -32,6 +32,17 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   writes it: a ledger written back another way differs on every line, and the review reads and
   bills the whole file as a change ([knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md](knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md)).
   Gate: `self-tests`.
+- `cd compiler && dotnet test Kurz.sln -c Release -p:RestoreLockedMode=true --disable-build-servers`
+  builds the compiler and runs its unit tests, with the SDK that `compiler/global.json` pins (the
+  dotnet host reads it from the working directory, so the command runs inside `compiler/`) and the
+  packages the lock files pin; `compiler/README.md` says what the suites cover.
+  `py -3 tools/compiler_gate.py` is that run as the gate reads it: red when `compiler/NuGet.config`
+  is missing, is not well-formed XML, does not open its package sources with `<clear />` or maps no
+  package to a source; on a failed test, a skipped test, fewer passed tests than its floor, no
+  summary line at all, a non-zero exit with no failed test, a restore outside the lock files, a
+  missing `dotnet` or a run out of time. The same gate runs on Windows in the workflow
+  `compiler-windows`, which the ruleset does not require: a red Windows run holds no merge
+  (HAZARD #30). Gate: `compiler-tests`, in every gates run.
 - `py -3 tools/lint_reference.py --sync` rewrites every sample in `reference/` from its corpus
   file. Change the `.kz` file, then sync: a sample edited by hand is red until it is overwritten.
   Gate: `reference`.
@@ -180,11 +191,15 @@ rule, each rule with an id and a status, and `corpus/` holds its cases: one smal
 file, with what it prints or the error it raises. `knowledge/` and `guides/` hold what a later
 session must know; `INDEX.md` is their index. `tools/` holds the gates (one runner, `gates.py`),
 the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
-`.github/workflows/` runs both. `compiler/` is the compiler's directory, the one directory the
-tree gate's allowlist was widened by for it: there it admits `.cs`, `.csproj`, `.sln`, `.props`,
-`.targets`, `.json`, `.md` and `.editorconfig` files outside `bin/`, `obj/` and dot-directories, and
-C# sources and project files nowhere else (since pull request 29 retired the design-phase rule, after the owner said
-build on 2026-10-09). The map of every gate is
+`.github/workflows/` runs both, and the compiler's Windows job. `compiler/` is the compiler's
+directory, the one directory the tree gate's allowlist was widened by for it: there it admits
+`.cs`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and `.editorconfig` files outside
+`bin/`, `obj/` and dot-directories, plus `compiler/NuGet.config` by name, and C# sources and
+project files nowhere else (since pull
+request 29 retired the design-phase rule, after the owner said build on 2026-10-09). It holds the
+library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Corpus/`
+reads a case header), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through
+the front end, and `compiler/README.md`. The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
 ## Critical Rules
@@ -365,6 +380,7 @@ Gate: review rule "rules for sessions".
 | every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout, a push with `--no-verify` (#4) |
 | workflow facts (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
+| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |

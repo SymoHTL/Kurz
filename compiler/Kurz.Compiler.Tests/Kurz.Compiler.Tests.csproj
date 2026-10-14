@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- xunit tests of the compiler. Every Kurz program a test reads is inline: the tree gate admits no
+       .kz file under compiler/, and the corpus under corpus/ is read where it lies. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Kurz.Compiler.Tests</RootNamespace>
+    <!-- test names read as sentences, with underscores for spaces; a helper's return type is for reading, not speed -->
+    <NoWarn>$(NoWarn);CA1707;CA1859</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kurz.Compiler\Kurz.Compiler.csproj" />
+  </ItemGroup>
+
+</Project>
