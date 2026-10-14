@@ -197,9 +197,10 @@ directory, the one directory the tree gate's allowlist was widened by for it: th
 `bin/`, `obj/` and dot-directories, plus `compiler/NuGet.config` by name, and C# sources and
 project files nowhere else (since pull
 request 29 retired the design-phase rule, after the owner said build on 2026-10-09). It holds the
-library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Corpus/`
-reads a case header), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through
-the front end, and `compiler/README.md`. The map of every gate is
+library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Semantics/`
+checks the tree against the rules of chapters 1 to 3, 5, 6 and 8 to 10 and says `not supported`
+to the rest, `Corpus/` reads a case header), the xunit suite `Kurz.Compiler.Tests`, which runs
+every corpus case through the front end and the checker, and `compiler/README.md`. The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
 ## Critical Rules

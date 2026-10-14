@@ -6,12 +6,16 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
 - `Kurz.Compiler/`: the library. `Text/` reads a source file (L1: UTF-8, a byte-order mark
   skipped, the two-byte line break of Windows editors read as one, in a `"""` block too), `Syntax/`
   turns it into tokens and a syntax tree (the syntax of chapters 1 to 11: every declaration,
-  statement and expression form the reference shows), `Corpus/` reads the header of a corpus case
-  in the shape `reference/00-about.md` states.
-- `Kurz.Compiler.Tests/`: xunit tests. Every program the lexer and parser tests read stands inline
-  in the test, and the corpus suite reads the cases where they lie, under `corpus/`: the tree gate
-  admits no `.kz` file under `compiler/`. That suite runs every corpus case through the front end
-  and checks that the errors it reports are exactly the ones the case's header expects of it.
+  statement and expression form the reference shows), `Semantics/` checks a tree the parser read
+  without an error against the rules of chapters 1 to 3, 5, 6 and 8 to 10 (the section "What the
+  checker reads" below) and says `not supported` to a construct of the other chapters, `Corpus/`
+  reads the header of a corpus case in the shape `reference/00-about.md` states.
+- `Kurz.Compiler.Tests/`: xunit tests. Every program the lexer, parser and checker tests read
+  stands inline in the test, and the corpus suite reads the cases where they lie, under `corpus/`:
+  the tree gate admits no `.kz` file under `compiler/`. That suite runs every corpus case through
+  the front end, and every case the front end reads clean through the checker, and checks that
+  the errors each reports are exactly the ones the case's header expects of it; a case that uses
+  a construct the checker does not read must get `not supported` and no error from it.
 
 ## Building and testing
 
@@ -43,15 +47,17 @@ A diagnostic is one of two kinds. A compile error carries an id from the table o
 UTF-8), and the line the reference's E1 names; a corpus case pins both and never the message,
 which is free to improve. The front end raises six ids of the table, `syntax`, `semicolon`,
 `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, and `invalid-source`.
-Nothing in this directory raises any other id of the table: a program that breaks a rule of the
-type system parses with no diagnostic, and a corpus case that expects such an id is checked for
-parsing clean, its expectation read against the rules as `reference/00-about.md` says. The second
-kind, `not supported`, names a construct the reference states and the front end does not read; it
-carries no id, so it can never pass for an error a case expects, and a corpus case that gets one
-fails its theory; the front end produces it nowhere, since every form of chapters 1 to 11 is read.
-One corpus case, `data/flags-match.kz`, expects a `syntax` that depends on the type of the matched
-value (D13), which the front end cannot see; the corpus theory checks that it parses with no
-diagnostic.
+The checker raises the ids of the chapters it reads, listed in its section below, and `syntax` for
+the shapes E4 leaves to it; a corpus case that expects an id of a chapter it does not read is
+checked for parsing clean and for getting `not supported` from the checker, its expectation read
+against the rules as `reference/00-about.md` says. The second kind, `not supported`, names a
+construct the reference states and this directory does not read; it carries no id, so it can
+never pass for an error a case expects. The front end produces it nowhere, since every form of
+chapters 1 to 11 is read; the checker produces it for the constructs its section lists, and says
+nothing else about a program that uses one. One corpus case, `data/flags-match.kz`, expects a
+`syntax` that depends on the type of the matched value (D13), which the front end cannot see and
+the checker does not read; the corpus theories check that it parses with no diagnostic and that
+the checker says `not supported` on its `flags` type.
 
 A declaration whose type is a user type is parsed speculatively, since its first token is a plain
 name, and so is one whose type is a function type (F11), since it starts with `(` as an expression
@@ -68,7 +74,7 @@ error wherever a block that a statement form, a type body, `with` or a function 
 next line, is missing or is replaced by a statement, and the rest of that line goes with the one
 error; a lambda's block after a `=>` that ends its line is the reading on F7 below.
 
-## Readings the reference leaves open
+## Readings the reference leaves open to the front end
 
 Each of these is the front end's reading, not a decision; a design round can ask about the ones
 that sit under a rule by its id. Every one is pinned by a test.
@@ -122,7 +128,9 @@ that sit under a rule by its id. Every one is pinned by a test.
   and a lone surrogate in the literal of a program text that was never a file (L1: no code point, and
   a file cannot hold one) are each `syntax`, as text no rule gives a meaning. Which id the doubled
   markers, the type parameters and the surrogate take is a question for a design round: an error of
-  the type checker could be meant, and E4 names the parser's id for none of them.
+  the type checker could be meant, and E4 names the parser's id for none of them. A modifier other
+  than `mut` before a variable's name (`pub x = 1`) is `syntax` the same way: V2 and V4 give a
+  variable `mut` and nothing else, so the word begins no declaration and the statement ends at it.
 - Recovery (no rule id): after an error the parser skips the rest of the statement, which is the
   rest of its line once every parenthesis, bracket and brace the statement opened is closed again,
   and a block the statement opened, with an `else` clause after it, so that the next statement
@@ -146,3 +154,83 @@ after text, or whose opening line holds text or a fourth quote, when no line tha
 follows; and a `class`, `data` or `interface` body whose `}` is missing reads the top-level
 statements after it as members, one `syntax` per line of them before the `syntax` of the missing
 brace. Each is pinned as it is, so that a fix shows.
+
+## What the checker reads
+
+The checker (`Semantics/`) takes a tree the parser read without an error and checks it against
+chapters 1 (source), 2 (variables), 3 (types and operators), 5 (data types: D1 to D11, D14 and
+D15), 6 (values: M1 to M5, M7, and M9 for lists), 8 (functions, without F9 and F10), 9 (outcomes)
+and 10 (control flow). It declares every data type and function of the file first (both are
+visible in the whole file, F6), resolves the fields and bases of the data types, checks the
+defaults, then every function body, then the top level. Every expression gets a type, and an
+expression made of literals and constants gets its value too, so that `byte c = 200 + 100` is
+`constant-overflow` where T6 and L17 put it and `10 / 0` is `constant-divide-by-zero`. A call is
+resolved as F12 to F14 and D11 say: named arguments are bound to parameters, type arguments are
+inferred from the arguments (T27: no widening between them, a literal takes what the other
+arguments fix, two data types meet at their common base), and the one candidate whose parameters
+fit is taken, else `argument-mismatch`, `ambiguous-call` or `cannot-infer`. A `match` and a postfix
+`else` are checked for the cases they cover (C4, C9, O5, O8), and a case the calling function does
+not list propagates as `unlisted-case` (O2, O3, O9). One defect, one diagnostic (E1): a value the
+checker could not type has the error type, which fits anywhere and is reported nowhere again.
+
+It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign-mix`,
+`constant-overflow`, `constant-divide-by-zero`, `inexact-literal`, `redeclared`, `unknown-name`,
+`unused-variable`, `assign-immutable`, `capture-assign`, `mut-required`, `mut-at-call`,
+`argument-mismatch`, `ambiguous-call`, `cannot-infer`, `duplicate-function`,
+`default-not-constant`, `missing-return`, `throw-needs-value`, `unlisted-case`,
+`match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`,
+`string-index`, `no-text`, and `syntax` for the shapes E4 leaves to it (the readings below).
+
+### What the checker does not read
+
+A program that uses one of these gets `not supported` at the construct's line and nothing else:
+a `class`, an `interface`, an `enum` or a `flags` type and a value of one (chapter 7, D12, D13,
+and the A-rules of their text); `null`, a nullable type, `?.` and `??` (chapter 4); `weak` (R3,
+R5), a `raw` block (R7) and `use` (F10); `Map` (M8, M9, M10) and an assignment into an index (M9);
+the body of a `data` type and its methods (D16 to D20), `equal by` (K8), an interface a `data`
+type names (K10) and the explicit form of inheritance (K17); the limit of a type parameter and a
+member of one (T19); a conversion to `string`, `bool` or `char` (A5 to A7); `this` (K7) and a
+modifier of a method on a top-level function (K7, M6). The corpus theory lists the rule ids whose
+cases the checker must say `not supported` to, and eight cases by name that cite only rules it
+reads and still use such a construct, each with the construct.
+
+### Readings the reference leaves open to the checker
+
+Each is the checker's reading, not a decision, pinned by a test in `CheckerTests.cs`; a design
+round can ask about it by the rule's id.
+
+- E4 with F11, T10, D2, F5 and C8: a function's name where a value stands (`f = Double`) is
+  `syntax`, since F11 gives a function value through a lambda only, and so is a type's name there
+  (`print(int)`); a value on its own as a statement (`x + 1`) is `syntax`, since F5 lists what a
+  statement is and a value is none; a range outside `for` is `syntax`, since C8 shows it there only.
+- T9 with T23 and T28: `-` on a `uint` or a `ulong` is `sign-mix`, since no signed type takes
+  every value of it; on a `byte` or a `ushort` the operand is promoted to `int` first, as T28
+  promotes it under every operator, so `-b` on a `byte` is an `int` and no error.
+- V10 with D9: a member a type does not have (`s.Count` on a string, `xs.Size` on a list) is
+  `unknown-name` at the dot, V10's id for a name no rule gives a type; a member of a union is
+  `type-mismatch`, since a union is one of its cases only after a `match` (D9).
+- V3 with C8 and M9: an assignment to a loop variable is `assign-immutable`, since C8 names it a
+  variable and V3 makes a variable without `mut` immutable; so is an assignment to a field through
+  a value no `mut` variable reaches (`Point(1).X = 2`), and to `Count`, which M9 gives no setter.
+- V9 with A1 and F6: a variable named `print`, or named as a function or a type of the file, is
+  `redeclared`, since a function's and a type's name is visible in the whole file and so is
+  `print`.
+- T27 with M9: `List()` with no type argument and no argument to infer it from is `cannot-infer`,
+  the id T27 gives a type argument nothing fixes.
+- F12: of two functions that do not differ in their parameters the second is `duplicate-function`,
+  and it is left out of overload resolution, so a call of the name gets no second error (E1).
+- O5: an arm of a postfix `else` that names a type the call cannot return beside its success, and
+  an arm that recovers with a value of another type than the success, are `type-mismatch` at the
+  arm; a case the arms leave out propagates as O2 says, or is `unlisted-case` where the calling
+  function does not list it.
+- T2 with T29 and L6: `decimal` beside a floating-point operand is `type-mismatch`, since neither
+  widens into the other; a duration under `*`, `/` or `%` is `type-mismatch`, since T29 gives the
+  time types `+`, `-` and the comparisons; `"a" + "b"` is `type-mismatch`, since L6 joins text by
+  interpolation and T2 gives `+` to numbers.
+- F16: a loop variable of the top-level code reserves its name in every top-level function, so a
+  parameter or a local of that name there is `redeclared`; F16's letter counts "every variable
+  declared outside a function ... at any depth of the top-level code". The corpus case
+  `null/early-continue-narrows.kz` named its loop variable `id` beside a parameter `id`, and was
+  renamed to hold under the rule as written; whether a loop variable, which lives only in its loop,
+  should reserve its name is a question for a design round.
+- F1: a function declared inside a block is a function of the file, as the front end reads it.

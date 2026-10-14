@@ -1,0 +1,256 @@
+using Kurz.Compiler.Corpus;
+using Kurz.Compiler.Semantics;
+using Kurz.Compiler.Syntax;
+using Kurz.Compiler.Text;
+using Xunit;
+
+namespace Kurz.Compiler.Tests;
+
+/// <summary>
+/// Every file of the corpus through the lexer, the parser and the checker. The front end's theory: a
+/// case that expects an error the front end reports (<c>syntax</c>, <c>semicolon</c>,
+/// <c>reserved-word</c>, <c>braces-required</c>, <c>unknown-escape</c>, <c>block-indentation</c>) gets
+/// exactly that error at that line; every other case gets none from the front end. The checker's
+/// theory, on every case the front end read clean: a case the checker reads in full gets exactly the
+/// error its header expects, or none; a case on which the checker says <c>not supported</c> gets no
+/// error from it, and cites a rule of a chapter the checker does not read, or stands in the list of
+/// cases that use such a construct under a rule it does read. No case is skipped, and floors hold the
+/// counts of cases read in full and of cases that expect an error the checker reports.
+/// </summary>
+public sealed class CorpusTests
+{
+    /// <summary>The corpus has more cases than this; a scan that finds fewer looked in the wrong place.</summary>
+    private const int Floor = 250;
+
+    /// <summary>The corpus has more cases that expect an error of the front end than this; a count below it read the headers wrong.</summary>
+    private const int FrontEndErrorFloor = 15;
+
+    /// <summary>The checker reads more cases in full than this, and more cases that expect an error it reports than the second floor; fewer means it refuses what it read before.</summary>
+    private const int ReadInFullFloor = 180;
+
+    private const int CheckerErrorFloor = 55;
+
+    private static readonly HashSet<string> FrontEndIds =
+    [
+        ErrorIds.Syntax, ErrorIds.Semicolon, ErrorIds.ReservedWord, ErrorIds.BracesRequired, ErrorIds.UnknownEscape, ErrorIds.BlockIndentation,
+    ];
+
+    /// <summary>E4 names shapes that only the type checker can tell: a <c>match</c> on a set of flags (D13). The parser reads them as sound.</summary>
+    private static readonly HashSet<string> CheckerSyntax = ["data/flags-match.kz"];
+
+    /// <summary>
+    /// The rules of the chapters the checker does not read: the null chapter, the class chapter, the
+    /// memory chapter, <c>enum</c> and <c>flags</c> (D12, D13, D17 to D20), the body of a data type (D16),
+    /// folders (F9, F10), <c>mut</c> methods and maps (M6, M8, M10), and the texts of class instances,
+    /// maps and sets of flags (A5 to A7, A9, A10, A13, A15). A case that cites one may get <c>not supported</c>.
+    /// </summary>
+    private static bool OutsideTheChecker(string rule) =>
+        rule[0] is 'N' or 'K' or 'R'
+        || rule is "D12" or "D13" or "D16" or "D17" or "D18" or "D19" or "D20" or "F9" or "F10" or "M6" or "M8" or "M10"
+        || rule is "A5" or "A6" or "A7" or "A9" or "A10" or "A13" or "A15";
+
+    /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct.</summary>
+    private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
+    {
+        ["classes/print-without-text.kz"] = "a class (chapter 7)",
+        ["types/generic-cannot-infer-classes.kz"] = "classes (chapter 7)",
+        ["types/generic-limit.kz"] = "an interface, a class and the limit of a type parameter (K6, K10, T19)",
+        ["types/generic-limit-unmet.kz"] = "an interface and the limit of a type parameter (K6, K10, T19)",
+        ["values/map.kz"] = "a Map and `??` (M9, N4)",
+        ["values/mut-method-through-field.kz"] = "a class (chapter 7)",
+        ["values/text.kz"] = "an enum, a nullable type and null (D12, N1)",
+        ["values/text-more.kz"] = "a flags type (D13)",
+    };
+
+    private static readonly string Root = FindRoot();
+
+    private static string FindRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, "corpus")) && File.Exists(Path.Combine(directory.FullName, "kurz-design.md")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("the repository root, which holds corpus/ and kurz-design.md, is not above the test directory");
+    }
+
+    /// <summary>Every case file, as a path relative to corpus/ with forward slashes, in a fixed order.</summary>
+    private static List<string> CaseFiles()
+    {
+        var corpus = Path.Combine(Root, "corpus");
+        return Directory.EnumerateFiles(corpus, "*.kz", SearchOption.AllDirectories)
+            .Select(file => Path.GetRelativePath(corpus, file).Replace('\\', '/'))
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    public static TheoryData<string> Cases()
+    {
+        var data = new TheoryData<string>();
+        foreach (var file in CaseFiles())
+        {
+            data.Add(file);
+        }
+
+        return data;
+    }
+
+    private static (CaseHeader Header, ProgramSyntax Tree, DiagnosticBag FrontEnd) ReadCase(string relativePath)
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(Root, "corpus", relativePath));
+        var source = SourceText.FromBytes(relativePath, bytes, out var invalid);
+        Assert.True(source is not null, $"{relativePath}: {invalid}");
+        var header = CaseHeader.Parse(source!.Text, out var problem);
+        Assert.True(header is not null, $"{relativePath}: {problem}");
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(source, diagnostics);
+        return (header!, tree, diagnostics);
+    }
+
+    private static bool ExpectsFrontEndError(CaseHeader header, string relativePath) =>
+        header.Expectation == Expectation.Error && FrontEndIds.Contains(header.ErrorId!) && !CheckerSyntax.Contains(relativePath);
+
+    [Fact]
+    public void The_corpus_holds_at_least_the_floor_of_cases()
+    {
+        Assert.True(CaseFiles().Count >= Floor, $"found {CaseFiles().Count} cases under {Root}");
+    }
+
+    [Theory]
+    [MemberData(nameof(Cases))]
+    public void The_front_end_reads_a_case_as_its_header_says(string relativePath)
+    {
+        var (header, tree, diagnostics) = ReadCase(relativePath);
+        var found = diagnostics.Items.Select(d => (d.Id, d.Line)).ToList();
+        Assert.DoesNotContain(diagnostics.Items, d => !d.IsError);
+        if (ExpectsFrontEndError(header, relativePath))
+        {
+            Assert.Equal([(header.ErrorId!, header.ErrorLine)], found);
+        }
+        else
+        {
+            Assert.Empty(found);
+            Assert.NotEmpty(tree.Statements); // a tree dropped whole would pass the line above
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Cases))]
+    public void The_checker_reads_a_case_as_its_header_says(string relativePath)
+    {
+        var (header, tree, frontEnd) = ReadCase(relativePath);
+        if (frontEnd.HasErrors)
+        {
+            Assert.True(ExpectsFrontEndError(header, relativePath), "the theory above holds this case"); // the checker reads a tree the parser read clean
+            return;
+        }
+
+        var diagnostics = new DiagnosticBag();
+        Checker.Check(tree, diagnostics);
+        var errors = diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList();
+        var unsupported = diagnostics.Sorted.Where(d => !d.IsError).Select(d => d.ToString()).ToList();
+        if (unsupported.Count > 0)
+        {
+            Assert.True(header.Rules.Any(OutsideTheChecker) || UnsupportedByConstruct.ContainsKey(relativePath),
+                $"the checker says `{string.Join("; ", unsupported)}` on a case that cites only rules it reads ({string.Join(", ", header.Rules)})");
+            Assert.True(errors.Count == 0, $"the checker reports {string.Join(", ", errors)} beside `{string.Join("; ", unsupported)}`");
+            return;
+        }
+
+        if (header.Expectation == Expectation.Error)
+        {
+            Assert.Equal([(header.ErrorId!, header.ErrorLine)], errors);
+        }
+        else
+        {
+            Assert.Empty(errors);
+        }
+    }
+
+    [Fact]
+    public void At_least_the_front_end_error_floor_of_cases_expect_an_error_of_the_front_end()
+    {
+        // the positive control of the front end's theory: its error branch runs for at least this many cases, read as the theory reads them
+        var found = CaseFiles().Count(relativePath => ExpectsFrontEndError(ReadCase(relativePath).Header, relativePath));
+        Assert.True(found >= FrontEndErrorFloor, $"only {found} cases expect an error of the front end");
+    }
+
+    [Fact]
+    public void At_least_the_floors_of_cases_are_read_in_full_by_the_checker()
+    {
+        // the positive controls of the checker's theory: its exact branch runs for at least this many cases, and its error branch for at least the second floor
+        var inFull = 0;
+        var withError = 0;
+        var notSupported = new List<string>();
+        foreach (var relativePath in CaseFiles())
+        {
+            var (header, tree, frontEnd) = ReadCase(relativePath);
+            if (frontEnd.HasErrors)
+            {
+                continue;
+            }
+
+            var diagnostics = new DiagnosticBag();
+            Checker.Check(tree, diagnostics);
+            if (diagnostics.HasNotSupported)
+            {
+                notSupported.Add(relativePath);
+                continue;
+            }
+
+            inFull++;
+            if (header.Expectation == Expectation.Error)
+            {
+                withError++;
+            }
+        }
+
+        Assert.True(inFull >= ReadInFullFloor, $"only {inFull} cases are read in full; not supported on {string.Join(", ", notSupported)}");
+        Assert.True(withError >= CheckerErrorFloor, $"only {withError} cases that expect an error are read in full");
+    }
+
+    [Fact]
+    public void Every_case_listed_as_unsupported_by_its_construct_exists_and_gets_not_supported()
+    {
+        // a stale entry would excuse a case the checker reads in full from its expectation
+        foreach (var (relativePath, construct) in UnsupportedByConstruct)
+        {
+            var (_, tree, frontEnd) = ReadCase(relativePath);
+            Assert.False(frontEnd.HasErrors, relativePath);
+            var diagnostics = new DiagnosticBag();
+            Checker.Check(tree, diagnostics);
+            Assert.True(diagnostics.HasNotSupported, $"{relativePath} is read in full, so its entry ({construct}) is stale");
+        }
+    }
+
+    [Theory]
+    [InlineData("// expect: output\n// | 9\n// rules: V1\n\nx = 4\nprint(x + 5)\n", Expectation.Output, null, 0, 1, null, 5)]
+    [InlineData("// expect: error assign-immutable at 6\n// rules: V7\n\nx = 4\nprint(x)\nx = 5\n", Expectation.Error, "assign-immutable", 6, 0, null, 4)]
+    [InlineData("// expect: throws overflow at 8\n// | 1\n// build: test\n// rules: T5\n\nx = 1\nprint(x)\nprint(2147483647 + x)\n", Expectation.Throws, "overflow", 8, 1, BuildKind.Test, 6)]
+    public void A_header_in_its_shape_is_read(string text, Expectation expectation, string? id, int line, int outputLines, BuildKind? build, int bodyLine)
+    {
+        var header = CaseHeader.Parse(text, out var problem);
+        Assert.Null(problem);
+        Assert.Equal((expectation, id, line, outputLines, build, bodyLine), (header!.Expectation, header.ErrorId, header.ErrorLine, header.OutputLines.Count, header.Build, header.BodyLine));
+    }
+
+    [Theory]
+    [InlineData("// expects output\n// rules: V1\n\nx = 4\n")]
+    [InlineData("// expect: output\n\nx = 4\n")]
+    [InlineData("// expect: output\n// rules: v1\n\nx = 4\n")]
+    [InlineData("// expect: output\n// rules: V1\nx = 4\n")]
+    [InlineData("// expect: output\n// rules: V1\n\n")]
+    [InlineData("// expect: error unused-variable at 5\n// | a\n// rules: V1\n\nx\n")]
+    [InlineData("// expect: throws overflow at 5\n// build: debug\n// rules: V1\n\nx\n")]
+    public void A_header_out_of_its_shape_is_refused(string text)
+    {
+        Assert.Null(CaseHeader.Parse(text, out var problem));
+        Assert.NotNull(problem);
+    }
+}

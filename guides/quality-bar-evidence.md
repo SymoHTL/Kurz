@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-11
-digest: 459d19c59eaa4ca65d645e81df2dbcc49d7f683b0fb40d62d5754d933b7a2ae9
+generated: 2026-10-14
+digest: b44cc2c99898f9efeec0a9b8c0396e491ceecc686cb54073bbb1ede101a51a49
 ttl_days: 60
 metadata:
   type: reference
@@ -142,8 +142,8 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Forge | Count |
 |---|---|
 | Pull requests opened by a writer, or merged | 10 |
-| Pull requests merged | 9 |
-| Merged over red, with a recorded waiver | 6 |
+| Pull requests merged | 10 |
+| Merged over red, with a recorded waiver | 7 |
 | Review findings posted: high | 67 |
 | Review findings posted: medium | 770 |
 | Review findings posted: low | 1026 |

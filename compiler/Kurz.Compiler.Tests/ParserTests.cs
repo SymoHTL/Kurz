@@ -230,6 +230,13 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void A_modifier_other_than_mut_on_a_variable_is_syntax()
+    {
+        // E4's general clause: V2 and V4 give a variable `mut` and nothing else, so `pub` begins no declaration and the statement ends at it
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("pub x = 1\nprint(x)"));
+    }
+
+    [Fact]
     public void A_speculation_that_is_no_declaration_drops_what_it_reported()
     {
         // `Job match` reports `reserved-word` on the name, then finds neither `=` nor `(`: the statement is an
