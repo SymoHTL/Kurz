@@ -10,18 +10,27 @@ public sealed partial class Checker
     /// C4, C9, O8: a <c>match</c> over a union or a single type: each arm names a case type, a
     /// literal or <c>else</c>; an arm an earlier one covers is <c>unreachable-arm</c>, a type that is
     /// no case is <c>type-mismatch</c>, and a <c>match</c> that lists neither every case nor <c>else</c>
-    /// is <c>match-not-exhaustive</c>. As an expression its arms share one type.
+    /// is <c>match-not-exhaustive</c>. As an expression its arms share one type. An arm after
+    /// <c>else</c> never reaches the checker: C9 puts <c>else</c> last, and the parser reports one
+    /// as <c>syntax</c> (the test <c>An_arm_after_else_is_syntax_at_its_line</c> of the parser's suite).
     /// </summary>
     private MatchResult CheckMatch(Expression subject, IReadOnlyList<MatchArm> arms, bool isExpression, KurzType? expected, int line)
     {
         var typed = CheckExpression(subject, null, keepCases: true);
         var subjectType = typed.Type;
         var known = !typed.IsError;
+        if (Types.IsVoid(subjectType))
+        {
+            Report(ErrorIds.Syntax, subject.Line, "a call with a `void` success used as a value (O10)");
+            known = false; // the arms name cases of nothing: as for a subject the checker could not type (E1)
+        }
+
         var cases = subjectType is UnionType u ? u.Cases.ToList() : known ? [subjectType] : [];
         var covered = new List<KurzType>();
         var literals = new List<(KurzType Type, Constant Value)>();
         var armTypes = new List<(KurzType Type, int Line)>();
         var hasElse = false;
+        var armWrong = false;
         var allEnd = true;
         foreach (var arm in arms)
         {
@@ -29,7 +38,7 @@ public sealed partial class Checker
             switch (arm.Pattern)
             {
                 case ElsePattern:
-                    if (known && Covers(cases, covered))
+                    if (known && Covers(cases, covered, literals))
                     {
                         Report(ErrorIds.UnreachableArm, arm.Line, "`else` after arms that cover every case (C4, C9)");
                     }
@@ -42,11 +51,12 @@ public sealed partial class Checker
                         var type = known ? Resolve(tp.Type) : Types.Error;
                         if (known && !Types.IsError(type))
                         {
-                            if (!cases.Any(c => Types.Assignable(type, c)))
+                            if (!cases.Any(c => IsCaseOf(type, c)))
                             {
                                 Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case of `{subjectType}` and derived from none (C4, T1)");
+                                armWrong = true;
                             }
-                            else if (covered.Any(c => Types.Assignable(type, c)))
+                            else if (covered.Any(c => IsCaseOf(type, c)))
                             {
                                 Report(ErrorIds.UnreachableArm, arm.Line, $"an earlier arm covers `{type}` (C4)");
                             }
@@ -66,21 +76,32 @@ public sealed partial class Checker
 
                 case ValuePattern vp:
                     {
+                        if (!known)
+                        {
+                            CheckLoosely(vp.Value); // the arms name values of a type the checker does not know (a value of an enum, say): nothing is judged
+                            break;
+                        }
+
+                        // C9: an arm names a literal; a folded expression or a name is not one, text no rule gives a meaning (E4)
+                        if (!IsLiteralPattern(vp.Value))
+                        {
+                            Report(ErrorIds.Syntax, arm.Line, "an arm names a case type, a literal or `else` (C4, C9)");
+                            CheckLoosely(vp.Value);
+                            break;
+                        }
+
                         var value = CheckExpression(vp.Value, Reach(subjectType));
-                        if (!known || value.IsError)
+                        if (value.IsError || value.Constant is null)
                         {
                             break;
                         }
 
-                        if (value.Constant is null)
-                        {
-                            Report(ErrorIds.Syntax, arm.Line, "an arm names a case type, a literal or `else` (C4, C9)");
-                        }
-                        else if (!cases.Any(c => Types.Assignable(value.Type, c)))
+                        if (!cases.Any(c => IsCaseOf(value.Type, c)))
                         {
                             Report(ErrorIds.TypeMismatch, arm.Line, $"a `{value.Type}` is no value of `{subjectType}` (C9, T1)");
+                            armWrong = true;
                         }
-                        else if (covered.Any(c => Types.Assignable(value.Type, c)))
+                        else if (covered.Any(c => IsCaseOf(value.Type, c)))
                         {
                             Report(ErrorIds.UnreachableArm, arm.Line, $"the arm of `{value.Type}` above takes every value (C4, C9)");
                         }
@@ -135,7 +156,7 @@ public sealed partial class Checker
             PopScope();
         }
 
-        var exhaustive = !known || hasElse || Covers(cases, covered) || (subjectType is PrimitiveType { Kind: Primitive.Bool } && literals.Count(l => l.Value is BoolConstant) == 2);
+        var exhaustive = !known || hasElse || armWrong || Covers(cases, covered, literals); // an arm that named no case was reported; the match is not reported again for it (E1)
         if (!exhaustive)
         {
             Report(ErrorIds.MatchNotExhaustive, line, $"the `match` lists neither every case of `{subjectType}` nor `else` (O8, C9)");
@@ -146,13 +167,33 @@ public sealed partial class Checker
             return new MatchResult(Types.Void, exhaustive, allEnd);
         }
 
-        return new MatchResult(ArmsType(armTypes, expected, line), exhaustive, allEnd);
+        if (armTypes.Count == 0 && !armWrong && known)
+        {
+            Report(ErrorIds.Syntax, line, "a `match` used as a value has an arm that is a value (C9)"); // every arm throws: text no rule gives a meaning (E4)
+            return new MatchResult(Types.Error, exhaustive, allEnd);
+        }
+
+        return new MatchResult(ArmsType(armTypes, expected), exhaustive, allEnd);
     }
 
-    private static bool Covers(List<KurzType> cases, List<KurzType> covered) => cases.Count > 0 && cases.All(c => covered.Any(t => Types.Assignable(c, t)));
+    /// <summary>C4: whether an arm's type names a case: the case itself, or a data type derived from it (D6); no widening (T8) makes a case.</summary>
+    private static bool IsCaseOf(KurzType type, KurzType c) => Types.Same(type, c) || (type is DataType && c is DataType && Types.Assignable(type, c));
 
-    /// <summary>C9: the type the arms of a <c>match</c> expression share, or the one written or expected around it.</summary>
-    private KurzType ArmsType(List<(KurzType Type, int Line)> armTypes, KurzType? expected, int line)
+    /// <summary>C9: what an arm may name beside a type and <c>else</c>: a literal, with its sign where it is a number (L17).</summary>
+    private static bool IsLiteralPattern(Expression e) => Unwrap(e) switch
+    {
+        IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral => true,
+        StringLiteral s => s.IsPlain,
+        UnaryExpression { Operator: TokenKind.Minus, Operand: IntegerLiteral or RealLiteral or UnitLiteral } => true,
+        _ => false,
+    };
+
+    /// <summary>O8, C9: every case is covered by an arm of its type or a base's, or, for <c>bool</c>, by the arms of both its literals.</summary>
+    private static bool Covers(List<KurzType> cases, List<KurzType> covered, List<(KurzType Type, Constant Value)> literals) =>
+        cases.Count > 0 && cases.All(c => covered.Any(t => IsCaseOf(c, t)) || (c is PrimitiveType { Kind: Primitive.Bool } && literals.Count(l => l.Value is BoolConstant) == 2));
+
+    /// <summary>C9: the type the arms of a <c>match</c> expression share, or the one written or expected around it; an arm of another type is reported at that arm (E1).</summary>
+    private KurzType ArmsType(List<(KurzType Type, int Line)> armTypes, KurzType? expected)
     {
         if (armTypes.Count == 0 || armTypes.Any(a => Types.IsError(a.Type)))
         {
@@ -173,10 +214,13 @@ public sealed partial class Checker
         }
 
         var first = armTypes[0].Type;
-        if (armTypes.Any(a => !Types.Same(a.Type, first)))
+        foreach (var (type, armLine) in armTypes)
         {
-            Report(ErrorIds.TypeMismatch, line, "the arms of a `match` used as a value have one type (C9)");
-            return Types.Error;
+            if (!Types.Same(type, first))
+            {
+                Report(ErrorIds.TypeMismatch, armLine, $"the arm is a `{type}` where the arms above are `{first}`: the arms of a `match` used as a value have one type (C9)");
+                return Types.Error;
+            }
         }
 
         return first;
@@ -216,9 +260,9 @@ public sealed partial class Checker
             switch (arm.Pattern)
             {
                 case ElsePattern:
-                    if (rest.Count > 0 && rest.All(c => handled.Any(h => Types.Assignable(c, h))))
+                    if (rest.All(c => handled.Any(h => IsCaseOf(c, h))))
                     {
-                        Report(ErrorIds.UnreachableArm, arm.Line, "`else` after arms that handle every case (O5, C4)");
+                        Report(ErrorIds.UnreachableArm, arm.Line, "`else` after arms that handle every case (O5, C4)"); // a call with no case beside its success among them
                     }
 
                     hasElse = true;
@@ -228,12 +272,12 @@ public sealed partial class Checker
                         var type = Resolve(tp.Type);
                         if (!Types.IsError(type))
                         {
-                            if (!rest.Any(c => Types.Assignable(type, c)))
+                            if (!rest.Any(c => IsCaseOf(type, c)))
                             {
                                 Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case the call can return beside its success (O5, T1)");
                                 armWrong = true;
                             }
-                            else if (handled.Any(h => Types.Assignable(type, h)))
+                            else if (handled.Any(h => IsCaseOf(type, h)))
                             {
                                 Report(ErrorIds.UnreachableArm, arm.Line, $"an earlier arm handles `{type}` (O5, C4)");
                             }
@@ -265,7 +309,9 @@ public sealed partial class Checker
 
         if (!hasElse && !armWrong)
         {
-            Propagate(rest.Where(c => !handled.Any(h => Types.Assignable(c, h))), e.Line); // an arm that names no case was reported; what it meant to handle is not reported again (E1)
+            // E1: an arm that names no case was reported at the arm; which case it meant is unknown, so no case is reported as unlisted
+            // beside it, the one defect carrying the one error
+            Propagate(rest.Where(c => !handled.Any(h => IsCaseOf(c, h))), e.Line);
         }
 
         if (!isStatement && Types.IsVoid(success))
@@ -277,25 +323,44 @@ public sealed partial class Checker
         return new Typed(success);
     }
 
+    /// <summary>The arms of an <c>else</c> after a call that did not type: what does not depend on the call's cases is still checked, with the success unknown (E1).</summary>
     private void CheckArmsLoosely(IReadOnlyList<MatchArm> arms)
     {
         foreach (var arm in arms)
         {
             PushScope();
-            if (arm.Pattern is TypePattern { Binding: not null } tp)
+            switch (arm.Pattern)
             {
-                Declare(tp.Binding, Types.Error, false, VariableKind.Binding, arm.Line);
+                case TypePattern tp:
+                    {
+                        var type = Resolve(tp.Type);
+                        if (tp.Binding is not null)
+                        {
+                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line);
+                        }
+
+                        break;
+                    }
+
+                case ValuePattern vp:
+                    Report(ErrorIds.Syntax, arm.Line, "an arm of `else` names a case type (O5)");
+                    CheckExpression(vp.Value, null);
+                    break;
+                default:
+                    break;
             }
 
-            var wasInElseArm = inElseArm;
-            inElseArm = true;
-            CheckStatement(arm.Body);
-            inElseArm = wasInElseArm;
+            CheckElseArmBody(arm.Body, Types.Error);
             PopScope();
         }
     }
 
-    /// <summary>O5: what an arm does; in a block, its last statement.</summary>
+    /// <summary>
+    /// O5: what an arm does; in a block, its last statement. With a success that is not <c>void</c> the
+    /// arm recovers with a value, returns or throws; a last statement that does none of these and can
+    /// complete leaves the call without a value, text no rule gives a meaning (E4). The bare <c>throw</c>
+    /// of O7 stands in the arm's last statement, not in the statements before it.
+    /// </summary>
     private void CheckElseArmBody(Statement body, KurzType success)
     {
         var wasInElseArm = inElseArm;
@@ -319,6 +384,12 @@ public sealed partial class Checker
 
             case Block b:
                 PushScope();
+                blockDepth++;
+                if (b.Statements.Count == 0 && !Types.IsVoid(success) && !Types.IsError(success))
+                {
+                    Report(ErrorIds.Syntax, b.Line, "an arm of `else` recovers with a value of the success type, returns or throws; an empty block does none (O5)");
+                }
+
                 for (var i = 0; i < b.Statements.Count; i++)
                 {
                     if (i == b.Statements.Count - 1)
@@ -333,10 +404,15 @@ public sealed partial class Checker
                     }
                 }
 
+                blockDepth--;
                 PopScope();
                 break;
             default:
-                CheckStatement(body);
+                if (CheckStatement(body) == Flow.Completes && !Types.IsVoid(success) && !Types.IsError(success))
+                {
+                    Report(ErrorIds.Syntax, body.Line, "an arm of `else` recovers with a value of the success type, returns or throws; a statement that completes does none (O5)");
+                }
+
                 break;
         }
 

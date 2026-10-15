@@ -128,9 +128,10 @@ that sit under a rule by its id. Every one is pinned by a test.
   and a lone surrogate in the literal of a program text that was never a file (L1: no code point, and
   a file cannot hold one) are each `syntax`, as text no rule gives a meaning. Which id the doubled
   markers, the type parameters and the surrogate take is a question for a design round: an error of
-  the type checker could be meant, and E4 names the parser's id for none of them. A modifier other
-  than `mut` before a variable's name (`pub x = 1`) is `syntax` the same way: V2 and V4 give a
-  variable `mut` and nothing else, so the word begins no declaration and the statement ends at it.
+  the type checker could be meant, and E4 names the parser's id for none of them, nor for the next
+  one. A modifier other than `mut` before a variable's name (`pub x = 1`) is `syntax` the same
+  way: V2 and V4 give a variable `mut` and nothing else, so the word begins no declaration and the
+  statement ends at it.
 - Recovery (no rule id): after an error the parser skips the rest of the statement, which is the
   rest of its line once every parenthesis, bracket and brace the statement opened is closed again,
   and a block the statement opened, with an `else` clause after it, so that the next statement
@@ -158,17 +159,19 @@ brace. Each is pinned as it is, so that a fix shows.
 ## What the checker reads
 
 The checker (`Semantics/`) takes a tree the parser read without an error and checks it against
-chapters 1 (source), 2 (variables), 3 (types and operators), 5 (data types: D1 to D11, D14 and
-D15), 6 (values: M1 to M5, M7, and M9 for lists), 8 (functions, without F9 and F10), 9 (outcomes)
-and 10 (control flow). It declares every data type and function of the file first (both are
-visible in the whole file, F6), resolves the fields and bases of the data types, checks the
+chapters 1 (source), 2 (variables), 3 (types and operators, without the limit of a type parameter,
+T19), 5 (data types: D1 to D11, D14 and D15), 6 (values: M1 to M5, M7, and M9 for lists), 8
+(functions, without F9 and F10: it reads one file), 9 (outcomes) and 10 (control flow). It declares
+every data type and function of the top level first, in source order (both are visible in the
+whole file, F6), resolves the fields and bases of the data types, then the signatures, checks the
 defaults, then every function body, then the top level. Every expression gets a type, and an
 expression made of literals and constants gets its value too, so that `byte c = 200 + 100` is
 `constant-overflow` where T6 and L17 put it and `10 / 0` is `constant-divide-by-zero`. A call is
 resolved as F12 to F14 and D11 say: named arguments are bound to parameters, type arguments are
 inferred from the arguments (T27: no widening between them, a literal takes what the other
-arguments fix, two data types meet at their common base), and the one candidate whose parameters
-fit is taken, else `argument-mismatch`, `ambiguous-call` or `cannot-infer`. A `match` and a postfix
+arguments fix, a data type and one derived from it meet at the base, in whatever order the
+arguments stand), and the one candidate whose parameters fit is taken, else `argument-mismatch`,
+`ambiguous-call` or `cannot-infer`. A `match` and a postfix
 `else` are checked for the cases they cover (C4, C9, O5, O8), and a case the calling function does
 not list propagates as `unlisted-case` (O2, O3, O9). One defect, one diagnostic (E1): a value the
 checker could not type has the error type, which fits anywhere and is reported nowhere again.
@@ -183,35 +186,67 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 
 ### What the checker does not read
 
-A program that uses one of these gets `not supported` at the construct's line and nothing else:
-a `class`, an `interface`, an `enum` or a `flags` type and a value of one (chapter 7, D12, D13,
-and the A-rules of their text); `null`, a nullable type, `?.` and `??` (chapter 4); `weak` (R3,
-R5), a `raw` block (R7) and `use` (F10); `Map` (M8, M9, M10) and an assignment into an index (M9);
-the body of a `data` type and its methods (D16 to D20), `equal by` (K8), an interface a `data`
-type names (K10) and the explicit form of inheritance (K17); the limit of a type parameter and a
-member of one (T19); a conversion to `string`, `bool` or `char` (A5 to A7); `this` (K7) and a
-modifier of a method on a top-level function (K7, M6). The corpus theory lists the rule ids whose
-cases the checker must say `not supported` to, and eight cases by name that cite only rules it
-reads and still use such a construct, each with the construct.
+A program that uses one of these gets `not supported` at the construct's line and nothing else;
+what stands inside the construct is still read, with its diagnostics dropped, so that the variables
+it uses count as used. The list, which is the complete one: a `class`, an `interface`, an `enum`
+or a `flags` type and a value of one (chapter 7, D12, D13, and the A-rules of their text); `null`,
+a nullable type, `?.` and `??` (chapter 4); `weak` (R3, R5), a `raw` block (R7) and `use` (F10);
+a second file of a program and what F9 makes visible across files, since the checker reads one
+file; `Map` (M8, M9, M10), an assignment into an index or into a path through one, a `mut` method
+on an element of a list and an element passed as `mut` (M9); the body of a `data` type and its
+methods (D16 to D20), `equal by` (K8), an interface a `data` type names (K10), the explicit form
+of inheritance (K17) and a generic data type as a base (D6, T19); the limit of a type parameter
+and a member of one (T19); a function or a type declared inside a block (F1, F6, below); `-` on a
+`uint` or a `ulong` (T9, below); a conversion to `string`, `bool` or `char` (A5 to A7); `this`
+(K7) and a modifier of a method on a top-level function (K7, M6). The corpus theory lists the rule
+ids whose cases the checker may say `not supported` to, and six cases by name that cite only rules
+it reads and still use such a construct, each with the construct; a case the checker reads in full
+is held to its header whatever it cites.
 
 ### Readings the reference leaves open to the checker
 
 Each is the checker's reading, not a decision, pinned by a test in `CheckerTests.cs`; a design
 round can ask about it by the rule's id.
 
-- E4 with F11, T10, D2, F5 and C8: a function's name where a value stands (`f = Double`) is
-  `syntax`, since F11 gives a function value through a lambda only, and so is a type's name there
-  (`print(int)`); a value on its own as a statement (`x + 1`) is `syntax`, since F5 lists what a
-  statement is and a value is none; a range outside `for` is `syntax`, since C8 shows it there only.
-- T9 with T23 and T28: `-` on a `uint` or a `ulong` is `sign-mix`, since no signed type takes
-  every value of it; on a `byte` or a `ushort` the operand is promoted to `int` first, as T28
-  promotes it under every operator, so `-b` on a `byte` is an `int` and no error.
+- E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
+  checker can tell among them (D13's `match` on flags, O10's call). The checker reads these shapes
+  under it: a function's name where a value stands (`f = Double`), since F11 gives a function value
+  through a lambda only, and a type's name there (`print(int)`), since T10 gives it a meaning as a
+  conversion only; a value on its own as a statement (`x + 1`), since F5 lists what a statement is
+  and a value is none; a range outside `for`, since C8 shows it there only; a value as the
+  expression body of a `void` function or a `void` lambda (F2, F4, F11); a call with a `void`
+  success where a value stands (O10); `Name()` on a data type without fields, whose value D8 writes
+  as the bare name; a second data type among the bases of a data type, which D6 gives one base; a
+  count of type arguments the type or function does not have (T17, T19), in a type as in a call;
+  a path as an arm (`p.X`, which the parser reads as a pattern for a value of an enum, D12), where
+  C9 has a literal; a `match` used as a value whose every arm throws, or whose arm is a statement,
+  where C9 has an arm with a value; an arm of a postfix `else` whose last statement neither
+  recovers, returns nor throws, the three things O5 lets it do, or that names a literal where O5
+  has a case type, or an `else` that follows no call; `data E()`, where D8 writes the type as the
+  bare name; `mut` on a field (D4); a function of the file without a body (F2, F3); `void` as the
+  type of a variable, a parameter or a field (F4); a modifier on a variable (V2, V4); the left
+  side of an assignment that is neither a name nor a path (V8, M4); a field or a constructor
+  outside a type body (K7, K14). An id of the type checker could be meant for any of them; a design
+  round can ask by the rule.
+- T9 with T23 and T28: `-` on a `uint` or a `ulong` is `not supported`: whether it is an error or
+  wraps is written nowhere. On a `byte` or a `ushort` the operand is promoted to `int` first, as
+  T28 promotes a narrow operand under every operator, so `-b` on a `byte` is an `int` and no error.
 - V10 with D9: a member a type does not have (`s.Count` on a string, `xs.Size` on a list) is
-  `unknown-name` at the dot, V10's id for a name no rule gives a type; a member of a union is
+  `unknown-name` at the dot: V10 gives that id to a name that is not visible at the place it
+  stands, and a member no rule gives the type is such a name; a member of a union is
   `type-mismatch`, since a union is one of its cases only after a `match` (D9).
-- V3 with C8 and M9: an assignment to a loop variable is `assign-immutable`, since C8 names it a
-  variable and V3 makes a variable without `mut` immutable; so is an assignment to a field through
-  a value no `mut` variable reaches (`Point(1).X = 2`), and to `Count`, which M9 gives no setter.
+- V7 with C8 and M9: an assignment to a loop variable is `assign-immutable`, since C8 names it a
+  variable and V7 makes a second assignment to a variable without `mut` that error; so is an
+  assignment to a field through a value no `mut` variable reaches (`Point(1).X = 2`), and to
+  `Count`, which M9 gives a list to read and no field to assign.
+- T27 with D6: the arguments of a type parameter's positions are gathered first and then judged,
+  so that their order makes no difference; where one argument's data type is the base of the
+  others' (D6) the parameter takes the base, and two derived types whose common base no argument
+  has are `cannot-infer`. T27 names the base for classes; the checker reads it for data types.
+- C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
+  so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
+- V9 with M9 and T17: a data type named as a built-in (`data List`, `data int`, `data print`) is
+  `redeclared`, since no type could name it.
 - V9 with A1 and F6: a variable named `print`, or named as a function or a type of the file, is
   `redeclared`, since a function's and a type's name is visible in the whole file and so is
   `print`.
@@ -230,7 +265,27 @@ round can ask about it by the rule's id.
 - F16: a loop variable of the top-level code reserves its name in every top-level function, so a
   parameter or a local of that name there is `redeclared`; F16's letter counts "every variable
   declared outside a function ... at any depth of the top-level code". The corpus case
-  `null/early-continue-narrows.kz` named its loop variable `id` beside a parameter `id`, and was
-  renamed to hold under the rule as written; whether a loop variable, which lives only in its loop,
-  should reserve its name is a question for a design round.
-- F1: a function declared inside a block is a function of the file, as the front end reads it.
+  `null/early-continue-narrows.kz` named its loop variable `id` beside a parameter `id`; the
+  checker says `not supported` to that case (chapter 4) and reports nothing on it, and the variable
+  was renamed on the rule's letter alone, so that the case holds under it whichever way a reader
+  takes the rule; whether a loop variable, which lives only in its loop, should reserve its name is
+  a question for a design round.
+- F1 with F6: a function or a type declared inside a block is `not supported`: F6 makes a
+  declaration of the file visible in the whole file and says nothing of one inside a block. The
+  name of such a declaration is one the checker does not read, so a use of it is no error.
+- V13 with C4: the name an arm of a `match` binds is never `unused-variable`, as a loop variable
+  is not (V13): the arm declares it, not the program's choice, and V13 names parameters and loop
+  variables only.
+- T27 with F11: a lambda argument fixes no type parameter. It is typed by the parameter it lands
+  on, after the other arguments fixed the type arguments, so a type parameter that only the
+  lambda's result could fix is `cannot-infer`.
+- F14 with L17: for a function that is not overloaded the parameter's type reaches a literal
+  argument (L17), so `H(1)` with one `H(byte b)` compiles; with a second `H` declared, F14 gives
+  the literal its own type for the pick, and the same call is `narrowing-conversion`.
+- M7 with M4: what stands after `mut` is a path of data fields from a `mut` variable; two fields
+  of one variable are two values and may both be passed; the same path twice, or a path and one it
+  is a prefix of, is `mut-at-call`.
+- D9 with O1: two unions are one type when their cases are the same in the same order, since O1
+  gives the order a meaning (the first case is the success), so `List<int | string>` and
+  `List<string | int>` are two types; a value of one union stands where another is required when
+  every case of it is a case there.

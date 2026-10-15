@@ -13,9 +13,11 @@ namespace Kurz.Compiler.Tests;
 /// exactly that error at that line; every other case gets none from the front end. The checker's
 /// theory, on every case the front end read clean: a case the checker reads in full gets exactly the
 /// error its header expects, or none; a case on which the checker says <c>not supported</c> gets no
-/// error from it, and cites a rule of a chapter the checker does not read, or stands in the list of
-/// cases that use such a construct under a rule it does read. No case is skipped, and floors hold the
-/// counts of cases read in full and of cases that expect an error the checker reports.
+/// error from it, and cites a rule the checker does not read, or stands in the list of cases that
+/// use such a construct under rules it does read. The excuse is taken only where the checker said
+/// <c>not supported</c>: a case read in full is held to its header, whatever rules it cites. No case
+/// is skipped, and floors hold the counts of cases read in full and of cases that expect an error the
+/// checker reports.
 /// </summary>
 public sealed class CorpusTests
 {
@@ -39,28 +41,29 @@ public sealed class CorpusTests
     private static readonly HashSet<string> CheckerSyntax = ["data/flags-match.kz"];
 
     /// <summary>
-    /// The rules of the chapters the checker does not read: the null chapter, the class chapter, the
+    /// The rules the checker does not read: those of the null chapter, the class chapter and the
     /// memory chapter, <c>enum</c> and <c>flags</c> (D12, D13, D17 to D20), the body of a data type (D16),
-    /// folders (F9, F10), <c>mut</c> methods and maps (M6, M8, M10), and the texts of class instances,
-    /// maps and sets of flags (A5 to A7, A9, A10, A13, A15). A case that cites one may get <c>not supported</c>.
+    /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
+    /// and maps (M6, M8, M10), and the texts of class instances, maps and sets of flags (A5 to A7, A9,
+    /// A10, A13, A15). A case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header.
     /// </summary>
     private static bool OutsideTheChecker(string rule) =>
         rule[0] is 'N' or 'K' or 'R'
-        || rule is "D12" or "D13" or "D16" or "D17" or "D18" or "D19" or "D20" or "F9" or "F10" or "M6" or "M8" or "M10"
+        || rule is "D12" or "D13" or "D16" or "D17" or "D18" or "D19" or "D20" or "F9" or "F10" or "T19" or "M6" or "M8" or "M10"
         || rule is "A5" or "A6" or "A7" or "A9" or "A10" or "A13" or "A15";
 
-    /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct.</summary>
+    /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct; an entry whose case cites a rule outside the checker is redundant and refused.</summary>
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
         ["classes/print-without-text.kz"] = "a class (chapter 7)",
         ["types/generic-cannot-infer-classes.kz"] = "classes (chapter 7)",
-        ["types/generic-limit.kz"] = "an interface, a class and the limit of a type parameter (K6, K10, T19)",
-        ["types/generic-limit-unmet.kz"] = "an interface and the limit of a type parameter (K6, K10, T19)",
         ["values/map.kz"] = "a Map and `??` (M9, N4)",
         ["values/mut-method-through-field.kz"] = "a class (chapter 7)",
         ["values/text.kz"] = "an enum, a nullable type and null (D12, N1)",
         ["values/text-more.kz"] = "a flags type (D13)",
     };
+
+    private static bool IsNotSupported(Diagnostic d) => d.Kind == DiagnosticKind.NotSupported;
 
     private static readonly string Root = FindRoot();
 
@@ -154,7 +157,8 @@ public sealed class CorpusTests
         var diagnostics = new DiagnosticBag();
         Checker.Check(tree, diagnostics);
         var errors = diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList();
-        var unsupported = diagnostics.Sorted.Where(d => !d.IsError).Select(d => d.ToString()).ToList();
+        var unsupported = diagnostics.Sorted.Where(IsNotSupported).Select(d => d.ToString()).ToList();
+        Assert.Equal(errors.Count + unsupported.Count, diagnostics.Items.Count); // the two kinds, and no third one that the floors would count as read in full
         if (unsupported.Count > 0)
         {
             Assert.True(header.Rules.Any(OutsideTheChecker) || UnsupportedByConstruct.ContainsKey(relativePath),
@@ -198,7 +202,7 @@ public sealed class CorpusTests
 
             var diagnostics = new DiagnosticBag();
             Checker.Check(tree, diagnostics);
-            if (diagnostics.HasNotSupported)
+            if (diagnostics.Items.Any(IsNotSupported))
             {
                 notSupported.Add(relativePath);
                 continue;
@@ -216,16 +220,18 @@ public sealed class CorpusTests
     }
 
     [Fact]
-    public void Every_case_listed_as_unsupported_by_its_construct_exists_and_gets_not_supported()
+    public void Every_case_listed_as_unsupported_by_its_construct_exists_cites_no_outside_rule_and_gets_not_supported()
     {
-        // a stale entry would excuse a case the checker reads in full from its expectation
+        // a stale entry would excuse a case the checker reads in full from its expectation; a redundant one, whose case cites a rule
+        // outside the checker, excuses nothing and would let the list drift from its meaning
         foreach (var (relativePath, construct) in UnsupportedByConstruct)
         {
-            var (_, tree, frontEnd) = ReadCase(relativePath);
+            var (header, tree, frontEnd) = ReadCase(relativePath);
             Assert.False(frontEnd.HasErrors, relativePath);
+            Assert.False(header.Rules.Any(OutsideTheChecker), $"{relativePath} cites a rule outside the checker ({string.Join(", ", header.Rules)}), so its entry ({construct}) is redundant");
             var diagnostics = new DiagnosticBag();
             Checker.Check(tree, diagnostics);
-            Assert.True(diagnostics.HasNotSupported, $"{relativePath} is read in full, so its entry ({construct}) is stale");
+            Assert.True(diagnostics.Items.Any(IsNotSupported), $"{relativePath} is read in full, so its entry ({construct}) is stale");
         }
     }
 

@@ -135,7 +135,14 @@ public sealed partial class Checker
 
             if (Types.IsFloating(target))
             {
-                return RealValue((double)value, target, line);
+                var d = (double)value;
+                if (double.IsInfinity(d))
+                {
+                    Report(ErrorIds.ConstantOverflow, line, "the literal lies outside the range of `double` (T6, L11)");
+                    return Typed.Error;
+                }
+
+                return RealValue(d, target, line);
             }
 
             if (Types.IsDecimal(target))
@@ -165,7 +172,7 @@ public sealed partial class Checker
             }
         }
 
-        Report(ErrorIds.ConstantOverflow, line, $"{value} fits no integer type (L10, T6)");
+        Report(ErrorIds.ConstantOverflow, line, suffix.Length == 0 ? $"{value} fits no integer type (L10, T6)" : $"{value} fits none of the types the suffix `{suffix}` names (L10, T6)");
         return Typed.Error;
     }
 
@@ -399,13 +406,13 @@ public sealed partial class Checker
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
             {
-                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a type and has no member `{m.Member}` (D1)");
+                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a type and has no member `{m.Member}` (D1, V10)");
                 return Typed.Error;
             }
 
-            if (Types.ByName.ContainsKey(n.Name) || n.Name is "List" or "Map" || functions.ContainsKey(n.Name))
+            if (IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
-                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}`");
+                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
                 return Typed.Error;
             }
         }
@@ -414,7 +421,12 @@ public sealed partial class Checker
         return MemberOf(target.Type, m.Member, m.Line);
     }
 
-    /// <summary>The members the reference gives a type: a string's <c>Bytes</c> and <c>Chars</c> (T15), a list's <c>Count</c> (M9), a data value's fields (D1).</summary>
+    /// <summary>
+    /// The members the reference gives a type: a string's <c>Bytes</c> and <c>Chars</c> (T15), a list's
+    /// <c>Count</c> (M9), a data value's fields (D1). A member no rule gives the type is a name that is not
+    /// visible here, V10's <c>unknown-name</c> (the reading in <c>compiler/README.md</c>); a member of a
+    /// union is <c>type-mismatch</c>, since a union is one of its cases only after a <c>match</c> (D9).
+    /// </summary>
     private Typed MemberOf(KurzType type, string member, int line)
     {
         switch (type)
@@ -467,7 +479,7 @@ public sealed partial class Checker
                 break;
         }
 
-        Report(ErrorIds.UnknownName, line, $"a `{type}` has no member `{member}`");
+        Report(ErrorIds.UnknownName, line, $"a `{type}` has no member `{member}` (V10)");
         return Typed.Error;
     }
 
@@ -526,13 +538,14 @@ public sealed partial class Checker
             case TokenKind.Minus:
                 if (Types.IsUnsigned(operand.Type) && !Types.IsNarrow(operand.Type))
                 {
-                    Report(ErrorIds.SignMix, u.Line, $"`-` on a `{operand.Type}` would need a signed type (T9, T23)");
+                    // T9 and T23 give the signedness rules of two operands; whether `-` on a `uint` or a `ulong` is an error or wraps is written nowhere
+                    NotSupported(u.Line, $"`-` on a `{operand.Type}` (T9, T23)");
                     return Typed.Error;
                 }
 
                 if (Types.IsNumber(operand.Type) || Types.IsDuration(operand.Type))
                 {
-                    var type = Types.IsNarrow(operand.Type) ? Types.Int : (PrimitiveType)operand.Type;
+                    var type = Types.IsNarrow(operand.Type) ? Types.Int : (PrimitiveType)operand.Type; // T28: a narrow operand is promoted under every operator
                     return Fold(type, u.Line, operand.Constant switch
                     {
                         IntegerConstant c => new IntegerConstant(-c.Value),
@@ -692,6 +705,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
+                    common = ConstantType(common, left, right); // L17: two literals of one type wrap in that type, `byte b = 200 +% 100` is 44
                     if (left.Constant is IntegerConstant l && right.Constant is IntegerConstant r)
                     {
                         var raw = b.Operator switch
@@ -762,13 +776,15 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    var type = Types.IsNarrow(left.Type) && left.Constant is null ? Types.Int : (PrimitiveType)left.Type;
+                    // T28: a narrow left operand is promoted to `int`, and the count is taken modulo 32 for it; two constants fold in the
+                    // literals' type (L17), with the count modulo the promoted width, and the result has to fit the type (T6)
+                    var type = left.Constant is IntegerConstant && right.Constant is IntegerConstant ? (PrimitiveType)left.Type : Types.IsNarrow(left.Type) ? Types.Int : (PrimitiveType)left.Type;
                     if (left.Constant is IntegerConstant l && right.Constant is IntegerConstant r)
                     {
-                        var width = Types.Width(type);
+                        var width = Types.IsNarrow(type) ? 32 : Types.Width(type);
                         var count = (int)(((r.Value % width) + width) % width);
-                        var value = b.Operator == TokenKind.LessLess ? Wrap(l.Value << count, type) : l.Value >> count;
-                        return new Typed(type, new IntegerConstant(value));
+                        var value = b.Operator == TokenKind.LessLess ? Wrap(l.Value << count, Types.IsNarrow(type) ? Types.Int : type) : l.Value >> count;
+                        return Fold(type, b.Line, new IntegerConstant(value));
                     }
 
                     return new Typed(type);
@@ -891,6 +907,9 @@ public sealed partial class Checker
     private static PrimitiveType ConstantType(PrimitiveType promoted, Typed left, Typed right) =>
         left.Constant is IntegerConstant && right.Constant is IntegerConstant && Types.IsInteger(left.Type) && Types.Same(left.Type, right.Type) ? (PrimitiveType)left.Type : promoted;
 
+    /// <summary>C8 judges <c>reversed-range</c> on ends that are expressions made only of literals; a named constant or a call is left to the run time (<c>reversed-range-at-run-time</c>).</summary>
+    private static bool IsLiteralEnd(Expression e) => IsLiteralOnly(e);
+
     private static PrimitiveType? TimeArithmetic(TokenKind op, PrimitiveType l, PrimitiveType r)
     {
         var wide = Types.IsWideTime(l) || Types.IsWideTime(r);
@@ -996,7 +1015,7 @@ public sealed partial class Checker
         _ => comparison >= 0,
     };
 
-    /// <summary>C8: the type of a range's numbers, and <c>reversed-range</c> for literal ends in the wrong order.</summary>
+    /// <summary>C8: the type of a range's numbers, and <c>reversed-range</c> for ends in the wrong order where both are expressions made only of literals, as the rule says.</summary>
     private KurzType CheckRange(RangeExpression r)
     {
         var (start, end) = Operands(r.Start, r.End, null, OperatorClass.Arithmetic);
@@ -1018,7 +1037,7 @@ public sealed partial class Checker
             return Types.Error;
         }
 
-        if (start.Constant is IntegerConstant s && end.Constant is IntegerConstant e && e.Value < s.Value)
+        if (IsLiteralEnd(r.Start) && IsLiteralEnd(r.End) && start.Constant is IntegerConstant s && end.Constant is IntegerConstant e && e.Value < s.Value)
         {
             Report(ErrorIds.ReversedRange, r.Line, $"the range ends at {e.Value}, below its start {s.Value} (C8)");
         }
@@ -1031,15 +1050,18 @@ public sealed partial class Checker
     /// <summary>F7, F11, F15: a lambda under the function type expected of it, or with its own type where its parameters are typed.</summary>
     private Typed CheckLambda(LambdaExpression l, FunctionType? expected)
     {
+        // after an error on the parameters the body is still read, with them error-typed, so that its own defects and the variables it reads count (E1)
         var parameterTypes = new List<KurzType>();
+        var failed = false;
+        if (expected is not null && expected.Parameters.Count != l.Parameters.Count)
+        {
+            Report(ErrorIds.TypeMismatch, l.Line, $"the lambda takes {l.Parameters.Count} parameters where `{expected}` takes {expected.Parameters.Count} (F11)");
+            failed = true;
+            expected = null;
+        }
+
         if (expected is not null)
         {
-            if (expected.Parameters.Count != l.Parameters.Count)
-            {
-                Report(ErrorIds.TypeMismatch, l.Line, $"the lambda takes {l.Parameters.Count} parameters where `{expected}` takes {expected.Parameters.Count} (F11)");
-                return Typed.Error;
-            }
-
             foreach (var (p, type) in l.Parameters.Zip(expected.Parameters))
             {
                 if (p.Type is null)
@@ -1059,13 +1081,13 @@ public sealed partial class Checker
         }
         else
         {
-            if (l.Parameters.Any(p => p.Type is null))
+            if (!failed && l.Parameters.Any(p => p.Type is null))
             {
                 Report(ErrorIds.CannotInfer, l.Line, "the parameters of the lambda have no type, and nothing around it gives one (F7, T27)");
-                return Typed.Error;
+                failed = true;
             }
 
-            parameterTypes.AddRange(l.Parameters.Select(p => Resolve(p.Type!)));
+            parameterTypes.AddRange(l.Parameters.Select(p => failed ? Types.Error : Resolve(p.Type!)));
         }
 
         var outer = frame;
@@ -1097,10 +1119,12 @@ public sealed partial class Checker
                 result = expected.Result;
                 if (Types.IsVoid(result))
                 {
+                    // F11 types the lambda by its parameter, whose result is `void`: a value standing as its body is text no rule gives a
+                    // meaning, E4's `syntax`, as for the expression body of a `void` function (F2, F4; the reading in compiler/README.md)
                     var body = CheckExpression(l.ExpressionBody, null);
-                    if (!Types.IsVoid(body.Type) && !body.IsError && l.ExpressionBody is not CallExpression and not ElseExpression)
+                    if (!Types.IsVoid(body.Type) && !body.IsError && Unwrap(l.ExpressionBody) is not CallExpression and not ElseExpression)
                     {
-                        Report(ErrorIds.Syntax, l.Line, "the body of a lambda with a `void` result is a call (F11, O10)");
+                        Report(ErrorIds.Syntax, l.Line, "the body of a lambda with a `void` result is a call or a call with `else` (E4, F11, F4)");
                     }
                 }
                 else
@@ -1129,7 +1153,7 @@ public sealed partial class Checker
 
         ReportUnused(frame.Scope);
         frame = outer;
-        return new Typed(parameterTypes.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameterTypes, result));
+        return new Typed(failed || parameterTypes.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameterTypes, result));
     }
 
     /// <summary>D5: a copy of a data value with fields replaced.</summary>

@@ -6,12 +6,13 @@ namespace Kurz.Compiler.Semantics;
 /// The checker: names, scopes and types of a program the parser read without an error, against the
 /// rules of chapters 1 to 3, 5, 6, 8, 9 and 10 of the reference. It reports the compile errors of
 /// the error table those chapters name, each at the line E1 gives it, and <c>not supported</c>
-/// for a construct of the chapters it does not read: a class, an interface, an <c>enum</c> or
-/// <c>flags</c> type (chapter 7, D12, D13), a nullable type and <c>null</c> (chapter 4), <c>weak</c>
-/// and <c>raw</c> (chapter 11), <c>use</c> (F10), a <c>Map</c> (M9), the body of a <c>data</c> type
-/// (D16) and a conversion to <c>string</c>, <c>bool</c> or <c>char</c>. A value of a construct it does
-/// not read has the error type, about which nothing is reported, so that the one line of the
-/// construct carries the one diagnostic (E1). <c>compiler/README.md</c> lists the readings it
+/// for a construct it does not read, at the construct's line and nothing else: a class and the
+/// other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c> and <c>raw</c>, and
+/// the rest of the list in the section "What the checker does not read" of <c>compiler/README.md</c>,
+/// which is the one complete list. A value of a construct it does not read has the error type, about
+/// which nothing is reported, so that the one line of the construct carries the one diagnostic
+/// (E1); what stands inside such a construct is still read, with its diagnostics dropped, so that
+/// the variables it uses count as used. <c>compiler/README.md</c> lists the readings the checker
 /// takes where the reference leaves a choice.
 /// </summary>
 public sealed partial class Checker
@@ -20,7 +21,10 @@ public sealed partial class Checker
     private readonly Stack<List<Diagnostic>> sinks = new();
     private readonly Dictionary<string, List<FunctionSymbol>> functions = new(StringComparer.Ordinal);
     private readonly List<FunctionSymbol> duplicates = [];
+    private readonly List<FunctionSymbol> refused = [];
     private readonly Dictionary<string, DataSymbol> dataTypes = new(StringComparer.Ordinal);
+    private readonly List<DataSymbol> dataDeclared = [];
+    private readonly List<DataSymbol> refusedTypes = [];
     private readonly HashSet<string> unsupportedTypes = new(StringComparer.Ordinal);
     private readonly HashSet<string> reservedTopLevel = new(StringComparer.Ordinal);
     private readonly Dictionary<string, KurzType> topLevel = new(StringComparer.Ordinal);
@@ -29,6 +33,7 @@ public sealed partial class Checker
     private List<TypeParameterSymbol>? typeContext;
     private bool inElseArm;
     private bool realKeepsOwnType;
+    private int blockDepth;
 
     private Checker(DiagnosticBag diagnostics)
     {
@@ -133,43 +138,47 @@ public sealed partial class Checker
 
     private void Run(ProgramSyntax program)
     {
-        var declarations = new List<Statement>();
-        CollectDeclarations(program.Statements, declarations);
-        foreach (var d in declarations.OfType<TypeDeclaration>())
+        // F6: the functions and data types of the file are visible in the whole file, so their names are declared before
+        // anything is checked, in source order, so that a name declared twice is `redeclared` at the later declaration (V9)
+        foreach (var s in program.Statements)
         {
-            DeclareType(d);
-        }
-
-        foreach (var d in declarations.OfType<TypeDeclaration>())
-        {
-            if (d.Kind == TypeDeclarationKind.Data && dataTypes.TryGetValue(d.Name, out var symbol) && ReferenceEquals(symbol.Declaration, d))
+            switch (s)
             {
-                ResolveData(symbol, []);
+                case TypeDeclaration t:
+                    DeclareType(t);
+                    break;
+                case FunctionDeclaration f:
+                    DeclareFunction(f);
+                    break;
+                default:
+                    break;
             }
         }
 
-        foreach (var f in declarations.OfType<FunctionDeclaration>())
+        CollectNested(program.Statements);
+        foreach (var symbol in dataDeclared.Concat(refusedTypes))
         {
-            DeclareFunction(f);
+            ResolveData(symbol, []);
+        }
+
+        foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
+        {
+            ResolveSignature(f);
         }
 
         CheckDuplicateFunctions();
         CheckDefaults();
         CollectReserved(program.Statements);
 
-        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates))
+        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused))
         {
-            if (f.Declaration is not null)
-            {
-                CheckFunctionBody(f);
-            }
+            CheckFunctionBody(f);
         }
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
-        var flow = Flow.Completes;
         foreach (var s in program.Statements)
         {
-            flow = CheckStatement(s) == Flow.Ends ? Flow.Ends : flow;
+            CheckStatement(s);
         }
 
         foreach (var v in frame.Scope.Variables.Values)
@@ -180,46 +189,54 @@ public sealed partial class Checker
         ReportUnused(frame.Scope);
     }
 
-    /// <summary>Every function and type declaration of the file, at any depth of its statements but not inside a type body: they are visible in the whole file (F6).</summary>
-    private static void CollectDeclarations(IEnumerable<Statement> statements, List<Statement> into)
+    /// <summary>
+    /// The names of the functions and types declared inside a block, at any depth: such a declaration is
+    /// <c>not supported</c> where it stands, and its name is one the checker does not read, so that a use
+    /// of it carries no error of its own (E1).
+    /// </summary>
+    private void CollectNested(IEnumerable<Statement> statements, bool nested = false)
     {
         foreach (var s in statements)
         {
             switch (s)
             {
-                case TypeDeclaration t:
-                    into.Add(t);
+                case TypeDeclaration t when nested:
+                    unsupportedTypes.Add(t.Name);
                     break;
                 case FunctionDeclaration f:
-                    into.Add(f);
+                    if (nested)
+                    {
+                        unsupportedTypes.Add(f.Name);
+                    }
+
                     if (f.BlockBody is not null)
                     {
-                        CollectDeclarations(f.BlockBody.Statements, into);
+                        CollectNested(f.BlockBody.Statements, true);
                     }
 
                     break;
                 case Block b:
-                    CollectDeclarations(b.Statements, into);
+                    CollectNested(b.Statements, true);
                     break;
                 case IfStatement i:
-                    CollectDeclarations(i.Then.Statements, into);
+                    CollectNested(i.Then.Statements, true);
                     if (i.Else is not null)
                     {
-                        CollectDeclarations([i.Else], into);
+                        CollectNested([i.Else], true);
                     }
 
                     break;
                 case WhileStatement w:
-                    CollectDeclarations(w.Body.Statements, into);
+                    CollectNested(w.Body.Statements, true);
                     break;
                 case ForInStatement f:
-                    CollectDeclarations(f.Body.Statements, into);
+                    CollectNested(f.Body.Statements, true);
                     break;
                 case MatchStatement m:
-                    CollectDeclarations(m.Arms.Select(a => a.Body), into);
+                    CollectNested(m.Arms.Select(a => a.Body), true);
                     break;
                 case RawBlock r:
-                    CollectDeclarations(r.Body.Statements, into);
+                    CollectNested(r.Body.Statements, true);
                     break;
                 default:
                     break;
@@ -283,14 +300,19 @@ public sealed partial class Checker
 
     private void DeclareType(TypeDeclaration d)
     {
-        if (dataTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || functions.ContainsKey(d.Name))
+        var clash = IsDeclaredName(d.Name);
+        if (clash)
         {
-            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)");
-            return;
+            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a built-in name among them: `data List` could never be named (M9, T17)
         }
 
         if (d.Kind != TypeDeclarationKind.Data)
         {
+            if (clash)
+            {
+                return;
+            }
+
             var what = d.Kind switch
             {
                 TypeDeclarationKind.Class => "a class (chapter 7)",
@@ -309,30 +331,33 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line));
         }
 
-        dataTypes[d.Name] = symbol;
-    }
-
-    /// <summary>Resolves the base (D6), then the fields, the base's first (D7); refuses what a <c>data</c> type does not have.</summary>
-    private void ResolveData(DataSymbol symbol, List<DataSymbol> chain)
-    {
-        if (symbol.Fields.Count > 0 || symbol.Base is not null)
+        if (clash)
         {
-            return; // resolved already, as the base of another
+            refusedTypes.Add(symbol); // its fields are checked all the same; no type names it
+            return;
         }
 
+        dataTypes[d.Name] = symbol;
+        dataDeclared.Add(symbol);
+    }
+
+    /// <summary>Resolves the base (D6), then the fields, the base's first (D7); refuses what a <c>data</c> type does not have. Each type once, whatever the outcome.</summary>
+    private void ResolveData(DataSymbol symbol, List<DataSymbol> chain)
+    {
+        if (symbol.Resolved)
+        {
+            return; // resolved already, as the base of another, or being resolved, as a base of itself
+        }
+
+        symbol.Resolved = true;
         var d = symbol.Declaration;
         typeContext = symbol.TypeParameters;
-        foreach (var (p, i) in d.TypeParameters.Select((p, i) => (p, i)))
+        foreach (var p in d.TypeParameters)
         {
             if (p.Limit is not null)
             {
-                symbol.TypeParameters[i].Limit = Resolve(p.Limit);
+                NotSupported(p.Line, "the limit of a type parameter (T19)"); // not resolved: the one diagnostic of the construct (E1)
             }
-        }
-
-        if (d.Bases.Count > 1)
-        {
-            NotSupported(d.Bases[1].Line, "an interface a data type names (K10)");
         }
 
         if (d.Bases.Count > 0)
@@ -340,14 +365,17 @@ public sealed partial class Checker
             var b = d.Bases[0];
             if (b.Arguments is not null)
             {
-                NotSupported(b.Line, "the explicit form of inheritance (K17)");
+                NotSupported(b.Line, "the explicit form of inheritance (K17)"); // the base is not resolved: the one diagnostic of the construct (E1)
             }
-
-            if (b.Type is NamedType { TypeArguments.Count: 0 } named && dataTypes.TryGetValue(named.Name, out var baseSymbol))
+            else if (b.Type is NamedType named && dataTypes.TryGetValue(named.Name, out var baseSymbol))
             {
-                if (chain.Contains(baseSymbol) || ReferenceEquals(baseSymbol, symbol))
+                if (named.TypeArguments.Count > 0 || baseSymbol.IsGeneric)
                 {
-                    Report(ErrorIds.TypeMismatch, b.Line, $"`{named.Name}` cannot be its own base (D6)");
+                    NotSupported(b.Line, "a generic data type as a base (D6, T19)");
+                }
+                else if (chain.Contains(baseSymbol) || ReferenceEquals(baseSymbol, symbol))
+                {
+                    Report(ErrorIds.TypeMismatch, b.Line, $"`{named.Name}` cannot be its own base (D6)"); // no base is set, so the walk up the bases ends
                 }
                 else
                 {
@@ -369,9 +397,28 @@ public sealed partial class Checker
             }
         }
 
+        for (var i = 1; i < d.Bases.Count; i++)
+        {
+            // D6 gives a data type one base; a second data type in the list is text no rule gives a meaning (E4); an interface there is K10's
+            var b = d.Bases[i];
+            if (b.Type is NamedType named && dataTypes.ContainsKey(named.Name))
+            {
+                Report(ErrorIds.Syntax, b.Line, $"a data type has one base, and `{named.Name}` is a second one (D6)");
+            }
+            else
+            {
+                NotSupported(b.Line, "an interface a data type names (K10)");
+            }
+        }
+
         if (d.EqualBy.Count > 0)
         {
             NotSupported(d.Line, "equal by (K8)");
+        }
+
+        if (d.PrimaryConstructor is { Count: 0 })
+        {
+            Report(ErrorIds.Syntax, d.Line, $"a data type without fields is written as the bare name `data {d.Name}`, with no `()` (D8)");
         }
 
         foreach (var p in d.PrimaryConstructor ?? [])
@@ -382,6 +429,16 @@ public sealed partial class Checker
             }
 
             var type = p.Type is null ? Types.Error : Resolve(p.Type);
+            if (p.Type is null)
+            {
+                Report(ErrorIds.Syntax, p.Line, $"the field `{p.Name}` of a data type names its type (D1)");
+            }
+            else if (Types.IsVoid(type))
+            {
+                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (D1, F4)");
+                type = Types.Error;
+            }
+
             if (symbol.Field(p.Name) is not null)
             {
                 Report(ErrorIds.Redeclared, p.Line, $"the field `{p.Name}` is declared already (V9)");
@@ -515,27 +572,41 @@ public sealed partial class Checker
 
     // ---- functions -------------------------------------------------------------------------------
 
+    /// <summary>F6, V9: the name of a function, declared before any signature is resolved; a name a data type or a built-in has is <c>redeclared</c> and no call can pick the function.</summary>
     private void DeclareFunction(FunctionDeclaration d)
     {
-        if (dataTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name))
-        {
-            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)");
-            return;
-        }
-
         var symbol = new FunctionSymbol(d.Name, d);
         foreach (var p in d.TypeParameters)
         {
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line));
         }
 
+        if (dataTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name))
+        {
+            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)");
+            refused.Add(symbol); // its signature, defaults and body are checked all the same
+            return;
+        }
+
+        if (!functions.TryGetValue(d.Name, out var list))
+        {
+            list = [];
+            functions[d.Name] = list;
+        }
+
+        list.Add(symbol);
+    }
+
+    /// <summary>F1, F4, T19: the parameter and result types of a function, resolved once every data type of the file is declared.</summary>
+    private void ResolveSignature(FunctionSymbol symbol)
+    {
+        var d = symbol.Declaration!;
         typeContext = symbol.TypeParameters;
-        foreach (var (p, i) in d.TypeParameters.Select((p, i) => (p, i)))
+        foreach (var p in d.TypeParameters)
         {
             if (p.Limit is not null)
             {
-                symbol.TypeParameters[i].Limit = Resolve(p.Limit);
-                NotSupported(p.Line, "the limit of a type parameter (T19)");
+                NotSupported(p.Line, "the limit of a type parameter (T19)"); // not resolved: the one diagnostic of the construct (E1)
             }
         }
 
@@ -568,13 +639,6 @@ public sealed partial class Checker
         }
 
         typeContext = null;
-        if (!functions.TryGetValue(d.Name, out var list))
-        {
-            list = [];
-            functions[d.Name] = list;
-        }
-
-        list.Add(symbol);
     }
 
     /// <summary>
@@ -607,50 +671,45 @@ public sealed partial class Checker
     /// <summary>O10: a function whose success case is <c>void</c> needs no <c>return</c> with a value.</summary>
     private static bool SuccessIsVoid(KurzType type) => type is VoidType || type is UnionType { Cases: [VoidType, ..] };
 
+    /// <summary>F12 names the parameters only: the type parameters are matched by their position, and their count makes no difference.</summary>
     private static bool SameParameters(FunctionSymbol a, FunctionSymbol b)
     {
-        if (a.Parameters.Count != b.Parameters.Count || a.TypeParameters.Count != b.TypeParameters.Count)
+        if (a.Parameters.Count != b.Parameters.Count)
         {
             return false;
         }
 
-        var mapA = a.TypeParameters.Select((p, i) => (p, i)).ToDictionary(x => x.p, x => (KurzType)new TypeParameterType(new TypeParameterSymbol("#" + i(x.i), 0)));
-        var mapB = b.TypeParameters.Select((p, i) => (p, i)).ToDictionary(x => x.p, x => mapA.Values.ElementAt(x.i));
+        var placeholders = Enumerable.Range(0, Math.Max(a.TypeParameters.Count, b.TypeParameters.Count))
+            .Select(i => (KurzType)new TypeParameterType(new TypeParameterSymbol("#" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), 0)))
+            .ToList();
+        var mapA = a.TypeParameters.Select((p, i) => (p, i)).ToDictionary(x => x.p, x => placeholders[x.i]);
+        var mapB = b.TypeParameters.Select((p, i) => (p, i)).ToDictionary(x => x.p, x => placeholders[x.i]);
         return a.Parameters.Zip(b.Parameters).All(pair => Types.Same(Types.Substitute(pair.First.Type, mapA), Types.Substitute(pair.Second.Type, mapB)));
-
-        static string i(int n) => n.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>F12, D11: a default value is a constant expression that fits its parameter, checked with no variable in sight.</summary>
     private void CheckDefaults()
     {
-        frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
-        foreach (var list in functions.Values)
+        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused))
         {
-            foreach (var f in list)
+            frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = f.Line, TypeParameters = f.TypeParameters };
+            foreach (var (p, symbol) in f.Declaration!.Parameters.Zip(f.Parameters))
             {
-                if (f.Declaration is null)
+                if (p.Default is not null)
                 {
-                    continue;
-                }
-
-                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = f.Line, TypeParameters = f.TypeParameters };
-                foreach (var (p, symbol) in f.Declaration.Parameters.Zip(f.Parameters))
-                {
-                    if (p.Default is not null)
-                    {
-                        CheckDefault(p.Default, symbol.Type, p.Line);
-                    }
+                    CheckDefault(p.Default, symbol.Type, p.Line);
                 }
             }
         }
 
-        foreach (var d in dataTypes.Values)
+        foreach (var d in dataDeclared.Concat(refusedTypes))
         {
             frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = d.Line, TypeParameters = d.TypeParameters };
-            foreach (var p in d.Declaration.PrimaryConstructor ?? [])
+            var written = d.Declaration.PrimaryConstructor ?? [];
+            var own = d.Fields.Skip(d.Fields.Count - written.Count); // the type's own fields follow the base's, one per written parameter (D7)
+            foreach (var (p, field) in written.Zip(own))
             {
-                if (p.Default is not null && d.Field(p.Name) is { } field)
+                if (p.Default is not null)
                 {
                     CheckDefault(p.Default, field.Type, p.Line);
                 }
@@ -711,10 +770,12 @@ public sealed partial class Checker
     {
         if (SuccessIsVoid(returnType))
         {
+            // F2 writes the body as `=> expression` and F4 gives a `void` function no value: a value standing there is text no rule
+            // gives a meaning, E4's `syntax` (the reading in compiler/README.md); a call or a postfix `else` is what such a body is
             var t = CheckExpression(body, returnType is UnionType ? returnType : null, keepCases: returnType is UnionType);
-            if (!Types.IsVoid(t.Type) && !t.IsError && body is not CallExpression and not ElseExpression && !Types.Assignable(t.Type, returnType))
+            if (!Types.IsVoid(t.Type) && !t.IsError && Unwrap(body) is not CallExpression and not ElseExpression && !Types.Assignable(t.Type, returnType))
             {
-                Report(ErrorIds.Syntax, line, "the expression body of a `void` function is a call (F2, F4)");
+                Report(ErrorIds.Syntax, line, "the expression body of a `void` function is a call or a call with `else` (E4, F2, F4)");
             }
 
             return;
@@ -732,8 +793,19 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(typed.Type, returnType))
         {
-            Report(Types.MismatchId(typed.Type, returnType), line, $"the body is a `{typed.Type}` where the result is a `{returnType}` (F2, T1)");
+            Report(Types.MismatchId(typed.Type, returnType), body.Line, $"the body is a `{typed.Type}` where the result is a `{returnType}` (F2, T1)"); // E1: at the value's line, as for every value that does not fit
         }
+    }
+
+    /// <summary>The expression inside every pair of parentheses around it.</summary>
+    private static Expression Unwrap(Expression e)
+    {
+        while (e is ParenthesizedExpression p)
+        {
+            e = p.Inner;
+        }
+
+        return e;
     }
 
     private void DeclareParameter(string name, KurzType type, bool mut, int line)
@@ -742,9 +814,9 @@ public sealed partial class Checker
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
         }
-        else if (Lookup(name).Variable is not null)
+        else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
-            Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)");
+            Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)"); // a function's, a type's or `print`'s name, as for a local
         }
 
         frame.Scope.Variables[name] = new VariableSymbol(name, type, mut, VariableKind.Parameter, line);
@@ -779,8 +851,12 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || unsupportedTypes.Contains(name) || name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map";
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || unsupportedTypes.Contains(name) || IsBuiltInName(name);
+
+    /// <summary>The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9).</summary>
+    private static bool IsBuiltInName(string name) => name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map";
 
     private void PushScope() => frame.Scope = new Scope { Parent = frame.Scope };
 
@@ -806,18 +882,23 @@ public sealed partial class Checker
         declared.Add(symbol);
     }
 
-    /// <summary>Declares the variable, or, where the name is <c>redeclared</c> and no variable of it is visible, binds it to the error type so that its uses carry no further error (E1).</summary>
+    /// <summary>Declares the variable, or, where the name is <c>redeclared</c>, binds it in this scope to the error type, so that its uses carry no further error and change no variable outside (E1).</summary>
     private void DeclareChecked(string name, KurzType type, bool mut, VariableKind kind, int line)
     {
         if (!Redeclares(name, line))
         {
             Declare(name, type, mut, kind, line);
         }
-        else if (Lookup(name).Variable is null)
+        else
         {
-            Declare(name, Types.Error, true, kind, line);
-            frame.Scope.Variables[name].Read = true;
+            DeclareUnreadable(name, kind, line);
         }
+    }
+
+    private void DeclareUnreadable(string name, VariableKind kind, int line)
+    {
+        Declare(name, Types.Error, true, kind, line);
+        frame.Scope.Variables[name].Read = true;
     }
 
     /// <summary>V9, F16: whether declaring <paramref name="name"/> here is <c>redeclared</c>, reported at <paramref name="line"/>.</summary>
@@ -843,6 +924,7 @@ public sealed partial class Checker
     private Flow CheckBlock(Block block)
     {
         PushScope();
+        blockDepth++;
         var flow = Flow.Completes;
         foreach (var s in block.Statements)
         {
@@ -852,6 +934,7 @@ public sealed partial class Checker
             }
         }
 
+        blockDepth--;
         PopScope();
         return flow;
     }
@@ -915,6 +998,8 @@ public sealed partial class Checker
                 CheckReturn(r);
                 return Flow.Ends;
             case ThrowStatement t:
+                // O6, O7: a throw is an exception, which ends the actor and is no case of the function's result, so nothing is
+                // listed for it (O3 lists the cases a call returns) and the top level may throw (O9 is about cases)
                 if (t.Value is not null)
                 {
                     var thrown = CheckExpression(t.Value, null);
@@ -930,14 +1015,31 @@ public sealed partial class Checker
 
                 return Flow.Ends;
             case RawBlock r:
-                NotSupported(r.Line, "a raw block (R7)");
-                return CheckBlock(r.Body);
+                {
+                    NotSupported(r.Line, "a raw block (R7)");
+                    Push();
+                    var flow = CheckBlock(r.Body); // read for the variables it uses, with its diagnostics dropped: the one diagnostic of the construct (E1)
+                    Pop(commit: false);
+                    return flow;
+                }
+
             case UseStatement u:
                 NotSupported(u.Line, "use (F10)");
                 return Flow.Completes;
-            case FunctionDeclaration:
-            case TypeDeclaration:
-                return Flow.Completes; // declared in the first passes
+            case FunctionDeclaration f:
+                if (blockDepth > 0)
+                {
+                    NotSupported(f.Line, "a function declared inside a block (F1, F6)"); // the top level's are declared in the first passes
+                }
+
+                return Flow.Completes;
+            case TypeDeclaration t:
+                if (blockDepth > 0)
+                {
+                    NotSupported(t.Line, "a type declared inside a block (D1, F6)");
+                }
+
+                return Flow.Completes;
             case FieldDeclaration f:
                 Report(ErrorIds.Syntax, f.Line, "a field stands in a type body (K7)");
                 return Flow.Completes;
@@ -953,7 +1055,11 @@ public sealed partial class Checker
     private void CheckCondition(Expression condition)
     {
         var t = CheckExpression(condition, Types.Bool);
-        if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Bool })
+        if (Types.IsVoid(t.Type))
+        {
+            Report(ErrorIds.Syntax, condition.Line, "a call with a `void` success used as a value (O10)");
+        }
+        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Bool })
         {
             Report(ErrorIds.TypeMismatch, condition.Line, $"a condition is a `bool`, not a `{t.Type}` (C3)");
         }
@@ -978,7 +1084,13 @@ public sealed partial class Checker
             }
         }
 
-        var redeclared = Redeclares(v.Name, v.Line);
+        if (Redeclares(v.Name, v.Line))
+        {
+            DeclareUnreadable(v.Name, VariableKind.Local, v.Line); // bound before the value is read: the uses of a redeclared name, in the value too, carry no further error (E1)
+            CheckExpression(v.Value, declared, keepCases: declared is UnionType);
+            return;
+        }
+
         var t = CheckExpression(v.Value, declared, keepCases: declared is UnionType);
         var type = declared ?? t.Type;
         if (Types.IsVoid(t.Type))
@@ -991,15 +1103,7 @@ public sealed partial class Checker
             Report(Types.MismatchId(t.Type, declared), v.Value.Line, $"a `{t.Type}` where a `{declared}` is required (T1)");
         }
 
-        if (!redeclared)
-        {
-            Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line);
-        }
-        else if (Lookup(v.Name).Variable is null)
-        {
-            Declare(v.Name, Types.Error, true, VariableKind.Local, v.Line); // the uses of a redeclared name carry no further error (E1)
-            frame.Scope.Variables[v.Name].Read = true;
-        }
+        Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line);
     }
 
     /// <summary>V8: an assignment where the name is visible, a declaration where it is not; F16 inside a top-level function.</summary>
@@ -1035,8 +1139,7 @@ public sealed partial class Checker
         {
             // F16: the declaration on the left is the one error; the read on the right reports nothing more
             Report(ErrorIds.Redeclared, a.Line, $"`{a.Name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
-            Declare(a.Name, Types.Error, true, VariableKind.Local, a.Line);
-            frame.Scope.Variables[a.Name].Read = true;
+            DeclareUnreadable(a.Name, VariableKind.Local, a.Line);
             CheckExpression(a.Value, null);
             return;
         }
@@ -1059,43 +1162,36 @@ public sealed partial class Checker
         Declare(a.Name, type, false, VariableKind.Local, a.Line);
     }
 
-    /// <summary>M4, D4: an assignment into a path of fields from a variable; an index is not read (M9's map is not read).</summary>
+    /// <summary>M4, D4: an assignment into a path of fields from a variable; a path through an index is not read (M9's map is not read).</summary>
     private void CheckAssignment(Assignment a)
     {
-        if (a.Target is IndexExpression index)
-        {
-            NotSupported(a.Line, "an assignment into an index (M9)");
-            CheckExpression(index.Target, null);
-            CheckExpression(index.Index, Types.Int);
-            CheckExpression(a.Value, null);
-            return;
-        }
-
-        if (a.Target is not MemberAccess)
-        {
-            Report(ErrorIds.Syntax, a.Line, "the left side of an assignment is a name or a path (V8, M4)");
-            CheckExpression(a.Value, null);
-            return;
-        }
-
         var members = new List<MemberAccess>();
-        Expression root = a.Target;
+        var root = Unwrap(a.Target);
         while (root is MemberAccess m)
         {
             if (m.Conditional)
             {
                 NotSupported(m.Line, "`?.` (N5)");
-                CheckExpression(a.Value, null);
+                CheckLoosely(a.Target, a.Value);
                 return;
             }
 
             members.Insert(0, m);
-            root = m.Target;
+            root = Unwrap(m.Target);
         }
 
-        while (root is ParenthesizedExpression p)
+        if (root is IndexExpression)
         {
-            root = p.Inner;
+            NotSupported(a.Line, "an assignment into an index (M9)");
+            CheckLoosely(a.Target, a.Value);
+            return;
+        }
+
+        if (members.Count == 0)
+        {
+            Report(ErrorIds.Syntax, a.Line, "the left side of an assignment is a name or a path (V8, M4)");
+            CheckExpression(a.Value, null);
+            return;
         }
 
         KurzType current;
@@ -1171,7 +1267,7 @@ public sealed partial class Checker
             }
         }
 
-        var value = CheckExpression(a.Value, Types.IsError(current) ? null : current);
+        var value = CheckExpression(a.Value, Types.IsError(current) ? null : current, keepCases: current is UnionType);
         if (last is null || Types.IsError(current) || value.IsError)
         {
             return;
@@ -1187,9 +1283,21 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>Reads the parts of a statement the checker does not read, with their diagnostics dropped, so that the variables they use count as used (E1).</summary>
+    private void CheckLoosely(params Expression[] expressions)
+    {
+        Push();
+        foreach (var e in expressions)
+        {
+            CheckExpression(e, null);
+        }
+
+        Pop(commit: false);
+    }
+
     private void CheckExpressionStatement(ExpressionStatement e)
     {
-        switch (e.Expression)
+        switch (Unwrap(e.Expression))
         {
             case CallExpression c:
                 CheckCall(c, null, keepCases: false);
@@ -1200,10 +1308,8 @@ public sealed partial class Checker
             case MatchExpression m:
                 CheckMatch(m.Subject, m.Arms, isExpression: false, expected: null, m.Line);
                 break;
-            case ParenthesizedExpression { Inner: CallExpression c }:
-                CheckCall(c, null, keepCases: false);
-                break;
             default:
+                // F5 lists what a statement is, and a value on its own is none: text no rule gives a meaning, E4's `syntax` (the reading in compiler/README.md)
                 if (!CheckExpression(e.Expression, null).IsError)
                 {
                     Report(ErrorIds.Syntax, e.Line, "a statement is a declaration, an assignment, a call or a statement form; a value on its own is none (F5, E4)");
@@ -1216,17 +1322,22 @@ public sealed partial class Checker
     private void CheckForIn(ForInStatement f)
     {
         KurzType element;
-        if (f.Collection is RangeExpression range)
+        if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
         }
         else
         {
             var t = CheckExpression(f.Collection, null);
+            if (Types.IsVoid(t.Type))
+            {
+                this.Report(ErrorIds.Syntax, f.Collection.Line, "a call with a `void` success used as a value (O10)");
+            }
+
             element = t.Type switch
             {
                 ListType l => l.Element,
-                ErrorType => Types.Error,
+                ErrorType or VoidType => Types.Error,
                 _ => Report(f.Collection.Line, t.Type),
             };
         }
@@ -1271,9 +1382,8 @@ public sealed partial class Checker
 
         if (Types.IsVoid(expected))
         {
-            if (r.Value is not null)
+            if (r.Value is not null && !CheckExpression(r.Value, null).IsError)
             {
-                CheckExpression(r.Value, null);
                 Report(ErrorIds.TypeMismatch, r.Line, "a `void` function returns no value (F3, F4)");
             }
 
@@ -1302,7 +1412,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, expected))
         {
-            Report(Types.MismatchId(value.Type, expected), r.Line, $"a `{value.Type}` is returned where the result is a `{expected}` (F3, T1)");
+            Report(Types.MismatchId(value.Type, expected), r.Value.Line, $"a `{value.Type}` is returned where the result is a `{expected}` (F3, T1)"); // E1: at the value's line, as for every value that does not fit
         }
     }
 

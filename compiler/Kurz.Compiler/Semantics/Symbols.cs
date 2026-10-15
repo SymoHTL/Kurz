@@ -13,7 +13,7 @@ public enum VariableKind
     /// <summary>The variable of a <c>for ... in</c> loop (C6): immutable, never <c>unused-variable</c> (V13).</summary>
     Loop,
 
-    /// <summary>The name an arm of a <c>match</c> binds (C4): immutable, and read as a loop variable is.</summary>
+    /// <summary>The name an arm of a <c>match</c> binds (C4): immutable, and never <c>unused-variable</c>, as a loop variable is not (V13's reading in <c>compiler/README.md</c>: the arm declares it, not the program's choice).</summary>
     Binding,
 }
 
@@ -35,14 +35,12 @@ public sealed class VariableSymbol(string name, KurzType type, bool mut, Variabl
     public bool Changed { get; set; }
 }
 
-/// <summary>A type parameter (T19) with its limit, where one is written.</summary>
+/// <summary>A type parameter (T19). A limit written on it is <c>not supported</c> and is not read, so none is kept here.</summary>
 public sealed class TypeParameterSymbol(string name, int line)
 {
     public string Name { get; } = name;
 
     public int Line { get; } = line;
-
-    public KurzType? Limit { get; set; }
 }
 
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>
@@ -83,7 +81,10 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
 
     public DataSymbol? Base { get; set; }
 
-    /// <summary>Whether the declaration writes a primary constructor at all: <c>data Empty</c> has none and one value (D8).</summary>
+    /// <summary>Set when the checker starts resolving the type, whatever the outcome, so that it is resolved once and a cycle of bases ends.</summary>
+    public bool Resolved { get; set; }
+
+    /// <summary>Whether the declaration writes a primary constructor: <c>data Empty</c> has none and one value (D8); an empty <c>()</c> is <c>syntax</c> and counts as written.</summary>
     public bool HasFields => Declaration.PrimaryConstructor is not null;
 
     public int Line => Declaration.Line;

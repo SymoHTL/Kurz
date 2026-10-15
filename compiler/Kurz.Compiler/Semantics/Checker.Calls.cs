@@ -39,6 +39,9 @@ public sealed partial class Checker
 
         public string? BindingError { get; set; }
 
+        /// <summary>The id the binding error carries: <c>argument-mismatch</c> (D11), or <c>syntax</c> for a count of type arguments no rule gives a meaning (T19, E4).</summary>
+        public string BindingErrorId { get; set; } = ErrorIds.ArgumentMismatch;
+
         public bool CannotInfer { get; set; }
 
         /// <summary>The first argument whose own type does not fit its parameter, with the parameter's type after substitution.</summary>
@@ -142,13 +145,20 @@ public sealed partial class Checker
     {
         foreach (var a in c.Arguments)
         {
-            if (a.Value is LambdaExpression l && l.Parameters.Any(p => p.Type is null))
-            {
-                continue; // nothing gives its parameters a type: its own error would stand beside the call's
-            }
-
-            CheckExpression(a.Value, null);
+            CheckArgumentLoosely(a.Value);
         }
+    }
+
+    /// <summary>A lambda whose parameters nothing types is read with its diagnostics dropped: its own error would stand beside the call's (E1), and the variables it reads still count.</summary>
+    private void CheckArgumentLoosely(Expression value)
+    {
+        if (value is LambdaExpression l && l.Parameters.Any(p => p.Type is null))
+        {
+            CheckLoosely(value);
+            return;
+        }
+
+        CheckExpression(value, null);
     }
 
     /// <summary>F11: a call of a function value, by position.</summary>
@@ -205,26 +215,33 @@ public sealed partial class Checker
     {
         if (!Types.IsNumber(target) && !Types.IsTime(target))
         {
-            NotSupported(c.Line, $"a conversion to `{target}`");
+            NotSupported(c.Line, $"a conversion to `{target}` (A5 to A7)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
 
-        if (c.Arguments.Count != 1 || c.Arguments[0].Name is not null || c.Arguments[0].Mut)
+        if (c.Arguments.Count != 1 || c.Arguments[0].Name is not null)
         {
             Report(ErrorIds.ArgumentMismatch, c.Line, $"a conversion to `{target}` takes one value (T10)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
 
+        if (c.Arguments[0].Mut)
+        {
+            Report(ErrorIds.MutAtCall, c.Arguments[0].Line, "a conversion changes nothing: no `mut` before its argument (M7)");
+        }
+
         var argument = c.Arguments[0].Value;
         Typed source;
         if (IsLiteralOnly(argument))
         {
-            // L17: the conversion reaches the integer literals inside it; a fraction or exponent literal keeps its own type
+            // L17: the conversion reaches the integer literals inside it, whatever number or time type it names; a fraction or
+            // exponent literal keeps its own type, so that `float(1e300)` converts a double (T26) instead of reading the literal as a float
+            var kept = realKeepsOwnType;
             realKeepsOwnType = true;
-            source = CheckExpression(argument, Types.IsInteger(target) ? target : Types.IsTime(target) ? target : null);
-            realKeepsOwnType = false;
+            source = CheckExpression(argument, target);
+            realKeepsOwnType = kept;
         }
         else
         {
@@ -289,7 +306,7 @@ public sealed partial class Checker
                     return new Typed(target, new DecimalConstant((decimal)k.Value));
                 }
 
-                return new Typed(target, new RealConstant(target.Kind == Primitive.Float ? (float)(double)k.Value : (double)k.Value));
+                return new Typed(target, new RealConstant(target.Kind == Primitive.Float ? (float)(double)k.Value : (double)k.Value)); // T26: beyond the range it is an infinity, no error
             case RealConstant r:
                 if (Types.IsInteger(target))
                 {
@@ -311,7 +328,8 @@ public sealed partial class Checker
 
                 if (Types.IsDecimal(target))
                 {
-                    if (double.IsNaN(r.Value) || double.IsInfinity(r.Value) || Math.Abs(r.Value) > (double)decimal.MaxValue)
+                    // (double)decimal.MaxValue rounds up to 2^96, one above the range, so a value equal to it is outside too
+                    if (double.IsNaN(r.Value) || double.IsInfinity(r.Value) || Math.Abs(r.Value) >= (double)decimal.MaxValue)
                     {
                         Report(ErrorIds.ConstantOverflow, line, "the value does not fit a `decimal` (T6)");
                         return Typed.Error;
@@ -320,6 +338,7 @@ public sealed partial class Checker
                     return new Typed(target, new DecimalConstant((decimal)r.Value));
                 }
 
+                // T26: a `double` into a `float` beyond its range becomes an infinity and loses nothing the rule names, so no error
                 return new Typed(target, new RealConstant(target.Kind == Primitive.Float ? (float)r.Value : r.Value));
             case DecimalConstant m:
                 if (Types.IsInteger(target))
@@ -345,7 +364,7 @@ public sealed partial class Checker
     {
         if (c.TypeArguments.Count != 1)
         {
-            Report(c.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, c.Line, "`List` takes one type argument (M9, T17)");
+            Report(c.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, c.Line, "`List` takes one type argument (M9, T17; E4 for a second one)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -365,13 +384,18 @@ public sealed partial class Checker
     {
         if (!data.HasFields)
         {
+            // D8 writes the value as the bare name: `Name()` is text no rule gives a meaning (E4); an argument is D11's error
             if (c.Arguments.Count != 0)
             {
-                Report(ErrorIds.ArgumentMismatch, c.Line, $"`{data.Name}` has no fields: its value is the bare name (D8)");
+                Report(ErrorIds.ArgumentMismatch, c.Line, $"`{data.Name}` has no fields and takes no argument: its value is the bare name (D8, D11)");
                 CheckArgumentsLoosely(c);
             }
+            else
+            {
+                Report(ErrorIds.Syntax, c.Line, $"the value of `{data.Name}` is the bare name, with no `()` (D8)");
+            }
 
-            return new Typed(new DataType(data, []), new UnitConstant());
+            return Typed.Error;
         }
 
         var slots = data.Fields.Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, data.TypeParameters.Any(p => Types.Mentions(f.Type, p)))).ToList();
@@ -380,7 +404,7 @@ public sealed partial class Checker
         {
             if (c.TypeArguments.Count != data.TypeParameters.Count)
             {
-                Report(ErrorIds.Syntax, c.Line, $"`{data.Name}` takes {data.TypeParameters.Count} type arguments (T19)");
+                Report(ErrorIds.Syntax, c.Line, $"`{data.Name}` takes {data.TypeParameters.Count} type arguments (T19; E4 for another count)");
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
             }
@@ -417,9 +441,9 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if ((dataTypes.TryGetValue(n.Name, out var data) && data.HasFields) || Types.ByName.ContainsKey(n.Name) || n.Name is "List" or "Map" || functions.ContainsKey(n.Name))
+            if ((dataTypes.TryGetValue(n.Name, out var data) && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
-                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}`");
+                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
             }
@@ -440,7 +464,11 @@ public sealed partial class Checker
                     {
                         var candidate = new Candidate { Slots = [new Slot("item", list.Element, false, false, false)], Result = Types.Void };
                         var result = Call([candidate], c, null);
-                        MutReceiver(m.Target, c.Line, "`Add` changes the list it is called on");
+                        if (!result.IsError)
+                        {
+                            MutReceiver(m.Target, c.Line, "`Add` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
                         return result;
                     }
 
@@ -466,24 +494,21 @@ public sealed partial class Checker
         return CallValue(member.Type, c);
     }
 
-    /// <summary>M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable is not changed (F11).</summary>
+    /// <summary>M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable is not changed (F11). A path through an index is not read (M9).</summary>
     private void MutReceiver(Expression receiver, int line, string what)
     {
-        var root = receiver;
-        while (true)
+        var members = new List<MemberAccess>();
+        var root = Unwrap(receiver);
+        while (root is MemberAccess { Conditional: false } m)
         {
-            if (root is ParenthesizedExpression p)
-            {
-                root = p.Inner;
-            }
-            else if (root is MemberAccess { Conditional: false } m)
-            {
-                root = m.Target;
-            }
-            else
-            {
-                break;
-            }
+            members.Insert(0, m);
+            root = Unwrap(m.Target);
+        }
+
+        if (root is IndexExpression)
+        {
+            NotSupported(line, "a `mut` method on an element of a list (M5, M9)");
+            return;
         }
 
         if (root is not NameExpression name)
@@ -498,6 +523,12 @@ public sealed partial class Checker
             return; // reported where the receiver was read
         }
 
+        if (!IsFieldPath(variable.Type, members, out var notField))
+        {
+            Report(ErrorIds.MutRequired, line, $"{what}, and `{notField}` is no field of a data value: only a path of data fields from a `mut` variable reaches a value that changes (M5, M4)");
+            return;
+        }
+
         if (captured)
         {
             Report(ErrorIds.CaptureAssign, line, $"a lambda reads `{name.Name}` and cannot change it (F11)");
@@ -510,25 +541,52 @@ public sealed partial class Checker
         variable.Changed = true;
     }
 
+    /// <summary>M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not tell passes.</summary>
+    private static bool IsFieldPath(KurzType type, List<MemberAccess> members, out string notField)
+    {
+        notField = "";
+        var current = type;
+        foreach (var m in members)
+        {
+            if (Types.IsError(current))
+            {
+                return true;
+            }
+
+            if (current is DataType d && d.Symbol.Field(m.Member) is { } field)
+            {
+                current = SubstituteData(d, field.Type);
+                continue;
+            }
+
+            notField = m.Member;
+            return false;
+        }
+
+        return true;
+    }
+
     // ---- overloads, binding and inference ----------------------------------------------------------
 
     /// <summary>F12 to F14, T27: the one function of the name a call picks.</summary>
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected)
     {
+        var typeArguments = c.TypeArguments.Select(Resolve).ToList(); // once: an error in one is one diagnostic, whatever the number of overloads (E1)
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
             var slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, p.Mut, p.HasDefault, f.TypeParameters.Any(t => Types.Mentions(p.Type, t)))).ToList();
             var candidate = new Candidate { Function = f, Slots = slots, TypeParameters = f.TypeParameters, Result = f.ReturnType };
-            if (c.TypeArguments.Count > 0)
+            if (typeArguments.Count > 0)
             {
-                if (c.TypeArguments.Count != f.TypeParameters.Count)
+                if (typeArguments.Count != f.TypeParameters.Count)
                 {
-                    candidate.BindingError = $"`{f.Name}` takes {f.TypeParameters.Count} type arguments (T19)";
+                    candidate.BindingError = $"`{f.Name}` takes {f.TypeParameters.Count} type arguments (T19; E4 for another count)";
+                    candidate.BindingErrorId = ErrorIds.Syntax;
                 }
                 else
                 {
-                    candidate.Map = f.TypeParameters.Zip(c.TypeArguments.Select(Resolve)).ToDictionary(p => p.First, p => p.Second);
+                    candidate.Map = f.TypeParameters.Zip(typeArguments).ToDictionary(p => p.First, p => p.Second);
                 }
             }
 
@@ -593,7 +651,7 @@ public sealed partial class Checker
             }
             else
             {
-                Report(ErrorIds.AmbiguousCall, c.Line, "the call fits more than one function, none of them exactly (F13)");
+                Report(ErrorIds.AmbiguousCall, c.Line, exact.Count > 1 ? "the call fits more than one function exactly (F13)" : "the call fits more than one function, none of them exactly (F13)");
             }
         }
         else
@@ -610,9 +668,9 @@ public sealed partial class Checker
                     Add(d);
                 }
 
-                if (pre.Lambda is not null && pre.Lambda.Parameters.All(p => p.Type is not null))
+                if (pre.Lambda is not null)
                 {
-                    CheckExpression(pre.Lambda, null);
+                    CheckArgumentLoosely(pre.Lambda);
                 }
             }
 
@@ -637,7 +695,7 @@ public sealed partial class Checker
             {
                 if (named)
                 {
-                    candidate.BindingError = "an argument without a name stands before the named ones (D11)";
+                    candidate.BindingError = "an argument without a name stands after a named one: it comes first, or gets a name (D11)";
                     return;
                 }
 
@@ -687,10 +745,17 @@ public sealed partial class Checker
         candidate.Binding = binding;
     }
 
-    /// <summary>T27: a type parameter takes the one type every argument in its positions has; literals take the type the others fix, or the type a constant of them has.</summary>
+    /// <summary>
+    /// T27: a type parameter takes the one type every argument in its positions has, with no widening
+    /// between them; where one argument's data type is the base of the others', the base; literals take
+    /// the type the others fix, and literals alone take the type a constant of them has. The arguments
+    /// of a position are gathered first, so that their order makes no difference; an argument the checker
+    /// could not type fixes nothing and contradicts nothing (E1).
+    /// </summary>
     private static void Infer(Candidate candidate, List<Pre> pres)
     {
         var map = new Dictionary<TypeParameterSymbol, KurzType>(candidate.Map);
+        var direct = candidate.TypeParameters.ToDictionary(p => p, _ => new List<KurzType>());
         for (var i = 0; i < pres.Count; i++)
         {
             var pre = pres[i];
@@ -699,11 +764,39 @@ public sealed partial class Checker
                 continue;
             }
 
-            if (!Unify(candidate.Slots[candidate.Binding[i]].Type, pre.Typed.Type, map))
+            var slot = candidate.Slots[candidate.Binding[i]].Type;
+            if (slot is TypeParameterType tp && direct.TryGetValue(tp.Symbol, out var types))
+            {
+                types.Add(pre.Typed.Type);
+            }
+            else if (!Unify(slot, pre.Typed.Type, map))
             {
                 candidate.CannotInfer = true;
                 return;
             }
+        }
+
+        foreach (var (p, types) in direct)
+        {
+            var known = types.Where(t => !Types.IsError(t)).ToList();
+            if (known.Count == 0)
+            {
+                if (types.Count > 0)
+                {
+                    map[p] = Types.Error; // every argument of the position carries its own error: nothing is inferred and nothing more is reported (E1)
+                }
+
+                continue;
+            }
+
+            var common = known.FirstOrDefault(t => known.All(u => Types.Same(u, t) || (u is DataType && t is DataType && Types.Assignable(u, t))));
+            if (common is null || (map.TryGetValue(p, out var bound) && !Types.Same(bound, common) && !Types.IsError(bound)))
+            {
+                candidate.CannotInfer = true;
+                return;
+            }
+
+            map[p] = common;
         }
 
         foreach (var p in candidate.TypeParameters)
@@ -713,13 +806,20 @@ public sealed partial class Checker
                 continue;
             }
 
-            // literals alone in its positions: the type a constant expression of them has (L10, L17)
+            // literals alone in its positions: the type a constant expression of them has (L10, L17, T27)
             KurzType? fixedType = null;
+            var untypable = false;
             for (var i = 0; i < pres.Count; i++)
             {
                 var pre = pres[i];
-                if (!pre.LiteralOnly || pre.Typed.IsError || candidate.Slots[candidate.Binding[i]].Type is not TypeParameterType tp || !ReferenceEquals(tp.Symbol, p))
+                if (!pre.LiteralOnly || candidate.Slots[candidate.Binding[i]].Type is not TypeParameterType tp || !ReferenceEquals(tp.Symbol, p))
                 {
+                    continue;
+                }
+
+                if (pre.Typed.IsError)
+                {
+                    untypable = true; // its own error stands; no second one for the inference (E1)
                     continue;
                 }
 
@@ -728,6 +828,12 @@ public sealed partial class Checker
                 {
                     break;
                 }
+            }
+
+            if (fixedType is null && untypable)
+            {
+                map[p] = Types.Error;
+                continue;
             }
 
             if (fixedType is null)
@@ -742,6 +848,7 @@ public sealed partial class Checker
         candidate.Map = map;
     }
 
+    /// <summary>The type two literal arguments of one type parameter fix together: the type the constant expression of them would have (L10, L17, T18, T23).</summary>
     private static KurzType? LiteralCommon(KurzType a, KurzType b)
     {
         if (a is not PrimitiveType pa || b is not PrimitiveType pb)
@@ -754,42 +861,34 @@ public sealed partial class Checker
             return Types.CommonInteger(pa, pb);
         }
 
+        if (Types.IsDecimal(pa) || Types.IsDecimal(pb))
+        {
+            // T23: an integer literal beside a decimal takes decimal; a floating-point literal beside one meets no type (T18)
+            return (Types.IsInteger(pa) || Types.IsDecimal(pa)) && (Types.IsInteger(pb) || Types.IsDecimal(pb)) ? Types.Decimal : null;
+        }
+
         if (Types.IsNumber(pa) && Types.IsNumber(pb))
         {
-            return pa.Kind == Primitive.Double || pb.Kind == Primitive.Double ? Types.Double : Types.IsDecimal(pa) || Types.IsDecimal(pb) ? null : Types.Float;
+            return pa.Kind == Primitive.Double || pb.Kind == Primitive.Double ? Types.Double : Types.Float;
         }
 
         return Types.Same(pa, pb) ? pa : null;
     }
 
+    /// <summary>Binds the type parameters inside a list, data or function type to the parts of the argument's type; a part bound already has to be the same (T27).</summary>
     private static bool Unify(KurzType parameter, KurzType argument, Dictionary<TypeParameterSymbol, KurzType> map)
     {
         switch (parameter)
         {
             case TypeParameterType p:
+                if (Types.IsError(argument))
+                {
+                    return true; // an argument the checker could not type fixes nothing and contradicts nothing (E1)
+                }
+
                 if (map.TryGetValue(p.Symbol, out var bound))
                 {
-                    if (Types.Same(bound, argument) || Types.IsError(argument) || Types.IsError(bound))
-                    {
-                        return true; // an argument the checker could not type fixes nothing and contradicts nothing
-                    }
-
-                    // T27: no widening between the arguments, as C# would do; where one data type is the base of the other, the base
-                    if (bound is DataType && argument is DataType)
-                    {
-                        if (Types.Assignable(argument, bound))
-                        {
-                            return true;
-                        }
-
-                        if (Types.Assignable(bound, argument))
-                        {
-                            map[p.Symbol] = argument;
-                            return true;
-                        }
-                    }
-
-                    return false;
+                    return Types.Same(bound, argument) || Types.IsError(bound);
                 }
 
                 map[p.Symbol] = argument;
@@ -805,8 +904,15 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>F13, F14: whether every argument fits its parameter by its own type, and whether all do exactly.</summary>
-    private static void Fit(Candidate candidate, List<Pre> pres, bool only)
+    /// <summary>
+    /// F13, F14: whether every argument fits its parameter by its own type, and whether all do exactly.
+    /// A literal argument of an overloaded function has its own type for the pick (F14: `Show(4)` fits
+    /// `Show(long)` and not `Show(short)`); where the function is not overloaded, or the position is
+    /// generic, the parameter's type reaches the literal (L17, T27) and the literal fits when it is read
+    /// under that type without an error. A <c>mut</c> parameter takes an argument of its own type only:
+    /// the callee writes a value of the parameter's type back into the variable (M7).
+    /// </summary>
+    private void Fit(Candidate candidate, List<Pre> pres, bool only)
     {
         var exact = !candidate.DefaultUsed;
         for (var i = 0; i < pres.Count; i++)
@@ -831,12 +937,22 @@ public sealed partial class Checker
 
             if (pre.LiteralOnly && (slot.GenericPosition || only) && Types.IsNumber(type) && Types.IsNumber(pre.Typed.Type))
             {
-                // T27, L17: the literal takes the type the parameter fixes; whether it fits is checked under that type
+                // the literal takes the parameter's type: it fits, and a value it cannot hold there (`300` as a `byte`, `1.5` as an `int`) is
+                // the error of the literal under that type, reported by Commit at the argument (L17, T6); only a literal that keeps its own type
+                // there and does not widen into the parameter's is a misfit
+                Push();
+                var under = CheckExpression(pre.Argument.Value, type);
+                var errors = Pop(commit: false);
+                if (errors.Count == 0 && !under.IsError && !Types.Assignable(under.Type, type))
+                {
+                    candidate.Misfit ??= (i, type);
+                }
+
                 exact &= Types.Same(pre.Typed.Type, type);
                 continue;
             }
 
-            if (!Types.Assignable(pre.Typed.Type, type))
+            if (!(slot.Mut ? Types.Same(pre.Typed.Type, type) : Types.Assignable(pre.Typed.Type, type)))
             {
                 candidate.Misfit ??= (i, type);
             }
@@ -852,7 +968,7 @@ public sealed partial class Checker
         var bound = candidates.FirstOrDefault(x => x.BindingError is null);
         if (bound is null)
         {
-            Report(ErrorIds.ArgumentMismatch, c.Line, candidates[0].BindingError!);
+            Report(candidates[0].BindingErrorId, c.Line, candidates[0].BindingError!);
             return;
         }
 
@@ -864,6 +980,12 @@ public sealed partial class Checker
 
         var (index, parameter) = bound.Misfit!.Value;
         var pre = pres[index];
+        if (pre.Lambda is null && bound.Slots[bound.Binding[index]].Mut && Types.Assignable(pre.Typed.Type, parameter))
+        {
+            Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"a `{pre.Typed.Type}` passed as `mut` where a `mut {parameter}` is required: a `mut` parameter takes a variable of its own type, since the callee writes a `{parameter}` back into it (M7, T1)");
+            return;
+        }
+
         var argumentType = pre.Lambda is not null ? "a lambda" : $"a `{pre.Typed.Type}`";
         var id = pre.Lambda is not null ? ErrorIds.TypeMismatch : Types.MismatchId(pre.Typed.Type, parameter);
         Report(id, pre.Argument.Line, $"{argumentType} where a `{parameter}` is required (T1)");
@@ -872,7 +994,7 @@ public sealed partial class Checker
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7).</summary>
     private void Commit(Candidate candidate, List<Pre> pres)
     {
-        var mutRoots = new List<string>();
+        var mutPaths = new List<string>();
         for (var i = 0; i < pres.Count; i++)
         {
             var pre = pres[i];
@@ -904,7 +1026,7 @@ public sealed partial class Checker
 
                 if (!pre.Typed.IsError && Types.IsVoid(pre.Typed.Type))
                 {
-                    Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
+                    Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (E4, O10)");
                 }
             }
 
@@ -918,29 +1040,31 @@ public sealed partial class Checker
             }
             else if (slot.Mut)
             {
-                MutArgument(a, mutRoots);
+                MutArgument(a, mutPaths);
             }
         }
     }
 
-    /// <summary>M7: what stands after <c>mut</c> at a call is a <c>mut</c> variable or a path of data fields from one, and each one once.</summary>
-    private void MutArgument(Argument a, List<string> roots)
+    /// <summary>
+    /// M7: what stands after <c>mut</c> at a call is a <c>mut</c> variable or a path of data fields from
+    /// one, and each path once: the same path twice, or a path and one it is a prefix of, would reach one
+    /// value through two parameters; two fields of one variable are two values. A path through an index
+    /// is not read (M9).
+    /// </summary>
+    private void MutArgument(Argument a, List<string> paths)
     {
-        var root = a.Value;
-        while (true)
+        var members = new List<MemberAccess>();
+        var root = Unwrap(a.Value);
+        while (root is MemberAccess { Conditional: false } m)
         {
-            if (root is ParenthesizedExpression p)
-            {
-                root = p.Inner;
-            }
-            else if (root is MemberAccess { Conditional: false } m)
-            {
-                root = m.Target;
-            }
-            else
-            {
-                break;
-            }
+            members.Insert(0, m);
+            root = Unwrap(m.Target);
+        }
+
+        if (root is IndexExpression)
+        {
+            NotSupported(a.Line, "an element of a list passed as `mut` (M7, M9)");
+            return;
         }
 
         if (root is not NameExpression name)
@@ -955,6 +1079,13 @@ public sealed partial class Checker
             return;
         }
 
+        if (!IsFieldPath(variable.Type, members, out var notField))
+        {
+            Report(ErrorIds.MutAtCall, a.Line, $"`{notField}` is no field of a data value: after `mut` stands a `mut` variable or a path of data fields from one (M7)");
+            return;
+        }
+
+        var path = string.Join(".", members.Select(m => m.Member).Prepend(name.Name));
         if (captured)
         {
             Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{name.Name}` and cannot pass it as `mut` (F11)");
@@ -963,12 +1094,12 @@ public sealed partial class Checker
         {
             Report(ErrorIds.MutRequired, a.Line, $"`{name.Name}` was declared without `mut` and cannot be passed as `mut` (M7)");
         }
-        else if (roots.Contains(name.Name))
+        else if (paths.Any(other => other == path || other.StartsWith(path + ".", StringComparison.Ordinal) || path.StartsWith(other + ".", StringComparison.Ordinal)))
         {
-            Report(ErrorIds.MutAtCall, a.Line, $"`{name.Name}` is passed as `mut` twice (M7)");
+            Report(ErrorIds.MutAtCall, a.Line, $"`{path}` is passed as `mut` twice (M7)");
         }
 
-        roots.Add(name.Name);
+        paths.Add(path);
         variable.Changed = true;
     }
 }

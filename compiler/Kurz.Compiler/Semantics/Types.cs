@@ -101,7 +101,13 @@ public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArg
     public override int GetHashCode() => Text.GetHashCode(StringComparison.Ordinal);
 }
 
-/// <summary>A union (D9). The cases are flat and distinct, in the order written; the first is the success case of a result (O1).</summary>
+/// <summary>
+/// A union (D9). The cases are flat and distinct, in the order written; the first is the success
+/// case of a result (O1). Two unions are the same type when their cases are the same in the same
+/// order (the reading in <c>compiler/README.md</c>): O1 gives the order a meaning, so
+/// <c>List&lt;int | string&gt;</c> and <c>List&lt;string | int&gt;</c> are two types, while a value of
+/// one union stands where the other is required when every case of it is a case there (<see cref="Types.Assignable"/>).
+/// </summary>
 public sealed record UnionType(IReadOnlyList<KurzType> Cases) : KurzType
 {
     public override string Text => string.Join(" | ", Cases.Select(c => c is FunctionType or UnionType ? "(" + c.Text + ")" : c.Text));
@@ -280,7 +286,9 @@ public static class Types
     /// into <c>double</c>; the narrow time type into its wide one (T29); a derived <c>data</c> type
     /// where its base is required (D6); a case where its union is required (D9); a union whose every
     /// case the required union holds. A value of the error type stands anywhere, and anything stands
-    /// where the error type is required (E1: one defect, one error).
+    /// where the error type is required (E1: one defect, one error). No type has the error type inside
+    /// it: a list, data or function type with an error in a part is the error type as a whole, as
+    /// <see cref="Checker"/> resolves and infers them, so the test on the whole is the whole test.
     /// </summary>
     public static bool Assignable(KurzType from, KurzType to)
     {
@@ -380,10 +388,12 @@ public static class Types
 
     /// <summary>
     /// The common type of two integer operands under <c>+ - * / %</c>, the comparisons and
-    /// <c>&amp; | ^</c> (T9, T18, T28): null for <c>sign-mix</c>, judged on the types as written.
-    /// Two operands narrower than <c>int</c> are promoted to <c>int</c>, whatever their signedness;
-    /// otherwise the type the other operand widens into (T23), and where neither widens into the
-    /// other (<c>uint</c> beside <c>int</c>, <c>ulong</c> beside any signed type) the error.
+    /// <c>&amp; | ^</c> (T9, T18, T28): null for <c>sign-mix</c>. T28: two operands narrower than
+    /// <c>int</c> are promoted to <c>int</c>, whatever their signedness, and a narrow operand beside a
+    /// <c>uint</c>, a <c>long</c> or a <c>ulong</c> takes that type, so <c>byte + uint</c> is a
+    /// <c>uint</c>; otherwise the type the other operand widens into (T23: <c>uint</c> widens into
+    /// <c>long</c>), and where neither widens into the other (<c>uint</c> beside <c>int</c>,
+    /// <c>ulong</c> beside any signed type) the error (T9).
     /// </summary>
     public static PrimitiveType? CommonInteger(PrimitiveType a, PrimitiveType b)
     {
