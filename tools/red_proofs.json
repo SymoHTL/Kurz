@@ -938,7 +938,7 @@
   {"tool": "tools/compiler_gate.py", "expect": "a failed test is red", "anchor": "    if failed:\n        errors.append(f\"{failed} tests failed\")", "replacement": "    if False:\n        errors.append(f\"{failed} tests failed\")"},
   {"tool": "tools/compiler_gate.py", "expect": "a skipped test is red", "anchor": "    if skipped:\n", "replacement": "    if False:\n"},
   {"tool": "tools/compiler_gate.py", "expect": "fewer passed tests than the floor is red", "anchor": "    if passed < floor:\n", "replacement": "    if False:\n"},
-  {"tool": "tools/compiler_gate.py", "expect": "the floor is at least 650 tests", "anchor": "FLOOR = 650  #", "replacement": "FLOOR = 0  #"},
+  {"tool": "tools/compiler_gate.py", "expect": "the floor is at least 1000 tests", "anchor": "FLOOR = 1000  #", "replacement": "FLOOR = 0  #"},
   {"tool": "tools/compiler_gate.py", "expect": "no summary line is red: nothing was proven", "anchor": "    if not summaries:\n        first", "replacement": "    if False:\n        first"},
   {"tool": "tools/compiler_gate.py", "expect": "a build failure names its first error", "anchor": "        first = ERROR_LINE.findall(output)[:5]", "replacement": "        first = []"},
   {"tool": "tools/compiler_gate.py", "expect": "a non-zero exit with no failed test is red", "anchor": "    if code != 0 and not failed:\n", "replacement": "    if False:\n"},

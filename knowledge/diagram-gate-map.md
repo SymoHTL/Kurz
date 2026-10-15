@@ -82,9 +82,10 @@ flowchart TD
         no test summary line at all, fewer passed tests than the floor, a skipped test, a non-zero exit with no failed test;
         compiler/NuGet.config missing, without the clear of the inherited sources or without a source mapping;
         a restore outside the lock files (locked mode), an SDK other than the one compiler/global.json pins;
-        dotnet missing or out of time. Read: the output of dotnet test, one summary per test project, summed.
-        Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's errors
-        against each header and runs no program"]
+        dotnet missing or out of time. Read: the output of dotnet test, one summary per test project, summed;
+        the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
+        Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's and the
+        checker's errors against each header and runs no program"]
         G4["ci-config: a pinned fact of a workflow changed. All three workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
