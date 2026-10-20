@@ -45,7 +45,9 @@ except Exception:  # only exit 2 blocks a hook call: a kit that is broken must n
 FLOOR = 5
 # What this tree holds, as full-path patterns; anything else is refused. compiler/ is admitted for the
 # compiler's .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files since the change
-# that retired the design-phase rule, after the owner said build on 2026-10-09; a bin/, obj/ or dot-directory
+# that retired the design-phase rule, after the owner said build on 2026-10-09, and for the .c and .h
+# files of the runtime a compiled program links, which the design record writes in C (section 2); an
+# object file or an executable is a build output and stays out whatever its place; a bin/, obj/ or dot-directory
 # segment under it (build outputs, IDE and tool state) is refused whatever the extension and whatever the
 # case of the segment; .gitignore keeps them out of a normal add only as spelled there, and the gate alone
 # covers the other spellings.
@@ -55,13 +57,13 @@ ALLOWED = [
     r"knowledge/[^/]+\.md", r"guides/[^/]+\.md",
     r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz",
     r"tools/(?:[^/]+/)*[^/]+\.(?:py|json|txt)",
-    r"compiler/(?:(?!(?i:bin|obj)/|\.)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
+    r"compiler/(?:(?!(?i:bin|obj)/|\.)[^/]+/)*(?:[^/]+\.(?:cs|c|h|csproj|sln|props|targets|json|md)|\.editorconfig)",
     r"compiler/NuGet\.config",
     r"\.review/[^/]+\.yaml", r"\.github/workflows/[^/]+\.yml", r"\.githooks/pre-push",
     r"\.claude/settings\.json", r"\.claude/skills/[^/]+/SKILL\.md",
 ]
 HOLDS = ("this tree holds the design record, the reference, the corpus, the knowledge store, the quality tools, "
-         "the compiler's source, project and text files under compiler/ (outside bin/, obj/ and dot-directories) "
+         "the compiler's C# source, the runtime's C source, and the project and text files under compiler/ (outside bin/, obj/ and dot-directories) "
          "and the repository's own readme, licence, git, session and skill files; the list is ALLOWED in tools/tree_gate.py (CLAUDE.md)")
 
 
@@ -296,6 +298,10 @@ def cases_in(base):
     cases.append(("floor: four files are below the gate's own floor", any("floor" in e for e in scan(four)), scan(four)))
     expect("a source file outside compiler/ is refused", {**ok_files, "Program.cs": b"class P {}\n"}, "Program.cs: not allowed")
     expect("compiler source under compiler/ is allowed", {**ok_files, "compiler/Kurz.Compiler/Lexer.cs": b"class L {}\n"}, None)
+    expect("a C source under compiler/ is allowed", {**ok_files, "compiler/Kurz.Compiler/Runtime/kurz_rt.c": b"int kurz_line;\n"}, None)
+    expect("a C header under compiler/ is allowed", {**ok_files, "compiler/Kurz.Compiler/Runtime/kurz_rt.h": b"extern int kurz_line;\n"}, None)
+    expect("a C source outside compiler/ is refused", {**ok_files, "src/kurz_rt.c": b"int kurz_line;\n"}, "kurz_rt.c: not allowed")
+    expect("a C object file under compiler/ is refused", {**ok_files, "compiler/Kurz.Compiler/Runtime/kurz_rt.o": b"ELF\n"}, "kurz_rt.o: not allowed")
     expect("a build output under compiler/ is refused",
            {**ok_files, "compiler/Kurz.Compiler/bin/Debug/Kurz.dll": b"MZ\n"}, "Kurz.dll: not allowed")
     expect("a build output with an admitted extension under compiler/ is refused",
@@ -330,7 +336,8 @@ def cases_in(base):
                  ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push",
                  "compiler/Kurz.sln", "compiler/Kurz.Compiler/Kurz.Compiler.csproj", "compiler/Kurz.Compiler/Lexer.cs",
                  "compiler/global.json", "compiler/README.md", "compiler/.editorconfig",
-                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets", "compiler/NuGet.config"):
+                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets", "compiler/NuGet.config",
+                 "compiler/Kurz.Compiler/Runtime/kurz_rt.c", "compiler/Kurz.Compiler/Runtime/kurz_rt.h"):
         cases.append((f"allowed path: {path}", check_path(path) is None, check_path(path)))
     for label, value in secrets.items():  # one plant per pattern; the error must name that pattern
         expect(f"secret: {label}", {**ok_files, "guides/g.md": value.encode()}, f"credential-shaped string ({label})")
@@ -520,6 +527,8 @@ def cases_in(base):
     for name, raw, want in [
         ("hook: a source file outside compiler/ is denied", call(inside("src/Lexer.cs")), 2),
         ("hook: compiler source under compiler/ is allowed", call(inside("compiler/Kurz.Compiler/Lexer.cs")), 0),
+        ("hook: a C source under compiler/ is allowed", call(inside("compiler/Kurz.Compiler/Runtime/kurz_rt.c")), 0),
+        ("hook: a C source outside compiler/ is denied", call(inside("src/kurz_rt.c")), 2),
         ("hook: the design record is allowed", call(inside("kurz-design.md")), 0),
         ("hook: a corpus case is allowed", call(inside("corpus/values/a.kz")), 0),
         ("hook: a file outside the repo is not this gate's business", call(outside), 0),

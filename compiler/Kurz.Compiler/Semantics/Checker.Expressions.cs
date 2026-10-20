@@ -16,6 +16,13 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckExpression(Expression expression, KurzType? expected, bool keepCases = false)
     {
+        var typed = CheckExpressionCore(expression, expected, keepCases);
+        model.RecordType(expression, typed); // the last reading stands: a call's arguments are read once more against the parameters of the function picked
+        return typed;
+    }
+
+    private Typed CheckExpressionCore(Expression expression, KurzType? expected, bool keepCases)
+    {
         switch (expression)
         {
             case IntegerLiteral i:
@@ -347,6 +354,7 @@ public sealed partial class Checker
         if (variable is not null)
         {
             variable.Read = true;
+            model.RecordName(n, variable);
             return new Typed(variable.Type);
         }
 
@@ -1103,7 +1111,7 @@ public sealed partial class Checker
         };
         foreach (var (p, type) in l.Parameters.Zip(parameterTypes))
         {
-            DeclareParameter(p.Name, type, p.Mut, p.Line);
+            DeclareParameter(p.Name, type, p.Mut, p.Line, p);
         }
 
         KurzType result;
@@ -1152,8 +1160,16 @@ public sealed partial class Checker
         }
 
         ReportUnused(frame.Scope);
+        var mine = frame;
         frame = outer;
-        return new Typed(failed || parameterTypes.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameterTypes, result));
+        if (failed || parameterTypes.Any(Types.IsError) || Types.IsError(result))
+        {
+            return Typed.Error;
+        }
+
+        var fnType = new FunctionType(parameterTypes, result);
+        model.RecordLambda(l, new LambdaInfo(l.Parameters.Select(p => mine.Scope.Variables[p.Name]).ToList(), mine.Captures.ToList(), fnType));
+        return new Typed(fnType);
     }
 
     /// <summary>D5: a copy of a data value with fields replaced.</summary>

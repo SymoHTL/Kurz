@@ -73,11 +73,13 @@ the picture is `knowledge/diagram-gate-map.md`. Of the jobs the method lists:
   verdict idea, which here is the runner itself.
 - **Have nothing to check:** UI quality, migration drift, the secrets gate for deploy directories,
   the deploy lane: there is no user interface, no database and no deployment.
-- **Not measured:** coverage, end-to-end and the complexity ratchet. The compiler is a library with
-  a unit suite, and no coverage collector runs; the corpus's output cases are the end-to-end
-  expectations of a compiler, and nothing runs a case (HAZARD #1); the compiler is code a
-  complexity ratchet would measure, and no measure of it runs. No decision records any of the
-  three, so each is the state of the tools and not a choice.
+- **Not measured:** coverage, end-to-end beyond the corpus runner, and the complexity ratchet. The
+  compiler is a library with a unit suite, and no coverage collector runs; the corpus's output
+  cases are the end-to-end expectations of a compiler, and the compiler's suite builds and runs
+  the cases its emitter emits, while the error cases and the cases of the types it does not emit
+  stand unrun (HAZARD #1); the compiler is code a complexity ratchet would measure, and no
+  measure of it runs. No decision records any of the three, so each is the state of the tools and
+  not a choice.
 
 GitHub's own secret scanning and push protection are enabled for this repository
 (`security_and_analysis` in the answer of `gh api repos/<owner>/<name>`, read 2026-10-02). They

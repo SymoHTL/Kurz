@@ -4,8 +4,9 @@ Kurz is a programming language. This repository is **public**. It holds the desi
 language reference with its conformance corpus, a knowledge store, the quality tools that gate
 them, and `compiler/`, the one directory the tree gate admits for the compiler's files since the
 change that retired the design-phase rule (pull request 29), after the owner said build on 2026-10-09.
-The quality tools compile nothing and run no corpus case; nothing here runs the corpus (HAZARD #1), and
-`compiler/` is where a compiler of Kurz is admitted.
+The quality tools compile nothing and run no corpus case; the compiler's suite under `compiler/`
+builds and runs the cases its emitter emits, and the error cases and the cases of the types it does
+not emit stand unrun (HAZARD #1).
 
 Load [INDEX.md](INDEX.md) first and open an entry when its hook matches the task. Long procedures
 are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, review, merge) and
@@ -34,11 +35,16 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   Gate: `self-tests`.
 - `cd compiler && dotnet test Kurz.sln -c Release -p:RestoreLockedMode=true --disable-build-servers`
   builds the compiler and runs its unit tests, with the SDK that `compiler/global.json` pins (the
-  dotnet host reads it from the working directory, so the command runs inside `compiler/`) and the
-  packages the lock files pin; `compiler/README.md` says what the suites cover.
+  dotnet host reads it from the working directory, so the command runs inside `compiler/`), the
+  packages the lock files pin, and the clang the machine has (every `clang-<major>` on the path,
+  newest first, then `clang`, then on Windows the LLVM installer's directory), which the suites
+  that build and run a program need: without one they fail and name the places looked at;
+  `compiler/README.md` says what the suites cover.
   `py -3 tools/compiler_gate.py` is that run as the gate reads it: red when `compiler/NuGet.config`
   is missing, is not well-formed XML, does not open its package sources with `<clear />` or maps no
-  package to a source; on a failed test, a skipped test, fewer passed tests than its floor, no
+  package to a source; when no clang answers under those names, or the one that answers is a major
+  release outside the set the gate names (its version line is printed); on a failed test, a
+  skipped test, fewer passed tests than its floor, no
   summary line at all, a non-zero exit with no failed test, a restore outside the lock files, a
   missing `dotnet` or a run out of time. The same gate runs on Windows in the workflow
   `compiler-windows`, which the ruleset does not require: a red Windows run holds no merge
@@ -128,10 +134,12 @@ Each line names a trap; its evidence is in the entry it links.
    completed off-pipeline review adds, `ci-config` for the clause of the workflow that skips the
    Ready event of a labelled head; counting and naming the bill, and the go-ahead for a run off the
    pipeline, are a `judgment step`.
-7. **An expectation nobody runs is not a proof.** Nothing runs `corpus/`. The lint checks the
-   shape of a case; whether its expected output or error is right is decided by reading it
+7. **An expectation nobody runs is not a proof.** The quality tools run nothing of `corpus/`; the
+   compiler's suite builds and runs every case its emitter emits and holds it to its header, and
+   an error case, or a case of a type the emitter does not emit, is run by nothing. The lint checks
+   the shape of a case; whether the expectation of an unrun case is right is decided by reading it
    against the rules it names ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
-   HAZARD (#1); review rule "corpus" carries the defect shapes.
+   HAZARD (#1) for the unrun cases; review rule "corpus" carries the defect shapes.
 
 ## CI
 
@@ -193,15 +201,20 @@ session must know; `INDEX.md` is their index. `tools/` holds the gates (one runn
 the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
 `.github/workflows/` runs both, and the compiler's Windows job. `compiler/` is the compiler's
 directory, the one directory the tree gate's allowlist was widened by for it: there it admits
-`.cs`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and `.editorconfig` files outside
-`bin/`, `obj/` and dot-directories, plus `compiler/NuGet.config` by name, and C# sources and
+`.cs`, `.c`, `.h`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and `.editorconfig` files outside
+`bin/`, `obj/` and dot-directories, plus `compiler/NuGet.config` by name, and C# sources, C sources and
 project files nowhere else (since pull
 request 29 retired the design-phase rule, after the owner said build on 2026-10-09). It holds the
 library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Semantics/`
 checks the tree against the rules of chapters 1 to 3, 5, 6 and 8 to 10 that `compiler/README.md`
-lists, and says `not supported` to the rest, `Corpus/` reads a case header), the xunit suite
-`Kurz.Compiler.Tests`, which runs every corpus case through the front end and every case it reads
-clean through the checker, and `compiler/README.md`. The map of every gate is
+lists, and says `not supported` to the rest, `Corpus/` reads a case header, `Emit/` writes LLVM
+IR for what the checker reads over the integers, `bool`, `char` and `string` and says
+`not supported` to the other types, `Runtime/` is the C runtime a built program links, `Build/`
+finds clang, builds and is the command), the command project `Kurz` (`kurz build`, `kurz run`,
+`kurz exec`), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through the
+front end, every case it reads clean through the checker, and every case that expects a run and
+the emitter emits through clang and the built program, and runs the command as a process, and
+`compiler/README.md`. The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
 ## Critical Rules
@@ -231,7 +244,7 @@ Gate: review rule "rules for sessions".
   held until that change merged, and its gate stays with a widened allowlist. The rule had held since 2026-10-01, when a v0
   compiler was built after asking only for a name and a toolchain, and every pick in it was void
   ([knowledge/design-before-build.md](knowledge/design-before-build.md)). What stays: the tree
-  gate admits C# sources and project files only under `compiler/`, with `.json`, `.md` and
+  gate admits C# sources, the runtime's C sources and project files only under `compiler/`, with `.json`, `.md` and
   `.editorconfig` files there, outside `bin/`, `obj/` and dot-directories; compiler code written as an allowed file elsewhere, a `.py` under `tools/`, is left to the
   review rule "tools"; and a pick the record does not
   hold is a question for a design round before it is a line of code (the next rule). Gate: `tree`
@@ -382,9 +395,9 @@ Gate: review rule "rules for sessions".
 | every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout, a push with `--no-verify` (#4) |
 | workflow facts (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
-| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
+| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins, a restore inside the lock files and a clang of a release the gate names, which builds and runs the corpus (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
-| title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
+| title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, error cases and the cases of the types the emitter does not emit being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | | the author and committer address a push publishes (#12) |

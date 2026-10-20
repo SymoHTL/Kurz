@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- xunit tests of the compiler. Every Kurz program a test reads is inline: the tree gate admits no
-       .kz file under compiler/, and the corpus under corpus/ is read where it lies. -->
+  <!-- xunit tests of the compiler and of the command, which the suite runs as a process from its own output
+       directory. Every Kurz program a test reads is inline: the tree gate admits no .kz file under
+       compiler/, and the corpus under corpus/ is read where it lies. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
@@ -18,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kurz.Compiler\Kurz.Compiler.csproj" />
+    <ProjectReference Include="..\Kurz\Kurz.csproj" />
   </ItemGroup>
 
 </Project>

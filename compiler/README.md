@@ -9,13 +9,22 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   statement and expression form the reference shows), `Semantics/` checks a tree the parser read
   without an error against the rules of chapters 1 to 3, 5, 6 and 8 to 10 (the section "What the
   checker reads" below) and says `not supported` to a construct of the other chapters, `Corpus/`
-  reads the header of a corpus case in the shape `reference/00-about.md` states.
-- `Kurz.Compiler.Tests/`: xunit tests. Every program the lexer, parser and checker tests read
-  stands inline in the test, and the corpus suite reads the cases where they lie, under `corpus/`:
-  the tree gate admits no `.kz` file under `compiler/`. That suite runs every corpus case through
-  the front end, and every case the front end reads clean through the checker, and checks that
-  the errors each reports are exactly the ones the case's header expects of it; a case that uses
-  a construct the checker does not read must get `not supported` and no error from it.
+  reads the header of a corpus case in the shape `reference/00-about.md` states, `Emit/` turns a
+  tree the checker read without an error into LLVM IR (the section "What the emitter emits"
+  below), `Runtime/` is the C runtime a built program links, carried inside the library, and
+  `Build/` finds clang, builds the IR with the runtime into an executable, and is the command.
+- `Kurz/`: the command `kurz` (`build`, `run` and `exec`, the section "The command" below), one
+  line over `Build/Command.cs`.
+- `Kurz.Compiler.Tests/`: xunit tests. Every program the lexer, parser, checker and command tests
+  read stands inline in the test, and the corpus suites read the cases where they lie, under
+  `corpus/`: the tree gate admits no `.kz` file under `compiler/`. One suite runs every corpus
+  case through the front end, and every case the front end reads clean through the checker, and
+  checks that the errors each reports are exactly the ones the case's header expects of it; a
+  case that uses a construct the checker does not read must get `not supported` and no error from
+  it. A second suite builds every case that expects a run, with the emitter and clang, and runs
+  it: its output, its exit code and the line an exception writes are held to the header; the
+  cases of the types the emitter does not emit are listed by name with the construct, and a stale
+  entry is refused. A third suite runs the command `kurz` as a process.
 
 ## Building and testing
 
@@ -33,11 +42,33 @@ repository root would run whatever SDK the machine has. `--disable-build-servers
 MSBuild node and no compiler server running after the command, so that the gate's timeout can end
 the run.
 
+The suites that build a program need a clang (design record, section 2). The compiler tries, in
+this order, every `clang-<major>` on the path, newest major first, then `clang`, then on Windows
+`LLVM\bin\clang.exe` under the program files, where the LLVM installer puts it without adding it
+to the path; the first that answers `--version` as clang does is taken. Without one, every test
+that builds a program fails and names the places looked at; none is skipped. The runtime's C is
+compiled once per run, and every program is linked against that object.
+
 The gate `compiler-tests` (`tools/compiler_gate.py`) reads `NuGet.config` as XML and refuses it
 when it is missing, is not well-formed, does not open its package sources with `<clear />` or maps
-no package pattern to a source; runs that command from inside `compiler/`; refuses a failed or a
-skipped test, a run with fewer passed tests than its floor, no summary line, a non-zero exit with
-no failed test, a missing `dotnet` and a run out of time; and is part of every gates run.
+no package pattern to a source; asks the clang the compiler would use for its version, prints the
+line, and refuses a missing clang or one whose major release is outside the set the gate names
+(18 to 23: the Linux image's 18, the Windows image's 20, and the releases up to the newest a build
+was seen on; the IR uses no form that differs between them); runs that command from inside
+`compiler/`; refuses a failed or a skipped test, a run with fewer passed tests than its floor, no
+summary line, a non-zero exit with no failed test, a missing `dotnet` and a run out of time; and
+is part of every gates run.
+
+## The command
+
+`kurz build file.kz [-o <executable>] [--release]` writes the executable beside the source, named
+after it, `hello` for `hello.kz` and `hello.exe` on Windows, or where `-o` says. `kurz run
+file.kz [--release]` and `kurz exec "<program>" [--release]` build into a temporary directory, run
+the program, remove the directory and end with the program's exit code. The default is the test
+build; `--release` builds the release one. A refused program gets its diagnostics, one line each,
+`hello.kz:3: <id>: <text>`, with `exec` in place of the file's name for a program given as the
+argument of `exec`, no executable, and the exit code 1 (design record, section 2). From inside
+`compiler/`, `dotnet run --project Kurz -- exec "print(1)"` runs it without a build of its own.
 
 ## What the compiler says about a program
 
@@ -289,3 +320,91 @@ round can ask about it by the rule's id.
   gives the order a meaning (the first case is the success), so `List<int | string>` and
   `List<string | int>` are two types; a value of one union stands where another is required when
   every case of it is a case there.
+
+## What the emitter emits
+
+The emitter (`Emit/`) takes a tree the checker read without an error and writes LLVM IR as text
+for what the checker reads, over the integers, `bool`, `char` and `string`, and the lists, data
+types, unions and function values made of them; the build (`Build/`) hands the IR and the
+runtime's C (`Runtime/kurz_rt.c`) to clang, which compiles both and links them into the one
+executable, the runtime's code a part of the program and the C library linked as the platform
+links it (design record, section 2). The runtime calls the C library for what the record's
+boundary lists and moves its own bytes with loops; the copy of a record in the emitted code is
+LLVM's copy intrinsic, which clang lowers to the C library's `memcpy` where it does not inline it. An integer is the LLVM integer of its width, signed and unsigned alike, and
+the operations tell them apart; a `bool` is `i1`; a `char` is its code point as `i32`; a string is
+a pointer to UTF-8 bytes and their count; a list is a pointer to a shared buffer and the count of
+items the value sees; a `data` value is a pointer to a record on the heap whose first field is
+the number of its type, with the base's fields first (D7), so that a value held as its base (D6)
+is told apart in a `match` (C4) and a value compares by its fields (D3); a union is the index of
+its case and a pointer to a box with the case's value, the success being case 0 (O1) and a
+`void` success having no box (O10); a function value is the code and its environment, which holds
+the captured variables by value (F15). A generic function or data type is emitted once per set of
+type arguments. The runtime's functions take and return scalars only: a string or a list crosses
+the boundary as its fields, or through a pointer to where the runtime writes it, because the
+platforms pass a 16-byte struct by value differently.
+
+The test build, the default, checks every `+`, `-` and `*` of T4 with LLVM's overflow intrinsics
+and raises `overflow` (T5); the release build wraps. A division or a remainder by zero raises
+`divide-by-zero` in both (T25); the signed minimum divided by -1 is `overflow` in the test build
+and wraps in the release build (a reading, below); a shift count is taken modulo the width (T22); a conversion that
+does not fit is `overflow` in the test build and wraps in the release build (T20). An exception
+writes `error: <id> at line <n>` on standard error and ends the process with the exit code 1
+through an exit that runs no handler of the C library (section 6); what `print` wrote before
+stays. Every call stores its line in the runtime before it runs, so that the line of a stack
+overflow is the line of the call that did not fit (O11): the runtime takes the fault on a signal
+stack, under a vectored handler on Windows, and writes the line as for any exception. No call of
+a Kurz function is a tail call (`notail`), so that a recursion that does not end overflows the
+stack as O11 says instead of running as a loop.
+
+Nothing is freed: the reference counting of section 3 is not in this compiler, and every
+allocation lives until the process ends. A list buffer is shared between the values that hold it
+and grown in place while the appending value holds the buffer's last item, the watermark in the
+buffer's header; an append behind the watermark copies the buffer, so that a list value never
+changes under a variable that holds an older one (M1, M3). A write into a field through a path
+replaces the records along the path by copies (M4), so that a variable that holds the old value
+keeps it.
+
+### What the emitter does not emit
+
+A program that uses `float`, `double`, `decimal` or a time type (T24, T26, T29, and the A-rules of
+their text) gets `not supported` at the line of the first such constant, variable, field,
+parameter or operation, and no IR; the runner lists every corpus case that expects a run and uses
+one, by name with the construct, and refuses a stale entry. What the checker does not read (its
+list above) never reaches the emitter.
+
+### Readings the reference leaves open to the emitter and the command
+
+Each is the reading of this directory, not a decision, pinned by a test in `CommandTests.cs` or
+`EmitterTests.cs`, named with it; a design round can ask about it.
+
+- Section 6 with E3: the text of a thrown value follows the line with `: ` between them,
+  `error: <id> at line <n>: <text>`, so that the fixed part of the line reads the same for every
+  exception. A corpus header names the id and the line, not the text, so the runner holds the
+  line to its fixed part alone; the whole line is pinned by `CommandTests.cs`
+  (`A_thrown_value_follows_the_error_line_after_a_colon_and_a_space`), which runs
+  `corpus/outcomes/throw-text.kz` through the command.
+- Section 2: a command line the command cannot read (no verb, a verb it does not know, no file or
+  program, a second file, an option it does not know, `-o` under `run` or `exec`) gets the usage on
+  standard error and the exit code 1, as a refused program does; a file that cannot be read, and a
+  clang that is missing or refuses the build, get one line that starts with `kurz: ` and the same
+  code. The record gives a refused program the code 1 and names no other failure of the command.
+  Pinned in `CommandTests.cs`: the usage by `A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1`,
+  the file by `A_missing_file_is_reported_and_exits_1`, the clang by
+  `A_missing_clang_is_reported_with_the_names_tried_and_exits_1` and
+  `A_clang_that_refuses_the_build_is_reported_and_exits_1`.
+- Section 2 with E1: a construct the compiler does not read is reported as
+  `<file>:<line>: not supported: <construct>`, the form of a compile error with `not supported`
+  where the id stands, since the record gives a refused program one line per diagnostic and
+  `not supported` carries no id. Pinned in `CommandTests.cs` by
+  `A_construct_the_compiler_does_not_read_is_reported_as_not_supported_with_its_line`.
+- Section 2: on a platform other than Windows the executable `kurz build` writes beside the
+  source has no extension, `hello` for `hello.kz`, as a program built there is named; the record
+  names `hello.exe` for Windows alone. Pinned in `CommandTests.cs` by
+  `Build_writes_the_executable_beside_the_source_named_after_it`, on each platform in its form.
+- T5 with T25: the signed minimum of a type divided by -1 does not fit the type, so `/` raises
+  `overflow` in the test build and gives the minimum in the release build, as `+`, `-` and `*` do
+  on a value that does not fit; `%` of the same pair is 0 in both builds, since nothing in it
+  overflows. T25 names the zero divisor alone. Pinned in `EmitterTests.cs`, since no corpus case
+  can stand on it, by `The_smallest_value_divided_by_minus_one_is_overflow_in_the_test_build`,
+  `The_smallest_value_divided_by_minus_one_is_the_smallest_value_in_the_release_build` and
+  `The_remainder_of_the_smallest_value_by_minus_one_is_zero_in_both_builds`.

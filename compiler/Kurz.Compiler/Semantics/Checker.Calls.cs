@@ -8,6 +8,8 @@ public sealed partial class Checker
     /// <summary>A parameter as a call binds it: of a function (F12), a primary constructor (D1) or a function value (F11).</summary>
     private sealed record Slot(string Name, KurzType Type, bool Mut, bool HasDefault, bool GenericPosition);
 
+    private static readonly IReadOnlyDictionary<TypeParameterSymbol, KurzType> NoMap = new Dictionary<TypeParameterSymbol, KurzType>();
+
     /// <summary>What an argument is before a candidate is picked: its own type, or that it is a lambda to be typed by the parameter it lands on (F13, F14, T27).</summary>
     private sealed class Pre
     {
@@ -77,6 +79,8 @@ public sealed partial class Checker
                     if (variable is not null)
                     {
                         variable.Read = true;
+                        model.RecordName(n, variable);
+                        model.RecordType(n, new Typed(variable.Type));
                         return CallValue(variable.Type, c);
                     }
 
@@ -207,6 +211,7 @@ public sealed partial class Checker
             Report(ErrorIds.NoText, c.Line, $"a `{t.Type}` has no text to print (A4, A7, A10)");
         }
 
+        model.RecordCall(c, new CallInfo(CallKind.Print, null, null, null, NoMap, [0], 1, Types.Void));
         return new Typed(Types.Void);
     }
 
@@ -255,7 +260,13 @@ public sealed partial class Checker
 
         if (Types.IsNumber(source.Type) && Types.IsNumber(target))
         {
-            return ConvertNumber(source, target, c.Line);
+            var converted = ConvertNumber(source, target, c.Line);
+            if (!converted.IsError)
+            {
+                model.RecordCall(c, new CallInfo(CallKind.Conversion, null, null, target, NoMap, [0], 1, target));
+            }
+
+            return converted;
         }
 
         if (Types.IsTime(source.Type) && Types.IsTime(target))
@@ -272,6 +283,7 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
+            model.RecordCall(c, new CallInfo(CallKind.Conversion, null, null, target, NoMap, [0], 1, target));
             return new Typed(target, source.Constant);
         }
 
@@ -376,7 +388,14 @@ public sealed partial class Checker
         }
 
         var element = Resolve(c.TypeArguments[0]);
-        return Types.IsError(element) ? Typed.Error : new Typed(new ListType(element));
+        if (Types.IsError(element))
+        {
+            return Typed.Error;
+        }
+
+        var list = new ListType(element);
+        model.RecordCall(c, new CallInfo(CallKind.ListNew, null, null, null, NoMap, [], 0, list));
+        return new Typed(list);
     }
 
     /// <summary>D2, D7, D11: a data value made by the type's name with the base's fields first.</summary>
@@ -419,7 +438,14 @@ public sealed partial class Checker
         }
 
         var arguments = data.TypeParameters.Select(p => candidate.Map.TryGetValue(p, out var t) ? t : Types.Error).ToList();
-        return new Typed(arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments));
+        if (arguments.Any(Types.IsError))
+        {
+            return Typed.Error;
+        }
+
+        var made = new DataType(data, arguments);
+        model.RecordCall(c, new CallInfo(CallKind.DataNew, null, data, null, candidate.Map, candidate.Binding, candidate.Slots.Count, made));
+        return new Typed(made);
     }
 
     /// <summary>M5, M9, T15: a call of a member: a list's <c>Add</c> and <c>Where</c>; a data value's field of function type.</summary>
@@ -466,6 +492,7 @@ public sealed partial class Checker
                         var result = Call([candidate], c, null);
                         if (!result.IsError)
                         {
+                            model.RecordCall(c, new CallInfo(CallKind.ListAdd, null, null, null, NoMap, candidate.Binding, 1, Types.Void));
                             MutReceiver(m.Target, c.Line, "`Add` changes the list it is called on"); // after the call's own error nothing more (E1)
                         }
 
@@ -476,7 +503,13 @@ public sealed partial class Checker
                     {
                         var test = new FunctionType([list.Element], Types.Bool);
                         var candidate = new Candidate { Slots = [new Slot("test", test, false, false, false)], Result = list };
-                        return Call([candidate], c, null);
+                        var result = Call([candidate], c, null);
+                        if (!result.IsError)
+                        {
+                            model.RecordCall(c, new CallInfo(CallKind.ListWhere, null, null, null, NoMap, candidate.Binding, 1, list));
+                        }
+
+                        return result;
                     }
 
                 default:
@@ -522,6 +555,8 @@ public sealed partial class Checker
         {
             return; // reported where the receiver was read
         }
+
+        model.RecordName(name, variable);
 
         if (!IsFieldPath(variable.Type, members, out var notField))
         {
@@ -679,6 +714,7 @@ public sealed partial class Checker
 
         Commit(picked, pres);
         var result = Types.Substitute(picked.Result, picked.Map);
+        model.RecordCall(c, new CallInfo(picked.Function is null ? CallKind.Value : CallKind.Function, picked.Function, null, null, picked.Map, picked.Binding, picked.Slots.Count, result));
         return new Typed(result);
     }
 
@@ -1079,6 +1115,7 @@ public sealed partial class Checker
             return;
         }
 
+        model.RecordName(name, variable);
         if (!IsFieldPath(variable.Type, members, out var notField))
         {
             Report(ErrorIds.MutAtCall, a.Line, $"`{notField}` is no field of a data value: after `mut` stands a `mut` variable or a path of data fields from one (M7)");
