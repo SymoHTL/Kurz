@@ -40,18 +40,22 @@ public sealed partial class Clang
     private static partial Regex VersionText();
 
     /// <summary>The clang the machine has, or null; <paramref name="looked"/> lists the names and places tried, in order.</summary>
-    public static Clang? Find(out IReadOnlyList<string> looked)
+    public static Clang? Find(out IReadOnlyList<string> looked) =>
+        Find(Environment.GetEnvironmentVariable("PATH"), Environment.GetEnvironmentVariable("ProgramFiles"), out looked);
+
+    /// <summary>The same search over the path and the Program Files directory given, as the variables <c>PATH</c> and <c>ProgramFiles</c> would name them; null stands for a variable that is not set.</summary>
+    public static Clang? Find(string? path, string? programFiles, out IReadOnlyList<string> looked)
     {
         var places = new List<string>();
-        foreach (var (place, path) in Candidates())
+        foreach (var (place, candidate) in Candidates(path, programFiles))
         {
             places.Add(place);
-            if (path is null)
+            if (candidate is null)
             {
                 continue;
             }
 
-            var found = Probe(path);
+            var found = Probe(candidate);
             if (found is not null)
             {
                 looked = places;
@@ -71,11 +75,11 @@ public sealed partial class Clang
     /// which on Windows would search the program's own directory, the current directory and the system
     /// directories before the path.
     /// </summary>
-    private static IEnumerable<(string Place, string? Path)> Candidates()
+    private static IEnumerable<(string Place, string? Path)> Candidates(string? path, string? programFiles)
     {
         var windows = OperatingSystem.IsWindows();
         var bare = windows ? "clang.exe" : "clang";
-        var directories = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+        var directories = (path ?? string.Empty)
             .Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Where(Directory.Exists)
             .ToList();
@@ -92,17 +96,16 @@ public sealed partial class Clang
             }
         }
 
-        foreach (var (_, path) in versioned.OrderByDescending(v => v.Major).ThenBy(v => v.Path, StringComparer.Ordinal))
+        foreach (var (_, versionedPath) in versioned.OrderByDescending(v => v.Major).ThenBy(v => v.Path, StringComparer.Ordinal))
         {
-            yield return (path, path);
+            yield return (versionedPath, versionedPath);
         }
 
         var onPath = directories.Select(d => System.IO.Path.Combine(d, bare)).FirstOrDefault(File.Exists);
         yield return (onPath ?? $"{bare} on the path", onPath);
         if (windows)
         {
-            var programFiles = Environment.GetEnvironmentVariable("ProgramFiles") ?? string.Empty; // the variable, as the gate reads it; the shell's known folder ignores the environment
-            if (programFiles.Length > 0)
+            if (!string.IsNullOrEmpty(programFiles)) // the variable, as the gate reads it; the shell's known folder ignores the environment
             {
                 var installed = System.IO.Path.Combine(programFiles, "LLVM", "bin", "clang.exe");
                 yield return (installed, File.Exists(installed) ? installed : null);

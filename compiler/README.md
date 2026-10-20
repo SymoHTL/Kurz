@@ -24,7 +24,9 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   it. A second suite builds every case that expects a run, with the emitter and clang, and runs
   it: its output, its exit code and the line an exception writes are held to the header; the
   cases of the types the emitter does not emit are listed by name with the construct, and a stale
-  entry is refused. A third suite runs the command `kurz` as a process.
+  entry is refused. A third suite runs the command `kurz` as a process. A fourth takes the pieces
+  of `Build/` on their own: the clang search over the path and the Program Files directory it is
+  given, and the environment a captured process gets.
 
 ## Building and testing
 
