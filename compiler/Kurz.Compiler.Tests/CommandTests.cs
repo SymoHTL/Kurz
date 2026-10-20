@@ -177,7 +177,8 @@ public sealed class CommandTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["PATH"] = empty, ["ProgramFiles"] = empty };
         Assert.True(File.Exists(Dll), $"the command is not built beside the suite: {Dll}");
         var (code, output, error) = Processes.Capture(Host, [Dll, "exec", "print(1)"], null, TimeSpan.FromMinutes(2), environment);
-        Assert.Equal((1, ""), (code, output));
+        Assert.True(code == 1, $"the command exited with {code} on a path without a clang; output: {output}; error: {error}");
+        Assert.Equal("", output);
         Assert.StartsWith("kurz: clang is not there; looked for ", error, StringComparison.Ordinal);
         Assert.Contains(OperatingSystem.IsWindows() ? "clang.exe" : "clang", error, StringComparison.Ordinal);
     }

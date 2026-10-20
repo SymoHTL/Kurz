@@ -8,9 +8,12 @@ namespace Kurz.Compiler.Build;
 /// C and links them (design record, section 2). The compiler calls it by its versioned name,
 /// <c>clang-18</c>, where the distribution installs one, taking the newest such name on the path;
 /// else as <c>clang</c>; else, on Windows, where the LLVM installer puts it when it is not on the
-/// path, <c>LLVM\bin\clang.exe</c> under the program files. Which releases are accepted is the
-/// compiler gate's to say (<c>tools/compiler_gate.py</c>); the compiler asks the clang it found for
-/// its version and uses it.
+/// path, <c>LLVM\bin\clang.exe</c> under the directory the <c>ProgramFiles</c> variable names. Each
+/// name is resolved through the path's directories by the compiler itself and run by its full path,
+/// so that the places the operating system would search beside the path (on Windows the program's
+/// own directory, the current directory and the system directories) play no part. Which releases
+/// are accepted is the compiler gate's to say (<c>tools/compiler_gate.py</c>); the compiler asks the
+/// clang it found for its version and uses it.
 /// </summary>
 public sealed partial class Clang
 {
@@ -21,7 +24,7 @@ public sealed partial class Clang
         VersionLine = versionLine;
     }
 
-    /// <summary>Where the executable is, or the bare name the path resolves.</summary>
+    /// <summary>Where the executable is.</summary>
     public string Path { get; }
 
     /// <summary>The release, as <c>clang --version</c> names it.</summary>
@@ -40,10 +43,15 @@ public sealed partial class Clang
     public static Clang? Find(out IReadOnlyList<string> looked)
     {
         var places = new List<string>();
-        foreach (var candidate in Candidates())
+        foreach (var (place, path) in Candidates())
         {
-            places.Add(candidate);
-            var found = Probe(candidate);
+            places.Add(place);
+            if (path is null)
+            {
+                continue;
+            }
+
+            var found = Probe(path);
             if (found is not null)
             {
                 looked = places;
@@ -55,19 +63,25 @@ public sealed partial class Clang
         return null;
     }
 
-    /// <summary>The versioned names on the path, newest major first, then the bare name, then the Windows installer's directory.</summary>
-    private static IEnumerable<string> Candidates()
+    /// <summary>
+    /// The versioned names on the path, newest major first, then the bare name where a directory of
+    /// the path holds it, then the Windows installer's directory: each as the place to name when
+    /// nothing answers, with the file to run, or null where the place holds no file. The bare name is
+    /// resolved through the path's directories here and never handed to the operating system bare,
+    /// which on Windows would search the program's own directory, the current directory and the system
+    /// directories before the path.
+    /// </summary>
+    private static IEnumerable<(string Place, string? Path)> Candidates()
     {
         var windows = OperatingSystem.IsWindows();
-        var directories = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        var bare = windows ? "clang.exe" : "clang";
+        var directories = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+            .Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(Directory.Exists)
+            .ToList();
         var versioned = new List<(int Major, string Path)>();
         foreach (var directory in directories)
         {
-            if (!Directory.Exists(directory))
-            {
-                continue;
-            }
-
             foreach (var file in Directory.EnumerateFiles(directory))
             {
                 var match = VersionedName().Match(System.IO.Path.GetFileName(file));
@@ -80,16 +94,18 @@ public sealed partial class Clang
 
         foreach (var (_, path) in versioned.OrderByDescending(v => v.Major).ThenBy(v => v.Path, StringComparer.Ordinal))
         {
-            yield return path;
+            yield return (path, path);
         }
 
-        yield return windows ? "clang.exe" : "clang";
+        var onPath = directories.Select(d => System.IO.Path.Combine(d, bare)).FirstOrDefault(File.Exists);
+        yield return (onPath ?? $"{bare} on the path", onPath);
         if (windows)
         {
             var programFiles = Environment.GetEnvironmentVariable("ProgramFiles") ?? string.Empty; // the variable, as the gate reads it; the shell's known folder ignores the environment
             if (programFiles.Length > 0)
             {
-                yield return System.IO.Path.Combine(programFiles, "LLVM", "bin", "clang.exe");
+                var installed = System.IO.Path.Combine(programFiles, "LLVM", "bin", "clang.exe");
+                yield return (installed, File.Exists(installed) ? installed : null);
             }
         }
     }
