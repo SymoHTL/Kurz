@@ -117,10 +117,10 @@ public sealed partial class Clang
         return new Clang(candidate, version, firstLine);
     }
 
-    /// <summary>Compiles the runtime's C to an object file, so that a run of many programs compiles it once.</summary>
+    /// <summary>Compiles the runtime's C to an object file, so that a run of many programs compiles it once. The runtime moves its bytes with its own loops, and <c>-fno-builtin</c> keeps the optimizer from turning a loop into a call of the C library.</summary>
     public void CompileRuntime(string sourcePath, string objectPath)
     {
-        var (code, _, error) = Processes.Capture(Path, ["-std=c11", "-O2", "-c", sourcePath, "-o", objectPath], null, TimeSpan.FromMinutes(2));
+        var (code, _, error) = Processes.Capture(Path, ["-std=c11", "-fno-builtin", "-O2", "-c", sourcePath, "-o", objectPath], null, TimeSpan.FromMinutes(2));
         if (code != 0)
         {
             throw new ToolchainException($"clang did not compile the runtime (exit {code}):\n{error}");
@@ -133,7 +133,7 @@ public sealed partial class Clang
         var arguments = new List<string> { "-O2", irPath, runtimePath, "-o", outputPath };
         if (runtimePath.EndsWith(".c", StringComparison.Ordinal))
         {
-            arguments.Insert(0, "-std=c11");
+            arguments.InsertRange(0, ["-std=c11", "-fno-builtin"]);
         }
 
         if (OperatingSystem.IsWindows() && File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Path) ?? string.Empty, "lld-link.exe")))

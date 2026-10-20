@@ -73,40 +73,14 @@ public sealed class Toolchain : IDisposable
 /// and writes nothing on standard error; a <c>throws</c> case exits with 1 and its error stream is
 /// the one line <c>error: &lt;id&gt; at line &lt;n&gt;</c> of the header, with the thrown text after it
 /// for a <c>throw</c>. A case the checker does not read is held by the checker's theory; a case the
-/// checker reads and the emitter does not lay out is in the list of cases the emitter does not
-/// emit, each with the construct, and that list holds no case the emitter emits. A case with a
+/// checker reads in full is emitted, or the theory fails with the emitter's diagnostic. A case with a
 /// <c>build:</c> line is built as it says; the others are built as the test build, the default.
 /// No case is skipped, and a floor holds the count of cases run.
 /// </summary>
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The suite runs more cases than this; fewer means the emitter refuses what it built before.</summary>
-    private const int RunFloor = 100;
-
-    /// <summary>Cases the checker reads in full and the emitter does not lay out, each with the construct; a stale entry, whose case the emitter emits, is refused.</summary>
-    private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
-    {
-        ["data/equality-nan.kz"] = "a field of type double (T24, D3)",
-        ["source/number-literal-forms.kz"] = "a double constant (T26, L2)",
-        ["source/number-literals.kz"] = "a double constant (T26, L2)",
-        ["source/unit-literal-fraction.kz"] = "a duration constant (T29, L5)",
-        ["types/constant-double-division.kz"] = "a double constant (T26)",
-        ["types/constant-mixed-fold.kz"] = "arithmetic on a double (T26, T28)",
-        ["types/conversion-float-infinity.kz"] = "a float constant (T26, T20)",
-        ["types/conversion-float-test.kz"] = "a double constant (T26, T20)",
-        ["types/conversion-saturates.kz"] = "a double constant (T26, T20)",
-        ["types/decimal-divide-by-zero.kz"] = "a decimal constant (T24, T25)",
-        ["types/duration-parameter.kz"] = "a duration constant (T29)",
-        ["types/float-remainder-by-zero.kz"] = "a double constant (T26, T25)",
-        ["types/fraction-beside-narrow.kz"] = "arithmetic on a double (T26, T28)",
-        ["types/longduration-parameter.kz"] = "a duration constant (T29)",
-        ["types/longduration-wide.kz"] = "a longduration constant (T29)",
-        ["types/widening-across-sign.kz"] = "a double variable (T26, T23)",
-        ["values/text-double-special.kz"] = "a double constant (T26, A12)",
-        ["values/text-duration-sub-millisecond.kz"] = "a duration constant (T29, A14)",
-        ["values/text-duration.kz"] = "a duration constant (T29, A14)",
-        ["values/text-float.kz"] = "a float constant (T26, A11)",
-    };
+    private const int RunFloor = 125;
 
     public static TheoryData<string> RunnableCases()
     {
@@ -155,11 +129,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (ir, notSupported) = Emit(relativePath, header);
         if (ir is null)
         {
-            if (notSupported is not null)
-            {
-                Assert.True(NotEmitted.ContainsKey(relativePath), $"{relativePath}: the emitter says `{notSupported}`, and the case is not listed as one it does not emit");
-            }
-
+            Assert.True(notSupported is null, $"{relativePath}: the emitter says `{notSupported}`");
             return;
         }
 
@@ -205,18 +175,5 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         Assert.True(run >= RunFloor, $"only {run} cases are built and run; not run: {string.Join(", ", notRun)}");
-    }
-
-    [Fact]
-    public void Every_case_listed_as_not_emitted_exists_is_read_in_full_by_the_checker_and_gets_not_supported_from_the_emitter()
-    {
-        // a stale entry would excuse a case the emitter emits from its run; an entry for a case the checker does not read excuses nothing
-        foreach (var (relativePath, construct) in NotEmitted)
-        {
-            var header = CorpusFiles.ReadCase(relativePath).Header;
-            Assert.NotEqual(Expectation.Error, header.Expectation);
-            var (ir, notSupported) = Emit(relativePath, header);
-            Assert.True(ir is null && notSupported is not null, $"{relativePath}: the emitter {(ir is null ? "is never asked: the checker does not read the case" : "emits the case")}, so its entry ({construct}) excuses nothing");
-        }
     }
 }
