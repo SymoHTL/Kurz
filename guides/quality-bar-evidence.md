@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-20
-digest: 7d0a2f38610b37acd16170823a0c64e189e6001af2b52984b6842ba1e43fc33a
+digest: 1e48111d1aea7cafbc684ba49a3019a699cf07691683401a1564017cbacd8060
 ttl_days: 60
 metadata:
   type: reference
@@ -77,13 +77,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 39 |
+| Entries in INDEX.md | 41 |
 | tagged (untagged) | 2 |
 | tagged HARD | 15 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 16 |
+| tagged TRAP | 18 |
 | Review rule sections | 12 |
 | Review rules | 69 |
 <!-- /generated:store -->
@@ -141,7 +141,7 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 12 |
+| Pull requests opened by a writer, or merged | 13 |
 | Pull requests merged | 10 |
 | Merged over red, with a recorded waiver | 7 |
 | Review findings posted: high | 73 |

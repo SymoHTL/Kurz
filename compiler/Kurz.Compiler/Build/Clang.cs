@@ -86,7 +86,7 @@ public sealed partial class Clang
         yield return windows ? "clang.exe" : "clang";
         if (windows)
         {
-            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var programFiles = Environment.GetEnvironmentVariable("ProgramFiles") ?? string.Empty; // the variable, as the gate reads it; the shell's known folder ignores the environment
             if (programFiles.Length > 0)
             {
                 yield return System.IO.Path.Combine(programFiles, "LLVM", "bin", "clang.exe");

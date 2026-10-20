@@ -45,11 +45,18 @@ public static class Processes
         }
     }
 
-    /// <summary>Runs a program on the caller's own streams, as <c>run</c> and <c>exec</c> run the program they built; its exit code.</summary>
+    /// <summary>
+    /// Runs a program on the caller's own console and streams, as <c>run</c> and <c>exec</c> run the
+    /// program they built; its exit code. On Windows a child given a hidden console of its own
+    /// (<see cref="ProcessStartInfo.CreateNoWindow"/>) writes to that console and not to the caller's
+    /// streams, so this one shares the caller's.
+    /// </summary>
     public static int Inherit(string file, IReadOnlyList<string> arguments, string? workingDirectory)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        using var process = Process.Start(Start(file, arguments, workingDirectory)) ?? throw new ToolchainException($"`{file}` did not start");
+        var info = Start(file, arguments, workingDirectory);
+        info.CreateNoWindow = false;
+        using var process = Process.Start(info) ?? throw new ToolchainException($"`{file}` did not start");
         process.WaitForExit();
         return process.ExitCode;
     }

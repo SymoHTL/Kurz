@@ -44,7 +44,7 @@ the run.
 
 The suites that build a program need a clang (design record, section 2). The compiler tries, in
 this order, every `clang-<major>` on the path, newest major first, then `clang`, then on Windows
-`LLVM\bin\clang.exe` under the program files, where the LLVM installer puts it without adding it
+`LLVM\bin\clang.exe` under the directory the `ProgramFiles` variable names, where the LLVM installer puts it without adding it
 to the path; the first that answers `--version` as clang does is taken. Without one, every test
 that builds a program fails and names the places looked at; none is skipped. The runtime's C is
 compiled once per run, and every program is linked against that object.
