@@ -173,7 +173,8 @@ public sealed class CommandTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_missing_clang_is_reported_with_the_names_tried_and_exits_1()
     {
         // the command searches the path and the Program Files directory it is given; an empty directory as both holds no clang.
-        // The two variables Windows keeps beside ProgramFiles for the other architecture are emptied with it.
+        // The two variables Windows keeps beside ProgramFiles for the other architecture are emptied with it: with ProgramFiles
+        // alone emptied the command found a clang on the Windows job (knowledge/a-bare-name-is-not-on-the-path-on-windows.md).
         var empty = Directory("no-clang");
         var environment = new Dictionary<string, string>(StringComparer.Ordinal)
         {
