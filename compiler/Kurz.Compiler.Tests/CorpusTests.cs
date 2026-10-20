@@ -1,7 +1,5 @@
 using Kurz.Compiler.Corpus;
 using Kurz.Compiler.Semantics;
-using Kurz.Compiler.Syntax;
-using Kurz.Compiler.Text;
 using Xunit;
 
 namespace Kurz.Compiler.Tests;
@@ -65,55 +63,15 @@ public sealed class CorpusTests
 
     private static bool IsNotSupported(Diagnostic d) => d.Kind == DiagnosticKind.NotSupported;
 
-    private static readonly string Root = FindRoot();
-
-    private static string FindRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (Directory.Exists(Path.Combine(directory.FullName, "corpus")) && File.Exists(Path.Combine(directory.FullName, "kurz-design.md")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("the repository root, which holds corpus/ and kurz-design.md, is not above the test directory");
-    }
-
-    /// <summary>Every case file, as a path relative to corpus/ with forward slashes, in a fixed order.</summary>
-    private static List<string> CaseFiles()
-    {
-        var corpus = Path.Combine(Root, "corpus");
-        return Directory.EnumerateFiles(corpus, "*.kz", SearchOption.AllDirectories)
-            .Select(file => Path.GetRelativePath(corpus, file).Replace('\\', '/'))
-            .OrderBy(f => f, StringComparer.Ordinal)
-            .ToList();
-    }
-
     public static TheoryData<string> Cases()
     {
         var data = new TheoryData<string>();
-        foreach (var file in CaseFiles())
+        foreach (var file in CorpusFiles.CaseFiles())
         {
             data.Add(file);
         }
 
         return data;
-    }
-
-    private static (CaseHeader Header, ProgramSyntax Tree, DiagnosticBag FrontEnd) ReadCase(string relativePath)
-    {
-        var bytes = File.ReadAllBytes(Path.Combine(Root, "corpus", relativePath));
-        var source = SourceText.FromBytes(relativePath, bytes, out var invalid);
-        Assert.True(source is not null, $"{relativePath}: {invalid}");
-        var header = CaseHeader.Parse(source!.Text, out var problem);
-        Assert.True(header is not null, $"{relativePath}: {problem}");
-        var diagnostics = new DiagnosticBag();
-        var tree = Parser.Parse(source, diagnostics);
-        return (header!, tree, diagnostics);
     }
 
     private static bool ExpectsFrontEndError(CaseHeader header, string relativePath) =>
@@ -122,14 +80,14 @@ public sealed class CorpusTests
     [Fact]
     public void The_corpus_holds_at_least_the_floor_of_cases()
     {
-        Assert.True(CaseFiles().Count >= Floor, $"found {CaseFiles().Count} cases under {Root}");
+        Assert.True(CorpusFiles.CaseFiles().Count >= Floor, $"found {CorpusFiles.CaseFiles().Count} cases under {CorpusFiles.Root}");
     }
 
     [Theory]
     [MemberData(nameof(Cases))]
     public void The_front_end_reads_a_case_as_its_header_says(string relativePath)
     {
-        var (header, tree, diagnostics) = ReadCase(relativePath);
+        var (header, tree, diagnostics) = CorpusFiles.ReadCase(relativePath);
         var found = diagnostics.Items.Select(d => (d.Id, d.Line)).ToList();
         Assert.DoesNotContain(diagnostics.Items, d => !d.IsError);
         if (ExpectsFrontEndError(header, relativePath))
@@ -147,7 +105,7 @@ public sealed class CorpusTests
     [MemberData(nameof(Cases))]
     public void The_checker_reads_a_case_as_its_header_says(string relativePath)
     {
-        var (header, tree, frontEnd) = ReadCase(relativePath);
+        var (header, tree, frontEnd) = CorpusFiles.ReadCase(relativePath);
         if (frontEnd.HasErrors)
         {
             Assert.True(ExpectsFrontEndError(header, relativePath), "the theory above holds this case"); // the checker reads a tree the parser read clean
@@ -181,7 +139,7 @@ public sealed class CorpusTests
     public void At_least_the_front_end_error_floor_of_cases_expect_an_error_of_the_front_end()
     {
         // the positive control of the front end's theory: its error branch runs for at least this many cases, read as the theory reads them
-        var found = CaseFiles().Count(relativePath => ExpectsFrontEndError(ReadCase(relativePath).Header, relativePath));
+        var found = CorpusFiles.CaseFiles().Count(relativePath => ExpectsFrontEndError(CorpusFiles.ReadCase(relativePath).Header, relativePath));
         Assert.True(found >= FrontEndErrorFloor, $"only {found} cases expect an error of the front end");
     }
 
@@ -192,9 +150,9 @@ public sealed class CorpusTests
         var inFull = 0;
         var withError = 0;
         var notSupported = new List<string>();
-        foreach (var relativePath in CaseFiles())
+        foreach (var relativePath in CorpusFiles.CaseFiles())
         {
-            var (header, tree, frontEnd) = ReadCase(relativePath);
+            var (header, tree, frontEnd) = CorpusFiles.ReadCase(relativePath);
             if (frontEnd.HasErrors)
             {
                 continue;
@@ -226,7 +184,7 @@ public sealed class CorpusTests
         // outside the checker, excuses nothing and would let the list drift from its meaning
         foreach (var (relativePath, construct) in UnsupportedByConstruct)
         {
-            var (header, tree, frontEnd) = ReadCase(relativePath);
+            var (header, tree, frontEnd) = CorpusFiles.ReadCase(relativePath);
             Assert.False(frontEnd.HasErrors, relativePath);
             Assert.False(header.Rules.Any(OutsideTheChecker), $"{relativePath} cites a rule outside the checker ({string.Join(", ", header.Rules)}), so its entry ({construct}) is redundant");
             var diagnostics = new DiagnosticBag();

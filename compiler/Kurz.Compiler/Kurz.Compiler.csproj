@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The compiler as a library: source text, lexer, parser and the syntax tree. The test project
-       references it. -->
+  <!-- The compiler as a library: source text, lexer, parser, syntax tree, checker and code generator, with
+       the runtime's source embedded. The test project and the command reference it. -->
   <PropertyGroup>
     <RootNamespace>Kurz.Compiler</RootNamespace>
     <AssemblyName>Kurz.Compiler</AssemblyName>
@@ -10,6 +10,12 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Kurz.Compiler.Tests" />
+  </ItemGroup>
+
+  <!-- The runtime's C source travels inside the compiler: a build of a Kurz program compiles it
+       beside the emitted IR with the same clang (design record, section 2). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Runtime\kurz_rt.c" LogicalName="Kurz.Compiler.Runtime.kurz_rt.c" />
   </ItemGroup>
 
 </Project>

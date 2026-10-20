@@ -16,7 +16,7 @@ flowchart TD
     subgraph W["Write time: one agent session"]
         W1["write-time hook, tree_gate.py --hook:
         denies a Write or Edit to a path the allowlist does not hold (under compiler/, since pull request 29 retired the
-        design-phase rule: .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files outside bin/, obj/
+        design-phase rule: .cs, .c, .h, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files outside bin/, obj/
         and dot-directories), and every call
         the gate could not judge; inside or outside the repository is decided by the file system's
         identity of directories, so a path spelled in another case is inside where case is ignored.
@@ -82,10 +82,12 @@ flowchart TD
         no test summary line at all, fewer passed tests than the floor, a skipped test, a non-zero exit with no failed test;
         compiler/NuGet.config missing, without the clear of the inherited sources or without a source mapping;
         a restore outside the lock files (locked mode), an SDK other than the one compiler/global.json pins;
-        dotnet missing or out of time. Read: the output of dotnet test, one summary per test project, summed;
-        the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
-        Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's and the
-        checker's errors against each header and runs no program"]
+        no clang under the names the compiler tries, or one of a major release outside the set the gate names;
+        dotnet missing or out of time. Read: clang's version line, printed; the output of dotnet test, one summary
+        per test project, summed; the floor sits above the suite without one corpus theory or the corpus runner,
+        so a run that lost one cannot pass. Not seen: a corpus expectation that is wrong (HAZARD issue 1) on a case
+        the suite does not run: an error case, read against its header's id and line only, and a case of the types
+        the emitter does not emit; a case the emitter builds is held to its header's output, exit and error line"]
         G4["ci-config: a pinned fact of a workflow changed. All three workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
@@ -225,7 +227,8 @@ flowchart TD
   whose replay runs every suite in it; `kit.message_text` changes: P1 and G6, which read commit and tag messages
   through it.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
-- `tools/compiler_gate.py` changes (the command, the floor, a verdict, the config check): G10 and C1.
+- `tools/compiler_gate.py` changes (the command, the floor, a verdict, the config check, the names clang is
+  tried under, the set of clang releases it accepts): G10 and C1.
   `compiler/global.json` changes the SDK: G10, whose command reads it from inside `compiler/`, and C1, whose SDK
   step installs it. A lock file, `compiler/Directory.Packages.props`, `compiler/Directory.Build.props` or
   `compiler/NuGet.config` changes what the gate restores or builds: G10 and C1.

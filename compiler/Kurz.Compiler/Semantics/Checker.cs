@@ -34,6 +34,7 @@ public sealed partial class Checker
     private bool inElseArm;
     private bool realKeepsOwnType;
     private int blockDepth;
+    private readonly SemanticModel model = new();
 
     private Checker(DiagnosticBag diagnostics)
     {
@@ -45,6 +46,15 @@ public sealed partial class Checker
 
     /// <summary>Every variable the program declares, in the order the checker met them: parameters, locals, loop variables and match bindings.</summary>
     public IReadOnlyList<VariableSymbol> Variables => declared;
+
+    /// <summary>What the checker found out, by node, for a code generator (<see cref="SemanticModel"/>).</summary>
+    public SemanticModel Model => model;
+
+    /// <summary>The functions of the file that were declared, every overload, in the order of their declaration.</summary>
+    public IReadOnlyList<FunctionSymbol> Functions => functions.Values.SelectMany(l => l).OrderBy(f => f.Line).ToList();
+
+    /// <summary>The data types of the file that were declared, by name.</summary>
+    public IReadOnlyDictionary<string, DataSymbol> DataTypes => dataTypes;
 
     /// <summary>Checks a program the parser read without an error and adds what it finds to <paramref name="diagnostics"/>.</summary>
     public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics)
@@ -89,6 +99,9 @@ public sealed partial class Checker
         public HashSet<string>? Reserved { get; init; }
 
         public Scope Scope { get; set; } = new();
+
+        /// <summary>The variables of the functions around this lambda that its body reads (F11, F15).</summary>
+        public HashSet<VariableSymbol> Captures { get; } = [];
     }
 
     private sealed class Scope
@@ -326,6 +339,7 @@ public sealed partial class Checker
         }
 
         var symbol = new DataSymbol(d.Name, d);
+        model.RecordDataType(d, symbol);
         foreach (var p in d.TypeParameters)
         {
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line));
@@ -576,6 +590,7 @@ public sealed partial class Checker
     private void DeclareFunction(FunctionDeclaration d)
     {
         var symbol = new FunctionSymbol(d.Name, d);
+        model.RecordFunction(d, symbol);
         foreach (var p in d.TypeParameters)
         {
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line));
@@ -741,7 +756,7 @@ public sealed partial class Checker
         frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel };
         foreach (var p in f.Parameters)
         {
-            DeclareParameter(p.Name, p.Type, p.Mut, p.Line);
+            DeclareParameter(p.Name, p.Type, p.Mut, p.Line, p);
         }
 
         var returnType = f.ReturnType;
@@ -808,7 +823,7 @@ public sealed partial class Checker
         return e;
     }
 
-    private void DeclareParameter(string name, KurzType type, bool mut, int line)
+    private void DeclareParameter(string name, KurzType type, bool mut, int line, object node)
     {
         if (frame.Reserved is not null && frame.Reserved.Contains(name))
         {
@@ -819,7 +834,9 @@ public sealed partial class Checker
             Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)"); // a function's, a type's or `print`'s name, as for a local
         }
 
-        frame.Scope.Variables[name] = new VariableSymbol(name, type, mut, VariableKind.Parameter, line);
+        var symbol = new VariableSymbol(name, type, mut, VariableKind.Parameter, line);
+        frame.Scope.Variables[name] = symbol;
+        model.RecordDeclaration(node, symbol);
     }
 
     // ---- scopes ----------------------------------------------------------------------------------
@@ -836,6 +853,11 @@ public sealed partial class Checker
             {
                 if (s.Variables.TryGetValue(name, out var v))
                 {
+                    for (var g = frame; captured && g != f; g = g.Outer!)
+                    {
+                        g.Captures.Add(v); // every lambda between the use and the function that declares the variable captures it
+                    }
+
                     return (v, captured);
                 }
             }
@@ -875,19 +897,23 @@ public sealed partial class Checker
         }
     }
 
-    private void Declare(string name, KurzType type, bool mut, VariableKind kind, int line)
+    private void Declare(string name, KurzType type, bool mut, VariableKind kind, int line, object? node = null)
     {
         var symbol = new VariableSymbol(name, type, mut, kind, line);
         frame.Scope.Variables[name] = symbol;
         declared.Add(symbol);
+        if (node is not null)
+        {
+            model.RecordDeclaration(node, symbol);
+        }
     }
 
     /// <summary>Declares the variable, or, where the name is <c>redeclared</c>, binds it in this scope to the error type, so that its uses carry no further error and change no variable outside (E1).</summary>
-    private void DeclareChecked(string name, KurzType type, bool mut, VariableKind kind, int line)
+    private void DeclareChecked(string name, KurzType type, bool mut, VariableKind kind, int line, object node)
     {
         if (!Redeclares(name, line))
         {
-            Declare(name, type, mut, kind, line);
+            Declare(name, type, mut, kind, line, node);
         }
         else
         {
@@ -1103,7 +1129,7 @@ public sealed partial class Checker
             Report(Types.MismatchId(t.Type, declared), v.Value.Line, $"a `{t.Type}` where a `{declared}` is required (T1)");
         }
 
-        Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line);
+        Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
     }
 
     /// <summary>V8: an assignment where the name is visible, a declaration where it is not; F16 inside a top-level function.</summary>
@@ -1132,6 +1158,7 @@ public sealed partial class Checker
             }
 
             variable.Changed = true;
+            model.RecordAssignment(a, variable);
             return;
         }
 
@@ -1159,7 +1186,7 @@ public sealed partial class Checker
             type = Types.Error;
         }
 
-        Declare(a.Name, type, false, VariableKind.Local, a.Line);
+        Declare(a.Name, type, false, VariableKind.Local, a.Line, a);
     }
 
     /// <summary>M4, D4: an assignment into a path of fields from a variable; a path through an index is not read (M9's map is not read).</summary>
@@ -1205,6 +1232,7 @@ public sealed partial class Checker
                 return;
             }
 
+            model.RecordName(name, variable);
             variable.Read = true; // V6: an assignment into a path reads the variable
             if (Types.IsError(variable.Type))
             {
@@ -1221,6 +1249,7 @@ public sealed partial class Checker
 
             variable.Changed = true;
             current = variable.Type;
+            model.RecordType(name, new Typed(current));
         }
         else
         {
@@ -1253,6 +1282,7 @@ public sealed partial class Checker
 
                 last = field;
                 current = SubstituteData(d, field.Type);
+                model.RecordType(m, new Typed(current));
             }
             else
             {
@@ -1325,6 +1355,7 @@ public sealed partial class Checker
         if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
+            model.RecordType(range, new Typed(element));
         }
         else
         {
@@ -1343,7 +1374,7 @@ public sealed partial class Checker
         }
 
         PushScope();
-        DeclareChecked(f.Variable, element, false, VariableKind.Loop, f.VariableLine);
+        DeclareChecked(f.Variable, element, false, VariableKind.Loop, f.VariableLine, f);
         frame.LoopDepth++;
         CheckBlock(f.Body);
         frame.LoopDepth--;

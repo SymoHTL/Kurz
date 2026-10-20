@@ -93,6 +93,12 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "kurz": {
+        "type": "Project",
+        "dependencies": {
+          "Kurz.Compiler": "[1.0.0, )"
+        }
+      },
       "kurz.compiler": {
         "type": "Project"
       }
