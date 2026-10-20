@@ -83,10 +83,10 @@ flowchart TD
         compiler/NuGet.config missing, without the clear of the inherited sources or without a source mapping;
         a restore outside the lock files (locked mode), an SDK other than the one compiler/global.json pins;
         dotnet missing or out of time. Read: the output of dotnet test, one summary per test project, summed.
-        Required of this gate by section 2 of the design record (an assumption there) and not read by it: the version of the clang the
-        compiler found, printed, and a fail when the compiler refused it or found none (the requirement stands on the record: judgment step).
         Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's errors
-        against each header and runs no program"]
+        against each header and runs no program; the version of the clang the compiler found, printed, and a fail when the compiler
+        refused it or found none, which section 2 of the design record (an assumption there) requires of this gate: the compiler under
+        compiler/ calls no clang and this gate reads no version (checked 2026-10-21: the sources of both), HAZARD issue 37"]
         G4["ci-config: a pinned fact of a workflow changed. All three workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
