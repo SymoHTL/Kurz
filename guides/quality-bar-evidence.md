@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-20
-digest: 1e48111d1aea7cafbc684ba49a3019a699cf07691683401a1564017cbacd8060
+digest: dad3147611b3bb204fbed4c59b3d96611bc440a4756ba6c7a1e0d3ea092c4fd4
 ttl_days: 60
 metadata:
   type: reference
@@ -77,13 +77,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 41 |
+| Entries in INDEX.md | 42 |
 | tagged (untagged) | 2 |
 | tagged HARD | 15 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 4 |
 | tagged RECIPE | 2 |
-| tagged TRAP | 18 |
+| tagged TRAP | 19 |
 | Review rule sections | 12 |
 | Review rules | 69 |
 <!-- /generated:store -->

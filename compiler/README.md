@@ -24,7 +24,9 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   it. A second suite builds every case that expects a run, with the emitter and clang, and runs
   it: its output, its exit code and the line an exception writes are held to the header; the
   cases of the types the emitter does not emit are listed by name with the construct, and a stale
-  entry is refused. A third suite runs the command `kurz` as a process.
+  entry is refused. A third suite runs the command `kurz` as a process. A fourth takes the pieces
+  of `Build/` on their own: the clang search over the path and the Program Files directory it is
+  given, and the environment a captured process gets.
 
 ## Building and testing
 
@@ -45,8 +47,12 @@ the run.
 The suites that build a program need a clang (design record, section 2). The compiler tries, in
 this order, every `clang-<major>` on the path, newest major first, then `clang`, then on Windows
 `LLVM\bin\clang.exe` under the directory the `ProgramFiles` variable names, where the LLVM installer puts it without adding it
-to the path; the first that answers `--version` as clang does is taken. Without one, every test
-that builds a program fails and names the places looked at; none is skipped. The runtime's C is
+to the path; the first that answers `--version` as clang does is taken. The compiler resolves each
+name through the path's directories itself and runs the file by its full path, so that the places
+the operating system would search beside the path (on Windows the program's own directory, the
+current directory and the system directories) play no part: a name that no directory of the path
+holds is named among the places looked at and not run. Without a clang, every test that builds a
+program fails and names the places looked at; none is skipped. The runtime's C is
 compiled once per run, and every program is linked against that object.
 
 The gate `compiler-tests` (`tools/compiler_gate.py`) reads `NuGet.config` as XML and refuses it
