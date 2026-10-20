@@ -172,9 +172,13 @@ public sealed class CommandTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_missing_clang_is_reported_with_the_names_tried_and_exits_1()
     {
-        // the command searches the path it is given; an empty directory as the whole path holds no clang
+        // the command searches the path and the Program Files directory it is given; an empty directory as both holds no clang.
+        // The two variables Windows keeps beside ProgramFiles for the other architecture are emptied with it.
         var empty = Directory("no-clang");
-        var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["PATH"] = empty, ["ProgramFiles"] = empty };
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["PATH"] = empty, ["ProgramFiles"] = empty, ["ProgramW6432"] = empty, ["ProgramFiles(x86)"] = empty,
+        };
         Assert.True(File.Exists(Dll), $"the command is not built beside the suite: {Dll}");
         var (code, output, error) = Processes.Capture(Host, [Dll, "exec", "print(1)"], null, TimeSpan.FromMinutes(2), environment);
         Assert.True(code == 1, $"the command exited with {code} on a path without a clang; output: {output}; error: {error}");

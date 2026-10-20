@@ -31,11 +31,12 @@ public sealed class BuildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         var value = Path.Combine(toolchain.Directory, "build-path");
         Directory.CreateDirectory(value);
-        var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["PATH"] = value };
+        // the path, and the Program Files variable with the one Windows keeps beside it for the other architecture
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["PATH"] = value, ["ProgramFiles"] = value, ["ProgramW6432"] = value };
         var (code, output, error) = OperatingSystem.IsWindows()
-            ? Processes.Capture(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", ["/d", "/c", "echo %PATH%"], null, TimeSpan.FromMinutes(1), environment)
-            : Processes.Capture("/bin/sh", ["-c", "printf %s \"$PATH\""], null, TimeSpan.FromMinutes(1), environment);
+            ? Processes.Capture(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", ["/d", "/c", "echo %PATH%|%ProgramFiles%|%ProgramW6432%"], null, TimeSpan.FromMinutes(1), environment)
+            : Processes.Capture("/bin/sh", ["-c", "printf %s \"$PATH|$ProgramFiles|$ProgramW6432\""], null, TimeSpan.FromMinutes(1), environment);
         Assert.Equal((0, ""), (code, error));
-        Assert.Equal(value, output.Trim());
+        Assert.Equal($"{value}|{value}|{value}", output.Trim());
     }
 }
