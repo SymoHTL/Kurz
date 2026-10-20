@@ -1,6 +1,6 @@
 ---
 name: a-struct-copy-becomes-a-memcpy-call
-description: At -O2 clang turns a struct assignment, and a loop that copies or clears bytes, into a call of the C library's memcpy or memset, so a runtime that promises its own loops at the boundary imports them all the same; the runtime copies its wide integers with a word loop and is compiled with -fno-builtin, and the object's undefined symbols are read after every change to it.
+description: At -O2 clang turns a struct assignment, and a loop that copies or clears bytes, into a call of the C library's memcpy or memset, so a runtime that promises its own loops at the boundary imports them all the same; the runtime copies its wide integers with a word loop and is compiled with -fno-builtin, and the object's undefined symbols are read by hand after every change to it (HAZARD #36).
 metadata:
   type: reference
 ---
@@ -17,5 +17,5 @@ and `Clang.CompileRuntime` and the C path of `Clang.Link`
 (`compiler/Kurz.Compiler/Build/Clang.cs`) pass `-fno-builtin`, which keeps the optimizer from
 turning a loop into a library call. With both, the object's undefined symbols on Linux are
 `write`, `_exit`, `malloc`, `__errno_location`, `sigaltstack`, `sigaction` and `sigemptyset`
-(`nm -u` on the object). Nothing in the suite reads that list: it is read by hand after a change
-to the runtime, and the pull request names what was read.
+(`nm -u` on the object). Nothing in the suite reads that list, HAZARD (#36): it is read by hand
+after a change to the runtime, and the pull request names what was read.

@@ -22,9 +22,9 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   checks that the errors each reports are exactly the ones the case's header expects of it; a
   case that uses a construct the checker does not read must get `not supported` and no error from
   it. A second suite builds every case that expects a run, with the emitter and clang, and runs
-  it: its output, its exit code and the line an exception writes are held to the header; the
-  cases of the types the emitter does not emit are listed by name with the construct, and a stale
-  entry is refused. A third suite runs the command `kurz` as a process. A fourth takes the pieces
+  it: its output, its exit code and the line an exception writes are held to the header, and a
+  `not supported` from the emitter on a case the checker reads in full fails it. A third suite runs
+  the command `kurz` as a process. A fourth takes the pieces
   of `Build/` on their own: the clang search over the path and the Program Files directory it is
   given, and the environment a captured process gets.
 
@@ -417,7 +417,9 @@ Each is the reading of this directory, not a decision, pinned by a test in `Comm
 - A14 with A11: the text of a `float` takes the exponent form at the thresholds A14 names for a
   `double`, from 1E+15 and below 1E-04, and the digits of either type are the fewest that read
   back as the same value, which can be seventeen for a `double` where sixteen read back as a
-  neighbour (2^-25 is `2.9802322387695312E-08`). Pinned in `EmitterTests.cs` by
+  neighbour (2^-25 is `2.9802322387695312E-08`, where C#'s own text has sixteen digits that do
+  not read back: the clause of A14 that the digits read back as the value is followed over the
+  C# text A14 also names). Pinned in `EmitterTests.cs` by
   `The_text_of_a_float_takes_the_exponent_form_at_the_thresholds_of_a_double` and
   `The_text_of_a_double_is_the_shortest_that_reads_back_as_the_value`.
 - T25 with T5 and T26: a `decimal` result that does not fit, and a floating-point value converted

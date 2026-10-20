@@ -87,7 +87,7 @@ flowchart TD
         per test project, summed; the floor sits above the suite without one corpus theory or the corpus runner,
         so a run that lost one cannot pass. Not seen: a corpus expectation that is wrong (HAZARD issue 1) on a case
         the suite does not run: an error case, read against its header's id and line only, and a case of the types
-        the emitter does not emit; a case the emitter builds is held to its header's output, exit and error line"]
+        the emitter does not emit (the timestamps); a case the emitter builds is held to its header's output, exit and error line"]
         G4["ci-config: a pinned fact of a workflow changed. All three workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
