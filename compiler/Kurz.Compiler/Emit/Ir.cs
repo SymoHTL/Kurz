@@ -21,6 +21,7 @@ internal sealed class IrModule
     {
         globals.AppendLine("%kz.str = type { ptr, i64 }");
         globals.AppendLine("%kz.list = type { ptr, i64 }");
+        globals.AppendLine("%kz.dec = type { i64, i64 }");
         globals.AppendLine("%kz.union = type { i32, ptr }");
         globals.AppendLine("%kz.fn = type { ptr, ptr }");
         globals.AppendLine("@kz_line = external global i32");

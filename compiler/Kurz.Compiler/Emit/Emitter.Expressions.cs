@@ -81,6 +81,12 @@ public sealed partial class Emitter
                 return StringValue(s.Value);
             case UnitConstant when type is DataType d:
                 return UnitValue(d);
+            case RealConstant r when Types.IsFloating(type):
+                return RealText(r.Value);
+            case DecimalConstant d when Types.IsDecimal(type):
+                return DecimalText(d.Value);
+            case IntegerConstant i when Types.IsTime(type):
+                return IntegerText(i.Value, type);
             default:
                 throw Unsupported(line, $"a constant of type `{type}`");
         }
@@ -98,6 +104,18 @@ public sealed partial class Emitter
         }
 
         return bits.ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>The LLVM literal of a <c>double</c>, or of a <c>float</c> held as the double it widens to: the bits of the double in the hexadecimal form, which LLVM reads for both types.</summary>
+    private static string RealText(double value) => "0x" + BitConverter.DoubleToInt64Bits(value).ToString("X16", CultureInfo.InvariantCulture);
+
+    /// <summary>A <c>%kz.dec</c> constant, written as an operand is: the two words of the layout <see cref="Lower"/> names, from the four of <see cref="decimal.GetBits(decimal)"/>.</summary>
+    private static string DecimalText(decimal value)
+    {
+        var bits = decimal.GetBits(value);
+        var low = (ulong)(uint)bits[0] | ((ulong)(uint)bits[1] << 32);
+        var high = (ulong)(uint)bits[2] | ((ulong)(((uint)bits[3] >> 16) & 0xFF) << 32) | ((ulong)((uint)bits[3] >> 31) << 63);
+        return $"{{ i64 {((long)low).ToString(CultureInfo.InvariantCulture)}, i64 {((long)high).ToString(CultureInfo.InvariantCulture)} }}";
     }
 
     /// <summary>A <c>%kz.str</c> constant, written as an operand is, without its type: the pointer to the literal's bytes and their count.</summary>
@@ -237,6 +255,18 @@ public sealed partial class Emitter
             case TokenKind.Minus:
                 {
                     var x = Convert(operand, operandType, type, u.Line);
+                    if (Types.IsFloating(type))
+                    {
+                        return fn.Value($"fneg {Ir(type)} {x}");
+                    }
+
+                    if (Types.IsDecimal(type))
+                    {
+                        // the sign bit of the high word flipped, as C#'s unary minus does
+                        var (low, high) = DecimalWords(x);
+                        return DecimalValue(low, fn.Value($"xor i64 {high}, -9223372036854775808"));
+                    }
+
                     return Arithmetic("sub", IntegerText(BigInteger.Zero, type), x, type, u.Line, checkedBuild: test);
                 }
 
@@ -280,13 +310,43 @@ public sealed partial class Emitter
 
             case TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent:
                 {
-                    if (!Types.IsInteger(type))
+                    var additive = op is TokenKind.Plus or TokenKind.Minus;
+                    if (!Types.IsInteger(type) && !Types.IsFloating(type) && !Types.IsDecimal(type) && !(Types.IsDuration(type) && additive))
                     {
                         throw Unsupported(b.Line, $"`{Spell(op)}` on a `{type}`");
                     }
 
                     var l = Convert(EmitExpression(b.Left), leftType, type, b.Line);
                     var r = Convert(EmitExpression(b.Right), rightType, type, b.Line);
+                    if (Types.IsFloating(type))
+                    {
+                        // T25: a floating-point division by zero yields an infinity or NaN and `%` by zero NaN, as IEEE 754 has it; the remainder is the runtime's, as C's fmod computes it
+                        var ir = Ir(type);
+                        return op switch
+                        {
+                            TokenKind.Plus => fn.Value($"fadd {ir} {l}, {r}"),
+                            TokenKind.Minus => fn.Value($"fsub {ir} {l}, {r}"),
+                            TokenKind.Star => fn.Value($"fmul {ir} {l}, {r}"),
+                            TokenKind.Slash => fn.Value($"fdiv {ir} {l}, {r}"),
+                            _ => fn.Value($"call {ir} @{(ir == "double" ? "kz_f64_rem" : "kz_f32_rem")}({ir} {l}, {ir} {r})"),
+                        };
+                    }
+
+                    if (Types.IsDecimal(type))
+                    {
+                        // as System.Decimal computes it, in the runtime: a result that does not fit raises `overflow` and a division or a remainder by zero `divide-by-zero`, in both builds (T25; a reading, compiler/README.md)
+                        var function = op switch
+                        {
+                            TokenKind.Plus => "kz_dec_add",
+                            TokenKind.Minus => "kz_dec_sub",
+                            TokenKind.Star => "kz_dec_mul",
+                            TokenKind.Slash => "kz_dec_div",
+                            _ => "kz_dec_rem",
+                        };
+                        return DecimalCall(function, l, r, b.Line);
+                    }
+
+                    // the integers, and the durations under `+` and `-`, whose counts overflow as integers do (T29)
                     return op switch
                     {
                         TokenKind.Plus => Arithmetic("add", l, r, type, b.Line, checkedBuild: test),
@@ -342,7 +402,7 @@ public sealed partial class Emitter
             return fn.Value($"{instruction} {ir} {l}, {r}");
         }
 
-        var intrinsic = $"llvm.{(Types.IsSigned(type) ? "s" : "u")}{instruction}.with.overflow.{ir}";
+        var intrinsic = $"llvm.{(Signed(type) ? "s" : "u")}{instruction}.with.overflow.{ir}";
         module.Declare($"declare {{ {ir}, i1 }} @{intrinsic}({ir}, {ir})");
         var pair = fn.Value($"call {{ {ir}, i1 }} @{intrinsic}({ir} {l}, {ir} {r})");
         var overflow = fn.Value($"extractvalue {{ {ir}, i1 }} {pair}, 1");
@@ -413,6 +473,40 @@ public sealed partial class Emitter
             return fn.Value($"icmp {condition} {Ir(common)} {l}, {r}");
         }
 
+        if (Types.IsNumber(leftType) && Types.IsNumber(rightType) && (Types.IsFloating(leftType) || Types.IsFloating(rightType)))
+        {
+            // the operands meet in the floating-point type the checker gives the pair, `double` where one is a `double`, else `float`; NaN is unordered, so `!=` holds and the others fail (T25)
+            var common = leftType is PrimitiveType { Kind: Primitive.Double } || rightType is PrimitiveType { Kind: Primitive.Double } ? Types.Double : Types.Float;
+            var l = Convert(left, leftType, common, b.Line);
+            var r = Convert(right, rightType, common, b.Line);
+            var condition = op switch
+            {
+                TokenKind.EqualEqual => "oeq",
+                TokenKind.NotEqual => "une",
+                TokenKind.Less => "olt",
+                TokenKind.LessEqual => "ole",
+                TokenKind.Greater => "ogt",
+                _ => "oge",
+            };
+            return fn.Value($"fcmp {condition} {Ir(common)} {l}, {r}");
+        }
+
+        if (Types.IsNumber(leftType) && Types.IsNumber(rightType) && (Types.IsDecimal(leftType) || Types.IsDecimal(rightType)))
+        {
+            var l = Convert(left, leftType, Types.Decimal, b.Line);
+            var r = Convert(right, rightType, Types.Decimal, b.Line);
+            return fn.Value($"icmp {SignedCondition(op)} i32 {DecimalCompare(l, r)}, 0");
+        }
+
+        if (Types.IsDuration(leftType) && Types.IsDuration(rightType))
+        {
+            // T29: the narrow operand widens, and the counts compare as signed integers
+            var common = Types.IsWideTime(leftType) || Types.IsWideTime(rightType) ? Types.LongDuration : Types.Duration;
+            var l = Convert(left, leftType, common, b.Line);
+            var r = Convert(right, rightType, common, b.Line);
+            return fn.Value($"icmp {SignedCondition(op)} {Ir(common)} {l}, {r}");
+        }
+
         if (leftType is PrimitiveType { Kind: Primitive.Char } && rightType is PrimitiveType { Kind: Primitive.Char })
         {
             var condition = op switch
@@ -436,13 +530,37 @@ public sealed partial class Emitter
         return op == TokenKind.EqualEqual ? equal : fn.Value($"xor i1 {equal}, true");
     }
 
+    /// <summary>The <c>icmp</c> condition of a comparison of signed values.</summary>
+    private static string SignedCondition(TokenKind op) => op switch
+    {
+        TokenKind.EqualEqual => "eq",
+        TokenKind.NotEqual => "ne",
+        TokenKind.Less => "slt",
+        TokenKind.LessEqual => "sle",
+        TokenKind.Greater => "sgt",
+        _ => "sge",
+    };
+
     /// <summary>Whether two values are equal by the equality Kurz gives their type (T18, D3).</summary>
     private string Equal(string left, KurzType leftType, string right, KurzType rightType, int line)
     {
         switch (leftType)
         {
-            case PrimitiveType p when Types.IsInteger(p) || p.Kind is Primitive.Bool or Primitive.Char:
+            case PrimitiveType p when Types.IsInteger(p) || Types.IsDuration(p) || p.Kind is Primitive.Bool or Primitive.Char:
                 return fn.Value($"icmp eq {Ir(leftType)} {left}, {right}");
+            case PrimitiveType p when Types.IsFloating(p):
+                {
+                    // D3: as the field of a C# record compares, NaN equals NaN here, where `==` on the values alone says false
+                    var ir = Ir(leftType);
+                    var same = fn.Value($"fcmp oeq {ir} {left}, {right}");
+                    var leftNaN = fn.Value($"fcmp uno {ir} {left}, {left}");
+                    var rightNaN = fn.Value($"fcmp uno {ir} {right}, {right}");
+                    var bothNaN = fn.Value($"and i1 {leftNaN}, {rightNaN}");
+                    return fn.Value($"or i1 {same}, {bothNaN}");
+                }
+
+            case PrimitiveType p when Types.IsDecimal(p):
+                return fn.Value($"icmp eq i32 {DecimalCompare(left, right)}, 0");
             case PrimitiveType { Kind: Primitive.String }:
                 {
                     var lp = fn.Value($"extractvalue %kz.str {left}, 0");
@@ -465,6 +583,49 @@ public sealed partial class Emitter
             default:
                 throw Unsupported(line, $"`==` on a `{leftType}`");
         }
+    }
+
+    // ---- decimal (as System.Decimal computes it, in the runtime) ---------------------------------
+
+    /// <summary>The two words of a <c>%kz.dec</c> value.</summary>
+    private (string Low, string High) DecimalWords(string value) =>
+        (fn.Value($"extractvalue %kz.dec {value}, 0"), fn.Value($"extractvalue %kz.dec {value}, 1"));
+
+    private string DecimalValue(string low, string high)
+    {
+        var withLow = fn.Value($"insertvalue %kz.dec undef, i64 {low}, 0");
+        return fn.Value($"insertvalue %kz.dec {withLow}, i64 {high}, 1");
+    }
+
+    /// <summary>An operation of the runtime on two decimals, which writes its result, or raises at the line.</summary>
+    private string DecimalCall(string function, string left, string right, int line)
+    {
+        var (ll, lh) = DecimalWords(left);
+        var (rl, rh) = DecimalWords(right);
+        var out_ = fn.Alloca("%kz.dec", "dec");
+        StoreLine(line);
+        fn.Emit($"call void @{function}(i64 {ll}, i64 {lh}, i64 {rl}, i64 {rh}, i32 {line.ToString(CultureInfo.InvariantCulture)}, ptr {out_})");
+        return fn.Value($"load %kz.dec, ptr {out_}");
+    }
+
+    /// <summary>The order of two decimals as the runtime reads it: below, at or above zero as <c>i32</c>.</summary>
+    private string DecimalCompare(string left, string right)
+    {
+        var (ll, lh) = DecimalWords(left);
+        var (rl, rh) = DecimalWords(right);
+        return fn.Value($"call i32 @kz_dec_cmp(i64 {ll}, i64 {lh}, i64 {rl}, i64 {rh})");
+    }
+
+    /// <summary>Raises the exception where the byte the runtime wrote is 0.</summary>
+    private void FailUnless(string byteValue, string id, int line)
+    {
+        var ok = fn.Value($"icmp ne i8 {byteValue}, 0");
+        var fail = fn.Label("fail");
+        var go = fn.Label("ok");
+        fn.CondBranch(ok, go, fail);
+        fn.Block(fail);
+        FailWith(id, line);
+        fn.Block(go);
     }
 
     // ---- conversions -----------------------------------------------------------------------------
@@ -497,8 +658,37 @@ public sealed partial class Emitter
             return Resize(value, from, to);
         }
 
+        if (Types.IsInteger(from) && Types.IsFloating(to))
+        {
+            // T23: rounded to the nearest value the type holds, no loss
+            return fn.Value($"{(Types.IsSigned(from) ? "sitofp" : "uitofp")} {Ir(from)} {value} to {Ir(to)}");
+        }
+
+        if (from is PrimitiveType { Kind: Primitive.Float } && to is PrimitiveType { Kind: Primitive.Double })
+        {
+            return fn.Value($"fpext float {value} to double");
+        }
+
+        if (Types.IsInteger(from) && Types.IsDecimal(to))
+        {
+            var signed = Types.IsSigned(from);
+            var wide = Resize(value, from, signed ? Types.Long : Types.ULong);
+            var out_ = fn.Alloca("%kz.dec", "dec");
+            fn.Emit($"call void @{(signed ? "kz_dec_from_i64" : "kz_dec_from_u64")}(i64 {wide}, ptr {out_})");
+            return fn.Value($"load %kz.dec, ptr {out_}");
+        }
+
+        if (Types.IsDuration(from) && Types.IsDuration(to))
+        {
+            // T29: a `duration` widens into a `longduration`
+            return Resize(value, from, to);
+        }
+
         throw Unsupported(line, $"a `{from}` where a `{to}` is required");
     }
+
+    /// <summary>Whether the bits of the type carry a sign: the signed integers, and the time types, whose counts are signed (T24).</summary>
+    private static bool Signed(KurzType type) => Types.IsSigned(type) || Types.IsTime(type);
 
     /// <summary>The bits of an integer in another width: extended by its own sign, or cut.</summary>
     private string Resize(string value, KurzType from, KurzType to)
@@ -512,7 +702,7 @@ public sealed partial class Emitter
 
         if (fromWidth < toWidth)
         {
-            return fn.Value($"{(Types.IsSigned(from) ? "sext" : "zext")} {Ir(from)} {value} to {Ir(to)}");
+            return fn.Value($"{(Signed(from) ? "sext" : "zext")} {Ir(from)} {value} to {Ir(to)}");
         }
 
         return fn.Value($"trunc {Ir(from)} {value} to {Ir(to)}");
@@ -585,12 +775,35 @@ public sealed partial class Emitter
         return fn.Value($"load %kz.union, ptr {slot}");
     }
 
-    /// <summary>T10, T20: a conversion written as a call of an integer type; a value that does not fit raises `overflow` in a test build and wraps in a release build.</summary>
+    /// <summary>
+    /// T10, T20, T26, T29: a conversion written as a call of a type. From an integer or a duration into
+    /// an integer or a duration, a value that does not fit raises `overflow` in a test build and wraps
+    /// in a release build (T20, T29). From a floating-point or `decimal` source into an integer type
+    /// the fraction is dropped, and a value that does not fit, an infinity and NaN raise `overflow` in
+    /// a test build and saturate in a release build, NaN to 0 (T26). Into a floating-point type the
+    /// value is rounded (T23); into `decimal` from a floating-point value, what does not fit, an
+    /// infinity and NaN raise `overflow` in both builds (a reading, compiler/README.md).
+    /// </summary>
     private string EmitConversion(CallExpression c, PrimitiveType target)
     {
         var source = c.Arguments[0].Value;
         var sourceType = TypeOf(source);
-        if (!Types.IsInteger(sourceType) || !Types.IsInteger(target))
+        if (Types.IsNumber(sourceType) && Types.IsNumber(target) && !Types.IsInteger(target))
+        {
+            return ConvertNumber(EmitExpression(source), sourceType, target, c.Line);
+        }
+
+        if (Types.IsFloating(sourceType) && Types.IsInteger(target))
+        {
+            return RealToInteger(EmitExpression(source), sourceType, target, c.Line);
+        }
+
+        if (Types.IsDecimal(sourceType) && Types.IsInteger(target))
+        {
+            return DecimalToInteger(EmitExpression(source), target, c.Line);
+        }
+
+        if (!(Types.IsInteger(sourceType) && Types.IsInteger(target)) && !(Types.IsDuration(sourceType) && Types.IsDuration(target)))
         {
             throw Unsupported(c.Line, $"a conversion from `{sourceType}` to `{target}`");
         }
@@ -598,8 +811,8 @@ public sealed partial class Emitter
         var value = EmitExpression(source);
         var fromWidth = Lower.Size(sourceType);
         var toWidth = Lower.Size(target);
-        var fromSigned = Types.IsSigned(sourceType);
-        var toSigned = Types.IsSigned(target);
+        var fromSigned = Signed(sourceType);
+        var toSigned = Signed(target);
         if (test)
         {
             string? misfit = null;
@@ -641,6 +854,117 @@ public sealed partial class Emitter
         return Resize(value, sourceType, target);
     }
 
+    /// <summary>A number into a floating-point type or <c>decimal</c>: an integer as <see cref="Convert"/> widens it (T23); a <c>float</c> into <c>double</c> widens, a <c>double</c> into <c>float</c> is rounded, to an infinity beyond its range; a <c>decimal</c> into a floating-point type and a floating-point value into <c>decimal</c> as System.Decimal converts, the latter with <c>overflow</c> for what does not fit, an infinity and NaN.</summary>
+    private string ConvertNumber(string value, KurzType from, PrimitiveType to, int line)
+    {
+        if (Types.Same(from, to) || Types.IsInteger(from) || (from is PrimitiveType { Kind: Primitive.Float } && to.Kind == Primitive.Double))
+        {
+            return Convert(value, from, to, line);
+        }
+
+        if (from is PrimitiveType { Kind: Primitive.Double } && to.Kind == Primitive.Float)
+        {
+            return fn.Value($"fptrunc double {value} to float");
+        }
+
+        if (Types.IsDecimal(from))
+        {
+            var (low, high) = DecimalWords(value);
+            var wide = fn.Value($"call double @kz_dec_to_f64(i64 {low}, i64 {high})");
+            return to.Kind == Primitive.Double ? wide : fn.Value($"fptrunc double {wide} to float");
+        }
+
+        var fits = fn.Alloca("i8", "fits");
+        var out_ = fn.Alloca("%kz.dec", "dec");
+        fn.Emit($"call void @{(from is PrimitiveType { Kind: Primitive.Double } ? "kz_dec_from_f64" : "kz_dec_from_f32")}({Ir(from)} {value}, ptr {fits}, ptr {out_})");
+        FailUnless(fn.Value($"load i8, ptr {fits}"), ErrorIds.Overflow, line);
+        return fn.Value($"load %kz.dec, ptr {out_}");
+    }
+
+    /// <summary>T26: a floating-point value into an integer type, the fraction dropped; what does not fit, an infinity and NaN raise <c>overflow</c> in a test build and saturate in a release build, NaN to 0.</summary>
+    private string RealToInteger(string value, KurzType from, PrimitiveType to, int line)
+    {
+        var real = Ir(from);
+        var suffix = real == "double" ? "f64" : "f32";
+        var ir = Ir(to);
+        var signed = Types.IsSigned(to);
+        if (!test)
+        {
+            var saturating = $"llvm.{(signed ? "fptosi" : "fptoui")}.sat.{ir}.{suffix}";
+            module.Declare($"declare {ir} @{saturating}({real})");
+            return fn.Value($"call {ir} @{saturating}({real} {value})");
+        }
+
+        // the value cut toward zero fits when it is at least the smallest value and below the largest plus one, both exact powers of two; NaN fails both
+        var truncate = $"llvm.trunc.{suffix}";
+        module.Declare($"declare {real} @{truncate}({real})");
+        var whole = fn.Value($"call {real} @{truncate}({real} {value})");
+        var width = Lower.Size(to) * 8;
+        var low = signed ? -Math.Pow(2, width - 1) : 0.0;
+        var high = signed ? Math.Pow(2, width - 1) : Math.Pow(2, width);
+        var aboveLow = fn.Value($"fcmp oge {real} {whole}, {RealText(low)}");
+        var belowHigh = fn.Value($"fcmp olt {real} {whole}, {RealText(high)}");
+        var fits = fn.Value($"and i1 {aboveLow}, {belowHigh}");
+        var fail = fn.Label("overflow");
+        var ok = fn.Label("fits");
+        fn.CondBranch(fits, ok, fail);
+        fn.Block(fail);
+        FailWith(ErrorIds.Overflow, line);
+        fn.Block(ok);
+        return fn.Value($"{(signed ? "fptosi" : "fptoui")} {real} {whole} to {ir}");
+    }
+
+    /// <summary>T26: a <c>decimal</c> into an integer type, the fraction dropped; what does not fit raises <c>overflow</c> in a test build and saturates in a release build.</summary>
+    private string DecimalToInteger(string value, PrimitiveType to, int line)
+    {
+        var (low, high) = DecimalWords(value);
+        var signed = Types.IsSigned(to);
+        var wideType = signed ? Types.Long : Types.ULong;
+        var fits = fn.Alloca("i8", "fits");
+        var wide = fn.Value($"call i64 @{(signed ? "kz_dec_to_i64" : "kz_dec_to_u64")}(i64 {low}, i64 {high}, ptr {fits})");
+        var fitsByte = fn.Value($"load i8, ptr {fits}");
+        var narrow = Lower.Size(to) < 8;
+        if (test)
+        {
+            FailUnless(fitsByte, ErrorIds.Overflow, line);
+            if (!narrow)
+            {
+                return wide;
+            }
+
+            // the check an integer conversion makes: the value cut to the type reads back as itself
+            var cut = fn.Value($"trunc i64 {wide} to {Ir(to)}");
+            var back = fn.Value($"{(signed ? "sext" : "zext")} {Ir(to)} {cut} to i64");
+            var same = fn.Value($"icmp eq i64 {back}, {wide}");
+            var fail = fn.Label("overflow");
+            var ok = fn.Label("fits");
+            fn.CondBranch(same, ok, fail);
+            fn.Block(fail);
+            FailWith(ErrorIds.Overflow, line);
+            fn.Block(ok);
+            return cut;
+        }
+
+        // the release build: a value beyond 64 bits takes the end its sign names, then the value is held to the type's range
+        var negative = fn.Value($"icmp slt i64 {high}, 0");
+        var (wideMin, wideMax) = Types.Range(wideType);
+        var end = fn.Value($"select i1 {negative}, i64 {IntegerText(wideMin, wideType)}, i64 {IntegerText(wideMax, wideType)}");
+        var fitsBit = fn.Value($"icmp ne i8 {fitsByte}, 0");
+        var held = fn.Value($"select i1 {fitsBit}, i64 {wide}, i64 {end}");
+        if (!narrow)
+        {
+            return held;
+        }
+
+        var prefix = signed ? "s" : "u";
+        module.Declare($"declare i64 @llvm.{prefix}max.i64(i64, i64)");
+        module.Declare($"declare i64 @llvm.{prefix}min.i64(i64, i64)");
+        var (min, max) = Types.Range(to);
+        var floored = fn.Value($"call i64 @llvm.{prefix}max.i64(i64 {held}, i64 {IntegerText(min, wideType)})");
+        var capped = fn.Value($"call i64 @llvm.{prefix}min.i64(i64 {floored}, i64 {IntegerText(max, wideType)})");
+        return fn.Value($"trunc i64 {capped} to {Ir(to)}");
+    }
+
     // ---- the text of a value (A2 to A4, A8) ------------------------------------------------------
 
     /// <summary>The text of a value as `print` and an interpolation show it (A1, L6), as a <c>%kz.str</c>.</summary>
@@ -670,6 +994,41 @@ public sealed partial class Emitter
                 {
                     var out_ = fn.Alloca("%kz.str", "text");
                     fn.Emit($"call void @kz_text_char(i32 {value}, ptr {out_})");
+                    return fn.Value($"load %kz.str, ptr {out_}");
+                }
+
+            case PrimitiveType p when Types.IsFloating(p):
+                {
+                    // A11, A14: the shortest digits that read back as the same value, with the exponent form from 1E+15 and below 1E-04 for both types (a reading, compiler/README.md)
+                    var out_ = fn.Alloca("%kz.str", "text");
+                    fn.Emit($"call void @{(p.Kind == Primitive.Double ? "kz_text_f64" : "kz_text_f32")}({Ir(type)} {value}, ptr {out_})");
+                    return fn.Value($"load %kz.str, ptr {out_}");
+                }
+
+            case PrimitiveType p when Types.IsDecimal(p):
+                {
+                    // A8: the digits it holds, its scale kept
+                    var (low, high) = DecimalWords(value);
+                    var out_ = fn.Alloca("%kz.str", "text");
+                    fn.Emit($"call void @kz_text_dec(i64 {low}, i64 {high}, ptr {out_})");
+                    return fn.Value($"load %kz.str, ptr {out_}");
+                }
+
+            case PrimitiveType { Kind: Primitive.Duration }:
+                {
+                    // A12: the count split into units
+                    var out_ = fn.Alloca("%kz.str", "text");
+                    fn.Emit($"call void @kz_text_duration(i64 {value}, ptr {out_})");
+                    return fn.Value($"load %kz.str, ptr {out_}");
+                }
+
+            case PrimitiveType { Kind: Primitive.LongDuration }:
+                {
+                    var low = fn.Value($"trunc i128 {value} to i64");
+                    var shifted = fn.Value($"lshr i128 {value}, 64");
+                    var high = fn.Value($"trunc i128 {shifted} to i64");
+                    var out_ = fn.Alloca("%kz.str", "text");
+                    fn.Emit($"call void @kz_text_longduration(i64 {low}, i64 {high}, ptr {out_})");
                     return fn.Value($"load %kz.str, ptr {out_}");
                 }
 

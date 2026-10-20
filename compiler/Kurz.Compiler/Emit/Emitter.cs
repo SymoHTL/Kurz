@@ -9,8 +9,8 @@ namespace Kurz.Compiler.Emit;
 /// <summary>
 /// The code generator: LLVM IR, as text, for a program the checker read without an error, from
 /// the syntax tree and the checker's <see cref="SemanticModel"/>. It emits what the checker reads
-/// of chapters 1 to 3, 5, 6 and 8 to 10 over the integers, <c>bool</c>, <c>char</c> and <c>string</c>
-/// (<see cref="Lower.Supported"/>); a program that uses another type, or a construct the emitter
+/// of chapters 1 to 3, 5, 6 and 8 to 10 over every primitive type but the timestamps
+/// (<see cref="Lower.Supported"/>); a program that uses a timestamp, or a construct the emitter
 /// does not lay out, gets one <c>not supported</c> diagnostic and no IR. Generic functions and data
 /// types are emitted once per set of type arguments. In a test build the arithmetic of T4 raises
 /// <c>overflow</c> (T5); in a release build it wraps. Every call stores its line before it runs
@@ -710,21 +710,23 @@ public sealed partial class Emitter
         return copy;
     }
 
-    /// <summary>The bytes of a record as LLVM lays it out: the type number, then each field at its own alignment, the whole padded to 8.</summary>
+    /// <summary>The bytes of a record as LLVM lays it out: the type number, then each field at its own alignment, the whole padded to its widest alignment, 8 at least.</summary>
     private static int RecordBytes(DataType data) => StructBytes(4, Lower.FieldTypes(data));
 
-    /// <summary>The bytes of a struct of <paramref name="leading"/> bytes and these fields, each at its own alignment, the whole padded to 8.</summary>
+    /// <summary>The bytes of a struct of <paramref name="leading"/> bytes and these fields, each at its own alignment, the whole padded to its widest alignment, 8 at least.</summary>
     private static int StructBytes(int leading, IEnumerable<KurzType> fields)
     {
         var offset = leading;
+        var widest = 8;
         foreach (var f in fields)
         {
             var size = Lower.Size(f);
-            var align = size >= 8 ? 8 : size;
+            var align = Lower.Align(f);
+            widest = Math.Max(widest, align);
             offset = (offset + align - 1) / align * align;
             offset += size;
         }
 
-        return Math.Max((offset + 7) / 8 * 8, 8);
+        return Math.Max((offset + widest - 1) / widest * widest, 8);
     }
 }

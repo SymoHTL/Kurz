@@ -11,7 +11,11 @@ namespace Kurz.Compiler.Emit;
 /// number of its type, so that a value held as its base type (D6) can be told from the others in a
 /// <c>match</c> (C4); a union is <c>%kz.union</c>, the index of its case and a pointer to a box that
 /// holds the case's value; a function value is <c>%kz.fn</c>, the code and its environment (F11, F15).
-/// The floating-point, <c>decimal</c> and time types are not emitted: <see cref="Supported"/> says so.
+/// A <c>float</c> and a <c>double</c> are LLVM's <c>float</c> and <c>double</c>; a <c>decimal</c> is
+/// <c>%kz.dec</c>, the four words of a <c>System.Decimal</c> as two 64-bit words: the low 64 bits of
+/// the 96-bit magnitude, then its high 32 bits with the scale in the byte above them and the sign in
+/// the top bit; a <c>duration</c> is its count of nanoseconds as <c>i64</c> and a <c>longduration</c>
+/// as <c>i128</c> (T24, T29). The timestamps are not emitted: <see cref="Supported"/> says so.
 /// </summary>
 internal static class Lower
 {
@@ -25,6 +29,11 @@ internal static class Lower
             Primitive.Long or Primitive.ULong => "i64",
             Primitive.Bool => "i1",
             Primitive.String => "%kz.str",
+            Primitive.Float => "float",
+            Primitive.Double => "double",
+            Primitive.Decimal => "%kz.dec",
+            Primitive.Duration => "i64",
+            Primitive.LongDuration => "i128",
             _ => throw new NotSupportedException($"a `{p}` is not emitted"),
         },
         VoidType => "void",
@@ -41,17 +50,19 @@ internal static class Lower
     {
         "i1" or "i8" => 1,
         "i16" => 2,
-        "i32" => 4,
-        "i64" or "ptr" => 8,
-        "%kz.str" or "%kz.list" or "%kz.union" or "%kz.fn" => 16,
+        "i32" or "float" => 4,
+        "i64" or "double" or "ptr" => 8,
+        "i128" or "%kz.dec" or "%kz.str" or "%kz.list" or "%kz.union" or "%kz.fn" => 16,
         var other => throw new InvalidOperationException($"no size for `{other}`"),
     };
 
-    /// <summary>Whether the type is one the emitter lays out: the integers, <c>bool</c>, <c>char</c>, <c>string</c>, and lists, data types, unions and functions made of them.</summary>
+    /// <summary>The alignment of a value of the type in a record, as LLVM lays it out: an <c>i128</c> at 16, everything else at its size up to 8.</summary>
+    public static int Align(KurzType type) => IrType(type) == "i128" ? 16 : Math.Min(Size(type), 8);
+
+    /// <summary>Whether the type is one the emitter lays out: every primitive type but the timestamps, and lists, data types, unions and functions made of them.</summary>
     public static bool Supported(KurzType type) => type switch
     {
-        PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt
-            or Primitive.Long or Primitive.ULong or Primitive.Bool or Primitive.Char or Primitive.String,
+        PrimitiveType p => !Types.IsTimestamp(p),
         VoidType => true,
         ListType l => Supported(l.Element),
         DataType d => d.TypeArguments.All(Supported),

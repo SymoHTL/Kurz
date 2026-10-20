@@ -80,7 +80,7 @@ public sealed class CommandTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_construct_the_compiler_does_not_read_is_reported_as_not_supported_with_its_line()
     {
-        var (code, output, error) = Kurz(null, "exec", "print(1)\ndouble d = 1.5\nprint(d)\n");
+        var (code, output, error) = Kurz(null, "exec", "print(1)\ndata Event(timestamp at)\nprint(2)\n");
         Assert.Equal((1, ""), (code, output));
         Assert.StartsWith("exec:2: not supported: ", error, StringComparison.Ordinal);
     }

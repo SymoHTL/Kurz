@@ -136,8 +136,9 @@ Each line names a trap; its evidence is in the entry it links.
    pipeline, are a `judgment step`.
 7. **An expectation nobody runs is not a proof.** The quality tools run nothing of `corpus/`; the
    compiler's suite builds and runs every case its emitter emits and holds it to its header, and
-   an error case, or a case of a type the emitter does not emit, is run by nothing. The lint checks
-   the shape of a case; whether the expectation of an unrun case is right is decided by reading it
+   an error case, or a case of a type the emitter does not emit (the timestamps), is run by
+   nothing. The lint checks the shape of a case; whether the expectation of an unrun case is right
+   is decided by reading it
    against the rules it names ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
    HAZARD (#1) for the unrun cases; review rule "corpus" carries the defect shapes.
 
@@ -208,8 +209,8 @@ request 29 retired the design-phase rule, after the owner said build on 2026-10-
 library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Semantics/`
 checks the tree against the rules of chapters 1 to 3, 5, 6 and 8 to 10 that `compiler/README.md`
 lists, and says `not supported` to the rest, `Corpus/` reads a case header, `Emit/` writes LLVM
-IR for what the checker reads over the integers, `bool`, `char` and `string` and says
-`not supported` to the other types, `Runtime/` is the C runtime a built program links, `Build/`
+IR for what the checker reads over every primitive type but the timestamps, and says
+`not supported` to those, `Runtime/` is the C runtime a built program links, `Build/`
 finds clang, builds and is the command), the command project `Kurz` (`kurz build`, `kurz run`,
 `kurz exec`), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through the
 front end, every case it reads clean through the checker, and every case that expects a run and
@@ -397,7 +398,7 @@ Gate: review rule "rules for sessions".
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins, a restore inside the lock files and a clang of a release the gate names, which builds and runs the corpus (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
-| title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, error cases and the cases of the types the emitter does not emit being right: nothing runs them (#1) |
+| title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, error cases and the cases of the types the emitter does not emit (the timestamps) being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | | the author and committer address a push publishes (#12) |

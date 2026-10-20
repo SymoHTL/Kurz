@@ -22,9 +22,9 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   checks that the errors each reports are exactly the ones the case's header expects of it; a
   case that uses a construct the checker does not read must get `not supported` and no error from
   it. A second suite builds every case that expects a run, with the emitter and clang, and runs
-  it: its output, its exit code and the line an exception writes are held to the header; the
-  cases of the types the emitter does not emit are listed by name with the construct, and a stale
-  entry is refused. A third suite runs the command `kurz` as a process. A fourth takes the pieces
+  it: its output, its exit code and the line an exception writes are held to the header, and a
+  `not supported` from the emitter on a case the checker reads in full fails it. A third suite runs
+  the command `kurz` as a process. A fourth takes the pieces
   of `Build/` on their own: the clang search over the path and the Program Files directory it is
   given, and the environment a captured process gets.
 
@@ -330,14 +330,18 @@ round can ask about it by the rule's id.
 ## What the emitter emits
 
 The emitter (`Emit/`) takes a tree the checker read without an error and writes LLVM IR as text
-for what the checker reads, over the integers, `bool`, `char` and `string`, and the lists, data
+for what the checker reads, over every primitive type but the timestamps, and the lists, data
 types, unions and function values made of them; the build (`Build/`) hands the IR and the
 runtime's C (`Runtime/kurz_rt.c`) to clang, which compiles both and links them into the one
 executable, the runtime's code a part of the program and the C library linked as the platform
 links it (design record, section 2). The runtime calls the C library for what the record's
 boundary lists and moves its own bytes with loops; the copy of a record in the emitted code is
 LLVM's copy intrinsic, which clang lowers to the C library's `memcpy` where it does not inline it. An integer is the LLVM integer of its width, signed and unsigned alike, and
-the operations tell them apart; a `bool` is `i1`; a `char` is its code point as `i32`; a string is
+the operations tell them apart; a `float` and a `double` are LLVM's, and the fewest digits that
+read back as the value are their text (A11, A14); a `decimal` is the four words of a
+`System.Decimal` as two 64-bit words, and its arithmetic, comparisons, conversions and text run
+in the runtime as `System.Decimal` computes them (T24, A8); a `duration` is its count of
+nanoseconds as `i64` and a `longduration` as `i128` (T24, T29); a `bool` is `i1`; a `char` is its code point as `i32`; a string is
 a pointer to UTF-8 bytes and their count; a list is a pointer to a shared buffer and the count of
 items the value sees; a `data` value is a pointer to a record on the heap whose first field is
 the number of its type, with the base's fields first (D7), so that a value held as its base (D6)
@@ -353,7 +357,14 @@ The test build, the default, checks every `+`, `-` and `*` of T4 with LLVM's ove
 and raises `overflow` (T5); the release build wraps. A division or a remainder by zero raises
 `divide-by-zero` in both (T25); the signed minimum divided by -1 is `overflow` in the test build
 and wraps in the release build (a reading, below); a shift count is taken modulo the width (T22); a conversion that
-does not fit is `overflow` in the test build and wraps in the release build (T20). An exception
+does not fit is `overflow` in the test build and wraps in the release build (T20). A
+floating-point division or remainder by zero gives an infinity or NaN, as IEEE 754 has it (T25); a
+`decimal` result that does not fit raises `overflow`, and a `decimal` division or remainder by
+zero `divide-by-zero`, in both builds (a reading, below); a conversion of a floating-point value
+or a `decimal` into an integer type drops the fraction, and a value that does not fit, an
+infinity and NaN raise `overflow` in the test build and saturate in the release build, NaN to 0
+(T26); a `duration` sum that does not fit, and a `longduration` converted into a `duration` it
+does not fit, are `overflow` in the test build and wrap in the release build (T29). An exception
 writes `error: <id> at line <n>` on standard error and ends the process with the exit code 1
 through an exit that runs no handler of the C library (section 6); what `print` wrote before
 stays. Every call stores its line in the runtime before it runs, so that the line of a stack
@@ -372,11 +383,11 @@ keeps it.
 
 ### What the emitter does not emit
 
-A program that uses `float`, `double`, `decimal` or a time type (T24, T26, T29, and the A-rules of
-their text) gets `not supported` at the line of the first such constant, variable, field,
-parameter or operation, and no IR; the runner lists every corpus case that expects a run and uses
-one, by name with the construct, and refuses a stale entry. What the checker does not read (its
-list above) never reaches the emitter.
+A program that uses a timestamp (T24, and the A-rules of its text) gets `not supported` at the
+line of the first field, variable, parameter or operation of that type the emitter reaches, and
+no IR; no corpus case that expects a run uses one, and the runner's theory fails on a
+`not supported` of any case the checker reads in full. What the checker does not read (its list
+above) never reaches the emitter.
 
 ### Readings the reference leaves open to the emitter and the command
 
@@ -403,6 +414,19 @@ Each is the reading of this directory, not a decision, pinned by a test in `Comm
   where the id stands, since the record gives a refused program one line per diagnostic and
   `not supported` carries no id. Pinned in `CommandTests.cs` by
   `A_construct_the_compiler_does_not_read_is_reported_as_not_supported_with_its_line`.
+- A14 with A11: the text of a `float` takes the exponent form at the thresholds A14 names for a
+  `double`, from 1E+15 and below 1E-04, and the digits of either type are the fewest that read
+  back as the same value, which can be seventeen for a `double` where sixteen read back as a
+  neighbour (2^-25 is `2.9802322387695312E-08`, where C#'s own text has sixteen digits that do
+  not read back: the clause of A14 that the digits read back as the value is followed over the
+  C# text A14 also names). Pinned in `EmitterTests.cs` by
+  `The_text_of_a_float_takes_the_exponent_form_at_the_thresholds_of_a_double` and
+  `The_text_of_a_double_is_the_shortest_that_reads_back_as_the_value`.
+- T25 with T5 and T26: a `decimal` result that does not fit, and a floating-point value converted
+  into `decimal` that does not fit, an infinity and NaN, raise `overflow` in both builds: the
+  record wraps an integer in the release build, and a `decimal` has no width to wrap at. Pinned
+  in `EmitterTests.cs` by `A_decimal_that_does_not_fit_is_overflow_in_both_builds` and
+  `A_floating_point_value_beyond_a_decimal_is_overflow_in_both_builds`.
 - Section 2: on a platform other than Windows the executable `kurz build` writes beside the
   source has no extension, `hello` for `hello.kz`, as a program built there is named; the record
   names `hello.exe` for Windows alone. Pinned in `CommandTests.cs` by
