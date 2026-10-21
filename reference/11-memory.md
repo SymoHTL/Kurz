@@ -209,14 +209,21 @@ print(before.Left?.Key ?? 0)
 Code that touches raw memory sits in `raw` blocks. A `raw` block compiles only in a package that the
 project grants `allow raw`; one in a package without the grant is the compile error
 `raw-not-allowed`, and a program without a `project.kz`, as every case of the corpus is, has no
-grant. The compiler's memory guarantees cover the Kurz code outside `raw` blocks; the runtime's C
-and assembly are unchecked, as a `raw` block is, and so is the foreign code the process runs beside
-them, the C library, the compiler's support library, the cipher library of TLS and a library the
+grant. A `raw` block holds the machine instructions no other form of the language expresses, as
+inline assembly (§3, the owner, 2026-10-21), written as R11 says, and the reading and writing through a
+raw pointer (R10).
+The compiler's memory guarantees cover the Kurz code outside `raw` blocks; the runtime is Kurz (§2),
+and its `raw` blocks and the inline assembly in them are unchecked as every `raw` block is, and so is
+the foreign code the process runs beside them, the C library, the system's DLLs on Windows, the compiler's
+support library, the unwind library on Linux and `dbghelp.dll` on Windows, Espressif's framework and its
+radio's binary libraries on the ESP32 models, avr-libc on AVR, the cipher library of TLS and a library the
 program takes through the C-ABI, so the guarantees hold while that code writes only the memory it
 owns or was handed, inside the bounds it was given, and keeps the invariants the Kurz code relies on
-*(assumed: the runtime's C and assembly and the foreign code outside the guarantees, under the
+*(assumed: the foreign code outside the guarantees, under the
 condition on what that code writes and keeps, as §3 marks it)*. The grant is per package and written
-like `allow network`. *(the error and the program without a project file are a proposed reading)* No
+like `allow network`. *(the error and the program without a project file are a proposed reading)* The
+runtime's and the standard library's packages carry the grant themselves, so that a program without
+a project file compiles with them *(assumed: as §3 marks it)*. No
 case shows a `raw` block that compiles: a grant sits in `project.kz`, and a case of the corpus is a
 single file.
 
@@ -226,6 +233,82 @@ raw {
     print(1)
 }
 ```
+
+### R10 (decided, §3) Raw pointers
+
+A raw pointer is written as C# writes it in `unsafe` code: the type `int*`, the reading and writing
+through it `*p` and `p[i]`, the offset `p + n` and the address `&x`; an offset is an `int` or a
+`long`, as every index is (§4). A pointer type stands anywhere, in a field or a parameter, and only
+the reading or writing through a pointer needs a `raw` block (§3, the owner, 2026-10-21); one outside it
+is the compile error `raw-required`.
+The address `&x` and the offset `p + n` read and write nothing and need no `raw` block, and `p + n`
+computes as Rust's `wrapping_add` (§3, the owner, 2026-10-21). *(assumed: the id `raw-required`, as §3
+marks it)* `p + n` and `p - n` count elements of the pointee, `p - q` is a `long`, the count of
+elements from `q` to `p`, and `==`, `!=`, `<`, `<=`, `>` and `>=` compare two pointers' addresses, none of
+them needing a `raw` block; `&x` takes a variable, a field or an element, and the pointer holds while
+that value lives *(assumed: the element count, the subtraction, the comparisons and what `&x` takes,
+as §3 marks them)*. `p - q` takes two pointers of one pointee type, others being `type-mismatch` (T1), and
+divides the distance in bytes by the size of the pointee; `p - n` wraps as `p + n` does; `&x` of a
+variable that is not `mut` gives a pointer through which a write is a misuse of `raw` code, and so is
+a read or a write through a pointer whose value a sweep or a return freed, outside the guarantees
+(R7) *(assumed: as §3 marks them)*. A pointer can be `null` (`int* p = null`), and `p == null` compares outside `raw`; N2's check does
+not apply to it, since a pointer type is no `T?`, and a read or a write through `null` is a misuse of
+`raw` code. A pointer points to a number, a `bool`, another pointer or `extern "C"` data; a pointer
+to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of
+such a type among them, is the compile error `counted-pointee` (§3, the owner, 2026-10-21), and a
+`data` value that holds no counted reference is a pointee too *(assumed: the id and that pointee, as
+§3 marks them; `counted-pointee` stands here and not in the table of chapter 12)*.
+
+No case: a pointer is read or written in a `raw` block only, which compiles only under a grant in
+`project.kz` (R7), and a case of the corpus is a single file; a case of `raw-required` through a pointer needs a pointer
+form, and the compiler's front end, through which every case runs, reads none: a pointer type, `&x`
+and `*p` all get `syntax` there, since it takes `-`, `!` and `~` alone as prefix operators.
+
+### R11 (decided, §3) Inline assembly
+
+Inline assembly is a statement inside a `raw` block, written as Rust writes `asm!`:
+`asm("add {r}, 1", r = inout(reg) count)`. A `{name}` in its template names an operand and is no
+interpolation (L6); a `"""` block (L13) holds a template of many lines; the operands take Rust's
+words, `in`, `out`, `inout`, `lateout`, the register classes Rust names for each architecture and
+`clobber_abi` (§3, the owner, 2026-10-21). `{{` and `}}` write a brace, an operand is taken by its name or by
+its position, a modifier after a colon gives the form of its register, `{r:e}`, every operand appears in
+the template, the operands take the rest of Rust's words, `inlateout`, `const`, `sym`, `label` and
+`options(...)`, and a variable an operand writes is `mut` *(assumed: the rest of Rust's rules of the
+template and of its words, as §3 marks them)*. On WebAssembly and on Xtensa the register classes are
+those of Rust's experimental support for them, `local` on wasm32 and `reg`, `freg`, `sreg` and
+`breg` on Xtensa; a breach of the template's rules is the compile error `asm-operand`, and an operand
+that writes a variable without `mut` is `assign-immutable`, as any assignment to it is *(assumed: as §3
+marks them; `asm-operand` stands here and not in the table of chapter 12)*. An `asm` outside a `raw` block and outside the body of a
+`naked` function (R12) is the compile error `raw-required` (R10) *(assumed: the id, as §3 marks it)*.
+`asm` is a core word (L18). No case shows an `asm` that compiles: it stands only in a `raw` block,
+which compiles only under a grant in `project.kz` (R7), and a case of the corpus is a single file. The
+case below runs through the compiler's front end, which reads `asm("nop")` with no error and checks
+only the ids it raises itself, as for every case whose id another part of the compiler raises.
+
+Case: [memory/asm-outside-raw.kz](../corpus/memory/asm-outside-raw.kz)
+```kurz
+asm("nop")
+// an `asm` outside a `raw` block and outside a `naked` function is raw-required (R11); the front end parses this line as a call with no error, and the id is raised after the parse
+```
+
+### R12 (decided, §3) A function with no frame
+
+A function marked `naked` before its signature, `naked void Switch(...)`, gets no prologue and no
+epilogue from the compiler; its body is one `asm` statement (R11), and it compiles only in a package
+granted `allow raw` (§3, the owner, 2026-10-21); its body counts as a `raw` block (§3, an assumption
+there). One in a package without the grant, or in a program without a project file, which has no grant (R7), is the compile
+error `naked-not-allowed`, and its body, a `raw` block, raises no `raw-not-allowed` beside it *(assumed:
+the id and the one error, as §3 marks them; the id stands here and not in the table of chapter 12)*.
+Its `asm` takes `sym` and `const` operands alone, its instructions return or never end, and the
+function is called by the C calling convention of its target *(assumed: as §3 marks them)*. A body
+other than one `asm`, or an operand there other than `sym` and `const`, is the compile error
+`naked-body`, and instructions that fall through the function's end are a misuse of `raw` code, which
+no compiler checks *(assumed: as §3 marks them; the id stands here and not in the table of chapter
+12)*. `naked` is a core word (L18).
+
+No case: the grant sits in `project.kz` (R7), and a case of the corpus is a single file; a case of
+`naked-not-allowed` needs a `naked` function, at which the compiler's front end, through which every
+case runs, reports `syntax`, so that such a case fails there.
 
 ### R8 (decided, §3) Fields of interface type
 

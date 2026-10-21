@@ -74,6 +74,8 @@ flowchart TD
         a fence indented or made of tildes outside a code block, which the lint would not read (inside one it is content);
         a corpus header that cannot be read or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
+        a table row whose id no case expects, unless it is a run-time row whose no-case note gives the reason none can,
+        and such a note on a compile-error row or on a row that a case does expect;
         a row that reads as an error id outside a table headed id, rules, meaning;
         an error-table row that does not read as one; a design record, a chapter or a corpus file that cannot be
         read, missing or not UTF-8, named with what went unchecked;

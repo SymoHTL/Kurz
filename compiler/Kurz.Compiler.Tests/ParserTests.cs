@@ -533,7 +533,7 @@ public sealed class ParserTests
         // L18 and L19, word for word: the lists are closed, so the sets are pinned whole
         string[] words = ["if", "else", "match", "for", "in", "while", "break", "continue", "return", "throw", "mut", "data",
             "class", "interface", "enum", "flags", "with", "equal", "by", "pub", "prot", "static", "this", "virtual", "override",
-            "weak", "raw", "use", "void", "true", "false", "null"];
+            "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern"];
         string[] types = ["sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong", "float", "double", "decimal",
             "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp"];
         Assert.Equal(words.Order(), CoreWords.Syntax.Order());

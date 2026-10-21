@@ -277,7 +277,8 @@ print(Email(2)?.Bytes.Count ?? 0)
 
 ### N6 (assumed, §4) `null` needs a nullable type
 
-`null` is a value of nullable types only. Giving it to a type without `?` is the compile error
+`null` is a value of nullable types only, and of pointer types (R10, §3, the owner, 2026-10-21).
+Giving it to another type without `?` is the compile error
 `type-mismatch`, and never N2's `nullable-unchecked`: N2 is about a value of a type `T?`, and the
 literal `null` has no such type until a nullable type takes it.
 

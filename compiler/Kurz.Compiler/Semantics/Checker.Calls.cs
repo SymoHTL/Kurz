@@ -128,6 +128,13 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
+                    if (n.Name == "asm")
+                    {
+                        NotSupported(n.Line, "`asm` (R11)");
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
                     Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
                     CheckArgumentsLoosely(c);
                     return Typed.Error;

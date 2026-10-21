@@ -231,6 +231,8 @@ public sealed partial class Checker
     {
         var (factor, isTime) = literal.Unit switch
         {
+            "ns" => (BigInteger.One, true),
+            "us" => (new BigInteger(1_000), true),
             "ms" => (new BigInteger(1_000_000), true),
             "s" => (new BigInteger(1_000_000_000), true),
             "min" => (new BigInteger(60_000_000_000), true),

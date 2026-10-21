@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-21
-digest: 05b9fafe8ccb0afac6fbabf689d925197dc5245ce082e5afc5db0b1a9b42a50a
+digest: bc999418b8a4143f515e54fec4902cc4bbbea78c753e4e4fe2f8bd7f66374396
 ttl_days: 60
 metadata:
   type: reference
@@ -62,14 +62,14 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/kit.py` | 26 | 24 |
 | `tools/lint_ci.py` | 118 | 119 |
 | `tools/lint_knowledge.py` | 91 | 74 |
-| `tools/lint_reference.py` | 77 | 81 |
+| `tools/lint_reference.py` | 82 | 86 |
 | `tools/merge_pr.py` | 154 | 142 |
 | `tools/pr_gates.py` | 117 | 124 |
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 276 | 256 |
 | `tools/tree_gate.py` | 124 | 100 |
-| **total** | 1114 | 1045 |
+| **total** | 1119 | 1050 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -102,8 +102,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 97 |
-| Bullets of the Open section | 18 |
+| Occurrences of the marker *(assumed)* | 111 |
+| Bullets of the Open section | 6 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -115,14 +115,14 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 182 |
-| of them decided | 142 |
+| Rules in the reference | 185 |
+| of them decided | 145 |
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 346 |
-| Compile-error ids | 53 |
-| Run-time error ids | 6 |
+| Corpus cases, none of them run | 349 |
+| Compile-error ids | 54 |
+| Run-time error ids | 7 |
 <!-- /generated:reference -->
 
 ## The forge
