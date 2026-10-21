@@ -66,7 +66,8 @@ here: `invalid-source` (L1), since the tools read every case as UTF-8.
 
 The exceptions a program can raise, as the header of a case names them. The line is the one that
 holds the construct that raised: the `throw`, the arithmetic, the index, the call of the type, or
-the range of the loop.
+the range of the loop; a stack overflow, or an exception a primitive of the runtime raises, in a release build built
+without its line tables names no line (O11; §6 for the primitive's raise, an assumption there).
 
 | id | rules | meaning |
 |---|---|---|
@@ -75,7 +76,7 @@ the range of the loop.
 | `divide-by-zero` | T14, T25 | an integer or `decimal` division or remainder by zero |
 | `index-out-of-range` | T14, M9 | an index outside the collection |
 | `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |
-| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the one the innermost Kurz call stored, in whichever source that call sits, also where the frame that did not fit was the runtime's, its file open (§14), and every case that pins it pins a call of the program's own, with a recursion that reaches neither the standard library nor the runtime, kept as calls by the test build (all of it §6, an assumption there) |
+| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the call that did not fit, read from the line tables for the frame above the one that did not fit, the innermost Kurz frame where that one was the runtime's, a line of the standard library's source where that frame's function was the library's, which the trace's first line names; every case that pins it pins a call of the program's own, with a recursion that reaches neither the standard library nor the runtime, kept as calls by the test build (all of it §6, an assumption there), and a release build built without its line tables names none (§2, the answer decided there, its reading an assumption) |
 
 ## The rules of this chapter
 
@@ -102,7 +103,7 @@ an error and never its message, which stays free to improve.
 
 No case: every corpus case that expects an error names its id and its line.
 
-### E3 (decided, §5, §8) How a case names the exception it expects
+### E3 (decided, §5, §6, §8) How a case names the exception it expects
 
 A corpus case that ends with an exception names it: `// expect: throws <id> at <line>`, with the id from
 the run-time table above and the line counted as for a compile error. The lint checks both as it
@@ -110,7 +111,10 @@ checks a compile error's. So a corpus case for a reversed range (C8), an overflo
 conversion that loses its value (T20) or an index out of range (T14) passes only with that
 exception from that line, and a `throw` of the program is `thrown` at the line of the `throw`
 that raised; the bare `throw` of an `else` arm (O5) is such a `throw`, and nothing is raised a
-second time, because nothing catches.
+second time, because nothing catches. The trace of the calls that the runtime writes after the error
+line (§6, where its reading for a case is an assumption) is words to a case: no case pins it, and a
+case passes with or without it *(assumed: the reading of this rule for the trace, proposed with the
+record of round 16 on 2026-10-20 and not put to the owner)*.
 The program's exit code is pinned with it (O6). The owner chose this on 2026-10-03, against a
 header that says only that something is thrown; the cost is a word the runtime carries in every
 exception.
