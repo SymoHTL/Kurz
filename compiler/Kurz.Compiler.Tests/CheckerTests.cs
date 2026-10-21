@@ -616,6 +616,10 @@ public sealed class CheckerTests
         var h = "void H(byte b) {\n    print(b)\n}\n\n";
         Clean(h + "H(1)");
         Assert.Equal([(ErrorIds.NarrowingConversion, 9)], Errors(h + "void H(string s) {\n    print(s)\n}\n\nH(1)"));
+        // F13 with F14 (the reading in the README): a call that fits none of several functions takes the error of the first one, in the order
+        // of declaration, that its arguments bind to, so the same call takes another id when the two declarations swap places; which id such a
+        // call takes is a question for a design round, and the test pins what the checker does
+        Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors("void H(string s) {\n    print(s)\n}\n\n" + h + "H(1)"));
     }
 
     [Fact]
