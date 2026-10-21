@@ -209,12 +209,15 @@ print(before.Left?.Key ?? 0)
 Code that touches raw memory sits in `raw` blocks. A `raw` block compiles only in a package that the
 project grants `allow raw`; one in a package without the grant is the compile error
 `raw-not-allowed`, and a program without a `project.kz`, as every case of the corpus is, has no
-grant. The compiler's memory guarantees cover the Kurz code outside `raw` blocks; the runtime's C
-and assembly are unchecked, as a `raw` block is, and so is the foreign code the process runs beside
-them, the C library, the compiler's support library, the cipher library of TLS and a library the
+grant. A `raw` block holds the machine instructions no other form of the language expresses, as
+inline assembly (§3, the owner, 2026-10-21), written as R11 says, and the reading and writing through a
+raw pointer (R10).
+The compiler's memory guarantees cover the Kurz code outside `raw` blocks; the runtime is Kurz (§2),
+and its `raw` blocks and the inline assembly in them are unchecked as every `raw` block is, and so is
+the foreign code the process runs beside them, the C library, the compiler's support library, the cipher library of TLS and a library the
 program takes through the C-ABI, so the guarantees hold while that code writes only the memory it
 owns or was handed, inside the bounds it was given, and keeps the invariants the Kurz code relies on
-*(assumed: the runtime's C and assembly and the foreign code outside the guarantees, under the
+*(assumed: the foreign code outside the guarantees, under the
 condition on what that code writes and keeps, as §3 marks it)*. The grant is per package and written
 like `allow network`. *(the error and the program without a project file are a proposed reading)* No
 case shows a `raw` block that compiles: a grant sits in `project.kz`, and a case of the corpus is a
@@ -226,6 +229,36 @@ raw {
     print(1)
 }
 ```
+
+### R10 (decided, §3) Raw pointers
+
+A raw pointer is written as C# writes it in `unsafe` code: the type `int*`, the reading and writing
+through it `*p` and `p[i]`, the offset `p + n` and the address `&x`; an offset is an `int` or a
+`long`, as every index is (§4). A pointer type stands anywhere, in a field or a parameter, and only
+the reading or writing through a pointer needs a `raw` block (§3, the owner, 2026-10-21).
+*(assumed: that `&x` and `p + n` read and write nothing and need no `raw` block, as §3 marks it)*
+
+No case: a pointer is read or written only in a `raw` block, which compiles only under a grant in
+`project.kz` (R7), and a case of the corpus is a single file.
+
+### R11 (decided, §3) Inline assembly
+
+Inline assembly is a statement inside a `raw` block, written as Rust writes `asm!`:
+`asm("add {r}, 1", r = inout(reg) count)`. A `{name}` in its template names an operand and is no
+interpolation (L6); a `"""` block (L13) holds a template of many lines; the operands take Rust's
+words, `in`, `out`, `inout`, `lateout`, the register classes and `clobber_abi` (§3, the owner,
+2026-10-21).
+
+No case: inline assembly stands only in a `raw` block, which compiles only under a grant in
+`project.kz` (R7), and a case of the corpus is a single file.
+
+### R12 (decided, §3) A function with no frame
+
+A function marked `naked` before its signature, `naked void Switch(...)`, gets no prologue and no
+epilogue from the compiler; its body is one `asm` statement (R11), and it compiles only in a package
+granted `allow raw` (§3, the owner, 2026-10-21).
+
+No case: the grant sits in `project.kz` (R7), and a case of the corpus is a single file.
 
 ### R8 (decided, §3) Fields of interface type
 

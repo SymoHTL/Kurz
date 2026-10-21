@@ -30,8 +30,9 @@ Fails on:
 - an expected error id that is not in its table (compile errors for `error`, the run-time table
   under `## Run-time errors` for `throws`), or whose table row lists none of the case's rules; an
   error line outside the file, on a blank line or in the header; a table row with an unknown
-  rule, a repeated id, an id no case expects, or a rule that no case expecting the id names; a row
-  under a `| id | rules | meaning |` head that does not read as one; a row that reads as one under
+  rule, a repeated id, an id no case expects whose row has no `(no case: <reason>)` note saying why
+  none can, such a note on a row that a case does expect, or a rule that no case expecting the id
+  names; a row under a `| id | rules | meaning |` head that does not read as one; a row that reads as one under
   any other head or outside a table, since its id would go unchecked;
 - a design record that cannot be read, said once instead of as every section it would lack;
 - a chapter or a corpus file that cannot be read, missing or not UTF-8, named with what went unchecked (its
@@ -50,6 +51,8 @@ RULES_FLOOR, CASES_FLOOR = 40, 30
 RULE = re.compile(r"### ([A-Z]\d+) \((decided|assumed|proposed|open)((?:, §\d+)*)\)")
 CASE = re.compile(r"Case: \[([^\]]+)\]\(\.\./corpus/([^)]+)\)")
 ERROR_ROW = re.compile(r"\| `([a-z][a-z-]*)` \| ([A-Z]\d+(?:, [A-Z]\d+)*) \| .*\S.* \|")
+# a row's note that no case can expect its id, with the reason: the one way an id stands in a table without a case
+NO_CASE_NOTE = re.compile(r"\(no case: [^()]*\S[^()]*\)")
 EXPECT = re.compile(r"// expect: (?:(output)|(throws) ([a-z][a-z-]*) at (\d+)|error ([a-z][a-z-]*) at (\d+))")
 RUNTIME_TABLE = "## Run-time errors"
 ERROR_HEAD = "| id | rules | meaning |"  # an error table starts with this line, and every row under it is read
@@ -116,7 +119,7 @@ def read_tree(root):
 
 def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
     chapters, files, sections, unread = read_tree(root)
-    errors, rules, links, error_ids = list(unread), {}, [], {}
+    errors, rules, links, error_ids, no_case = list(unread), {}, [], {}, set()
     parsed = {}
     for path, text in files.items():
         parsed[path], why = parse_case(text)
@@ -161,6 +164,8 @@ def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
                 if row.group(1) in error_ids:
                     errors.append(f"{where}: error id {row.group(1)} is in the tables twice")
                 error_ids[row.group(1)] = (where, row.group(2).split(", "), table)
+                if NO_CASE_NOTE.search(line):
+                    no_case.add(row.group(1))
             if line.startswith("### "):
                 m = rule_heading(line)
                 if not m:
@@ -237,7 +242,10 @@ def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
     for eid, (where, of_rules, kind) in error_ids.items():
         errors += [f"{where}: error {eid} names rule {r}, which the reference does not have" for r in of_rules if r not in rules]
         if eid not in {e for e, _ in raised}:
-            errors.append(f"{where}: no corpus case {'throws' if kind == 'throws' else 'expects error'} {eid}")
+            if eid not in no_case:
+                errors.append(f"{where}: no corpus case {'throws' if kind == 'throws' else 'expects error'} {eid}")
+        elif eid in no_case:
+            errors.append(f"{where}: error {eid} says no case can expect it, and a case does: drop the note or the case")
         else:
             errors += [f"{where}: error {eid} lists rule {r}, and no case that names {r} expects it"
                        for r in of_rules if r in rules and (eid, r) not in raised]
@@ -395,6 +403,17 @@ def cases_in(base):
         "a run-time row that no case expects": (tree(edit(ref, "| `overflow` | V5 | arithmetic left its type |\n",
                                                           "| `overflow` | V5 | arithmetic left its type |\n| `divide-by-zero` | V5 | by zero |\n")),
                                                 "no corpus case throws divide-by-zero"),
+        "a run-time row whose note says why no case can expect it needs none": (
+            tree(edit(ref, "| `overflow` | V5 | arithmetic left its type |\n",
+                      "| `overflow` | V5 | arithmetic left its type |\n| `write-failed` | V5 | a write failed (no case: a case cannot make a write fail) |\n")),
+            None),
+        "a no-case note without a reason is no note": (
+            tree(edit(ref, "| `overflow` | V5 | arithmetic left its type |\n",
+                      "| `overflow` | V5 | arithmetic left its type |\n| `write-failed` | V5 | a write failed (no case: ) |\n")),
+            "no corpus case throws write-failed"),
+        "a no-case note on a row that a case expects": (
+            tree(edit(ref, "| `overflow` | V5 | arithmetic left its type |", "| `overflow` | V5 | arithmetic left its type (no case: none) |")),
+            "says no case can expect it, and a case does"),
         "an error line on the blank line after the header": (tree(edit(assign, "at 6", "at 3")), "outside the file, empty or in the header"),
         "an error line just past the end of the file": (tree(edit(assign, "at 6", "at 7")), "outside the file, empty or in the header"),
         "an error id no case expects": (tree(edit(ref, "| `assign-immutable` | V2 | a second assignment |",

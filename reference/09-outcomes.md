@@ -380,8 +380,8 @@ too under `on crash escalate`, as for any crash (O6), while at the top level, th
 process exits with the exit code 1 (O6). The exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
 reference's reading, on which the case stands), read from the line tables for the call that did
-not fit (§6), the innermost Kurz frame and its call into the runtime where that one was
-the runtime's, so that the owner's words hold with that reading, in whichever source that frame's
+not fit (§6), the innermost frame outside the runtime and its call into the runtime where that one was
+the runtime's (§6, the owner, 2026-10-21), so that the owner's words hold with that reading, in whichever source that frame's
 function sits, a line of the standard library's source where that function was the library's, whose
 file the error line names (§6, decided there; the owner, 2026-10-21) and whose function the trace's
 first line names (§6), so a case pins a line of the
@@ -391,8 +391,7 @@ library and nothing that reaches the runtime's primitives or the allocator's ent
 allocate nothing, as the case below does over an `int`, which the test build keeps as calls (§2, an
 assumption there), so that the frame that does not fit is the program's in that build, its number is
 the program's line and the runner compares it as E3 says; the corpus holds no case whose overflow
-lands in the standard library's source *(assumed: the innermost Kurz frame as the one read where the
-call that did not fit was the runtime's, the name of a library file, which the naming of the
+lands in the standard library's source *(assumed: the name of a library file, which the naming of the
 standard library gives (§14), and the condition on the cases, as §6 marks it; the line's reading
 from the tables is decided, as below)*; in a release build built without its line tables
 (§2, the answer decided there, its reading an assumption) the error
@@ -412,7 +411,10 @@ against an allocation failure as a `Reason`, which would need a reserve to build
 when nothing can be allocated; the cost is a guard page per actor stack and a program that cannot recover from memory pressure; the
 stack probe in every frame larger than that page, so that no frame steps past it, and the signal stack
 per thread for the handler that turns the fault into the exception the owner added to the cost on
-2026-10-10). The case runs at the top level, which is the root actor, so the
+2026-10-10). A stack exhausted inside the allocator or the scheduler ends the process the same
+way, with the exit code 1 and the error line, as an overflow with no actor does (§6, the owner,
+2026-10-21), and no case pins that, since a case's recursion reaches neither (above). The case runs at the
+top level, which is the root actor, so the
 exception ends the program (O6); the allocation failure has no case, since no case can ask for
 memory that does not exist.
 
