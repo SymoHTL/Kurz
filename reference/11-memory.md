@@ -412,12 +412,12 @@ print(thread)
 
 A conversion between pointers, and of a pointer to and from a number, takes the call form of T10's
 conversions: `Ptr<Block>(m)` is the pointer to a `Block` at the address `m` holds, `long(b)` the
-address of `b`, a field is reached through a pointer by `(*b).Link`, and the size of a type in bytes
+address of `b`, a field is reached through a pointer by `(*b).Next`, and the size of a type in bytes
 is `SizeOf<Block>()`, as Rust converts with `as` and reads a size with `size_of::<T>()` (§3, the
 owner, 2026-10-21). `Ptr<T>` names the type `T*` in a conversion alone, `Ptr<T>(x)` takes a pointer
 to any pointee or a `long`, `long(p)` gives the address as a `long`, and `SizeOf<T>()` is a `long`
 and takes what a pointer points to (R10); none of these reads or writes through a pointer, so none
-needs a `raw` block, while `(*b).Link` reads through one and needs it. The untyped pointer is
+needs a `raw` block, while `(*b).Next` reads through one and needs it *(assumed: as §3 marks them)*. The untyped pointer is
 `void*`, through which nothing is read or written and which `p + n` does not offset; a conversion of
 another value is `type-mismatch` (T1), and `SizeOf` of a type a pointer cannot point to is
 `counted-pointee` *(assumed: as §3 marks them)*.
