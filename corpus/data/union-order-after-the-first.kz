@@ -1,0 +1,16 @@
+// expect: output
+// | 2
+// rules: D9
+
+data A(int X)
+data B(int Y)
+data C(int Z)
+
+void Count(List<A | B | C> xs) {
+    print(xs.Count)
+}
+
+mut items = List<A | C | B>()
+items.Add(B(1))
+items.Add(C(2))
+Count(items)

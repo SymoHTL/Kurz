@@ -1,0 +1,8 @@
+// expect: output
+// | 8
+// rules: F16
+
+int Twice(int n) => n * 2
+
+f = (int n) => Twice(n)
+print(f(4))

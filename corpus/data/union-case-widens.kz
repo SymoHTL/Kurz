@@ -1,0 +1,18 @@
+// expect: output
+// | 10
+// rules: D9, O1
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+long | NotFound r = Find(1)
+match r {
+    long n => print(n)
+    NotFound => print("none")
+}

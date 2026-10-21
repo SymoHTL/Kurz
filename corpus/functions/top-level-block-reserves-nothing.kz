@@ -1,0 +1,10 @@
+// expect: output
+// | 6
+// rules: F16
+
+int Twice(int n) => n * 2
+
+if true {
+    n = 3
+    print(Twice(n))
+}

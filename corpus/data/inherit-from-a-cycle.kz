@@ -1,0 +1,7 @@
+// expect: error base-cycle at 4
+// rules: D6
+
+data Node(int Value) : Node
+data Leaf(int Size) : Node
+
+print(1)

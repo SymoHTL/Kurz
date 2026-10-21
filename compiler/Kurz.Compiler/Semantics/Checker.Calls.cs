@@ -1089,14 +1089,21 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// F13, F14: a call that fits no function of its name. The first function, in the order of declaration, to which
-    /// the arguments bind decides the id and the line: its <c>cannot-infer</c>, or the misfit of its first argument
-    /// that does not fit (the reading in <c>compiler/README.md</c>); with no binding, the first function's binding
-    /// error. The reference names no id for a call that fits none of several functions, so that the id can change
-    /// when two declarations swap places: a question for a design round.
+    /// F13 with F14: a call of a name with more than one function that fits none of them is <c>argument-mismatch</c> at the
+    /// call's first line, the line E1 gives an error of the whole construct (the record's reading), with a
+    /// line of the message per function and why it does not fit. A call of one function, a constructor or a function value
+    /// reports its own error: its binding error, its <c>cannot-infer</c>, or the misfit of its first argument that does not
+    /// fit, at that argument's line.
     /// </summary>
     private void ReportNoFit(List<Candidate> candidates, CallExpression c, List<Pre> pres)
     {
+        if (candidates.Count > 1)
+        {
+            var reasons = candidates.Select(x => $"  `{Signature(x.Function!)}` at line {x.Function!.Line}: {WhyNot(x, pres)}");
+            Report(ErrorIds.ArgumentMismatch, c.Line, $"the call fits none of the functions named `{candidates[0].Function!.Name}` (F13):\n{string.Join("\n", reasons)}");
+            return;
+        }
+
         var bound = candidates.FirstOrDefault(x => x.BindingError is null);
         if (bound is null)
         {
@@ -1121,6 +1128,68 @@ public sealed partial class Checker
         var argumentType = pre.Lambda is not null ? "a lambda" : $"a `{pre.Typed.Type}`";
         var id = pre.Lambda is not null ? ErrorIds.TypeMismatch : Types.MismatchId(pre.Typed.Type, parameter);
         Report(id, pre.Argument.Line, $"{argumentType} where a `{parameter}` is required (T1)");
+    }
+
+    /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>, each default after its parameter (<c>int b = 0</c>).</summary>
+    private static string Signature(FunctionSymbol f)
+    {
+        var typeParameters = f.TypeParameters.Count == 0 ? "" : $"<{string.Join(", ", f.TypeParameters.Select(p => p.Name))}>";
+        var defaults = f.Declaration?.Parameters.Select(p => p.Default).ToList() ?? [];
+        return $"{f.ReturnType} {f.Name}{typeParameters}({string.Join(", ", f.Parameters.Select((p, i) => $"{(p.Mut ? "mut " : "")}{p.Type} {p.Name}{(defaults.ElementAtOrDefault(i) is { } d ? " = " + DefaultText(d) : "")}"))})";
+    }
+
+    /// <summary>A default value for a message, from its tree: a literal, a name and the operators of a constant expression over them (F12); <c>...</c> for another form.</summary>
+    private static string DefaultText(Expression e) => e switch
+    {
+        IntegerLiteral i => (i.Value.Radix == 16 ? "0x" : i.Value.Radix == 2 ? "0b" : "") + i.Value.Digits + i.Value.Suffix,
+        RealLiteral r => r.Value.Text + r.Value.Suffix,
+        UnitLiteral u => u.Value.Number + u.Value.Unit,
+        BoolLiteral b => b.Value ? "true" : "false",
+        CharLiteral c => System.Text.Rune.IsValid(c.CodePoint) ? Quoted(new System.Text.Rune(c.CodePoint).ToString(), '\'') : "...",
+        StringLiteral { IsPlain: true } s => Quoted(string.Concat(s.Segments.Cast<TextSegment>().Select(t => t.Text)), '"'),
+        NameExpression n => n.Name,
+        ParenthesizedExpression p => $"({DefaultText(p.Inner)})",
+        UnaryExpression u => Operator(u.Operator) + DefaultText(u.Operand),
+        BinaryExpression b => $"{DefaultText(b.Left)} {Operator(b.Operator)} {DefaultText(b.Right)}",
+        _ => "...",
+    };
+
+    /// <summary>A char or string default in its quotes, or <c>...</c> where the source writes it with an escape (L7, L16), so that the message keeps one line per function.</summary>
+    private static string Quoted(string text, char quote) =>
+        text.Any(ch => char.IsControl(ch) || ch == '\\' || ch == quote || (quote == '"' && ch == '{')) ? "..." : $"{quote}{text}{quote}";
+
+    /// <summary>F13: why a function does not fit a call, as far as the checker knows it: its binding error (D11, T19), type arguments it cannot infer (T27), or its first argument that does not fit.</summary>
+    private static string WhyNot(Candidate candidate, List<Pre> pres)
+    {
+        if (candidate.BindingError is not null)
+        {
+            return candidate.BindingError;
+        }
+
+        if (candidate.CannotInfer)
+        {
+            return "its type arguments are neither written nor inferable from the arguments (T27)";
+        }
+
+        var (index, parameter) = candidate.Misfit!.Value;
+        var pre = pres[index];
+        if (pre.Lambda is not null)
+        {
+            return $"argument {index + 1}, a lambda, does not fit a `{parameter}` (F11)";
+        }
+
+        if (candidate.Slots[candidate.Binding[index]].Mut && Types.Assignable(pre.Typed.Type, parameter))
+        {
+            return $"argument {index + 1}, a `{pre.Typed.Type}`, is no variable of the type `{parameter}` that a `mut` parameter writes back into (M7)";
+        }
+
+        var why = Types.MismatchId(pre.Typed.Type, parameter) switch
+        {
+            ErrorIds.NarrowingConversion => "a narrowing conversion (T7)",
+            ErrorIds.SignMix => "a type of the other signedness (T23)",
+            _ => "a value of another type (T1)",
+        };
+        return $"argument {index + 1} is a `{pre.Typed.Type}`{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where a `{parameter}` is required: {why}";
     }
 
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7).</summary>

@@ -150,6 +150,127 @@ long big = small
 print(big)
 ```
 
+Where a union is required (D9), a value that is no case of it stands there when it widens into
+exactly one of its cases: a `byte` stands where `int | string` is required. One that would widen
+into two of them, a `byte` where `short | int` is required, is the compile error `type-mismatch`
+(T1), and a conversion (T10), `short(b)`, picks the case, as one picks the function of a call that
+fits two through widening (F13). The owner chose this on 2026-10-21, against the narrowest case,
+under which the `byte` becomes a `short` by C#'s better-conversion rule, and against no widening
+into unions, under which the value must be one of the cases exactly, as Rust widens nothing
+implicitly; the cost is a conversion at such places. A value that is one of the cases is that case,
+and no other fit by widening or derivation is looked for, so a `short` where `short | int` is
+required is a `short`, and so is a `data` value (D9). The owner chose this on 2026-10-21, against
+two fits being `type-mismatch` even beside an exact case, under which a `User` where `User | Person`
+is required, with `User : Person`, is `type-mismatch` too; C#'s better-conversion rule prefers the
+identity conversion, and Rust has only the exact fit; the cost is that adding a case to a union can
+change without a word which case an existing value goes to, as a `byte` goes to `int` where
+`int | string` is required and to `byte` where `int | string | byte` is, while under the option
+turned down that addition is a compile error. The owner kept this choice with that cost shown on
+2026-10-21. A value that would go to two cases by deriving from them is `type-mismatch` too (D9).
+
+Case: [types/widening-into-union.kz](../corpus/types/widening-into-union.kz)
+```kurz
+byte b = 1
+int | string v = b
+match v {
+    int i => print(i)
+    string s => print(s)
+}
+```
+
+Case: [types/widening-into-two-cases.kz](../corpus/types/widening-into-two-cases.kz)
+```kurz
+byte b = 1
+short | int v = b
+match v {
+    short s => print("short {s}")
+    int i => print("int {i}")
+}
+```
+
+Case: [types/conversion-picks-the-case.kz](../corpus/types/conversion-picks-the-case.kz)
+```kurz
+byte b = 1
+short | int w = short(b)
+match w {
+    short x => print("short {x}")
+    int y => print("int {y}")
+}
+```
+
+A literal where a union is required whose cases it would widen into twice has its own type (L10),
+`int` for `5`, so `long | double x = 5` is `type-mismatch`, and `5L` or `5.0` picks the case, as a
+literal argument has its own type for the choice between functions (F14), so that the case does not
+depend on the order the cases are written in. The owner chose this on 2026-10-21, against the first
+case in the written order that can hold it, as a written or expected type reaches a literal (L17),
+under which the case depends on the order and on the value; the cost is a suffix at such places.
+
+Case: [types/literal-into-two-cases.kz](../corpus/types/literal-into-two-cases.kz)
+```kurz
+long | double x = 5
+match x {
+    long n => print("long {n}")
+    double d => print("double {d}")
+}
+```
+
+A union with exactly one number case, a case of a number type (T2: an integer type, `float`,
+`double` or `decimal`), reaches a number literal, an integer literal or one with a fraction or an
+exponent (L10, L11), as a written type does (L17), so `byte | string x = 5` makes the `5` a `byte`;
+where it has two or more number cases the literal has its own type, which goes to a case as a value
+does, so `short | long x = 5`, whose `int` widens into the `long` alone, is a `long`, while
+`byte | short x = 5`, whose `int` widens into neither case, is `type-mismatch` too, and `byte(5)`
+picks the case. The owner chose this on 2026-10-21, against every number case the literal fits
+reaching it, with two fits the error, under which `byte | short x = 300` is a `short` and the case
+depends on the literal's value, and against the literal's own type even beside one number case,
+under which `byte | string x = 5` needs a conversion; the cost is a conversion at such places, as
+for a literal whose own type would widen into two cases.
+
+Case: [types/literal-one-number-case.kz](../corpus/types/literal-one-number-case.kz)
+```kurz
+byte | string x = 5
+match x {
+    byte n => print("byte {n}")
+    string s => print(s)
+}
+```
+
+Case: [types/literal-two-number-cases.kz](../corpus/types/literal-two-number-cases.kz)
+```kurz
+byte | short x = 5
+match x {
+    byte b => print("byte {b}")
+    short s => print("short {s}")
+}
+```
+
+Case: [types/literal-widens-into-one-case.kz](../corpus/types/literal-widens-into-one-case.kz)
+```kurz
+short | long x = 5
+match x {
+    short s => print("short {s}")
+    long n => print("long {n}")
+}
+```
+
+The union's one time case, a case of a time type (`duration`, `timestamp`, `longduration` or
+`longtimestamp`: T13, T29), reaches a duration literal (L14) as a written type does, whatever number
+cases the union has, so `int | duration d = 5days` makes the literal a `duration` and
+`int | duration d = 106752days` is `constant-overflow` (T29); with two or more time cases the
+literal keeps its own type, a `duration`, or a `longduration` when its value does not fit one (T29).
+The owner chose this on 2026-10-21, against the literal's own type always, under which
+`duration | string d = 106752days` is `type-mismatch`; the cost is the same conversion at such
+places as for a number literal.
+
+Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
+```kurz
+int | duration d = 106752days
+match d {
+    int n => print("int {n}")
+    duration t => print("duration {t}")
+}
+```
+
 ### T23 (decided, §4) Widening across signedness and into floating-point
 
 As in C#: an unsigned type widens into every signed type that holds all its values, so `byte`
@@ -393,6 +514,10 @@ longduration a = 100000days
 longduration l = a + a
 print(duration(l))
 ```
+
+Where a union is required, its one time case reaches a duration literal as a written type does (T8).
+
+Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
 
 ### T14 (assumed, §4) Out of range and division by zero
 

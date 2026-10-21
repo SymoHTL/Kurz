@@ -1,0 +1,13 @@
+// expect: output
+// | 2
+// | 4
+// rules: F16
+
+int Twice(int n) {
+    i = n * 2
+    return i
+}
+
+for i in 1..2 {
+    print(Twice(i))
+}

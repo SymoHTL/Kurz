@@ -1,0 +1,12 @@
+// expect: output
+// | short 1
+// rules: D9
+
+short s = 1
+byte | short x = s
+int | short | long y = x
+match y {
+    int i => print("int {i}")
+    short n => print("short {n}")
+    long l => print("long {l}")
+}

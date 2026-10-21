@@ -1,0 +1,12 @@
+// expect: error type-mismatch at 8
+// rules: D9
+
+data Person(string Name)
+data User(int Id) : Person
+data Admin(int Level) : User
+
+User | Person v = Admin("a", 1, 2)
+match v {
+    User u => print(u.Id)
+    Person p => print(p.Name)
+}

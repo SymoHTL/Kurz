@@ -1,0 +1,8 @@
+// expect: error base-cycle at 6
+// rules: D6
+
+data Admin(int Level) : User
+data User(int Id) : Person
+data Person(string Name) : Admin
+
+print(1)

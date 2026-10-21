@@ -1,0 +1,10 @@
+// expect: output
+// | 1
+// rules: T8, D9
+
+byte b = 1
+int | string v = b
+match v {
+    int i => print(i)
+    string s => print(s)
+}

@@ -33,6 +33,113 @@ match Twice(2) {
 }
 ```
 
+The first case is the success case by its place, so no case becomes a success it was not: D9 says
+when a union takes the value of another, and O3 where a case that leaves a function through a call
+is listed; each records the owner's choice of 2026-10-21, with what it was chosen against and its
+cost.
+
+Case: [data/union-order.kz](../corpus/data/union-order.kz)
+```kurz
+data A(int X)
+data B(int Y)
+
+A | B x = B(2)
+B | A y = x
+match y {
+    B b => print("b {b.Y}")
+    A a => print("a {a.X}")
+}
+```
+
+Case: [outcomes/case-as-success.kz](../corpus/outcomes/case-as-success.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+NotFound Lost(int id) {
+    value = Find(id)
+    print(value)
+    return NotFound
+}
+
+print(Lost(1))
+```
+
+Case: [data/union-case-widens.kz](../corpus/data/union-case-widens.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+long | NotFound r = Find(1)
+match r {
+    long n => print(n)
+    NotFound => print("none")
+}
+```
+
+Case: [data/union-case-derives.kz](../corpus/data/union-case-derives.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+Admin | NotFound a = Admin("a", 2)
+User | NotFound u = a
+match u {
+    User x => print("user {x.Name}")
+    NotFound => print("none")
+}
+```
+
+Case: [data/union-case-after-the-first.kz](../corpus/data/union-case-after-the-first.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+// the Admin is the case Admin, and no other fit is looked for (D9)
+User | Admin a = Admin("a", 1)
+User | NotFound u = a
+match u {
+    User x => print(x.Name)
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/success-case-takes-no-part.kz](../corpus/outcomes/success-case-takes-no-part.kz)
+```kurz
+bool | short Check(int id) {
+    if id == 1 {
+        return true
+    }
+    return short(id)
+}
+
+// the short that leaves Check goes to Load's int case, which it widens into, and not to Load's success (O3)
+short | int Load(int id) {
+    ok = Check(id)
+    print(ok)
+    return int(0)
+}
+
+match Load(2) {
+    short s => print("short {s}")
+    int i => print("int {i}")
+}
+```
+
 ### O2 (decided, §5) The unwrap rule
 
 Calling such a function yields the success value directly. Every other case leaves the calling
@@ -63,6 +170,84 @@ int Twice(int id) {
 
 print(Twice(1))
 ```
+
+It is listed as a case after the first one, which is the success case (O1): a return type that is no
+union lists none, so `NotFound Lost()` whose body calls an `int | NotFound Find()` and lets the
+`NotFound` leave is `unlisted-case`, as Rust's `?` fills only the `Err` side. The owner chose this
+on 2026-10-21, against a case leaving as the success of the calling function, which a return type
+that is the case itself, or that names it first, would let it do; the cost is that such a function
+needs a `match` on the call to return the case. A case after the first lists a case that is its type
+and one that widens into it (T8, T23). The owner chose this on 2026-10-21 with the answer on the
+success type below, whose propagated `short` widens into `int`, against the options and at the cost
+that answer names. It also lists a case that derives from it (D6) *(assumed: the derivation, which
+the answers did not name)*.
+
+Case: [outcomes/case-as-success.kz](../corpus/outcomes/case-as-success.kz)
+
+A propagated case that would go to two of the cases after the first, a `byte` under the return type
+`string | short | int`, is `unlisted-case`, and a `match` on the call picks the case. The owner
+chose this on 2026-10-21, against the nearest case, the most derived base or the narrowest type, as
+C#'s better-conversion rule picks it, under which propagation would answer differently from widening
+(T8, D9); the cost is that such code needs that `match`. A propagated case that is one of the cases
+after the first goes there, and no other fit is looked for, so a propagated `short` under
+`string | short | int` is listed by its `short`. The owner chose this on 2026-10-21, as for a value
+(T8), against two fits being `unlisted-case` even beside an exact case, under which such a function
+needs a `match` on the call; the cost is that adding a case to a return type can change without a
+word which case an existing propagated case leaves as, as a propagated `short` leaves as the `int`
+under `string | int` and as the `short` under `string | int | short`, while under the option turned
+down that addition is a compile error. The owner kept this choice with that cost shown on
+2026-10-21.
+
+Case: [outcomes/case-fits-two-cases.kz](../corpus/outcomes/case-fits-two-cases.kz)
+```kurz
+string | byte Get(int id) {
+    if id == 1 {
+        return "one"
+    }
+    return byte(id)
+}
+
+string | short | int Load(int id) {
+    got = Get(id)
+    return got
+}
+
+match Load(1) {
+    string s => print(s)
+    short n => print(n)
+    int i => print(i)
+}
+```
+
+Case: [outcomes/case-is-its-case.kz](../corpus/outcomes/case-is-its-case.kz)
+```kurz
+string | short Get(int id) {
+    if id == 1 {
+        return "one"
+    }
+    return short(id)
+}
+
+string | short | int Load(int id) {
+    got = Get(id)
+    return got
+}
+
+match Load(2) {
+    string s => print(s)
+    short n => print("short {n}")
+    int i => print("int {i}")
+}
+```
+
+A propagated case is looked for among the cases after the first only, so in `short | int F()`
+calling `bool | short G()` the `short` widens into `int` and leaves as `F`'s `int` case. The owner
+chose this on 2026-10-21, against `unlisted-case`, with a `match` on the call picking the case;
+Rust's `?` converts the error into the error type of the calling function and never looks at its
+success type; the cost is that a propagated case that is exactly the success type leaves as another
+case, by widening, without a word.
+
+Case: [outcomes/success-case-takes-no-part.kz](../corpus/outcomes/success-case-takes-no-part.kz)
 
 ### O4 (decided, §5) Keeping all cases
 

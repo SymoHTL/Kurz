@@ -1,0 +1,10 @@
+// expect: output
+// | short 1
+// rules: T8, D9
+
+byte b = 1
+short | int w = short(b)
+match w {
+    short x => print("short {x}")
+    int y => print("int {y}")
+}

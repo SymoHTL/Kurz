@@ -1,0 +1,12 @@
+// expect: error type-mismatch at 8
+// rules: D9, O1
+
+data A(int X)
+data B(int Y)
+
+A | B x = B(2)
+B | A y = x
+match y {
+    B b => print("b {b.Y}")
+    A a => print("a {a.X}")
+}

@@ -78,11 +78,15 @@ public sealed partial class Checker
         _ => false,
     };
 
-    /// <summary>The number or time type an expected type reaches a literal with: the type itself, or the one such case of a union (L10, L17, T29).</summary>
-    private static PrimitiveType? Reach(KurzType? expected) => expected switch
+    /// <summary>
+    /// The number or time type an expected type reaches a literal with: the type itself (L10, L17, T29), or, by the literal's kind, the one
+    /// case of a union that is a number type for a number literal and the one that is a time type for a <paramref name="duration"/> literal,
+    /// whatever cases of the other kind the union has (T8 with D9 and L17, the owner, 2026-10-21).
+    /// </summary>
+    private static PrimitiveType? Reach(KurzType? expected, bool duration = false) => expected switch
     {
         PrimitiveType p when Types.IsNumber(p) || Types.IsTime(p) => p,
-        UnionType u => u.Cases.Where(c => c is PrimitiveType p && (Types.IsNumber(p) || Types.IsTime(p))).Cast<PrimitiveType>().ToList() is [var one] ? one : null,
+        UnionType u => u.Cases.OfType<PrimitiveType>().Where(c => duration ? Types.IsTime(c) : Types.IsNumber(c)).ToList() is [var one] ? one : null,
         _ => null,
     };
 
@@ -256,7 +260,7 @@ public sealed partial class Checker
             return IntegerValue(value, "", line, expected);
         }
 
-        var target = Reach(expected);
+        var target = Reach(expected, duration: true);
         if (target is not null && Types.IsDuration(target))
         {
             if (!Types.Fits(value, target))

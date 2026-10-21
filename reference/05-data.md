@@ -154,6 +154,53 @@ print(a.Level)
 print(NameOf(a))
 ```
 
+A `data` type that is its own base, directly or through others, is the compile error `base-cycle`,
+reported at the base that closes the cycle, for the condition C# reports as CS0146, a circular base
+type dependency. The owner chose this on 2026-10-21, against `type-mismatch` (T1); the cost is one
+more id. Only the condition is C#'s: C# reports CS0146 at the name of every type on the cycle
+(checked 2026-10-21 with the .NET SDK 10.0.402: two classes that name each other as their base gave
+two CS0146, three classes on a cycle three, a class that names itself one, and a class that only
+derives from a cycle none). To find that base the files of a program are read in the order of their
+paths, and the base that closes a cycle is the base of the declaration that completes it in that
+reading. The owner chose this on 2026-10-21, against `base-cycle` at every base on the cycle, under
+which no order is needed and a cycle through three types is three errors; the cost is that renaming
+a file can move the error to another line. The path of a file is the one relative to the program's
+root directory, with `/` as the separator, and two paths are compared code point by code point, case
+kept, so that the order is the same on every platform. The owner chose this on 2026-10-21, against
+the order in which the files are given to the compiler, as a C# project lists them; the cost is that
+the order of the files is a rule of the language, and that renaming a file can move the error, as
+above. Each file is read from its top; a type that names itself as its base is a cycle of one; a
+cycle is one error, and a type that only derives from a cycle gets none *(assumed: the answers named
+the base that closes the cycle and the order of the files, and did not say in which order a file is
+read, whether a type that names itself as its base is a cycle of one, whether a cycle is one error,
+or what a type that only derives from a cycle gets)*.
+
+Case: [data/inherit-cycle.kz](../corpus/data/inherit-cycle.kz)
+```kurz
+data Node(int Value) : Node
+
+print(1)
+```
+
+Case: [data/inherit-cycle-of-three.kz](../corpus/data/inherit-cycle-of-three.kz)
+```kurz
+data Admin(int Level) : User
+data User(int Id) : Person
+data Person(string Name) : Admin
+
+print(1)
+```
+
+A type that only derives from a cycle, `Leaf` below, gets no error of its own, by the reading above.
+
+Case: [data/inherit-from-a-cycle.kz](../corpus/data/inherit-from-a-cycle.kz)
+```kurz
+data Node(int Value) : Node
+data Leaf(int Size) : Node
+
+print(1)
+```
+
 ### D7 (decided, §4) How `data` inheritance is written
 
 `data Admin(int Level) : User` declares a `data` type that inherits from `User`. Its constructor
@@ -176,7 +223,7 @@ e = Empty
 print(e == Empty)
 ```
 
-### D9 (decided, §4) Unions
+### D9 (decided, §4, §5) Unions
 
 `A | B` is a type. Its values are the values of `A` and the values of `B`. A value of a case
 type is a value of the union without a word. To use it as one of its cases, `match` it (C4).
@@ -195,6 +242,262 @@ void Describe(Circle | Square shape) {
 
 Describe(Circle(2))
 Describe(Square(3))
+```
+
+A value of a union stands where another union is required when its first case goes to the first case
+of that union and each of its other cases to a case of it after the first, each by being that type,
+by widening into it (T8) or by deriving from it (D6), since the first case is the success case (O1):
+an `A | B` stands where `A | B | C` is required, and where `B | A` is required it is the compile
+error `type-mismatch` (T1), as in Rust `Result<A, B>` and `Result<B, A>` are two types with no
+conversion between them. The owner chose this on 2026-10-21, against accepting it wherever the other
+union lists all of its cases, in whatever order; the cost is that swapping the order takes a
+`match`. So `long | NotFound r = Find(1)` compiles where `Find` returns an `int | NotFound`, while a
+`User | Admin` where `User | NotFound` is required is `type-mismatch`, since its `Admin` would
+become a success (O1). The owner chose this on 2026-10-21, against the first case being the same
+type while the other cases may widen, as Rust's `Result<i32, E>` is no `Result<i64, E>`, under which
+`long | NotFound r = Find(1)` is refused while `long r = Find(1)` compiles, and against exact types
+everywhere, with no widening or derivation between unions; the cost is that a conversion between
+unions checks each case. A case after the first that would go to two of the cases after the first is
+`type-mismatch` too, as a value that would go to two cases is *(assumed: the answers named a value
+and a propagated case, not a case of a union)*. A case after the first that is one of the cases
+after the first goes there all the same, and no other fit by widening or derivation is looked for,
+so an `int | short` stands where `int | short | long` is required. The owner chose this on
+2026-10-21, as for a value (T8), against two fits being `type-mismatch` even beside an exact case,
+under which such a union needs a `match`; the cost is that adding a case to a union can change
+without a word which case an existing union's case goes to, as the `short` of an `int | short` goes
+to `long` where `int | long` is required and to `short` where `int | long | short` is, while under
+the option turned down that addition is a compile error. The owner kept this choice with that cost
+shown on 2026-10-21.
+
+A value that is no case goes to a case as T8 says, and one that would go to two cases by deriving
+from them, an `Admin` where `User | Person` is required with `Admin : User : Person`, is
+`type-mismatch`, as one that would widen into two is (T8); a variable of the case's type picks the
+case, as `User u = admin` makes the `Admin` a `User` (D6), where a conversion picks it for a number
+(T8) and a `match` on the call for a propagated case (O3) *(assumed: the variable; the answers named
+a conversion or a `match`, and a `data` value has no conversion to its base)*. The owner chose this
+on 2026-10-21, against the nearest case, the most derived base or the narrowest type, as C#'s
+better-conversion rule picks it, under which derivation and propagation would answer differently
+from widening; the cost is that such code needs that conversion, variable or `match`. A value that
+is one of the cases is that case, a `data` value among them, and no other fit by derivation is
+looked for: a `User` where `User | Person` is required, with `User : Person`, is a `User`. The owner
+chose this on 2026-10-21, against two fits being `type-mismatch` even beside an exact case, under
+which that `User` is `type-mismatch` too; C#'s better-conversion rule prefers the identity
+conversion, and Rust has only the exact fit; the cost is that adding a case to a union can change
+without a word which case an existing value goes to, as a `User` goes to `Person` where
+`int | Person` is required and to `User` where `int | Person | User` is, while under the option
+turned down that addition is a compile error. The owner kept this choice with that cost shown on
+2026-10-21. A number literal where a union is required takes the union's one number case, and has
+its own type where the union has two or more, and a duration literal takes the union's one time
+case, as T8 and L17 say.
+
+Case: [data/union-more-cases.kz](../corpus/data/union-more-cases.kz)
+```kurz
+data A(int X)
+data B(int Y)
+data C(int Z)
+
+A | B x = B(2)
+A | B | C y = x
+match y {
+    A a => print("a {a.X}")
+    B b => print("b {b.Y}")
+    C c => print("c {c.Z}")
+}
+```
+
+Case: [data/union-order.kz](../corpus/data/union-order.kz)
+```kurz
+data A(int X)
+data B(int Y)
+
+A | B x = B(2)
+B | A y = x
+match y {
+    B b => print("b {b.Y}")
+    A a => print("a {a.X}")
+}
+```
+
+Case: [types/widening-into-union.kz](../corpus/types/widening-into-union.kz)
+```kurz
+byte b = 1
+int | string v = b
+match v {
+    int i => print(i)
+    string s => print(s)
+}
+```
+
+Case: [types/widening-into-two-cases.kz](../corpus/types/widening-into-two-cases.kz)
+```kurz
+byte b = 1
+short | int v = b
+match v {
+    short s => print("short {s}")
+    int i => print("int {i}")
+}
+```
+
+Case: [types/conversion-picks-the-case.kz](../corpus/types/conversion-picks-the-case.kz)
+```kurz
+byte b = 1
+short | int w = short(b)
+match w {
+    short x => print("short {x}")
+    int y => print("int {y}")
+}
+```
+
+Case: [data/union-case-widens.kz](../corpus/data/union-case-widens.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+long | NotFound r = Find(1)
+match r {
+    long n => print(n)
+    NotFound => print("none")
+}
+```
+
+Case: [data/union-case-derives.kz](../corpus/data/union-case-derives.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+Admin | NotFound a = Admin("a", 2)
+User | NotFound u = a
+match u {
+    User x => print("user {x.Name}")
+    NotFound => print("none")
+}
+```
+
+Case: [data/union-case-after-the-first.kz](../corpus/data/union-case-after-the-first.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+// the Admin is the case Admin, and no other fit is looked for (D9)
+User | Admin a = Admin("a", 1)
+User | NotFound u = a
+match u {
+    User x => print(x.Name)
+    NotFound => print("none")
+}
+```
+
+Case: [data/union-case-is-its-case.kz](../corpus/data/union-case-is-its-case.kz)
+```kurz
+short s = 1
+byte | short x = s
+int | short | long y = x
+match y {
+    int i => print("int {i}")
+    short n => print("short {n}")
+    long l => print("long {l}")
+}
+```
+
+Case: [data/derives-from-two-cases.kz](../corpus/data/derives-from-two-cases.kz)
+```kurz
+data Person(string Name)
+data User(int Id) : Person
+data Admin(int Level) : User
+
+User | Person v = Admin("a", 1, 2)
+match v {
+    User u => print(u.Id)
+    Person p => print(p.Name)
+}
+```
+
+Case: [data/value-is-its-case.kz](../corpus/data/value-is-its-case.kz)
+```kurz
+data Person(string Name)
+data User(int Id) : Person
+
+User | Person v = User("a", 1)
+match v {
+    User u => print("user {u.Id}")
+    Person p => print(p.Name)
+}
+```
+
+Case: [types/literal-into-two-cases.kz](../corpus/types/literal-into-two-cases.kz)
+```kurz
+long | double x = 5
+match x {
+    long n => print("long {n}")
+    double d => print("double {d}")
+}
+```
+
+Case: [types/literal-one-number-case.kz](../corpus/types/literal-one-number-case.kz)
+```kurz
+byte | string x = 5
+match x {
+    byte n => print("byte {n}")
+    string s => print(s)
+}
+```
+
+Case: [types/literal-two-number-cases.kz](../corpus/types/literal-two-number-cases.kz)
+```kurz
+byte | short x = 5
+match x {
+    byte b => print("byte {b}")
+    short s => print("short {s}")
+}
+```
+
+Case: [types/literal-widens-into-one-case.kz](../corpus/types/literal-widens-into-one-case.kz)
+```kurz
+short | long x = 5
+match x {
+    short s => print("short {s}")
+    long n => print("long {n}")
+}
+```
+
+Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
+```kurz
+int | duration d = 106752days
+match d {
+    int n => print("int {n}")
+    duration t => print("duration {t}")
+}
+```
+
+Two unions with the same first case and the same other cases are one type, whatever the order of the
+cases after the first, so `List<A | B | C>` and `List<A | C | B>` are one type. The owner chose this
+on 2026-10-21, against two types, the order being part of the type as a generic type is invariant in
+C#, under which a list of one cannot be passed where the other is required; the cost is that the
+compiler orders the cases after the first itself, for the numbers of their tags, and that a reader
+sees one type written two ways.
+
+Case: [data/union-order-after-the-first.kz](../corpus/data/union-order-after-the-first.kz)
+```kurz
+data A(int X)
+data B(int Y)
+data C(int Z)
+
+void Count(List<A | B | C> xs) {
+    print(xs.Count)
+}
+
+mut items = List<A | C | B>()
+items.Add(B(1))
+items.Add(C(2))
+Count(items)
 ```
 
 ### D10 (assumed, §4) Small values are plain values

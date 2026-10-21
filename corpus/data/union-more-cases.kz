@@ -1,0 +1,15 @@
+// expect: output
+// | b 2
+// rules: D9
+
+data A(int X)
+data B(int Y)
+data C(int Z)
+
+A | B x = B(2)
+A | B | C y = x
+match y {
+    A a => print("a {a.X}")
+    B b => print("b {b.Y}")
+    C c => print("c {c.Z}")
+}
