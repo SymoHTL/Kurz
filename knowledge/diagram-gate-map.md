@@ -88,7 +88,7 @@ flowchart TD
         the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
         Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's and the
         checker's errors against each header and runs no program; the version of the clang the compiler found, printed, and a fail when the compiler
-        refused it or found none, which section 2 of the design record (an assumption there) requires of this gate: the compiler under
+        refused it or found none, which section 2 of the design record (decided there, round 20) requires of this gate: the compiler under
         compiler/ calls no clang and this gate reads no version (checked 2026-10-20: the sources of both), HAZARD issue 37"]
         G4["ci-config: a pinned fact of a workflow changed. All three workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
