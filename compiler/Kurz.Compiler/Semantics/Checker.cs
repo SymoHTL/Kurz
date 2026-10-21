@@ -384,9 +384,9 @@ public sealed partial class Checker
     /// <summary>
     /// D6: a data type that is its own base, directly or through others, is <c>base-cycle</c> at the base that closes the cycle. That
     /// base is the base of the declaration that completes the cycle where the files of a program are read in the ordinal order of their
-    /// paths, each from its top (the owner, 2026-10-21): in the one file the checker reads, the member declared last. A type that names
-    /// itself as its base is a cycle of one, a cycle is one error, and a type that only derives from a cycle gets none (the record's
-    /// reading). Each closing member is kept with its cycle, from itself round to itself.
+    /// paths (the owner, 2026-10-21): in the one file the checker reads, the member declared last. Each file is read from its top, a type
+    /// that names itself as its base is a cycle of one, a cycle is one error, and a type that only derives from a cycle gets none (the
+    /// record's reading). Each closing member is kept with its cycle, from itself round to itself.
     /// </summary>
     private void FindBaseCycles()
     {

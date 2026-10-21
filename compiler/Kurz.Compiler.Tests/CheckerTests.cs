@@ -1017,9 +1017,9 @@ public sealed class CheckerTests
     public void A_cycle_of_bases_is_base_cycle_at_the_base_that_closes_it()
     {
         // D6 (the owner, 2026-10-21): the id base-cycle, at the base that closes the cycle, and the walk up the bases ends; that base is the base
-        // of the declaration that completes the cycle where the files of the program are read in the ordinal order of their paths, each from its
-        // top, of which the checker reads one; a type that is its own base is a cycle of one, a cycle is one error, and a type that only
-        // derives from a cycle gets none (the record's reading)
+        // of the declaration that completes the cycle where the files of the program are read in the ordinal order of their paths, of which the
+        // checker reads one. Each file is read from its top, a type that is its own base is a cycle of one, a cycle is one error, and a type
+        // that only derives from a cycle gets none (the record's reading)
         Assert.Equal([(ErrorIds.BaseCycle, 1)], Errors("data A(int X) : A\n\nprint(1)"));
         Assert.Equal([(ErrorIds.BaseCycle, 2)], Errors("data A(int X) : B\ndata B(int Y) : A\n\nprint(1)"));
         Assert.Equal([(ErrorIds.BaseCycle, 3)], Errors("data A(int X) : B\ndata B(int Y) : C\ndata C(int Z) : A\n\nprint(1)"));
