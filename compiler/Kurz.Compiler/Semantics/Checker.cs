@@ -1241,6 +1241,7 @@ public sealed partial class Checker
             // R13: state outside a function, at the outermost level of a file, which chapter 11 states and the checker does not read;
             // its uses carry no further error. A `static` without `mut` has no meaning there, as on any variable (below)
             NotSupported(v.Line, "a `static mut` declaration at the top level of a file (R13)");
+            CheckLoosely(v.Value); // the initial value is read, so that the variables it uses count as used
             DeclareUnreadable(v.Name, VariableKind.Local, v.Line);
             return;
         }

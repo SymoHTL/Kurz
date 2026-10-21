@@ -279,14 +279,22 @@ public sealed class CorpusTests
     [InlineData("// expect: output\n// rules: V1\n\n")]
     [InlineData("// expect: error unused-variable at 5\n// | a\n// rules: V1\n\nx\n")]
     [InlineData("// expect: throws overflow at 5\n// build: debug\n// rules: V1\n\nx\n")]
-    [InlineData("// expect: output\n// allow: network\n// rules: R7\n\nx\n")]
-    [InlineData("// expect: output\n// allow: native raw\n// rules: R7\n\nx\n")]
-    [InlineData("// expect: output\n// allow: raw raw\n// rules: R7\n\nx\n")]
-    [InlineData("// expect: output\n// allow:\n// rules: R7\n\nx\n")]
     [InlineData("// expect: output\n// allow: raw\n// build: test\n// rules: R7\n\nx\n")]
     public void A_header_out_of_its_shape_is_refused(string text)
     {
         Assert.Null(CaseHeader.Parse(text, out var problem));
         Assert.NotNull(problem);
+    }
+
+    [Theory]
+    [InlineData("// expect: output\n// allow: network\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow: native raw\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow: raw raw\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow:\n// rules: R7\n\nx\n")]
+    public void A_grant_line_the_header_does_not_take_is_refused_as_such(string text)
+    {
+        // R7: the line takes `raw`, `native` or `raw native`, in that order; another is named as the grant line it is, not as a missing rules line
+        Assert.Null(CaseHeader.Parse(text, out var problem));
+        Assert.Equal("the `// allow:` line is not `// allow: raw`, `// allow: native` or `// allow: raw native`", problem);
     }
 }

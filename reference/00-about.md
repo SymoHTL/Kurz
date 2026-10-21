@@ -54,11 +54,13 @@ carries the `Case:` line alone.
 ```
 
 A case is a single file with no `project.kz`; its `// allow:` line gives it the grants a
-`project.kz` would give its package (R7; §3, the owner, 2026-10-21).
+`project.kz` would give its package (R7; §3, the owner, 2026-10-21). The line takes `raw`, `native` or
+`raw native`, in that order, and each compiler's runner of the corpus reads it; a program outside the
+corpus takes no grant from it *(assumed: as §3 marks it)*.
 
 The ids of both kinds are listed in chapter 12. No tool runs a program or compares its output: the compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
-except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13) and which the suite checks for no diagnostic;
+except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13), whose front end the suite checks for no diagnostic, and which the checker, reading no `flags` type, holds to `not supported` and no error;
 it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; what a program prints, and an error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.

@@ -56,7 +56,7 @@ never pass for an error a case expects. The front end produces it nowhere: it re
 chapters 1 to 11 but a pointer type, `&x` and `*p` (R10), a `naked` function (R12), `thread static`
 (R13) and `extern` (R16, R17), and at each of these it reports `syntax` in its place, so that a
 program holding one gets that id, while `asm(...)`, `Ptr<T>(x)` and `SizeOf<T>()` parse as calls
-and `p[i]` as an index. No corpus case holds a form the front end reports `syntax` at in its place; the forms that parse clean stand in the cases of R10, R11, R14 and R15, which the checker reads as the section below says. The checker produces it for the constructs its section lists, and
+and `p[i]` as an index. No corpus case holds a form the front end reports `syntax` at in its place; the forms that parse clean stand in the cases of R7, R10, R11, R13, R14 and R15, which the checker reads as the section below says. The checker produces it for the constructs its section lists, and
 says nothing else about a program that uses one. Both sides raise `syntax`, so a case that expects it
 is the front end's when the front end reports an error on it, and the checker's when the front end
 reads it clean. One such case, `data/flags-match.kz`, expects a `syntax` that depends on the type

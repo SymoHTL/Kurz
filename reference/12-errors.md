@@ -42,7 +42,7 @@ expects it.
 | `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file, but for a case of the corpus whose header line grants it |
 | `raw-required` | R10, R11, R13 | an `asm`, or a read or a write through a raw pointer (R10), outside a `raw` block and outside the body of a `naked` function; a read or a write of a top-level `static` (R13), a member that shows the memory of a string or a list (R15), or a call of a C function or through a C function type (R16, R17), outside a `raw` block |
 | `asm-operand` | R11 | a breach of the rules of an `asm`'s template and its operands: an operand the template does not use, a name in the template that no operand has, or a word or a register class that is not one of Rust's |
-| `counted-pointee` | R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), or `SizeOf` of such a type |
+| `counted-pointee` | R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), `SizeOf` of such a type, or a list's `Pointer` member or `List<T>.FromRaw` of such an element type (R15) |
 | `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |

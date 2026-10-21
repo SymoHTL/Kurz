@@ -570,6 +570,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("if true {\n    static mut long total = 0\n    print(total)\n}"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("void F() {\n    static mut long total = 0\n    print(total)\n}\n\nF()"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("static long total = 0\nprint(total)")); // R13 states `static mut` alone
+        // its initial value is read, so that a variable it uses counts as used (E1)
+        Assert.Equal(["2: a `static mut` declaration at the top level of a file (R13)"], NotSupported("long n = 5\nstatic mut long total = n"));
+        // the state is visible in every function, so a parameter of its name is `redeclared` (V9), and a write in that function goes to the
+        // parameter, as a read does (V8)
+        var (diagnostics, _) = Check("static mut long total = 0\n\nvoid F(long total) {\n    total = 2\n}\n\nF(1)");
+        Assert.Equal([(ErrorIds.Redeclared, 3), (ErrorIds.AssignImmutable, 4)], diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList());
     }
 
     [Fact]

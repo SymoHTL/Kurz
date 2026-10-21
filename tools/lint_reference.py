@@ -82,7 +82,7 @@ def parse_case(text):
         rest = rest[1:]
     if rest and rest[0].startswith("// allow:"):  # the grants of a project.kz the file takes (R7)
         if not re.fullmatch(r"// allow: (?:raw(?: native)?|native)", rest[0]):
-            return None, "the `// allow:` line names a grant other than `raw`, `native` or `raw native`"
+            return None, "the `// allow:` line is not `// allow: raw`, `// allow: native` or `// allow: raw native`"
         rest = rest[1:]
     if len(rest) != 1 or not re.fullmatch(r"// rules: [A-Z]\d+(?:, [A-Z]\d+)*", rest[0]):
         return None, "the header does not end in one `// rules: A1, B2` line"
@@ -395,7 +395,8 @@ def cases_in(base):
         "a rules line that is not a list of ids": (tree(edit(declare, "// rules: V1", "// rules: v1")), "does not end in one"),
         "a grant line the header takes": (tree(edit(declare, "// rules: V1", "// allow: raw native\n// rules: V1")), None),
         "a grant line of native alone": (tree(edit(declare, "// rules: V1", "// allow: native\n// rules: V1")), None),
-        "a grant line with a word that is no grant": (tree(edit(declare, "// rules: V1", "// allow: network\n// rules: V1")), "names a grant other than"),
+        "a grant line the header does not take": (tree(edit(declare, "// rules: V1", "// allow: network\n// rules: V1")), "the `// allow:` line is not"),
+        "a grant line in the order native raw": (tree(edit(declare, "// rules: V1", "// allow: native raw\n// rules: V1")), "the `// allow:` line is not"),
         "a case without a body": (tree({declare: "// expect: output\n// rules: V1\n"}), "no body"),
         "a case that names an unknown rule": (tree(edit(declare, "// rules: V1", "// rules: V1, V9")), "does not have"),
         "a case not linked from a rule it names": (tree(edit(declare, "// rules: V1", "// rules: V1, V4")), "has no Case line for it"),

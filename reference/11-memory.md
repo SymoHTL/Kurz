@@ -211,7 +211,11 @@ project grants `allow raw`; one in a package without the grant is the compile er
 `raw-not-allowed`, and a program without a `project.kz` has no grant. A case of the corpus, a single
 file, takes the grants of its header's `// allow:` line as a `project.kz` would give
 them to its package (§3, the owner, 2026-10-21); in any other file the line is a comment and grants
-nothing *(assumed: as §3 marks it)*. A `raw` block holds the machine instructions no other form of the language expresses, as
+nothing *(assumed: as §3 marks it)*. The line takes `raw`, `native` or `raw native`, in that order, the grants R7 and
+R16 ask of a file's own code; each compiler's runner of the corpus reads it and gives the case's file
+its grants, as Rust's test runner reads a test's directives and passes their flags to the compiler,
+so that a program outside the corpus takes no grant from it and a build of a project takes none from it
+*(assumed: as §3 marks it)*. A `raw` block holds the machine instructions no other form of the language expresses, as
 inline assembly (§3, the owner, 2026-10-21), written as R11 says, and the reading and writing through a
 raw pointer (R10).
 The compiler's memory guarantees cover the Kurz code outside `raw` blocks; the runtime is Kurz (§2),
@@ -368,18 +372,23 @@ A package granted `allow raw` declares, at the top level of a file, state that e
 package reaches, `static mut long freeList = 0`, and state of which each thread has its own, `thread
 static mut long stackLimit = 0`, both read and written inside a `raw` block alone, as Rust reads and
 writes a `static mut` only in an `unsafe` block (§3, the owner, 2026-10-21); this is the one
-exception to the reason of K18's rule, that no state is reached by every actor. `thread` is a word
+exception the record decides to the reason of K18's rule, that no state is reached by every actor, a
+C library's global variables standing open (§14). `thread` is a word
 only before `static` in such a declaration and a name everywhere else (L18; §3, the owner,
 2026-10-21). Such state is its package's alone: no `pub` stands before it, and another package calls
 a function of its package (§3, the owner, 2026-10-21). Such a declaration holds what a pointer points
-to (R10) and takes an initial value, which is a constant; each thread's value starts at that
+to (R10) and takes an initial value, which is a constant expression as F12 counts one for a
+parameter's default value; each thread's value starts at that
 constant; a declaration that no function reads is no `unused-variable` (V5), being state of its
 package and no variable; a `static` without `mut` at the top level of a file has no meaning there,
 `syntax` (E4) as on any variable; and a `static mut` field of a class stays `static-state` in such a
 package too (K18). A declaration of either kind in a package without the grant, of another type,
 without an initial value or with one that is no constant, or with `pub` before it, is the compile
 error `static-state`, and a read or a write of one outside a `raw` block is `raw-required` (R10)
-*(assumed: as §3 marks them)*. No case declares a `thread static`: the compiler's front end, through
+*(assumed: as §3 marks them)*. A `thread static mut` is the target's thread-local storage, as C's
+`_Thread_local` is: each thread's value sits at an offset from the pointer the target keeps for each
+thread, an access taking a few instructions more than one of a `static mut`, and on a target that
+runs one thread, AVR among them, it is one value *(assumed: as §3 marks it)*. No case declares a `thread static`: the compiler's front end, through
 which every case runs, reports `syntax` at it.
 
 Case: [memory/static-mut-in-raw.kz](../corpus/memory/static-mut-in-raw.kz)
@@ -436,12 +445,15 @@ is `SizeOf<Block>()`, as Rust converts with `as` and reads a size with `size_of:
 owner, 2026-10-21). `Ptr<T>` names the type `T*` in a conversion alone, `Ptr<T>(x)` takes a pointer
 to any pointee or a `long`, `long(p)` gives the address as a `long`, and `SizeOf<T>()` is a `long`
 and takes what a pointer points to (R10); none of these reads or writes through a pointer, so none
-needs a `raw` block, while `(*b).Next` reads through one and needs it *(assumed: as §3 marks them)*. The untyped pointer is
-`void*`, through which nothing is read or written and which `p + n` does not offset; a conversion of
+needs a `raw` block, nor the grant `allow raw`, a pointer standing in a package without it (R10), while
+`(*b).Next` reads through one and needs it *(assumed: as §3 marks them)*. The untyped pointer is
+`void*`, through which nothing is read or written and which `p + n`, `p - n` and `p - q` do not take; a conversion of
 another value is `type-mismatch` (T1), and `SizeOf` of a type a pointer cannot point to is
 `counted-pointee`. On a target whose pointer is narrower than a `long`, `Ptr<T>(x)` keeps the low
-bits of `x` and `long(p)` gives the address as a number that is never negative; a read or a write
-through `void*` and `p + n` on one are `type-mismatch`, `Ptr<void>(x)` gives a `void*` and
+bits of `x` and `long(p)` gives the address as a number that is never negative, and on a target whose
+pointer is as wide as a `long` both keep the bits, so that an address whose highest bit is set is a
+negative `long` and `Ptr<T>(x)` of a negative `x` is that address; a read or a write
+through `void*`, and `p + n`, `p - n` and `p - q` on one, are `type-mismatch`, `Ptr<void>(x)` gives a `void*` and
 `SizeOf<void>()` is `type-mismatch`; and another count of type arguments or of arguments in these
 forms is `syntax` (E4) *(assumed: as §3 marks them)*. `Ptr` and `SizeOf` are core words (L18; §3,
 the owner, 2026-10-21).
@@ -481,15 +493,20 @@ A string and a list show their memory inside a `raw` block alone: `s.Pointer` is
 bytes of a string, whose count `s.Bytes.Count` gives (T15), `l.Pointer` the pointer to the first
 element of a list, whose count is `l.Count`, and `string.FromRaw(p, n)` and `List<T>.FromRaw(p, n)`
 make a string of the `n` bytes and a list of the `n` elements at `p`, as Rust's `as_ptr`, `len` and
-`from_raw_parts` do (§3, the owner, 2026-10-21). The layout is the compiler's, defined in one place.
+`String::from_raw_parts` and `Vec::from_raw_parts` do (§3, the owner, 2026-10-21). The layout is the
+compiler's, defined in one place. `s.Pointer` points at the string's UTF-8 bytes in order (T15) and
+`l.Pointer` at the list's elements in order, the layout around them being the compiler's.
 `s.Pointer` is a `byte*` and `l.Pointer` a `T*`; `l.Pointer` and `List<T>.FromRaw` take a `T` that a
 pointer can point to, another `T` being `counted-pointee` (R10); a write through `s.Pointer` is a
 misuse of `raw` code, a string being immutable; the pointer of an empty string or list is not `null`,
-and nothing is read or written through it; and such a member outside a `raw` block is the compile
+and nothing is read or written through it; the member's pointer holds while the string or the list
+lives and, for a list, while its count does not change, a use after either being a misuse of `raw`
+code; and such a member outside a `raw` block is the compile
 error `raw-required` (R10). `FromRaw` takes over memory the allocator's entry gave (§2), which the
 string or the list frees as its own; a list made so holds room for its `n` elements and takes more as
 it grows; bytes handed to `string.FromRaw` that are not UTF-8 are a misuse of `raw` code; and `n` of 0
-makes an empty string or list *(assumed: as §3 marks them)*.
+makes an empty string or list; and `FromRaw` takes no capacity, which Rust's two functions take as a
+third argument, the room of a list made so being its `n` elements *(assumed: as §3 marks them)*.
 
 Case: [memory/string-pointer.kz](../corpus/memory/string-pointer.kz)
 ```kurz
@@ -532,7 +549,10 @@ C calling convention, the package's own or one that a block of R16 declares, as 
 `(extern "C" (int) => void)?`, a call through it outside a `raw` block is `raw-required` (R10), as a
 call of R16's functions is, it stands where a raw pointer stands (R10), in a field of C-layout data,
 `extern "C" data Point(int X, int Y)` (§2), among them, and a lambda or a function that does not take the C calling convention where such a type is
-required is `type-mismatch` (T1) *(assumed: as §13 marks them)*.
+required is `type-mismatch` (T1); a `null` that C gives where such a type is not nullable, in a field
+it writes or as the result of a function R16 declares, is a misuse of `raw` code, as a `fn` pointer
+value must be non-null in Rust, so that a declaration where C may give `null` takes the nullable form
+*(assumed: as §13 marks them)*.
 
 No case: the type starts with `extern`, at which the compiler's front end, through which every case
 runs, reports `syntax`, so that a case that writes it fails there.

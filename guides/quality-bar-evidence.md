@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-21
-digest: c7da96abf285ab959dc2a419c49a1e9497326a49e27f848363595816c07d85e5
+generated: 2026-10-22
+digest: 91c7dd28c6e626d012c6123eb47bb58a1081af8b86417364c20d28177fa6cf1d
 ttl_days: 60
 metadata:
   type: reference
@@ -62,14 +62,14 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/kit.py` | 26 | 24 |
 | `tools/lint_ci.py` | 118 | 119 |
 | `tools/lint_knowledge.py` | 91 | 74 |
-| `tools/lint_reference.py` | 85 | 89 |
+| `tools/lint_reference.py` | 86 | 90 |
 | `tools/merge_pr.py` | 154 | 142 |
 | `tools/pr_gates.py` | 117 | 124 |
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 276 | 256 |
 | `tools/tree_gate.py` | 124 | 100 |
-| **total** | 1122 | 1053 |
+| **total** | 1123 | 1054 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -102,7 +102,7 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 121 |
+| Occurrences of the marker *(assumed)* | 122 |
 | Bullets of the Open section | 7 |
 <!-- /generated:design -->
 
@@ -145,7 +145,7 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Pull requests merged | 17 |
 | Merged over red, with a recorded waiver | 11 |
 | Review findings posted: high | 85 |
-| Review findings posted: medium | 1216 |
-| Review findings posted: low | 1491 |
+| Review findings posted: medium | 1234 |
+| Review findings posted: low | 1519 |
 | Open HAZARD issues | 17 |
 <!-- /generated:forge -->

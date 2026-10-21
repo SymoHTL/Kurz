@@ -100,8 +100,15 @@ public sealed partial record CaseHeader(
         }
 
         IReadOnlyList<string> grants = [];
-        if (i < lines.Length && AllowLine().Match(lines[i]) is { Success: true } allowMatch)
+        if (i < lines.Length && lines[i].StartsWith("// allow:", StringComparison.Ordinal))
         {
+            var allowMatch = AllowLine().Match(lines[i]);
+            if (!allowMatch.Success)
+            {
+                problem = "the `// allow:` line is not `// allow: raw`, `// allow: native` or `// allow: raw native`";
+                return null;
+            }
+
             grants = allowMatch.Groups[1].Value.Split(' ');
             i++;
         }
