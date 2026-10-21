@@ -159,8 +159,9 @@ reported at the base that closes the cycle, as C# reports CS0146, a circular bas
 The owner chose this on 2026-10-21, against `type-mismatch` (T1); the cost is one more id. The base
 that closes a cycle is the base of the declaration that, read from the top of the file, completes
 it; a type that names itself as its base is a cycle of one; a cycle is one error, and a type that
-only derives from a cycle gets none *(assumed: the answer named the base that closes the cycle and
-not which one that is where the cycle runs through several types)*.
+only derives from a cycle gets none *(assumed: the answer named the base that closes the cycle, and
+not which one that is where the cycle runs through several types, how many errors a cycle gives,
+or what a type that only derives from a cycle gets)*.
 
 Case: [data/inherit-cycle.kz](../corpus/data/inherit-cycle.kz)
 ```kurz
@@ -226,7 +227,8 @@ type while the other cases may widen, as Rust's `Result<i32, E>` is no `Result<i
 `long | NotFound r = Find(1)` is refused while `long r = Find(1)` compiles, and against exact types
 everywhere, with no widening or derivation between unions; the cost is that a conversion between
 unions checks each case. A case after the first that would go to two of the cases after the first is
-`type-mismatch` too, as a value that would go to two cases is.
+`type-mismatch` too, as a value that would go to two cases is *(assumed: the answers named a value
+and a propagated case, not a case of a union)*.
 
 A value that is no case goes to a case as T8 says, and one that would go to two cases by deriving
 from them, an `Admin` where `User | Person` is required with `Admin : User : Person`, is

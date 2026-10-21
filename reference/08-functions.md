@@ -448,7 +448,9 @@ the parameter of a lambda there as well; closest to Rust, where an inner `fn` se
 function around it; the cost is that the reading assumed on 2026-10-09, under which a variable at
 any depth of the top-level code reserves its name, no longer holds). That the lambda is one of the
 top-level code, so that inside a top-level function a lambda's parameter stays such a declaration, is
-*(assumed: the answer's text named a lambda's parameter without saying where the lambda stands)*. In `count = count + 1` inside such a function the one error is `redeclared`, for the
+*(assumed: the answer's text named a lambda's parameter without saying where the lambda stands)*. A name that an
+arm of a `match` of the top-level code binds reserves nothing either, as a variable of a block there
+*(assumed: the answer named a loop variable, a variable inside a block and a lambda's parameter)*. In `count = count + 1` inside such a function the one error is `redeclared`, for the
 declaration on the left, which the compiler reads first to learn whether the line declares; the read
 on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
 read first, whose message points at the read while the fix is the whole line). The owner chose the
