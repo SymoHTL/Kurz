@@ -16,7 +16,7 @@ here: `invalid-source` (L1), since the tools read every case as UTF-8.
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or `.Number` and `From` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
 | `unknown-name` | V10, F16 | a name that is not visible at this place, a top-level variable read inside a top-level function included |
-| `type-mismatch` | T1, T13, T19, N6, C3, O4, K5, C8, D9, T8 | a value of one type where another type is required, a written union type that lists only some of a call's cases (O4), a union where one is required whose first case its first case does not go to, or where one of its other cases goes to none of the cases after the first, or to two (D9, the second an assumption there), a value that is no case of a union and would widen into two of its cases, a literal among them by its own type (T8), or derive from two of them (D9), an arithmetic operator on two class instances (K5) and a range end that is no integer (C8) included |
+| `type-mismatch` | T1, T13, T19, N6, C3, O4, K5, C8, D9, T8 | a value of one type where another type is required, a written union type that lists only some of a call's cases (O4), a union where one is required whose first case its first case does not go to, or where one of its other cases goes to none of the cases after the first, or, being none of them, to two of them (D9, the case of two fits an assumption there), a value that is no case of a union and would widen into two of its cases, a literal among them by its own type where the union has two or more number cases (T8), or derive from two of them (D9), an arithmetic operator on two class instances (K5) and a range end that is no integer (C8) included |
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
 | `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance, or an interpolation of one, whose `Text()` is not `pub`, from outside its class (A9); the same inside the class is A15's reading |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
@@ -28,7 +28,7 @@ here: `invalid-source` (L1), since the tools read every case as UTF-8.
 | `nullable-unchecked` | N2, N3, N7, N9 | a nullable value used without a check |
 | `mut-required` | M5, M7 | a `mut` method called on, or a `mut` argument taken from, something that is not `mut` |
 | `mut-at-call` | M7 | an argument for a `mut` parameter without `mut` in front of it, `mut` in front of an argument whose parameter is not `mut`, or one variable passed as `mut` twice |
-| `unlisted-case` | O1, O3, O9 | a case that would leave a function whose return type does not list it after its first case, the success (O1); a return type that is no union lists none; a case that would go to two of the cases after the first (O3) |
+| `unlisted-case` | O1, O3, O9 | a case that would leave a function whose return type does not list it after its first case, the success (O1); a return type that is no union lists none; a case that is none of the cases after the first and would go to two of them (O3) |
 | `match-not-exhaustive` | O8, C9, D12 | a `match` that lists neither every case nor an `else` arm |
 | `braces-required` | C1 | a block that a construct requires, replaced by a statement or opened on the next line, at the line where the block should have opened (C1); a method signature inside a type body with its `{` on the next line is `syntax` instead |
 | `reference-cycle` | R2, R4, R8, R9 | a class that can reach itself through strong fields, one of them `mut` |
@@ -61,7 +61,7 @@ here: `invalid-source` (L1), since the tools read every case as UTF-8.
 | `unreachable-arm` | C4, C9 | an arm of a `match` that can never run: an earlier arm covers its type, a literal arm follows the arm of its type, or `else` follows arms that cover every case (C9) |
 | `override-return-type` | K7 | an `override` whose return type differs from the overridden method's, at the method |
 | `default-not-constant` | F12 | a parameter's default value that is not a constant expression, at the parameter |
-| `base-cycle` | D6 | a `data` type that is its own base, directly or through others, at the base that closes the cycle: the base of the declaration that, read from the top of the file, completes it; one error per cycle |
+| `base-cycle` | D6 | a `data` type that is its own base, directly or through others, at the base that closes the cycle: the base of the declaration that completes it where the files of the program are read in the ordinal order of their paths, each from its top; one error per cycle |
 
 ## Run-time errors
 

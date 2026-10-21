@@ -1,10 +1,11 @@
-// expect: error type-mismatch at 9
+// expect: error type-mismatch at 10
 // rules: D9, O1
 
 data User(string Name)
 data Admin(int Level) : User
 data NotFound
 
+// the Admin is the case Admin, and no other fit is looked for (D9)
 User | Admin a = Admin("a", 1)
 User | NotFound u = a
 match u {

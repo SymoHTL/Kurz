@@ -236,11 +236,12 @@ public static class Types
 
     /// <summary>
     /// The cases among <paramref name="cases"/> a value of <paramref name="from"/> goes to: the case
-    /// that is its type, and no other, since a case is that case (the record's reading on T8 with D9,
-    /// and beyond a value the reading in <c>compiler/README.md</c>); else every case it widens into (T8)
-    /// or derives from (D6). One is a fit; none is no fit, and two or more are the error a conversion
-    /// or a <c>match</c> resolves, as a call that fits two functions is (F13) (T8 with D9, D9 with D6
-    /// and O3, the owner, 2026-10-21).
+    /// that is its type, and no other, for a value, a <c>data</c> value, a case of a union after its
+    /// first and a propagated case alike (T8 with D9, D9, O3, the owner, 2026-10-21); else every case
+    /// it widens into (T8) or derives from (D6). One is a fit; none is no fit, and two or more are the
+    /// error a conversion or a <c>match</c> resolves, as a call that fits two functions is (F13), for a
+    /// value and a propagated case (T8 with D9, D9 with D6 and O3, the owner, 2026-10-21) and for a
+    /// case of a union after its first (the record's reading).
     /// </summary>
     public static IReadOnlyList<KurzType> CasesFor(KurzType from, IReadOnlyList<KurzType> cases)
     {
@@ -327,8 +328,9 @@ public static class Types
 
         if (from is UnionType fu)
         {
-            // D9 with O1 (the owner, 2026-10-21): the first case goes to the first case, the success, and each other case to exactly one
-            // case after the first, so that no case becomes a success it was not
+            // D9 with O1 (the owner, 2026-10-21): the first case goes to the first case, the success, and each other case to a case after
+            // the first, so that no case becomes a success it was not; one that is a case there goes to it (the owner, 2026-10-21), and that
+            // one that would otherwise go to two is no fit is the record's reading
             return to is UnionType tu && Assignable(fu.Cases[0], tu.Cases[0]) && fu.Cases.Skip(1).All(c => CasesFor(c, tu.Cases.Skip(1).ToList()).Count == 1);
         }
 

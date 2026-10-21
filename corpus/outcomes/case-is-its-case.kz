@@ -1,0 +1,21 @@
+// expect: output
+// | short 2
+// rules: O3
+
+string | short Get(int id) {
+    if id == 1 {
+        return "one"
+    }
+    return short(id)
+}
+
+string | short | int Load(int id) {
+    got = Get(id)
+    return got
+}
+
+match Load(2) {
+    string s => print(s)
+    short n => print("short {n}")
+    int i => print("int {i}")
+}

@@ -374,6 +374,38 @@ long big = 2147483647 + 1
 print(big)
 ```
 
+Where a union is required, its one number case reaches a literal as a written type does, so
+`byte | string x = 5` makes the `5` a `byte`; with two or more number cases the union reaches none,
+and the literal has its own type, so `long | double x = 5` and `byte | short x = 5` are
+`type-mismatch` (T8, which gives the owner's choice of 2026-10-21 and its cost).
+
+Case: [types/literal-one-number-case.kz](../corpus/types/literal-one-number-case.kz)
+```kurz
+byte | string x = 5
+match x {
+    byte n => print("byte {n}")
+    string s => print(s)
+}
+```
+
+Case: [types/literal-two-number-cases.kz](../corpus/types/literal-two-number-cases.kz)
+```kurz
+byte | short x = 5
+match x {
+    byte b => print("byte {b}")
+    short s => print("short {s}")
+}
+```
+
+Case: [types/literal-into-two-cases.kz](../corpus/types/literal-into-two-cases.kz)
+```kurz
+long | double x = 5
+match x {
+    long n => print("long {n}")
+    double d => print("double {d}")
+}
+```
+
 ### L11 (decided, §4) Number literals
 
 Number literals take every form C# gives them: decimal digits; hexadecimal digits after `0x` or `0X` and

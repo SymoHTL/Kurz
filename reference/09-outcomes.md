@@ -74,8 +74,6 @@ print(Lost(1))
 
 Case: [data/union-case-widens.kz](../corpus/data/union-case-widens.kz)
 ```kurz
-data User(string Name)
-data Admin(int Level) : User
 data NotFound
 
 int | NotFound Find(int id) {
@@ -90,6 +88,14 @@ match r {
     long n => print(n)
     NotFound => print("none")
 }
+```
+
+Case: [data/union-case-derives.kz](../corpus/data/union-case-derives.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
 Admin | NotFound a = Admin("a", 2)
 User | NotFound u = a
 match u {
@@ -104,6 +110,7 @@ data User(string Name)
 data Admin(int Level) : User
 data NotFound
 
+// the Admin is the case Admin, and no other fit is looked for (D9)
 User | Admin a = Admin("a", 1)
 User | NotFound u = a
 match u {
@@ -124,15 +131,6 @@ Case: [outcomes/unwrap.kz](../corpus/outcomes/unwrap.kz)
 A case that can leave a function this way has to be listed in that function's own return type.
 Otherwise the call is the compile error `unlisted-case`.
 
-It is listed as a case after the first one, which is the success case (O1): a return type that is
-no union lists none, so `NotFound Lost()` whose body calls an `int | NotFound Find()` and lets the
-`NotFound` leave is `unlisted-case`, as Rust's `?` fills only the `Err` side. The owner chose this on
-2026-10-21, against a case leaving as the success of the calling function, which a return type that
-is the case itself, or that names it first, would let it do; the cost is that such a function needs
-a `match` on the call to return the case. A case after the first lists a case that is its type, that
-widens into it (T8, T23) or that derives from it (D6) *(assumed: the widening and the derivation,
-which the answer did not name)*.
-
 Case: [outcomes/unlisted-case.kz](../corpus/outcomes/unlisted-case.kz)
 ```kurz
 data NotFound
@@ -152,13 +150,26 @@ int Twice(int id) {
 print(Twice(1))
 ```
 
+It is listed as a case after the first one, which is the success case (O1): a return type that is
+no union lists none, so `NotFound Lost()` whose body calls an `int | NotFound Find()` and lets the
+`NotFound` leave is `unlisted-case`, as Rust's `?` fills only the `Err` side. The owner chose this on
+2026-10-21, against a case leaving as the success of the calling function, which a return type that
+is the case itself, or that names it first, would let it do; the cost is that such a function needs
+a `match` on the call to return the case. A case after the first lists a case that is its type, that
+widens into it (T8, T23) or that derives from it (D6) *(assumed: the widening and the derivation,
+which the answer did not name)*.
+
 Case: [outcomes/case-as-success.kz](../corpus/outcomes/case-as-success.kz)
 
 A propagated case that would go to two of the cases after the first, a `byte` under the return type
 `string | short | int`, is `unlisted-case`, and a `match` on the call picks the case. The owner
 chose this on 2026-10-21, against the nearest case, the most derived base or the narrowest type, as
 C#'s better-conversion rule picks it, under which propagation would answer differently from widening
-(T8, D9); the cost is that such code needs that `match`.
+(T8, D9); the cost is that such code needs that `match`. A propagated case that is one of the cases
+after the first goes there, and no other fit is looked for, so a propagated `short` under
+`string | short | int` is listed by its `short`. The owner chose this on 2026-10-21, as for a value
+(T8), against two fits being `unlisted-case` even beside an exact case, under which such a function
+needs a `match` on the call; the cost is one more sentence in the rule.
 
 Case: [outcomes/case-fits-two-cases.kz](../corpus/outcomes/case-fits-two-cases.kz)
 ```kurz
@@ -178,6 +189,27 @@ match Load(1) {
     string s => print(s)
     short n => print(n)
     int i => print(i)
+}
+```
+
+Case: [outcomes/case-is-its-case.kz](../corpus/outcomes/case-is-its-case.kz)
+```kurz
+string | short Get(int id) {
+    if id == 1 {
+        return "one"
+    }
+    return short(id)
+}
+
+string | short | int Load(int id) {
+    got = Get(id)
+    return got
+}
+
+match Load(2) {
+    string s => print(s)
+    short n => print("short {n}")
+    int i => print("int {i}")
 }
 ```
 

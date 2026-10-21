@@ -78,11 +78,20 @@ public sealed partial class Checker
         _ => false,
     };
 
-    /// <summary>The number or time type an expected type reaches a literal with: the type itself, or the one such case of a union (L10, L17, T29).</summary>
+    /// <summary>
+    /// The number or time type an expected type reaches a literal with: the type itself (L10, L17, T29), or the one number case of a
+    /// union, a time case being none (L17 with D9, the owner, 2026-10-21); of a union with no number case its one time case, which a
+    /// duration literal takes as it takes a written one (the reading in <c>compiler/README.md</c>).
+    /// </summary>
     private static PrimitiveType? Reach(KurzType? expected) => expected switch
     {
         PrimitiveType p when Types.IsNumber(p) || Types.IsTime(p) => p,
-        UnionType u => u.Cases.Where(c => c is PrimitiveType p && (Types.IsNumber(p) || Types.IsTime(p))).Cast<PrimitiveType>().ToList() is [var one] ? one : null,
+        UnionType u => u.Cases.OfType<PrimitiveType>().Where(Types.IsNumber).ToList() switch
+        {
+            [var one] => one,
+            [] => u.Cases.OfType<PrimitiveType>().Where(Types.IsTime).ToList() is [var time] ? time : null,
+            _ => null,
+        },
         _ => null,
     };
 

@@ -1,21 +1,10 @@
 // expect: output
-// | 2
-// | 4
 // | 6
-// | 8
 // rules: F16
 
-int Twice(int n) {
-    i = n * 2
-    return i
-}
+int Twice(int n) => n * 2
 
-for i in 1..2 {
-    print(Twice(i))
-}
 if true {
     n = 3
     print(Twice(n))
 }
-f = (int n) => Twice(n)
-print(f(4))

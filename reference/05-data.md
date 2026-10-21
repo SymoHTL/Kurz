@@ -155,17 +155,35 @@ print(NameOf(a))
 ```
 
 A `data` type that is its own base, directly or through others, is the compile error `base-cycle`,
-reported at the base that closes the cycle, as C# reports CS0146, a circular base type dependency.
-The owner chose this on 2026-10-21, against `type-mismatch` (T1); the cost is one more id. The base
-that closes a cycle is the base of the declaration that, read from the top of the file, completes
-it; a type that names itself as its base is a cycle of one; a cycle is one error, and a type that
-only derives from a cycle gets none *(assumed: the answer named the base that closes the cycle, and
-not which one that is where the cycle runs through several types, how many errors a cycle gives,
-or what a type that only derives from a cycle gets)*.
+reported at the base that closes the cycle, for the condition C# reports as CS0146, a circular base
+type dependency. The owner chose this on 2026-10-21, against `type-mismatch` (T1); the cost is one
+more id. Only the condition is C#'s: C# reports CS0146 at the name of every type on the cycle
+(checked 2026-10-21 with the .NET SDK 10.0.402: two classes that name each other as their base gave
+two CS0146, three classes on a cycle three, a class that names itself one, and a class that only
+derives from a cycle none). To find that base the files of a program are read in the ordinal order
+of their paths, and the base that closes a cycle is the base of the declaration that completes it in
+that reading. The owner chose this on 2026-10-21, against `base-cycle` at every base on the cycle,
+under which no order is needed and a cycle through three types is three errors; the cost is that
+renaming a file can move the error to another line. Each file is read from its top; a type that
+names itself as its base is a cycle of one; a cycle is one error, and a type that only derives from
+a cycle gets none *(assumed: the answers named the base that closes the cycle and the order of the
+files it is found in, and not the order within a file, said back on 2026-10-21, whether a type that
+names itself is a cycle, that a cycle gives no error beside that base, or what a type that only
+derives from a cycle gets)*.
 
 Case: [data/inherit-cycle.kz](../corpus/data/inherit-cycle.kz)
 ```kurz
 data Node(int Value) : Node
+
+print(1)
+```
+
+Case: [data/inherit-cycle-of-three.kz](../corpus/data/inherit-cycle-of-three.kz)
+```kurz
+data Admin(int Level) : User
+data User(int Id) : Person
+data Guest(int Visits) : User
+data Person(string Name) : Admin
 
 print(1)
 ```
@@ -222,20 +240,31 @@ conversion between them. The owner chose this on 2026-10-21, against accepting i
 union lists all of its cases, in whatever order; the cost is that swapping the order takes a
 `match`. So `long | NotFound r = Find(1)` compiles where `Find` returns an `int | NotFound`, while a
 `User | Admin` where `User | NotFound` is required is `type-mismatch`, since its `Admin` would
-become a success (O3). The owner chose this on 2026-10-21, against the first case being the same
+become a success (O1). The owner chose this on 2026-10-21, against the first case being the same
 type while the other cases may widen, as Rust's `Result<i32, E>` is no `Result<i64, E>`, under which
 `long | NotFound r = Find(1)` is refused while `long r = Find(1)` compiles, and against exact types
 everywhere, with no widening or derivation between unions; the cost is that a conversion between
 unions checks each case. A case after the first that would go to two of the cases after the first is
 `type-mismatch` too, as a value that would go to two cases is *(assumed: the answers named a value
-and a propagated case, not a case of a union)*.
+and a propagated case, not a case of a union)*. A case after the first that is one of the cases
+after the first goes there all the same, and no other fit by widening or derivation is looked for,
+so an `int | short` stands where `int | short | long` is required. The owner chose this on
+2026-10-21, as for a value (T8), against two fits being `type-mismatch` even beside an exact case,
+under which such a union needs a `match`; the cost is one more sentence in the rule.
 
 A value that is no case goes to a case as T8 says, and one that would go to two cases by deriving
 from them, an `Admin` where `User | Person` is required with `Admin : User : Person`, is
 `type-mismatch`, as one that would widen into two is (T8); a conversion or a `match` picks the case.
 The owner chose this on 2026-10-21, against the nearest case, the most derived base or the narrowest
 type, as C#'s better-conversion rule picks it, under which derivation and propagation would answer
-differently from widening; the cost is that such code needs that conversion or `match`.
+differently from widening; the cost is that such code needs that conversion or `match`. A value
+that is one of the cases is that case, a `data` value among them, and no other fit by derivation is
+looked for: a `User` where `User | Person` is required, with `User : Person`, is a `User`. The owner
+chose this on 2026-10-21, against two fits being `type-mismatch` even beside an exact case, under
+which that `User` needs a conversion; C#'s better-conversion rule prefers the identity conversion,
+and Rust has only the exact fit; the cost is one more sentence in the rule. A literal where a union
+is required takes the union's one number case, and has its own type where the union has two or
+more, as T8 and L17 say.
 
 Case: [data/union-more-cases.kz](../corpus/data/union-more-cases.kz)
 ```kurz
@@ -273,11 +302,6 @@ match v {
     int i => print(i)
     string s => print(s)
 }
-short | int w = short(b)
-match w {
-    short x => print("short {x}")
-    int y => print("int {y}")
-}
 ```
 
 Case: [types/widening-into-two-cases.kz](../corpus/types/widening-into-two-cases.kz)
@@ -290,10 +314,18 @@ match v {
 }
 ```
 
+Case: [types/conversion-picks-the-case.kz](../corpus/types/conversion-picks-the-case.kz)
+```kurz
+byte b = 1
+short | int w = short(b)
+match w {
+    short x => print("short {x}")
+    int y => print("int {y}")
+}
+```
+
 Case: [data/union-case-widens.kz](../corpus/data/union-case-widens.kz)
 ```kurz
-data User(string Name)
-data Admin(int Level) : User
 data NotFound
 
 int | NotFound Find(int id) {
@@ -308,6 +340,14 @@ match r {
     long n => print(n)
     NotFound => print("none")
 }
+```
+
+Case: [data/union-case-derives.kz](../corpus/data/union-case-derives.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
 Admin | NotFound a = Admin("a", 2)
 User | NotFound u = a
 match u {
@@ -322,11 +362,24 @@ data User(string Name)
 data Admin(int Level) : User
 data NotFound
 
+// the Admin is the case Admin, and no other fit is looked for (D9)
 User | Admin a = Admin("a", 1)
 User | NotFound u = a
 match u {
     User x => print(x.Name)
     NotFound => print("none")
+}
+```
+
+Case: [data/union-case-is-its-case.kz](../corpus/data/union-case-is-its-case.kz)
+```kurz
+short s = 1
+int | short x = s
+int | short | long y = x
+match y {
+    int i => print("int {i}")
+    short n => print("short {n}")
+    long l => print("long {l}")
 }
 ```
 
@@ -340,6 +393,45 @@ User | Person v = Admin("a", 1, 2)
 match v {
     User u => print(u.Id)
     Person p => print(p.Name)
+}
+```
+
+Case: [data/value-is-its-case.kz](../corpus/data/value-is-its-case.kz)
+```kurz
+data Person(string Name)
+data User(int Id) : Person
+
+User | Person v = User("a", 1)
+match v {
+    User u => print("user {u.Id}")
+    Person p => print(p.Name)
+}
+```
+
+Case: [types/literal-into-two-cases.kz](../corpus/types/literal-into-two-cases.kz)
+```kurz
+long | double x = 5
+match x {
+    long n => print("long {n}")
+    double d => print("double {d}")
+}
+```
+
+Case: [types/literal-one-number-case.kz](../corpus/types/literal-one-number-case.kz)
+```kurz
+byte | string x = 5
+match x {
+    byte n => print("byte {n}")
+    string s => print(s)
+}
+```
+
+Case: [types/literal-two-number-cases.kz](../corpus/types/literal-two-number-cases.kz)
+```kurz
+byte | short x = 5
+match x {
+    byte b => print("byte {b}")
+    short s => print("short {s}")
 }
 ```
 

@@ -1,5 +1,5 @@
 // expect: error type-mismatch at 4
-// rules: T8
+// rules: T8, L17, D9
 
 long | double x = 5
 match x {

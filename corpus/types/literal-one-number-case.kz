@@ -1,0 +1,9 @@
+// expect: output
+// | byte 5
+// rules: T8, L17, D9
+
+byte | string x = 5
+match x {
+    byte n => print("byte {n}")
+    string s => print(s)
+}

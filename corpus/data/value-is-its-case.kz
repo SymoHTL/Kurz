@@ -1,0 +1,12 @@
+// expect: output
+// | user 1
+// rules: D9
+
+data Person(string Name)
+data User(int Id) : Person
+
+User | Person v = User("a", 1)
+match v {
+    User u => print("user {u.Id}")
+    Person p => print(p.Name)
+}

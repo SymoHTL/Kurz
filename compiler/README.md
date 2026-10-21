@@ -182,9 +182,10 @@ not fit (F13), and for a name with one function the error of that function: `arg
 `cannot-infer`, or the id of the argument that does not fit, `narrowing-conversion` among them. A
 `match` and a postfix `else` are checked for the cases they cover (C4, C9, O5, O8), and a case the
 calling function does not list after the first case of its return type propagates as
-`unlisted-case` (O1 to O3, O9); a cycle of `data` bases is `base-cycle` (D6). One defect, one
-diagnostic (E1): a value the checker could not type has the error type, which fits anywhere and is
-reported nowhere again.
+`unlisted-case` (O1 to O3, O9); a cycle of `data` bases is `base-cycle` (D6), where the order in
+which D6 reads the files of a program, the ordinal order of their paths, is not reached, since the
+checker reads one file. One defect, one diagnostic (E1): a value the checker could not type has
+the error type, which fits anywhere and is reported nowhere again.
 
 It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign-mix`,
 `constant-overflow`, `constant-divide-by-zero`, `inexact-literal`, `redeclared`, `unknown-name`,
@@ -262,13 +263,12 @@ round can ask about it by the rule's id.
   operation; under `-` and `~` too, so `short s = -(5)` is a `short` as `short s = -5` is,
   `byte m = ~0x0F` is the `byte` 240 and `byte b = -(5)` is `constant-overflow`. A conversion is no
   literal, and neither is a named constant: `byte(200) + byte(100)` is the `int` 300 (T28).
-- L17 with D9: where a union with exactly one number or time case is required, that case reaches a
-  literal, so `byte | string x = 5` makes the `5` a `byte`; where it has more than one, the literal
-  has its own type, so `long | double x = 5` is `type-mismatch` (the owner, 2026-10-21), and so is
-  `byte | short x = 5`, whose `int` widens into neither case. The answer speaks of a literal whose
-  own type would widen into two cases; whether a union with one number case reaches the literal,
-  where its own type `int` is no case of `byte | string`, and whether a union with two reaches it
-  where its own type widens into none, is a question for a design round.
+- L17 with D9 and T29: where a union with no number case and exactly one time case is required,
+  that case reaches a duration literal, as a written time type does, so
+  `duration | string d = 106752days` is `constant-overflow`, where the literal's own type, a
+  `longduration`, would be `type-mismatch`. T8 and L17 decide the number cases of a union (the
+  owner, 2026-10-21), and a time case is none of them, so `byte | duration x = 5` makes the `5` a
+  `byte`.
 - T22 with L17 and T28: a shift of two operands made of literals folds in the type they take, the
   count taken modulo 32 for a narrow type, which T28 promotes to `int` first, and modulo the width
   otherwise; the bits that leave the type are dropped, at every width, since T22 makes a shift no
@@ -341,15 +341,6 @@ round can ask about it by the rule's id.
 - M7 with M4: what stands after `mut` is a path of data fields from a `mut` variable; two fields
   of one variable are two values and may both be passed; the same path twice, or a path and one it
   is a prefix of, is `mut-at-call`.
-- D9 with O1, T8 with D9 and O3 with O1: a case of a union after its first, a `data` value and a
-  propagated case that is one of the cases it may go to is that case, and no widening or derivation is looked
-  for, as a value that is one of a union's cases is (the record's reading on T8 with D9): an
-  `int | short` stands where `int | short | long` is required, a `User` where `User | Person` is
-  required with `User : Person`, and a propagated `short` is listed by `string | short | int`,
-  although each would go to two cases by widening or derivation, which the owner's answers of
-  2026-10-21 make the error. The record's reading speaks of a value and of widening; whether it holds
-  for the cases of a union after its first, for a propagated case and for derivation is a question
-  for a design round.
 - D9 with C4: a value of a union stands where a union is required only, since a union is one of its
   cases only after a `match`: a `byte | short` is no `int`, and a union of two data types derived
   from one base no value of the base; each is `type-mismatch`.

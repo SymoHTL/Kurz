@@ -252,8 +252,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// F16: the names of the variables at the outermost level of the top-level code, which live for the whole program; a loop
-    /// variable, a variable inside a block of the top-level code, the name an arm binds and a parameter of a lambda there reserve
-    /// no name, since no function can mean them.
+    /// variable, a variable inside a block of the top-level code and a parameter of a lambda there reserve no name, since no
+    /// function can mean them (the owner, 2026-10-21). That the name an arm binds reserves none either, and that the lambda is
+    /// one of the top-level code, so that a lambda's parameter inside a top-level function stays a declaration there, is the
+    /// record's reading.
     /// </summary>
     private void CollectReserved(IEnumerable<Statement> statements)
     {
@@ -381,9 +383,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// D6: a data type that is its own base, directly or through others, is <c>base-cycle</c> at the base that closes the cycle. That
-    /// base is the base of the declaration that, read from the top of the file, completes the cycle, the member declared last; a type
-    /// that names itself as its base is a cycle of one, a cycle is one error, and a type that only derives from a cycle gets none (the
-    /// record's reading). Each closing member is kept with its cycle, from itself round to itself.
+    /// base is the base of the declaration that completes the cycle where the files of a program are read in the ordinal order of their
+    /// paths, each from its top (the owner, 2026-10-21): in the one file the checker reads, the member declared last. A type that names
+    /// itself as its base is a cycle of one, a cycle is one error, and a type that only derives from a cycle gets none (the record's
+    /// reading). Each closing member is kept with its cycle, from itself round to itself.
     /// </summary>
     private void FindBaseCycles()
     {
@@ -1576,9 +1579,10 @@ public sealed partial class Checker
     /// <summary>
     /// O2, O3, O9: the cases a call can leave the calling function with have to be listed in its return type; the top level
     /// has none. A case is listed as a case after the first one, the success (O3 with O1), so a return type that is no union
-    /// lists none; a case after the first lists a case that is its type, or one that widens into it or derives from it (the
-    /// record's reading), and a case that would go to two cases after the first is listed by none, as a
-    /// value that would go to two cases stands nowhere (O3 with T8 and D6, the owner, 2026-10-21; <see cref="Types.CasesFor"/>).
+    /// lists none; a case after the first lists a case that is its type, and one that widens into it or derives from it (the
+    /// record's reading); a case that is one of the cases after the first goes there, and no other fit is looked for, and a
+    /// case that would otherwise go to two cases after the first is listed by none, as a value that would go to two cases
+    /// stands nowhere (O3 with T8 and D6, the owner, 2026-10-21; <see cref="Types.CasesFor"/>).
     /// </summary>
     private void Propagate(IEnumerable<KurzType> cases, int line)
     {
@@ -1603,6 +1607,12 @@ public sealed partial class Checker
             if (goes.Count > 1)
             {
                 Report(ErrorIds.UnlistedCase, line, $"the case `{first}` can leave this function and would go to {goes.Count} cases of its return type after the success, {string.Join(" and ", goes.Select(g => $"`{g}`"))}: a `match` on the call picks one (O3, T8, D6)");
+                return;
+            }
+
+            if (returnType is null)
+            {
+                Report(ErrorIds.UnlistedCase, line, $"the case `{first}` can leave this lambda, whose result is inferred from its value and lists no case (O3, F7)");
                 return;
             }
 

@@ -1,0 +1,14 @@
+// expect: output
+// | user a
+// rules: D9, O1
+
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+Admin | NotFound a = Admin("a", 2)
+User | NotFound u = a
+match u {
+    User x => print("user {x.Name}")
+    NotFound => print("none")
+}

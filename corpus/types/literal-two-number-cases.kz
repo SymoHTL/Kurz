@@ -1,0 +1,8 @@
+// expect: error type-mismatch at 4
+// rules: T8, L17, D9
+
+byte | short x = 5
+match x {
+    byte b => print("byte {b}")
+    short s => print("short {s}")
+}

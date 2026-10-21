@@ -1123,12 +1123,29 @@ public sealed partial class Checker
         Report(id, pre.Argument.Line, $"{argumentType} where a `{parameter}` is required (T1)");
     }
 
-    /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>.</summary>
+    /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>, each default after its parameter (<c>int b = 0</c>).</summary>
     private static string Signature(FunctionSymbol f)
     {
         var typeParameters = f.TypeParameters.Count == 0 ? "" : $"<{string.Join(", ", f.TypeParameters.Select(p => p.Name))}>";
-        return $"{f.ReturnType} {f.Name}{typeParameters}({string.Join(", ", f.Parameters.Select(p => $"{(p.Mut ? "mut " : "")}{p.Type} {p.Name}"))})";
+        var defaults = f.Declaration?.Parameters.Select(p => p.Default).ToList() ?? [];
+        return $"{f.ReturnType} {f.Name}{typeParameters}({string.Join(", ", f.Parameters.Select((p, i) => $"{(p.Mut ? "mut " : "")}{p.Type} {p.Name}{(defaults.ElementAtOrDefault(i) is { } d ? " = " + DefaultText(d) : "")}"))})";
     }
+
+    /// <summary>A default value for a message, from its tree: a literal, a name and the operators of a constant expression over them (F12); <c>...</c> for another form.</summary>
+    private static string DefaultText(Expression e) => e switch
+    {
+        IntegerLiteral i => (i.Value.Radix == 16 ? "0x" : i.Value.Radix == 2 ? "0b" : "") + i.Value.Digits + i.Value.Suffix,
+        RealLiteral r => r.Value.Text + r.Value.Suffix,
+        UnitLiteral u => u.Value.Number + u.Value.Unit,
+        BoolLiteral b => b.Value ? "true" : "false",
+        CharLiteral c => System.Text.Rune.IsValid(c.CodePoint) ? $"'{new System.Text.Rune(c.CodePoint)}'" : "...",
+        StringLiteral { IsPlain: true } s => $"\"{string.Concat(s.Segments.Cast<TextSegment>().Select(t => t.Text))}\"",
+        NameExpression n => n.Name,
+        ParenthesizedExpression p => $"({DefaultText(p.Inner)})",
+        UnaryExpression u => Operator(u.Operator) + DefaultText(u.Operand),
+        BinaryExpression b => $"{DefaultText(b.Left)} {Operator(b.Operator)} {DefaultText(b.Right)}",
+        _ => "...",
+    };
 
     /// <summary>F13: why a function does not fit a call, as far as the checker knows it: its binding error (D11, T19), type arguments it cannot infer (T27), or its first argument that does not fit.</summary>
     private static string WhyNot(Candidate candidate, List<Pre> pres)

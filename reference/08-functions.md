@@ -445,8 +445,10 @@ parameter of a lambda there do not, since no function can mean them (the owner, 
 every variable declared outside a function reserving its name at any depth of the top-level code,
 the reading this rule took on 2026-10-09, and against every name of the top-level code reserving it,
 the parameter of a lambda there as well; closest to Rust, where an inner `fn` sees no local of the
-function around it; the cost is that the reading assumed on 2026-10-09, under which a variable at
-any depth of the top-level code reserves its name, no longer holds). That the lambda is one of the
+function around it; the cost is that a local of a top-level function may share its name with a loop
+variable, a variable of a block or a parameter of a lambda of the top-level code, so that a reader
+may take one for the other, and that the compiler tells the outermost level of the top-level code
+from the blocks inside it). That the lambda is one of the
 top-level code, so that inside a top-level function a lambda's parameter stays such a declaration, is
 *(assumed: the answer's text named a lambda's parameter without saying where the lambda stands)*. A name that an
 arm of a `match` of the top-level code binds reserves nothing either, as a variable of a block there
@@ -504,7 +506,7 @@ Bump()
 print(count)
 ```
 
-Case: [functions/top-level-block-reserves-nothing.kz](../corpus/functions/top-level-block-reserves-nothing.kz)
+Case: [functions/top-level-loop-reserves-nothing.kz](../corpus/functions/top-level-loop-reserves-nothing.kz)
 ```kurz
 int Twice(int n) {
     i = n * 2
@@ -514,10 +516,22 @@ int Twice(int n) {
 for i in 1..2 {
     print(Twice(i))
 }
+```
+
+Case: [functions/top-level-block-reserves-nothing.kz](../corpus/functions/top-level-block-reserves-nothing.kz)
+```kurz
+int Twice(int n) => n * 2
+
 if true {
     n = 3
     print(Twice(n))
 }
+```
+
+Case: [functions/top-level-lambda-reserves-nothing.kz](../corpus/functions/top-level-lambda-reserves-nothing.kz)
+```kurz
+int Twice(int n) => n * 2
+
 f = (int n) => Twice(n)
 print(f(4))
 ```
