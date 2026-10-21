@@ -8,9 +8,10 @@ namespace Kurz.Compiler.Tests;
 
 /// <summary>
 /// Every file of the corpus through the lexer, the parser and the checker. The front end's theory: a
-/// case that expects an error the front end reports (<c>syntax</c>, <c>semicolon</c>,
-/// <c>reserved-word</c>, <c>braces-required</c>, <c>unknown-escape</c>, <c>block-indentation</c>) gets
-/// exactly that error at that line; every other case gets none from the front end. The checker's
+/// case that expects an error the front end reports (<c>semicolon</c>, <c>reserved-word</c>,
+/// <c>braces-required</c>, <c>unknown-escape</c>, <c>block-indentation</c>, and <c>syntax</c> where the
+/// front end reports an error on the case) gets exactly that error at that line; every other case gets
+/// none from the front end. The checker's
 /// theory, on every case the front end read clean: a case the checker reads in full gets exactly the
 /// error its header expects, or none; a case on which the checker says <c>not supported</c> gets no
 /// error from it, and cites a rule the checker does not read, or stands in the list of cases that
@@ -36,9 +37,6 @@ public sealed class CorpusTests
     [
         ErrorIds.Syntax, ErrorIds.Semicolon, ErrorIds.ReservedWord, ErrorIds.BracesRequired, ErrorIds.UnknownEscape, ErrorIds.BlockIndentation,
     ];
-
-    /// <summary>E4 names shapes that only the type checker can tell: a <c>match</c> on a set of flags (D13). The parser reads them as sound.</summary>
-    private static readonly HashSet<string> CheckerSyntax = ["data/flags-match.kz"];
 
     /// <summary>
     /// The rules the checker does not read: those of the null chapter, the class chapter and the
@@ -116,8 +114,19 @@ public sealed class CorpusTests
         return (header!, tree, diagnostics);
     }
 
-    private static bool ExpectsFrontEndError(CaseHeader header, string relativePath) =>
-        header.Expectation == Expectation.Error && FrontEndIds.Contains(header.ErrorId!) && !CheckerSyntax.Contains(relativePath);
+    /// <summary>
+    /// Whether the front end is the side that raises the error a case expects. Five of its ids are the front end's
+    /// alone; <c>syntax</c> is raised by both sides, by the front end for text it cannot read and by the checker
+    /// for the shapes E4 leaves to it, which the parser reads as sound (the readings in <c>compiler/README.md</c>:
+    /// a value on its own as a statement, a <c>void</c> call where a value stands, D13's <c>match</c> on a set of
+    /// flags and the rest of that list). So a case that expects <c>syntax</c> is the front end's when the front end
+    /// reports an error on it, and the checker's when the front end reads it clean: the checker's theory then holds
+    /// it to its id and line, or, where the checker does not read the construct, to <c>not supported</c> and no
+    /// error, as for <c>data/flags-match.kz</c>, whose flags type it does not read and whose expectation no test
+    /// holds; no floor counts such a case.
+    /// </summary>
+    private static bool ExpectsFrontEndError(CaseHeader header, DiagnosticBag frontEnd) =>
+        header.Expectation == Expectation.Error && FrontEndIds.Contains(header.ErrorId!) && (header.ErrorId != ErrorIds.Syntax || frontEnd.HasErrors);
 
     [Fact]
     public void The_corpus_holds_at_least_the_floor_of_cases()
@@ -132,7 +141,7 @@ public sealed class CorpusTests
         var (header, tree, diagnostics) = ReadCase(relativePath);
         var found = diagnostics.Items.Select(d => (d.Id, d.Line)).ToList();
         Assert.DoesNotContain(diagnostics.Items, d => !d.IsError);
-        if (ExpectsFrontEndError(header, relativePath))
+        if (ExpectsFrontEndError(header, diagnostics))
         {
             Assert.Equal([(header.ErrorId!, header.ErrorLine)], found);
         }
@@ -150,7 +159,7 @@ public sealed class CorpusTests
         var (header, tree, frontEnd) = ReadCase(relativePath);
         if (frontEnd.HasErrors)
         {
-            Assert.True(ExpectsFrontEndError(header, relativePath), "the theory above holds this case"); // the checker reads a tree the parser read clean
+            Assert.True(ExpectsFrontEndError(header, frontEnd), "the theory above holds this case"); // the checker reads a tree the parser read clean
             return;
         }
 
@@ -181,7 +190,11 @@ public sealed class CorpusTests
     public void At_least_the_front_end_error_floor_of_cases_expect_an_error_of_the_front_end()
     {
         // the positive control of the front end's theory: its error branch runs for at least this many cases, read as the theory reads them
-        var found = CaseFiles().Count(relativePath => ExpectsFrontEndError(ReadCase(relativePath).Header, relativePath));
+        var found = CaseFiles().Count(relativePath =>
+        {
+            var (header, _, frontEnd) = ReadCase(relativePath);
+            return ExpectsFrontEndError(header, frontEnd);
+        });
         Assert.True(found >= FrontEndErrorFloor, $"only {found} cases expect an error of the front end");
     }
 

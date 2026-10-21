@@ -260,6 +260,7 @@ public static class Types
     /// <summary>
     /// A union of these cases, flat and without a case listed twice (D9); the one case alone when
     /// only one is left. The order is the order given, so that the first case stays the success case (O1).
+    /// A union with the error type among its cases is the error type (E1).
     /// </summary>
     public static KurzType Union(IEnumerable<KurzType> cases)
     {
@@ -276,19 +277,25 @@ public static class Types
             }
         }
 
-        return flat.Count == 1 ? flat[0] : new UnionType(flat);
+        return flat.Any(f => f is ErrorType) ? Error : flat.Count == 1 ? flat[0] : new UnionType(flat);
     }
 
     /// <summary>
     /// Whether a value of <paramref name="from"/> stands where <paramref name="to"/> is required
-    /// without a word: the same type; an integer widened within its signedness or across it where C#
-    /// widens (T8, T23); an integer into a floating-point type or <c>decimal</c> (T23); <c>float</c>
-    /// into <c>double</c>; the narrow time type into its wide one (T29); a derived <c>data</c> type
-    /// where its base is required (D6); a case where its union is required (D9); a union whose every
-    /// case the required union holds. A value of the error type stands anywhere, and anything stands
-    /// where the error type is required (E1: one defect, one error). No type has the error type inside
-    /// it: a list, data or function type with an error in a part is the error type as a whole, as
-    /// <see cref="Checker"/> resolves and infers them, so the test on the whole is the whole test.
+    /// without a word: the same type; an integer into a wider one of its signedness (T8); an unsigned
+    /// integer into a signed one that holds all its values, <c>byte</c> into <c>short</c>, <c>int</c>
+    /// and <c>long</c>, <c>ushort</c> into <c>int</c> and <c>long</c>, <c>uint</c> into <c>long</c>
+    /// (T23); every integer into <c>float</c>, <c>double</c> or <c>decimal</c>, rounded where the type
+    /// does not hold the value (T23); <c>float</c> into <c>double</c>; the narrow time type into its
+    /// wide one (T29); a derived <c>data</c> type where its base is required (D6); a case where its
+    /// union is required (D9), and a value that widens into a case (the reading on T8 with D9 in
+    /// <c>compiler/README.md</c>); a union whose every case the required union holds. A union stands
+    /// only where a union is required, since it is one of its cases only after a <c>match</c>
+    /// (D9). A value of the error type stands anywhere, and anything stands where the error type is
+    /// required (E1: one defect, one error). No type has the error type inside it: a list, data,
+    /// union or function type with an error in a part is the error type as a whole, as
+    /// <see cref="Checker"/> resolves them and <see cref="Substitute"/> and <see cref="Union"/> build
+    /// them, so the test on the whole is the whole test.
     /// </summary>
     public static bool Assignable(KurzType from, KurzType to)
     {
@@ -301,11 +308,13 @@ public static class Types
 
         if (from is UnionType fu)
         {
-            return fu.Cases.All(c => Assignable(c, to));
+            return to is UnionType && fu.Cases.All(c => Assignable(c, to));
         }
 
         if (to is UnionType tu)
         {
+            // T8 with D9: a case, or a value that widens into one; which case a value becomes that widens into two, `byte` into
+            // `short | int`, no rule says, a question for a design round (compiler/README.md)
             return tu.Cases.Any(c => Assignable(from, c));
         }
 
@@ -389,11 +398,13 @@ public static class Types
     /// <summary>
     /// The common type of two integer operands under <c>+ - * / %</c>, the comparisons and
     /// <c>&amp; | ^</c> (T9, T18, T28): null for <c>sign-mix</c>. T28: two operands narrower than
-    /// <c>int</c> are promoted to <c>int</c>, whatever their signedness, and a narrow operand beside a
-    /// <c>uint</c>, a <c>long</c> or a <c>ulong</c> takes that type, so <c>byte + uint</c> is a
-    /// <c>uint</c>; otherwise the type the other operand widens into (T23: <c>uint</c> widens into
-    /// <c>long</c>), and where neither widens into the other (<c>uint</c> beside <c>int</c>,
-    /// <c>ulong</c> beside any signed type) the error (T9).
+    /// <c>int</c> are promoted to <c>int</c>, whatever their signedness; a narrow operand beside a
+    /// <c>long</c> takes that type, and an unsigned narrow one beside a <c>uint</c> or a <c>ulong</c>
+    /// too, so <c>byte + uint</c> is a <c>uint</c>; otherwise the type the other operand widens into
+    /// (T23: <c>uint</c> widens into <c>long</c>), and where neither widens into the other the error
+    /// (T9): <c>uint</c> beside <c>int</c>, <c>ulong</c> beside any signed type, and a signed narrow
+    /// operand beside a <c>uint</c> or a <c>ulong</c>, since T9 judges the operands as written and a
+    /// signed type never becomes unsigned without a word (T23): <c>sbyte + uint</c> is the error.
     /// </summary>
     public static PrimitiveType? CommonInteger(PrimitiveType a, PrimitiveType b)
     {
@@ -447,20 +458,39 @@ public static class Types
         return false;
     }
 
-    /// <summary>Every type parameter of <paramref name="type"/> replaced through <paramref name="map"/>; a parameter the map lacks stays.</summary>
+    /// <summary><paramref name="type"/> with each type parameter <paramref name="map"/> holds put in its place; a parameter the map lacks stays. A type a part of which becomes the error type is the error type (E1).</summary>
     public static KurzType Substitute(KurzType type, IReadOnlyDictionary<TypeParameterSymbol, KurzType> map)
     {
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(map);
-        return type switch
+        switch (type)
         {
-            TypeParameterType p => map.TryGetValue(p.Symbol, out var t) ? t : type,
-            ListType l => new ListType(Substitute(l.Element, map)),
-            DataType d => new DataType(d.Symbol, d.TypeArguments.Select(a => Substitute(a, map)).ToList()),
-            UnionType u => Union(u.Cases.Select(c => Substitute(c, map))),
-            FunctionType f => new FunctionType(f.Parameters.Select(p => Substitute(p, map)).ToList(), Substitute(f.Result, map)),
-            _ => type,
-        };
+            case TypeParameterType p:
+                return map.TryGetValue(p.Symbol, out var t) ? t : type;
+            case ListType l:
+                {
+                    var element = Substitute(l.Element, map);
+                    return element is ErrorType ? Error : new ListType(element);
+                }
+
+            case DataType d:
+                {
+                    var arguments = d.TypeArguments.Select(a => Substitute(a, map)).ToList();
+                    return arguments.Any(a => a is ErrorType) ? Error : new DataType(d.Symbol, arguments);
+                }
+
+            case UnionType u:
+                return Union(u.Cases.Select(c => Substitute(c, map)));
+            case FunctionType f:
+                {
+                    var parameters = f.Parameters.Select(p => Substitute(p, map)).ToList();
+                    var result = Substitute(f.Result, map);
+                    return parameters.Any(p => p is ErrorType) || result is ErrorType ? Error : new FunctionType(parameters, result);
+                }
+
+            default:
+                return type;
+        }
     }
 
     public static bool Mentions(KurzType type, TypeParameterSymbol parameter)

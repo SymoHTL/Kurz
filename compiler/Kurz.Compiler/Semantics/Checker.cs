@@ -26,6 +26,12 @@ public sealed partial class Checker
     private readonly List<DataSymbol> dataDeclared = [];
     private readonly List<DataSymbol> refusedTypes = [];
     private readonly HashSet<string> unsupportedTypes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> unsupportedBases = new(StringComparer.Ordinal);
+    private readonly HashSet<string> unreadData = new(StringComparer.Ordinal);
+    private readonly HashSet<string> unreadFunctions = new(StringComparer.Ordinal);
+    private readonly HashSet<FunctionSymbol> modifiedFunctions = [];
+    private readonly List<FunctionSymbol> unreadOverloads = [];
+    private readonly List<(HashSet<string> Types, HashSet<string> Functions)> nestedNames = [];
     private readonly HashSet<string> reservedTopLevel = new(StringComparer.Ordinal);
     private readonly Dictionary<string, KurzType> topLevel = new(StringComparer.Ordinal);
     private readonly List<VariableSymbol> declared = [];
@@ -155,7 +161,7 @@ public sealed partial class Checker
             }
         }
 
-        CollectNested(program.Statements);
+        RefuseUnreadBases();
         foreach (var symbol in dataDeclared.Concat(refusedTypes))
         {
             ResolveData(symbol, []);
@@ -166,13 +172,14 @@ public sealed partial class Checker
             ResolveSignature(f);
         }
 
+        RefuseModifiedFunctions();
         CheckDuplicateFunctions();
         CheckDefaults();
         CollectReserved(program.Statements);
 
-        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused))
+        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
         {
-            CheckFunctionBody(f);
+            Unread(f, () => CheckFunctionBody(f));
         }
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
@@ -190,57 +197,54 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// The names of the functions and types declared inside a block, at any depth: such a declaration is
-    /// <c>not supported</c> where it stands, and its name is one the checker does not read, so that a use
-    /// of it carries no error of its own (E1).
+    /// F1 with F6: the names of the functions and types a block declares, which the block's statements see while it is
+    /// checked: such a declaration is <c>not supported</c> where it stands, and inside its block its name is one the
+    /// checker does not read, so that a use of it there carries no error of its own (E1); outside its block the name is
+    /// not visible (V10). A function's name is no type's.
     /// </summary>
-    private void CollectNested(IEnumerable<Statement> statements, bool nested = false)
+    private void PushNested(IEnumerable<Statement> statements)
     {
+        var types = new HashSet<string>(StringComparer.Ordinal);
+        var functionNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var s in statements)
         {
             switch (s)
             {
-                case TypeDeclaration t when nested:
-                    unsupportedTypes.Add(t.Name);
+                case TypeDeclaration t:
+                    types.Add(t.Name);
                     break;
                 case FunctionDeclaration f:
-                    if (nested)
-                    {
-                        unsupportedTypes.Add(f.Name);
-                    }
-
-                    if (f.BlockBody is not null)
-                    {
-                        CollectNested(f.BlockBody.Statements, true);
-                    }
-
-                    break;
-                case Block b:
-                    CollectNested(b.Statements, true);
-                    break;
-                case IfStatement i:
-                    CollectNested(i.Then.Statements, true);
-                    if (i.Else is not null)
-                    {
-                        CollectNested([i.Else], true);
-                    }
-
-                    break;
-                case WhileStatement w:
-                    CollectNested(w.Body.Statements, true);
-                    break;
-                case ForInStatement f:
-                    CollectNested(f.Body.Statements, true);
-                    break;
-                case MatchStatement m:
-                    CollectNested(m.Arms.Select(a => a.Body), true);
-                    break;
-                case RawBlock r:
-                    CollectNested(r.Body.Statements, true);
+                    functionNames.Add(f.Name);
                     break;
                 default:
                     break;
             }
+        }
+
+        nestedNames.Add((types, functionNames));
+    }
+
+    private void PopNested() => nestedNames.RemoveAt(nestedNames.Count - 1);
+
+    /// <summary>A type's name the checker does not read: a type of chapter 7, an enum, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
+    private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
+
+    /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
+    private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
+
+    /// <summary>Runs <paramref name="check"/>, with its diagnostics dropped where <paramref name="f"/> is a function the checker does not read (K7, M6).</summary>
+    private void Unread(FunctionSymbol f, Action check)
+    {
+        var unread = modifiedFunctions.Contains(f);
+        if (unread)
+        {
+            Push();
+        }
+
+        check();
+        if (unread)
+        {
+            Pop(commit: false);
         }
     }
 
@@ -322,13 +326,20 @@ public sealed partial class Checker
             };
             NotSupported(d.Line, what);
             unsupportedTypes.Add(d.Name);
+            unsupportedBases[d.Name] = d.Kind switch
+            {
+                TypeDeclarationKind.Class => "a class a data type names (chapter 7)",
+                TypeDeclarationKind.Interface => "an interface a data type names (K10)",
+                TypeDeclarationKind.Enum => "an enum a data type names (D12)",
+                _ => "a flags type a data type names (D13)",
+            };
             return;
         }
 
         var symbol = new DataSymbol(d.Name, d);
         foreach (var p in d.TypeParameters)
         {
-            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line));
+            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
         if (clash)
@@ -340,6 +351,55 @@ public sealed partial class Checker
         dataTypes[d.Name] = symbol;
         dataDeclared.Add(symbol);
     }
+
+    /// <summary>
+    /// Chapter 7, K10, K17, T19: a data type whose bases hold the explicit form of inheritance, a generic data type, or a class,
+    /// an interface, an enum or a flags type is not read: that base is <c>not supported</c> at its line, and the type,
+    /// with every data type whose base it is, joins the types the checker does not read, so that a use of any of them
+    /// has the error type and carries nothing more (E1); the type's own fields would lack the base's (D7).
+    /// </summary>
+    private void RefuseUnreadBases()
+    {
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var symbol in dataDeclared.ToList())
+            {
+                foreach (var b in symbol.Declaration.Bases)
+                {
+                    var construct = UnreadBase(b);
+                    if (construct is null)
+                    {
+                        continue;
+                    }
+
+                    if (construct.Length > 0)
+                    {
+                        NotSupported(b.Line, construct);
+                    }
+
+                    dataTypes.Remove(symbol.Name);
+                    dataDeclared.Remove(symbol);
+                    unsupportedTypes.Add(symbol.Name);
+                    unreadData.Add(symbol.Name);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        while (changed);
+    }
+
+    /// <summary>The construct a base names that the checker does not read; an empty text for a data type it does not read, whose own base carried the diagnostic; null for a base it reads.</summary>
+    private string? UnreadBase(BaseSpecifier b) => b switch
+    {
+        { Arguments: not null } => "the explicit form of inheritance (K17)",
+        { Type: NamedType n } when dataTypes.TryGetValue(n.Name, out var data) && data.IsGeneric => "a generic data type as a base (T19)",
+        { Type: NamedType n } when unreadData.Contains(n.Name) => "",
+        { Type: NamedType n } when unsupportedBases.TryGetValue(n.Name, out var construct) => construct,
+        _ => null,
+    };
 
     /// <summary>Resolves the base (D6), then the fields, the base's first (D7); refuses what a <c>data</c> type does not have. Each type once, whatever the outcome.</summary>
     private void ResolveData(DataSymbol symbol, List<DataSymbol> chain)
@@ -360,54 +420,57 @@ public sealed partial class Checker
             }
         }
 
-        if (d.Bases.Count > 0)
+        // D6 gives a data type one base, the data type among the bases wherever it stands; a second one is text no rule gives a
+        // meaning (E4); what the checker does not read among them left the type unread before (RefuseUnreadBases), unless the
+        // type is a redeclared one, whose bases report it here
+        DataSymbol? taken = null;
+        foreach (var b in d.Bases)
         {
-            var b = d.Bases[0];
-            if (b.Arguments is not null)
+            if (UnreadBase(b) is { } construct)
             {
-                NotSupported(b.Line, "the explicit form of inheritance (K17)"); // the base is not resolved: the one diagnostic of the construct (E1)
+                if (construct.Length > 0)
+                {
+                    NotSupported(b.Line, construct);
+                }
+
+                continue;
             }
-            else if (b.Type is NamedType named && dataTypes.TryGetValue(named.Name, out var baseSymbol))
+
+            if (b.Type is not NamedType named || !dataTypes.TryGetValue(named.Name, out var baseSymbol))
             {
-                if (named.TypeArguments.Count > 0 || baseSymbol.IsGeneric)
-                {
-                    NotSupported(b.Line, "a generic data type as a base (D6, T19)");
-                }
-                else if (chain.Contains(baseSymbol) || ReferenceEquals(baseSymbol, symbol))
-                {
-                    Report(ErrorIds.TypeMismatch, b.Line, $"`{named.Name}` cannot be its own base (D6)"); // no base is set, so the walk up the bases ends
-                }
-                else
-                {
-                    chain.Add(symbol);
-                    ResolveData(baseSymbol, chain);
-                    chain.RemoveAt(chain.Count - 1);
-                    typeContext = symbol.TypeParameters;
-                    symbol.Base = baseSymbol;
-                    symbol.Fields.AddRange(baseSymbol.Fields);
-                }
-            }
-            else
-            {
-                var baseType = Resolve(b.Type);
+                var baseType = Resolve(b.Type); // a name that is no type is `unknown-name` there (V10)
                 if (!Types.IsError(baseType))
                 {
                     Report(ErrorIds.TypeMismatch, b.Line, $"the base of a data type is a data type (D6), not `{baseType}`");
                 }
-            }
-        }
 
-        for (var i = 1; i < d.Bases.Count; i++)
-        {
-            // D6 gives a data type one base; a second data type in the list is text no rule gives a meaning (E4); an interface there is K10's
-            var b = d.Bases[i];
-            if (b.Type is NamedType named && dataTypes.ContainsKey(named.Name))
+                continue;
+            }
+
+            if (taken is not null)
             {
                 Report(ErrorIds.Syntax, b.Line, $"a data type has one base, and `{named.Name}` is a second one (D6)");
+                continue;
+            }
+
+            taken = baseSymbol;
+            if (named.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, b.Line, $"`{named.Name}` takes no type arguments (T19; E4 for another count)"); // the base is taken all the same, so that its fields carry no second error (E1)
+            }
+
+            if (chain.Contains(baseSymbol) || ReferenceEquals(baseSymbol, symbol))
+            {
+                Report(ErrorIds.TypeMismatch, b.Line, $"`{named.Name}` cannot be its own base (D6)"); // the reading in compiler/README.md; no base is set, so the walk up the bases ends
             }
             else
             {
-                NotSupported(b.Line, "an interface a data type names (K10)");
+                chain.Add(symbol);
+                ResolveData(baseSymbol, chain);
+                chain.RemoveAt(chain.Count - 1);
+                typeContext = symbol.TypeParameters;
+                symbol.Base = baseSymbol;
+                symbol.Fields.AddRange(baseSymbol.Fields);
             }
         }
 
@@ -449,6 +512,8 @@ public sealed partial class Checker
 
         if (d.Members is { Count: > 0 } members)
         {
+            // its members are not declared: a member that is no field, of a value of the type or of one derived from it, or after the
+            // type's name, is `not supported` where it is used (MemberOf, CheckMember), so nothing more is reported (E1)
             NotSupported(members[0].Line, "the body of a data type (D16)");
         }
 
@@ -542,7 +607,7 @@ public sealed partial class Checker
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
-        if (unsupportedTypes.Contains(n.Name))
+        if (IsUnreadType(n.Name))
         {
             return Types.Error;
         }
@@ -578,7 +643,7 @@ public sealed partial class Checker
         var symbol = new FunctionSymbol(d.Name, d);
         foreach (var p in d.TypeParameters)
         {
-            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line));
+            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
         if (dataTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name))
@@ -614,8 +679,15 @@ public sealed partial class Checker
         if (unsupportedModifiers != Modifiers.None)
         {
             NotSupported(d.Line, $"the modifier `{unsupportedModifiers.ToString().ToLowerInvariant()}` of a method (K7, M6)");
+            modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped (E1)
         }
 
+        Unread(symbol, () => ResolveTypes(symbol, d));
+        typeContext = null;
+    }
+
+    private void ResolveTypes(FunctionSymbol symbol, FunctionDeclaration d)
+    {
         symbol.ReturnType = Resolve(d.ReturnType);
         foreach (var p in d.Parameters)
         {
@@ -637,8 +709,23 @@ public sealed partial class Checker
 
             symbol.Parameters.Add(new ParameterSymbol(p.Name, type, p.Mut, p.Default is not null, p.Line));
         }
+    }
 
-        typeContext = null;
+    /// <summary>
+    /// K7, M6: a function of the file with a modifier of a method is not read, and neither is a call of its name, whichever
+    /// function of the name the call would pick: the modifier's meaning is not applied, so the call could carry an error
+    /// the program does not have (E1). The other functions of the name are checked all the same.
+    /// </summary>
+    private void RefuseModifiedFunctions()
+    {
+        foreach (var name in modifiedFunctions.Select(f => f.Name).Distinct(StringComparer.Ordinal).ToList())
+        {
+            if (functions.Remove(name, out var list))
+            {
+                unreadOverloads.AddRange(list);
+                unreadFunctions.Add(name);
+            }
+        }
     }
 
     /// <summary>
@@ -690,14 +777,14 @@ public sealed partial class Checker
     /// <summary>F12, D11: a default value is a constant expression that fits its parameter, checked with no variable in sight.</summary>
     private void CheckDefaults()
     {
-        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused))
+        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
         {
             frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = f.Line, TypeParameters = f.TypeParameters };
             foreach (var (p, symbol) in f.Declaration!.Parameters.Zip(f.Parameters))
             {
                 if (p.Default is not null)
                 {
-                    CheckDefault(p.Default, symbol.Type, p.Line);
+                    Unread(f, () => CheckDefault(p.Default, symbol.Type, p.Line));
                 }
             }
         }
@@ -853,7 +940,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || unsupportedTypes.Contains(name) || IsBuiltInName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || IsUnreadName(name) || IsBuiltInName(name);
 
     /// <summary>The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9).</summary>
     private static bool IsBuiltInName(string name) => name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map";
@@ -924,6 +1011,7 @@ public sealed partial class Checker
     private Flow CheckBlock(Block block)
     {
         PushScope();
+        PushNested(block.Statements);
         blockDepth++;
         var flow = Flow.Completes;
         foreach (var s in block.Statements)
@@ -935,6 +1023,7 @@ public sealed partial class Checker
         }
 
         blockDepth--;
+        PopNested();
         PopScope();
         return flow;
     }
@@ -1030,6 +1119,9 @@ public sealed partial class Checker
                 if (blockDepth > 0)
                 {
                     NotSupported(f.Line, "a function declared inside a block (F1, F6)"); // the top level's are declared in the first passes
+                    Push();
+                    ReadNestedFunction(f); // what stands inside is read with its diagnostics dropped, so that the variables it reads count as used (E1)
+                    Pop(commit: false);
                 }
 
                 return Flow.Completes;
@@ -1037,17 +1129,79 @@ public sealed partial class Checker
                 if (blockDepth > 0)
                 {
                     NotSupported(t.Line, "a type declared inside a block (D1, F6)");
+                    Push();
+                    ReadNestedType(t);
+                    Pop(commit: false);
                 }
 
                 return Flow.Completes;
             case FieldDeclaration f:
-                Report(ErrorIds.Syntax, f.Line, "a field stands in a type body (K7)");
+                // the parser reads a field and a constructor in a type body only (K7, K14), whose members the checker does not read (D16, chapter 7)
+                NotSupported(f.Line, "a field of a type body (K7)");
                 return Flow.Completes;
             case ConstructorDeclaration c:
-                Report(ErrorIds.Syntax, c.Line, "a constructor stands in a class body (K14)");
+                NotSupported(c.Line, "a constructor of a type body (K14)");
                 return Flow.Completes;
             default:
                 throw new InvalidOperationException(statement.GetType().Name);
+        }
+    }
+
+    /// <summary>F1 with F6: the body of a function declared inside a block, read as a lambda's is, with its parameters error-typed, for the variables around it that it reads.</summary>
+    private void ReadNestedFunction(FunctionDeclaration f)
+    {
+        var outer = frame;
+        frame = new Frame
+        {
+            IsLambda = true,
+            Outer = outer,
+            CapturedScope = outer.Scope,
+            ReturnType = Types.Error,
+            Line = f.Line,
+            TypeParameters = [.. f.TypeParameters.Select(p => new TypeParameterSymbol(p.Name, p.Line)), .. outer.TypeParameters],
+            Reserved = outer.Reserved,
+        };
+        foreach (var p in f.Parameters)
+        {
+            frame.Scope.Variables[p.Name] = new VariableSymbol(p.Name, Types.Error, p.Mut, VariableKind.Parameter, p.Line);
+        }
+
+        if (f.ExpressionBody is not null)
+        {
+            CheckExpression(f.ExpressionBody, null);
+        }
+        else if (f.BlockBody is not null)
+        {
+            CheckBlock(f.BlockBody);
+        }
+
+        frame = outer;
+    }
+
+    /// <summary>F1 with F6: the defaults, field values and methods of a type declared inside a block, read for the variables around it that they read.</summary>
+    private void ReadNestedType(TypeDeclaration t)
+    {
+        foreach (var p in t.PrimaryConstructor ?? [])
+        {
+            if (p.Default is not null)
+            {
+                CheckExpression(p.Default, null);
+            }
+        }
+
+        foreach (var member in t.Members ?? [])
+        {
+            switch (member)
+            {
+                case FunctionDeclaration f:
+                    ReadNestedFunction(f);
+                    break;
+                case FieldDeclaration { Value: not null } field:
+                    CheckExpression(field.Value, null);
+                    break;
+                default:
+                    break;
+            }
         }
     }
 
@@ -1241,30 +1395,23 @@ public sealed partial class Checker
                 break;
             }
 
-            if (current is DataType d)
+            if (current is DataType d && d.Symbol.Field(m.Member) is { } field)
             {
-                var field = d.Symbol.Field(m.Member);
-                if (field is null)
-                {
-                    current = MemberOf(current, m.Member, m.Line).Type; // reports what is wrong with the member
-                    last = null;
-                    continue;
-                }
-
                 last = field;
                 current = SubstituteData(d, field.Type);
+                continue;
             }
-            else
-            {
-                var member = MemberOf(current, m.Member, m.Line);
-                if (!member.IsError)
-                {
-                    Report(ErrorIds.AssignImmutable, m.Line, $"`{m.Member}` is no field of a data value and cannot be assigned (M4)");
-                }
 
-                current = Types.Error;
-                last = null;
+            // a member that is no field of a data value, of a data value or of any other: MemberOf reports a member the type does not have,
+            // and one it has, a list's `Count` (M9), is assigned nowhere (M4)
+            var member = MemberOf(current, m.Member, m.Line);
+            if (!member.IsError)
+            {
+                Report(ErrorIds.AssignImmutable, m.Line, $"`{m.Member}` is no field of a data value and cannot be assigned (M4)");
             }
+
+            current = Types.Error;
+            last = null;
         }
 
         var value = CheckExpression(a.Value, Types.IsError(current) ? null : current, keepCases: current is UnionType);
@@ -1361,7 +1508,9 @@ public sealed partial class Checker
         var expected = frame.ReturnType;
         if (expected is null)
         {
-            // a lambda whose result is inferred from its first return (F7)
+            // a lambda whose result is inferred from its first return (F7); O4 keeps a call's cases only as the subject of a match and in a
+            // written union type, so a call returned here unwraps (O2), and the result inferred from its value lists no case (O3): the reading
+            // in compiler/README.md
             if (r.Value is null)
             {
                 frame.ReturnType = Types.Void;
@@ -1416,7 +1565,12 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>O2, O3, O9: the cases a call can leave the calling function with have to be listed in its return type; the top level has none.</summary>
+    /// <summary>
+    /// O2, O3, O9: the cases a call can leave the calling function with have to be listed in its return type; the top level
+    /// has none. A return type that is no union lists the one type it is, so a case that is that type, or widens into it,
+    /// is listed and leaves as the function's result (the reading in <c>compiler/README.md</c>: O3 asks that the case be
+    /// listed; whether it may leave as the success of the calling function, O1, is a question for a design round).
+    /// </summary>
     private void Propagate(IEnumerable<KurzType> cases, int line)
     {
         var list = cases.ToList();

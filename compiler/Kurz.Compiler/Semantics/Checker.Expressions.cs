@@ -310,20 +310,29 @@ public sealed partial class Checker
     /// <summary>A2 to A15: whether a value of the type has a text for <c>print</c> and an interpolation. The error type has one, so that nothing more is reported.</summary>
     private static bool HasText(KurzType type) => HasText(type, []);
 
+    /// <summary>
+    /// A data type has a text when each type argument that a field reaches has one, and its fields have one with its own
+    /// type parameters standing for those arguments. The fields of a type are read on the way down and not again inside
+    /// it, so that a type that holds itself ends, and each use of it is still judged on its own type arguments.
+    /// </summary>
     private static bool HasText(KurzType type, List<DataSymbol> seen) => type switch
     {
         PrimitiveType => true,
         ErrorType => true,
         ListType l => HasText(l.Element, seen),
         UnionType u => u.Cases.All(c => HasText(c, seen)),
-        DataType d => seen.Contains(d.Symbol) || Fields(d, seen),
-        _ => false, // a type parameter without a limit (A10), a function value
+        DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
+        TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
+        _ => false, // a function value; a type parameter of a function, which has no limit the checker reads (A10)
     };
 
-    private static bool Fields(DataType d, List<DataSymbol> seen)
+    private static bool ArgumentsHaveText(DataType d, List<DataSymbol> seen) =>
+        d.Symbol.TypeParameters.Zip(d.TypeArguments).All(pair => !d.Symbol.Fields.Any(f => Types.Mentions(f.Type, pair.First)) || HasText(pair.Second, seen));
+
+    private static bool Fields(DataSymbol symbol, List<DataSymbol> seen)
     {
-        seen.Add(d.Symbol);
-        var result = d.Symbol.Fields.All(f => HasText(SubstituteData(d, f.Type), seen));
+        seen.Add(symbol);
+        var result = symbol.Fields.All(f => HasText(f.Type, seen));
         seen.RemoveAt(seen.Count - 1);
         return result;
     }
@@ -367,7 +376,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (unsupportedTypes.Contains(n.Name))
+        if (IsUnreadName(n.Name))
         {
             return Typed.Error;
         }
@@ -399,13 +408,19 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (unsupportedTypes.Contains(n.Name))
+            if (IsUnreadName(n.Name))
             {
                 return Typed.Error;
             }
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
             {
+                if (HasBody(data))
+                {
+                    NotSupported(m.Line, "a method of a data type (D16)"); // a member its body declares, which the checker does not read
+                    return Typed.Error;
+                }
+
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a type and has no member `{m.Member}` (D1, V10)");
                 return Typed.Error;
             }
@@ -425,7 +440,9 @@ public sealed partial class Checker
     /// The members the reference gives a type: a string's <c>Bytes</c> and <c>Chars</c> (T15), a list's
     /// <c>Count</c> (M9), a data value's fields (D1). A member no rule gives the type is a name that is not
     /// visible here, V10's <c>unknown-name</c> (the reading in <c>compiler/README.md</c>); a member of a
-    /// union is <c>type-mismatch</c>, since a union is one of its cases only after a <c>match</c> (D9).
+    /// union is <c>type-mismatch</c>, since a union is one of its cases only after a <c>match</c> (D9). A
+    /// type parameter has members only through a limit (T19), so a member of one without a limit is
+    /// <c>unknown-name</c>, and of one with a limit, which the checker does not read, <c>not supported</c>.
     /// </summary>
     private Typed MemberOf(KurzType type, string member, int line)
     {
@@ -460,7 +477,7 @@ public sealed partial class Checker
                         return new Typed(SubstituteData(d, field.Type));
                     }
 
-                    if (d.Symbol.Declaration.Members is { Count: > 0 })
+                    if (HasBody(d.Symbol))
                     {
                         NotSupported(line, "a method of a data type (D16)");
                         return Typed.Error;
@@ -472,8 +489,8 @@ public sealed partial class Checker
             case UnionType:
                 Report(ErrorIds.TypeMismatch, line, $"a `{type}` is one of its cases only after a `match` (D9)");
                 return Typed.Error;
-            case TypeParameterType:
-                NotSupported(line, "a member of a type parameter (T19)");
+            case TypeParameterType { Symbol.HasLimit: true }:
+                NotSupported(line, "a member of a type parameter with a limit (T19)");
                 return Typed.Error;
             default:
                 break;
@@ -481,6 +498,20 @@ public sealed partial class Checker
 
         Report(ErrorIds.UnknownName, line, $"a `{type}` has no member `{member}` (V10)");
         return Typed.Error;
+    }
+
+    /// <summary>D16: whether the type or a base of it writes a body, whose members the checker does not read.</summary>
+    private static bool HasBody(DataSymbol symbol)
+    {
+        for (DataSymbol? s = symbol; s is not null; s = s.Base)
+        {
+            if (s.Declaration.Members is { Count: > 0 })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private Typed CheckIndex(IndexExpression i)
@@ -527,7 +558,10 @@ public sealed partial class Checker
             }
         }
 
-        var operand = CheckExpression(u.Operand, u.Operator != TokenKind.Bang && IsLiteralOnly(u.Operand) ? expected : null);
+        // L17: an operand made of literals takes the type the context reaches it with and folds in it, without T28's promotion, which is
+        // for the operand of a run-time operation; so `short s = -(5)` is a `short`, as `short s = -5` is
+        var literal = IsLiteralOnly(u.Operand);
+        var operand = CheckExpression(u.Operand, u.Operator != TokenKind.Bang && literal ? expected : null);
         if (operand.IsError)
         {
             return Typed.Error;
@@ -538,14 +572,15 @@ public sealed partial class Checker
             case TokenKind.Minus:
                 if (Types.IsUnsigned(operand.Type) && !Types.IsNarrow(operand.Type))
                 {
-                    // T9 and T23 give the signedness rules of two operands; whether `-` on a `uint` or a `ulong` is an error or wraps is written nowhere
-                    NotSupported(u.Line, $"`-` on a `{operand.Type}` (T9, T23)");
+                    // T9 and T23 judge two operands; whether `-` on one `uint` or `ulong` value is an error or wraps no rule says. `-5U` and
+                    // `uint u = -1` are no such value: the `-` belongs to the literal (L17)
+                    NotSupported(u.Line, $"`-` on a `{operand.Type}`, which no rule gives a meaning");
                     return Typed.Error;
                 }
 
                 if (Types.IsNumber(operand.Type) || Types.IsDuration(operand.Type))
                 {
-                    var type = Types.IsNarrow(operand.Type) ? Types.Int : (PrimitiveType)operand.Type; // T28: a narrow operand is promoted under every operator
+                    var type = Types.IsNarrow(operand.Type) && !literal ? Types.Int : (PrimitiveType)operand.Type; // T28: a narrow operand is promoted under every operator
                     return Fold(type, u.Line, operand.Constant switch
                     {
                         IntegerConstant c => new IntegerConstant(-c.Value),
@@ -566,7 +601,7 @@ public sealed partial class Checker
             case TokenKind.Tilde:
                 if (Types.IsInteger(operand.Type))
                 {
-                    var type = Types.IsNarrow(operand.Type) ? Types.Int : (PrimitiveType)operand.Type;
+                    var type = Types.IsNarrow(operand.Type) && !literal ? Types.Int : (PrimitiveType)operand.Type;
                     return new Typed(type, operand.Constant is IntegerConstant c ? new IntegerConstant(Types.IsUnsigned(type) ? Types.Range(type).Max - c.Value : -c.Value - 1) : null);
                 }
 
@@ -705,7 +740,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    common = ConstantType(common, left, right); // L17: two literals of one type wrap in that type, `byte b = 200 +% 100` is 44
+                    common = ConstantType(common, b, left, right); // L17: two literals of one type wrap in that type, `byte b = 200 +% 100` is 44
                     if (left.Constant is IntegerConstant l && right.Constant is IntegerConstant r)
                     {
                         var raw = b.Operator switch
@@ -753,7 +788,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    common = ConstantType(common, left, right);
+                    common = ConstantType(common, b, left, right);
                     if (left.Constant is IntegerConstant l && right.Constant is IntegerConstant r)
                     {
                         var value = b.Operator switch
@@ -776,15 +811,16 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    // T28: a narrow left operand is promoted to `int`, and the count is taken modulo 32 for it; two constants fold in the
-                    // literals' type (L17), with the count modulo the promoted width, and the result has to fit the type (T6)
-                    var type = left.Constant is IntegerConstant && right.Constant is IntegerConstant ? (PrimitiveType)left.Type : Types.IsNarrow(left.Type) ? Types.Int : (PrimitiveType)left.Type;
+                    // T22, T28: a narrow left operand is promoted to `int`, so its width is 32 and the count is taken modulo 32; two operands
+                    // made of literals fold in the type they take (L17). A shift is not arithmetic in the sense of T4 to T6: the bits that
+                    // leave the type are dropped at every width, and no fold of one is `constant-overflow`
+                    var type = IsLiteralOnly(b.Left) && IsLiteralOnly(b.Right) ? (PrimitiveType)left.Type : Types.IsNarrow(left.Type) ? Types.Int : (PrimitiveType)left.Type;
                     if (left.Constant is IntegerConstant l && right.Constant is IntegerConstant r)
                     {
                         var width = Types.IsNarrow(type) ? 32 : Types.Width(type);
                         var count = (int)(((r.Value % width) + width) % width);
-                        var value = b.Operator == TokenKind.LessLess ? Wrap(l.Value << count, Types.IsNarrow(type) ? Types.Int : type) : l.Value >> count;
-                        return Fold(type, b.Line, new IntegerConstant(value));
+                        var value = b.Operator == TokenKind.LessLess ? Wrap(l.Value << count, type) : l.Value >> count;
+                        return new Typed(type, new IntegerConstant(value));
                     }
 
                     return new Typed(type);
@@ -839,7 +875,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        type = ConstantType(type, left, right);
+        type = ConstantType(type, b, left, right);
         if (right.Constant is IntegerConstant { Value.IsZero: true } or DecimalConstant { Value: 0m } && b.Operator is TokenKind.Slash or TokenKind.Percent && (Types.IsInteger(type) || Types.IsDecimal(type)))
         {
             Report(ErrorIds.ConstantDivideByZero, b.Line, $"`{op}` by a constant zero can never succeed (T25)");
@@ -903,9 +939,9 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>L17: a constant expression is folded in the type its literals take, without T28's promotion, which is for the operands of a run-time operation.</summary>
-    private static PrimitiveType ConstantType(PrimitiveType promoted, Typed left, Typed right) =>
-        left.Constant is IntegerConstant && right.Constant is IntegerConstant && Types.IsInteger(left.Type) && Types.Same(left.Type, right.Type) ? (PrimitiveType)left.Type : promoted;
+    /// <summary>L17: an expression made of literals is folded in the type its literals take, without T28's promotion, which is for the operands of a run-time operation; a conversion or another constant that is no literal is promoted (T28).</summary>
+    private static PrimitiveType ConstantType(PrimitiveType promoted, BinaryExpression b, Typed left, Typed right) =>
+        IsLiteralOnly(b.Left) && IsLiteralOnly(b.Right) && left.Constant is IntegerConstant && right.Constant is IntegerConstant && Types.IsInteger(left.Type) && Types.Same(left.Type, right.Type) ? (PrimitiveType)left.Type : promoted;
 
     /// <summary>C8 judges <c>reversed-range</c> on ends that are expressions made only of literals; a named constant or a call is left to the run time (<c>reversed-range-at-run-time</c>).</summary>
     private static bool IsLiteralEnd(Expression e) => IsLiteralOnly(e);
@@ -1074,6 +1110,7 @@ public sealed partial class Checker
                 if (!Types.IsError(written) && !Types.Same(written, type))
                 {
                     Report(ErrorIds.TypeMismatch, p.Line, $"the parameter `{p.Name}` is a `{written}` where `{expected}` passes a `{type}` (F11)");
+                    written = Types.Error; // and the lambda with it, so that the call reports nothing more about it (E1)
                 }
 
                 parameterTypes.Add(written);

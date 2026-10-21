@@ -35,12 +35,14 @@ public sealed class VariableSymbol(string name, KurzType type, bool mut, Variabl
     public bool Changed { get; set; }
 }
 
-/// <summary>A type parameter (T19). A limit written on it is <c>not supported</c> and is not read, so none is kept here.</summary>
+/// <summary>A type parameter (T19). A limit written on it is <c>not supported</c> and is not read; whether one is written is kept, since only a limit gives a type parameter members.</summary>
 public sealed class TypeParameterSymbol(string name, int line)
 {
     public string Name { get; } = name;
 
     public int Line { get; } = line;
+
+    public bool HasLimit { get; init; }
 }
 
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>

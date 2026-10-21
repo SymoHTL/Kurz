@@ -171,11 +171,18 @@ public sealed class CheckerTests
     [InlineData("f = float(1e300)\nprint(f)", "f", "float")]
     [InlineData("longduration l = 100000days\nprint(l)", "l", "longduration")]
     [InlineData("x = 2kb\nprint(x)", "x", "int")]
+    [InlineData("short s = -(5)\nprint(s)", "s", "short")]
+    [InlineData("short s = -(1 + 2)\nprint(s)", "s", "short")]
+    [InlineData("byte m = ~0x0F\nprint(m)", "m", "byte")]
+    [InlineData("x = byte(200) + byte(100)\nprint(x)", "x", "int")]
     public void A_written_or_expected_type_reaches_the_literals_of_a_constant_expression(string program, string variable, string type)
     {
         // L17: the whole expression when it is made of literals; an integer literal beside an operand that has a type takes that type, while
         // a fraction literal keeps its own (`b + 1.5` on a byte is a double); a conversion reaches the integer literals inside it and leaves a
-        // fraction or exponent literal its own type, so `float(1e300)` converts a double to a float, which T26 makes an infinity and no error
+        // fraction or exponent literal its own type, so `float(1e300)` converts a double to a float, which T26 makes an infinity and no error;
+        // `-` and `~` before an expression of literals fold in the type the context reached it with, as the binary operators do, since T28's
+        // promotion is for the operands of a run-time operation (L17), so `~0x0F` as a byte is 240; a conversion is no literal, so the sum of
+        // two converted constants is promoted (T28) and `byte(200) + byte(100)` is the `int` 300
         Assert.Equal(type, TypeOf(program, variable));
     }
 
@@ -199,11 +206,14 @@ public sealed class CheckerTests
     [InlineData("print(-5U)", 1)]
     [InlineData("print(decimal(79228162514264337593543950336.0))", 1)]
     [InlineData("duration d = 200000days\nprint(d)", 1)]
+    [InlineData("byte b = -(5)\nprint(b)", 1)]
     public void A_constant_that_does_not_fit_the_type_it_takes_is_constant_overflow(string program, int line)
     {
         // T6, L10, L11, L17, T29: wherever the literal stands, and one operation at a time; `b + 300` on a byte is 300 as a byte, since the
-        // literal takes the other operand's type (L17) before the operation's type is found (T28); `-5U` fits none of the types the suffix
-        // names (L10); the double that equals 2^96 lies one above the range of decimal
+        // literal takes the other operand's type (L17) before the operation's type is found (T28); a `-` written directly before a literal
+        // belongs to the literal (L17), so `uint u = -1` is the literal -1 under `uint` and `-5U` the literal -5, which fits none of the types
+        // the suffix names (L10): neither is the `-` on a `uint` value that no rule gives a meaning (the not-supported theory below); `-(5)`
+        // under a byte folds in the byte its literal takes (L17); the double that equals 2^96 lies one above the range of decimal
         Assert.Equal([(ErrorIds.ConstantOverflow, line)], Errors(program));
     }
 
@@ -271,12 +281,15 @@ public sealed class CheckerTests
     [InlineData("uint u = 1\nint i = 1\nprint(u < i)", 3)]
     [InlineData("byte a = 1\nsbyte b = 1\nprint(a +% b)", 3)]
     [InlineData("int a = 0\nuint n = 3\nfor i in a..<n {\n    print(i)\n}", 3)]
+    [InlineData("sbyte s = 1\nuint u = 1\nprint(s + u)", 3)]
+    [InlineData("short s = 1\nulong u = 1\nprint(s + u)", 3)]
     public void Signed_and_unsigned_do_not_meet(string program, int line)
     {
-        // T9: judged after T28 (two narrow operands are an `int` whatever their signedness; a narrow operand beside a `uint`, a `long` or a
-        // `ulong` takes that type) and T23 (`uint` widens into `long`): what is left is an unsigned type beside a signed one that neither
-        // widens into, `uint` beside `int` and `ulong` beside any signed type; the wrapping operators mix no signedness whatever the widths
-        // (T28); `-` on a `uint` or a `ulong` is not read (the not-supported theory below)
+        // T9: judged on the two operand types as written, before the promotion of T28. Two narrow operands are an `int` whatever their
+        // signedness, an unsigned narrow operand beside a `uint` or a `ulong` takes that type (T28), and T23 widens `uint` into `long`; what is
+        // left is a `uint` or a `ulong` beside a signed type it does not widen into, a narrow signed one included: a signed narrow operand is
+        // never promoted into an unsigned type, so `sbyte + uint` (a `long` in C#) and `short + ulong` are this error. The wrapping operators
+        // mix no signedness whatever the widths (T28); `-` on a `uint` or a `ulong` value is not read (the not-supported theory below)
         Assert.Equal([(ErrorIds.SignMix, line)], Errors(program));
     }
 
@@ -331,11 +344,14 @@ public sealed class CheckerTests
     [Fact]
     public void Bit_operators_take_integers_and_a_shift_count_is_masked_in_a_constant()
     {
-        // T22, T28: the count is taken modulo the width, 32 for a narrow left operand; two literals fold in the type they take (L17), and the
-        // result has to fit it (T6); a narrow left operand that is no constant is promoted to `int`, so `1 << n` as a byte is narrowing
-        Clean("print(6 & 3)\nprint(6 | 3)\nprint(6 ^ 3)\nprint(~6)\nprint(1 << 4)\nprint(-16 >> 2)\nprint(1 << 31)\nprint(1 << 33)\nprint(1 << -1)");
+        // T22, T28: the count is taken modulo the width, 32 for a narrow left operand; two literals fold in the type they take (L17), and a
+        // shift is not arithmetic in the sense of T6: the bits that leave the type are dropped at every width, so `1 << 31` is -2147483648,
+        // `0x40000000 << 2` is 0 and `byte b = 1 << 9` is 0, none of them an error; a conversion is no literal, so `byte(1) << 9` is promoted to
+        // `int` (T28); a narrow left operand that is no constant is promoted to `int`, so `1 << n` as a byte is narrowing
+        Clean("print(6 & 3)\nprint(6 | 3)\nprint(6 ^ 3)\nprint(~6)\nprint(1 << 4)\nprint(-16 >> 2)\nprint(1 << 31)\nprint(1 << 33)\nprint(1 << -1)\nprint(0x40000000 << 2)");
         Clean("byte b = 1 << 7\nprint(b)");
-        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("byte b = 1 << 9\nprint(b)"));
+        Assert.Equal("byte", TypeOf("byte b = 1 << 9\nprint(b)", "b"));
+        Assert.Equal("int", TypeOf("x = byte(1) << 9\nprint(x)", "x"));
         Assert.Equal([(ErrorIds.NarrowingConversion, 2)], Errors("n = 3\nbyte b = 1 << n\nprint(b)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(1.5 & 1)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(true | false)"));
@@ -367,6 +383,10 @@ public sealed class CheckerTests
         Clean("long big = 5\nprint(int(big))\nprint(int(-2.5))\nprint(byte(255))\nduration d = 1s\nlongduration l = d\nprint(duration(l))");
         Assert.Equal("double", TypeOf("x = double(1 / 2)\nprint(x)", "x"));
         Assert.Equal([(ErrorIds.MutAtCall, 2)], Errors("mut x = 1\nprint(int(mut x))"));
+        Assert.Equal([(ErrorIds.MutAtCall, 1)], Errors("print(byte(mut 300))")); // E1: after the call's own error nothing more
+        Assert.Equal([(ErrorIds.MutAtCall, 2)], Errors("f = (int x) => x\nprint(mut f)"));
+        Clean("print(1m / (decimal(123456789.123456789) - 123456789.123457m))"); // T6: the double's value rounded to decimal's precision, not to 15 digits
+        Clean("print(1m / (decimal(0.1) - 0.1m))");
         Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(int(1, 2))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(int(\"5\"))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(int(true))"));
@@ -390,8 +410,10 @@ public sealed class CheckerTests
     public void A_member_a_type_does_not_have_is_unknown_name_at_the_dot()
     {
         // V10 gives `unknown-name` to a name that is not visible at the place it stands; a member no rule gives the type is such a name (the
-        // reading in the README); a member of a union is `type-mismatch`, since a union is one of its cases only after a match (D9), and the
-        // last case names a field one case has, so the id comes from D9 and not from a missing member
+        // reading in the README), and so is a member after the name of a type or a function (`int.Parse`, `print.Count`): the name stands before
+        // a dot, where the parser reads a member access (L12's reading), not where a value stands, so E4's reading for a function's or a type's
+        // name as a value does not apply; a member of a union is `type-mismatch`, since a union is one of its cases only after a match (D9), and
+        // the last case names a field one case has, so the id comes from D9 and not from a missing member
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("s = \"abc\"\nprint(s.Count)"));
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("xs = List<int>()\nprint(xs.Size)"));
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("data User(int Id)\n\nprint(User(1).Name)"));
@@ -429,8 +451,10 @@ public sealed class CheckerTests
     public void A_type_argument_is_inferred_from_the_arguments_or_is_cannot_infer()
     {
         // T27: no widening between arguments; literals take what the others fix; literals alone take the type a constant of them has, so
-        // `Pick(1, 2.5)` is a `double` as `1 + 2.5` is, `Pick(1, 2.5m)` a `decimal` (T23) and `Pick(1.5, 2.5m)` nothing (T18); a wrong count of
-        // type arguments is text no rule gives a meaning (T19, E4); a type argument that does not resolve is one error, whatever the overloads
+        // `Pick(1, 2.5)` is a `double` as `1 + 2.5` is, `Pick(1, 2.5m)` a `decimal` (T23) and `Pick(1.5, 2.5m)` nothing (T18); a count of type
+        // arguments that is neither none nor the count declared, `Pair<int>` for two, is text no rule gives a meaning (T19, E4), where none
+        // written leaves them to be inferred (T19) and is T27's `cannot-infer` when nothing infers them (the test below); a type argument that
+        // does not resolve is one error, whatever the overloads
         Clean("T First<T>(List<T> items) => items[0]\n\nmut xs = List<int>()\nxs.Add(4)\nprint(First(xs))");
         Clean("T Pick<T>(T a, T b) => a\n\nbyte small = 7\nbyte r = Pick(small, 1)\nprint(r)");
         Assert.Equal("int", TypeOf("T Pick<T>(T a, T b) => a\n\nx = Pick(1, 2)\nprint(x)", "x"));
@@ -446,6 +470,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("int<int> x = 1\nprint(x)"));
         Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("T Pick<T>(T a, T b) => a\nT Pick<T>(T a, T b, T c) => a\n\nx = 1\nprint(Pick<Nope>(x, x))"));
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("T Pick<T>(T a, T b) => a\n\nprint(Pick(nope, 1))")); // E1: an argument that has no type fixes nothing and is no second error
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("void Show<T>(T item) {\n    print(item.Name)\n}\n\nShow(1)")); // only a limit gives a type parameter members (T19, A10)
+    }
+
+    [Fact]
+    public void A_callee_without_type_parameters_takes_no_type_argument()
+    {
+        // T19 with E4: `print`, a conversion, a function value and a list's `Add` and `Where` declare no type parameter, so a type argument
+        // written for one is a count the callee does not have, text no rule gives a meaning, as `int<int>` is in a type
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print<int>(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("x = 5\nprint(long<bool>(x))"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("f = (int x) => x\nprint(f<int>(1))"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("mut xs = List<int>()\nxs.Add<string>(1)\nprint(xs.Count)"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("xs = List<int>()\nprint(xs.Where<int>(x => x > 1).Count)"));
     }
 
     [Fact]
@@ -460,10 +497,12 @@ public sealed class CheckerTests
     [Fact]
     public void A_generic_data_type_names_its_type_arguments_or_infers_them()
     {
-        // T17, T19, T27, D1
+        // T17, T19, T27, D1: T19 says a use names the type arguments or leaves them to be inferred (T27), the part of T19 the checker reads
+        // beside the limit of a type parameter, which it does not; a written type that leaves them has no argument to infer them from, so
+        // `Pair p` is T27's `cannot-infer`, as `List()` is, where `Pair<int> p`, a count that is neither, is `syntax` (the test above)
         Clean("data Pair<A, B>(A First, B Second)\n\np = Pair<int, string>(1, \"one\")\nprint(p.First)\nprint(p.Second)");
         Assert.Equal("Pair<int, string>", TypeOf("data Pair<A, B>(A First, B Second)\n\np = Pair(1, \"one\")\nprint(p.First)", "p"));
-        Assert.Equal([(ErrorIds.CannotInfer, 3)], Errors("data Pair<A, B>(A First, B Second)\n\nPair p = Pair<int, string>(1, \"one\")\nprint(p.First)")); // T19: a written type names its arguments; `Pair` alone fixes none, T27's id
+        Assert.Equal([(ErrorIds.CannotInfer, 3)], Errors("data Pair<A, B>(A First, B Second)\n\nPair p = Pair<int, string>(1, \"one\")\nprint(p.First)"));
     }
 
     [Fact]
@@ -477,6 +516,9 @@ public sealed class CheckerTests
         Assert.Equal("Shape", TypeOf(shapes + "x = Pick(Circle(1, 2), Shape(1), Square(1, 3))\nprint(x.Id)", "x"));
         Assert.Equal("Shape", TypeOf(shapes + "x = Pick(Circle(1, 2), Square(1, 3), Shape(1))\nprint(x.Id)", "x"));
         Assert.Equal([(ErrorIds.CannotInfer, 6)], Errors("data User(string Name)\ndata Admin(int Level) : User\ndata Guest(int N) : User\n\nT Pick<T>(T a, T b) => a\nprint(Pick(Admin(\"a\", 1), Guest(\"b\", 2)).Name)"));
+        var put = "data User(string Name)\ndata Admin(int Level) : User\n\nT Put<T>(List<T> items, T item) => item\n\nmut users = List<User>()\nusers.Add(User(\"b\"))\n";
+        Assert.Equal("User", TypeOf(put + "got = Put(users, Admin(\"a\", 1))\nprint(got.Name)", "got")); // the list fixes `User`, and the derived argument meets it there
+        Assert.Equal([(ErrorIds.CannotInfer, 6)], Errors("data User(string Name)\ndata Admin(int Level) : User\n\nT Put<T>(List<T> items, T item) => item\n\nprint(Put(List<Admin>(), User(\"b\")).Name)")); // a list of the derived type fixes it, and the base is no `Admin`
     }
 
     // ---- functions (chapter 8) ----------------------------------------------------------------------
@@ -485,7 +527,9 @@ public sealed class CheckerTests
     public void A_function_with_a_result_whose_end_can_be_reached_is_missing_return_at_its_first_line()
     {
         // F3 with E1: the end that can be reached is a defect of the function, at its first line; a bare `return` in such a function is a
-        // defect of that statement, at its line; a `void` function returns no value (F4), reported once the value itself is clean (E1)
+        // defect of that statement, at its line; F3 makes `return` with a value in a `void` function (F4) `type-mismatch`, reported where the
+        // value itself is clean (E1), while a value as the expression body of one is E4's `syntax` (the reading in the README: F2 and F4 name
+        // no id for that shape, where F3 names this one)
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors("int Sign(int n) {\n    if n < 0 {\n        return -1\n    }\n}\n\nprint(Sign(3))"));
         Assert.Equal([(ErrorIds.MissingReturn, 2)], Errors("int Sign(int n) {\n    return\n}\n\nprint(Sign(3))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("void Show(int n) {\n    return n\n}\n\nShow(3)"));
@@ -499,17 +543,29 @@ public sealed class CheckerTests
     [Fact]
     public void A_function_is_visible_in_the_whole_file_and_one_declared_inside_a_block_is_not_read()
     {
-        // F6 makes a declaration of the file visible in the whole file and says nothing of one inside a block (the reading in the README);
-        // the name of such a declaration is one the checker does not read, so a use of it is no error of its own (E1)
+        // F6 makes a declaration of the file visible in the whole file and says nothing of one inside a block (the reading in the README):
+        // inside its block the name of such a declaration is one the checker does not read, so a use of it there is no error of its own (E1),
+        // and outside its block the name is not visible, `unknown-name` (V10), as a type's name and a function's name are where no type or
+        // function of the file has it; its body is read with its diagnostics dropped, so that a variable around it that it reads counts as used
         Clean("print(Double(4))\n\nint Double(int n) => n * 2");
-        Assert.Equal(["2: a function declared inside a block (F1, F6)"], NotSupported("void F() {\n    int G() => 1\n    print(G())\n}\n\nF()\nprint(G())"));
+        Assert.Equal(["2: a function declared inside a block (F1, F6)"], NotSupported("void F() {\n    int G() => 1\n    print(G())\n}\n\nF()"));
         Assert.Equal(["2: a type declared inside a block (D1, F6)"], NotSupported("if true {\n    data P(int X)\n    print(P(1).X)\n}"));
+        Assert.Equal(["3: a function declared inside a block (F1, F6)"], NotSupported("void F() {\n    n = 1\n    int G() => n\n    print(G())\n}\n\nF()"));
+        var (outside, _) = Check("void F() {\n    int G() => 1\n    print(G())\n}\n\nF()\nprint(G())");
+        Assert.Equal(["2: not supported: a function declared inside a block (F1, F6)", "7: error unknown-name: no `G` is visible here (V10)"], outside.Sorted.Select(d => d.ToString()));
+        var (elsewhere, _) = Check("void F() {\n    if true {\n        data P(int X)\n        print(P(1).X)\n    }\n}\n\nint G(P p) => 1\n\nF()\nprint(G(1))");
+        Assert.Equal([(ErrorIds.UnknownName, 8)], elsewhere.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
+        var (asType, _) = Check("void F() {\n    int G() => 1\n    G x = G()\n    print(x)\n}\n\nF()");
+        Assert.Equal([(ErrorIds.UnknownName, 3)], asType.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line))); // a function's name is no type
     }
 
     [Fact]
     public void A_lambda_takes_the_function_type_expected_of_it_or_needs_typed_parameters()
     {
-        // F7, F11, T27
+        // F7, F11, T27; F11 makes a lambda whose body is a call with a `void` success, under a function type whose result is not `void`,
+        // `type-mismatch` at the lambda, where O10 makes a `void` call elsewhere where a value stands `syntax`; a parameter of a lambda of the
+        // top-level code reserves no name in a top-level function, `x` beside `Show(int x)` (the reading on F16 in the README); a written
+        // parameter type that does not fit is the one error of the lambda, which is then read with it error-typed (E1)
         Clean("int Apply((int) => int f, int n) => f(n)\n\nprint(Apply(x => x + 1, 4))");
         Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("f = x => x * 2\nprint(f(2))"));
         Assert.Equal("(int) => int", TypeOf("f = (int x) => x * 2\nprint(f(2))", "f"));
@@ -519,6 +575,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("int Apply((int) => int f, int n) => f(n)\n\nprint(Apply((x, y) => x, 4))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("y = 5\nint Apply((int) => int f, int n) => f(n)\n\nprint(Apply((a, b) => y, 4))")); // the body is read after the error: `y` counts as read
         Clean("void Run((int) => void f) {\n    f(1)\n}\n\nRun(x => print(x))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("int Apply((int) => int f, int n) => f(n)\n\nprint(Apply((string s) => 1, 4))"));
     }
 
     [Fact]
@@ -559,6 +616,18 @@ public sealed class CheckerTests
         var h = "void H(byte b) {\n    print(b)\n}\n\n";
         Clean(h + "H(1)");
         Assert.Equal([(ErrorIds.NarrowingConversion, 9)], Errors(h + "void H(string s) {\n    print(s)\n}\n\nH(1)"));
+    }
+
+    [Fact]
+    public void An_argument_with_an_error_of_its_own_leaves_the_pick_of_an_overload_open()
+    {
+        // E1: an argument the checker could not type, or a `void` call standing as one, which O10 makes `syntax` wherever the parameter is (the
+        // reading in the README), carries its own error; a call that fits no function or more than one of them with it reports nothing more,
+        // since the argument may have been meant for any of them
+        var two = "void Show(int n) {\n    print(n)\n}\n\nvoid Show(string s) {\n    print(s)\n}\n\n";
+        Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(two + "Show(missing)"));
+        Assert.Equal([(ErrorIds.Syntax, 11)], Errors(two + "void Log() {\n}\nShow(Log())"));
+        Assert.Equal([(ErrorIds.Syntax, 7)], Errors("void Log() {\n}\nvoid Take(int n) {\n    print(n)\n}\n\nTake(Log())"));
     }
 
     [Theory]
@@ -604,7 +673,9 @@ public sealed class CheckerTests
     public void A_top_level_function_neither_reads_nor_declares_a_top_level_variable(string program, string id, int line)
     {
         // F16: the read is unknown-name, every declaration of the name is redeclared, the one error for `count = count + 1`; the name is reserved at any
-        // depth, above or below, and a loop variable of the top-level code reserves it too (the reading in the README)
+        // depth, above or below, and a loop variable of the top-level code reserves it too (the reading in the README), where a parameter of a
+        // lambda of the top-level code does not: the lambda is a function (F7, F11), and F16 counts the variables declared outside one (the
+        // same reading; the test of lambdas above)
         Assert.Equal([(id, line)], Errors(program));
     }
 
@@ -621,9 +692,10 @@ public sealed class CheckerTests
         // E4 gives one id, `syntax`, to text no rule gives a meaning, and names shapes of the checker's among them; these are the shapes the
         // checker reads under it (the reading in the README): F11 gives a function value through a lambda only, and T10 a type's name a
         // meaning as a conversion only; F5 lists what a statement is; C8 shows a range in `for` only; F2 and F4 give a `void` function's
-        // expression body no value, and F11 a `void` lambda's; D8 writes a fieldless data type's value as the bare name; D6 gives a data type
-        // one base; C9 has an arm name a literal, and a `match` used as a value an arm with a value; O5 has an arm of `else` recover, return
-        // or throw
+        // expression body no value, and F11 a `void` lambda's; D8 writes a fieldless data type's value as the bare name, and declares the type
+        // as the bare name too, `data Name`, so the declaration `data E()` with an empty field list is no shape of D8 or D1; D6 gives a data
+        // type one base; C9 has an arm name a literal, and a `match` used as a value an arm with a value; O5 has an arm of `else` recover,
+        // return or throw
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("int Double(int n) => n * 2\n\nf = Double\nprint(f(1))"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("x = 1\nx + 1"));
         Clean("void F() {\n}\n\n((F()))");
@@ -672,7 +744,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("x = 1\nif x {\n    print(\"yes\")\n}"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("x = 1\nwhile x {\n    print(\"yes\")\n}"));
         Clean("x = 7\nif (x > 5) {\n    print(\"big\")\n}");
-        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nif Log() {\n    print(1)\n}")); // O10: a void call where a value stands, as everywhere
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nif Log() {\n    print(1)\n}")); // O10: a void call where a value stands, as everywhere but the body of a lambda with a result, which F11 makes type-mismatch
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nfor x in Log() {\n    print(1)\n}"));
     }
 
@@ -760,6 +832,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("n = 1\ns = match n {\n    0 => \"zero\"\n    else => 1\n}\nprint(s)")); // E1: at the first arm whose type differs
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("n = 1\nstring s = match n {\n    0 => \"zero\"\n    else => 1\n}\nprint(s)"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("for i in 1..3 {\n    s = match i {\n        0 => break\n        else => \"many\"\n    }\n    print(s)\n}")); // C9: an arm of a value is an expression
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("n = 1\nm = 2\nx = match n {\n    0 => {\n        print(m)\n    }\n    else => 1\n}\nprint(x)")); // the arm's body is read all the same: `m` counts as read
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Log() {\n}\nn = 1\nx = match n {\n    else => Log()\n}\nprint(x)")); // E1: the arm carries the error, the match no second one
         Clean("data User(string Name)\ndata Admin(int Level) : User\ndata NotFound\n\nvoid Show(User | NotFound u) {\n    match u {\n        Admin a => print(\"admin {a.Level}\")\n        User x => print(\"user {x.Name}\")\n        NotFound => print(\"none\")\n    }\n}\n\nShow(Admin(\"Ann\", 2))");
     }
 
@@ -774,6 +848,15 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnlistedCase, 11)], Errors(find + "int Twice(int id) {\n    value = Find(id)\n    return value * 2\n}\n\nprint(Twice(1))"));
         Assert.Equal([(ErrorIds.UnlistedCase, 10)], Errors(find + "value = Find(2)\nprint(value)"));
         Assert.Equal("int", TypeOf(find + "int | NotFound Twice(int id) => Find(id) * 2\n\nx = Twice(1) else {\n    NotFound => 0\n}\nprint(x)", "x"));
+
+        // O4 keeps the cases only for the subject of a match and a written union type, so a call that a lambda returns without a written
+        // result unwraps (O2), and the result F7 infers from the value lists no case (O3), the reading in the README
+        Assert.Equal([(ErrorIds.UnlistedCase, 11)], Errors(find + "f = (int id) => {\n    return Find(id)\n}\nprint(f(1))"));
+
+        // O3 asks that the case be listed in the return type, and a return type that is the case itself lists it, the reading in the README;
+        // whether a case may leave as the success of the calling function (O1) is a question for a design round, and the test pins what the
+        // checker does
+        Clean(find + "NotFound Lost(int id) {\n    value = Find(id)\n    print(value)\n    return NotFound\n}\n\nprint(Lost(1))");
     }
 
     [Fact]
@@ -802,6 +885,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnreachableArm, 4)], Errors("int One() => 1\n\nx = One() else {\n    else => 0\n}\nprint(x)")); // a call with no case beside its success
         Assert.Equal([(ErrorIds.Syntax, 13)], Errors(find + "int OrZero(int id) {\n    value = Find(id) else {\n        NotFound => {\n            if id > 0 {\n                print(1)\n            }\n        }\n    }\n    return value\n}\n\nprint(OrZero(1))")); // O5: the arm neither recovers, returns nor throws
         Assert.Equal([(ErrorIds.Redeclared, 12)], Errors(find + "int OrZero(int id) {\n    value = Nope(id) else {\n        NotFound id => 0\n    }\n    return value\n}\n\nprint(OrZero(1))").Where(e => e.Item1 == ErrorIds.Redeclared).ToList()); // after a call that did not type, a binding is still checked
+        Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(find + "value = Find(2) else {\n    Nope => 0\n}\nprint(value)")); // E1: which case the arm meant is unknown, so no case is unlisted beside it
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("data NotFound\nvoid Log() {\n}\n\nx = Nope() else {\n    NotFound => Log()\n}\nprint(x)")); // the success is unknown, and with a `void` one the arm is a statement (O10)
+        Assert.Equal([(ErrorIds.Syntax, 11)], Errors(find + "value = Find(2) else {\n    0 => 0\n}\nprint(value)")); // O5: an arm of `else` names a case type, not a literal (E4)
     }
 
     [Fact]
@@ -887,19 +973,50 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("data A(int X)\nint A(int x) => x\n\nprint(A(1).X)"));
         Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("int A(int x) => x\ndata A(int X)\n\nprint(A(1))")); // the later declaration, whichever kind it is
         Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.TypeMismatch, 3)], Errors("data A(int X)\nint A(int x) {\n    return \"s\"\n}\n\nprint(A(1).X)")); // the refused function's body is checked all the same
-        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("data A(int X) : B\ndata B(int Y) : A\n\nprint(1)")); // D6: a cycle of bases is one error, and the walk up the bases ends
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("data A(int X) : B\ndata B(int Y) : A\n\nprint(1)")); // a cycle of bases is one error, and the walk up the bases ends; its id is the reading on D6 in the README, a question for a design round
     }
 
-    // ---- print and texts (A1 to A14) -------------------------------------------------------------------------
+    [Fact]
+    public void A_data_type_takes_the_data_type_among_its_bases_and_one_it_does_not_read_leaves_it_unread()
+    {
+        // D6 gives a data type one base, the data type among its bases wherever it stands, and a second one is `syntax` (E4); a type argument
+        // on a base that is not generic is a count it does not have (T19, E4); a name that is no type is `unknown-name` (V10), and a type that
+        // is no data type D6's `type-mismatch`, wherever it stands. An interface among the bases (K10), a generic base (T19) and the explicit
+        // form (K17) are `not supported`, and the data type, with every one derived from it, is not read: its uses carry nothing more (E1)
+        var shape = "interface Shape {\n    int Area()\n}\n\n";
+        Assert.Contains("5: an interface a data type names (K10)", NotSupported(shape + "data Circle(int R) : Shape\n\nc = Circle(1)\nprint(c.R)"));
+        Assert.Contains("6: an interface a data type names (K10)", NotSupported(shape + "data B(int X)\ndata A(int Y) : Shape, B\n\nprint(A(1, 2).Y)"));
+        Assert.Equal(["2: a generic data type as a base (T19)"], NotSupported("data Box<T>(T Item)\ndata IntBox(int Extra) : Box<int>\ndata Big(int More) : IntBox\n\nb = Big(1, 2, 3)\nprint(b.More)"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("data A(int X)\ndata B(int Y) : A<int>\n\nprint(B(1, 2).Y)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("data B(int X)\ndata A(int Y) : B, Nmae\n\nprint(A(1, 2).Y)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("data B(int X)\ndata A(int Y) : Nmae, B\n\nprint(A(1, 2).Y)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("data B(int X)\ndata A(int Y) : B, int\n\nprint(A(1, 2).Y)"));
+    }
+
+    [Fact]
+    public void A_field_or_a_constructor_read_as_a_statement_is_not_supported()
+    {
+        // K7, K14: the parser reads a field and a constructor in a type body only, whose members the checker does not read (D16, chapter 7);
+        // a tree that holds one among its statements, built here since the parser makes none, gets `not supported` and no error
+        var field = new FieldDeclaration(1, Modifiers.None, null, "x", new BoolLiteral(1, true));
+        var constructor = new ConstructorDeclaration(2, Modifiers.None, "P", [], null, new Block(2, [], 2));
+        var diagnostics = new DiagnosticBag();
+        Checker.Check(new ProgramSyntax([field, constructor]), diagnostics);
+        Assert.Equal(["1: not supported: a field of a type body (K7)", "2: not supported: a constructor of a type body (K14)"], diagnostics.Sorted.Select(d => d.ToString()));
+    }
+
+    // ---- print and texts (A1 to A4, A8, A10 for a type parameter, A11, A12, A14) -------------------------------
 
     [Fact]
     public void Print_takes_a_value_with_a_text_and_a_type_parameter_without_a_limit_has_none()
     {
-        // A1, A2 to A4, A8, A10, A11, A12, A14
+        // A1, A2 to A4, A8, A10, A11, A12, A14; a data value's text is its fields' (A3), so a function value two generic types deep has none
         Clean("print(1)\nprint(\"a\")\nprint(true)\nprint('c')\nprint(0.5)\nprint(90min)\nprint(1.5kb)\nxs = List<int>()\nprint(xs)");
         Assert.Equal([(ErrorIds.NoText, 2)], Errors("void Show<T>(T item) {\n    print(item)\n}\n\nShow(1)"));
         Assert.Equal([(ErrorIds.NoText, 2)], Errors("void Show<T>(T item) {\n    print(\"got {item}\")\n}\n\nShow(1)"));
         Assert.Equal([(ErrorIds.NoText, 2)], Errors("f = (int x) => x\nprint(f)"));
+        Assert.Equal([(ErrorIds.NoText, 5)], Errors("data Box<T>(T Value)\n\nf = (int x) => x\nb = Box(Box(f))\nprint(b)"));
+        Clean("data Node(int Value, List<Node> Children)\n\nprint(Node(1, List<Node>()))");
     }
 
     // ---- what the checker does not read ---------------------------------------------------------------------
@@ -918,14 +1035,20 @@ public sealed class CheckerTests
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
     [InlineData("print(string(1))", "1: a conversion to `string` (A5 to A7)")]
-    [InlineData("xs = List<int>()\nxs[0] = 1", "2: an assignment into an index (M9)")]
+    [InlineData("mut xs = List<int>()\nxs[0] = 1", "2: an assignment into an index (M9)")]
     [InlineData("data P(int X)\n\nmut ps = List<P>()\nps[0].X = 1", "4: an assignment into an index (M9)")]
     [InlineData("mut grid = List<List<int>>()\ngrid[0].Add(1)", "2: a `mut` method on an element of a list (M5, M9)")]
     [InlineData("data Shape\n\nint AreaOf<T: Shape>(T item) => 1\n\nprint(AreaOf(5))", "3: the limit of a type parameter (T19)")]
     [InlineData("data Shape\ndata Box<T: Shape>(T Item)\n\nprint(1)", "2: the limit of a type parameter (T19)")]
-    [InlineData("data Box<T>(T Item)\ndata IntBox(int Extra) : Box<int>\n\nprint(1)", "2: a generic data type as a base (D6, T19)")]
-    [InlineData("uint u = 1\nprint(-u)", "2: `-` on a `uint` (T9, T23)")]
-    [InlineData("ulong u = 1\nprint(-u)", "2: `-` on a `ulong` (T9, T23)")]
+    [InlineData("data Box<T>(T Item)\ndata IntBox(int Extra) : Box<int>\n\nprint(1)", "2: a generic data type as a base (T19)")]
+    [InlineData("data Box<T>(T Item)\ndata IntBox(int Extra) : Box<int>\n\nb = IntBox(1, 2)\nprint(b.Item)", "2: a generic data type as a base (T19)")]
+    [InlineData("uint u = 1\nprint(-u)", "2: `-` on a `uint`, which no rule gives a meaning")]
+    [InlineData("ulong u = 1\nprint(-u)", "2: `-` on a `ulong`, which no rule gives a meaning")]
+    [InlineData("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut xs = List<short>()\nBump(mut xs[0])", "6: an element of a list passed as `mut` (M7, M9)")]
+    [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nprint(Counter.Increment)", "2: the body of a data type (D16)")]
+    [InlineData("data Counter(int Count) {\n    pub static Counter Zero() => Counter(0)\n}\n\nprint(Counter.Zero().Count)", "2: the body of a data type (D16)")]
+    [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\ndata Sub(int X) : Counter\n\nmut s = Sub(1, 2)\ns.Increment()", "2: the body of a data type (D16)")]
+    [InlineData("static int Twice(int n) {\n    return \"x\"\n}\n\nprint(Twice(\"a\"))", "1: the modifier `static` of a method (K7, M6)")]
     [InlineData("x = 1\nraw {\n    y = x + \"a\"\n}", "2: a raw block (R7)")]
     [InlineData("data User(string Name)\n\nmut u = User(\"a\")\nu?.Name = \"b\"", "4: `?.` (N5)")]
     public void A_construct_of_a_chapter_the_checker_does_not_read_is_not_supported_and_carries_no_error(string program, string first)
@@ -949,9 +1072,37 @@ public sealed class CheckerTests
     [Fact]
     public void A_union_is_the_same_type_as_another_when_its_cases_stand_in_the_same_order()
     {
-        // D9 with O1 (the reading in the README): the order has a meaning, the first case is the success, so `List<int | string>` and
-        // `List<string | int>` are two types, while a value of one union stands where the other is required when every case of it is a case there
+        // D9 with O1 (the reading in the README): two unions are one type when their cases stand in the same order, so `List<int | string>`
+        // and `List<string | int>` are two types; a value of one union stands where another union is required when every case of it is a
+        // case there, its first one included, so `B | A y = x` with an `A | B` `x` compiles: whether a value may stand where a union with
+        // another first case is required is a question for a design round, and the test pins what the checker does
         Clean("data A\ndata B\n\nA | B x = B\nB | A y = x\nprint(y)");
         Assert.Equal([(ErrorIds.TypeMismatch, 8)], Errors("data A\ndata B\n\nvoid F(List<A | B> xs) {\n    print(xs.Count)\n}\n\nF(List<B | A>())"));
+    }
+
+    [Fact]
+    public void A_union_stands_only_where_a_union_is_required()
+    {
+        // D9: a union is one of its cases only after a match (C4), so a value of one stands where no union is required in no other way, even
+        // where every case would: a `byte | short` is no `int`, and a union of two derived types no value of their base (D6)
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("void Show(byte | short v) {\n    int i = v\n    print(i)\n}\n\nbyte b = 1\nShow(b)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 8)], Errors("data User(string Name)\ndata Admin(int Level) : User\ndata Guest(int N) : User\n\nstring NameOf(User u) => u.Name\n\nvoid Show(Admin | Guest v) {\n    print(NameOf(v))\n}\n\nShow(Guest(\"a\", 1))"));
+    }
+
+    [Fact]
+    public void A_value_widens_into_a_case_of_a_union()
+    {
+        // T8 with D9 (the reading in the README): a value that widens into a case stands where the union is required; which case it becomes
+        // where it widens into two is a question for a design round, and the test pins what the checker does
+        Clean("byte b = 1\nint | string v = b\nprint(v)");
+        Clean("byte b = 1\nshort | int v = b\nprint(v)");
+    }
+
+    [Fact]
+    public void A_type_built_around_the_error_type_is_the_error_type()
+    {
+        // E1: a type parameter that only an argument without a type fixed is the error type, and so is a list of it, so the call's result
+        // carries nothing more where a list is required
+        Assert.Equal([(ErrorIds.UnknownName, 7)], Errors("List<T> Wrap<T>(T item) {\n    mut xs = List<T>()\n    xs.Add(item)\n    return xs\n}\n\nList<int> ys = Wrap(nope)\nprint(ys.Count)"));
     }
 }

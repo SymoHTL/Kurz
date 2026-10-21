@@ -20,6 +20,9 @@ public sealed partial class Checker
         public bool LiteralOnly { get; init; }
 
         public LambdaExpression? Lambda { get; init; }
+
+        /// <summary>A construct the checker does not read stands as the argument: it was <c>not supported</c> before the pick, and the pick checks nothing of it (E1).</summary>
+        public bool Unread { get; init; }
     }
 
     private sealed class Candidate
@@ -119,7 +122,7 @@ public sealed partial class Checker
                         return CheckConstruction(data, c, expected);
                     }
 
-                    if (unsupportedTypes.Contains(n.Name))
+                    if (IsUnreadName(n.Name))
                     {
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
@@ -161,6 +164,19 @@ public sealed partial class Checker
         CheckExpression(value, null);
     }
 
+    /// <summary>T19: a callee without type parameters, <c>print</c>, a conversion, a function value or a list's method, takes no type argument; one written is a count no rule gives a meaning (E4).</summary>
+    private bool RefusesTypeArguments(CallExpression c, string callee)
+    {
+        if (c.TypeArguments.Count == 0)
+        {
+            return false;
+        }
+
+        Report(ErrorIds.Syntax, c.Line, $"{callee} takes no type arguments (T19; E4 for another count)");
+        CheckArgumentsLoosely(c);
+        return true;
+    }
+
     /// <summary>F11: a call of a function value, by position.</summary>
     private Typed CallValue(KurzType type, CallExpression c)
     {
@@ -177,6 +193,11 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (RefusesTypeArguments(c, $"a `{type}`"))
+        {
+            return Typed.Error;
+        }
+
         var slots = f.Parameters.Select((p, i) => new Slot($"#{i}", p, false, false, false)).ToList();
         var candidate = new Candidate { Slots = slots, Result = f.Result };
         return Call([candidate], c, null);
@@ -184,6 +205,11 @@ public sealed partial class Checker
 
     private Typed CheckPrint(CallExpression c)
     {
+        if (RefusesTypeArguments(c, "`print`"))
+        {
+            return new Typed(Types.Void);
+        }
+
         if (c.Arguments.Count != 1 || c.Arguments[0].Name is not null)
         {
             Report(ErrorIds.ArgumentMismatch, c.Line, "`print` takes one value (A1)");
@@ -195,6 +221,8 @@ public sealed partial class Checker
         if (argument.Mut)
         {
             Report(ErrorIds.MutAtCall, argument.Line, "`print` changes nothing: no `mut` before its argument (M7)");
+            CheckArgumentsLoosely(c); // the call's own error: nothing more about it (E1)
+            return new Typed(Types.Void);
         }
 
         var t = CheckExpression(argument.Value, null);
@@ -220,6 +248,11 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (RefusesTypeArguments(c, $"a conversion to `{target}`"))
+        {
+            return Typed.Error;
+        }
+
         if (c.Arguments.Count != 1 || c.Arguments[0].Name is not null)
         {
             Report(ErrorIds.ArgumentMismatch, c.Line, $"a conversion to `{target}` takes one value (T10)");
@@ -230,6 +263,8 @@ public sealed partial class Checker
         if (c.Arguments[0].Mut)
         {
             Report(ErrorIds.MutAtCall, c.Arguments[0].Line, "a conversion changes nothing: no `mut` before its argument (M7)");
+            CheckArgumentsLoosely(c); // the call's own error: nothing more about it (E1)
+            return Typed.Error;
         }
 
         var argument = c.Arguments[0].Value;
@@ -335,7 +370,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    return new Typed(target, new DecimalConstant((decimal)r.Value));
+                    return new Typed(target, new DecimalConstant(ToDecimal(r.Value)));
                 }
 
                 // T26: a `double` into a `float` beyond its range becomes an infinity and loses nothing the rule names, so no error
@@ -357,6 +392,48 @@ public sealed partial class Checker
             default:
                 return new Typed(target);
         }
+    }
+
+    /// <summary>
+    /// T6: a <c>double</c> inside decimal's range rounded to decimal's precision: its exact binary value at
+    /// the largest scale up to 28 whose digits fit decimal's 96 bits, rounded half to even. The conversion
+    /// of the runtime library keeps 15 significant digits, so that <c>decimal(0.1) - 0.1m</c> would be 0.
+    /// </summary>
+    private static decimal ToDecimal(double value)
+    {
+        var bits = BitConverter.DoubleToInt64Bits(value);
+        var exponent = (int)((bits >> 52) & 0x7FF);
+        var fraction = bits & 0xFFFFFFFFFFFFFL;
+        var mantissa = new BigInteger(exponent == 0 ? fraction : fraction | (1L << 52));
+        var power = Math.Max(exponent, 1) - 1075; // the value is mantissa * 2^power
+        var numerator = power >= 0 ? mantissa << power : mantissa;
+        var denominator = power >= 0 ? BigInteger.One : BigInteger.One << -power;
+        var limit = BigInteger.One << 96;
+        for (var scale = 28; scale >= 0; scale--)
+        {
+            var digits = BigInteger.DivRem(numerator * BigInteger.Pow(10, scale), denominator, out var remainder);
+            var twice = remainder * 2;
+            if (twice > denominator || (twice == denominator && !digits.IsEven))
+            {
+                digits += 1;
+            }
+
+            if (digits >= limit)
+            {
+                continue;
+            }
+
+            while (scale > 0 && digits % 10 == 0 && !digits.IsZero)
+            {
+                digits /= 10;
+                scale--;
+            }
+
+            var mask = new BigInteger(uint.MaxValue);
+            return new decimal((int)(uint)(digits & mask), (int)(uint)((digits >> 32) & mask), (int)(uint)(digits >> 64), bits < 0 && !digits.IsZero, (byte)scale);
+        }
+
+        throw new InvalidOperationException("the value is outside decimal's range"); // the caller reported it: `constant-overflow` (T6)
     }
 
     /// <summary>M9: <c>List&lt;T&gt;()</c> makes an empty list.</summary>
@@ -435,13 +512,20 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (unsupportedTypes.Contains(n.Name))
+            if (IsUnreadName(n.Name))
             {
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
             }
 
-            if ((dataTypes.TryGetValue(n.Name, out var data) && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
+            if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields && HasBody(data))
+            {
+                NotSupported(m.Line, "a method of a data type (D16)"); // a member its body declares, which the checker does not read
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
                 CheckArgumentsLoosely(c);
@@ -462,6 +546,11 @@ public sealed partial class Checker
             {
                 case "Add":
                     {
+                        if (RefusesTypeArguments(c, "`Add`"))
+                        {
+                            return Typed.Error;
+                        }
+
                         var candidate = new Candidate { Slots = [new Slot("item", list.Element, false, false, false)], Result = Types.Void };
                         var result = Call([candidate], c, null);
                         if (!result.IsError)
@@ -474,6 +563,11 @@ public sealed partial class Checker
 
                 case "Where":
                     {
+                        if (RefusesTypeArguments(c, "`Where`"))
+                        {
+                            return Typed.Error;
+                        }
+
                         var test = new FunctionType([list.Element], Types.Bool);
                         var candidate = new Candidate { Slots = [new Slot("test", test, false, false, false)], Result = list };
                         return Call([candidate], c, null);
@@ -608,9 +702,27 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (a.Mut && IsElementPath(a.Value))
+            {
+                NotSupported(a.Line, "an element of a list passed as `mut` (M7, M9)"); // before the pick, so that no misfit of its type is reported beside it (E1)
+                Push();
+                CheckExpression(a.Value, null);
+                Pop(commit: false);
+                pres.Add(new Pre { Argument = a, Typed = Typed.Error, Unread = true });
+                continue;
+            }
+
             Push();
             var typed = CheckExpression(a.Value, null);
             var captured = Pop(commit: false);
+            if (!typed.IsError && Types.IsVoid(typed.Type))
+            {
+                // O10: a `void` call where a value stands is `syntax`, whatever the parameter (the reading in compiler/README.md), and it is
+                // the argument's own error, so that it fits no parameter and contradicts none (E1)
+                captured.Add(Diagnostic.Error(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (E4, O10)"));
+                typed = Typed.Error;
+            }
+
             pres.Add(new Pre { Argument = a, Typed = typed, Diagnostics = captured, LiteralOnly = IsLiteralOnly(a.Value) });
         }
 
@@ -632,13 +744,16 @@ public sealed partial class Checker
             }
         }
 
+        // E1: an argument with an error of its own may have been meant for any of the functions of the name, so neither
+        // `ambiguous-call` nor a misfit is reported beside its error, which the arguments' diagnostics below carry
+        var open = candidates.Count > 1 && pres.Any(p => p.Lambda is null && p.Typed.IsError);
         var fitting = candidates.Where(x => x.Fits).ToList();
         Candidate? picked = null;
         if (fitting.Count == 1)
         {
             picked = fitting[0];
         }
-        else if (fitting.Count > 1)
+        else if (fitting.Count > 1 && !open)
         {
             var exact = fitting.Where(x => x.Exact).ToList();
             if (exact.Count == 1)
@@ -654,7 +769,7 @@ public sealed partial class Checker
                 Report(ErrorIds.AmbiguousCall, c.Line, exact.Count > 1 ? "the call fits more than one function exactly (F13)" : "the call fits more than one function, none of them exactly (F13)");
             }
         }
-        else
+        else if (fitting.Count == 0 && !open)
         {
             ReportNoFit(candidates, c, pres);
         }
@@ -789,8 +904,11 @@ public sealed partial class Checker
                 continue;
             }
 
-            var common = known.FirstOrDefault(t => known.All(u => Types.Same(u, t) || (u is DataType && t is DataType && Types.Assignable(u, t))));
-            if (common is null || (map.TryGetValue(p, out var bound) && !Types.Same(bound, common) && !Types.IsError(bound)))
+            // a type a nested position bound already, `List<T>` of a `List<User>`, is the one the direct arguments meet: each is that
+            // type or a data type derived from it (D6), whatever order the arguments stand in
+            var nested = map.TryGetValue(p, out var bound) && !Types.IsError(bound);
+            var common = nested ? bound : known.FirstOrDefault(t => known.All(u => Types.Same(u, t) || (u is DataType && t is DataType && Types.Assignable(u, t))));
+            if (common is null || !known.All(u => Types.Same(u, common) || (u is DataType && common is DataType && Types.Assignable(u, common))))
             {
                 candidate.CannotInfer = true;
                 return;
@@ -963,6 +1081,13 @@ public sealed partial class Checker
         candidate.Exact = exact;
     }
 
+    /// <summary>
+    /// F13, F14: a call that fits no function of its name. The first function, in the order of declaration, to which
+    /// the arguments bind decides the id and the line: its <c>cannot-infer</c>, or the misfit of its first argument
+    /// that does not fit (the reading in <c>compiler/README.md</c>); with no binding, the first function's binding
+    /// error. The reference names no id for a call that fits none of several functions, so that the id can change
+    /// when two declarations swap places: a question for a design round.
+    /// </summary>
     private void ReportNoFit(List<Candidate> candidates, CallExpression c, List<Pre> pres)
     {
         var bound = candidates.FirstOrDefault(x => x.BindingError is null);
@@ -998,6 +1123,11 @@ public sealed partial class Checker
         for (var i = 0; i < pres.Count; i++)
         {
             var pre = pres[i];
+            if (pre.Unread)
+            {
+                continue;
+            }
+
             var slot = candidate.Slots[candidate.Binding[i]];
             var type = Types.Substitute(slot.Type, candidate.Map);
             var a = pre.Argument;
@@ -1023,11 +1153,6 @@ public sealed partial class Checker
                 {
                     Add(d);
                 }
-
-                if (!pre.Typed.IsError && Types.IsVoid(pre.Typed.Type))
-                {
-                    Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (E4, O10)");
-                }
             }
 
             if (slot.Mut && !a.Mut)
@@ -1045,11 +1170,23 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>M7, M9: whether the path after <c>mut</c> starts at an element of a list, which the checker does not read.</summary>
+    private static bool IsElementPath(Expression value)
+    {
+        var root = Unwrap(value);
+        while (root is MemberAccess { Conditional: false } m)
+        {
+            root = Unwrap(m.Target);
+        }
+
+        return root is IndexExpression;
+    }
+
     /// <summary>
     /// M7: what stands after <c>mut</c> at a call is a <c>mut</c> variable or a path of data fields from
     /// one, and each path once: the same path twice, or a path and one it is a prefix of, would reach one
     /// value through two parameters; two fields of one variable are two values. A path through an index
-    /// is not read (M9).
+    /// is not read (M9), and was refused before the pick.
     /// </summary>
     private void MutArgument(Argument a, List<string> paths)
     {
@@ -1059,12 +1196,6 @@ public sealed partial class Checker
         {
             members.Insert(0, m);
             root = Unwrap(m.Target);
-        }
-
-        if (root is IndexExpression)
-        {
-            NotSupported(a.Line, "an element of a list passed as `mut` (M7, M9)");
-            return;
         }
 
         if (root is not NameExpression name)

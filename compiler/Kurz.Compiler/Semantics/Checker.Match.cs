@@ -31,6 +31,7 @@ public sealed partial class Checker
         var armTypes = new List<(KurzType Type, int Line)>();
         var hasElse = false;
         var armWrong = false;
+        var armReported = false;
         var allEnd = true;
         foreach (var arm in arms)
         {
@@ -131,6 +132,7 @@ public sealed partial class Checker
                             if (Types.IsVoid(t.Type))
                             {
                                 Report(ErrorIds.Syntax, es.Line, "a call with a `void` success used as a value (O10)");
+                                armReported = true;
                             }
                             else
                             {
@@ -144,7 +146,11 @@ public sealed partial class Checker
                         CheckStatement(t);
                         break;
                     default:
+                        // C9 gives the arms of a `match` used as a value a value each: a statement or a block there is text no rule gives a
+                        // meaning, E4's `syntax` (the reading in compiler/README.md); what it holds is still checked
                         Report(ErrorIds.Syntax, arm.Line, "an arm of a `match` used as a value is an expression (C9)");
+                        armReported = true;
+                        CheckStatement(arm.Body);
                         break;
                 }
             }
@@ -167,9 +173,9 @@ public sealed partial class Checker
             return new MatchResult(Types.Void, exhaustive, allEnd);
         }
 
-        if (armTypes.Count == 0 && !armWrong && known)
+        if (armTypes.Count == 0 && !armWrong && !armReported && known)
         {
-            Report(ErrorIds.Syntax, line, "a `match` used as a value has an arm that is a value (C9)"); // every arm throws: text no rule gives a meaning (E4)
+            Report(ErrorIds.Syntax, line, "a `match` used as a value has an arm that is a value (C9)"); // every arm throws: text no rule gives a meaning (E4); an arm reported above is the one error (E1)
             return new MatchResult(Types.Error, exhaustive, allEnd);
         }
 
@@ -235,6 +241,8 @@ public sealed partial class Checker
     {
         if (e.Call is not CallExpression call)
         {
+            // O5 gives the postfix `else` to a call, and the parser reads it after a call only, so that after anything else it is the parser's
+            // `syntax` (E4; the reading in compiler/README.md); a tree built another way gets the same id here
             Report(ErrorIds.Syntax, e.Line, "`else` follows a call (O5)");
             CheckExpression(e.Call, null);
             CheckArmsLoosely(e.Arms);
@@ -270,7 +278,11 @@ public sealed partial class Checker
                 case TypePattern tp:
                     {
                         var type = Resolve(tp.Type);
-                        if (!Types.IsError(type))
+                        if (Types.IsError(type))
+                        {
+                            armWrong = true; // the type carries its own diagnostic, and which case the arm meant is unknown (E1)
+                        }
+                        else
                         {
                             if (!rest.Any(c => IsCaseOf(type, c)))
                             {
@@ -296,8 +308,10 @@ public sealed partial class Checker
                     }
 
                 case ValuePattern vp:
+                    // O5 gives an arm of `else` a case type: a value there is text no rule gives a meaning, E4's `syntax` (the reading in compiler/README.md)
                     Report(ErrorIds.Syntax, arm.Line, "an arm of `else` names a case type (O5)");
                     CheckExpression(vp.Value, null);
+                    armWrong = true;
                     break;
                 default:
                     throw new InvalidOperationException(arm.Pattern.GetType().Name);
@@ -370,7 +384,7 @@ public sealed partial class Checker
             case ExpressionStatement es when !Types.IsVoid(success):
                 {
                     var t = CheckExpression(es.Expression, success, keepCases: success is UnionType);
-                    if (Types.IsVoid(t.Type))
+                    if (Types.IsVoid(t.Type) && !Types.IsError(success)) // after a call that did not type, the success may be `void`, and the arm a statement (O10, E1)
                     {
                         Report(ErrorIds.Syntax, es.Line, "a call with a `void` success used as a value (O10)");
                     }
@@ -384,6 +398,7 @@ public sealed partial class Checker
 
             case Block b:
                 PushScope();
+                PushNested(b.Statements);
                 blockDepth++;
                 if (b.Statements.Count == 0 && !Types.IsVoid(success) && !Types.IsError(success))
                 {
@@ -405,6 +420,7 @@ public sealed partial class Checker
                 }
 
                 blockDepth--;
+                PopNested();
                 PopScope();
                 break;
             default:
