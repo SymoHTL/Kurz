@@ -1,0 +1,7 @@
+// expect: error raw-required at 7
+// rules: R10
+
+long n = 5
+p = &n
+print(n)
+print(*p)

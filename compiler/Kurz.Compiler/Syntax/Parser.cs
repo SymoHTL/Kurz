@@ -26,6 +26,7 @@ public sealed class Parser
     private int openBraces; // braces a construct of the statement opened (`with { }`, an enum body): recovery closes them
     private List<Diagnostic> pending = new(); // reported while speculating: kept when that parse succeeds, dropped when it is rewound
     private bool committed; // the speculative parse has seen the shape of a declaration: an error after that is reported, not rewound
+    private bool noLambda; // the value of an operand of `asm`, where `=>` splits the operand (R11) and starts no lambda
     private readonly List<(int Index, Token Original)> tokenEdits = new(); // tokens a speculative parse rewrote (`>>`): undone with the rewind
 
     private Parser(SourceText source, IEnumerable<Token> tokens, DiagnosticBag diagnostics)
@@ -515,6 +516,11 @@ public sealed class Parser
                     Advance();
                     return new ThrowStatement(token.Line, EndsStatement() ? null : ParseExpression());
                 case "raw": Advance(); return new RawBlock(token.Line, ParseBlockAfter(token.Line, "the `raw` block"));
+                case "extern" when Peek().Kind == TokenKind.StringLiteral
+                    && (Peek(2).Kind is TokenKind.LeftBrace or TokenKind.Newline or TokenKind.EndOfFile || Peek(2).IsKeyword("in")):
+                    return ParseExternBlock(); // R16: `extern "C" {` and `extern "C" in "lib" {`; a declaration does not end its line after `extern "C"`
+                case "asm" when Peek().Kind == TokenKind.LeftParen:
+                    return ParseAsm(); // R11: a statement of its own
                 case "use": return ParseUse();
                 case "data": case "class": case "interface": case "enum": case "flags":
                     return ParseTypeDeclaration(Modifiers.None);
@@ -523,7 +529,7 @@ public sealed class Parser
                     ReportSyntax(token.Line, "`else` follows the closing brace of the `if` block on the same line");
                     Advance();
                     return ParseStrayElseClause(token.Line);
-                case "pub": case "prot": case "static": case "mut": case "virtual": case "override": case "void": case "weak":
+                case "pub": case "prot": case "static": case "mut": case "virtual": case "override": case "void": case "weak": case "naked": case "extern":
                     if (TryDeclaration(out var modified))
                     {
                         return modified!;
@@ -569,11 +575,11 @@ public sealed class Parser
         if (At(TokenKind.Assign))
         {
             var assign = Advance();
-            // V8: a name on the left declares or assigns (above); M4: a path; M9: an index, `map[key] = value`; any other left side
-            // is text no rule gives a meaning (E4)
-            if (expression is not (MemberAccess or IndexExpression))
+            // V8: a name on the left declares or assigns (above); M4: a path; M9: an index, `map[key] = value`; R10: a write through a
+            // pointer, `*p = v`; any other left side is text no rule gives a meaning (E4)
+            if (expression is not (MemberAccess or IndexExpression or UnaryExpression { Operator: TokenKind.Star }))
             {
-                throw new ParseError(assign.Line, "only a variable, a path or an index can be assigned");
+                throw new ParseError(assign.Line, "only a variable, a path, an index or what a pointer points to can be assigned");
             }
 
             SkipNewlines();
@@ -609,6 +615,217 @@ public sealed class Parser
         }
 
         return new UseStatement(use.Line, string.Join('.', parts));
+    }
+
+    /// <summary>The string after <c>extern</c>: the C calling convention, <c>"C"</c>, the one R16 and R17 write; another is text no rule gives a meaning (E4).</summary>
+    private void ExpectConvention()
+    {
+        committed = true; // `extern` and a string: a declaration, a block of them or a type, whatever follows
+        var convention = Current;
+        if (convention.Kind != TokenKind.StringLiteral || convention.Value is not StringLiteralValue { PlainText: "C" })
+        {
+            throw new ParseError(ErrorLine(), $"`extern` takes the convention \"C\" (R16, R17), found {convention}");
+        }
+
+        Advance();
+    }
+
+    /// <summary>
+    /// R16: a block of the functions of a C library, <c>extern "C" { long write(int fd, byte* buf, long n) }</c>, with the library
+    /// after <c>in</c> where one is named, <c>extern "C" in "dbghelp" { ... }</c>. Its body opens on the line of <c>extern</c> (C1)
+    /// and holds a declaration with no body on each line; which modifiers, types and defaults a declaration may take is the checker's.
+    /// </summary>
+    private ExternBlock ParseExternBlock()
+    {
+        var keyword = Advance();
+        ExpectConvention();
+        string? library = null;
+        if (MatchKeyword("in"))
+        {
+            if (Current.Kind != TokenKind.StringLiteral || Current.Value is not StringLiteralValue { PlainText: { } name })
+            {
+                throw Fail("the name of the library as a string, `in \"dbghelp\"`");
+            }
+
+            library = name;
+            Advance();
+        }
+
+        ExpectOpeningBrace(keyword.Line, "the block of `extern`");
+        var saved = suppressNewlines;
+        suppressNewlines = 0;
+        var functions = new List<ExternFunction>();
+        while (true)
+        {
+            SkipNewlines();
+            if (At(TokenKind.RightBrace) || At(TokenKind.EndOfFile))
+            {
+                break;
+            }
+
+            var startIndex = index;
+            try
+            {
+                functions.Add(ParseExternFunction());
+                EndStatement();
+            }
+            catch (ParseError e)
+            {
+                FailStatement(e, startIndex, 0);
+            }
+        }
+
+        Expect(TokenKind.RightBrace, "`}`");
+        suppressNewlines = saved;
+        return new ExternBlock(keyword.Line, library, functions);
+    }
+
+    /// <summary>A function of a block of R16: its signature, which ends its line, with no body, its last parameter <c>...</c> where it takes a variable count of arguments.</summary>
+    private ExternFunction ParseExternFunction()
+    {
+        var start = Current;
+        var modifiers = ParseModifiers();
+        var returnType = ParseType();
+        var name = ExpectName("the name of the C function");
+        Expect(TokenKind.LeftParen, "`(`");
+        suppressNewlines++;
+        var parameters = new List<Parameter>();
+        var variadic = false;
+        if (!At(TokenKind.RightParen))
+        {
+            do
+            {
+                if (Match(TokenKind.Ellipsis))
+                {
+                    variadic = true; // R16: `...` is the last parameter, so what follows it is text no rule gives a meaning (E4)
+                    break;
+                }
+
+                parameters.Add(ParseParameter(typesOptional: false));
+            }
+            while (Match(TokenKind.Comma));
+        }
+
+        suppressNewlines--;
+        Expect(TokenKind.RightParen, "`)`");
+        return new ExternFunction(start.Line, modifiers, returnType, name.Text, parameters, variadic);
+    }
+
+    /// <summary>
+    /// R11: <c>asm("add {r}, 1", r = inout(reg) count)</c>, a statement of its own: its templates, string literals the lexer read
+    /// with no hole, then its operands as Rust writes them (<see cref="ParseAsmOperand"/>).
+    /// </summary>
+    private AsmStatement ParseAsm()
+    {
+        var keyword = Advance();
+        Expect(TokenKind.LeftParen, "`(`");
+        suppressNewlines++;
+        var templates = new List<AsmTemplate>();
+        var operands = new List<AsmOperand>();
+        do
+        {
+            if (Current.Kind == TokenKind.StringLiteral && Current.Value is StringLiteralValue { IsTemplate: true } template)
+            {
+                templates.Add(new AsmTemplate(Advance().Line, template.PlainText!));
+            }
+            else if (templates.Count == 0)
+            {
+                throw Fail("the template of the `asm`, a string literal");
+            }
+            else
+            {
+                operands.Add(ParseAsmOperand());
+            }
+        }
+        while (Match(TokenKind.Comma));
+
+        suppressNewlines--;
+        Expect(TokenKind.RightParen, "`)`");
+        return new AsmStatement(keyword.Line, templates, operands);
+    }
+
+    /// <summary>
+    /// An operand of an <c>asm</c> in Rust's shape (R11): <c>name =</c> where it has a name, a word, then a list in parentheses
+    /// (<c>in(reg)</c>, <c>out("eax")</c>, <c>clobber_abi("C")</c>, <c>options(nostack)</c>), then the value and a place after
+    /// <c>=&gt;</c>, or a block (<c>label { ... }</c>). Which words, register classes and shapes are Rust's is the checker's
+    /// (<c>asm-operand</c>), so a word the parser does not know parses as any other.
+    /// </summary>
+    private AsmOperand ParseAsmOperand()
+    {
+        var start = Current;
+        string? name = null;
+        if ((At(TokenKind.Name) || At(TokenKind.Keyword)) && Peek().Kind == TokenKind.Assign)
+        {
+            name = Advance().Text;
+            Advance(); // `=`
+        }
+
+        if (!At(TokenKind.Name) && !At(TokenKind.Keyword))
+        {
+            throw Fail("an operand of the `asm`, `in(reg) x`, `const 1` or `options(nostack)`");
+        }
+
+        var word = Advance();
+        if (At(TokenKind.LeftBrace))
+        {
+            if (Current.Line != word.Line)
+            {
+                Report(ErrorIds.BracesRequired, word.Line, $"the block of `{word.Text}` opens on its line, not on the next (C1)");
+            }
+
+            return new AsmOperand(start.Line, name, word.Text, null, null, null, ParseBlock());
+        }
+
+        List<AsmArgument>? arguments = null;
+        if (Match(TokenKind.LeftParen))
+        {
+            arguments = [];
+            if (!At(TokenKind.RightParen))
+            {
+                do
+                {
+                    var argument = Current;
+                    if (argument.Kind == TokenKind.StringLiteral && argument.Value is StringLiteralValue { PlainText: { } text })
+                    {
+                        arguments.Add(new AsmArgument(Advance().Line, text, Quoted: true));
+                    }
+                    else if (argument.Kind is TokenKind.Name or TokenKind.Keyword)
+                    {
+                        arguments.Add(new AsmArgument(Advance().Line, argument.Text, Quoted: false));
+                    }
+                    else
+                    {
+                        throw Fail("a register class, a register, an ABI or an option");
+                    }
+                }
+                while (Match(TokenKind.Comma));
+            }
+
+            Expect(TokenKind.RightParen, "`)`");
+            if (At(TokenKind.Comma) || At(TokenKind.RightParen))
+            {
+                return new AsmOperand(start.Line, name, word.Text, arguments, null, null, null); // `clobber_abi(...)`, `options(...)`
+            }
+        }
+
+        var value = ParseAsmValue();
+        var output = Match(TokenKind.Arrow) ? ParseAsmValue() : null;
+        return new AsmOperand(start.Line, name, word.Text, arguments, value, output, null);
+    }
+
+    /// <summary>The value of an operand of an <c>asm</c>, where <c>x =&gt; y</c> is the operand split into what goes in and where the result goes (R11), no lambda.</summary>
+    private Expression ParseAsmValue()
+    {
+        var saved = noLambda;
+        noLambda = true;
+        try
+        {
+            return ParseExpression();
+        }
+        finally
+        {
+            noLambda = saved;
+        }
     }
 
     // ---- blocks and control flow ---------------------------------------------------------------
@@ -924,16 +1141,26 @@ public sealed class Parser
     private Modifiers ParseModifiers()
     {
         var modifiers = Modifiers.None;
-        while (At(TokenKind.Keyword))
+        while (true)
         {
-            var flag = Current.Text switch
+            var flag = Current switch
             {
-                "pub" => Modifiers.Pub,
-                "prot" => Modifiers.Prot,
-                "static" => Modifiers.Static,
-                "mut" => Modifiers.Mut,
-                "virtual" => Modifiers.Virtual,
-                "override" => Modifiers.Override,
+                // R13: `thread` is a word only before `static`, and a name everywhere else (L18)
+                { Kind: TokenKind.Name, Text: "thread" } when Peek().IsKeyword("static") => Modifiers.Thread,
+                // `extern "C"` before a function, its C calling convention (R16), or before a data type, C's layout (R17); before `(`
+                // it starts the type of a C function (R17), which the type is read as
+                { Kind: TokenKind.Keyword, Text: "extern" } when Peek().Kind == TokenKind.StringLiteral && Peek(2).Kind != TokenKind.LeftParen => Modifiers.Extern,
+                { Kind: TokenKind.Keyword } => Current.Text switch
+                {
+                    "pub" => Modifiers.Pub,
+                    "prot" => Modifiers.Prot,
+                    "static" => Modifiers.Static,
+                    "mut" => Modifiers.Mut,
+                    "virtual" => Modifiers.Virtual,
+                    "override" => Modifiers.Override,
+                    "naked" => Modifiers.Naked, // R12
+                    _ => Modifiers.None,
+                },
                 _ => Modifiers.None,
             };
             if (flag == Modifiers.None)
@@ -951,6 +1178,10 @@ public sealed class Parser
 
             modifiers |= flag;
             Advance();
+            if (flag == Modifiers.Extern)
+            {
+                ExpectConvention();
+            }
         }
 
         return modifiers;
@@ -1308,11 +1539,25 @@ public sealed class Parser
         }
 
         var type = ParseCoreType();
-        if (At(TokenKind.Question))
+        // R10: `int*`, a raw pointer, and `int**`, a pointer to one, `void*` the untyped one (R14), as C# writes them; a pointer holds
+        // `null` itself, so a `?` after one is text no rule gives a meaning (E4), while `int?*` points to an `int?`, a pointee the
+        // checker judges
+        while (At(TokenKind.Star) || (At(TokenKind.Question) && type is not NullableType))
         {
+            var suffix = Advance();
+            if (suffix.Kind == TokenKind.Star)
+            {
+                type = new PointerType(suffix.Line, type);
+                continue;
+            }
+
+            if (type is PointerType)
+            {
+                throw new ParseError(suffix.Line, "a pointer holds `null` itself and takes no `?` (R10)");
+            }
+
             // N1: `T?`; a second `?` is text no rule gives a meaning, which the caller's next expectation reports (E4)
-            var question = Advance();
-            type = new NullableType(question.Line, type);
+            type = new NullableType(suffix.Line, type);
         }
 
         return type;
@@ -1358,6 +1603,25 @@ public sealed class Parser
         {
             Advance();
             return new VoidType(token.Line);
+        }
+
+        if (token.IsKeyword("extern"))
+        {
+            // R17: `extern "C" (int) => void`, the type of a function that takes the C calling convention, F11's function type after
+            // `extern "C"`; its nullable form is written in parentheses, `(extern "C" (int) => void)?`
+            Advance();
+            ExpectConvention();
+            if (!At(TokenKind.LeftParen))
+            {
+                throw Fail("the parameter types of the C function, `(int) => void`");
+            }
+
+            if (ParseCoreType() is not FunctionType function)
+            {
+                throw new ParseError(token.Line, "`extern \"C\"` before a type takes a function type, `extern \"C\" (int) => void` (R17)");
+            }
+
+            return new ExternFunctionType(token.Line, function.Parameters, function.Result);
         }
 
         if (token.Kind == TokenKind.Name || (token.Kind == TokenKind.Keyword && CoreWords.TypeNames.Contains(token.Text)))
@@ -1448,7 +1712,7 @@ public sealed class Parser
 
     private static bool CanStartExpression(TokenKind kind) => kind is TokenKind.Name or TokenKind.Keyword
         or TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.UnitLiteral or TokenKind.StringLiteral or TokenKind.CharLiteral
-        or TokenKind.LeftParen or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde; // no expression starts with `[`
+        or TokenKind.LeftParen or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.Star or TokenKind.Ampersand; // no expression starts with `[`
 
     private Expression ParseUnary()
     {
@@ -1459,8 +1723,30 @@ public sealed class Parser
             return new UnaryExpression(op.Line, op.Kind, ParseUnary());
         }
 
+        // R10: `*p` reads through a pointer and `&x` takes the address of a variable, a field or an element, prefix operators as C#
+        // writes them in `unsafe` code, binding as `-` does, so `*p.Next` reads through `p.Next`; `&` of anything else is text no
+        // rule gives a meaning (E4), as the left side of an assignment is
+        if (At(TokenKind.Star) || At(TokenKind.Ampersand))
+        {
+            var op = Advance();
+            var operand = ParseUnary();
+            if (op.Kind == TokenKind.Ampersand && !IsPlace(operand))
+            {
+                throw new ParseError(op.Line, "`&` takes a variable, a field or an element (R10)");
+            }
+
+            return new UnaryExpression(op.Line, op.Kind, operand);
+        }
+
         return ParsePostfix();
     }
+
+    private static bool IsPlace(Expression expression) => expression switch
+    {
+        NameExpression or IndexExpression or MemberAccess { Conditional: false } or UnaryExpression { Operator: TokenKind.Star } => true,
+        ParenthesizedExpression p => IsPlace(p.Inner),
+        _ => false,
+    };
 
     private Expression ParsePostfix()
     {
@@ -1577,6 +1863,8 @@ public sealed class Parser
     {
         Expect(TokenKind.LeftParen, "`(`");
         suppressNewlines++;
+        var savedNoLambda = noLambda;
+        noLambda = false; // an argument of a call inside an operand of `asm` takes a lambda as any argument does
         var arguments = new List<Argument>();
         if (!At(TokenKind.RightParen))
         {
@@ -1600,6 +1888,7 @@ public sealed class Parser
         }
 
         suppressNewlines--;
+        noLambda = savedNoLambda;
         Expect(TokenKind.RightParen, "`)`");
         return arguments;
     }
@@ -1626,7 +1915,7 @@ public sealed class Parser
                 return ParseStringLiteral(token);
             case TokenKind.Name:
                 Advance();
-                if (At(TokenKind.Arrow))
+                if (At(TokenKind.Arrow) && !noLambda)
                 {
                     Advance(); // F7: `x => ...`, a lambda written as in C#
                     return ParseLambdaBody(token.Line, [new Parameter(token.Line, false, null, token.Text, null)]);
@@ -1648,6 +1937,8 @@ public sealed class Parser
                         Advance();
                         var subject = ParseExpression();
                         return new MatchExpression(token.Line, subject, ParseArms(token.Line, "`match`"));
+                    case "asm" when Peek().Kind == TokenKind.LeftParen:
+                        throw new ParseError(token.Line, "`asm` is a statement of its own (R11)");
                     default:
                         if (token.Text is "if" or "while" or "for" or "else" or "return" or "throw" or "break" or "continue"
                             or "data" or "class" or "interface" or "enum" or "flags" or "raw" or "use" or "with" or "in")
@@ -1666,7 +1957,7 @@ public sealed class Parser
                 // F7: `(x, y) => ...` and `(int x, int y) => ...`, the parameters tried speculatively, since `(` also opens a
                 // parenthesized expression (C1)
                 List<Parameter>? parameters = null;
-                if (Try(() =>
+                if (!noLambda && Try(() =>
                     {
                         parameters = ParseParameters(typesOptional: true);
                         Expect(TokenKind.Arrow, "`=>`");

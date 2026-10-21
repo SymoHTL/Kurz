@@ -1,0 +1,13 @@
+// expect: output
+// | 8
+// allow: raw native
+// rules: R16, R17
+
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+extern "C" (long) => long f = Twice
+raw {
+    print(f(4))
+}

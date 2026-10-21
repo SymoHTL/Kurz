@@ -271,10 +271,6 @@ such a type among them, is the compile error `counted-pointee` (§3, the owner, 
 `data` value that holds no counted reference is a pointee too *(assumed: the id and that pointee, as
 §3 marks them)*.
 
-A case reaches a pointer through a conversion (R14) or a member of a string (R15), since the
-compiler's front end, through which every case runs, reads a pointer type, `&x` and `*p` as `syntax`:
-it takes `-`, `!` and `~` alone as prefix operators.
-
 Case: [memory/pointer-offset.kz](../corpus/memory/pointer-offset.kz)
 ```kurz
 long m = 64
@@ -307,6 +303,45 @@ raw {
 }
 ```
 
+Case: [memory/pointer-address.kz](../corpus/memory/pointer-address.kz)
+```kurz
+mut long n = 5
+p = &n
+raw {
+    *p = 7
+}
+print(n)
+```
+
+Case: [memory/pointer-parameter.kz](../corpus/memory/pointer-parameter.kz)
+```kurz
+void Set(long* p, long v) {
+    raw {
+        *p = v
+    }
+}
+
+mut long n = 1
+Set(&n, 9)
+print(n)
+```
+
+Case: [memory/pointer-deref-outside-raw.kz](../corpus/memory/pointer-deref-outside-raw.kz)
+```kurz
+long n = 5
+p = &n
+print(n)
+print(*p)
+```
+
+Case: [memory/address-of-counted.kz](../corpus/memory/address-of-counted.kz)
+```kurz
+s = "hi"
+p = &s
+print(p == null)
+print(s)
+```
+
 ### R11 (decided, §3) Inline assembly
 
 Inline assembly is a statement inside a `raw` block, written as Rust writes `asm!`:
@@ -331,7 +366,7 @@ raises.
 Case: [memory/asm-outside-raw.kz](../corpus/memory/asm-outside-raw.kz)
 ```kurz
 asm("nop")
-// an `asm` outside a `raw` block and outside a `naked` function is raw-required (R11); the front end parses this line as a call with no error, and the id is raised after the parse
+// an `asm` outside a `raw` block and outside a `naked` function is raw-required (R11); the front end parses this line as an `asm` statement with no error, and the id is raised after the parse
 ```
 
 Case: [memory/asm-in-raw.kz](../corpus/memory/asm-in-raw.kz)
@@ -348,6 +383,13 @@ raw {
 }
 ```
 
+Case: [memory/asm-unused-operand.kz](../corpus/memory/asm-unused-operand.kz)
+```kurz
+raw {
+    asm("nop", x = in(reg) 1)
+}
+```
+
 ### R12 (decided, §3) A function with no frame
 
 A function marked `naked` before its signature, `naked void Switch(...)`, gets no prologue and no
@@ -355,16 +397,26 @@ epilogue from the compiler; its body is one `asm` statement (R11), and it compil
 granted `allow raw` (§3, the owner, 2026-10-21); its body counts as a `raw` block (§3, an assumption
 there). One in a package without the grant, or in a program without a project file, which has no grant (R7), is the compile
 error `naked-not-allowed`, and its body, a `raw` block, raises no `raw-not-allowed` beside it *(assumed:
-the id and the one error, as §3 marks them; the id stands here and not in the table of chapter 12)*.
+the id and the one error, as §3 marks them)*.
 Its `asm` takes `sym` and `const` operands alone, its instructions return or never end, and the
 function is called by the C calling convention of its target *(assumed: as §3 marks them)*. A body
 other than one `asm`, or an operand there other than `sym` and `const`, is the compile error
 `naked-body`, and instructions that fall through the function's end are a misuse of `raw` code, which
-no compiler checks *(assumed: as §3 marks them; the id stands here and not in the table of chapter
-12)*. `naked` is a core word (L18).
+no compiler checks *(assumed: as §3 marks them)*. `naked` is a core word (L18).
 
-No case: a case of R12 needs a `naked` function, at which the compiler's front end, through which
-every case runs, reports `syntax`, so that such a case fails there.
+Case: [memory/naked-not-allowed.kz](../corpus/memory/naked-not-allowed.kz)
+```kurz
+naked void Switch() {
+    asm("ret")
+}
+```
+
+Case: [memory/naked-body.kz](../corpus/memory/naked-body.kz)
+```kurz
+naked void Switch() {
+    asm("mov {x}, 1", x = out(reg) _)
+}
+```
 
 ### R13 (decided, §3) State outside a function
 
@@ -388,8 +440,7 @@ error `static-state`, and a read or a write of one outside a `raw` block is `raw
 *(assumed: as §3 marks them)*. A `thread static mut` is the target's thread-local storage, as C's
 `_Thread_local` is: each thread's value sits at an offset from the pointer the target keeps for each
 thread, an access taking a few instructions more than one of a `static mut`, and on a target that
-runs one thread, AVR among them, it is one value *(assumed: as §3 marks it)*. No case declares a `thread static`: the compiler's front end, through
-which every case runs, reports `syntax` at it.
+runs one thread, AVR among them, it is one value *(assumed: as §3 marks it)*.
 
 Case: [memory/static-mut-in-raw.kz](../corpus/memory/static-mut-in-raw.kz)
 ```kurz
@@ -427,6 +478,15 @@ Case: [memory/static-mut-pub.kz](../corpus/memory/static-mut-pub.kz)
 pub static mut long total = 0
 raw {
     total = 1
+}
+```
+
+Case: [memory/thread-static-mut.kz](../corpus/memory/thread-static-mut.kz)
+```kurz
+thread static mut long depth = 0
+raw {
+    depth = depth + 1
+    print(depth)
 }
 ```
 
@@ -533,12 +593,66 @@ than an `int`, a `bool` and a `float`, which C would widen and which the develop
 in a package without the grant is the compile error `native-not-allowed`; a call of a declared
 function outside a `raw` block is `raw-required` (R10), so that a package that calls one needs `allow
 raw` beside `allow native` (R7); and a declaration with a type that cannot cross to C, or such an
-argument in the place of `...`, is `native-type` *(assumed: as §13 marks them; `native-not-allowed`
-and `native-type` stand here and not in the table of chapter 12)*. `extern` is
+argument in the place of `...`, is `native-type` *(assumed: as §13 marks them)*. `extern` is
 a core word (L18).
 
-No case: a case of R16 needs an `extern` block, at which the compiler's front end, through which
-every case runs, reports `syntax`, so that such a case fails there.
+Case: [memory/extern-not-allowed.kz](../corpus/memory/extern-not-allowed.kz)
+```kurz
+extern "C" {
+    int abs(int n)
+}
+```
+
+Case: [memory/extern-call.kz](../corpus/memory/extern-call.kz)
+```kurz
+extern "C" {
+    int abs(int n)
+}
+
+raw {
+    print(abs(-3))
+}
+```
+
+Case: [memory/extern-call-outside-raw.kz](../corpus/memory/extern-call-outside-raw.kz)
+```kurz
+extern "C" {
+    int abs(int n)
+}
+
+print(abs(-3))
+```
+
+Case: [memory/extern-type.kz](../corpus/memory/extern-type.kz)
+```kurz
+extern "C" {
+    long strlen(string s)
+}
+```
+
+Case: [memory/extern-variadic-bool.kz](../corpus/memory/extern-variadic-bool.kz)
+```kurz
+extern "C" {
+    int printf(byte* format, ...)
+}
+
+s = "%d"
+raw {
+    printf(s.Pointer, true)
+}
+```
+
+Case: [memory/c-function-type.kz](../corpus/memory/c-function-type.kz)
+```kurz
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+extern "C" (long) => long f = Twice
+raw {
+    print(f(4))
+}
+```
 
 ### R17 (decided, §2, §13) The type of a C function
 
@@ -554,8 +668,25 @@ it writes or as the result of a function R16 declares, is a misuse of `raw` code
 value must be non-null in Rust, so that a declaration where C may give `null` takes the nullable form
 *(assumed: as §13 marks them)*.
 
-No case: the type starts with `extern`, at which the compiler's front end, through which every case
-runs, reports `syntax`, so that a case that writes it fails there.
+Case: [memory/c-function-type.kz](../corpus/memory/c-function-type.kz)
+
+Case: [memory/c-function-type-outside-raw.kz](../corpus/memory/c-function-type-outside-raw.kz)
+```kurz
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+extern "C" (long) => long f = Twice
+print(f(4))
+```
+
+Case: [memory/c-function-type-lambda.kz](../corpus/memory/c-function-type-lambda.kz)
+```kurz
+void Run(extern "C" (long) => long f) {
+}
+
+Run((long x) => x * 2)
+```
 
 ### R8 (decided, §3) Fields of interface type
 

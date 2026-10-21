@@ -579,6 +579,34 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void The_raw_forms_of_chapter_11_are_not_read()
+    {
+        // R10: a pointer type, a read through a pointer, an address and a write through a pointer; R11: `asm`, whose operands are read for
+        // the variables they use; R12: a `naked` function; R13: a `thread static mut` at the top level; R16: a block of C functions, whose
+        // names a call reaches with no error of its own (E1), and a function of the C calling convention; R17: the type of a C function and
+        // data in C's layout. Each is `not supported` at its line and carries nothing more (E1)
+        Assert.Equal(["1: a raw pointer type (R10)"], NotSupported("void Fill(byte* buf) {\n}\n\nprint(1)"));
+        Assert.Equal(["2: the address of a place, `&x` (R10)"], NotSupported("long n = 5\np = &n\nprint(p)"));
+        Assert.Equal(["2: the address of a place, `&x` (R10)", "3: a read through a raw pointer, `*p` (R10)"], NotSupported("long n = 5\np = &n\nprint(*p + 1)"));
+        Assert.Equal(["2: the address of a place, `&x` (R10)", "3: a write through a raw pointer (R10)"], NotSupported("mut long n = 5\np = &n\n*p = 7"));
+        Assert.Equal(["2: `asm` (R11)"], NotSupported("mut long count = 1\nasm(\"add {r}, 1\", r = inout(reg) count)"));
+        Assert.Equal(["1: a `naked` function (R12)"], NotSupported("naked void Switch() {\n    asm(\"ret\")\n}\n\nSwitch()"));
+        Assert.Equal(["1: a `thread static mut` declaration at the top level of a file (R13)"], NotSupported("thread static mut long depth = 0\nprint(depth)"));
+        Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)"], NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(-3))"));
+        Assert.Equal(["1: a function of the C calling convention, `extern \"C\"` (R16)"], NotSupported("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nprint(Twice(4))"));
+        Assert.Equal(["1: the type of a C function (R17)"], NotSupported("void Run(extern \"C\" (long) => long f) {\n}\n\nprint(1)"));
+        // a lambda where the type of a C function stands is no misfit beside it, typed or not (E1)
+        Assert.Equal(["1: the type of a C function (R17)"], NotSupported("void Run(extern \"C\" (long) => long f) {\n}\n\nRun((long x) => x * 2)"));
+        Assert.Equal(["1: the type of a C function (R17)"], NotSupported("extern \"C\" (long) => long f = x => x * 2\nprint(1)"));
+        Assert.Equal(["1: a data type in C's layout, `extern \"C\" data` (R17)"], NotSupported("extern \"C\" data Point(int X, int Y)\nprint(Point(1, 2).X)"));
+        // the variables an operand of `asm` and a `label` block use count as used, so none is `unused-variable`
+        Assert.Equal(["4: `asm` (R11)"], NotSupported("long a = 1\nmut long b = 2\nlong c = 3\nasm(\"{x} {l}\", x = inout(reg) a => b, l = label {\n    print(c)\n})"));
+        // a block of C functions inside a function makes its names visible there alone (V10)
+        var (nested, _) = Check("void F() {\n    extern \"C\" {\n        int abs(int n)\n    }\n\n    print(abs(-3))\n}\n\nF()\nprint(abs(-3))");
+        Assert.Equal(["2: not supported: a block of C functions, `extern \"C\"` (R16)", "10: error unknown-name: no `abs` is visible here (V10)"], nested.Sorted.Select(d => d.ToString()));
+    }
+
+    [Fact]
     public void A_conversion_of_a_pointer_and_the_size_of_a_type_are_not_read()
     {
         // R14: `Ptr<T>(x)` and `SizeOf<T>()` take the call form of T10's conversions, which the checker does not read for a pointer;

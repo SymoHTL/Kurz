@@ -1,0 +1,6 @@
+// expect: error naked-not-allowed at 4
+// rules: R12
+
+naked void Switch() {
+    asm("ret")
+}

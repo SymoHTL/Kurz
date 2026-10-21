@@ -1064,7 +1064,7 @@ public sealed partial class Checker
             var type = Types.Substitute(slot.Type, candidate.Map);
             if (pre.Lambda is not null)
             {
-                if (type is not FunctionType f || f.Parameters.Count != pre.Lambda.Parameters.Count)
+                if (!Types.IsError(type) && (type is not FunctionType f || f.Parameters.Count != pre.Lambda.Parameters.Count))
                 {
                     candidate.Misfit ??= (i, type);
                 }

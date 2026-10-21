@@ -1,0 +1,10 @@
+// expect: output
+// | 1
+// allow: raw
+// rules: R13
+
+thread static mut long depth = 0
+raw {
+    depth = depth + 1
+    print(depth)
+}

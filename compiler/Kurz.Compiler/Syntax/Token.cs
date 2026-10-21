@@ -38,6 +38,9 @@ public enum TokenKind
     Dot,
     DotDot,
     DotDotLess,
+
+    /// <summary><c>...</c>, the last parameter of a C function that takes a variable count of arguments (R16).</summary>
+    Ellipsis,
     Colon,
     Question,
     QuestionDot,
@@ -113,6 +116,9 @@ public sealed record HolePart(string Source, int Line, int Offset) : StringPart;
 
 public sealed record StringLiteralValue(IReadOnlyList<StringPart> Parts)
 {
+    /// <summary>A template of an <c>asm</c> (R11), read with no hole: its <c>{name}</c> names an operand and is no interpolation (L6), so its one part is its text with its braces.</summary>
+    public bool IsTemplate { get; init; }
+
     /// <summary>The text of a literal without holes, or null when it has one.</summary>
     public string? PlainText => Parts.All(p => p is TextPart) ? string.Concat(Parts.Cast<TextPart>().Select(p => p.Text)) : null;
 }

@@ -29,6 +29,12 @@ public sealed record WeakType(int Line, TypeSyntax Inner) : TypeSyntax(Line);
 /// <summary><c>void</c> (F4), as a result type.</summary>
 public sealed record VoidType(int Line) : TypeSyntax(Line);
 
+/// <summary><c>int*</c>, a raw pointer to what <paramref name="Pointee"/> names, <c>void*</c> among them (R10, R14).</summary>
+public sealed record PointerType(int Line, TypeSyntax Pointee) : TypeSyntax(Line);
+
+/// <summary><c>extern "C" (int) => void</c>, the type of a function that takes the C calling convention (R17).</summary>
+public sealed record ExternFunctionType(int Line, IReadOnlyList<TypeSyntax> Parameters, TypeSyntax Result) : TypeSyntax(Line);
+
 // ---- expressions -------------------------------------------------------------------------------
 
 public abstract record Expression(int Line) : Node(Line);
@@ -82,7 +88,7 @@ public sealed record CallExpression(int Line, Expression Callee, IReadOnlyList<T
 /// <summary><c>list[i]</c> or <c>map[key]</c> (M9); the line is the bracket's.</summary>
 public sealed record IndexExpression(int Line, Expression Target, Expression Index) : Expression(Line);
 
-/// <summary><c>-x</c> and <c>!x</c> (T18), <c>~x</c> (T22).</summary>
+/// <summary><c>-x</c> and <c>!x</c> (T18), <c>~x</c> (T22), and of a raw pointer the read <c>*p</c> and the address <c>&amp;x</c> (R10).</summary>
 public sealed record UnaryExpression(int Line, TokenKind Operator, Expression Operand) : Expression(Line);
 
 /// <summary>A binary operator of T18, T22 or T12, or N4's <c>??</c>; the line is the operator's (E1).</summary>
@@ -179,9 +185,39 @@ public sealed record RawBlock(int Line, Block Body) : Statement(Line);
 /// <summary><c>use folder</c> (F10).</summary>
 public sealed record UseStatement(int Line, string Target) : Statement(Line);
 
+/// <summary>
+/// An <c>asm</c> statement (R11): its templates, each a string literal whose <c>{name}</c> names an operand and is no
+/// interpolation (L6), then its operands.
+/// </summary>
+public sealed record AsmStatement(int Line, IReadOnlyList<AsmTemplate> Templates, IReadOnlyList<AsmOperand> Operands) : Statement(Line);
+
+/// <summary>A template of an <c>asm</c>, its text with the escapes of a string literal read and its braces as written.</summary>
+public sealed record AsmTemplate(int Line, string Text);
+
+/// <summary>
+/// An operand of an <c>asm</c> as Rust writes one (R11): an optional <c>name =</c>, a word, then the list in parentheses of
+/// <c>in(reg)</c>, <c>out("eax")</c>, <c>clobber_abi("C")</c> or <c>options(nomem, nostack)</c>, then the value, with the place
+/// after <c>=&gt;</c> where it is split (<c>inout(reg) x =&gt; y</c>); <c>const</c> and <c>sym</c> take the value alone, and
+/// <c>label</c> takes a block. A discarded output, Rust's <c>_</c>, is the name <c>_</c>. Which words, register classes and shapes
+/// are Rust's is the checker's (<c>asm-operand</c>).
+/// </summary>
+public sealed record AsmOperand(int Line, string? Name, string Word, IReadOnlyList<AsmArgument>? Arguments, Expression? Value, Expression? Output, Block? Body);
+
+/// <summary>A word or a string in the parentheses of an operand: a register class, a register (<paramref name="Quoted"/>), an ABI or an option.</summary>
+public sealed record AsmArgument(int Line, string Text, bool Quoted);
+
+/// <summary>
+/// A block of the functions of a C library (R16): <c>extern "C" { long write(int fd, byte* buf, long n) }</c>, with the library
+/// after <c>in</c> where one is named, <c>extern "C" in "dbghelp" { ... }</c>.
+/// </summary>
+public sealed record ExternBlock(int Line, string? Library, IReadOnlyList<ExternFunction> Functions) : Statement(Line);
+
+/// <summary>A function a block of R16 declares, with no body; <paramref name="Variadic"/> where its last parameter is <c>...</c>.</summary>
+public sealed record ExternFunction(int Line, Modifiers Modifiers, TypeSyntax ReturnType, string Name, IReadOnlyList<Parameter> Parameters, bool Variadic);
+
 // ---- declarations ------------------------------------------------------------------------------
 
-/// <summary>The modifiers a declaration can carry, as flags: K7's <c>pub</c>, <c>prot</c>, <c>static</c>, <c>virtual</c> and <c>override</c>, F9's <c>pub</c>, V2's and M6's <c>mut</c>.</summary>
+/// <summary>The modifiers a declaration can carry, as flags: K7's <c>pub</c>, <c>prot</c>, <c>static</c>, <c>virtual</c> and <c>override</c>, F9's <c>pub</c>, V2's and M6's <c>mut</c>, R12's <c>naked</c>, R13's <c>thread</c>, and <c>extern "C"</c>, the C calling convention of a function (R16) and the C layout of a data type (R17).</summary>
 [Flags]
 public enum Modifiers
 {
@@ -192,6 +228,9 @@ public enum Modifiers
     Mut = 8,
     Virtual = 16,
     Override = 32,
+    Naked = 64,
+    Thread = 128,
+    Extern = 256,
 }
 
 /// <summary>A parameter of a function, a lambda or a primary constructor: <c>mut</c> (M7), a type (absent on an untyped lambda parameter), a name and a default (D11).</summary>

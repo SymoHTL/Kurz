@@ -556,8 +556,8 @@ public sealed class LexerTests
     public void Every_operator_is_one_token()
     {
         // T18 and T22: the arithmetic, wrapping, comparison, logical and bit operators; T12: `?.` and `??`; N4 and N5: `?` and `:`; C8: `..`
-        // and `..<`; F2, F7 and F11: `=>`; L5: `;`; the brackets of C1, M9 and F2
-        var program = "+ - * / % +% -% *% == != < <= > >= && || ! & | ^ ~ << >> = => . .. ..< ?. ?? ? : , ( ) [ ] { } ;";
+        // and `..<`; F2, F7 and F11: `=>`; L5: `;`; the brackets of C1, M9 and F2; R16: `...`
+        var program = "+ - * / % +% -% *% == != < <= > >= && || ! & | ^ ~ << >> = => . .. ..< ... ?. ?? ? : , ( ) [ ] { } ;";
         var kinds = Meaningful(program).Select(t => t.Kind).ToList();
         Assert.Equal(
             [
@@ -566,7 +566,7 @@ public sealed class LexerTests
                 TokenKind.EqualEqual, TokenKind.NotEqual, TokenKind.Less, TokenKind.LessEqual, TokenKind.Greater, TokenKind.GreaterEqual,
                 TokenKind.AmpersandAmpersand, TokenKind.BarBar, TokenKind.Bang, TokenKind.Ampersand, TokenKind.Bar, TokenKind.Caret, TokenKind.Tilde,
                 TokenKind.LessLess, TokenKind.GreaterGreater, TokenKind.Assign, TokenKind.Arrow, TokenKind.Dot, TokenKind.DotDot, TokenKind.DotDotLess,
-                TokenKind.QuestionDot, TokenKind.QuestionQuestion, TokenKind.Question, TokenKind.Colon, TokenKind.Comma,
+                TokenKind.Ellipsis, TokenKind.QuestionDot, TokenKind.QuestionQuestion, TokenKind.Question, TokenKind.Colon, TokenKind.Comma,
                 TokenKind.LeftParen, TokenKind.RightParen, TokenKind.LeftBracket, TokenKind.RightBracket, TokenKind.LeftBrace, TokenKind.RightBrace,
                 TokenKind.Semicolon,
             ],
@@ -683,6 +683,35 @@ public sealed class LexerTests
         Assert.Equal(
             [TokenKind.Name, TokenKind.Assign, TokenKind.Bad, TokenKind.Name, TokenKind.LeftParen, TokenKind.IntegerLiteral, TokenKind.RightParen],
             tokens.Where(t => t.Kind is not TokenKind.Newline and not TokenKind.EndOfFile).Select(t => t.Kind));
+    }
+
+    [Theory]
+    [InlineData("asm(\"add {r}, 1\", r = inout(reg) x)", "add {r}, 1")]
+    [InlineData("asm(\"mov {}, {0:e}\", out(reg) x)", "mov {}, {0:e}")]
+    [InlineData("asm(\n    \"push {{r4}}\")", "push {{r4}}")]
+    [InlineData("asm(\"a\", \"b {x\", x = in(reg) 1)", "a")]
+    [InlineData("asm(\"\"\"\n    nop {x}\n    \"\"\", x = in(reg) 1)", "nop {x}")]
+    public void A_template_of_asm_is_read_with_no_hole(string program, string first)
+    {
+        // R11: a string literal that opens the arguments of `asm`, or follows such a template and a comma, is a template, whose `{name}`
+        // names an operand and is no interpolation (L6), so an empty `{}`, a `{` no `}` closes and Rust's `{{` read as text, in a `"""`
+        // block too
+        var (tokens, diagnostics) = Lex(program);
+        Assert.Empty(diagnostics.Items);
+        var templates = tokens.Where(t => t.Value is StringLiteralValue { IsTemplate: true }).Select(t => ((StringLiteralValue)t.Value!).PlainText).ToList();
+        Assert.Equal(first, templates[0]);
+        Assert.Equal(program.Contains("\"b {x\"", StringComparison.Ordinal) ? 2 : 1, templates.Count);
+    }
+
+    [Theory]
+    [InlineData("print(\"{}\")")]
+    [InlineData("asm(x, \"{}\")")]
+    [InlineData("asm(\"nop\", x = in(reg) \"{}\")")]
+    public void A_string_that_is_no_template_of_asm_keeps_its_holes(string program)
+    {
+        // L6: outside the templates of R11, an empty hole holds no expression, `syntax` (E4): a literal after another argument of `asm`
+        // or inside an operand is an ordinary one
+        Assert.Equal((ErrorIds.Syntax, 1), OnlyError(program));
     }
 
     [Fact]

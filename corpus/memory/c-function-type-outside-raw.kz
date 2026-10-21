@@ -1,0 +1,10 @@
+// expect: error raw-required at 10
+// allow: native
+// rules: R17
+
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+extern "C" (long) => long f = Twice
+print(f(4))

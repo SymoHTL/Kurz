@@ -52,6 +52,11 @@ public sealed partial class Checker
                 CheckRange(r);
                 Report(ErrorIds.Syntax, r.Line, "a range stands in a `for` loop (C8)");
                 return Typed.Error;
+            case LambdaExpression l when expected is not null && Types.IsError(expected):
+                // a lambda where a type stands that was reported or is not read, the type of a C function (R17) among them, is read with its
+                // diagnostics dropped: its misfit or its untyped parameters would stand beside that type's own line (E1)
+                CheckLoosely(l);
+                return Typed.Error;
             case LambdaExpression l:
                 return CheckLambda(l, expected as FunctionType);
             case MatchExpression m:
@@ -548,6 +553,14 @@ public sealed partial class Checker
 
     private Typed CheckUnary(UnaryExpression u, KurzType? expected)
     {
+        if (u.Operator is TokenKind.Star or TokenKind.Ampersand)
+        {
+            // R10: a read through a raw pointer and the address of a place, which chapter 11 states and the checker does not read
+            NotSupported(u.Line, u.Operator == TokenKind.Star ? "a read through a raw pointer, `*p` (R10)" : "the address of a place, `&x` (R10)");
+            CheckLoosely(u.Operand);
+            return Typed.Error;
+        }
+
         if (u.Operator == TokenKind.Minus)
         {
             // L17: a `-` written directly before a literal belongs to the literal

@@ -1,0 +1,12 @@
+// expect: error native-type at 11
+// allow: raw native
+// rules: R16
+
+extern "C" {
+    int printf(byte* format, ...)
+}
+
+s = "%d"
+raw {
+    printf(s.Pointer, true)
+}

@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 7
+// rules: R17
+
+void Run(extern "C" (long) => long f) {
+}
+
+Run((long x) => x * 2)

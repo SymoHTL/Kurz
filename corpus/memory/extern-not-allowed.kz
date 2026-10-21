@@ -1,0 +1,6 @@
+// expect: error native-not-allowed at 4
+// rules: R16
+
+extern "C" {
+    int abs(int n)
+}

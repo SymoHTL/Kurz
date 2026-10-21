@@ -1,0 +1,14 @@
+// expect: output
+// | 9
+// allow: raw
+// rules: R10
+
+void Set(long* p, long v) {
+    raw {
+        *p = v
+    }
+}
+
+mut long n = 1
+Set(&n, 9)
+print(n)

@@ -1,0 +1,7 @@
+// expect: error naked-body at 6
+// allow: raw
+// rules: R12
+
+naked void Switch() {
+    asm("mov {x}, 1", x = out(reg) _)
+}

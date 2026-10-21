@@ -976,6 +976,117 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("long* p = null", "(declare long* p null)")]
+    [InlineData("byte** pp = null", "(declare byte** pp null)")]
+    [InlineData("void* v = Ptr<void>(m)", "(declare void* v (call Ptr<void> m))")]
+    [InlineData("int?* q = null", "(declare int?* q null)")]
+    [InlineData("List<int*> xs = List<int*>()", "(declare List<int*> xs (call List<int*>))")]
+    [InlineData("void Fill(byte* buf, long n) {\n}", "(function void Fill(byte* buf, long n) {})")]
+    [InlineData("p = &n", "(assign-or-declare p (& n))")]
+    [InlineData("q = &a[i]", "(assign-or-declare q (& (index a i)))")]
+    [InlineData("q = &(*b).Next", "(assign-or-declare q (& (. (paren (* b)) Next)))")]
+    [InlineData("x = *p + 1", "(assign-or-declare x (+ (* p) (int 1)))")]
+    [InlineData("print(*b.Next)", "(call print (* (. b Next)))")]
+    [InlineData("y = **pp", "(assign-or-declare y (* (* pp)))")]
+    [InlineData("x = a & b", "(assign-or-declare x (& a b))")]
+    [InlineData("*p = 7", "(assign (* p) (int 7))")]
+    [InlineData("(*b).Next = q", "(assign (. (paren (* b)) Next) q)")]
+    [InlineData("x = a\n*p = 3", "(assign-or-declare x a) (assign (* p) (int 3))")]
+    [InlineData("x = a *\n    b", "(assign-or-declare x (* a b))")]
+    [InlineData("Block* b = Ptr<Block>(m)", "(declare Block* b (call Ptr<Block> m))")]
+    [InlineData("match *p {\n    else => print(0)\n}", "(match (* p) [(else => (call print (int 0)))])")]
+    [InlineData("Fill(mut *p)", "(call Fill mut (* p))")]
+    public void A_raw_pointer_is_written_as_c_sharp_writes_it(string program, string tree)
+    {
+        // R10: the type `int*`, `int**` a pointer to one, `void*` the untyped one (R14), in a declaration, a parameter and a type argument;
+        // the read `*p` and the address `&x` are prefix operators that bind as `-` does, so `*b.Next` reads through `b.Next`; `*p = v` and
+        // `(*b).Next = q` write through a pointer; a line that starts with `*` starts a statement, and one that ends in `*` continues (L4);
+        // `*` and `&` start a value as `-` does, after `match` and after the `mut` of an argument (M7).
+        // `int?*` points to an `int?`, a pointee the checker judges
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("naked void Switch() {\n    asm(\"ret\")\n}", "(function naked void Switch() {(asm \"ret\")})")]
+    [InlineData("naked pub void S() {\n}", "(function pub naked void S() {})")]
+    [InlineData("thread static mut long depth = 0", "(mut-declare static thread long depth (int 0))")]
+    [InlineData("thread = 1", "(assign-or-declare thread (int 1))")]
+    [InlineData("print(thread.Count)", "(call print (. thread Count))")]
+    [InlineData("extern \"C\" {\n    long write(int fd, byte* buf, long n)\n}", "(extern {(c-function long write(int fd, byte* buf, long n))})")]
+    [InlineData("extern \"C\" { long write(int fd, byte* buf, long n) }", "(extern {(c-function long write(int fd, byte* buf, long n))})")]
+    [InlineData("extern \"C\" in \"dbghelp\" {\n    int printf(byte* format, ...)\n    void Tick()\n}", "(extern in \"dbghelp\" {(c-function int printf(byte* format, ...)) (c-function void Tick())})")]
+    [InlineData("extern \"C\" int OnSample(int frames) {\n    return frames\n}", "(function extern int OnSample(int frames) {(return frames)})")]
+    [InlineData("extern \"C\" (int) => void f = Tick", "(declare extern \"C\" (int) => void f Tick)")]
+    [InlineData("(extern \"C\" (int) => void)? g = null", "(declare (extern \"C\" (int) => void)? g null)")]
+    [InlineData("extern \"C\" extern \"C\" (int) => int Pick() => Twice", "(function extern extern \"C\" (int) => int Pick() => Twice)")]
+    [InlineData("extern \"C\" data Point(int X, int Y)", "(data extern Point(int X, int Y))")]
+    public void A_function_with_no_frame_thread_state_and_the_forms_of_c_parse(string program, string tree)
+    {
+        // R12: `naked` before a signature, among the other modifiers in any order, as C# orders modifiers; R13: `thread` is a word only
+        // before `static`, and a name everywhere else (L18); R16: a block of C functions with no bodies, on one line or on several, the
+        // library after `in`, `...` the last parameter; R16: a function of the package's own in the C calling convention; R17: the type
+        // of a C function, its nullable form in parentheses, and `extern "C"` before `(` starts that type; §2: data in C's layout
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("asm(\"nop\")", "(asm \"nop\")")]
+    [InlineData("asm(\"nop\", \"nop\")", "(asm \"nop\" \"nop\")")]
+    [InlineData("asm(\"add {r}, 1\", r = inout(reg) count)", "(asm \"add {r}, 1\" [r = inout(reg) count])")]
+    [InlineData("asm(\"mov {}, {}\", out(reg) x, in(\"eax\") y)", "(asm \"mov {}, {}\" [out(reg) x] [in(\"eax\") y])")]
+    [InlineData("asm(\"xchg {a}, {b}\", a = inout(reg) x => y, b = inout(reg) z => _)", "(asm \"xchg {a}, {b}\" [a = inout(reg) x => y] [b = inout(reg) z => _])")]
+    [InlineData("asm(\"{a}\", a = inout(reg) (x) => y)", "(asm \"{a}\" [a = inout(reg) (paren x) => y])")]
+    [InlineData("asm(\"call {f}\", f = sym Tick, const 4, clobber_abi(\"C\"), options(nostack, raw))", "(asm \"call {f}\" [f = sym Tick] [const (int 4)] [clobber_abi(\"C\")] [options(nostack, raw)])")]
+    [InlineData("asm(\"jmp {l}\", l = label {\n    print(1)\n})", "(asm \"jmp {l}\" [l = label {(call print (int 1))}])")]
+    [InlineData("asm(\"\"\"\n    nop\n    nop {x}\n    \"\"\", x = in(reg) 1)", "(asm \"nop\\nnop {x}\" [x = in(reg) (int 1)])")]
+    [InlineData("asm(\"{x}\", x = in(reg) Pick(y => y))", "(asm \"{x}\" [x = in(reg) (call Pick (lambda (y) y))])")]
+    [InlineData("asm(\"{x}\", x = frobnicate(reg) y)", "(asm \"{x}\" [x = frobnicate(reg) y])")]
+    public void An_asm_statement_takes_its_operands_as_rust_writes_them(string program, string tree)
+    {
+        // R11: the templates first, then the operands in Rust's shape, a name and `=` where they have one, `in`, `out`, `inout` with a
+        // register class or a register's string, `=>` that splits an operand (a lambda nowhere but in an argument of a call there), `_`,
+        // `sym`, `const`, `clobber_abi`, `options` and `label` with its block; a word that is not Rust's parses, and the checker judges it
+        // (`asm-operand`)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("int*? p = null", 1)]
+    [InlineData("q = &F()", 1)]
+    [InlineData("q = &(a + b)", 1)]
+    [InlineData("extern \"C++\" {\n}", 1)]
+    [InlineData("extern \"C\" {\n    long write(int fd, ...) {\n    }\n}", 2)]
+    [InlineData("extern \"C\" {\n    int printf(..., byte* format)\n}", 2)]
+    [InlineData("extern \"C\" {\n    long errno\n}", 2)]
+    [InlineData("int F(int x, ...) {\n}", 1)]
+    [InlineData("x = asm(\"nop\")", 1)]
+    [InlineData("asm(1)", 1)]
+    [InlineData("asm()", 1)]
+    [InlineData("asm(\"nop\", x = in(reg) 1, \"nop\")", 1)]
+    [InlineData("extern \"C\" (int) F() {\n}", 1)]
+    [InlineData("static thread mut long x = 0", 1)]
+    [InlineData("extern \"C\" in dbghelp {\n}", 1)]
+    public void A_raw_form_outside_its_shape_is_syntax(string program, int line)
+    {
+        // E4: a pointer holds `null` itself, so `int*?` has no meaning (R10, as C#); `&` takes a variable, a field or an element (R10);
+        // `extern` names the convention "C" (R16, R17); a function of a block of C functions has no body, `...` is its last parameter, and
+        // the block declares functions (R16), whether it declares a C library's variables standing open; `asm` is a statement whose
+        // templates, string literals, come before its operands (R11); `extern "C" (` starts the type of a C function (R17); `thread`
+        // is a word only before `static` (R13)
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("extern \"C\"\n{\n    int abs(int n)\n}")]
+    [InlineData("asm(\"jmp {l}\", l = label\n{\n})")]
+    public void The_block_of_c_functions_and_of_label_opens_on_the_line_of_its_word(string program)
+    {
+        // C1: a block that opens on the next line is `braces-required` at the line of its construct, inside the parentheses of `asm` too,
+        // where L4 passes the line break over; the block is read all the same
+        Assert.Equal([(ErrorIds.BracesRequired, 1)], Errors(program));
+    }
+
+    [Theory]
     [InlineData("xs.Map<int>(f)", "(call (. xs Map)<int> f)")]
     [InlineData("f(a < b, c > (d))", "(call f (call a<b, c> d))")]
     [InlineData("print(a < b, c > d)", "(call print (< a b), (> c d))")]

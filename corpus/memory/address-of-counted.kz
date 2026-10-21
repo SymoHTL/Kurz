@@ -1,0 +1,7 @@
+// expect: error counted-pointee at 5
+// rules: R10
+
+s = "hi"
+p = &s
+print(p == null)
+print(s)
