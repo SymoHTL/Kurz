@@ -207,8 +207,8 @@ def gates_facts(text):
     except (yaml.YAMLError, ValueError) as e:
         return unreadable(name, e)
     errors = common(name, text, data, set()) + pr_push_errors(name, on)
-    if data.get("permissions") != {"contents": "read", "pull-requests": "read"}:
-        errors.append(f"{name}: permissions must be exactly contents: read, pull-requests: read")
+    if data.get("permissions") != {"contents": "read", "issues": "read", "pull-requests": "read"}:
+        errors.append(f"{name}: permissions must be exactly contents: read, issues: read, pull-requests: read")
     if list(data["jobs"]) != ["gates"]:
         errors.append(f"{name}: jobs must be exactly [gates]")
     job = data["jobs"].get("gates") or {}
@@ -368,6 +368,9 @@ MUTATIONS = [
      "job gates sets `defaults`"),
     ("gates.yml", "no timeout", "    timeout-minutes: 25\n", "", "no timeout"),
     ("gates.yml", "a write token", "pull-requests: read", "pull-requests: write", "permissions"),
+    ("gates.yml", "no permission to read the collection ticket", "  issues: read  # pr-findings lists the collection ticket at the review cap\n",
+     "", "permissions"),
+    ("gates.yml", "a write token on issues", "  issues: read", "  issues: write", "permissions"),
     ("gates.yml", "continue-on-error", "      - name: Run every gate\n", "      - name: Run every gate\n        continue-on-error: true\n",
      "uses continue-on-error"),
     ("gates.yml", "a job that may fail quietly", "    timeout-minutes: 25\n", "    timeout-minutes: 25\n    continue-on-error: true\n",

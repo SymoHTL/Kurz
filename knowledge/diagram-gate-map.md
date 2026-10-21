@@ -96,8 +96,8 @@ flowchart TD
         a step that writes GITHUB_ENV or GITHUB_PATH, a step that checks out or fetches by hand,
         the deciding step with any env key but the pinned ones, a key twice in one mapping.
         gates.yml: an if on the job (a skipped job reports success to the required check),
-        a path filter, any filter on pull_request, a push trigger for any branch but main, a wider token,
-        a second job.
+        a path filter, any filter on pull_request, a push trigger for any branch but main, a token other than
+        contents, issues and pull-requests read (issues for the collection ticket, G8), a second job.
         review.yml: an if, a checkout ref, a concurrency group or permissions other than the pinned ones,
         no start-time step first, the budget anywhere but on the review step,
         a CLI that is not at an exact version.
@@ -124,6 +124,11 @@ flowchart TD
         the reviewer's threads whose files all changed since the finding's commit, resolves them with --go, and leaves the rest open
         with the reason, a person's reply in the thread and a head the forge still shows as the
         finding's commit among them (self-tests).
+        At the review cap (R7) a finding on any file is also answered by a reply from someone who may write here
+        that links an open issue labelled review-leftovers, the collection ticket; the gate reads that list only
+        at the cap, and the resolve command resolves a thread whose replies all move it (self-tests).
+        The gates job reads that list with issues: read, the one grant of its token beyond the tree and the
+        pull request (ci-config pins the grant); a refused read fails the gate closed.
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]
     end
     subgraph C["CI: workflow compiler-windows, on the same events as the job gates"]
@@ -132,7 +137,7 @@ flowchart TD
     end
     subgraph R["CI: workflow review, pull_request_target and dispatch"]
         R1["job review-run: red when the review did not complete. The last line names the kind:
-        credential, usage-limit, budget, oversized, base, closed, rules, empty, bad-diff, head-moved,
+        credential, usage-limit, budget, oversized, base, closed, cap, rules, empty, bad-diff, head-moved,
         wrong-model, bad-output, cli-missing, api, failed, the last also for a post the forge refused,
         a finding above low that landed as a plain note, and a rate limit with no wait left.
         Every finding is printed to the log, in UTF-8, before anything is posted; what was found is posted
@@ -171,13 +176,22 @@ flowchart TD
         other head is reviewed by the run its event starts; a run that started is a bill). A dispatch on
         another ref runs that ref's copy, and the job's if refuses it only in the default branch's copy:
         HAZARD issue 11"]
+        R7["review rounds, the owner's cap of three (2026-10-21): a round is a run that labelled the pull request;
+        a run with files to review, in CI or off the pipeline, puts review-round-n on before its first pass,
+        a round whatever follows, and the count is the highest n (kit.review_rounds); at three every run ends
+        before any pass as cap, in CI with the status review at error naming the cap, on the head the third
+        round reviewed too. The end is inside the job: a job its if skips reports success.
+        Red: self-tests (the count, the label before the first pass, the end and its status).
+        A label taken off or put on by hand, a second issue with the collection label, two runs that start
+        at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
     end
     subgraph M["Merge: server side and the merge tool"]
         M1["ruleset on main: pull request required, squash only, every thread resolved,
         gates and review green on the head, branch up to date,
         no force push, no deletion, nobody bypasses"]
         M2["merge_pr.py: refuses a head other than the one named, a Draft,
-        a branch behind its base, armed auto-merge, an unanswered finding,
+        a branch behind its base, armed auto-merge, an unanswered finding (at the review cap a finding
+        moved to the collection ticket is answered, R7 and G8),
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
         a title or description the title gate refuses, an option it does not know.
@@ -191,7 +205,11 @@ flowchart TD
         included, is caught by nobody, so the window is narrowed, not closed, and nothing stops another merge
         or push in it: HAZARD issue 27.
         Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
-        The owner approves each item: judgment step, HAZARD issue 3"]
+        The owner approves each item: judgment step, HAZARD issue 3; at the review cap (R7) the owner's
+        approval of 2026-10-21 is given for the head the third round reviewed, when that round completed,
+        for review and for gates when pr-findings is its one FAIL, conditions the caller reads (judgment
+        step). The tool refuses a branch behind its base (M2), so when main moves after the third round
+        the branch is brought up to date as a new head, which only the owner's approval of that head merges"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
     end
@@ -207,7 +225,7 @@ flowchart TD
         X2["samples in the design record and expectations in the corpus are right:
         nothing runs them, HAZARD issue 1"]
         X3["wrap-up: lessons promoted out of private memory: HAZARD issue 6"]
-        X4["one push per review round: judgment step"]
+        X4["one push per review round, and none after the third (R7): judgment step"]
     end
     W --> P --> G --> M
     P --> R --> M
@@ -218,10 +236,11 @@ flowchart TD
 ## Update triggers
 
 - `tools/gates.py` (the `GATES` list, a verdict, `PARTLY_OK`) changes: the subgraphs G and L.
-- `.github/workflows/gates.yml` (its events) changes: the header of subgraph G.
+- `.github/workflows/gates.yml` (its events) changes: the header of subgraph G; its token's grant: G4 and G8.
 - `tools/red_proof.py` or the shape of `tools/red_proofs.json` changes: G1.
 - `tools/tree_gate.py`, `.claude/settings.json` (the hook command), `.githooks/pre-push` change:
   W1, P1, G2.
+- `tools/kit.py` (ROUND_LABEL, ROUND_CAP, LEFTOVERS_LABEL, `review_rounds`) changes: R7, G8, M2 and M3.
 - `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals) changes: P1, G2, G6 and M2;
   W1 reads paths only, so a pattern reaches it nowhere. `kit.scratch` or `kit.writable_then_retry` changes: G1,
   whose replay runs every suite in it; `kit.message_text` changes: P1 and G6, which read commit and tag messages
