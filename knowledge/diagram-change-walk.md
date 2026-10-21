@@ -53,12 +53,14 @@ flowchart TD
     G -- "error: did not complete" --> H["read the run's last line, REVIEW DID NOT COMPLETE (kind).
     Gate: the status stays error, so the ruleset holds the merge.
     usage-limit: wait for the reset. credential: the owner fixes the secret.
-    budget: re-run, what converged is replayed. head-moved: a push arrived, review the new head.
+    budget: re-run, what converged is replayed. A run that labelled the pull request is a round whatever its kind,
+    so a re-run takes a round of the three. head-moved: a push arrived, review the new head.
     oversized: split the change. base: target the default branch. cap: the three review rounds are spent, node Q.
     rules, empty, bad-diff: the line says what.
     wrong-model, bad-output, cli-missing, api, failed: find the cause before any re-run"]
     H -- "the cause is outside the change" --> P
     H -- "the change has to change" --> B
+    H -- "cap" --> Q
     G -- "no review can run in CI" --> O["count the batches with review.py --pr N --plan, name the bill,
     ask the owner: it spends the owner's seat; then
     review.py --pr N --local: findings and an audit note, no status;
@@ -68,14 +70,15 @@ flowchart TD
     G -- "success" --> I["read every thread; fix each finding in its file; mark Draft; push once;
     read the plan of pr_gates.py resolve --pr N --head SHA, then resolve with --go; mark Ready again.
     On tool, workflow and hook code a finding that does not hold, or that a HAZARD issue records,
-    is answered by a reply that says so: judgment step. On every other file only the edit counts.
+    is answered by a reply that says so: judgment step. On every other file only the edit counts, and at the cap the move (node Q).
     Low findings are collected on the issue labelled review-lows: they are fixed together,
     or with a push that is needed anyway. After the third round no push: node Q. Gate: pr-findings"]
     I -- "the third round is done" --> Q["the cap, three review rounds counted by the labels review-round-n:
-    no fix push. What is open goes on the collection ticket, the open issue labelled review-leftovers;
-    every open thread gets a reply that links it, and pr_gates.py resolve --pr N --go resolves the threads
-    whose replies all move them. Gate: pr-findings and the merge tool read the move (self-tests);
-    the labels a person can change: HAZARD issue 41"]
+    no fix push and no run started. What is open goes on the collection ticket, the open issue labelled review-leftovers;
+    every open thread gets a reply that links it, and pr_gates.py resolve --pr N --head SHA --go, with the head
+    the third round reviewed, resolves the threads whose replies all move them. Gate: pr-findings and the merge
+    tool read the move (self-tests); the section on the ticket: judgment step; the labels a person can change:
+    HAZARD issue 41; the gates job's read of the ticket: HAZARD issue 44"]
     Q --> N
     I --> J{"gates green and review green on the head,
     zero unresolved threads, branch up to date?"}
@@ -83,7 +86,7 @@ flowchart TD
     J -- "yes" --> K["py -3 tools/merge_pr.py PR SHA: merges exactly that head, squash.
     Gate: the ruleset. The merge button skips what only the tool checks: HAZARD issue 14"]
     J -- "red for a cause outside the change" --> N["the owner approves this pull request and head:
-    merge_pr.py --over-red. At the cap (node Q) the approval is given for the head the third round reviewed. The ruleset is off for that one merge, and nothing stops another merge or push
+    merge_pr.py --over-red. At the cap (node Q) the approval is given for the head the third round reviewed, for review and for gates when pr-findings is its one FAIL. The ruleset is off for that one merge, and nothing stops another merge or push
     in that window (HAZARD issue 27).
     Exit 1 with REFUSED: the checks or the threads changed between the tool's first reading and its reading
     after the ruleset went off (what changed before the tool started is the owner's to see); the ruleset is restored and
@@ -113,5 +116,5 @@ flowchart TD
   a change to any pattern of `tools/kit.py` (SECRETS, MACHINE, CONFLICT, NOREPLY_TRAILER, the skip literals)
   reaches nodes C and D, which scan the tree, the pushed commits, the title, the description and every commit
   message through them, and not B1: the write-time hook reads the path alone.
-- `tools/kit.py` changes the cap or its labels (ROUND_LABEL, ROUND_CAP, LEFTOVERS_LABEL): nodes H, Q and N.
-- A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 13, 14, 27, 41) closes or opens: that node.
+- `tools/kit.py` changes the cap, its labels or its count (ROUND_LABEL, ROUND_CAP, LEFTOVERS_LABEL, review_rounds): nodes H, Q and N.
+- A HAZARD issue that a node names (2, 3, 4, 10, 11, 12, 13, 14, 27, 41, 44) closes or opens: that node.

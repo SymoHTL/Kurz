@@ -107,7 +107,10 @@ the head that will be reviewed is a `judgment step`.
    - `error`: open the run and read its last line, `REVIEW DID NOT COMPLETE (<kind>)`.
      `usage-limit`: wait for the reset the message names; running it again now fixes nothing.
      `credential`: only the owner can fix the secret. `budget`: run it again; what it found is
-     posted, what converged is replayed, and the next run continues with the rest.
+     posted, what converged is replayed, and the run after it continues with the rest. A run that
+     labelled the pull request is a round whatever its kind (item 8): running it again after
+     `budget`, `usage-limit`, a `credential` refusal in a pass or `failed` takes a round of the
+     three.
      `head-moved`: a push arrived; review the new head. `oversized`: split the change. `base`:
      the pull request must target the default branch. `cap`: the pull request had its three
      review rounds, and item 8 says what follows. `rules`, `empty`, `bad-diff`: the line says
@@ -162,22 +165,27 @@ the head that will be reviewed is a `judgment step`.
    request does cancel it. After the third round this order ends: no push, item 8.
    `judgment step`
 8. The cap: a pull request gets three review rounds, the rounds before the cap counted (the
-   owner, 2026-10-21). The reviewer labels the pull request `review-round-<n>` before the first
-   pass of each round, `gh pr view <N> --json labels` shows them, and the count is the highest
-   `n`; a fourth run ends before any pass as `REVIEW DID NOT COMPLETE (cap)`. After the third
-   round no fix push follows:
+   owner, 2026-10-21). A round is a run that labelled the pull request: a run with files to
+   review puts `review-round-<n>` on before its first pass, whatever follows; a dry run and
+   `--plan` put none on. `gh pr view <N> --json labels` shows the labels, and the count is the
+   highest `n`; a fourth run ends before any pass as `REVIEW DID NOT COMPLETE (cap)`, and in CI
+   its `error` takes the place of the `review` status on its head, the head the third round
+   reviewed too. After the third round no fix push follows, and no run is started (no Draft and
+   Ready, no dispatch):
    1. Write what is still open on the collection ticket, the open issue labelled
       `review-leftovers`: a section for the pull request with the head the findings were made
       on, each open finding with its severity, file, line and thread link, and the link of the
       round's lows on the `review-lows` issue.
    2. Reply on every open thread with the link of that section or of the ticket (`#<ticket>`, or
       its address).
-   3. `py -3 tools/pr_gates.py resolve --pr <N>` lists the threads whose replies all move them,
-      and `--go` resolves them; a thread in which a person wrote anything else is read, answered,
-      and resolved by hand.
-   4. Merge over red at the head the third round reviewed (section 4, item 4).
-   Gate: `pr-findings` and the merge tool read the move at the cap (`self-tests`); the labels a
-   person can change, two runs that start at the same moment and a dry run: HAZARD (#41).
+   3. `py -3 tools/pr_gates.py resolve --pr <N> --head <the head the third round reviewed>` lists
+      the threads whose replies all move them, and `--go` resolves them; a thread in which a
+      person wrote anything else is read, answered, and resolved by hand.
+   4. Merge at the head the third round reviewed, over red where it is red (section 4, item 4).
+   Gate: `pr-findings` and the merge tool read the move at the cap (`self-tests`); writing the
+   section and starting no run are a `judgment step`; the labels a person can change, a second
+   issue with the collection label, two runs that start at the same moment and a dry run:
+   HAZARD (#41); the gates job's read of the ticket: HAZARD (#44).
 
 ## 4. Merge
 
@@ -187,10 +195,12 @@ the head that will be reviewed is a `judgment step`.
 3. Merge: `py -3 tools/merge_pr.py <N> <full head sha>`. Never the merge button, never
    `gh pr merge`: the ruleset holds those to the checks and the threads, but not to the exact
    head, the last scan of title and description, or the read-back of the settings. HAZARD (#14).
-4. If a required check is red or missing for a cause outside the change, stop and ask the owner.
-   At the review cap (section 3, item 8) the approval is given: the owner's of 2026-10-21, for the
-   head the third round reviewed; a head that took `main` after that round is a new head, and its
-   approval is asked as for any other. Only with the owner's approval for this pull request and this head:
+4. A required check that is red or missing. At the review cap (section 3, item 8) the owner's
+   approval of 2026-10-21 is given for the head the third round reviewed, for the check `review`
+   and for `gates` when its table shows `pr-findings` as its one FAIL. Any other red check or
+   gate at the cap, a head that took `main` after the third round, and on any other pull request
+   a check that is red or missing for a cause outside the change: stop and ask the owner. Only
+   with the owner's approval for this pull request and this head:
    `py -3 tools/merge_pr.py <N> <sha> --over-red <N>@<sha>=<check>[,<check>]`. The tool switches
    the ruleset off for the one merge, restores it and reads it back. While it is off nothing on
    the server holds any other pull request or a push to `main`. HAZARD (#3): the approval is the

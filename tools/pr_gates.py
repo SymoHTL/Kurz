@@ -21,7 +21,8 @@ findings  the review policy: every finding the reviewer posted as a review threa
           by kit.review_rounds) a finding on any file is also answered by its move to the
           collection ticket: a reply from someone who may write here that links an open issue
           labelled kit.LEFTOVERS_LABEL, and the errors name that move (MOVE), since no edit follows the
-          third round. Below the cap such a reply answers nothing.
+          third round. Below the cap such a reply is a written reply like any other: it answers a
+          finding on tool, workflow and hook code, and nothing on the other files.
 resolve   not a gate: the session's step after its fix push. Every unresolved thread of the
           reviewer whose files all changed since the finding's commit is resolved, because its
           edit is the answer as `findings` reads it, and so is, at the cap, one whose posts after
@@ -175,6 +176,8 @@ def leftovers(repo, pr, pages=None):
     """(review rounds, moved) for a pull request as the forge sent it: the rounds from its labels, and
     `moved_to` over the open collection tickets, which are asked for only at the cap: below it no
     reply moves a finding, so nothing is read."""
+    if "labels" not in pr:  # no list is no count: zero rounds would read as a pull request below the cap
+        raise kit.Refused("the forge sent the pull request without its labels, so its review rounds cannot be counted")
     rounds = kit.review_rounds([label["name"] for label in pr["labels"]])
     if rounds < kit.ROUND_CAP:
         return rounds, moved_to(repo, ())
@@ -626,7 +629,7 @@ def self_test():
                   type(out) is tuple and out[1](dict(reply, body="Moved to #41")) is False, repr(out)))
     out = got(lambda: leftovers("o/n", {k: v for k, v in recorded.items() if k != "labels"}, ticket_pages))
     cases.append(("leftovers: a pull request the forge sent without its labels is a refusal, not a count of none",
-                  isinstance(out, KeyError), repr(out)))
+                  isinstance(out, kit.Refused) and "without its labels" in str(out), repr(out)))
 
     if found:
         # the forge answers the threads on two pages; the finding on the first names the design record, resolved

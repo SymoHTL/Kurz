@@ -38,8 +38,9 @@ What the rows show:
   over ten rounds, and never reached zero.
 - **The diff grew with the fixes.** Each round's push answered its threads by edits, as the thread
   rule asks, and the edits widened the change: from one file in one batch to seven files in four
-  or five batches. A round costs batches times passes, so the bill of a round grew from 0.64 to
-  about 4 USD while what it found stayed the same size.
+  or five batches. A round's bill grows with its passes, two or three a batch, and with what each
+  pass reads (0.21 USD a pass in round 1, 0.47 in round 13), so the bill of a round grew from 0.64
+  to about 4 USD while what it found stayed the same size.
 - **Nothing was replayed.** Every run read every file again ("0 replayed from the cache" in each
   first line): a file is replayed only when it did not change since a converged review, and every
   file changed in every round.
@@ -52,11 +53,13 @@ What the rows show:
 - A pull request gets at most three review rounds, and the rounds before the cap count (`CLAUDE.md`,
   "A pull request gets at most three review rounds"). No fix push follows the third: what is still
   open goes on the collection ticket, the open issue labelled `review-leftovers`, one section per
-  pull request with the head the findings were made on and the links of its threads and lows; each
-  open thread gets a reply that links the ticket and is resolved, and the pull request merges as it
-  is, over red, on the approval the cap gives, for the head the third round reviewed.
-- The reviewer counts the rounds: a run that posts labels the pull request `review-round-<n>` before
-  its first pass, the count is the highest `n`, and at three every run ends before its first pass as
+  pull request with the head the findings were made on, the links of its threads and the link of
+  its lows on the `review-lows` issue; each open thread gets a reply that links the ticket and is
+  resolved, and the pull request merges as it is, on the approval the cap gives for the head the
+  third round reviewed (for `review`, and for `gates` when `pr-findings` is its one FAIL).
+- The reviewer counts the rounds: a run that has files to review labels the pull request
+  `review-round-<n>` before its first pass, and is a round whatever follows; the count is the
+  highest `n`, and at three every run ends before its first pass as
   `REVIEW DID NOT COMPLETE (cap)`, in CI with the status `review` at `error`. The end is inside the
   job, since a job its `if` skips reports success ([[a-skipped-job-reports-success]]).
 - At the cap, and only there, the gate `pr-findings`, the resolve command of `tools/pr_gates.py` and
@@ -69,9 +72,10 @@ What the rows show:
 - Read the round count on the pull request before a round starts: `gh pr view <N> --json labels`.
   The third round is the last; the push before it carries every fix that can be made, the lows of
   the pull request too.
-- A round is a bill whatever it finds or costs: a run cancelled after its first pass, and one that
-  stopped on a limit, are rounds.
+- A round is a bill whatever it finds or costs: a run cancelled after its label, one that stopped
+  on a limit, and a run of it again are rounds.
 - Keep the change small, so that the three rounds are enough: the bill of a round, and what a round
   finds, grow with the diff ([[what-a-review-pass-costs]]).
-- What the labels do not hold: a label taken off or put on by hand, two runs of one pull request
-  that start at the same moment, and a dry run, which posts no label (HAZARD #41).
+- What the labels do not hold: a label taken off or put on by hand, a second issue with the
+  collection label, two runs of one pull request that start at the same moment, and a dry run,
+  which posts no label (HAZARD #41).

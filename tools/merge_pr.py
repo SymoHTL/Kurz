@@ -403,6 +403,15 @@ def blockers(threads, changed_since, settings, squash, unread=(), moved=lambda c
             + [f"the squash commit would carry it: {e}" for e in squash])
 
 
+def held_by(repo, pr, threads, changed_since, settings, unread=(), pages=None):
+    """(review rounds, blockers) of a pull request as the forge sent it: the rounds and the moves to the
+    collection ticket from pr_gates.leftovers, the cap from those rounds, and the title gate over its
+    title and description. `pages` is the forge's list call; a self-test passes its own."""
+    rounds, moved = pr_gates.leftovers(repo, pr, pages)
+    return rounds, blockers(threads, changed_since, settings, pr_gates.title_errors(pr["title"], [], pr["body"]), unread,
+                            moved, rounds >= kit.ROUND_CAP)
+
+
 def arguments(argv):
     """(pull request, sha, waiver or None) of a merge call, or None when the call is not understood.
     An --over-red whose value is missing or is not a waiver is not understood: it never falls back
@@ -458,9 +467,7 @@ def run(argv):
     threads = pr_gates.fetch_threads(repo, number)
     changed = lambda path, at: pr_gates.blob_at(repo, path, at) != pr_gates.blob_at(repo, path, head)
     behind = kit.gh_json(f"repos/{repo}/compare/{pr['base']['ref']}...{head}")["behind_by"]
-    rounds, moved = pr_gates.leftovers(repo, pr)
-
-    held = blockers(threads, changed, settings, pr_gates.title_errors(pr["title"], [], pr["body"]), notes, moved, rounds >= kit.ROUND_CAP)
+    rounds, held = held_by(repo, pr, threads, changed, settings, notes)
     verdict, reasons, waived = decide(number, sha, pr, default_branch, states, held, behind, waiver)
     print(f"{repo}#{number} at {head[:8]}: " + ", ".join(f"{c}={s}" for c, s in states.items()) + f"; {len(threads)} threads; behind by {behind}"
           f"; {rounds} review rounds (the cap is {kit.ROUND_CAP})")
@@ -751,6 +758,15 @@ def self_test():
         got = (blockers([thread(False)], same, [], [], (), at_cap, True), blockers([thread(False)], same, [], []))
         case("blockers: the threads are read at the cap the caller passes, and below it by default",
              len(got[0]) == 1 and got[0][0].endswith(pr_gates.MOVE) and got[1] == ["1 unresolved threads"], got)
+        ticket_pages = lambda path: [{"number": 39}] if f"labels={kit.LEFTOVERS_LABEL}" in path else []
+        labelled = lambda n: {"title": "ok", "body": "", "labels": [{"name": f"{kit.ROUND_LABEL}{n}"}]}
+        got = {n: held_by("o/r", labelled(n), [moved], same, [], (), ticket_pages) for n in (kit.ROUND_CAP - 1, kit.ROUND_CAP, kit.ROUND_CAP + 1)}
+        case("held: below the cap a finding moved to the collection ticket blocks and names the edit, at the cap and over it nothing holds",
+             got[kit.ROUND_CAP - 1][0] == kit.ROUND_CAP - 1 and len(got[kit.ROUND_CAP - 1][1]) == 1
+             and pr_gates.MOVE not in got[kit.ROUND_CAP - 1][1][0] and got[kit.ROUND_CAP] == (kit.ROUND_CAP, [])
+             and got[kit.ROUND_CAP + 1] == (kit.ROUND_CAP + 1, []), got)
+        got = held_by("o/r", labelled(kit.ROUND_CAP), [thread(False)], same, [], (), ticket_pages)
+        case("held: at the cap a thread not moved names the move", len(got[1]) == 1 and got[1][0].endswith(pr_gates.MOVE), got)
 
     # one write, against a gh that answers what it is told to
     def sent(answer):

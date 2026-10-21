@@ -903,8 +903,11 @@ def suite(case):
          and "REVIEW DID NOT COMPLETE (cap)" in out, (code, forge.statuses, unused.batches, forge.labels, out[-300:]))
     case("run: at the cap the error status says that the cap was reached",
          bool(forge.said) and f"cap: {kit.ROUND_CAP} review rounds reached" in forge.said[-1], forge.said)
-    case("run: at the cap the note says that the rounds before stand, not that the pull request is not reviewed",
-         len(forge.notes) == 1 and "Its review rounds before stand" in forge.notes[0]["body"] and "is not reviewed" not in forge.notes[0]["body"],
+    case("run: at the cap the note says that the rounds before stand, not that the pull request is not reviewed, and that the approval "
+         "holds at the head the third round reviewed alone",
+         len(forge.notes) == 1 and "Its review rounds before stand" in forge.notes[0]["body"] and "is not reviewed" not in forge.notes[0]["body"]
+         and "merges as it is at the head the third round reviewed" in forge.notes[0]["body"]
+         and "a head pushed after that round is outside that approval" in forge.notes[0]["body"],
          [c["body"][:160] for c in forge.notes])
     forge, unused = MemoryForge(), scripted_model(found)
     forge.labels = [f"{kit.ROUND_LABEL}{kit.ROUND_CAP + 2}"]
@@ -920,7 +923,8 @@ def suite(case):
     forge.refuse_labels = kit.ROUND_LABEL
     code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")
     case("run: a round label the forge refuses ends the run red before any pass",
-         (code, forge.statuses, unused.batches) == (1, error, []) and "REVIEW DID NOT COMPLETE (failed)" in out and "could not be added" in out,
+         (code, forge.statuses, unused.batches) == (1, error, []) and "REVIEW DID NOT COMPLETE (failed)" in out and "could not be added" in out
+         and "whether it landed is not known" in out,
          (code, forge.statuses, unused.batches, out[-300:]))
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--dry-run"])

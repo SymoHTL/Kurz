@@ -125,7 +125,9 @@ flowchart TD
         finding's commit among them (self-tests).
         At the review cap (R7) a finding on any file is also answered by a reply from someone who may write here
         that links an open issue labelled review-leftovers, the collection ticket; the gate reads that list only
-        at the cap, and the resolve command resolves a thread whose replies all move it (self-tests)
+        at the cap, and the resolve command resolves a thread whose replies all move it (self-tests).
+        Whether the gates job's token, which has no issues permission, may read that list was not tried:
+        a refusal fails the gate closed, HAZARD issue 44.
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]
     end
     subgraph C["CI: workflow compiler-windows, on the same events as the job gates"]
@@ -173,13 +175,14 @@ flowchart TD
         other head is reviewed by the run its event starts; a run that started is a bill). A dispatch on
         another ref runs that ref's copy, and the job's if refuses it only in the default branch's copy:
         HAZARD issue 11"]
-        R7["review rounds, the owner's cap of three (2026-10-21): a run that posts, in CI or off the pipeline,
-        labels the pull request review-round-n before its first pass, and the count is the highest n
-        (kit.review_rounds); at three every run ends before any pass as cap, in CI with the status review
-        at error naming the cap. The end is inside the job: a job its if skips reports success.
+        R7["review rounds, the owner's cap of three (2026-10-21): a round is a run that labelled the pull request;
+        a run with files to review, in CI or off the pipeline, puts review-round-n on before its first pass,
+        a round whatever follows, and the count is the highest n (kit.review_rounds); at three every run ends
+        before any pass as cap, in CI with the status review at error naming the cap, on the head the third
+        round reviewed too. The end is inside the job: a job its if skips reports success.
         Red: self-tests (the count, the label before the first pass, the end and its status).
-        A label taken off or put on by hand, two runs that start at the same moment, and a dry run,
-        which puts on no label: HAZARD issue 41"]
+        A label taken off or put on by hand, a second issue with the collection label, two runs that start
+        at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
     end
     subgraph M["Merge: server side and the merge tool"]
         M1["ruleset on main: pull request required, squash only, every thread resolved,
@@ -202,7 +205,8 @@ flowchart TD
         or push in it: HAZARD issue 27.
         Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3; at the review cap (R7) the owner's
-        approval of 2026-10-21 is given for the head the third round reviewed"]
+        approval of 2026-10-21 is given for the head the third round reviewed, for review and for gates when
+        pr-findings is its one FAIL"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
     end

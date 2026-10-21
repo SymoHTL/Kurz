@@ -65,9 +65,10 @@ SKIP_LITERALS = [r"\[skip ci\]", r"\[ci skip\]", r"\[no ci\]", r"\[skip actions\
 # the issue that records the unread part (PARTLY_OK in tools/gates.py).
 PARTLY = 5
 # The owner's cap on review rounds (2026-10-21): a pull request gets at most ROUND_CAP of them, the
-# rounds before the cap counted. A round is a review run that reached its first pass: the reviewer
-# labels the pull request ROUND_LABEL plus the round's number before that pass, so a run that fails
-# or is cancelled after it counts too. The count is the highest such number: a lower label taken off
+# rounds before the cap counted. A round is a review run that labelled the pull request: a run with
+# files to review puts ROUND_LABEL plus the round's number on before its first pass, so it is a round
+# whatever follows, a limit, a cut-off or a failure before any pass included; a dry run and a count
+# of the batches put none on. The count is the highest such number: a lower label taken off
 # changes nothing, and one label put on by hand counts the rounds no reviewer labelled. What a
 # pull request at the cap still holds goes on the collection ticket, an open issue labelled
 # LEFTOVERS_LABEL.

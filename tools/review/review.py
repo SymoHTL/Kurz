@@ -971,7 +971,8 @@ def review(argv):
             return stop("cap", f"the pull request has had {rounds} review rounds (its label {kit.ROUND_LABEL}{rounds}), and the cap is "
                                f"{kit.ROUND_CAP} (the owner, 2026-10-21): no further round runs. What is still open goes on the "
                                f"collection ticket, the open issue labelled {kit.LEFTOVERS_LABEL}, and the pull request merges as "
-                               f"it is, over red, on the approval the cap gives",
+                               f"it is at the head the third round reviewed, on the approval the cap gives; a head pushed after "
+                               f"that round is outside that approval",
                         status=f"review did not complete: cap: {rounds} review rounds reached, the cap is {kit.ROUND_CAP}")
         if in_ci and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
             return stop("credential", "CLAUDE_CODE_OAUTH_TOKEN is not set as a repository secret")
@@ -1038,8 +1039,9 @@ def review(argv):
             try:
                 forge.label(counted)
             except kit.Refused as e:
-                return stop("failed", f"the label {counted} could not be added ({public(str(e))[:200]}), so this round would count "
-                                      f"for nothing against the cap of {kit.ROUND_CAP}; nothing was reviewed")
+                return stop("failed", f"the label {counted} could not be added ({public(str(e))[:200]}), and whether it landed is "
+                                      f"not known, so this run may count as a round of the {kit.ROUND_CAP} or as none; read the "
+                                      f"labels of the pull request. Nothing was reviewed")
         suffix = fresh_suffix(diff, pr["title"], pr["body"])
 
         def call_of(index):
