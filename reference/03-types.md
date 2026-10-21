@@ -159,11 +159,14 @@ under which the `byte` becomes a `short` by C#'s better-conversion rule, and aga
 into unions, under which the value must be one of the cases exactly, as Rust widens nothing
 implicitly; the cost is a conversion at such places. A value that is one of the cases is that case,
 and no other fit by widening or derivation is looked for, so a `short` where `short | int` is
-required is a `short`, and so is a `data` value (D9). The owner chose this on 2026-10-21, against two
-fits being `type-mismatch` even beside an exact case, under which a `User` where `User | Person` is
-required, with `User : Person`, needs a conversion; C#'s better-conversion rule prefers the identity
-conversion, and Rust has only the exact fit; the cost is one more sentence in the rule. A value that
-would go to two cases by deriving from them is `type-mismatch` too (D9).
+required is a `short`, and so is a `data` value (D9). The owner chose this on 2026-10-21, against
+two fits being `type-mismatch` even beside an exact case, under which a `User` where `User | Person`
+is required, with `User : Person`, is `type-mismatch` too; C#'s better-conversion rule prefers the
+identity conversion, and Rust has only the exact fit; the cost is that adding a case to a union can
+change without a word which case an existing value goes to, as a `byte` goes to `int` where
+`int | string` is required and to `byte` where `int | string | byte` is, while under the option
+turned down that addition is a compile error. The owner kept this choice with that cost shown on
+2026-10-21. A value that would go to two cases by deriving from them is `type-mismatch` too (D9).
 
 Case: [types/widening-into-union.kz](../corpus/types/widening-into-union.kz)
 ```kurz
@@ -211,14 +214,17 @@ match x {
 }
 ```
 
-A union with exactly one number case reaches a literal as a written type does (L17), so
-`byte | string x = 5` makes the `5` a `byte`; where it has two or more number cases the literal has
-its own type, so `byte | short x = 5`, whose `int` widens into neither case, is `type-mismatch` too,
-and `byte(5)` picks the case. The owner chose this on 2026-10-21, against every number case the
-literal fits reaching it, with two fits the error, under which `byte | short x = 300` is a `short`
-and the case depends on the literal's value, and against the literal's own type even beside one
-number case, under which `byte | string x = 5` needs a conversion; the cost is a conversion at such
-places, as for a literal whose own type would widen into two cases.
+A union with exactly one number case, a case of a number type (T2: an integer type, `float`,
+`double` or `decimal`), reaches a number literal, an integer literal or one with a fraction or an
+exponent (L10, L11), as a written type does (L17), so `byte | string x = 5` makes the `5` a `byte`;
+where it has two or more number cases the literal has its own type, which goes to a case as a value
+does, so `short | long x = 5`, whose `int` widens into the `long` alone, is a `long`, while
+`byte | short x = 5`, whose `int` widens into neither case, is `type-mismatch` too, and `byte(5)`
+picks the case. The owner chose this on 2026-10-21, against every number case the literal fits
+reaching it, with two fits the error, under which `byte | short x = 300` is a `short` and the case
+depends on the literal's value, and against the literal's own type even beside one number case,
+under which `byte | string x = 5` needs a conversion; the cost is a conversion at such places, as
+for a literal whose own type would widen into two cases.
 
 Case: [types/literal-one-number-case.kz](../corpus/types/literal-one-number-case.kz)
 ```kurz
@@ -235,6 +241,33 @@ byte | short x = 5
 match x {
     byte b => print("byte {b}")
     short s => print("short {s}")
+}
+```
+
+Case: [types/literal-widens-into-one-case.kz](../corpus/types/literal-widens-into-one-case.kz)
+```kurz
+short | long x = 5
+match x {
+    short s => print("short {s}")
+    long n => print("long {n}")
+}
+```
+
+The union's one time case, a case of a time type (`duration`, `timestamp`, `longduration` or
+`longtimestamp`: T13, T29), reaches a duration literal (L14) as a written type does, whatever number
+cases the union has, so `int | duration d = 5days` makes the literal a `duration` and
+`int | duration d = 106752days` is `constant-overflow` (T29); with two or more time cases the
+literal keeps its own type, a `duration`, or a `longduration` when its value does not fit one (T29).
+The owner chose this on 2026-10-21, against the literal's own type always, under which
+`duration | string d = 106752days` is `type-mismatch`; the cost is the same conversion at such
+places as for a number literal.
+
+Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
+```kurz
+int | duration d = 106752days
+match d {
+    int n => print("int {n}")
+    duration t => print("duration {t}")
 }
 ```
 
@@ -481,6 +514,10 @@ longduration a = 100000days
 longduration l = a + a
 print(duration(l))
 ```
+
+Where a union is required, its one time case reaches a duration literal as a written type does (T8).
+
+Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
 
 ### T14 (assumed, §4) Out of range and division by zero
 

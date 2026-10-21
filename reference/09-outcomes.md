@@ -33,11 +33,10 @@ match Twice(2) {
 }
 ```
 
-The first case is the success case by its place: a union takes the value of another only when the
-first case of that value goes to its first case and each other case to one of its cases after the
-first (D9), so no case becomes a success it was not, and a case that leaves a function through a
-call is listed after the first case of that function's return type (O3). The owner chose these on
-2026-10-21.
+The first case is the success case by its place, so no case becomes a success it was not: D9 says
+when a union takes the value of another, and O3 where a case that leaves a function through a call
+is listed; each records the owner's choice of 2026-10-21, with what it was chosen against and its
+cost.
 
 Case: [data/union-order.kz](../corpus/data/union-order.kz)
 ```kurz
@@ -119,6 +118,28 @@ match u {
 }
 ```
 
+Case: [outcomes/success-case-takes-no-part.kz](../corpus/outcomes/success-case-takes-no-part.kz)
+```kurz
+bool | short Check(int id) {
+    if id == 1 {
+        return true
+    }
+    return short(id)
+}
+
+// the short that leaves Check goes to Load's int case, which it widens into, and not to Load's success (O3)
+short | int Load(int id) {
+    ok = Check(id)
+    print(ok)
+    return int(0)
+}
+
+match Load(2) {
+    short s => print("short {s}")
+    int i => print("int {i}")
+}
+```
+
 ### O2 (decided, §5) The unwrap rule
 
 Calling such a function yields the success value directly. Every other case leaves the calling
@@ -150,14 +171,16 @@ int Twice(int id) {
 print(Twice(1))
 ```
 
-It is listed as a case after the first one, which is the success case (O1): a return type that is
-no union lists none, so `NotFound Lost()` whose body calls an `int | NotFound Find()` and lets the
-`NotFound` leave is `unlisted-case`, as Rust's `?` fills only the `Err` side. The owner chose this on
-2026-10-21, against a case leaving as the success of the calling function, which a return type that
-is the case itself, or that names it first, would let it do; the cost is that such a function needs
-a `match` on the call to return the case. A case after the first lists a case that is its type, that
-widens into it (T8, T23) or that derives from it (D6) *(assumed: the widening and the derivation,
-which the answer did not name)*.
+It is listed as a case after the first one, which is the success case (O1): a return type that is no
+union lists none, so `NotFound Lost()` whose body calls an `int | NotFound Find()` and lets the
+`NotFound` leave is `unlisted-case`, as Rust's `?` fills only the `Err` side. The owner chose this
+on 2026-10-21, against a case leaving as the success of the calling function, which a return type
+that is the case itself, or that names it first, would let it do; the cost is that such a function
+needs a `match` on the call to return the case. A case after the first lists a case that is its type
+and one that widens into it (T8, T23). The owner chose this on 2026-10-21 with the answer on the
+success type below, whose propagated `short` widens into `int`, against the options and at the cost
+that answer names. It also lists a case that derives from it (D6) *(assumed: the derivation, which
+the answers did not name)*.
 
 Case: [outcomes/case-as-success.kz](../corpus/outcomes/case-as-success.kz)
 
@@ -169,7 +192,11 @@ C#'s better-conversion rule picks it, under which propagation would answer diffe
 after the first goes there, and no other fit is looked for, so a propagated `short` under
 `string | short | int` is listed by its `short`. The owner chose this on 2026-10-21, as for a value
 (T8), against two fits being `unlisted-case` even beside an exact case, under which such a function
-needs a `match` on the call; the cost is one more sentence in the rule.
+needs a `match` on the call; the cost is that adding a case to a return type can change without a
+word which case an existing propagated case leaves as, as a propagated `short` leaves as the `int`
+under `string | int` and as the `short` under `string | int | short`, while under the option turned
+down that addition is a compile error. The owner kept this choice with that cost shown on
+2026-10-21.
 
 Case: [outcomes/case-fits-two-cases.kz](../corpus/outcomes/case-fits-two-cases.kz)
 ```kurz
@@ -181,8 +208,8 @@ string | byte Get(int id) {
 }
 
 string | short | int Load(int id) {
-    s = Get(id)
-    return s
+    got = Get(id)
+    return got
 }
 
 match Load(1) {
@@ -212,6 +239,15 @@ match Load(2) {
     int i => print("int {i}")
 }
 ```
+
+A propagated case is looked for among the cases after the first only, so in `short | int F()`
+calling `bool | short G()` the `short` widens into `int` and leaves as `F`'s `int` case. The owner
+chose this on 2026-10-21, against `unlisted-case`, with a `match` on the call picking the case;
+Rust's `?` converts the error into the error type of the calling function and never looks at its
+success type; the cost is that a propagated case that is exactly the success type leaves as another
+case, by widening, without a word.
+
+Case: [outcomes/success-case-takes-no-part.kz](../corpus/outcomes/success-case-takes-no-part.kz)
 
 ### O4 (decided, §5) Keeping all cases
 

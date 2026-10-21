@@ -1,0 +1,8 @@
+// expect: error constant-overflow at 4
+// rules: T8, L17, D9, T29
+
+int | duration d = 106752days
+match d {
+    int n => print("int {n}")
+    duration t => print("duration {t}")
+}

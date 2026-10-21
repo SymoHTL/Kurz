@@ -1145,14 +1145,18 @@ public sealed partial class Checker
         RealLiteral r => r.Value.Text + r.Value.Suffix,
         UnitLiteral u => u.Value.Number + u.Value.Unit,
         BoolLiteral b => b.Value ? "true" : "false",
-        CharLiteral c => System.Text.Rune.IsValid(c.CodePoint) ? $"'{new System.Text.Rune(c.CodePoint)}'" : "...",
-        StringLiteral { IsPlain: true } s => $"\"{string.Concat(s.Segments.Cast<TextSegment>().Select(t => t.Text))}\"",
+        CharLiteral c => System.Text.Rune.IsValid(c.CodePoint) ? Quoted(new System.Text.Rune(c.CodePoint).ToString(), '\'') : "...",
+        StringLiteral { IsPlain: true } s => Quoted(string.Concat(s.Segments.Cast<TextSegment>().Select(t => t.Text)), '"'),
         NameExpression n => n.Name,
         ParenthesizedExpression p => $"({DefaultText(p.Inner)})",
         UnaryExpression u => Operator(u.Operator) + DefaultText(u.Operand),
         BinaryExpression b => $"{DefaultText(b.Left)} {Operator(b.Operator)} {DefaultText(b.Right)}",
         _ => "...",
     };
+
+    /// <summary>A char or string default in its quotes, or <c>...</c> where the source writes it with an escape (L7, L16), so that the message keeps one line per function.</summary>
+    private static string Quoted(string text, char quote) =>
+        text.Any(ch => char.IsControl(ch) || ch == '\\' || ch == quote || (quote == '"' && ch == '{')) ? "..." : $"{quote}{text}{quote}";
 
     /// <summary>F13: why a function does not fit a call, as far as the checker knows it: its binding error (D11, T19), type arguments it cannot infer (T27), or its first argument that does not fit.</summary>
     private static string WhyNot(Candidate candidate, List<Pre> pres)

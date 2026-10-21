@@ -67,7 +67,7 @@ expects it.
 | `unreachable-arm` | C4, C9 | an arm of a `match` that can never run: an earlier arm covers its type, a literal arm follows the arm of its type, or `else` follows arms that cover every case (C9) |
 | `override-return-type` | K7 | an `override` whose return type differs from the overridden method's, at the method |
 | `default-not-constant` | F12 | a parameter's default value that is not a constant expression, at the parameter |
-| `base-cycle` | D6 | a `data` type that is its own base, directly or through others, at the base that closes the cycle: the base of the declaration that completes it where the files of the program are read in the ordinal order of their paths; each file read from its top and one error per cycle, assumptions there |
+| `base-cycle` | D6 | a `data` type that is its own base, directly or through others, at the base that closes the cycle: the base of the declaration that completes it where the files of the program are read in the order of their paths, each relative to the program's root directory with `/` as the separator, compared code point by code point, case kept; that each file is read from its top, that a type that names itself as its base is a cycle of one, that a cycle is one error and that a type that only derives from a cycle gets none are assumptions there |
 
 ## Run-time errors
 

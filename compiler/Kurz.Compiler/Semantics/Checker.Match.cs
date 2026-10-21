@@ -91,7 +91,7 @@ public sealed partial class Checker
                             break;
                         }
 
-                        var value = CheckExpression(vp.Value, Reach(subjectType));
+                        var value = CheckExpression(vp.Value, subjectType); // each literal reads its reach from the type, a union's by its kind (T8 with D9)
                         if (value.IsError || value.Constant is null)
                         {
                             break;

@@ -1,0 +1,9 @@
+// expect: output
+// | long 5
+// rules: T8, L17, D9
+
+short | long x = 5
+match x {
+    short s => print("short {s}")
+    long n => print("long {n}")
+}

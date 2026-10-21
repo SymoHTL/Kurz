@@ -79,19 +79,14 @@ public sealed partial class Checker
     };
 
     /// <summary>
-    /// The number or time type an expected type reaches a literal with: the type itself (L10, L17, T29), or the one number case of a
-    /// union, a time case being none (L17 with D9, the owner, 2026-10-21); of a union with no number case its one time case, which a
-    /// duration literal takes as it takes a written one (the reading in <c>compiler/README.md</c>).
+    /// The number or time type an expected type reaches a literal with: the type itself (L10, L17, T29), or, by the literal's kind, the one
+    /// case of a union that is a number type for a number literal and the one that is a time type for a <paramref name="duration"/> literal,
+    /// whatever cases of the other kind the union has (T8 with D9 and L17, the owner, 2026-10-21).
     /// </summary>
-    private static PrimitiveType? Reach(KurzType? expected) => expected switch
+    private static PrimitiveType? Reach(KurzType? expected, bool duration = false) => expected switch
     {
         PrimitiveType p when Types.IsNumber(p) || Types.IsTime(p) => p,
-        UnionType u => u.Cases.OfType<PrimitiveType>().Where(Types.IsNumber).ToList() switch
-        {
-            [var one] => one,
-            [] => u.Cases.OfType<PrimitiveType>().Where(Types.IsTime).ToList() is [var time] ? time : null,
-            _ => null,
-        },
+        UnionType u => u.Cases.OfType<PrimitiveType>().Where(c => duration ? Types.IsTime(c) : Types.IsNumber(c)).ToList() is [var one] ? one : null,
         _ => null,
     };
 
@@ -265,7 +260,7 @@ public sealed partial class Checker
             return IntegerValue(value, "", line, expected);
         }
 
-        var target = Reach(expected);
+        var target = Reach(expected, duration: true);
         if (target is not null && Types.IsDuration(target))
         {
             if (!Types.Fits(value, target))

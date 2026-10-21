@@ -182,12 +182,13 @@ arguments stand, is the reading on T27 with D6 below), and the one candidate who
 is taken; more than one is `ambiguous-call` (F13), and none is, for a name with more than one
 function, `argument-mismatch` at the call, with a line of the message per function and why it does
 not fit (F13), and for a name with one function the error of that function: `argument-mismatch`,
-`cannot-infer`, or the id of the argument that does not fit, `narrowing-conversion` among them. A
-`match` and a postfix `else` are checked for the cases they cover (C4, C9, O5, O8), and a case the
+`cannot-infer`, E4's `syntax` for a count of type arguments it does not have (the reading on E4
+below), or the id of the argument that does not fit, `narrowing-conversion` among them. A `match`
+and a postfix `else` are checked for the cases they cover (C4, C9, O5, O8), and a case the
 calling function does not list after the first case of its return type propagates as
 `unlisted-case` (O1 to O3, O9); a cycle of `data` bases is `base-cycle` (D6), where the order in
-which D6 reads the files of a program, the ordinal order of their paths, is not reached, since the
-checker reads one file. One defect, one diagnostic (E1): a value the checker could not type has
+which D6 reads the files of a program, the order of their paths, is not reached, since the checker
+reads one file. One defect, one diagnostic (E1): a value the checker could not type has
 the error type, which fits anywhere and is reported nowhere again.
 
 It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign-mix`,
@@ -266,12 +267,6 @@ round can ask about it by the rule's id.
   operation; under `-` and `~` too, so `short s = -(5)` is a `short` as `short s = -5` is,
   `byte m = ~0x0F` is the `byte` 240 and `byte b = -(5)` is `constant-overflow`. A conversion is no
   literal, and neither is a named constant: `byte(200) + byte(100)` is the `int` 300 (T28).
-- L17 with D9 and T29: where a union with no number case and exactly one time case is required,
-  that case reaches a duration literal, as a written time type does, so
-  `duration | string d = 106752days` is `constant-overflow`, where the literal's own type, a
-  `longduration`, would be `type-mismatch`. T8 and L17 decide the number cases of a union (the
-  owner, 2026-10-21), and a time case is none of them, so `byte | duration x = 5` makes the `5` a
-  `byte`.
 - T22 with L17 and T28: a shift of two operands made of literals folds in the type they take, the
   count taken modulo 32 for a narrow type, which T28 promotes to `int` first, and modulo the width
   otherwise; the bits that leave the type are dropped, at every width, since T22 makes a shift no

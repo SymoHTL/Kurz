@@ -383,8 +383,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// D6: a data type that is its own base, directly or through others, is <c>base-cycle</c> at the base that closes the cycle. That
-    /// base is the base of the declaration that completes the cycle where the files of a program are read in the ordinal order of their
-    /// paths (the owner, 2026-10-21): in the one file the checker reads, the member declared last. Each file is read from its top, a type
+    /// base is the base of the declaration that completes the cycle where the files of a program are read in the order of their paths
+    /// (the owner, 2026-10-21): in the one file the checker reads, the member declared last. Each file is read from its top, a type
     /// that names itself as its base is a cycle of one, a cycle is one error, and a type that only derives from a cycle gets none (the
     /// record's reading). Each closing member is kept with its cycle, from itself round to itself.
     /// </summary>
@@ -1579,8 +1579,8 @@ public sealed partial class Checker
     /// <summary>
     /// O2, O3, O9: the cases a call can leave the calling function with have to be listed in its return type; the top level
     /// has none. A case is listed as a case after the first one, the success (O3 with O1), so a return type that is no union
-    /// lists none; a case after the first lists a case that is its type, and one that widens into it or derives from it (the
-    /// record's reading); a case that is one of the cases after the first goes there, and no other fit is looked for, and a
+    /// lists none; a case after the first lists a case that is its type, one that widens into it (the owner, 2026-10-21) and one
+    /// that derives from it (the record's reading); a case that is one of the cases after the first goes there, and no other fit is looked for, and a
     /// case that would otherwise go to two cases after the first is listed by none, as a value that would go to two cases
     /// stands nowhere (O3 with T8 and D6, the owner, 2026-10-21; <see cref="Types.CasesFor"/>).
     /// </summary>

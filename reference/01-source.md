@@ -375,10 +375,13 @@ long big = 2147483647 + 1
 print(big)
 ```
 
-Where a union is required, its one number case reaches a literal as a written type does, so
+Where a union is required, its one number case reaches a number literal as a written type does, so
 `byte | string x = 5` makes the `5` a `byte`; with two or more number cases the union reaches none,
 and the literal has its own type, so `long | double x = 5` and `byte | short x = 5` are
-`type-mismatch` (T8, which gives the owner's choice of 2026-10-21 and its cost).
+`type-mismatch`, and `short | long x = 5`, whose `int` widens into the `long` alone, is a `long`.
+Its one time case reaches a duration literal, whatever number cases it has, so
+`int | duration d = 106752days` is `constant-overflow` (T8, which gives the owner's choices of
+2026-10-21 and their costs).
 
 Case: [types/literal-one-number-case.kz](../corpus/types/literal-one-number-case.kz)
 ```kurz
@@ -404,6 +407,24 @@ long | double x = 5
 match x {
     long n => print("long {n}")
     double d => print("double {d}")
+}
+```
+
+Case: [types/literal-widens-into-one-case.kz](../corpus/types/literal-widens-into-one-case.kz)
+```kurz
+short | long x = 5
+match x {
+    short s => print("short {s}")
+    long n => print("long {n}")
+}
+```
+
+Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
+```kurz
+int | duration d = 106752days
+match d {
+    int n => print("int {n}")
+    duration t => print("duration {t}")
 }
 ```
 

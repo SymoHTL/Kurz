@@ -1,9 +1,8 @@
-// expect: error base-cycle at 7
+// expect: error base-cycle at 6
 // rules: D6
 
 data Admin(int Level) : User
 data User(int Id) : Person
-data Guest(int Visits) : User
 data Person(string Name) : Admin
 
 print(1)

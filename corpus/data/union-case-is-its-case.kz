@@ -3,7 +3,7 @@
 // rules: D9
 
 short s = 1
-int | short x = s
+byte | short x = s
 int | short | long y = x
 match y {
     int i => print("int {i}")

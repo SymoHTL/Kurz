@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-21
-digest: bc999418b8a4143f515e54fec4902cc4bbbea78c753e4e4fe2f8bd7f66374396
+digest: 9e59adbb866be8bfb872628eee371b9be62461ffa1f5d16a9ffd6d1ed6aedbdc
 ttl_days: 60
 metadata:
   type: reference
@@ -102,7 +102,7 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 111 |
+| Occurrences of the marker *(assumed)* | 112 |
 | Bullets of the Open section | 6 |
 <!-- /generated:design -->
 
@@ -120,7 +120,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 349 |
+| Corpus cases, none of them run | 353 |
 | Compile-error ids | 54 |
 | Run-time error ids | 7 |
 <!-- /generated:reference -->
@@ -145,7 +145,7 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Pull requests merged | 16 |
 | Merged over red, with a recorded waiver | 11 |
 | Review findings posted: high | 84 |
-| Review findings posted: medium | 1160 |
-| Review findings posted: low | 1432 |
+| Review findings posted: medium | 1169 |
+| Review findings posted: low | 1443 |
 | Open HAZARD issues | 17 |
 <!-- /generated:forge -->

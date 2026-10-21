@@ -1,0 +1,22 @@
+// expect: output
+// | int 2
+// rules: O3, O1
+
+bool | short Check(int id) {
+    if id == 1 {
+        return true
+    }
+    return short(id)
+}
+
+// the short that leaves Check goes to Load's int case, which it widens into, and not to Load's success (O3)
+short | int Load(int id) {
+    ok = Check(id)
+    print(ok)
+    return int(0)
+}
+
+match Load(2) {
+    short s => print("short {s}")
+    int i => print("int {i}")
+}

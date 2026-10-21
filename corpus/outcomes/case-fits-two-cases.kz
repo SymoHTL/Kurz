@@ -9,8 +9,8 @@ string | byte Get(int id) {
 }
 
 string | short | int Load(int id) {
-    s = Get(id)
-    return s
+    got = Get(id)
+    return got
 }
 
 match Load(1) {

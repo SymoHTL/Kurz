@@ -160,16 +160,20 @@ type dependency. The owner chose this on 2026-10-21, against `type-mismatch` (T1
 more id. Only the condition is C#'s: C# reports CS0146 at the name of every type on the cycle
 (checked 2026-10-21 with the .NET SDK 10.0.402: two classes that name each other as their base gave
 two CS0146, three classes on a cycle three, a class that names itself one, and a class that only
-derives from a cycle none). To find that base the files of a program are read in the ordinal order
-of their paths, and the base that closes a cycle is the base of the declaration that completes it in
-that reading. The owner chose this on 2026-10-21, against `base-cycle` at every base on the cycle,
-under which no order is needed and a cycle through three types is three errors; the cost is that
-renaming a file can move the error to another line. Each file is read from its top; a type that
-names itself as its base is a cycle of one; a cycle is one error, and a type that only derives from
-a cycle gets none *(assumed: the answers named the base that closes the cycle and the order of the
-files it is found in, and not the order within a file, said back on 2026-10-21, whether a type that
-names itself is a cycle, that a cycle gives no error beside that base, or what a type that only
-derives from a cycle gets)*.
+derives from a cycle none). To find that base the files of a program are read in the order of their
+paths, and the base that closes a cycle is the base of the declaration that completes it in that
+reading. The owner chose this on 2026-10-21, against `base-cycle` at every base on the cycle, under
+which no order is needed and a cycle through three types is three errors; the cost is that renaming
+a file can move the error to another line. The path of a file is the one relative to the program's
+root directory, with `/` as the separator, and two paths are compared code point by code point, case
+kept, so that the order is the same on every platform. The owner chose this on 2026-10-21, against
+the order in which the files are given to the compiler, as a C# project lists them; the cost is that
+the order of the files is a rule of the language, and that renaming a file can move the error, as
+above. Each file is read from its top; a type that names itself as its base is a cycle of one; a
+cycle is one error, and a type that only derives from a cycle gets none *(assumed: the answers named
+the base that closes the cycle and the order of the files, and did not say in which order a file is
+read, whether a type that names itself as its base is a cycle of one, whether a cycle is one error,
+or what a type that only derives from a cycle gets)*.
 
 Case: [data/inherit-cycle.kz](../corpus/data/inherit-cycle.kz)
 ```kurz
@@ -182,8 +186,17 @@ Case: [data/inherit-cycle-of-three.kz](../corpus/data/inherit-cycle-of-three.kz)
 ```kurz
 data Admin(int Level) : User
 data User(int Id) : Person
-data Guest(int Visits) : User
 data Person(string Name) : Admin
+
+print(1)
+```
+
+A type that only derives from a cycle, `Leaf` below, gets no error of its own, by the reading above.
+
+Case: [data/inherit-from-a-cycle.kz](../corpus/data/inherit-from-a-cycle.kz)
+```kurz
+data Node(int Value) : Node
+data Leaf(int Size) : Node
 
 print(1)
 ```
@@ -250,21 +263,32 @@ and a propagated case, not a case of a union)*. A case after the first that is o
 after the first goes there all the same, and no other fit by widening or derivation is looked for,
 so an `int | short` stands where `int | short | long` is required. The owner chose this on
 2026-10-21, as for a value (T8), against two fits being `type-mismatch` even beside an exact case,
-under which such a union needs a `match`; the cost is one more sentence in the rule.
+under which such a union needs a `match`; the cost is that adding a case to a union can change
+without a word which case an existing union's case goes to, as the `short` of an `int | short` goes
+to `long` where `int | long` is required and to `short` where `int | long | short` is, while under
+the option turned down that addition is a compile error. The owner kept this choice with that cost
+shown on 2026-10-21.
 
 A value that is no case goes to a case as T8 says, and one that would go to two cases by deriving
 from them, an `Admin` where `User | Person` is required with `Admin : User : Person`, is
-`type-mismatch`, as one that would widen into two is (T8); a conversion or a `match` picks the case.
-The owner chose this on 2026-10-21, against the nearest case, the most derived base or the narrowest
-type, as C#'s better-conversion rule picks it, under which derivation and propagation would answer
-differently from widening; the cost is that such code needs that conversion or `match`. A value
-that is one of the cases is that case, a `data` value among them, and no other fit by derivation is
+`type-mismatch`, as one that would widen into two is (T8); a variable of the case's type picks the
+case, as `User u = admin` makes the `Admin` a `User` (D6), where a conversion picks it for a number
+(T8) and a `match` on the call for a propagated case (O3) *(assumed: the variable; the answers named
+a conversion or a `match`, and a `data` value has no conversion to its base)*. The owner chose this
+on 2026-10-21, against the nearest case, the most derived base or the narrowest type, as C#'s
+better-conversion rule picks it, under which derivation and propagation would answer differently
+from widening; the cost is that such code needs that conversion, variable or `match`. A value that
+is one of the cases is that case, a `data` value among them, and no other fit by derivation is
 looked for: a `User` where `User | Person` is required, with `User : Person`, is a `User`. The owner
 chose this on 2026-10-21, against two fits being `type-mismatch` even beside an exact case, under
-which that `User` needs a conversion; C#'s better-conversion rule prefers the identity conversion,
-and Rust has only the exact fit; the cost is one more sentence in the rule. A literal where a union
-is required takes the union's one number case, and has its own type where the union has two or
-more, as T8 and L17 say.
+which that `User` is `type-mismatch` too; C#'s better-conversion rule prefers the identity
+conversion, and Rust has only the exact fit; the cost is that adding a case to a union can change
+without a word which case an existing value goes to, as a `User` goes to `Person` where
+`int | Person` is required and to `User` where `int | Person | User` is, while under the option
+turned down that addition is a compile error. The owner kept this choice with that cost shown on
+2026-10-21. A number literal where a union is required takes the union's one number case, and has
+its own type where the union has two or more, and a duration literal takes the union's one time
+case, as T8 and L17 say.
 
 Case: [data/union-more-cases.kz](../corpus/data/union-more-cases.kz)
 ```kurz
@@ -374,7 +398,7 @@ match u {
 Case: [data/union-case-is-its-case.kz](../corpus/data/union-case-is-its-case.kz)
 ```kurz
 short s = 1
-int | short x = s
+byte | short x = s
 int | short | long y = x
 match y {
     int i => print("int {i}")
@@ -432,6 +456,24 @@ byte | short x = 5
 match x {
     byte b => print("byte {b}")
     short s => print("short {s}")
+}
+```
+
+Case: [types/literal-widens-into-one-case.kz](../corpus/types/literal-widens-into-one-case.kz)
+```kurz
+short | long x = 5
+match x {
+    short s => print("short {s}")
+    long n => print("long {n}")
+}
+```
+
+Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
+```kurz
+int | duration d = 106752days
+match d {
+    int n => print("int {n}")
+    duration t => print("duration {t}")
 }
 ```
 
