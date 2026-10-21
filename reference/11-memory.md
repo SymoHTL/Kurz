@@ -235,30 +235,41 @@ raw {
 A raw pointer is written as C# writes it in `unsafe` code: the type `int*`, the reading and writing
 through it `*p` and `p[i]`, the offset `p + n` and the address `&x`; an offset is an `int` or a
 `long`, as every index is (§4). A pointer type stands anywhere, in a field or a parameter, and only
-the reading or writing through a pointer needs a `raw` block (§3, the owner, 2026-10-21).
-*(assumed: that `&x` and `p + n` read and write nothing and need no `raw` block, as §3 marks it)*
+the reading or writing through a pointer needs a `raw` block or the body of a `naked` function (R12)
+(§3, the owner, 2026-10-21); one outside both is the compile error `raw-required`.
+The address `&x` and the offset `p + n` read and write nothing and need no `raw` block, and `p + n`
+computes as Rust's `wrapping_add` (§3, the owner, 2026-10-21). *(the id `raw-required` is a proposed
+reading, and it stands here and not in the table of chapter 12)*
 
-No case: a pointer is read or written only in a `raw` block, which compiles only under a grant in
-`project.kz` (R7), and a case of the corpus is a single file.
+No case: a pointer is read or written in a `raw` block only, which compiles only under a grant in
+`project.kz` (R7), and a case of the corpus is a single file; a case of `raw-required` needs a pointer
+type, which the compiler's front end, through which every case runs, does not read.
 
 ### R11 (decided, §3) Inline assembly
 
 Inline assembly is a statement inside a `raw` block, written as Rust writes `asm!`:
 `asm("add {r}, 1", r = inout(reg) count)`. A `{name}` in its template names an operand and is no
 interpolation (L6); a `"""` block (L13) holds a template of many lines; the operands take Rust's
-words, `in`, `out`, `inout`, `lateout`, the register classes and `clobber_abi` (§3, the owner,
-2026-10-21).
+words, `in`, `out`, `inout`, `lateout`, the register classes Rust names for each architecture and
+`clobber_abi` (§3, the owner, 2026-10-21). An `asm` outside a `raw` block and outside the body of a
+`naked` function (R12) is the compile error `raw-required` (R10) *(the id a proposed reading)*.
+Whether `asm` is a core word (L18) is open (record, section 14).
 
 No case: inline assembly stands only in a `raw` block, which compiles only under a grant in
-`project.kz` (R7), and a case of the corpus is a single file.
+`project.kz` (R7), and a case of the corpus is a single file; a case of an `asm` outside a `raw`
+block would stand on whether `asm` is a core word, which is open.
 
 ### R12 (decided, §3) A function with no frame
 
 A function marked `naked` before its signature, `naked void Switch(...)`, gets no prologue and no
 epilogue from the compiler; its body is one `asm` statement (R11), and it compiles only in a package
-granted `allow raw` (§3, the owner, 2026-10-21).
+granted `allow raw` (§3, the owner, 2026-10-21); its body counts as a `raw` block (§3, an assumption
+there). One in a package without the grant, or in a program without a project file, is the compile
+error `naked-not-allowed` *(the id a proposed reading, standing here and not in the table of chapter
+12)*. Whether `naked` is a core word (L18) is open (record, section 14).
 
-No case: the grant sits in `project.kz` (R7), and a case of the corpus is a single file.
+No case: the grant sits in `project.kz` (R7), and a case of the corpus is a single file; a case of
+`naked-not-allowed` would stand on whether `naked` is a core word, which is open.
 
 ### R8 (decided, §3) Fields of interface type
 

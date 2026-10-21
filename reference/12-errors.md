@@ -3,7 +3,8 @@
 The errors the corpus cases expect. An id is what a corpus header names: `// expect: error <id> at
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
 raises when it runs (E3). The two tables share one namespace of ids. An id that no case can expect stands in its rule and not
-here: `invalid-source` (L1), since the tools read every case as UTF-8; the one exception is
+here: `invalid-source` (L1), since the tools read every case as UTF-8, and `raw-required` (R10, R11)
+and `naked-not-allowed` (R12), whose rules say why no case can expect them; the one exception is
 `print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21) and says in it why no case
 expects it.
 
