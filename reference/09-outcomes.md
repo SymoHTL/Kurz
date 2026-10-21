@@ -379,16 +379,21 @@ runtime's `data` type (O7); its parent lives under `on crash restart` and `on cr
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
 process exits with the exit code 1 (O6). The exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
-reference's reading, on which the case stands), the line the innermost Kurz call stored, where the
-frame that did not fit was the runtime's too, in whichever source that call sits, a line of the
+reference's reading, on which the case stands), read, where the frame that did not fit was the
+runtime's, as the line the innermost Kurz call stored, the call into the runtime, the owner's words
+holding with that reading (§6, an assumption there), in whichever source that call sits, the
+standard library's or the allocator's and the scheduler's Kurz code among them, a line of the
 standard library's source where that call was the library's, whose file the line does not name while
 §14 keeps that question open, so a case pins a line of the program only where that call was the
 program's, and every case of the corpus that pins a stack overflow pins a call of the program's own,
-with a recursion that calls nothing of the standard library, as the case below does, so that the
-frame that does not fit is the program's under every compiler and in both builds, its number is the
-program's line and the runner compares it as E3 says; the corpus holds no case whose overflow lands
-in the standard library's source *(assumed: the innermost Kurz call's line, the library's source
-with its file open, and the condition on the cases, as §6 marks it)*. An allocation that fails ends the whole process with the exit code 1 and a line on
+with a recursion that calls nothing of the standard library and nothing that reaches the runtime's
+primitives or the allocator's entry, over values that allocate nothing, as the case below does over
+an `int`, which the test build keeps as calls (§2, an assumption there), so that the frame that does
+not fit is the program's in that build, its number is the program's line and the runner compares it
+as E3 says; the corpus holds no case whose overflow lands in the standard library's source
+*(assumed: the reading of the owner's words where the frame was the runtime's, the innermost Kurz
+call's line in whichever source, the library's source with its file open, and the condition on the
+cases, as §6 marks it)*. An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value

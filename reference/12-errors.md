@@ -75,7 +75,7 @@ the range of the loop.
 | `divide-by-zero` | T14, T25 | an integer or `decimal` division or remainder by zero |
 | `index-out-of-range` | T14, M9 | an index outside the collection |
 | `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |
-| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the one the innermost Kurz call stored, where the frame that did not fit was the runtime's too, a line of the standard library's source where that call was the library's, whose file is open (§14); every case that pins it pins a call of the program's own, with a recursion that calls nothing of the standard library (§6, an assumption there) |
+| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the one the innermost Kurz call stored, in whichever source that call sits, also where the frame that did not fit was the runtime's, its file open (§14), and every case that pins it pins a call of the program's own, with a recursion that reaches neither the standard library nor the runtime, kept as calls by the test build (all of it §6, an assumption there) |
 
 ## The rules of this chapter
 
