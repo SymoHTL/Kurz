@@ -154,6 +154,21 @@ print(a.Level)
 print(NameOf(a))
 ```
 
+A `data` type that is its own base, directly or through others, is the compile error `base-cycle`,
+reported at the base that closes the cycle, as C# reports CS0146, a circular base type dependency.
+The owner chose this on 2026-10-21, against `type-mismatch` (T1); the cost is one more id. The base
+that closes a cycle is the base of the declaration that, read from the top of the file, completes
+it; a type that names itself as its base is a cycle of one; a cycle is one error, and a type that
+only derives from a cycle gets none *(assumed: the answer named the base that closes the cycle and
+not which one that is where the cycle runs through several types)*.
+
+Case: [data/inherit-cycle.kz](../corpus/data/inherit-cycle.kz)
+```kurz
+data Node(int Value) : Node
+
+print(1)
+```
+
 ### D7 (decided, §4) How `data` inheritance is written
 
 `data Admin(int Level) : User` declares a `data` type that inherits from `User`. Its constructor
@@ -176,7 +191,7 @@ e = Empty
 print(e == Empty)
 ```
 
-### D9 (decided, §4) Unions
+### D9 (decided, §4, §5) Unions
 
 `A | B` is a type. Its values are the values of `A` and the values of `B`. A value of a case
 type is a value of the union without a word. To use it as one of its cases, `match` it (C4).
@@ -195,6 +210,158 @@ void Describe(Circle | Square shape) {
 
 Describe(Circle(2))
 Describe(Square(3))
+```
+
+A value of a union stands where another union is required when its first case goes to the first case
+of that union and each of its other cases to a case of it after the first, each by being that type,
+by widening into it (T8) or by deriving from it (D6), since the first case is the success case (O1):
+an `A | B` stands where `A | B | C` is required, and where `B | A` is required it is the compile
+error `type-mismatch` (T1), as in Rust `Result<A, B>` and `Result<B, A>` are two types with no
+conversion between them. The owner chose this on 2026-10-21, against accepting it wherever the other
+union lists all of its cases, in whatever order; the cost is that swapping the order takes a
+`match`. So `long | NotFound r = Find(1)` compiles where `Find` returns an `int | NotFound`, while a
+`User | Admin` where `User | NotFound` is required is `type-mismatch`, since its `Admin` would
+become a success (O3). The owner chose this on 2026-10-21, against the first case being the same
+type while the other cases may widen, as Rust's `Result<i32, E>` is no `Result<i64, E>`, under which
+`long | NotFound r = Find(1)` is refused while `long r = Find(1)` compiles, and against exact types
+everywhere, with no widening or derivation between unions; the cost is that a conversion between
+unions checks each case. A case after the first that would go to two of the cases after the first is
+`type-mismatch` too, as a value that would go to two cases is.
+
+A value that is no case goes to a case as T8 says, and one that would go to two cases by deriving
+from them, an `Admin` where `User | Person` is required with `Admin : User : Person`, is
+`type-mismatch`, as one that would widen into two is (T8); a conversion or a `match` picks the case.
+The owner chose this on 2026-10-21, against the nearest case, the most derived base or the narrowest
+type, as C#'s better-conversion rule picks it, under which derivation and propagation would answer
+differently from widening; the cost is that such code needs that conversion or `match`.
+
+Case: [data/union-more-cases.kz](../corpus/data/union-more-cases.kz)
+```kurz
+data A(int X)
+data B(int Y)
+data C(int Z)
+
+A | B x = B(2)
+A | B | C y = x
+match y {
+    A a => print("a {a.X}")
+    B b => print("b {b.Y}")
+    C c => print("c {c.Z}")
+}
+```
+
+Case: [data/union-order.kz](../corpus/data/union-order.kz)
+```kurz
+data A(int X)
+data B(int Y)
+
+A | B x = B(2)
+B | A y = x
+match y {
+    B b => print("b {b.Y}")
+    A a => print("a {a.X}")
+}
+```
+
+Case: [types/widening-into-union.kz](../corpus/types/widening-into-union.kz)
+```kurz
+byte b = 1
+int | string v = b
+match v {
+    int i => print(i)
+    string s => print(s)
+}
+short | int w = short(b)
+match w {
+    short x => print("short {x}")
+    int y => print("int {y}")
+}
+```
+
+Case: [types/widening-into-two-cases.kz](../corpus/types/widening-into-two-cases.kz)
+```kurz
+byte b = 1
+short | int v = b
+match v {
+    short s => print("short {s}")
+    int i => print("int {i}")
+}
+```
+
+Case: [data/union-case-widens.kz](../corpus/data/union-case-widens.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+long | NotFound r = Find(1)
+match r {
+    long n => print(n)
+    NotFound => print("none")
+}
+Admin | NotFound a = Admin("a", 2)
+User | NotFound u = a
+match u {
+    User x => print("user {x.Name}")
+    NotFound => print("none")
+}
+```
+
+Case: [data/union-case-after-the-first.kz](../corpus/data/union-case-after-the-first.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+User | Admin a = Admin("a", 1)
+User | NotFound u = a
+match u {
+    User x => print(x.Name)
+    NotFound => print("none")
+}
+```
+
+Case: [data/derives-from-two-cases.kz](../corpus/data/derives-from-two-cases.kz)
+```kurz
+data Person(string Name)
+data User(int Id) : Person
+data Admin(int Level) : User
+
+User | Person v = Admin("a", 1, 2)
+match v {
+    User u => print(u.Id)
+    Person p => print(p.Name)
+}
+```
+
+Two unions with the same first case and the same other cases are one type, whatever the order of the
+cases after the first, so `List<A | B | C>` and `List<A | C | B>` are one type. The owner chose this
+on 2026-10-21, against two types, the order being part of the type as a generic type is invariant in
+C#, under which a list of one cannot be passed where the other is required; the cost is that the
+compiler orders the cases after the first itself, for the numbers of their tags, and that a reader
+sees one type written two ways.
+
+Case: [data/union-order-after-the-first.kz](../corpus/data/union-order-after-the-first.kz)
+```kurz
+data A(int X)
+data B(int Y)
+data C(int Z)
+
+void Count(List<A | B | C> xs) {
+    print(xs.Count)
+}
+
+mut items = List<A | C | B>()
+items.Add(B(1))
+items.Add(C(2))
+Count(items)
 ```
 
 ### D10 (assumed, §4) Small values are plain values

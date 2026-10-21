@@ -564,7 +564,7 @@ public sealed class CheckerTests
     {
         // F7, F11, T27; F11 makes a lambda whose body is a call with a `void` success, under a function type whose result is not `void`,
         // `type-mismatch` at the lambda, where O10 makes a `void` call elsewhere where a value stands `syntax`; a parameter of a lambda of the
-        // top-level code reserves no name in a top-level function, `x` beside `Show(int x)` (the reading on F16 in the README); a written
+        // top-level code reserves no name in a top-level function, `x` beside `Show(int x)` (F16, the owner, 2026-10-21); a written
         // parameter type that does not fit is the one error of the lambda, which is then read with it error-typed (E1)
         Clean("int Apply((int) => int f, int n) => f(n)\n\nprint(Apply(x => x + 1, 4))");
         Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("f = x => x * 2\nprint(f(2))"));
@@ -615,11 +615,33 @@ public sealed class CheckerTests
         Clean("void Show(int n) {\n    print(\"int {n}\")\n}\n\nvoid Show(int a, int b = 0) {\n    print(\"two {a} {b}\")\n}\n\nint i = 4\nShow(i)");
         var h = "void H(byte b) {\n    print(b)\n}\n\n";
         Clean(h + "H(1)");
-        Assert.Equal([(ErrorIds.NarrowingConversion, 9)], Errors(h + "void H(string s) {\n    print(s)\n}\n\nH(1)"));
-        // F13 with F14 (the reading in the README): a call that fits none of several functions takes the error of the first one, in the order
-        // of declaration, that its arguments bind to, so the same call takes another id when the two declarations swap places; which id such a
-        // call takes is a question for a design round, and the test pins what the checker does
-        Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors("void H(string s) {\n    print(s)\n}\n\n" + h + "H(1)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 9)], Errors(h + "void H(string s) {\n    print(s)\n}\n\nH(1)"));
+        // F13 with F14 (the owner, 2026-10-21): a call that fits none of several functions is argument-mismatch, whichever order the
+        // declarations stand in (the test below)
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 9)], Errors("void H(string s) {\n    print(s)\n}\n\n" + h + "H(1)"));
+    }
+
+    [Fact]
+    public void A_call_that_fits_none_of_several_functions_is_argument_mismatch_at_the_call_naming_each_function()
+    {
+        // F13 with F14 (the owner, 2026-10-21): one id, whatever kept each function from fitting, at the first line of the call, as E1 reports an
+        // error of the whole construct (the record's reading), and the message names each function, one line each, and why it does not
+        // fit; a name with one function keeps the error of its argument at the argument's line, and so does a name whose second function is a
+        // duplicate, which takes no part in the pick (F12)
+        var two = "void Show(int n) {\n    print(n)\n}\n\nvoid Show(string s) {\n    print(s)\n}\n\n";
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 10)], Errors(two + "long big = 5\nShow(big)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 9)], Errors(two + "Show(\n    true)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 9)], Errors(two + "Show(1, 2)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 9)], Errors(two + "Show<int>(1)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 4)], Errors("T Pick<T>(T a, T b) => a\nint Pick(int a) => a\n\nprint(Pick(1, \"a\"))"));
+        var (diagnostics, _) = Check(two + "long big = 5\nShow(big)");
+        var lines = Assert.Single(diagnostics.Items).Message.Split('\n');
+        Assert.Equal(3, lines.Length);
+        Assert.Contains("`void Show(int n)`", lines[1], StringComparison.Ordinal);
+        Assert.Contains("narrowing", lines[1], StringComparison.Ordinal);
+        Assert.Contains("`void Show(string s)`", lines[2], StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Take(int n) {\n    print(n)\n}\n\nTake(\n    true)"));
+        Assert.Equal([(ErrorIds.DuplicateFunction, 2), (ErrorIds.TypeMismatch, 3)], Errors("int F(int a) => a\nint F(int b = 1) => b\nprint(F(true))"));
     }
 
     [Fact]
@@ -672,15 +694,24 @@ public sealed class CheckerTests
     [InlineData("mut count = 0\n\nint Next(int count) => count + 1\n\ncount = Next(count)\nprint(count)", ErrorIds.Redeclared, 3)]
     [InlineData("mut count = 0\n\nvoid Bump() {\n    count = count + 1\n}\n\nBump()\nprint(count)", ErrorIds.Redeclared, 4)]
     [InlineData("void Bump() {\n    for count in 0..<2 {\n        print(count)\n    }\n}\n\nmut count = 0\nBump()\nprint(count)", ErrorIds.Redeclared, 2)]
-    [InlineData("void Bump() {\n    f = (int count) => count\n    print(f(1))\n}\n\nif true {\n    count = 0\n    print(count)\n}\nBump()", ErrorIds.Redeclared, 2)]
-    [InlineData("string Email(int id) => \"a\"\n\nfor id in 0..2 {\n    print(Email(id))\n}", ErrorIds.Redeclared, 1)]
+    [InlineData("count = 0\n\nvoid Bump() {\n    f = (int count) => count\n    print(f(1))\n}\n\nBump()\nprint(count)", ErrorIds.Redeclared, 4)]
     public void A_top_level_function_neither_reads_nor_declares_a_top_level_variable(string program, string id, int line)
     {
-        // F16: the read is unknown-name, every declaration of the name is redeclared, the one error for `count = count + 1`; the name is reserved at any
-        // depth, above or below, and a loop variable of the top-level code reserves it too (the reading in the README), where a parameter of a
-        // lambda of the top-level code does not: the lambda is a function (F7, F11), and F16 counts the variables declared outside one (the
-        // same reading; the test of lambdas above)
+        // F16: the read is unknown-name, every declaration of the name is redeclared, the one error for `count = count + 1`, whether the variable
+        // stands above or below the function; inside the function the parameter of a lambda is such a declaration too (the record's reading)
         Assert.Equal([(id, line)], Errors(program));
+    }
+
+    [Fact]
+    public void Only_a_variable_at_the_outermost_level_of_the_top_level_code_reserves_its_name()
+    {
+        // F16 (the owner, 2026-10-21): a loop variable, a variable inside a block of the top-level code and a parameter of a lambda there (the
+        // test of lambdas above) reserve no name in a top-level function, and neither does the name an arm of a top-level match binds, which
+        // lives in its arm; such a variable is not visible in the function either, so a read of it there is unknown-name (V10)
+        Clean("string Email(int id) => \"a\"\n\nfor id in 0..2 {\n    print(Email(id))\n}");
+        Clean("int Twice(int n) {\n    count = n * 2\n    return count\n}\n\nif true {\n    count = 1\n    print(Twice(count))\n}");
+        Clean("data Found(int Id)\ndata NotFound\n\nint Show(int f) => f\n\nFound | NotFound v = Found(1)\nmatch v {\n    Found f => print(Show(f.Id))\n    NotFound => print(0)\n}");
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("int Get() => count\n\nif true {\n    count = 1\n    print(count)\n}\nprint(Get())"));
     }
 
     [Fact]
@@ -857,10 +888,17 @@ public sealed class CheckerTests
         // result unwraps (O2), and the result F7 infers from the value lists no case (O3), the reading in the README
         Assert.Equal([(ErrorIds.UnlistedCase, 11)], Errors(find + "f = (int id) => {\n    return Find(id)\n}\nprint(f(1))"));
 
-        // O3 asks that the case be listed in the return type, and a return type that is the case itself lists it, the reading in the README;
-        // whether a case may leave as the success of the calling function (O1) is a question for a design round, and the test pins what the
-        // checker does
-        Clean(find + "NotFound Lost(int id) {\n    value = Find(id)\n    print(value)\n    return NotFound\n}\n\nprint(Lost(1))");
+        // O3 with O1 (the owner, 2026-10-21): a propagated case is listed as a case after the first one, so a return type that is the case itself,
+        // or that names it first, lists it nowhere; a case after the first lists a case that derives from it or widens into it (the record's
+        // reading), and a case that would go to two cases after the first is unlisted-case, as a value that would go to two cases is
+        // type-mismatch (the owner, 2026-10-21); a case that is a case after the first is that case (the reading in the README)
+        Assert.Equal([(ErrorIds.UnlistedCase, 11)], Errors(find + "NotFound Lost(int id) {\n    value = Find(id)\n    print(value)\n    return NotFound\n}\n\nprint(Lost(1))"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 11)], Errors(find + "NotFound | int Lost(int id) {\n    value = Find(id)\n    print(value)\n    return NotFound\n}\n\nmatch Lost(1) {\n    NotFound => print(0)\n    int n => print(n)\n}"));
+        Clean("data User(string Name)\ndata Admin(int Level) : User\n\nint | Admin Get(int id) {\n    if id == 1 {\n        return 1\n    }\n    return Admin(\"a\", 2)\n}\n\nint | User Load(int id) {\n    return Get(id) + 1\n}\n\nmatch Load(1) {\n    int n => print(n)\n    User u => print(u.Name)\n}");
+        Clean("string | int Get(int id) {\n    if id == 1 {\n        return \"one\"\n    }\n    return id\n}\n\nstring | long Load(int id) {\n    s = Get(id)\n    return s\n}\n\nmatch Load(1) {\n    string s => print(s)\n    long n => print(n)\n}");
+        Assert.Equal([(ErrorIds.UnlistedCase, 9)], Errors("string | byte Get(int id) {\n    if id == 1 {\n        return \"one\"\n    }\n    return byte(id)\n}\n\nstring | short | int Load(int id) {\n    s = Get(id)\n    return s\n}\n\nmatch Load(1) {\n    string s => print(s)\n    short n => print(n)\n    int i => print(i)\n}"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 13)], Errors("data Person(string Name)\ndata User(int Id) : Person\ndata Admin(int Level) : User\n\nint | Admin Get(int id) {\n    if id == 1 {\n        return 1\n    }\n    return Admin(\"a\", 1, 2)\n}\n\nint | User | Person Load(int id) {\n    return Get(id) + 1\n}\n\nmatch Load(1) {\n    int n => print(n)\n    User u => print(u.Id)\n    Person p => print(p.Name)\n}"));
+        Clean("string | short Get(int id) {\n    if id == 1 {\n        return \"one\"\n    }\n    return short(id)\n}\n\nstring | short | int Load(int id) {\n    s = Get(id)\n    return s\n}\n\nmatch Load(1) {\n    string s => print(s)\n    short n => print(n)\n    int i => print(i)\n}");
     }
 
     [Fact]
@@ -977,7 +1015,20 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("data A(int X)\nint A(int x) => x\n\nprint(A(1).X)"));
         Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("int A(int x) => x\ndata A(int X)\n\nprint(A(1))")); // the later declaration, whichever kind it is
         Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.TypeMismatch, 3)], Errors("data A(int X)\nint A(int x) {\n    return \"s\"\n}\n\nprint(A(1).X)")); // the refused function's body is checked all the same
-        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("data A(int X) : B\ndata B(int Y) : A\n\nprint(1)")); // a cycle of bases is one error, and the walk up the bases ends; its id is the reading on D6 in the README, a question for a design round
+    }
+
+    [Fact]
+    public void A_cycle_of_bases_is_base_cycle_at_the_base_that_closes_it()
+    {
+        // D6 (the owner, 2026-10-21): the id base-cycle, at the base that closes the cycle, and the walk up the bases ends; that base is the base
+        // of the declaration that, read from the top of the file, completes the cycle, a type that is its own base is a cycle of one, a cycle
+        // is one error, and a type that only derives from a cycle gets none (the record's reading)
+        Assert.Equal([(ErrorIds.BaseCycle, 1)], Errors("data A(int X) : A\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.BaseCycle, 2)], Errors("data A(int X) : B\ndata B(int Y) : A\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.BaseCycle, 3)], Errors("data A(int X) : B\ndata B(int Y) : C\ndata C(int Z) : A\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.BaseCycle, 3)], Errors("data A(int X) : C\ndata B(int Y) : A\ndata C(int Z) : B\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.BaseCycle, 3)], Errors("data D(int W) : A\ndata A(int X) : B\ndata B(int Y) : A\n\nprint(D(1, 2, 3).W)"));
+        Assert.Equal([(ErrorIds.BaseCycle, 2), (ErrorIds.BaseCycle, 4)], Errors("data A(int X) : B\ndata B(int Y) : A\ndata C(int Z) : D\ndata D(int W) : C\n\nprint(1)"));
     }
 
     [Fact]
@@ -1074,13 +1125,29 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_union_is_the_same_type_as_another_when_its_cases_stand_in_the_same_order()
+    public void A_union_stands_where_another_is_required_when_its_first_case_goes_to_the_first_and_each_other_case_to_one_after_the_first()
     {
-        // D9 with O1 (the reading in the README): two unions are one type when their cases stand in the same order, so `List<int | string>`
-        // and `List<string | int>` are two types; a value of one union stands where another union is required when every case of it is a
-        // case there, its first one included, so `B | A y = x` with an `A | B` `x` compiles: whether a value may stand where a union with
-        // another first case is required is a question for a design round, and the test pins what the checker does
-        Clean("data A\ndata B\n\nA | B x = B\nB | A y = x\nprint(y)");
+        // D9 with O1 (the owner, 2026-10-21): `A | B` stands where `A | B | C` is required and not where `B | A` is, as an argument too; the
+        // first case goes to the first case and each other case to one after the first, by being that type, widening into it (T8) or deriving from
+        // it (D6), so a `long | NotFound` takes an `int | NotFound` and a `User | NotFound` no `User | Admin`, whose `Admin` would become a
+        // success; a case that would go to two cases after the first is type-mismatch, as a value that would go to two cases is (T8 with D9)
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data A\ndata B\n\nA | B x = B\nB | A y = x\nprint(y)"));
+        Clean("data A\ndata B\ndata C\n\nA | B x = B\nA | B | C y = x\nprint(y)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors("data A\ndata B\n\nvoid F(B | A v) {\n    print(v)\n}\n\nA | B x = A\nF(x)"));
+        Clean("data User(string Name)\ndata Admin(int Level) : User\ndata NotFound\n\nAdmin | NotFound a = NotFound\nUser | NotFound u = a\nprint(u)");
+        Clean("data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\nlong | NotFound r = Find(1)\nprint(r)");
+        Clean("data User(string Name)\ndata Admin(int Level) : User\ndata NotFound\n\nNotFound | Admin a = NotFound\nNotFound | User u = a\nprint(u)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("data User(string Name)\ndata Admin(int Level) : User\ndata NotFound\n\nUser | Admin a = Admin(\"a\", 1)\nUser | NotFound u = a\nprint(u)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("byte b = 1\nint | byte x = b\nint | short | long y = x\nprint(y)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors("data Person(string Name)\ndata User(int Id) : Person\ndata Admin(int Level) : User\ndata NotFound\n\nNotFound | Admin a = NotFound\nNotFound | User | Person u = a\nprint(u)"));
+        Clean("short s = 1\nint | short x = s\nint | short | long y = x\nprint(y)"); // a case after the first that is one there is that case, and no widening is looked for (the reading in the README)
+
+        // D9 (the owner, 2026-10-21): the order of the cases after the first makes no other type, so `List<A | B | C>` and `List<A | C | B>` are one
+        // type, and two functions of one name that take them do not differ (F12); another first case is another type, so `List<A | B>` and
+        // `List<B | A>` are two
+        Clean("data A\ndata B\ndata C\n\nA | B | C x = B\nA | C | B y = x\nprint(y)");
+        Clean("data A\ndata B\ndata C\n\nvoid F(List<A | B | C> xs) {\n    print(xs.Count)\n}\n\nF(List<A | C | B>())");
+        Assert.Equal([(ErrorIds.DuplicateFunction, 8)], Errors("data A\ndata B\ndata C\n\nvoid F(A | B | C v) {\n    print(v)\n}\nvoid F(A | C | B v) {\n    print(v)\n}\n\nF(A)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 8)], Errors("data A\ndata B\n\nvoid F(List<A | B> xs) {\n    print(xs.Count)\n}\n\nF(List<B | A>())"));
     }
 
@@ -1094,12 +1161,28 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_value_widens_into_a_case_of_a_union()
+    public void A_value_goes_into_one_case_of_a_union_and_one_that_fits_two_is_type_mismatch()
     {
-        // T8 with D9 (the reading in the README): a value that widens into a case stands where the union is required; which case it becomes
-        // where it widens into two is a question for a design round, and the test pins what the checker does
+        // T8 with D9 (the owner, 2026-10-21): a value that is no case stands where a union is required when it widens into exactly one of its
+        // cases, one that would widen into two is type-mismatch, as an argument too, and a conversion picks the case; a data value that
+        // derives from two cases is type-mismatch as well (D6); a value that is a case is that case and no widening is looked for (the
+        // record's reading)
         Clean("byte b = 1\nint | string v = b\nprint(v)");
-        Clean("byte b = 1\nshort | int v = b\nprint(v)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("byte b = 1\nshort | int v = b\nprint(v)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Show(short | int v) {\n    print(v)\n}\n\nbyte b = 1\nShow(b)"));
+        Clean("byte b = 1\nshort | int v = short(b)\nprint(v)");
+        Clean("int i = 1\nshort | int | long v = i\nprint(v)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data Person(string Name)\ndata User(int Id) : Person\ndata Admin(int Level) : User\n\nUser | Person v = Admin(\"a\", 1, 2)\nprint(v)"));
+        Clean("data Person(string Name)\ndata User(int Id) : Person\ndata Admin(int Level) : User\n\nUser | Person v = User(\"a\", 1)\nprint(v)");
+        Clean("data Person(string Name)\ndata User(int Id) : Person\ndata Admin(int Level) : User\n\nUser u = Admin(\"a\", 1, 2)\nUser | Person v = u\nprint(v)");
+
+        // T8 with D9 and F14 (the owner, 2026-10-21): a literal has its own type where a union is required, so one whose cases it widens into
+        // twice is type-mismatch, and a suffix or a fraction picks the case
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("long | double x = 5\nprint(x)"));
+        Clean("long | double x = 5L\nprint(x)");
+        Clean("long | double x = 5.0\nprint(x)");
+        Clean("byte | string x = 5\nprint(x)"); // the one number case of a union reaches the literal (the reading on L17 with D9 in the README)
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("byte | short x = 5\nprint(x)")); // with two, the literal's own type widens into neither (the same reading)
     }
 
     [Fact]

@@ -33,6 +33,85 @@ match Twice(2) {
 }
 ```
 
+The first case is the success case by its place: a union takes the value of another only when the
+first case of that value goes to its first case and each other case to one of its cases after the
+first (D9), so no case becomes a success it was not, and a case that leaves a function through a
+call is listed after the first case of that function's return type (O3). The owner chose these on
+2026-10-21.
+
+Case: [data/union-order.kz](../corpus/data/union-order.kz)
+```kurz
+data A(int X)
+data B(int Y)
+
+A | B x = B(2)
+B | A y = x
+match y {
+    B b => print("b {b.Y}")
+    A a => print("a {a.X}")
+}
+```
+
+Case: [outcomes/case-as-success.kz](../corpus/outcomes/case-as-success.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+NotFound Lost(int id) {
+    value = Find(id)
+    print(value)
+    return NotFound
+}
+
+print(Lost(1))
+```
+
+Case: [data/union-case-widens.kz](../corpus/data/union-case-widens.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+long | NotFound r = Find(1)
+match r {
+    long n => print(n)
+    NotFound => print("none")
+}
+Admin | NotFound a = Admin("a", 2)
+User | NotFound u = a
+match u {
+    User x => print("user {x.Name}")
+    NotFound => print("none")
+}
+```
+
+Case: [data/union-case-after-the-first.kz](../corpus/data/union-case-after-the-first.kz)
+```kurz
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+User | Admin a = Admin("a", 1)
+User | NotFound u = a
+match u {
+    User x => print(x.Name)
+    NotFound => print("none")
+}
+```
+
 ### O2 (decided, §5) The unwrap rule
 
 Calling such a function yields the success value directly. Every other case leaves the calling
@@ -44,6 +123,15 @@ Case: [outcomes/unwrap.kz](../corpus/outcomes/unwrap.kz)
 
 A case that can leave a function this way has to be listed in that function's own return type.
 Otherwise the call is the compile error `unlisted-case`.
+
+It is listed as a case after the first one, which is the success case (O1): a return type that is
+no union lists none, so `NotFound Lost()` whose body calls an `int | NotFound Find()` and lets the
+`NotFound` leave is `unlisted-case`, as Rust's `?` fills only the `Err` side. The owner chose this on
+2026-10-21, against a case leaving as the success of the calling function, which a return type that
+is the case itself, or that names it first, would let it do; the cost is that such a function needs
+a `match` on the call to return the case. A case after the first lists a case that is its type, that
+widens into it (T8, T23) or that derives from it (D6) *(assumed: the widening and the derivation,
+which the answer did not name)*.
 
 Case: [outcomes/unlisted-case.kz](../corpus/outcomes/unlisted-case.kz)
 ```kurz
@@ -62,6 +150,35 @@ int Twice(int id) {
 }
 
 print(Twice(1))
+```
+
+Case: [outcomes/case-as-success.kz](../corpus/outcomes/case-as-success.kz)
+
+A propagated case that would go to two of the cases after the first, a `byte` under the return type
+`string | short | int`, is `unlisted-case`, and a `match` on the call picks the case. The owner
+chose this on 2026-10-21, against the nearest case, the most derived base or the narrowest type, as
+C#'s better-conversion rule picks it, under which propagation would answer differently from widening
+(T8, D9); the cost is that such code needs that `match`.
+
+Case: [outcomes/case-fits-two-cases.kz](../corpus/outcomes/case-fits-two-cases.kz)
+```kurz
+string | byte Get(int id) {
+    if id == 1 {
+        return "one"
+    }
+    return byte(id)
+}
+
+string | short | int Load(int id) {
+    s = Get(id)
+    return s
+}
+
+match Load(1) {
+    string s => print(s)
+    short n => print(n)
+    int i => print(i)
+}
 ```
 
 ### O4 (decided, §5) Keeping all cases

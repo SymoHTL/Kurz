@@ -1,0 +1,13 @@
+// expect: error argument-mismatch at 13
+// rules: F13
+
+void Show(int n) {
+    print("int {n}")
+}
+
+void Show(string s) {
+    print("text {s}")
+}
+
+long big = 5
+Show(big)

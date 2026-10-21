@@ -1,0 +1,19 @@
+// expect: error unlisted-case at 14
+// rules: O3, O1
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+NotFound Lost(int id) {
+    value = Find(id)
+    print(value)
+    return NotFound
+}
+
+print(Lost(1))

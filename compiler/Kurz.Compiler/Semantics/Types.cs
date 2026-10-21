@@ -88,7 +88,7 @@ public sealed record ListType(KurzType Element) : KurzType
 
     public bool Equals(ListType? other) => other is not null && Types.Same(Element, other.Element);
 
-    public override int GetHashCode() => Text.GetHashCode(StringComparison.Ordinal);
+    public override int GetHashCode() => HashCode.Combine(nameof(ListType), Element);
 }
 
 /// <summary>A <c>data</c> type (D1), with its type arguments where it is generic (T19).</summary>
@@ -98,23 +98,25 @@ public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArg
 
     public bool Equals(DataType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol) && Types.AllSame(TypeArguments, other.TypeArguments);
 
-    public override int GetHashCode() => Text.GetHashCode(StringComparison.Ordinal);
+    public override int GetHashCode() => HashCode.Combine(Symbol.Name, TypeArguments.Count);
 }
 
 /// <summary>
 /// A union (D9). The cases are flat and distinct, in the order written; the first is the success
-/// case of a result (O1). Two unions are the same type when their cases are the same in the same
-/// order (the reading in <c>compiler/README.md</c>): O1 gives the order a meaning, so
-/// <c>List&lt;int | string&gt;</c> and <c>List&lt;string | int&gt;</c> are two types, while a value of
-/// one union stands where the other is required when every case of it is a case there (<see cref="Types.Assignable"/>).
+/// case of a result (O1). Two unions are one type when they have the same first case and the same
+/// other cases, in whatever order (D9, the owner, 2026-10-21): <c>List&lt;A | B | C&gt;</c> and
+/// <c>List&lt;A | C | B&gt;</c> are one type, and <c>List&lt;int | string&gt;</c> and
+/// <c>List&lt;string | int&gt;</c> two. A value of one union stands where another is required when
+/// its first case goes to the first case and each other case to one case after the first (D9 with O1,
+/// <see cref="Types.Assignable"/>).
 /// </summary>
 public sealed record UnionType(IReadOnlyList<KurzType> Cases) : KurzType
 {
     public override string Text => string.Join(" | ", Cases.Select(c => c is FunctionType or UnionType ? "(" + c.Text + ")" : c.Text));
 
-    public bool Equals(UnionType? other) => other is not null && Types.AllSame(Cases, other.Cases);
+    public bool Equals(UnionType? other) => other is not null && Types.Same(this, other);
 
-    public override int GetHashCode() => Text.GetHashCode(StringComparison.Ordinal);
+    public override int GetHashCode() => HashCode.Combine(Cases[0], Cases.Count);
 }
 
 /// <summary>The type of a function value (F11): <c>(int) => bool</c>.</summary>
@@ -124,7 +126,7 @@ public sealed record FunctionType(IReadOnlyList<KurzType> Parameters, KurzType R
 
     public bool Equals(FunctionType? other) => other is not null && Types.AllSame(Parameters, other.Parameters) && Types.Same(Result, other.Result);
 
-    public override int GetHashCode() => Text.GetHashCode(StringComparison.Ordinal);
+    public override int GetHashCode() => HashCode.Combine(Parameters.Count, Result);
 }
 
 /// <summary>A type parameter inside the generic function or type that declares it (T19).</summary>
@@ -232,6 +234,22 @@ public static class Types
         return value >= min && value <= max;
     }
 
+    /// <summary>
+    /// The cases among <paramref name="cases"/> a value of <paramref name="from"/> goes to: the case
+    /// that is its type, and no other, since a case is that case (the record's reading on T8 with D9,
+    /// and beyond a value the reading in <c>compiler/README.md</c>); else every case it widens into (T8)
+    /// or derives from (D6). One is a fit; none is no fit, and two or more are the error a conversion
+    /// or a <c>match</c> resolves, as a call that fits two functions is (F13) (T8 with D9, D9 with D6
+    /// and O3, the owner, 2026-10-21).
+    /// </summary>
+    public static IReadOnlyList<KurzType> CasesFor(KurzType from, IReadOnlyList<KurzType> cases)
+    {
+        ArgumentNullException.ThrowIfNull(from);
+        ArgumentNullException.ThrowIfNull(cases);
+        var same = cases.FirstOrDefault(c => Same(from, c));
+        return same is not null ? [same] : cases.Where(c => Assignable(from, c)).ToList();
+    }
+
     public static bool Same(KurzType a, KurzType b)
     {
         ArgumentNullException.ThrowIfNull(a);
@@ -243,7 +261,7 @@ public static class Types
             (ErrorType, ErrorType) => true,
             (ListType x, ListType y) => Same(x.Element, y.Element),
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
-            (UnionType x, UnionType y) => AllSame(x.Cases, y.Cases),
+            (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
             (FunctionType x, FunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (TypeParameterType x, TypeParameterType y) => ReferenceEquals(x.Symbol, y.Symbol),
             _ => false,
@@ -287,11 +305,12 @@ public static class Types
     /// and <c>long</c>, <c>ushort</c> into <c>int</c> and <c>long</c>, <c>uint</c> into <c>long</c>
     /// (T23); every integer into <c>float</c>, <c>double</c> or <c>decimal</c>, rounded where the type
     /// does not hold the value (T23); <c>float</c> into <c>double</c>; the narrow time type into its
-    /// wide one (T29); a derived <c>data</c> type where its base is required (D6); a case where its
-    /// union is required (D9), and a value that widens into a case (the reading on T8 with D9 in
-    /// <c>compiler/README.md</c>); a union whose every case the required union holds. A union stands
-    /// only where a union is required, since it is one of its cases only after a <c>match</c>
-    /// (D9). A value of the error type stands anywhere, and anything stands where the error type is
+    /// wide one (T29); a derived <c>data</c> type where its base is required (D6); a value where a union
+    /// is required that goes to exactly one of its cases (<see cref="CasesFor"/>: D9, T8 with D9); a
+    /// union where a union is required whose first case its first case goes to, and each of whose other
+    /// cases goes to exactly one of its cases after the first (D9 with O1). A union stands only where a union is
+    /// required, since it is one of its cases only after a <c>match</c> (D9). A value of the error
+    /// type stands anywhere, and anything stands where the error type is
     /// required (E1: one defect, one error). No type has the error type inside it: a list, data,
     /// union or function type with an error in a part is the error type as a whole, as
     /// <see cref="Checker"/> resolves them and <see cref="Substitute"/> and <see cref="Union"/> build
@@ -308,14 +327,14 @@ public static class Types
 
         if (from is UnionType fu)
         {
-            return to is UnionType && fu.Cases.All(c => Assignable(c, to));
+            // D9 with O1 (the owner, 2026-10-21): the first case goes to the first case, the success, and each other case to exactly one
+            // case after the first, so that no case becomes a success it was not
+            return to is UnionType tu && Assignable(fu.Cases[0], tu.Cases[0]) && fu.Cases.Skip(1).All(c => CasesFor(c, tu.Cases.Skip(1).ToList()).Count == 1);
         }
 
-        if (to is UnionType tu)
+        if (to is UnionType union)
         {
-            // T8 with D9: a case, or a value that widens into one; which case a value becomes that widens into two, `byte` into
-            // `short | int`, no rule says, a question for a design round (compiler/README.md)
-            return tu.Cases.Any(c => Assignable(from, c));
+            return CasesFor(from, union.Cases).Count == 1;
         }
 
         if (from is PrimitiveType f && to is PrimitiveType t)

@@ -150,6 +150,59 @@ long big = small
 print(big)
 ```
 
+Where a union is required (D9), a value that is no case of it stands there when it widens into
+exactly one of its cases: a `byte` stands where `int | string` is required. One that would widen
+into two of them, a `byte` where `short | int` is required, is the compile error `type-mismatch`
+(T1), and a conversion (T10), `short(b)`, picks the case, as one picks the function of a call that
+fits two through widening (F13). The owner chose this on 2026-10-21, against the narrowest case,
+under which the `byte` becomes a `short` by C#'s better-conversion rule, and against no widening
+into unions, under which the value must be one of the cases exactly, as Rust widens nothing
+implicitly; the cost is a conversion at such places. A value that is one of the cases is that case,
+and no widening is looked for, so that a `short` where `short | int` is required is a `short`
+*(assumed: the answer's text spoke of the widening alone)*. A value that would go to two cases by
+deriving from them is `type-mismatch` too (D9).
+
+Case: [types/widening-into-union.kz](../corpus/types/widening-into-union.kz)
+```kurz
+byte b = 1
+int | string v = b
+match v {
+    int i => print(i)
+    string s => print(s)
+}
+short | int w = short(b)
+match w {
+    short x => print("short {x}")
+    int y => print("int {y}")
+}
+```
+
+Case: [types/widening-into-two-cases.kz](../corpus/types/widening-into-two-cases.kz)
+```kurz
+byte b = 1
+short | int v = b
+match v {
+    short s => print("short {s}")
+    int i => print("int {i}")
+}
+```
+
+A literal where a union is required whose cases it would widen into twice has its own type (L10),
+`int` for `5`, so `long | double x = 5` is `type-mismatch`, and `5L` or `5.0` picks the case, as a
+literal argument has its own type for the choice between functions (F14), which keeps the case from
+depending on the literal's value. The owner chose this on 2026-10-21, against the first case in the
+written order that can hold it, as a written or expected type reaches a literal (L17), under which
+the case depends on the order and on the value; the cost is a suffix at such places.
+
+Case: [types/literal-into-two-cases.kz](../corpus/types/literal-into-two-cases.kz)
+```kurz
+long | double x = 5
+match x {
+    long n => print("long {n}")
+    double d => print("double {d}")
+}
+```
+
 ### T23 (decided, §4) Widening across signedness and into floating-point
 
 As in C#: an unsigned type widens into every signed type that holds all its values, so `byte`

@@ -176,18 +176,21 @@ resolved as F12 to F14 and D11 say: named arguments are bound to parameters, typ
 inferred from the arguments (T27: no widening between them, and a literal takes what the other
 arguments fix; that a data type and one derived from it meet at the base, in whatever order the
 arguments stand, is the reading on T27 with D6 below), and the one candidate whose parameters fit
-is taken; more than one is `ambiguous-call` (F13), and none is the error of the first function the
-arguments bind to: `argument-mismatch`, `cannot-infer`, or the id of the argument that does not
-fit, `narrowing-conversion` among them (the reading on F13 with F14 below). A `match` and a postfix
-`else` are checked for the cases they cover (C4, C9, O5, O8), and a case the calling function does
-not list propagates as `unlisted-case` (O2, O3, O9). One defect, one diagnostic (E1): a value the
-checker could not type has the error type, which fits anywhere and is reported nowhere again.
+is taken; more than one is `ambiguous-call` (F13), and none is, for a name with more than one
+function, `argument-mismatch` at the call, with a line of the message per function and why it does
+not fit (F13), and for a name with one function the error of that function: `argument-mismatch`,
+`cannot-infer`, or the id of the argument that does not fit, `narrowing-conversion` among them. A
+`match` and a postfix `else` are checked for the cases they cover (C4, C9, O5, O8), and a case the
+calling function does not list after the first case of its return type propagates as
+`unlisted-case` (O1 to O3, O9); a cycle of `data` bases is `base-cycle` (D6). One defect, one
+diagnostic (E1): a value the checker could not type has the error type, which fits anywhere and is
+reported nowhere again.
 
 It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign-mix`,
 `constant-overflow`, `constant-divide-by-zero`, `inexact-literal`, `redeclared`, `unknown-name`,
 `unused-variable`, `assign-immutable`, `capture-assign`, `mut-required`, `mut-at-call`,
 `argument-mismatch`, `ambiguous-call`, `cannot-infer`, `duplicate-function`,
-`default-not-constant`, `missing-return`, `throw-needs-value`, `unlisted-case`,
+`default-not-constant`, `base-cycle`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`,
 `string-index`, `no-text`, and `syntax` for the shapes E4 leaves to it (the readings below).
 
@@ -259,6 +262,13 @@ round can ask about it by the rule's id.
   operation; under `-` and `~` too, so `short s = -(5)` is a `short` as `short s = -5` is,
   `byte m = ~0x0F` is the `byte` 240 and `byte b = -(5)` is `constant-overflow`. A conversion is no
   literal, and neither is a named constant: `byte(200) + byte(100)` is the `int` 300 (T28).
+- L17 with D9: where a union with exactly one number or time case is required, that case reaches a
+  literal, so `byte | string x = 5` makes the `5` a `byte`; where it has more than one, the literal
+  has its own type, so `long | double x = 5` is `type-mismatch` (the owner, 2026-10-21), and so is
+  `byte | short x = 5`, whose `int` widens into neither case. The answer speaks of a literal whose
+  own type would widen into two cases; whether a union with one number case reaches the literal,
+  where its own type `int` is no case of `byte | string`, and whether a union with two reaches it
+  where its own type widens into none, is a question for a design round.
 - T22 with L17 and T28: a shift of two operands made of literals folds in the type they take, the
   count taken modulo 32 for a narrow type, which T28 promotes to `int` first, and modulo the width
   otherwise; the bits that leave the type are dropped, at every width, since T22 makes a shift no
@@ -303,16 +313,6 @@ round can ask about it by the rule's id.
   widens into the other; a duration under `*`, `/` or `%` is `type-mismatch`, since T29 gives the
   time types `+`, `-` and the comparisons; `"a" + "b"` is `type-mismatch`, since L6 joins text by
   interpolation and T2 gives `+` to numbers.
-- F16: a loop variable of the top-level code reserves its name in every top-level function, so a
-  parameter or a local of that name there is `redeclared`; F16's letter counts "every variable
-  declared outside a function ... at any depth of the top-level code". The corpus case
-  `null/early-continue-narrows.kz` named its loop variable `id` beside a parameter `id`; the
-  checker says `not supported` to that case (chapter 4) and reports nothing on it, and the variable
-  was renamed on the rule's letter alone, so that the case holds under it whichever way a reader
-  takes the rule; whether a loop variable, which lives only in its loop, should reserve its name is
-  a question for a design round. A parameter of a lambda of the top-level code reserves no name: a
-  lambda is a function (F7, F11), and F16 counts the variables declared outside one; whether it
-  should is a question for the same design round.
 - F1 with F6: a function or a type declared inside a block is `not supported`: F6 makes a
   declaration of the file visible in the whole file and says nothing of one inside a block. Inside
   its block the name of such a declaration is one the checker does not read, so a use of it there
@@ -328,39 +328,32 @@ round can ask about it by the rule's id.
 - F14 with L17: for a function that is not overloaded the parameter's type reaches a literal
   argument (L17), so `H(1)` with one `H(byte b)` compiles; with a second `H` declared, F14 gives
   the literal its own type for the pick, and the same call fits no function.
-- F13 with F14: a call that fits no function of its name takes the error of the first function, in
-  the order of declaration, to which its arguments bind: its `cannot-infer`, or the id of its first
-  argument that does not fit, `narrowing-conversion` for the `H(1)` above; with no binding, the
-  first function's `argument-mismatch`. The reference names no id for a call that fits none of
-  several functions, so the id can change when two declarations swap places: a question for a
-  design round.
+- F13 with F14: a call that fits none of the functions of its name is `argument-mismatch` at the
+  call where the name has more than one function in the pick (the owner, 2026-10-21); a name whose
+  second function is `duplicate-function` has one there (the reading on F12 above), so its call keeps
+  the error of its argument. A count of type arguments that no function of such a name has is that
+  `argument-mismatch` too, where for a name with one function it is E4's `syntax` (the reading on E4
+  above): it follows from the letter of the answer, under which a call that fits none of the
+  functions of its name is that error, whatever kept each function from fitting.
 - E1 with F13: an argument with an error of its own, or a `void` call standing as one, fits every
   parameter and contradicts none, so a call of an overloaded name that it leaves without one pick
   reports nothing more: the argument may have been meant for any of the functions.
 - M7 with M4: what stands after `mut` is a path of data fields from a `mut` variable; two fields
   of one variable are two values and may both be passed; the same path twice, or a path and one it
   is a prefix of, is `mut-at-call`.
-- D9 with O1: two unions are one type when their cases are the same in the same order, since O1
-  gives the order a meaning (the first case is the success), so `List<int | string>` and
-  `List<string | int>` are two types; a value of one union stands where another union is required
-  when every case of it is a case there, so an `A | B` stands where `B | A` is required and its
-  success becomes `B`. Whether a value may stand where a union with another first case is required
-  is a question for a design round.
+- D9 with O1, T8 with D9 and O3 with O1: a case of a union after its first, a `data` value and a
+  propagated case that is one of the cases it may go to is that case, and no widening or derivation is looked
+  for, as a value that is one of a union's cases is (the record's reading on T8 with D9): an
+  `int | short` stands where `int | short | long` is required, a `User` where `User | Person` is
+  required with `User : Person`, and a propagated `short` is listed by `string | short | int`,
+  although each would go to two cases by widening or derivation, which the owner's answers of
+  2026-10-21 make the error. The record's reading speaks of a value and of widening; whether it holds
+  for the cases of a union after its first, for a propagated case and for derivation is a question
+  for a design round.
 - D9 with C4: a value of a union stands where a union is required only, since a union is one of its
   cases only after a `match`: a `byte | short` is no `int`, and a union of two data types derived
   from one base no value of the base; each is `type-mismatch`.
-- T8 with D9: a value stands where a union is required when it is one of its cases (D9) or widens
-  into one (T8 makes the widening wordless wherever the wider type is required), so a `byte` stands
-  where `int | string` is. Which case a value becomes that widens into two, a `byte` where
-  `short | int` is required, no rule says: a question for a design round.
-- D6 with T1: a data type that is its own base, directly or through others, is `type-mismatch` at
-  the base that closes the cycle, since D6 names a data type as the base and a cycle gives the type
-  none; the reference gives a cycle no id, so which one it takes is a question for a design round.
 - O2 to O4 with F7: O4 keeps a call's cases only as the subject of a `match` and in a written union
   type, so a call that a lambda with an inferred result returns unwraps (O2), and the result F7
   infers from the value lists no case: a case the calling function does not list is
   `unlisted-case` (O3).
-- O3 with O1: a return type that is no union lists the one type it is, so a call's case that is
-  that type, or widens into it, is listed, and leaves as the function's result (`NotFound Lost()`
-  passing on the `NotFound` of a call). O3 asks that the case be listed; whether it may leave as the
-  success of the calling function (O1) is a question for a design round.

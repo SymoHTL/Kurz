@@ -113,6 +113,7 @@ public static class ErrorIds
     public const string UnreachableArm = "unreachable-arm";
     public const string OverrideReturnType = "override-return-type";
     public const string DefaultNotConstant = "default-not-constant";
+    public const string BaseCycle = "base-cycle";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

@@ -346,6 +346,28 @@ short s = 4
 Show(s)
 ```
 
+A call of a name that has more than one function and fits none of them is the compile error
+`argument-mismatch`, at the call, with a message that names each function and why it does not fit.
+The owner chose this on 2026-10-21, against the error of the first function, in the order of
+declaration, that the arguments bind to, under which the error changes when two declarations swap
+places; the cost is a longer message, and an id that no longer names the argument's own fault, such
+as `narrowing-conversion` (T7). The line is the first line of the call, as E1 reports an error of
+the whole construct *(assumed: the answer said at the call)*.
+
+Case: [functions/overload-no-fit.kz](../corpus/functions/overload-no-fit.kz)
+```kurz
+void Show(int n) {
+    print("int {n}")
+}
+
+void Show(string s) {
+    print("text {s}")
+}
+
+long big = 5
+Show(big)
+```
+
 ### F14 (decided, §8) A literal as an argument of an overloaded function
 
 For the pick of an overload (F13), a literal argument has the type it has on its own (L10, L11):
@@ -415,9 +437,18 @@ program's counter does not declare a local instead (the owner, 2026-10-04, again
 the cost is that the function cannot reuse the name, and that a top-level variable added later turns
 every top-level function that already declares that name into a compile error). A parameter of the
 function, a parameter of a lambda inside it and a loop variable are declarations in this sense and
-`redeclared` too, and every variable declared outside a function reserves its name, whether it is
-declared above or below the function (F6) and at any depth of the top-level code. *(assumed: the
-reference's reading, accepted by its id on 2026-10-09 without its text shown)* In `count = count + 1` inside such a function the one error is `redeclared`, for the
+`redeclared` too, and a variable reserves its name whether it is declared above or below the
+function (F6). *(assumed: the reference's reading, accepted by its id on 2026-10-09 without its text
+shown)* Only a variable at the outermost level of the top-level code reserves its name, since it
+lives for the whole program; a loop variable, a variable inside a block of the top-level code and a
+parameter of a lambda there do not, since no function can mean them (the owner, 2026-10-21, against
+every variable declared outside a function reserving its name at any depth of the top-level code,
+the reading this rule took on 2026-10-09, and against every name of the top-level code reserving it,
+the parameter of a lambda there as well; closest to Rust, where an inner `fn` sees no local of the
+function around it; the cost is that the reading assumed on 2026-10-09, under which a variable at
+any depth of the top-level code reserves its name, no longer holds). That the lambda is one of the
+top-level code, so that inside a top-level function a lambda's parameter stays such a declaration, is
+*(assumed: the answer's text named a lambda's parameter without saying where the lambda stands)*. In `count = count + 1` inside such a function the one error is `redeclared`, for the
 declaration on the left, which the compiler reads first to learn whether the line declares; the read
 on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
 read first, whose message points at the read while the fix is the whole line). The owner chose the
@@ -469,4 +500,22 @@ void Bump() {
 
 Bump()
 print(count)
+```
+
+Case: [functions/top-level-block-reserves-nothing.kz](../corpus/functions/top-level-block-reserves-nothing.kz)
+```kurz
+int Twice(int n) {
+    i = n * 2
+    return i
+}
+
+for i in 1..2 {
+    print(Twice(i))
+}
+if true {
+    n = 3
+    print(Twice(n))
+}
+f = (int n) => Twice(n)
+print(f(4))
 ```

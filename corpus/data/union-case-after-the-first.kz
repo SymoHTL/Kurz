@@ -1,0 +1,13 @@
+// expect: error type-mismatch at 9
+// rules: D9, O1
+
+data User(string Name)
+data Admin(int Level) : User
+data NotFound
+
+User | Admin a = Admin("a", 1)
+User | NotFound u = a
+match u {
+    User x => print(x.Name)
+    NotFound => print("none")
+}

@@ -1,0 +1,20 @@
+// expect: error unlisted-case at 12
+// rules: O3
+
+string | byte Get(int id) {
+    if id == 1 {
+        return "one"
+    }
+    return byte(id)
+}
+
+string | short | int Load(int id) {
+    s = Get(id)
+    return s
+}
+
+match Load(1) {
+    string s => print(s)
+    short n => print(n)
+    int i => print(i)
+}

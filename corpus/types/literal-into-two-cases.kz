@@ -1,0 +1,8 @@
+// expect: error type-mismatch at 4
+// rules: T8
+
+long | double x = 5
+match x {
+    long n => print("long {n}")
+    double d => print("double {d}")
+}

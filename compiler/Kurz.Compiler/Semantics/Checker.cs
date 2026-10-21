@@ -33,6 +33,7 @@ public sealed partial class Checker
     private readonly List<FunctionSymbol> unreadOverloads = [];
     private readonly List<(HashSet<string> Types, HashSet<string> Functions)> nestedNames = [];
     private readonly HashSet<string> reservedTopLevel = new(StringComparer.Ordinal);
+    private readonly Dictionary<DataSymbol, List<DataSymbol>> baseCycles = [];
     private readonly Dictionary<string, KurzType> topLevel = new(StringComparer.Ordinal);
     private readonly List<VariableSymbol> declared = [];
     private Frame frame = null!;
@@ -162,9 +163,10 @@ public sealed partial class Checker
         }
 
         RefuseUnreadBases();
+        FindBaseCycles();
         foreach (var symbol in dataDeclared.Concat(refusedTypes))
         {
-            ResolveData(symbol, []);
+            ResolveData(symbol);
         }
 
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -248,7 +250,11 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>F16: the names of every variable declared outside a function, at any depth of the top-level code.</summary>
+    /// <summary>
+    /// F16: the names of the variables at the outermost level of the top-level code, which live for the whole program; a loop
+    /// variable, a variable inside a block of the top-level code, the name an arm binds and a parameter of a lambda there reserve
+    /// no name, since no function can mean them.
+    /// </summary>
     private void CollectReserved(IEnumerable<Statement> statements)
     {
         foreach (var s in statements)
@@ -260,39 +266,6 @@ public sealed partial class Checker
                     break;
                 case AssignOrDeclare a:
                     reservedTopLevel.Add(a.Name);
-                    break;
-                case ForInStatement f:
-                    reservedTopLevel.Add(f.Variable);
-                    CollectReserved(f.Body.Statements);
-                    break;
-                case Block b:
-                    CollectReserved(b.Statements);
-                    break;
-                case IfStatement i:
-                    CollectReserved(i.Then.Statements);
-                    if (i.Else is not null)
-                    {
-                        CollectReserved([i.Else]);
-                    }
-
-                    break;
-                case WhileStatement w:
-                    CollectReserved(w.Body.Statements);
-                    break;
-                case MatchStatement m:
-                    foreach (var arm in m.Arms)
-                    {
-                        if (arm.Pattern is TypePattern { Binding: not null } tp)
-                        {
-                            reservedTopLevel.Add(tp.Binding);
-                        }
-
-                        CollectReserved([arm.Body]);
-                    }
-
-                    break;
-                case RawBlock r:
-                    CollectReserved(r.Body.Statements);
                     break;
                 default:
                     break;
@@ -401,8 +374,45 @@ public sealed partial class Checker
         _ => null,
     };
 
+    /// <summary>The base D6 gives a data type of the file: the first data type among its bases that the checker reads, as <see cref="ResolveData"/> takes it.</summary>
+    private DataSymbol? BaseOf(DataSymbol symbol) => symbol.Declaration.Bases
+        .Select(b => b.Type is NamedType n && UnreadBase(b) is null && dataTypes.TryGetValue(n.Name, out var data) ? data : null)
+        .FirstOrDefault(data => data is not null);
+
+    /// <summary>
+    /// D6: a data type that is its own base, directly or through others, is <c>base-cycle</c> at the base that closes the cycle. That
+    /// base is the base of the declaration that, read from the top of the file, completes the cycle, the member declared last; a type
+    /// that names itself as its base is a cycle of one, a cycle is one error, and a type that only derives from a cycle gets none (the
+    /// record's reading). Each closing member is kept with its cycle, from itself round to itself.
+    /// </summary>
+    private void FindBaseCycles()
+    {
+        var order = dataDeclared.Select((symbol, index) => (symbol, index)).ToDictionary(p => p.symbol, p => p.index);
+        var walked = new HashSet<DataSymbol>();
+        foreach (var start in dataDeclared)
+        {
+            var path = new List<DataSymbol>();
+            for (var d = start; d is not null && !walked.Contains(d); d = BaseOf(d))
+            {
+                var at = path.IndexOf(d);
+                if (at >= 0)
+                {
+                    var members = path.Skip(at).ToList();
+                    var closing = members.MaxBy(m => order[m])!;
+                    var round = members.Skip(members.IndexOf(closing)).Concat(members.Take(members.IndexOf(closing))).Append(closing).ToList();
+                    baseCycles[closing] = round;
+                    break;
+                }
+
+                path.Add(d);
+            }
+
+            walked.UnionWith(path);
+        }
+    }
+
     /// <summary>Resolves the base (D6), then the fields, the base's first (D7); refuses what a <c>data</c> type does not have. Each type once, whatever the outcome.</summary>
-    private void ResolveData(DataSymbol symbol, List<DataSymbol> chain)
+    private void ResolveData(DataSymbol symbol)
     {
         if (symbol.Resolved)
         {
@@ -459,15 +469,13 @@ public sealed partial class Checker
                 Report(ErrorIds.Syntax, b.Line, $"`{named.Name}` takes no type arguments (T19; E4 for another count)"); // the base is taken all the same, so that its fields carry no second error (E1)
             }
 
-            if (chain.Contains(baseSymbol) || ReferenceEquals(baseSymbol, symbol))
+            if (baseCycles.TryGetValue(symbol, out var cycle))
             {
-                Report(ErrorIds.TypeMismatch, b.Line, $"`{named.Name}` cannot be its own base (D6)"); // the reading in compiler/README.md; no base is set, so the walk up the bases ends
+                Report(ErrorIds.BaseCycle, b.Line, $"the base `{named.Name}` closes a cycle of bases, {string.Join(" : ", cycle.Select(m => m.Name))}: a data type cannot be its own base (D6)"); // no base is set, so the walk up the bases ends
             }
             else
             {
-                chain.Add(symbol);
-                ResolveData(baseSymbol, chain);
-                chain.RemoveAt(chain.Count - 1);
+                ResolveData(baseSymbol);
                 typeContext = symbol.TypeParameters;
                 symbol.Base = baseSymbol;
                 symbol.Fields.AddRange(baseSymbol.Fields);
@@ -1567,9 +1575,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// O2, O3, O9: the cases a call can leave the calling function with have to be listed in its return type; the top level
-    /// has none. A return type that is no union lists the one type it is, so a case that is that type, or widens into it,
-    /// is listed and leaves as the function's result (the reading in <c>compiler/README.md</c>: O3 asks that the case be
-    /// listed; whether it may leave as the success of the calling function, O1, is a question for a design round).
+    /// has none. A case is listed as a case after the first one, the success (O3 with O1), so a return type that is no union
+    /// lists none; a case after the first lists a case that is its type, or one that widens into it or derives from it (the
+    /// record's reading), and a case that would go to two cases after the first is listed by none, as a
+    /// value that would go to two cases stands nowhere (O3 with T8 and D6, the owner, 2026-10-21; <see cref="Types.CasesFor"/>).
     /// </summary>
     private void Propagate(IEnumerable<KurzType> cases, int line)
     {
@@ -1586,11 +1595,19 @@ public sealed partial class Checker
         }
 
         var returnType = frame.ReturnType;
-        var listed = returnType is UnionType u ? u.Cases : returnType is null ? [] : [returnType];
-        var unlisted = list.Where(c => !listed.Any(r => Types.Assignable(c, r))).ToList();
+        var listed = returnType is UnionType u ? u.Cases.Skip(1).ToList() : [];
+        var unlisted = list.Select(c => (Case: c, Goes: Types.CasesFor(c, listed))).Where(c => c.Goes.Count != 1).ToList();
         if (unlisted.Count > 0 && !(returnType is not null && Types.IsError(returnType)))
         {
-            Report(ErrorIds.UnlistedCase, line, $"the case `{unlisted[0]}` can leave this function, whose return type does not list it (O3)");
+            var (first, goes) = unlisted[0];
+            if (goes.Count > 1)
+            {
+                Report(ErrorIds.UnlistedCase, line, $"the case `{first}` can leave this function and would go to {goes.Count} cases of its return type after the success, {string.Join(" and ", goes.Select(g => $"`{g}`"))}: a `match` on the call picks one (O3, T8, D6)");
+                return;
+            }
+
+            var where = returnType is UnionType ? "does not list it after its first case, the success" : "is no union and lists no case beside its success";
+            Report(ErrorIds.UnlistedCase, line, $"the case `{first}` can leave this function, whose return type {where} (O3, O1)");
         }
     }
 }
