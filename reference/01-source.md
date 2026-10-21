@@ -128,7 +128,7 @@ a = 1
 print(a); print(a + 1)
 ```
 
-### L6 (decided, §8) Interpolation is always on
+### L6 (decided, §8) Interpolation is on in every string but an `asm` template
 
 Inside a string literal, `{expression}` is replaced by the text (A2 to A15) of the expression's value.
 The template of an `asm` statement is the one exception: there `{name}` names an operand (R11, §3).
@@ -594,8 +594,8 @@ print(text)
 
 A number directly followed by a unit is a duration or a size. The list of units is fixed: `ns`, `us`,
 `ms`, `s`, `min`, `h` and `days` make a duration (T13), `ns` and `us` by the owner's choice of 2026-10-21,
-against the units as they were, under which the text of a duration (A12) could not always be read back
-as a literal; `kb`, `mb` and `gb` make a number of bytes, an integer
+against the units as they were, under which the units that the text of a duration (A12) writes below a
+millisecond were no units of a literal; `kb`, `mb` and `gb` make a number of bytes, an integer
 literal (L10) in steps of 1024. The number is a decimal integer or a decimal fraction in the forms of L11, `.5h` included, with `_`
 between its digits: `1.5s` is 1500 ms, `0.5h` is 30 min and `1.5kb` is 1536. A fraction that does
 not fall on a whole nanosecond, or on a whole byte before `kb`, `mb` and `gb`, is the compile error

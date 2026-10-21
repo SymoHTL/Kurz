@@ -48,7 +48,9 @@ type system parses with no diagnostic, and a corpus case that expects such an id
 parsing clean, its expectation read against the rules as `reference/00-about.md` says. The second
 kind, `not supported`, names a construct the reference states and the front end does not read; it
 carries no id, so it can never pass for an error a case expects, and a corpus case that gets one
-fails its theory; the front end produces it nowhere, since every form of chapters 1 to 11 is read.
+fails its theory; the front end produces it nowhere. It reads every form of chapters 1 to 11 but
+those of R10 to R12: a pointer type and a `naked` function get `syntax`, and `asm(...)` parses as a
+call.
 One corpus case, `data/flags-match.kz`, expects a `syntax` that depends on the type of the matched
 value (D13), which the front end cannot see; the corpus theory checks that it parses with no
 diagnostic.

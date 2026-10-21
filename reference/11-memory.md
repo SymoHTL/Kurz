@@ -214,7 +214,9 @@ inline assembly (§3, the owner, 2026-10-21), written as R11 says, and the readi
 raw pointer (R10).
 The compiler's memory guarantees cover the Kurz code outside `raw` blocks; the runtime is Kurz (§2),
 and its `raw` blocks and the inline assembly in them are unchecked as every `raw` block is, and so is
-the foreign code the process runs beside them, the C library, the compiler's support library, the cipher library of TLS and a library the
+the foreign code the process runs beside them, the C library, the system's DLLs on Windows, the compiler's
+support library, the unwind library on Linux and `dbghelp.dll` on Windows, Espressif's framework and its
+radio's binary libraries on the ESP32 models, avr-libc on AVR, the cipher library of TLS and a library the
 program takes through the C-ABI, so the guarantees hold while that code writes only the memory it
 owns or was handed, inside the bounds it was given, and keeps the invariants the Kurz code relies on
 *(assumed: the foreign code outside the guarantees, under the
@@ -235,15 +237,20 @@ raw {
 A raw pointer is written as C# writes it in `unsafe` code: the type `int*`, the reading and writing
 through it `*p` and `p[i]`, the offset `p + n` and the address `&x`; an offset is an `int` or a
 `long`, as every index is (§4). A pointer type stands anywhere, in a field or a parameter, and only
-the reading or writing through a pointer needs a `raw` block or the body of a `naked` function (R12)
-(§3, the owner, 2026-10-21); one outside both is the compile error `raw-required`.
+the reading or writing through a pointer needs a `raw` block (§3, the owner, 2026-10-21); one outside it
+is the compile error `raw-required`.
 The address `&x` and the offset `p + n` read and write nothing and need no `raw` block, and `p + n`
 computes as Rust's `wrapping_add` (§3, the owner, 2026-10-21). *(assumed: the id `raw-required`, as §3
-marks it)*
+marks it)* `p + n` and `p - n` count elements of the pointee, `p - q` is a `long`, the count of
+elements from `q` to `p`, and `==`, `!=`, `<`, `<=`, `>` and `>=` compare two pointers' addresses, none of
+them needing a `raw` block; `&x` takes a variable, a field or an element, and the pointer holds while
+that value lives *(assumed: the element count, the subtraction, the comparisons and what `&x` takes,
+as §3 marks them)*.
 
 No case: a pointer is read or written in a `raw` block only, which compiles only under a grant in
 `project.kz` (R7), and a case of the corpus is a single file; a case of `raw-required` through a pointer needs a pointer
-type, which the compiler's front end, through which every case runs, does not read.
+type, at which the compiler's front end, through which every case runs, reports `syntax`, so that such a
+case fails there.
 
 ### R11 (decided, §3) Inline assembly
 
@@ -251,14 +258,21 @@ Inline assembly is a statement inside a `raw` block, written as Rust writes `asm
 `asm("add {r}, 1", r = inout(reg) count)`. A `{name}` in its template names an operand and is no
 interpolation (L6); a `"""` block (L13) holds a template of many lines; the operands take Rust's
 words, `in`, `out`, `inout`, `lateout`, the register classes Rust names for each architecture and
-`clobber_abi` (§3, the owner, 2026-10-21). An `asm` outside a `raw` block and outside the body of a
+`clobber_abi` (§3, the owner, 2026-10-21). `{{` and `}}` write a brace, an operand is taken by its name or by
+its position, a modifier after a colon gives the form of its register, `{r:e}`, every operand appears in
+the template, the operands take the rest of Rust's words, `inlateout`, `const`, `sym`, `label` and
+`options(...)`, and a variable an operand writes is `mut` *(assumed: the rest of Rust's rules of the
+template and of its words, as §3 marks them)*. An `asm` outside a `raw` block and outside the body of a
 `naked` function (R12) is the compile error `raw-required` (R10) *(assumed: the id, as §3 marks it)*.
 `asm` is a core word (L18). No case shows an `asm` that compiles: it stands only in a `raw` block,
-which compiles only under a grant in `project.kz` (R7), and a case of the corpus is a single file.
+which compiles only under a grant in `project.kz` (R7), and a case of the corpus is a single file. The
+case below runs through the compiler's front end, which reads `asm("nop")` with no error and checks
+only the ids it raises itself, as for every case whose id another part of the compiler raises.
 
 Case: [memory/asm-outside-raw.kz](../corpus/memory/asm-outside-raw.kz)
 ```kurz
 asm("nop")
+// an `asm` outside a `raw` block and outside a `naked` function is raw-required (R11); the front end parses this line as a call with no error, and the id is raised after the parse
 ```
 
 ### R12 (decided, §3) A function with no frame
@@ -267,12 +281,15 @@ A function marked `naked` before its signature, `naked void Switch(...)`, gets n
 epilogue from the compiler; its body is one `asm` statement (R11), and it compiles only in a package
 granted `allow raw` (§3, the owner, 2026-10-21); its body counts as a `raw` block (§3, an assumption
 there). One in a package without the grant, or in a program without a project file, which has no grant (R7), is the compile
-error `naked-not-allowed` *(assumed: the id, as §3 marks it; it stands here and not in the table of
-chapter 12)*. `naked` is a core word (L18).
+error `naked-not-allowed`, and its body, a `raw` block, raises no `raw-not-allowed` beside it *(assumed:
+the id and the one error, as §3 marks them; the id stands here and not in the table of chapter 12)*.
+Its `asm` takes `sym` and `const` operands alone, its instructions return or never end, and the
+function is called by the C calling convention of its target *(assumed: as §3 marks them)*. `naked` is
+a core word (L18).
 
 No case: the grant sits in `project.kz` (R7), and a case of the corpus is a single file; a case of
-`naked-not-allowed` needs a `naked` function, which the compiler's front end, through which every case
-runs, does not read.
+`naked-not-allowed` needs a `naked` function, at which the compiler's front end, through which every
+case runs, reports `syntax`, so that such a case fails there.
 
 ### R8 (decided, §3) Fields of interface type
 

@@ -374,15 +374,20 @@ Remove(2) else {
 
 ### O11 (decided, §2, §6) A child's stack and the process's heap
 
-An actor that exhausts its stack dies as it does for any exception (O6), with a `Reason` of the
+An actor that exhausts its stack on Linux or on Windows dies as it does for any exception (O6), with a
+`Reason` of the
 runtime's `data` type (O7); its parent lives under `on crash restart` and `on crash stop`, and crashes
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
 process exits with the exit code 1 (O6); on WebAssembly an exhausted stack ends the program, as the
-engine's trap does (§2, the owner, 2026-10-21). The exception is
+engine's trap does (§2, the owner, 2026-10-21), with no error line of the program's, since no code
+of it runs after a trap, and with the exit code its engine gives (§2, from the WebAssembly specification
+it checks), and what it does on the ESP32 models and on AVR is open (record, section 14). The
+exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
 reference's reading, on which the case stands), read from the line tables for the call that did
 not fit (§6), the innermost frame outside the runtime and its call into the runtime where that one was
-the runtime's (§6, the owner, 2026-10-21), so that the owner's words hold with that reading, in whichever source that frame's
+the runtime's (§6, the owner, 2026-10-21), the runtime being its primitives and not the allocator, the
+scheduler or a collection, which are the standard library's Kurz code above them (§6, §3), so that the owner's words hold with that reading, in whichever source that frame's
 function sits, a line of the standard library's source where that function was the library's, whose
 file the error line names (§6, decided there; the owner, 2026-10-21) and whose function the trace's
 first line names (§6), so a case pins a line of the
@@ -413,8 +418,10 @@ when nothing can be allocated; the cost is a guard page per actor stack and a pr
 stack probe in every frame larger than that page, so that no frame steps past it, and the signal stack
 per thread for the handler that turns the fault into the exception the owner added to the cost on
 2026-10-10). A stack exhausted inside the allocator or the scheduler ends the process the same
-way, with the exit code 1 and the error line, as an overflow with no actor does (§6, the owner,
-2026-10-21), and no case pins that, since a case's recursion reaches neither (above). The case runs at the
+way, with the exit code 1 and the error line, as an overflow with no actor does, which the handler
+tells by a count per thread that the package's entry raises and its exit lowers, and the error line
+names the line of the innermost frame outside the runtime, as above, the allocator's or the
+scheduler's own where the fault is there (§6, the owner, 2026-10-21), and no case pins that, since a case's recursion reaches neither (above). The case runs at the
 top level, which is the root actor, so the
 exception ends the program (O6); the allocation failure has no case, since no case can ask for
 memory that does not exist.
