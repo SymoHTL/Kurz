@@ -3,8 +3,8 @@
 The errors the corpus cases expect. An id is what a corpus header names: `// expect: error <id> at
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
 raises when it runs (E3). The two tables share one namespace of ids. An id that no case can expect stands in its rule and not
-here: `invalid-source` (L1), since the tools read every case as UTF-8, and `raw-required` (R10, R11)
-and `naked-not-allowed` (R12), whose rules say why no case can expect them; the one exception is
+here: `invalid-source` (L1), since the tools read every case as UTF-8, and
+`naked-not-allowed` (R12), whose rule says why no case can expect it; the one exception is
 `print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21) and says in it why no case
 expects it.
 
@@ -38,6 +38,7 @@ expects it.
 | `weak-not-nullable` | R5 | a `weak` type written without its `?` |
 | `weak-value` | R5 | `weak` in front of a type whose values are not instances of a class |
 | `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file |
+| `raw-required` | R11 | an `asm`, or a read or a write through a raw pointer (R10, whose rule says why no case shows one), outside a `raw` block and outside the body of a `naked` function |
 | `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |

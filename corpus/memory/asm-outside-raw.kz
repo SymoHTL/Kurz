@@ -1,0 +1,4 @@
+// expect: error raw-required at 4
+// rules: R11
+
+asm("nop")

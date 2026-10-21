@@ -377,7 +377,8 @@ Remove(2) else {
 An actor that exhausts its stack dies as it does for any exception (O6), with a `Reason` of the
 runtime's `data` type (O7); its parent lives under `on crash restart` and `on crash stop`, and crashes
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
-process exits with the exit code 1 (O6). The exception is
+process exits with the exit code 1 (O6); on WebAssembly an exhausted stack ends the program, as the
+engine's trap does (§2, the owner, 2026-10-21). The exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
 reference's reading, on which the case stands), read from the line tables for the call that did
 not fit (§6), the innermost frame outside the runtime and its call into the runtime where that one was

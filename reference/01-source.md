@@ -483,13 +483,21 @@ this on 2026-10-03, against the keywords of C#, which would take `goto`, `unsafe
 from programs for nothing; the cost is that the list has to be kept. Four words were not in the
 list the owner saw: `equal` and `by` are core words by K8 (the owner, 2026-10-02), `this` is the
 call of the primary constructor (K14) and `virtual` the marker of K7 (both the owner, 2026-10-04).
-The names of the built-in types are core words as well (L19). Whether `asm` and `naked`, which R11
-and R12 use as syntax, join the list is open (record, section 14).
+The names of the built-in types are core words as well (L19). `asm` and `naked`, which R11 and R12
+use as syntax, and `extern`, which the boundary with C uses (§2), are core words too, and `out`,
+`inout`, `lateout`, the register classes and `clobber_abi`, the other words of an `asm`'s operands
+(R11), are words inside an `asm` alone (§3, the owner, 2026-10-21).
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
 equal = 1
 print(equal)
+```
+
+Case: [source/core-word-naked.kz](../corpus/source/core-word-naked.kz)
+```kurz
+naked = 1
+print(naked)
 ```
 
 ### L19 (decided, §8) The names of the built-in types are core words
