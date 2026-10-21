@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-21
-digest: 866f92af10e210fcc003f137f5ec43f8783ac39e3c68f349a164d9bbc2dfc63c
+generated: 2026-10-22
+digest: fc52d39b4eb47eb9658475816d1c44ef35302b24ad00416915909f71e9310ad4
 ttl_days: 60
 metadata:
   type: reference
@@ -102,8 +102,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 119 |
-| Bullets of the Open section | 7 |
+| Occurrences of the marker *(assumed)* | 120 |
+| Bullets of the Open section | 10 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -145,7 +145,7 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Pull requests merged | 17 |
 | Merged over red, with a recorded waiver | 11 |
 | Review findings posted: high | 85 |
-| Review findings posted: medium | 1216 |
-| Review findings posted: low | 1491 |
+| Review findings posted: medium | 1234 |
+| Review findings posted: low | 1519 |
 | Open HAZARD issues | 17 |
 <!-- /generated:forge -->
