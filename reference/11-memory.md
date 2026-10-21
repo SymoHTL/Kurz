@@ -401,6 +401,7 @@ raw {
 
 Case: [memory/static-mut-not-allowed.kz](../corpus/memory/static-mut-not-allowed.kz)
 ```kurz
+// a package without `allow raw` declares no such state (R13); that no function reads it is no `unused-variable`, the state being no variable
 static mut long total = 0
 print(1)
 ```
