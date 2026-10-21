@@ -45,6 +45,20 @@ def captured_pr():
 PR = captured_pr()
 
 
+def captured_label():
+    """A label as the forge really sends one, from its answer for a list of issues (tools/fixtures/SOURCES.txt),
+    for the labels the fake forge below puts on the pull request. None when it cannot be read: the case
+    "fixture: the captured label" then fails."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures", "hazard-issues.json")
+    try:
+        return next(label for issue in json.loads(kit.read(path)) for label in issue["labels"])
+    except (OSError, ValueError, kit.Refused, KeyError, TypeError, StopIteration):
+        return None
+
+
+LABEL = captured_label()
+
+
 def raises(kind, fn):
     try:
         fn()
@@ -107,15 +121,17 @@ class MemoryForge(rv.Forge):
         self.threads, self.notes, self.statuses, self.said, self.asked, self.refuse_findings = [], [], [], [], [], False
         self.base, self.heads = base, list(heads)
         self.issues, self.opened, self.collected = [], [], []  # open lows issues, issues this run opened, (issue, comment) pairs
-        self.first_write = None  # how long the log was when the first write reached the wire
-        self.labels = []  # labels this run put on the pull request
-        self.refuse_labels = False  # the forge refuses the label write
+        self.first_write = None  # how long the log was when the first write of a result reached the wire (the round's label is none)
+        self.labels = []  # labels on the pull request, which a case may preload: pr() answers them, and a run adds to them
+        self.refuse_labels = None  # the forge refuses a label write whose name starts with this
         self.read_back = 0  # how often the lows issue was read back after a comment on it failed
 
     def pr(self):
         # the captured payload, with the head and the base of this case; its state is open, like the real one's
         head = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
-        return {**PR, "head": {**PR.get("head", {}), "sha": head}, "base": {**PR.get("base", {}), "ref": self.base}}
+        # edited: the labels it carries, each the captured label renamed
+        return {**PR, "head": {**PR.get("head", {}), "sha": head}, "base": {**PR.get("base", {}), "ref": self.base},
+                "labels": [dict(LABEL or {}, name=name) for name in self.labels]}
 
     def me(self):
         return "bot"
@@ -144,7 +160,8 @@ class MemoryForge(rv.Forge):
 
     def send(self, path, payload, method):
         body = payload.get("body") or ""
-        if self.first_write is None and hasattr(sys.stdout, "getvalue"):
+        counting = path == f"issues/{self.number}/labels" and all(n.startswith(kit.ROUND_LABEL) for n in payload["labels"])
+        if self.first_write is None and hasattr(sys.stdout, "getvalue") and not counting:
             self.first_write = len(sys.stdout.getvalue())
         if self.refuse_findings and (("kurz-review:findings" in body and path.startswith("pulls/")) or "low findings of pull request" in body):
             raise kit.Refused("`gh api` exited 1: gh: Validation Failed (HTTP 422)")  # written by hand: no capture holds this refusal
@@ -161,7 +178,7 @@ class MemoryForge(rv.Forge):
             self.notes.append(comment)
             return {"id": comment["id"]}  # as the forge answers a new comment
         elif path == f"issues/{self.number}/labels":
-            if self.refuse_labels:
+            if self.refuse_labels is not None and any(n.startswith(self.refuse_labels) for n in payload["labels"]):
                 raise kit.Refused("`gh api` exited 1: gh: Not Found (HTTP 404)")
             self.labels.extend(payload["labels"])
         elif path.startswith("issues/"):
@@ -239,7 +256,8 @@ def run():
 
 def suite(case):
     case("fixture: the captured pull request is read, open, and carries what the reviewer reads from one",
-         PR.get("state") == "open" and all(k in PR for k in ("title", "body", "html_url", "draft", "author_association")), sorted(PR)[:12])
+         PR.get("state") == "open" and all(k in PR for k in ("title", "body", "html_url", "draft", "author_association", "labels")), sorted(PR)[:12])
+    case("fixture: the captured label carries the name the reviewer reads", isinstance(LABEL, dict) and isinstance(LABEL.get("name"), str), LABEL)
     # --- pins (first: a wrong model id makes the real answers below unreadable)
     case("pin: the model is an exact id, not an alias", bool(rv.re.fullmatch(r"claude-[a-z]+-\d+(?:-\d+)+", rv.MODEL)), rv.MODEL)
     case("pin: at least two passes, and a cap", 2 <= rv.MIN_PASSES < rv.MAX_PASSES <= 6)
@@ -838,15 +856,22 @@ def suite(case):
          (again.batches, code, kinds(forge), stored(forge)))
     case("run: a run outside CI posts no status", forge.statuses == [], forge.statuses)
     case("run: a completed run outside CI labels the pull request with the head, so that Ready of that head starts no paid run",
-         forge.labels == [f"{rv.LOCAL_LABEL}{HEAD}"], forge.labels)
+         [n for n in forge.labels if n.startswith(rv.LOCAL_LABEL)] == [f"{rv.LOCAL_LABEL}{HEAD}"], forge.labels)
+    case("run: a run outside CI counts its round too, each run the one after the rounds its labels count",
+         [n for n in forge.labels if n.startswith(kit.ROUND_LABEL)] == [f"{kit.ROUND_LABEL}1", f"{kit.ROUND_LABEL}2"], forge.labels)
+    again = scripted_model(found)
+    code, out = run_review(forge, again, ["--pr", "1", "--local"])
+    case("run: a run with nothing left to review, every file replayed, counts no round",
+         code == 0 and again.batches == [] and [n for n in forge.labels if n.startswith(kit.ROUND_LABEL)] == [f"{kit.ROUND_LABEL}1", f"{kit.ROUND_LABEL}2"],
+         (code, again.batches, forge.labels))
     clause = kit.load_yaml(kit.read(os.path.join(FIX, "..", "..", "..", ".github", "workflows", "review.yml")))["jobs"]["review-run"]["if"]
     case("run: the label the reviewer adds is the one the workflow's clause builds from the head",
          f"format('{rv.LOCAL_LABEL}{{0}}', github.event.pull_request.head.sha)" in clause, (rv.LOCAL_LABEL, clause))
     forge = MemoryForge()
-    forge.refuse_labels = True
+    forge.refuse_labels = rv.LOCAL_LABEL
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local"])
     case("run: a refused label write posts the findings and the note, says the label is missing, and ends the run red",
-         code != 0 and forge.labels == [] and "LABEL NOT ADDED" in out and "REVIEW DID NOT COMPLETE (failed)" in out
+         code != 0 and not any(n.startswith(rv.LOCAL_LABEL) for n in forge.labels) and "LABEL NOT ADDED" in out and "REVIEW DID NOT COMPLETE (failed)" in out
          and any("could NOT be added" in (n["body"] or "") for n in forge.notes) and len(forge.threads) == 1,
          (code, forge.labels, kinds(forge)))
     success, error = [(HEAD, "review", "success")], [(HEAD, "review", "error")]
@@ -854,7 +879,52 @@ def suite(case):
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
     case("run: in CI a completed review posts the success status", (code, forge.statuses) == (0, success) and "REVIEW COMPLETE" in out,
          (code, forge.statuses))
-    case("run: in CI the pull request gets no label", forge.labels == [], forge.labels)
+    case("run: in CI the pull request gets no label of a review off the pipeline", not any(n.startswith(rv.LOCAL_LABEL) for n in forge.labels),
+         forge.labels)
+    forge, seen = MemoryForge(), []
+    counted = scripted_model(found)
+
+    def watching(prompt, paths, timeout_s):
+        seen.append(list(forge.labels))  # what the pull request carried when this pass was called
+        return counted(prompt, paths, timeout_s)
+    code, out = run_review(forge, watching, ["--pr", "1"], ci=True, credential="x")
+    case("run: in CI a review labels the pull request with its round before its first pass",
+         code == 0 and forge.labels == [f"{kit.ROUND_LABEL}1"] and bool(seen) and seen[0] == [f"{kit.ROUND_LABEL}1"], (code, forge.labels, seen[:1]))
+    forge = MemoryForge()
+    forge.labels = ["bug", f"{kit.ROUND_LABEL}{kit.ROUND_CAP - 1}"]  # edited: the rounds before the labels, counted by one label
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
+    case("run: the round's number follows the rounds the labels count, so one label counts the rounds before it",
+         code == 0 and forge.labels[-1] == f"{kit.ROUND_LABEL}{kit.ROUND_CAP}", (code, forge.labels))
+    forge, unused = MemoryForge(), scripted_model(found)
+    forge.labels = [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"]
+    code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")
+    case("run: at the cap a run in CI ends before any pass as cap, adds no label and posts no finding",
+         (code, forge.statuses, unused.batches, forge.labels, forge.threads) == (1, error, [], [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"], [])
+         and "REVIEW DID NOT COMPLETE (cap)" in out, (code, forge.statuses, unused.batches, forge.labels, out[-300:]))
+    case("run: at the cap the error status says that the cap was reached",
+         bool(forge.said) and f"cap: {kit.ROUND_CAP} review rounds reached" in forge.said[-1], forge.said)
+    case("run: at the cap the note says that the rounds before stand, not that the pull request is not reviewed",
+         len(forge.notes) == 1 and "Its review rounds before stand" in forge.notes[0]["body"] and "is not reviewed" not in forge.notes[0]["body"],
+         [c["body"][:160] for c in forge.notes])
+    forge, unused = MemoryForge(), scripted_model(found)
+    forge.labels = [f"{kit.ROUND_LABEL}{kit.ROUND_CAP + 2}"]
+    local = run_review(forge, unused, ["--pr", "1", "--local"])
+    plan_forge = MemoryForge()
+    plan_forge.labels = list(forge.labels)
+    planned = run_review(plan_forge, unused, ["--pr", "1", "--plan"])
+    case("run: at the cap a run off the pipeline ends the same way, with no status, and a plan too, posting nothing",
+         local[0] == 1 and "REVIEW DID NOT COMPLETE (cap)" in local[1] and forge.statuses == [] and unused.batches == []
+         and planned[0] == 1 and "REVIEW DID NOT COMPLETE (cap)" in planned[1] and (plan_forge.notes, plan_forge.statuses) == ([], []),
+         (local[0], planned[0], forge.statuses, unused.batches, plan_forge.notes))
+    forge, unused = MemoryForge(), scripted_model(found)
+    forge.refuse_labels = kit.ROUND_LABEL
+    code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")
+    case("run: a round label the forge refuses ends the run red before any pass",
+         (code, forge.statuses, unused.batches) == (1, error, []) and "REVIEW DID NOT COMPLETE (failed)" in out and "could not be added" in out,
+         (code, forge.statuses, unused.batches, out[-300:]))
+    forge = MemoryForge()
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--dry-run"])
+    case("run: a dry run counts no round: it posts nothing, that label included", code == 0 and forge.labels == [], (code, forge.labels))
     case("run: the rules are asked from the default branch", forge.asked == ["trunk"], forge.asked)
     forge = MemoryForge(heads=(HEAD, "d" * 40))
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")

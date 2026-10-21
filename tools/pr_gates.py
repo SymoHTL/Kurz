@@ -16,10 +16,16 @@ findings  the review policy: every finding the reviewer posted as a review threa
           a rule file counts as answered only when that file changed after the finding; a finding
           on tool, workflow or hook code may also be answered by a written reply: a comment in its
           thread from someone who may write here, that is not a post of the reviewer. The check is
-          per file, not per line: one real change to a file answers every finding on it.
+          per file, not per line: one real change to a file answers every finding on it. On a
+          pull request at the owner's cap of review rounds (kit.ROUND_CAP, counted from its labels
+          by kit.review_rounds) a finding on any file is also answered by its move to the
+          collection ticket: a reply from someone who may write here that links an open issue
+          labelled kit.LEFTOVERS_LABEL, and the errors name that move (MOVE), since no edit follows the
+          third round. Below the cap such a reply answers nothing.
 resolve   not a gate: the session's step after its fix push. Every unresolved thread of the
           reviewer whose files all changed since the finding's commit is resolved, because its
-          edit is the answer as `findings` reads it; a thread without findings, a reviewer post that
+          edit is the answer as `findings` reads it, and so is, at the cap, one whose posts after
+          the reviewer's all move it to the collection ticket; a thread without findings, a reviewer post that
           names no file, a finding whose commit is gone, one whose files did not all change, one in
           which a person wrote after the reviewer, and one whose commit the pull request still
           shows as its head (right after a push, for a moment) are left open and printed with
@@ -150,22 +156,56 @@ def spoke(comment):
     return not (bot and MARKER in (comment.get("body") or ""))
 
 
-def findings_errors(threads, changed_since):
-    """changed_since(path, sha) -> True when the file at the head differs from the file at sha."""
+def moved_to(repo, tickets):
+    """moved(comment) -> True for a reply that moves its thread's finding to a collection ticket: a
+    post from someone who may write here that is not the reviewer's (`answers`), linking one of
+    `tickets`, the numbers of the open collection tickets, as #N or by the issue's address in this
+    repository. With no ticket nothing moves: below the cap `leftovers` passes none."""
+    tickets = set(tickets)
+
+    def moved(comment):
+        body = comment.get("body") or ""
+        named = {int(n) for n in re.findall(r"(?<![\w&/])#(\d+)\b", body)}
+        named |= {int(n) for n in re.findall(rf"https://github\.com/{re.escape(repo)}/issues/(\d+)\b", body, re.I)}
+        return answers(comment) and bool(named & tickets)
+    return moved
+
+
+def leftovers(repo, pr, pages=None):
+    """(review rounds, moved) for a pull request as the forge sent it: the rounds from its labels, and
+    `moved_to` over the open collection tickets, which are asked for only at the cap: below it no
+    reply moves a finding, so nothing is read."""
+    rounds = kit.review_rounds([label["name"] for label in pr["labels"]])
+    if rounds < kit.ROUND_CAP:
+        return rounds, moved_to(repo, ())
+    issues = (pages or kit.gh_pages)(f"repos/{repo}/issues?state=open&labels={kit.LEFTOVERS_LABEL}&per_page=100")
+    return rounds, moved_to(repo, [i["number"] for i in issues if "pull_request" not in i])  # the endpoint lists pull requests too
+
+
+# What a finding still open at the cap asks for: no edit follows the third round, so the error names the move.
+MOVE = f"at the review cap no edit follows: reply with a link to the collection ticket, the open issue labelled {kit.LEFTOVERS_LABEL}, then resolve"
+
+
+def findings_errors(threads, changed_since, moved=lambda comment: False, capped=False):
+    """changed_since(path, sha) -> True when the file at the head differs from the file at sha;
+    moved(comment) -> True for a reply that moved the finding to the collection ticket (`leftovers`);
+    capped: the pull request is at the review cap, so an error names the move, not an edit."""
     errors = []
     for t, findings in finding_threads(threads):
         paths = sorted({f["file"] for f in findings})
         if not t["isResolved"]:
-            errors.append(f"unresolved review finding on {', '.join(paths)}")
+            errors.append(f"unresolved review finding on {', '.join(paths)}" + (f": {MOVE}" if capped else ""))
             continue
         nodes = t["comments"]["nodes"]
         sha = (nodes[0].get("originalCommit") or {}).get("oid")
         replied = any(answers(c) for c in nodes[1:])
+        if any(moved(c) for c in nodes[1:]):  # at the review cap: the finding waits on the collection ticket
+            continue
         for path in paths:
             changed = bool(sha) and changed_since(path, sha)
             if changed or (replied and path.startswith(CODE)):
                 continue
-            how = "edit it or reply with the reason, then resolve" if path.startswith(CODE) else \
+            how = MOVE if capped else "edit it or reply with the reason, then resolve" if path.startswith(CODE) else \
                 "edit the file so the misreading is impossible, then resolve"
             errors.append(f"finding on {path} was resolved without changing the file: {how}")
     return errors
@@ -191,10 +231,11 @@ def once(read):
     return first
 
 
-def resolve_plan(threads, changed_since, head=None, proven=False):
+def resolve_plan(threads, changed_since, head=None, proven=False, moved=lambda comment: False):
     """(to resolve, left open) among the unresolved threads. A finding thread whose files all changed
     since the finding's commit is answered by its edit, the reading `findings` applies, and may be
-    resolved; everything else is left with its reason: a thread without findings is a person's, a
+    resolved, and so may one whose posts after the reviewer's all move it to the collection ticket
+    (`moved`, at the cap), whatever changed; everything else is left with its reason: a thread without findings is a person's, a
     reviewer post that names no file names nothing to check, a finding whose commit is gone cannot
     be proven answered, a finding whose file did not change (of several, the reason names the
     ones that did not) is answered by an edit or, on tool, workflow or hook code, by a reply,
@@ -217,6 +258,10 @@ def resolve_plan(threads, changed_since, head=None, proven=False):
         sha = (nodes[0].get("originalCommit") or {}).get("oid") if nodes else None
         findings = findings_of.get(id(t))
         paths = sorted({f["file"] for f in findings}) if findings is not None else [p for p in [t.get("path")] if p]
+        said = [c for c in nodes[1:] if spoke(c)]
+        if findings is not None and said and all(moved(c) for c in said):  # the move is the answer; any other post is read first
+            resolve.append((t, paths))
+            continue
         if findings is not None and any(spoke(c) for c in nodes[1:]):
             left.append((t, paths, REPLIED))
             continue
@@ -233,23 +278,26 @@ def resolve_plan(threads, changed_since, head=None, proven=False):
     return resolve, left
 
 
-def resolve_threads(repo, number, go, get=None, expect=None):
+def resolve_threads(repo, number, go, get=None, expect=None, pages=None):
     """Prints what is left open with its reason and id, then each answered thread as it would be
     resolved or, with `go`, once the forge said it is, one write a second: (answered, left open),
     where answered counts the threads resolved with `go` and the ones to resolve without it.
     An answer that does not say resolved is a refusal; what was resolved before it stays so.
     `expect` is the commit the session pushed, in full or as a prefix of seven or more hex digits in
     any case: while the pull request shows another head, the push has not reached it yet (or the
-    checkout is elsewhere), and no thread is read, nothing is compared or written."""
+    checkout is elsewhere), and no thread is read, nothing is compared or written. `pages` reads the
+    collection tickets at the cap (`leftovers`)."""
     get = get or kit.gh_json
-    head = get(f"repos/{repo}/pulls/{number}")["head"]["sha"]
+    pr = get(f"repos/{repo}/pulls/{number}")
+    head = pr["head"]["sha"]
     if expect and not re.fullmatch(r"[0-9a-fA-F]{7,40}", expect):
         raise kit.Refused(f"--head {expect!r} is no commit: pass the pushed commit, in full or its first seven or more hex digits")
     if expect and not head.lower().startswith(expect.lower()):
         raise kit.Refused(f"the pull request shows head {head}, not {expect}: the push has not reached it yet, or the checkout is elsewhere; run again")
     threads = fetch_threads(repo, number, get)
     changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
-    resolve, left = resolve_plan(threads, changed, head, proven=bool(expect))
+    moved = leftovers(repo, pr, pages)[1]
+    resolve, left = resolve_plan(threads, changed, head, proven=bool(expect), moved=moved)
     for t, paths, why in left:
         print(f"left open: {', '.join(paths) or '(no file)'} ({t.get('id')}): {why}")
     for t, paths in resolve:
@@ -264,12 +312,12 @@ def resolve_threads(repo, number, go, get=None, expect=None):
     return len(resolve), len(left)
 
 
-def resolve_command(repo, number, go, get=None, expect=None):
+def resolve_command(repo, number, go, get=None, expect=None, pages=None):
     """The exit code of the resolve command: 0 when the plan ran, 1 when `--head` was refused (no
     commit, or another head shown), a read or a write failed, or the run was interrupted. Any
     failure after the first write leaves threads resolved, so the message says what stands."""
     try:
-        resolved, left = resolve_threads(repo, number, go, get, expect)
+        resolved, left = resolve_threads(repo, number, go, get, expect, pages)
     except BaseException as e:  # whatever failed, an interrupt too: the lines printed above are what the forge confirmed
         print(f"ERROR: resolve stopped: {type(e).__name__}: {e}. The threads printed as resolved above stay resolved; "
               f"if a write failed, its thread may or may not be: run the plan again, it shows what is left")
@@ -350,8 +398,10 @@ def run_gate(gate, repo, number, get=None, pages=None):
         head = pr["head"]["sha"]
         threads = fetch_threads(repo, number, get)
         changed = lambda path, sha: blob_at(repo, path, sha, get) != blob_at(repo, path, head, get)
+        rounds, moved = leftovers(repo, pr, pages)
         print(LIMIT)
-        return findings_errors(threads, changed), f"{len(threads)} threads, {len(finding_threads(threads))} with findings"
+        return (findings_errors(threads, changed, moved, rounds >= kit.ROUND_CAP),
+                f"{len(threads)} threads, {len(finding_threads(threads))} with findings, {rounds} review rounds (the cap is {kit.ROUND_CAP})")
     raise kit.Refused(f"unknown gate {gate!r}: title, breadth, findings or resolve")
 
 
@@ -376,6 +426,17 @@ def fixture_pull_request():
             return json.load(f)
     except (OSError, ValueError):
         return {}
+
+
+def fixture_issues():
+    """The forge's real answer for the open issues of one label (see tools/fixtures/SOURCES.txt). [] when
+    the file is missing or unreadable, which fails the case that needs it instead of crashing the suite."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "hazard-issues.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
 
 
 def fixture_answer():
@@ -484,6 +545,36 @@ def self_test():
         gone = json.loads(json.dumps(variant(True)))
         gone[0]["comments"]["nodes"][0]["originalCommit"] = None
         check("a finding whose commit is gone cannot be proven answered", findings_errors(gone, differs), "without changing the file")
+        moving = {"body": "Moved to the collection ticket #39, with the head of this review and the link of this thread."}
+        to_ticket = moved_to("o/n", [39])
+        check("a finding moved to the collection ticket is answered, on the design record too",
+              findings_errors(variant(True, replies=1, path="kurz-design.md", reply=moving), same, to_ticket), None)
+        check("a moved finding that is still unresolved blocks: the move is no resolution",
+              findings_errors(variant(False, replies=1, path="kurz-design.md", reply=moving), same, to_ticket), "unresolved review finding")
+        addresses = [findings_errors(variant(True, replies=1, path="kurz-design.md", reply={"body": f"Moved to {url}"}), same, to_ticket)
+                     for url in ("https://github.com/o/n/issues/39", "https://github.com/O/N/issues/39#issuecomment-1",
+                                 "https://github.com/x/n/issues/39", "https://github.com/o/n/issues/390")]
+        cases.append(("the collection ticket's address in this repository moves a finding, in any case; another repository's or another number's does not",
+                      [bool(e) for e in addresses] == [False, False, True, True], addresses))
+        check("a reply that links another issue moves nothing",
+              findings_errors(variant(True, replies=1, path="kurz-design.md", reply={"body": "see #40"}), same, to_ticket), "without changing the file")
+        check("#39 inside a word, a path or a character reference is no link",
+              findings_errors(variant(True, replies=1, path="kurz-design.md", reply={"body": "PR#39, x/#39 and &#39;"}), same, to_ticket),
+              "without changing the file")
+        check("an outsider's reply that links the collection ticket moves nothing",
+              findings_errors(variant(True, replies=1, path="kurz-design.md", reply={**moving, "authorAssociation": "NONE"}), same, to_ticket),
+              "without changing the file")
+        check("the reviewer's own post that names the collection ticket moves nothing",
+              findings_errors(variant(True, replies=1, path="kurz-design.md", reply={"body": MARKER + "findings [] --> #39"}), same, to_ticket),
+              "without changing the file")
+        check("with no collection ticket nothing moves", findings_errors(variant(True, replies=1, path="kurz-design.md", reply=moving), same,
+                                                                         moved_to("o/n", [])), "without changing the file")
+        open_ones = ((True, "kurz-design.md"), (True, "tools/kit.py"), (False, "kurz-design.md"))
+        at_cap = [findings_errors(variant(resolved, path=path), same, to_ticket, capped=True) for resolved, path in open_ones]
+        below_cap = [findings_errors(variant(resolved, path=path), same, to_ticket) for resolved, path in open_ones]
+        cases.append(("findings: at the cap every finding still open names the move to the collection ticket, never an edit, which no push follows; below the cap none names the move",
+                      all(len(e) == 1 and e[0].endswith(MOVE) and "edit it" not in e[0] and "edit the file" not in e[0] for e in at_cap)
+                      and all(len(e) == 1 and MOVE not in e[0] for e in below_cap), repr((at_cap, below_cap))))
     plain = [{"isResolved": False, "path": "a.md", "comments": {"nodes": [
         {"author": {"login": "someone"}, "authorAssociation": "OWNER", "body": "a human comment", "originalCommit": {"oid": "x"}}]}}]
     check("a human thread is the merge check's business, not this gate's", findings_errors(plain, lambda p, s: False), None)
@@ -507,6 +598,35 @@ def self_test():
     # the endpoint is echoed in the refusal, and this commit id holds the digits 404
     out = got(lambda: blob_at("o/n", "a.md", "c404", forge(failing=kit.Refused("`gh api repos/o/n/contents/a.md?ref=c404` exited 1: HTTP 502"))))
     cases.append(("blob: a refusal that only holds the digits 404 stays a refusal", type(out) is kit.Refused, repr(out)))
+
+    # the collection tickets, from the forge's real answer for a list of open issues of one label
+    listed_issues = fixture_issues()
+    real_label = next((label for i in listed_issues for label in i.get("labels") or []), None)
+    cases.append(("fixture: the captured list of issues holds an issue with a label, the shape the cases below edit",
+                  bool(listed_issues) and real_label is not None, repr(listed_issues)[:200]))
+    labelled = lambda *names: dict(recorded, labels=[dict(real_label or {}, name=n) for n in names])  # edited: the captured label, renamed
+    # edited: the captured issue as the collection ticket #39, and a pull request #41, which the list endpoint names too
+    tickets = [dict(listed_issues[0] if listed_issues else {}, number=39, labels=[dict(real_label or {}, name=kit.LEFTOVERS_LABEL)]),
+               dict(listed_issues[0] if listed_issues else {}, number=41, pull_request={"url": "x"})]
+    asked = []
+
+    def ticket_pages(path):
+        asked.append(path)
+        return json.loads(json.dumps(tickets))
+
+    reply = {"body": "Moved to #39 and #41", "author": {"login": "a-maintainer"}, "authorAssociation": "OWNER"}
+    out = got(lambda: leftovers("o/n", labelled("bug", f"{kit.ROUND_LABEL}{kit.ROUND_CAP - 1}"), ticket_pages))
+    cases.append(("leftovers: below the cap the collection tickets are not asked for, and no reply moves a finding",
+                  type(out) is tuple and out[0] == kit.ROUND_CAP - 1 and out[1](reply) is False and asked == [], repr((out, asked))))
+    out = got(lambda: leftovers("o/n", labelled(f"{kit.ROUND_LABEL}1", f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"), ticket_pages))
+    cases.append(("leftovers: at the cap the open issues of the collection label are read, and a reply that links one moves a finding",
+                  type(out) is tuple and out[0] == kit.ROUND_CAP and out[1](reply) is True
+                  and asked == [f"repos/o/n/issues?state=open&labels={kit.LEFTOVERS_LABEL}&per_page=100"], repr((out, asked))))
+    cases.append(("leftovers: a pull request the list of issues names is no collection ticket",
+                  type(out) is tuple and out[1](dict(reply, body="Moved to #41")) is False, repr(out)))
+    out = got(lambda: leftovers("o/n", {k: v for k, v in recorded.items() if k != "labels"}, ticket_pages))
+    cases.append(("leftovers: a pull request the forge sent without its labels is a refusal, not a count of none",
+                  isinstance(out, KeyError), repr(out)))
 
     if found:
         # the forge answers the threads on two pages; the finding on the first names the design record, resolved
@@ -532,6 +652,27 @@ def self_test():
         out = got(lambda: run_gate("findings", "o/n", 1, paged(lambda ref: "blob")))
         cases.append(("findings: the same blob at the finding's commit and at the head is no edit",
                       type(out) is tuple and len(out[0]) == 2 and any("without changing the file" in e for e in out[0]), repr(out)))
+
+        def capped_at(rounds, reply=moving):
+            """A forge whose pull request carries the label of `rounds` rounds and one resolved thread on the design
+            record, its file unchanged, with a reply, by default one that moves it to the collection ticket."""
+            def get(*args):
+                if args[0] == "graphql":
+                    page = {"nodes": variant(True, replies=1, path="kurz-design.md", reply=reply), "pageInfo": {"hasNextPage": False}}
+                    return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
+                if "/contents/" in args[0]:
+                    return {"sha": "blob"}
+                return labelled(f"{kit.ROUND_LABEL}{rounds}")
+            return get
+
+        below, at = (got(lambda: run_gate("findings", "o/n", 1, capped_at(n), ticket_pages)) for n in (kit.ROUND_CAP - 1, kit.ROUND_CAP))
+        cases.append(("findings: a thread moved to the collection ticket passes at the cap, and the same thread below the cap is an error",
+                      type(below) is tuple and any("without changing the file" in e for e in below[0])
+                      and type(at) is tuple and at[0] == [] and f"{kit.ROUND_CAP} review rounds" in at[1], repr((below, at))))
+        below, at = (got(lambda: run_gate("findings", "o/n", 1, capped_at(n, {"body": "because"}), ticket_pages)) for n in (kit.ROUND_CAP - 1, kit.ROUND_CAP))
+        cases.append(("findings: at the cap the gate's error for a finding not moved names the move, and below the cap the edit",
+                      type(below) is tuple and any("edit the file" in e for e in below[0])
+                      and type(at) is tuple and len(at[0]) == 1 and at[0][0].endswith(MOVE), repr((below, at))))
 
         # resolve: which unresolved threads the tool may resolve, and what it writes
         counts = lambda plan: [len(plan[0]), len(plan[1])]
@@ -601,6 +742,18 @@ def self_test():
         cases.append(("resolve: a finding whose commit is still the head is left open, saying so",
                       bool(still) and counts(plan) == [0, 1] and plan[1][0][2].startswith("the head is still the finding's commit"),
                       repr((still, plan))))
+        plan = resolve_plan(variant(False, replies=1, path="kurz-design.md", reply=moving), same, head=still, moved=to_ticket)
+        cases.append(("resolve: a finding thread whose replies all move it to the collection ticket is resolved, whatever changed and whatever the head",
+                      counts(plan) == [1, 0], repr(plan)))
+        asking = variant(False, replies=1, path="kurz-design.md", reply=moving)
+        asking[0]["comments"]["nodes"].append(dict(asking[0]["comments"]["nodes"][0], body="Why not fix it here?",
+                                                   author={"login": "someone"}, authorAssociation="NONE"))
+        plan = resolve_plan(asking, same, moved=to_ticket)
+        cases.append(("resolve: a person's post beside the move holds the thread: it is read first",
+                      counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
+        plan = resolve_plan(variant(False, replies=1, path="kurz-design.md", reply=moving), same)
+        cases.append(("resolve: without the cap's moves the same reply holds the thread",
+                      counts(plan) == [0, 1] and plan[1][0][2].startswith("a person wrote in it"), repr(plan)))
 
         PUSHED = "0123456789abcdef0123456789abcdef01234567"  # the head the fake forge shows, commit-shaped
 
@@ -612,9 +765,9 @@ def self_test():
                 thread["isResolved"] = False
             return answer
 
-        def resolving(blob, says=True, threads=1, breaks_at=None, error=None, head=PUSHED):
-            """A forge for resolve_threads: the pull request at `head`, one page with the real thread unresolved
-            (`threads` copies with their own ids), blob(ref) for a file, and the mutation, which it
+        def resolving(blob, says=True, threads=1, breaks_at=None, error=None, head=PUSHED, pr=None, node=None):
+            """A forge for resolve_threads: the pull request (`pr`, else the recorded one) at `head`, one page with the real
+            thread unresolved, or `node` (`threads` copies with their own ids), blob(ref) for a file, and the mutation, which it
             records and answers as told, or raises `error` (an error nobody expected) at write `breaks_at`.
             The mutation's answer is the captured one (tools/fixtures/resolve-thread.json), edited to say the
             thread is not resolved where `says` is false. `get.asked` lists what was asked."""
@@ -628,12 +781,12 @@ def self_test():
                     written.append(args[-1])
                     return json.loads(json.dumps(captured)) if says else refused_answer()
                 if args[0] == "graphql":
-                    nodes = [dict(variant(False)[0], id=f"t{n}") for n in range(threads)]
+                    nodes = [dict(node or variant(False)[0], id=f"t{n}") for n in range(threads)]
                     page = {"nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}
                     return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
                 if "/contents/" in args[0]:
                     return {"sha": blob(args[0].split("?ref=")[1])}
-                return dict(recorded, head=dict(recorded.get("head") or {}, sha=head))  # edited: the head this case pushed
+                return dict(pr or recorded, head=dict(recorded.get("head") or {}, sha=head))  # edited: the head this case pushed
             get.asked = asked
             return get, written
 
@@ -714,6 +867,12 @@ def self_test():
             out, printed = quietly(lambda: resolve_command("o/n", 1, True, get))
             cases.append(("resolve: the command ends 0 when the plan ran, and prints the known limit",
                           out == 0 and "1 threads resolved" in printed and "re-run the gates after resolving" in printed, repr((out, printed))))
+            asked.clear()
+            get, written = resolving(lambda ref: "blob", pr=labelled(f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"),
+                                     node=variant(False, replies=1, path="kurz-design.md", reply=moving)[0])
+            out, printed = quietly(lambda: resolve_command("o/n", 1, True, get, pages=ticket_pages))
+            cases.append(("resolve: at the cap the collection tickets are read, and a thread moved to one is resolved although its file did not change",
+                          out == 0 and written == ["thread=t0"] and len(asked) == 1, repr((out, written, asked, printed))))
         finally:
             time.sleep = saved_sleep
 

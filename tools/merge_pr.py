@@ -10,7 +10,9 @@ skips what only this tool adds (HAZARD #14).
 
 A merge needs: the exact head that was looked at; an open pull request into the default branch that
 is not a Draft, not behind its base and has no auto-merge armed; every review thread resolved, and
-resolved by the edit or, on tool, workflow or hook code, the reply that answers it (tools/pr_gates.py);
+resolved by the edit or, on tool, workflow or hook code, the reply that answers it, or, on a pull
+request at the owner's cap of three review rounds, the reply that moves it to the collection ticket
+(tools/pr_gates.py);
 every required check of the ruleset `success` on that head;
 merge rules on the server that are what tools/ruleset.json says, every one of them read: a setting
 this token cannot read refuses the merge; a title and a description the title gate accepts, because
@@ -23,7 +25,9 @@ are read again once it is off, and a change that second reading finds merges not
 between the second reading and the moment the ruleset is restored is caught by nobody, which is why
 nothing else may merge or push meanwhile (the owner's judgment step, HAZARD #27). Exit 3 means the
 ruleset was not read back as active, so it may still be off, until someone reads it back and
-switches it on; so the approval is per item and never standing. The tool cannot
+switches it on; so the approval is per item and never standing, except at the review cap: a pull
+request that has had its three review rounds carries the owner's approval of 2026-10-21 to merge
+over red at the head the third round reviewed, which the caller states like any other. The tool cannot
 verify the approval: it is the caller's statement (HAZARD #3), and the record says so. The waiver
 lets through only what it names:
 - it names a pull request and a head; another pull request is refused, another head voids it;
@@ -377,22 +381,24 @@ def merge(repo, number, sha, pr, waived, states, threads):
     return code
 
 
-def thread_reasons(threads, changed_since):
+def thread_reasons(threads, changed_since, moved=lambda comment: False, capped=False):
     """What the threads of a pull request hold against a merge: any unresolved thread, and any
-    review finding that was resolved without its answer (tools/pr_gates.py)."""
+    review finding that was resolved without its answer (tools/pr_gates.py); `moved` reads a reply
+    that moved a finding to the collection ticket at the cap (pr_gates.leftovers), and `capped`, the
+    pull request at the cap, makes the errors name that move."""
     unresolved = sum(not t["isResolved"] for t in threads)
-    errors = [f"{unresolved} unresolved threads"] if unresolved else []
-    return errors + [e for e in pr_gates.findings_errors(threads, changed_since) if not e.startswith("unresolved")]
+    errors = [f"{unresolved} unresolved threads" + (f": {pr_gates.MOVE}" if capped else "")] if unresolved else []
+    return errors + [e for e in pr_gates.findings_errors(threads, changed_since, moved, capped) if not e.startswith("unresolved")]
 
 
-def blockers(threads, changed_since, settings, squash, unread=()):
+def blockers(threads, changed_since, settings, squash, unread=(), moved=lambda comment: False, capped=False):
     """Everything besides the checks that holds a merge: the threads; merge rules that are not as
     tools/ruleset.json defines them, or that this token could not read (`unread`: a setting nobody
     read is not a pass); and what the title gate holds against the title and the description, which
     this tool writes into the commit on main. The required checks are read from the file, so a
     server that differs from it means this run would verify another list than the server enforces;
     with the ruleset off for an over-red merge nothing would correct that."""
-    return (thread_reasons(threads, changed_since) + [f"merge checks are not as defined: {e}" for e in settings]
+    return (thread_reasons(threads, changed_since, moved, capped) + [f"merge checks are not as defined: {e}" for e in settings]
             + [f"merge checks were not read in full, run the merge with a login that can read them: {n}" for n in unread]
             + [f"the squash commit would carry it: {e}" for e in squash])
 
@@ -452,10 +458,12 @@ def run(argv):
     threads = pr_gates.fetch_threads(repo, number)
     changed = lambda path, at: pr_gates.blob_at(repo, path, at) != pr_gates.blob_at(repo, path, head)
     behind = kit.gh_json(f"repos/{repo}/compare/{pr['base']['ref']}...{head}")["behind_by"]
+    rounds, moved = pr_gates.leftovers(repo, pr)
 
-    held = blockers(threads, changed, settings, pr_gates.title_errors(pr["title"], [], pr["body"]), notes)
+    held = blockers(threads, changed, settings, pr_gates.title_errors(pr["title"], [], pr["body"]), notes, moved, rounds >= kit.ROUND_CAP)
     verdict, reasons, waived = decide(number, sha, pr, default_branch, states, held, behind, waiver)
-    print(f"{repo}#{number} at {head[:8]}: " + ", ".join(f"{c}={s}" for c, s in states.items()) + f"; {len(threads)} threads; behind by {behind}")
+    print(f"{repo}#{number} at {head[:8]}: " + ", ".join(f"{c}={s}" for c, s in states.items()) + f"; {len(threads)} threads; behind by {behind}"
+          f"; {rounds} review rounds (the cap is {kit.ROUND_CAP})")
     for n in notes:
         print("note:", n)
     for r in reasons:
@@ -722,6 +730,27 @@ def self_test():
         case("threads: an unresolved thread without a finding blocks too", got == ["1 unresolved threads"], got)
         got = thread_reasons([thread(True)], same)
         case("threads: a finding resolved without its answer blocks", len(got) == 1 and "without changing the file" in got[0], got)
+        moved = json.loads(json.dumps(thread(True)))
+        # edited: the finding on the design record, where a reply alone answers nothing, and a reply of the owner
+        # that moves it to the collection ticket #39, as a session writes one at the cap
+        on_record = json.dumps([dict(f, file="kurz-design.md") for f in found[0][1]])
+        moved["comments"]["nodes"][0]["body"] = pr_gates.MARK.sub(lambda m: f"<!-- kurz-review:findings {on_record} -->",
+                                                                  moved["comments"]["nodes"][0]["body"])
+        moved["comments"]["nodes"].append(dict(moved["comments"]["nodes"][0], body="Moved to the collection ticket #39.",
+                                               author={"login": "the-owner"}, authorAssociation="OWNER"))
+        at_cap, below_cap = pr_gates.moved_to("o/r", [39]), pr_gates.moved_to("o/r", [])
+        got = (thread_reasons([moved], same, at_cap), thread_reasons([moved], same, below_cap))
+        case("threads: at the cap a finding moved to the collection ticket is nothing against the merge, and with no ticket it blocks",
+             got[0] == [] and len(got[1]) == 1 and "without changing the file" in got[1][0], got)
+        got = (blockers([moved], same, [], [], (), at_cap), blockers([moved], same, [], []))
+        case("blockers: the threads are read with the moves to the collection ticket the caller passes",
+             got[0] == [] and len(got[1]) == 1, got)
+        got = (thread_reasons([thread(True), thread(False)], same, at_cap, True), thread_reasons([thread(True), thread(False)], same, at_cap))
+        case("threads: at the cap an unresolved thread and a finding not moved name the move to the collection ticket, below it the edit",
+             len(got[0]) == 2 and all(e.endswith(pr_gates.MOVE) for e in got[0]) and not any(pr_gates.MOVE in e for e in got[1]), got)
+        got = (blockers([thread(False)], same, [], [], (), at_cap, True), blockers([thread(False)], same, [], []))
+        case("blockers: the threads are read at the cap the caller passes, and below it by default",
+             len(got[0]) == 1 and got[0][0].endswith(pr_gates.MOVE) and got[1] == ["1 unresolved threads"], got)
 
     # one write, against a gh that answers what it is told to
     def sent(answer):

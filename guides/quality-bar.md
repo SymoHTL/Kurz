@@ -44,7 +44,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Test-quality clauses | The "Tests" section of `CLAUDE.md`, cut down to what a tree of tools can break; see "Not implemented". |
 | Automated reviewer | `tools/review/review.py`, `.review/review-rules.yaml`, `.github/workflows/review.yml`. |
 | Server-side merge checks | A repository ruleset, defined in `tools/ruleset.json`, asserted on every gates run (gate `merge-checks`). A change to that file is red in `merge-checks` until the owner applies it to the live ruleset (`merge_pr.py --apply-settings`); from then on every other open pull request is red until it takes the change from `main`. |
-| Reading the review before merging, threads, one push per round | `tools/merge_pr.py` checks them at the moment of the merge; the round discipline is a rule in `CLAUDE.md`. |
+| Reading the review before merging, threads, one push per round | `tools/merge_pr.py` checks them at the moment of the merge; the round discipline is a rule in `CLAUDE.md`. The owner's cap of three review rounds per pull request (2026-10-21) is the reviewer's: it labels each round before its first pass and ends a run at the cap before any pass; at the cap `tools/merge_pr.py` and the gate `pr-findings` accept a finding moved to the collection ticket, and the labels a person can change are HAZARD #41. |
 | Gate-flip | `tools/merge_pr.py --over-red`. |
 | CI triage | The "CI" section of `CLAUDE.md`. |
 | Agent operations (isolation, notes file, owner queue, worktrees) | Outside this repository. Nothing here depends on it. |

@@ -1,6 +1,7 @@
 """Shared by every tool here: process calls that never read a failure as a pass, the GitHub CLI
-wrapper, the patterns for strings that must not be in a public tree, and the self-test reporter.
-`--self-test` covers the calls and the reporter; the patterns have their cases in tools/tree_gate.py."""
+wrapper, the patterns for strings that must not be in a public tree, the count of a pull request's
+review rounds against the owner's cap, and the self-test reporter. `--self-test` covers the calls,
+the count and the reporter; the patterns have their cases in tools/tree_gate.py."""
 import contextlib
 import io
 import json
@@ -63,6 +64,21 @@ SKIP_LITERALS = [r"\[skip ci\]", r"\[ci skip\]", r"\[no ci\]", r"\[skip actions\
 # read. The runner shows it as PARTLY, never as a pass, and turns red unless the gate is listed with
 # the issue that records the unread part (PARTLY_OK in tools/gates.py).
 PARTLY = 5
+# The owner's cap on review rounds (2026-10-21): a pull request gets at most ROUND_CAP of them, the
+# rounds before the cap counted. A round is a review run that reached its first pass: the reviewer
+# labels the pull request ROUND_LABEL plus the round's number before that pass, so a run that fails
+# or is cancelled after it counts too. The count is the highest such number: a lower label taken off
+# changes nothing, and one label put on by hand counts the rounds no reviewer labelled. What a
+# pull request at the cap still holds goes on the collection ticket, an open issue labelled
+# LEFTOVERS_LABEL.
+ROUND_LABEL, ROUND_CAP, LEFTOVERS_LABEL = "review-round-", 3, "review-leftovers"
+
+
+def review_rounds(labels):
+    """The review rounds a pull request has had, from the names of its labels: the highest n of a
+    label `review-round-<n>`, 0 when it carries none."""
+    numbers = [re.fullmatch(re.escape(ROUND_LABEL) + r"([1-9][0-9]*)", name) for name in labels]
+    return max((int(m.group(1)) for m in numbers if m), default=0)
 
 
 class Refused(Exception):
@@ -277,6 +293,14 @@ def self_test():
         codes = (report([]), report([("a", True, "")]), report([("a", True, ""), ("b", False, "why")]))
     cases.append(("report: no case at all is a failure, and so is one failed case", codes == (1, 0, 1), codes))
     cases.append(("report: the summary line counts cases and failures", "2 cases, 1 failed" in said.getvalue(), said.getvalue()[-80:]))
+    counted = (review_rounds([]), review_rounds(["bug", "review-round-1", "review-round-2"]), review_rounds(["review-round-3"]))
+    cases.append(("rounds: no round label is no round, and the rounds are the highest number, so one label counts the rounds before it",
+                  counted == (0, 2, 3), counted))
+    counted = (review_rounds(["review-round-12", "review-round-3"]), review_rounds(["review-round-0", "review-round-x", "review-round-7b", "review-rounds-4", "Review-round-5"]))
+    cases.append(("rounds: the numbers are compared as numbers, and a label that only looks like one counts nothing",
+                  counted == (12, 0), counted))
+    cases.append(("rounds: the cap is the owner's three rounds (2026-10-21), and its labels carry the names the tools read",
+                  (ROUND_CAP, ROUND_LABEL, LEFTOVERS_LABEL) == (3, "review-round-", "review-leftovers"), (ROUND_CAP, ROUND_LABEL, LEFTOVERS_LABEL)))
     with scratch("kit-scratch-") as path:
         there = os.path.isdir(path)
     cases.append(("scratch: the directory is there inside the block and gone after it", there and not os.path.exists(path), path))
