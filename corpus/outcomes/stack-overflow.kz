@@ -1,4 +1,5 @@
-// expect: throws stack-overflow at 4
+// expect: throws stack-overflow at 5
+// build: test
 // rules: O11
 
 int Down(int n) => Down(n) + 1
