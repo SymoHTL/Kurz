@@ -1,0 +1,9 @@
+// expect: output
+// | 64
+// | 8
+// rules: R14
+
+long m = 64
+p = Ptr<long>(m)
+print(long(p))
+print(SizeOf<long>())

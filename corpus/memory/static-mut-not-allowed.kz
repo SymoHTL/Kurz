@@ -1,0 +1,5 @@
+// expect: error static-state at 4
+// rules: R13
+
+static mut long total = 0
+print(1)

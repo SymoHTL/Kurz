@@ -1,0 +1,4 @@
+// expect: error counted-pointee at 4
+// rules: R14
+
+print(SizeOf<string>())

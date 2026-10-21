@@ -482,7 +482,10 @@ cases after the first, so `List<A | B | C>` and `List<A | C | B>` are one type. 
 on 2026-10-21, against two types, the order being part of the type as a generic type is invariant in
 C#, under which a list of one cannot be passed where the other is required; the cost is that the
 compiler orders the cases after the first itself, for the numbers of their tags, and that a reader
-sees one type written two ways.
+sees one type written two ways. A case's tag is the number its type has in the program, one number
+for each type of the program, so that the order the compiler gives the cases after the first is that
+of those numbers, and a union value converted into another union keeps its tag (§4, the owner,
+2026-10-21); the cost is that the numbers differ between two builds of a program.
 
 Case: [data/union-order-after-the-first.kz](../corpus/data/union-order-after-the-first.kz)
 ```kurz

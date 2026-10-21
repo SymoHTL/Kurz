@@ -257,6 +257,18 @@ public sealed class CorpusTests
         var header = CaseHeader.Parse(text, out var problem);
         Assert.Null(problem);
         Assert.Equal((expectation, id, line, outputLines, build, bodyLine), (header!.Expectation, header.ErrorId, header.ErrorLine, header.OutputLines.Count, header.Build, header.BodyLine));
+        Assert.Empty(header.Grants);
+    }
+
+    [Theory]
+    [InlineData("// expect: output\n// | 1\n// allow: raw\n// rules: R7\n\nraw {\n    print(1)\n}\n", "raw", 6)]
+    [InlineData("// expect: error raw-required at 5\n// allow: native\n// rules: R7\n\nx\n", "native", 5)]
+    [InlineData("// expect: output\n// | 1\n// build: release\n// allow: raw native\n// rules: R7\n\nx\n", "raw native", 7)]
+    public void A_grant_line_gives_the_case_the_grants_it_names(string text, string grants, int bodyLine)
+    {
+        var header = CaseHeader.Parse(text, out var problem);
+        Assert.Null(problem);
+        Assert.Equal((grants, bodyLine), (string.Join(' ', header!.Grants), header.BodyLine));
     }
 
     [Theory]
@@ -267,6 +279,11 @@ public sealed class CorpusTests
     [InlineData("// expect: output\n// rules: V1\n\n")]
     [InlineData("// expect: error unused-variable at 5\n// | a\n// rules: V1\n\nx\n")]
     [InlineData("// expect: throws overflow at 5\n// build: debug\n// rules: V1\n\nx\n")]
+    [InlineData("// expect: output\n// allow: network\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow: native raw\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow: raw raw\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow:\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow: raw\n// build: test\n// rules: R7\n\nx\n")]
     public void A_header_out_of_its_shape_is_refused(string text)
     {
         Assert.Null(CaseHeader.Parse(text, out var problem));

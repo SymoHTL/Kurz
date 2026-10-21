@@ -364,7 +364,7 @@ class Dog : Animal {
 print(Dog().Sound())
 ```
 
-### K18 (decided, §4, §6) What a `static` field may hold
+### K18 (decided, §3, §4, §6) What a `static` field may hold
 
 A `static` field exists once for the program, so it holds an immutable value only: `static
 mut`, and a static field whose type is or holds a class, are the compile error `static-state`. A
@@ -373,7 +373,8 @@ instance, mutable or not, lives in one actor's heap, which no other actor reache
 does one inside a `List<Button>`. The owner chose this on 2026-10-03, against one copy per actor.
 *(assumed: that the heap is the reason for an immutable class and for a value that holds one, and
 that a static field of a generic class exists once per type argument, as in C#)* K7's case shows
-a static field that is allowed.
+a static field that is allowed. In a package granted `allow raw`, a `static mut` field takes R13's
+exception *(assumed: as §3 marks it)*.
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
 

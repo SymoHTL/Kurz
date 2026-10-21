@@ -1232,6 +1232,15 @@ public sealed partial class Checker
 
     private void CheckVariableDeclaration(VariableDeclaration v)
     {
+        if ((v.Modifiers & Modifiers.Static) != 0 && frame.IsTopLevel && frame.Scope.Parent is null)
+        {
+            // R13: state outside a function, at the outermost level of a file, which chapter 11 states and the checker does not read;
+            // its uses carry no further error
+            NotSupported(v.Line, "a `static` declaration at the top level of a file (R13)");
+            DeclareUnreadable(v.Name, VariableKind.Local, v.Line);
+            return;
+        }
+
         var other = v.Modifiers & ~Modifiers.Mut;
         if (other != Modifiers.None)
         {

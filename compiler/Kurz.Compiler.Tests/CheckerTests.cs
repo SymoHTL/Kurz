@@ -560,6 +560,26 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_static_declaration_at_the_top_level_is_not_read_and_one_inside_a_block_has_no_meaning()
+    {
+        // R13: a `static mut` at the outermost level of a file is chapter 11's state outside a function, which the checker does not read;
+        // the uses of its name carry no further error (E1). Inside a block or a function a `static` has no meaning on a variable (V2, V4)
+        Assert.Equal(["1: a `static` declaration at the top level of a file (R13)"], NotSupported("static mut long total = 0\nprint(total)"));
+        Assert.Equal(["2: a `static` declaration at the top level of a file (R13)"], NotSupported("print(1)\nstatic mut long total = 0\ntotal = 2"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("if true {\n    static mut long total = 0\n    print(total)\n}"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("void F() {\n    static mut long total = 0\n    print(total)\n}\n\nF()"));
+    }
+
+    [Fact]
+    public void A_conversion_of_a_pointer_and_the_size_of_a_type_are_not_read()
+    {
+        // R14: `Ptr<T>(x)` and `SizeOf<T>()` take the call form of T10's conversions, which the checker does not read for a pointer;
+        // the pointer a conversion gives carries no further error (E1), through an offset and a conversion back among them
+        Assert.Equal(["2: `Ptr` (R14)"], NotSupported("long m = 64\np = Ptr<long>(m)\nprint(long(p + 3) - long(p))"));
+        Assert.Equal(["1: `SizeOf` (R14)"], NotSupported("print(SizeOf<string>())"));
+    }
+
+    [Fact]
     public void A_lambda_takes_the_function_type_expected_of_it_or_needs_typed_parameters()
     {
         // F7, F11, T27; F11 makes a lambda whose body is a call with a `void` success, under a function type whose result is not `void`,

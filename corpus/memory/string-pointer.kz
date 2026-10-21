@@ -1,0 +1,14 @@
+// expect: output
+// | true
+// | 105
+// | 2
+// allow: raw
+// rules: R10, R15
+
+s = "hi"
+raw {
+    p = s.Pointer
+    print(p != null)
+    print(p[1])
+}
+print(s.Bytes.Count)

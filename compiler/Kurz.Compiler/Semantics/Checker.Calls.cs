@@ -135,6 +135,13 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
+                    if (n.Name is "Ptr" or "SizeOf")
+                    {
+                        NotSupported(n.Line, $"`{n.Name}` (R14)");
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
                     Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
                     CheckArgumentsLoosely(c);
                     return Typed.Error;

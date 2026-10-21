@@ -46,7 +46,15 @@ carries the `Case:` line alone.
 // | before
 // build: test                        optional: the case holds for this kind of build only (test or release)
 // rules: T5
+
+// expect: output
+// | 1
+// allow: raw                         optional: the grants of a `project.kz` the file takes: raw, native or raw native
+// rules: R7
 ```
+
+A case is a single file with no `project.kz`; its `// allow:` line gives it the grants a
+`project.kz` would give its package (R7; §3, the owner, 2026-10-21).
 
 The ids of both kinds are listed in chapter 12. No tool runs a program or compares its output: the compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
