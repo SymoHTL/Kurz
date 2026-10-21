@@ -935,7 +935,7 @@ def review(argv):
         if kind == "usage-limit":
             print("A usage limit is not a crash: retry after the reset the message names, not now.")
         if head and me and not dry:
-            key = note_wanted(notes, "failed", sha=head) if kind != "oversized" else None
+            key = note_wanted(notes, "cap" if kind == "cap" else "failed", sha=head) if kind != "oversized" else None  # the cap's own note, past any failure
             tail = "What it posted before stands; the rest is in the log of the run." if told_any else \
                 "Its review rounds before stand; no further round runs." if kind == "cap" else \
                 "This pull request is not reviewed; what the run found, if anything, is in its log."
@@ -971,8 +971,8 @@ def review(argv):
             return stop("cap", f"the pull request has had {rounds} review rounds (its label {kit.ROUND_LABEL}{rounds}), and the cap is "
                                f"{kit.ROUND_CAP} (the owner, 2026-10-21): no further round runs. What is still open goes on the "
                                f"collection ticket, the open issue labelled {kit.LEFTOVERS_LABEL}, and the pull request merges as "
-                               f"it is at the head the third round reviewed, on the approval the cap gives; a head pushed after "
-                               f"that round is outside that approval",
+                               f"it is at the head round {kit.ROUND_CAP} reviewed, on the approval the cap gives when that round "
+                               f"completed; a head pushed after that round is outside that approval",
                         status=f"review did not complete: cap: {rounds} review rounds reached, the cap is {kit.ROUND_CAP}")
         if in_ci and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
             return stop("credential", "CLAUDE_CODE_OAUTH_TOKEN is not set as a repository secret")

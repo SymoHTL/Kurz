@@ -1,0 +1,88 @@
+[
+  {
+    "url": "https://api.github.com/repos/SymoHTL/Kurz/issues/39",
+    "repository_url": "https://api.github.com/repos/SymoHTL/Kurz",
+    "labels_url": "https://api.github.com/repos/SymoHTL/Kurz/issues/39/labels{/name}",
+    "comments_url": "https://api.github.com/repos/SymoHTL/Kurz/issues/39/comments",
+    "events_url": "https://api.github.com/repos/SymoHTL/Kurz/issues/39/events",
+    "html_url": "https://github.com/SymoHTL/Kurz/issues/39",
+    "id": 5956249870,
+    "node_id": "I_kwDOU3tPGc8AAAABYwUpDg",
+    "number": 39,
+    "title": "Review findings left open by the three-round cap",
+    "user": {
+      "login": "SymoHTL",
+      "id": 54981573,
+      "node_id": "MDQ6VXNlcjU0OTgxNTcz",
+      "avatar_url": "https://avatars.githubusercontent.com/u/54981573?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/SymoHTL",
+      "html_url": "https://github.com/SymoHTL",
+      "followers_url": "https://api.github.com/users/SymoHTL/followers",
+      "following_url": "https://api.github.com/users/SymoHTL/following{/other_user}",
+      "gists_url": "https://api.github.com/users/SymoHTL/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/SymoHTL/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/SymoHTL/subscriptions",
+      "organizations_url": "https://api.github.com/users/SymoHTL/orgs",
+      "repos_url": "https://api.github.com/users/SymoHTL/repos",
+      "events_url": "https://api.github.com/users/SymoHTL/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/SymoHTL/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "labels": [
+      {
+        "id": 12777733308,
+        "node_id": "LA_kwDOU3tPGc8AAAAC-Zy8vA",
+        "url": "https://api.github.com/repos/SymoHTL/Kurz/labels/review-leftovers",
+        "name": "review-leftovers",
+        "color": "5319E7",
+        "default": false,
+        "description": "Review findings a pull request still held at the cap of three review rounds",
+        "archived_at": null,
+        "archived_by": null
+      }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-21T07:27:08Z",
+    "updated_at": "2026-10-21T09:05:15Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "OWNER",
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+      "total": 0,
+      "completed": 0,
+      "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+      "blocked_by": 0,
+      "total_blocked_by": 0,
+      "blocking": 0,
+      "total_blocking": 0
+    },
+    "body": "Findings that a pull request still held when it reached the owner's cap of three review rounds (the owner, 2026-10-21): no fix push follows the third round, and what the last review left open is collected here, one section per pull request, while the pull request merges with what it has. Each section names the head the findings were made on and links the threads and the low findings. An item here is closed by a pull request that fixes it, which names this issue and the item.\n\n## Pull request #33 at `7ec4e5e`\n\nThirteen review rounds before the cap took effect; merged over red with the owner's approval of 2026-10-21. Open threads of the thirteenth review, resolved on the pull request with a pointer here:\n\n- **medium** `kurz-design.md` line 21: \"The compiler keeps every call as a call\" rests on one tail-call attribute, which leaves inlining free to remove calls. https://github.com/SymoHTL/Kurz/pull/33#discussion_r4333401406\n- **medium** `kurz-design.md` line 660: the sweep's condition frees messages copied into the receiver's heap while it handles another message. (same thread)\n- **medium** `reference/09-outcomes.md` line 391: O11 never says which build the rule holds for; a release build may not overflow at all. https://github.com/SymoHTL/Kurz/pull/33#discussion_r4333401614\n\nThe fifteen low findings of the same review: https://github.com/SymoHTL/Kurz/issues/19#issuecomment-6308932622\n\n## Pull request #38 at `9ebe591`\n\nThree review rounds on 2026-10-21, the cap; it merges with what it has. Open threads of the third review, resolved on the pull request with a pointer here:\n\n- **medium** `kurz-design.md` line 14: the principle's cost leaves out costs paid in every run and while crashes are decided. https://github.com/SymoHTL/Kurz/pull/38#discussion_r4334865593\n- **medium** `kurz-design.md` line 21: the Windows heap-lock failure is stated as a hang, but the faulting thread re-enters its own lock. (same thread)\n- **medium** `kurz-design.md` line 21: the runtime's own lock does not serialise other users of dbghelp.dll in the process. (same thread)\n- **medium** `kurz-design.md` line 22: removing a running program's place can take away the line tables its crash reads, and the cost list does not say so. (same thread)\n- **medium** `kurz-design.md` line 208: \"A corpus case checks the id, the line and the exit code\" leaves out the file check that E3 now makes. (same thread)\n- **medium** `kurz-design.md` line 208: not stated as a cost: a crash its parent restarts or stops now writes nothing. (same thread)\n- **medium** `kurz-design.md` line 215: no line rule for a stack overflow raised at the allocator's or the scheduler's entry check. (same thread)\n- **medium** `kurz-design.md` line 215: the trace's walk of a kept stack, made when the trace is written, contradicts the unwinder's stated scope. (same thread)\n- **medium** `kurz-design.md` line 672: handler-room item's second option still has the handler run on the carved region, contradicting the added stack switch. (same thread)\n- **medium** `reference/12-errors.md` line 71: calling every other id a raise by the program's code ignores `decimal` division and collection indexing. https://github.com/SymoHTL/Kurz/pull/38#discussion_r4334865881\n- **medium** `reference/12-errors.md` line 75: the order of the no-line notes doesn't place the `--lines` note, and \"the file's\" has no note of its own. (same thread)\n- **medium** `reference/12-errors.md` line 121: blast radius says E3 leaves the file unpinned and calls the rest words, but E3 now has the runner check the file. (same thread)\n\nThe seventeen low findings of the same review: https://github.com/SymoHTL/Kurz/issues/19#issuecomment-6312050023\n\nTwo low findings of the second review left open: whether the `Crashed` value's place holds the file beside the line, and the form of a library file's name, which hangs on the naming of the standard library (section 14): https://github.com/SymoHTL/Kurz/issues/19#issuecomment-6311564303\n",
+    "closed_by": null,
+    "reactions": {
+      "url": "https://api.github.com/repos/SymoHTL/Kurz/issues/39/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/SymoHTL/Kurz/issues/39/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+  }
+]

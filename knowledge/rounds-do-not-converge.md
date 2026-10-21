@@ -38,12 +38,11 @@ What the rows show:
   over ten rounds, and never reached zero.
 - **The diff grew with the fixes.** Each round's push answered its threads by edits, as the thread
   rule asks, and the edits widened the change: from one file in one batch to seven files in four
-  or five batches. A round's bill grows with its passes, two or three a batch, and with what each
+  or five batches. A round's bill grows with its passes, two to four a batch, and with what each
   pass reads (0.21 USD a pass in round 1, 0.47 in round 13), so the bill of a round grew from 0.64
   to about 4 USD while what it found stayed the same size.
 - **Nothing was replayed.** Every run read every file again ("0 replayed from the cache" in each
-  first line): a file is replayed only when it did not change since a converged review, and every
-  file changed in every round.
+  first line), so no round was cheaper than the size of its diff.
 - **Each run was small on its own.** The bill was counted before each run as the walk says, and no
   single run was over 4 USD; what no rule counted was the rounds. The third round paid nothing and
   was a round all the same.
@@ -56,7 +55,8 @@ What the rows show:
   pull request with the head the findings were made on, the links of its threads and the link of
   its lows on the `review-lows` issue; each open thread gets a reply that links the ticket and is
   resolved, and the pull request merges as it is, on the approval the cap gives for the head the
-  third round reviewed (for `review`, and for `gates` when `pr-findings` is its one FAIL).
+  third round reviewed when that round completed (for `review`, and for `gates` when `pr-findings`
+  is its one FAIL); any other red is the owner's to approve for that head.
 - The reviewer counts the rounds: a run that has files to review labels the pull request
   `review-round-<n>` before its first pass, and is a round whatever follows; the count is the
   highest `n`, and at three every run ends before its first pass as

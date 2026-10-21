@@ -95,8 +95,8 @@ flowchart TD
         a step that writes GITHUB_ENV or GITHUB_PATH, a step that checks out or fetches by hand,
         the deciding step with any env key but the pinned ones, a key twice in one mapping.
         gates.yml: an if on the job (a skipped job reports success to the required check),
-        a path filter, any filter on pull_request, a push trigger for any branch but main, a wider token,
-        a second job.
+        a path filter, any filter on pull_request, a push trigger for any branch but main, a token other than
+        contents, issues and pull-requests read (issues for the collection ticket, G8), a second job.
         review.yml: an if, a checkout ref, a concurrency group or permissions other than the pinned ones,
         no start-time step first, the budget anywhere but on the review step,
         a CLI that is not at an exact version.
@@ -126,8 +126,8 @@ flowchart TD
         At the review cap (R7) a finding on any file is also answered by a reply from someone who may write here
         that links an open issue labelled review-leftovers, the collection ticket; the gate reads that list only
         at the cap, and the resolve command resolves a thread whose replies all move it (self-tests).
-        Whether the gates job's token, which has no issues permission, may read that list was not tried:
-        a refusal fails the gate closed, HAZARD issue 44.
+        The gates job reads that list with issues: read, the one grant of its token beyond the tree and the
+        pull request (ci-config pins the grant); a refused read fails the gate closed.
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]
     end
     subgraph C["CI: workflow compiler-windows, on the same events as the job gates"]
@@ -205,8 +205,10 @@ flowchart TD
         or push in it: HAZARD issue 27.
         Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3; at the review cap (R7) the owner's
-        approval of 2026-10-21 is given for the head the third round reviewed, for review and for gates when
-        pr-findings is its one FAIL"]
+        approval of 2026-10-21 is given for the head the third round reviewed, when that round completed,
+        for review and for gates when pr-findings is its one FAIL, conditions the caller reads (judgment
+        step). The tool refuses a branch behind its base (M2), so when main moves after the third round
+        the branch is brought up to date as a new head, which only the owner's approval of that head merges"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
     end
@@ -233,7 +235,7 @@ flowchart TD
 ## Update triggers
 
 - `tools/gates.py` (the `GATES` list, a verdict, `PARTLY_OK`) changes: the subgraphs G and L.
-- `.github/workflows/gates.yml` (its events) changes: the header of subgraph G.
+- `.github/workflows/gates.yml` (its events) changes: the header of subgraph G; its token's grant: G4 and G8.
 - `tools/red_proof.py` or the shape of `tools/red_proofs.json` changes: G1.
 - `tools/tree_gate.py`, `.claude/settings.json` (the hook command), `.githooks/pre-push` change:
   W1, P1, G2.

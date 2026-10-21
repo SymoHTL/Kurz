@@ -431,15 +431,17 @@ def fixture_pull_request():
         return {}
 
 
-def fixture_issues():
-    """The forge's real answer for the open issues of one label (see tools/fixtures/SOURCES.txt). [] when
-    the file is missing or unreadable, which fails the case that needs it instead of crashing the suite."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "hazard-issues.json")
+def fixture_issues(path=None):
+    """The forge's real answer for the open issues of the collection label (tools/fixtures/leftovers-issues.json,
+    see tools/fixtures/SOURCES.txt). [] when the file is missing, unreadable or not a list of issue records,
+    which fails the case that needs it instead of crashing the suite. `path` is a self-test's own file."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "leftovers-issues.json")
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            issues = json.load(f)
     except (OSError, ValueError):
         return []
+    return issues if isinstance(issues, list) and all(isinstance(i, dict) for i in issues) else []
 
 
 def fixture_answer():
@@ -602,14 +604,21 @@ def self_test():
     out = got(lambda: blob_at("o/n", "a.md", "c404", forge(failing=kit.Refused("`gh api repos/o/n/contents/a.md?ref=c404` exited 1: HTTP 502"))))
     cases.append(("blob: a refusal that only holds the digits 404 stays a refusal", type(out) is kit.Refused, repr(out)))
 
-    # the collection tickets, from the forge's real answer for a list of open issues of one label
+    # the collection tickets, from the forge's real answer for the open issues of the collection label
     listed_issues = fixture_issues()
     real_label = next((label for i in listed_issues for label in i.get("labels") or []), None)
-    cases.append(("fixture: the captured list of issues holds an issue with a label, the shape the cases below edit",
-                  bool(listed_issues) and real_label is not None, repr(listed_issues)[:200]))
+    cases.append(("fixture: the captured list of the collection label holds the open ticket #39 with that label, the shape the cases below read",
+                  bool(listed_issues) and listed_issues[0].get("number") == 39 and "pull_request" not in listed_issues[0]
+                  and (real_label or {}).get("name") == kit.LEFTOVERS_LABEL, repr(listed_issues)[:200]))
+    with kit.scratch("pr-gates-fixture-") as folder:
+        bad = os.path.join(folder, "issues.json")
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write('{"message": "Not Found"}')  # the shape of a forge error, which a capture could hold
+        cases.append(("fixture: a capture that is not a list of issues reads as none, so the case that needs it fails, not the suite",
+                      fixture_issues(bad) == [], repr(fixture_issues(bad))))
     labelled = lambda *names: dict(recorded, labels=[dict(real_label or {}, name=n) for n in names])  # edited: the captured label, renamed
-    # edited: the captured issue as the collection ticket #39, and a pull request #41, which the list endpoint names too
-    tickets = [dict(listed_issues[0] if listed_issues else {}, number=39, labels=[dict(real_label or {}, name=kit.LEFTOVERS_LABEL)]),
+    # the captured ticket as it is, and edited: a pull request #41 beside it, which the list endpoint names too
+    tickets = [listed_issues[0] if listed_issues else {},
                dict(listed_issues[0] if listed_issues else {}, number=41, pull_request={"url": "x"})]
     asked = []
 

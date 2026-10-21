@@ -881,6 +881,7 @@ def suite(case):
          (code, forge.statuses))
     case("run: in CI the pull request gets no label of a review off the pipeline", not any(n.startswith(rv.LOCAL_LABEL) for n in forge.labels),
          forge.labels)
+    case("run: the rules are asked from the default branch", forge.asked == ["trunk"], forge.asked)
     forge, seen = MemoryForge(), []
     counted = scripted_model(found)
 
@@ -904,9 +905,10 @@ def suite(case):
     case("run: at the cap the error status says that the cap was reached",
          bool(forge.said) and f"cap: {kit.ROUND_CAP} review rounds reached" in forge.said[-1], forge.said)
     case("run: at the cap the note says that the rounds before stand, not that the pull request is not reviewed, and that the approval "
-         "holds at the head the third round reviewed alone",
+         "holds at the head the last round reviewed alone, when that round completed",
          len(forge.notes) == 1 and "Its review rounds before stand" in forge.notes[0]["body"] and "is not reviewed" not in forge.notes[0]["body"]
-         and "merges as it is at the head the third round reviewed" in forge.notes[0]["body"]
+         and f"merges as it is at the head round {kit.ROUND_CAP} reviewed" in forge.notes[0]["body"]
+         and "on the approval the cap gives when that round completed" in forge.notes[0]["body"]
          and "a head pushed after that round is outside that approval" in forge.notes[0]["body"],
          [c["body"][:160] for c in forge.notes])
     forge, unused = MemoryForge(), scripted_model(found)
@@ -922,14 +924,18 @@ def suite(case):
     forge, unused = MemoryForge(), scripted_model(found)
     forge.refuse_labels = kit.ROUND_LABEL
     code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")
-    case("run: a round label the forge refuses ends the run red before any pass",
+    case("run: a round label the forge refuses ends the run red before any pass, and says that whether the label landed is not known",
          (code, forge.statuses, unused.batches) == (1, error, []) and "REVIEW DID NOT COMPLETE (failed)" in out and "could not be added" in out
          and "whether it landed is not known" in out,
          (code, forge.statuses, unused.batches, out[-300:]))
+    forge.refuse_labels, forge.labels = None, [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"]  # the same head, which carries that failure note
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
+    case("run: at the cap the note is posted on a head that already carries a failure note",
+         code == 1 and "REVIEW DID NOT COMPLETE (cap)" in out and sum("(cap)" in n["body"] for n in forge.notes) == 1
+         and sum("(failed)" in n["body"] for n in forge.notes) == 1, [n["body"][:120] for n in forge.notes])
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--dry-run"])
     case("run: a dry run counts no round: it posts nothing, that label included", code == 0 and forge.labels == [], (code, forge.labels))
-    case("run: the rules are asked from the default branch", forge.asked == ["trunk"], forge.asked)
     forge = MemoryForge(heads=(HEAD, "d" * 40))
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
     case("run: the status goes on the head that was reviewed, not on one pushed during the run", (code, forge.statuses) == (0, success),

@@ -108,9 +108,9 @@ the head that will be reviewed is a `judgment step`.
      `usage-limit`: wait for the reset the message names; running it again now fixes nothing.
      `credential`: only the owner can fix the secret. `budget`: run it again; what it found is
      posted, what converged is replayed, and the run after it continues with the rest. A run that
-     labelled the pull request is a round whatever its kind (item 8): running it again after
-     `budget`, `usage-limit`, a `credential` refusal in a pass or `failed` takes a round of the
-     three.
+     labelled the pull request is a round whatever kind it ends with (item 8): running it again
+     after any of them, `budget`, `usage-limit`, `head-moved` and the reviewer's own defects among
+     them, takes a round of the three, and after the third round no run follows.
      `head-moved`: a push arrived; review the new head. `oversized`: split the change. `base`:
      the pull request must target the default branch. `cap`: the pull request had its three
      review rounds, and item 8 says what follows. `rules`, `empty`, `bad-diff`: the line says
@@ -185,7 +185,7 @@ the head that will be reviewed is a `judgment step`.
    Gate: `pr-findings` and the merge tool read the move at the cap (`self-tests`); writing the
    section and starting no run are a `judgment step`; the labels a person can change, a second
    issue with the collection label, two runs that start at the same moment and a dry run:
-   HAZARD (#41); the gates job's read of the ticket: HAZARD (#44).
+   HAZARD (#41).
 
 ## 4. Merge
 
@@ -196,10 +196,13 @@ the head that will be reviewed is a `judgment step`.
    `gh pr merge`: the ruleset holds those to the checks and the threads, but not to the exact
    head, the last scan of title and description, or the read-back of the settings. HAZARD (#14).
 4. A required check that is red or missing. At the review cap (section 3, item 8) the owner's
-   approval of 2026-10-21 is given for the head the third round reviewed, for the check `review`
-   and for `gates` when its table shows `pr-findings` as its one FAIL. Any other red check or
-   gate at the cap, a head that took `main` after the third round, and on any other pull request
-   a check that is red or missing for a cause outside the change: stop and ask the owner. Only
+   approval of 2026-10-21 is given for the head the third round reviewed, when that round
+   completed, for the check `review` and for `gates` when its table shows `pr-findings` as its one
+   FAIL; reading those conditions is a `judgment step`, since the tool takes `--over-red` as the
+   caller's statement. A third round that did not complete, any other red check or gate at the
+   cap, a head that took `main` after the third round (a branch behind `main` at the cap is
+   brought up to date only with the owner's approval of that new head), and on any other pull
+   request a check that is red or missing for a cause outside the change: stop and ask the owner. Only
    with the owner's approval for this pull request and this head:
    `py -3 tools/merge_pr.py <N> <sha> --over-red <N>@<sha>=<check>[,<check>]`. The tool switches
    the ruleset off for the one merge, restores it and reads it back. While it is off nothing on

@@ -182,10 +182,12 @@ Each line names a trap; its evidence is in the entry it links.
   review it off the pipeline. `cap`: the pull request had its three review rounds; no run follows,
   and the rule "A pull request gets at most three review rounds" says what does. `rules`,
   `oversized`, `empty`, `bad-diff`: the line says what to do. A run that labelled the pull
-  request is a round whatever its kind (that rule): running it again after `budget`,
-  `usage-limit`, a `credential` refusal in a pass or `failed` takes a round of the three.
+  request is a round whatever kind it ends with (that rule), so running it again after any of
+  them, `budget`, `usage-limit`, `head-moved` and the reviewer's own defects among them, takes a
+  round of the three, and after the third round no run follows.
   `judgment step`
-- A branch behind `main` fails what `main` already fixed: update the branch before debugging.
+- A branch behind `main` fails what `main` already fixed: update the branch before debugging. At
+  the review cap the update is a new head outside the cap's approval: ask the owner first.
   `judgment step`
 
 ## Architecture
@@ -299,10 +301,11 @@ Gate: review rule "rules for sessions".
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
   head**, passed as `--over-red`. An approval is never standing, but for one case: a pull request
   at the review cap (the rule "A pull request gets at most three review rounds" below) carries the
-  owner's approval of 2026-10-21 to merge over red at the head its third round reviewed, for the
-  check `review` and for `gates` when its table shows `pr-findings` as its one FAIL; any other red
-  check or gate, and a head that took `main` after that round, need the owner's approval for that
-  head as for any other. Retired on
+  owner's approval of 2026-10-21 to merge over red at the head its third round reviewed, when that
+  round completed, for the check `review` and for `gates` when its table shows `pr-findings` as its
+  one FAIL; a third round that did not complete, any other red check or gate, and a head that took
+  `main` after that round need the owner's approval for that head as for any other. Whether those conditions hold is read by the caller, a `judgment step`: the merge tool
+  takes `--over-red` as the caller's statement (HAZARD #3). Retired on
   2026-10-21 by that cap: "An approval is never standing" with no case. The tool switches the whole
   ruleset off for the one merge and restores it; while it is off nothing on the server holds any
   pull request or any push to `main`, so the tool reads the checks and the threads again once it
@@ -339,8 +342,8 @@ Gate: review rule "rules for sessions".
   `pr-findings`, in the resolve command and in the merge tool, whose wiring of it is
   `merge_pr.held_by`); writing the section and starting no run at the cap are a `judgment step`; a
   label taken off or put on by hand, a second open issue that carries the label, two runs of one
-  pull request that start at the same moment, and a dry run, which puts on no label: HAZARD (#41);
-  whether the gates job's token may list the ticket: HAZARD (#44).
+  pull request that start at the same moment, and a dry run, which puts on no label: HAZARD (#41).
+  The gates job lists the ticket with `issues: read`, which `ci-config` pins.
 - **A finding above low is a thread, and a thread is answered by an edit.** On the design
   record, the reference, the corpus, the knowledge store and rule files the file must change
   before the thread is resolved; on tool, workflow and hook code a written reply also counts; at
@@ -426,7 +429,7 @@ Gate: review rule "rules for sessions".
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
-| at most three review rounds per pull request, and at the cap a finding moved to the collection ticket (`self-tests`) | the round labels, which anyone who may triage can change, a second issue with the collection label, two runs that start at the same moment, and a dry run, which no label counts (#41); the gates job's read of the collection ticket (#44) |
+| at most three review rounds per pull request, and at the cap a finding moved to the collection ticket (`self-tests`) | the round labels, which anyone who may triage can change, a second issue with the collection label, two runs that start at the same moment, and a dry run, which no label counts (#41) |
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
 | | a merge by the button, which skips what only the merge tool does (#14) |

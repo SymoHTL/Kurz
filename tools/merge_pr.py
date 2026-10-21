@@ -27,7 +27,10 @@ nothing else may merge or push meanwhile (the owner's judgment step, HAZARD #27)
 ruleset was not read back as active, so it may still be off, until someone reads it back and
 switches it on; so the approval is per item and never standing, except at the review cap: a pull
 request that has had its three review rounds carries the owner's approval of 2026-10-21 to merge
-over red at the head the third round reviewed, which the caller states like any other. The tool cannot
+over red at the head the third round reviewed, when that round completed, for the check `review` and
+for `gates` when `pr-findings` is its one FAIL; any other red check stays the owner's to approve for
+that head. The caller states it like any other approval and checks those conditions (a judgment step,
+CLAUDE.md, the over-red rule): the tool reads none of them. The tool cannot
 verify the approval: it is the caller's statement (HAZARD #3), and the record says so. The waiver
 lets through only what it names:
 - it names a pull request and a head; another pull request is refused, another head voids it;
@@ -739,7 +742,8 @@ def self_test():
         case("threads: a finding resolved without its answer blocks", len(got) == 1 and "without changing the file" in got[0], got)
         moved = json.loads(json.dumps(thread(True)))
         # edited: the finding on the design record, where a reply alone answers nothing, and a reply of the owner
-        # that moves it to the collection ticket #39, as a session writes one at the cap
+        # that moves it to the collection ticket #39, as a session writes one at the cap; the reply is written for
+        # the case, and the real moves of pull request 38 were read through these functions, read-only, on 2026-10-21
         on_record = json.dumps([dict(f, file="kurz-design.md") for f in found[0][1]])
         moved["comments"]["nodes"][0]["body"] = pr_gates.MARK.sub(lambda m: f"<!-- kurz-review:findings {on_record} -->",
                                                                   moved["comments"]["nodes"][0]["body"])
@@ -754,15 +758,19 @@ def self_test():
              got[0] == [] and len(got[1]) == 1, got)
         got = (thread_reasons([thread(True), thread(False)], same, at_cap, True), thread_reasons([thread(True), thread(False)], same, at_cap))
         case("threads: at the cap an unresolved thread and a finding not moved name the move to the collection ticket, below it the edit",
-             len(got[0]) == 2 and all(e.endswith(pr_gates.MOVE) for e in got[0]) and not any(pr_gates.MOVE in e for e in got[1]), got)
+             len(got[0]) == 2 and all(e.endswith(pr_gates.MOVE) for e in got[0])
+             and len(got[1]) == 2 and got[1][0] == "1 unresolved threads" and "without changing the file" in got[1][1]
+             and not any(pr_gates.MOVE in e for e in got[1]), got)
         got = (blockers([thread(False)], same, [], [], (), at_cap, True), blockers([thread(False)], same, [], []))
         case("blockers: the threads are read at the cap the caller passes, and below it by default",
              len(got[0]) == 1 and got[0][0].endswith(pr_gates.MOVE) and got[1] == ["1 unresolved threads"], got)
-        ticket_pages = lambda path: [{"number": 39}] if f"labels={kit.LEFTOVERS_LABEL}" in path else []
+        # the forge's real answer for the open issues of the collection label, whose one issue is #39
+        ticket_pages = lambda path: pr_gates.fixture_issues() if f"labels={kit.LEFTOVERS_LABEL}" in path else []
         labelled = lambda n: {"title": "ok", "body": "", "labels": [{"name": f"{kit.ROUND_LABEL}{n}"}]}
         got = {n: held_by("o/r", labelled(n), [moved], same, [], (), ticket_pages) for n in (kit.ROUND_CAP - 1, kit.ROUND_CAP, kit.ROUND_CAP + 1)}
         case("held: below the cap a finding moved to the collection ticket blocks and names the edit, at the cap and over it nothing holds",
              got[kit.ROUND_CAP - 1][0] == kit.ROUND_CAP - 1 and len(got[kit.ROUND_CAP - 1][1]) == 1
+             and "without changing the file" in got[kit.ROUND_CAP - 1][1][0]
              and pr_gates.MOVE not in got[kit.ROUND_CAP - 1][1][0] and got[kit.ROUND_CAP] == (kit.ROUND_CAP, [])
              and got[kit.ROUND_CAP + 1] == (kit.ROUND_CAP + 1, []), got)
         got = held_by("o/r", labelled(kit.ROUND_CAP), [thread(False)], same, [], (), ticket_pages)

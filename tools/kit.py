@@ -77,8 +77,9 @@ ROUND_LABEL, ROUND_CAP, LEFTOVERS_LABEL = "review-round-", 3, "review-leftovers"
 
 def review_rounds(labels):
     """The review rounds a pull request has had, from the names of its labels: the highest n of a
-    label `review-round-<n>`, 0 when it carries none."""
-    numbers = [re.fullmatch(re.escape(ROUND_LABEL) + r"([1-9][0-9]*)", name) for name in labels]
+    label `review-round-<n>`, 0 when it carries none. The forge holds label names without regard to
+    case, so a label spelled `Review-Round-3` is the reviewer's own write of `review-round-3`."""
+    numbers = [re.fullmatch(re.escape(ROUND_LABEL) + r"([1-9][0-9]*)", name, re.I) for name in labels]
     return max((int(m.group(1)) for m in numbers if m), default=0)
 
 
@@ -297,9 +298,11 @@ def self_test():
     counted = (review_rounds([]), review_rounds(["bug", "review-round-1", "review-round-2"]), review_rounds(["review-round-3"]))
     cases.append(("rounds: no round label is no round, and the rounds are the highest number, so one label counts the rounds before it",
                   counted == (0, 2, 3), counted))
-    counted = (review_rounds(["review-round-12", "review-round-3"]), review_rounds(["review-round-0", "review-round-x", "review-round-7b", "review-rounds-4", "Review-round-5"]))
+    counted = (review_rounds(["review-round-12", "review-round-3"]), review_rounds(["review-round-0", "review-round-x", "review-round-7b", "review-rounds-4"]))
     cases.append(("rounds: the numbers are compared as numbers, and a label that only looks like one counts nothing",
                   counted == (12, 0), counted))
+    counted = review_rounds(["Review-Round-5", "REVIEW-ROUND-2"])
+    cases.append(("rounds: a label in another case is the same label on the forge, so it counts", counted == 5, counted))
     cases.append(("rounds: the cap is the owner's three rounds (2026-10-21), and its labels carry the names the tools read",
                   (ROUND_CAP, ROUND_LABEL, LEFTOVERS_LABEL) == (3, "review-round-", "review-leftovers"), (ROUND_CAP, ROUND_LABEL, LEFTOVERS_LABEL)))
     with scratch("kit-scratch-") as path:
