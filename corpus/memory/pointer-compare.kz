@@ -1,0 +1,8 @@
+// expect: output
+// | true
+// rules: R10, R14
+
+long m = 64
+p = Ptr<long>(m)
+q = p + 3
+print(q > p)

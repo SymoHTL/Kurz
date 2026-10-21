@@ -135,6 +135,23 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
+                    if (n.Name is "Ptr" or "SizeOf")
+                    {
+                        // R14 states `Ptr<T>(x)` and `SizeOf<T>()`; another count of type arguments or arguments is text no rule gives a meaning (E4)
+                        var shaped = c.TypeArguments.Count == 1 && c.Arguments.Count == (n.Name == "Ptr" ? 1 : 0);
+                        if (shaped)
+                        {
+                            NotSupported(n.Line, $"`{n.Name}` (R14)");
+                        }
+                        else
+                        {
+                            Report(ErrorIds.Syntax, n.Line, $"R14 writes `{n.Name}` as `{(n.Name == "Ptr" ? "Ptr<T>(x)" : "SizeOf<T>()")}` (E4)");
+                        }
+
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
                     Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
                     CheckArgumentsLoosely(c);
                     return Typed.Error;

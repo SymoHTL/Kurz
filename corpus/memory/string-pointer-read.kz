@@ -1,0 +1,10 @@
+// expect: output
+// | 105
+// allow: raw
+// rules: R10, R15
+
+s = "hi"
+raw {
+    p = s.Pointer
+    print(p[1])
+}

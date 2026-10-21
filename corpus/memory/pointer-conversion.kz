@@ -1,0 +1,7 @@
+// expect: output
+// | 64
+// rules: R14
+
+long m = 64
+p = Ptr<long>(m)
+print(long(p))

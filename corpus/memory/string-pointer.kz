@@ -1,0 +1,9 @@
+// expect: output
+// | true
+// allow: raw
+// rules: R15
+
+s = "hi"
+raw {
+    print(s.Pointer != null)
+}

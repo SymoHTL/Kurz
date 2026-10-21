@@ -1,0 +1,18 @@
+// expect: output
+// | 2
+// allow: raw
+// rules: R13
+
+static mut long total = 0
+
+void Add() {
+    raw {
+        total = total + 1
+    }
+}
+
+Add()
+Add()
+raw {
+    print(total)
+}

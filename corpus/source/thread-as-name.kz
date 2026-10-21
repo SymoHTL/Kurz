@@ -1,0 +1,6 @@
+// expect: output
+// | 1
+// rules: L18, R13
+
+thread = 1
+print(thread)

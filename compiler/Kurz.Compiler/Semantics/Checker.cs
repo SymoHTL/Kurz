@@ -33,6 +33,7 @@ public sealed partial class Checker
     private readonly List<FunctionSymbol> unreadOverloads = [];
     private readonly List<(HashSet<string> Types, HashSet<string> Functions)> nestedNames = [];
     private readonly HashSet<string> reservedTopLevel = new(StringComparer.Ordinal);
+    private readonly HashSet<string> unreadStatics = new(StringComparer.Ordinal); // R13: state every function of the package reaches, which the checker does not read
     private readonly Dictionary<DataSymbol, List<DataSymbol>> baseCycles = [];
     private readonly Dictionary<string, KurzType> topLevel = new(StringComparer.Ordinal);
     private readonly List<VariableSymbol> declared = [];
@@ -232,7 +233,7 @@ public sealed partial class Checker
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
 
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
-    private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
+    private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || unreadStatics.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
 
     /// <summary>Runs <paramref name="check"/>, with its diagnostics dropped where <paramref name="f"/> is a function the checker does not read (K7, M6).</summary>
     private void Unread(FunctionSymbol f, Action check)
@@ -263,6 +264,9 @@ public sealed partial class Checker
         {
             switch (s)
             {
+                case VariableDeclaration v when (v.Modifiers & (Modifiers.Static | Modifiers.Mut)) == (Modifiers.Static | Modifiers.Mut):
+                    unreadStatics.Add(v.Name); // R13: reached by every function, so it reserves no name and is no variable of the top-level code
+                    break;
                 case VariableDeclaration v:
                     reservedTopLevel.Add(v.Name);
                     break;
@@ -1232,6 +1236,16 @@ public sealed partial class Checker
 
     private void CheckVariableDeclaration(VariableDeclaration v)
     {
+        if ((v.Modifiers & (Modifiers.Static | Modifiers.Mut)) == (Modifiers.Static | Modifiers.Mut) && frame.IsTopLevel && frame.Scope.Parent is null)
+        {
+            // R13: state outside a function, at the outermost level of a file, which chapter 11 states and the checker does not read;
+            // its uses carry no further error. A `static` without `mut` has no meaning there, as on any variable (below)
+            NotSupported(v.Line, "a `static mut` declaration at the top level of a file (R13)");
+            CheckLoosely(v.Value); // the initial value is read, so that the variables it uses count as used
+            DeclareUnreadable(v.Name, VariableKind.Local, v.Line);
+            return;
+        }
+
         var other = v.Modifiers & ~Modifiers.Mut;
         if (other != Modifiers.None)
         {
@@ -1297,6 +1311,13 @@ public sealed partial class Checker
             }
 
             variable.Changed = true;
+            return;
+        }
+
+        if (unreadStatics.Contains(a.Name))
+        {
+            // R13: an assignment to state outside a function, which the checker does not read; the value is read
+            CheckExpression(a.Value, null);
             return;
         }
 
