@@ -379,22 +379,25 @@ runtime's `data` type (O7); its parent lives under `on crash restart` and `on cr
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
 process exits with the exit code 1 (O6). The exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
-reference's reading, on which the case stands), read from the line tables for the frame above the
-one that did not fit (§6), the innermost Kurz frame and its call into the runtime where that one was
+reference's reading, on which the case stands), read from the line tables for the call that did
+not fit (§6), the innermost Kurz frame and its call into the runtime where that one was
 the runtime's, so that the owner's words hold with that reading, in whichever source that frame's
-function sits, a line of the standard library's source where that function was the library's, which
-the error line does not name and the trace's first line does (§6), so a case pins a line of the
+function sits, a line of the standard library's source where that function was the library's, whose
+file the error line names (§6, decided there; the owner, 2026-10-21) and whose function the trace's
+first line names (§6), so a case pins a line of the
 program only where that frame was the program's, and every case of the corpus that pins a stack
 overflow pins a call of the program's own, with a recursion that calls nothing of the standard
 library and nothing that reaches the runtime's primitives or the allocator's entry, over values that
 allocate nothing, as the case below does over an `int`, which the test build keeps as calls (§2, an
 assumption there), so that the frame that does not fit is the program's in that build, its number is
 the program's line and the runner compares it as E3 says; the corpus holds no case whose overflow
-lands in the standard library's source *(assumed: the line from the tables for the frame above the
-one that did not fit, the library's source named by the trace's first line and not by the error
-line, and the condition on the cases, as §6 marks it)*; in a release build built without its line tables
+lands in the standard library's source *(assumed: the line from the tables for the call that did not
+fit, the name of a library file, which the naming of the standard library gives (§14), and the
+condition on the cases, as §6 marks it)*; in a release build built without its line tables
 (§2, the answer decided there, its reading an assumption) the error
-line names no line, since the line of a stack overflow comes from those tables (§6, decided there,
+line names no line and is `error: stack-overflow (no line tables: build with --lines)`, and the
+`Crashed` value's place holds the line 0 (§6, an assumption there as to both), since the line of a
+stack overflow comes from those tables (§6, decided there,
 with the assumptions its markers name; the owner, 2026-10-20), and no case pins that, since a case's
 header names a line (E3). An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
