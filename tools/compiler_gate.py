@@ -33,7 +33,7 @@ import kit  # noqa: E402
 CWD = "compiler"  # the working directory of the command: the dotnet host reads global.json from here and its parents, never from beside the solution
 SOLUTION = "Kurz.sln"  # relative to CWD
 CONFIG = "compiler/NuGet.config"
-FLOOR = 650  # below the tests the suites hold, above what is left without the corpus theory (over 300 of them): a run that lost a project or the corpus cannot pass
+FLOOR = 1000  # below the tests the suites hold, above what is left without either corpus theory (over 300 cases each): a run that lost a project or a corpus theory cannot pass
 TIMEOUT = 900  # seconds for restore, build and tests together
 COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreLockedMode=true", "--disable-build-servers"]
 SUMMARY = re.compile(r"^(Passed|Failed)!\s+-\s+Failed:\s+(\d+),\s+Passed:\s+(\d+),\s+Skipped:\s+(\d+),\s+Total:\s+(\d+)", re.M)
@@ -123,7 +123,7 @@ def main():
     return 1 if errors else 0
 
 
-GREEN = ("Passed!  - Failed:     0, Passed:   704, Skipped:     0, Total:   704, Duration: 2 s - Kurz.Compiler.Tests.dll (net10.0)\n")
+GREEN = ("Passed!  - Failed:     0, Passed:  1263, Skipped:     0, Total:  1263, Duration: 2 s - Kurz.Compiler.Tests.dll (net10.0)\n")
 RED = ("Failed!  - Failed:     5, Passed:    77, Skipped:     0, Total:    82, Duration: 107 ms - Kurz.Compiler.Tests.dll (net10.0)\n")
 BUILD_ERROR = ("  Determining projects to restore...\n"
                "compiler/Kurz.Compiler/Syntax/Lexer.cs(710,46): error CS0019: Operator '+' cannot be applied [compiler/Kurz.Compiler/Kurz.Compiler.csproj]\n"
@@ -144,14 +144,14 @@ def self_test():
     case("a green run with enough tests passes", 0, GREEN, None)
     case("a failed test is red", 1, RED, "5 tests failed")
     case("a skipped test is red", 0, GREEN.replace("Skipped:     0", "Skipped:     1"), "skipped")
-    case("fewer passed tests than the floor is red", 0, GREEN.replace("Passed:   704", "Passed:   649"), "floor is")
-    cases.append(("the floor is at least 650 tests", FLOOR >= 650, FLOOR))
+    case("fewer passed tests than the floor is red", 0, GREEN.replace("Passed:  1263", "Passed:   999"), "floor is")
+    cases.append(("the floor is at least 1000 tests", FLOOR >= 1000, FLOOR))
     case("no summary line is red: nothing was proven", 0, "Build succeeded.\n", "nothing was proven")
     case("a build failure names its first error", 1, BUILD_ERROR, "CS0019")
     case("a non-zero exit with no failed test is red", 3, GREEN, "exited 3")
-    case("two projects' summaries are summed", 0, GREEN.replace("Passed:   704", "Passed:   330") * 2, None)  # each alone is below the floor
-    errors, counts = judge(0, GREEN + GREEN.replace("Passed:   704", "Passed:    10").replace("Total:   704", "Total:    10"))
-    cases.append(("the counts are summed over the summaries", counts == (0, 714, 0, 714), counts))
+    case("two projects' summaries are summed", 0, GREEN.replace("Passed:  1263", "Passed:   520") * 2, None)  # each alone is below the floor
+    errors, counts = judge(0, GREEN + GREEN.replace("Passed:  1263", "Passed:    10").replace("Total:  1263", "Total:    10"))
+    cases.append(("the counts are summed over the summaries", counts == (0, 1273, 0, 1273), counts))
     cases.append(("the command restores in locked mode and names the solution", "-p:RestoreLockedMode=true" in COMMAND and SOLUTION in COMMAND, COMMAND))
     cases.append(("the command runs inside compiler/, where the SDK pin is read", CWD == "compiler" and "/" not in SOLUTION, (CWD, SOLUTION)))
     cases.append(("the command disables the build servers, so that the timeout can end it", "--disable-build-servers" in COMMAND, COMMAND))

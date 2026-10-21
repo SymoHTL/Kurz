@@ -230,6 +230,15 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void A_modifier_other_than_mut_on_a_variable_is_syntax()
+    {
+        // E4's general clause, as the front end reads it (the readings in compiler/README.md): V2 and V4 give a variable `mut` and nothing
+        // else, so `pub` begins no declaration and the statement ends at it; the reference does not settle which id this takes, and the
+        // README lists it among the questions for a design round, with the doubled modifier
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("pub x = 1\nprint(x)"));
+    }
+
+    [Fact]
     public void A_speculation_that_is_no_declaration_drops_what_it_reported()
     {
         // `Job match` reports `reserved-word` on the name, then finds neither `=` nor `(`: the statement is an
@@ -310,6 +319,14 @@ public sealed class ParserTests
         // L12 (decided): a core word that begins a statement form is `syntax` (E4) where an expression stands, `print(if)` the record's
         // example; the seventeen are the words of L18 that begin or continue a statement form, `with` among them
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors($"print({word})"));
+    }
+
+    [Fact]
+    public void An_else_after_what_is_no_call_is_syntax()
+    {
+        // O5 gives the postfix `else` to a call: after anything else it continues nothing, and the statement ends before it, text no rule
+        // gives a meaning (E4; the reading in compiler/README.md)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("x = 5 else {\n    else => 0\n}\nprint(x)"));
     }
 
     [Theory]

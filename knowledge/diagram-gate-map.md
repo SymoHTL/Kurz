@@ -82,9 +82,10 @@ flowchart TD
         no test summary line at all, fewer passed tests than the floor, a skipped test, a non-zero exit with no failed test;
         compiler/NuGet.config missing, without the clear of the inherited sources or without a source mapping;
         a restore outside the lock files (locked mode), an SDK other than the one compiler/global.json pins;
-        dotnet missing or out of time. Read: the output of dotnet test, one summary per test project, summed.
-        Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's errors
-        against each header and runs no program; the version of the clang the compiler found, printed, and a fail when the compiler
+        dotnet missing or out of time. Read: the output of dotnet test, one summary per test project, summed;
+        the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
+        Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's and the
+        checker's errors against each header and runs no program; the version of the clang the compiler found, printed, and a fail when the compiler
         refused it or found none, which section 2 of the design record (an assumption there) requires of this gate: the compiler under
         compiler/ calls no clang and this gate reads no version (checked 2026-10-20: the sources of both), HAZARD issue 37"]
         G4["ci-config: a pinned fact of a workflow changed. All three workflows: an action not pinned by commit SHA (flow-style
