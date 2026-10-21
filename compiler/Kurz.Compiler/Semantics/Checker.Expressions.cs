@@ -1,0 +1,1243 @@
+using System.Globalization;
+using System.Numerics;
+using Kurz.Compiler.Syntax;
+
+namespace Kurz.Compiler.Semantics;
+
+public sealed partial class Checker
+{
+    private static readonly BigInteger DecimalMax = new(decimal.MaxValue);
+
+    /// <summary>
+    /// The type of an expression, and its value where it is a constant. <paramref name="expected"/>
+    /// is the type written or expected around it, which reaches its literals (L10, L17); with
+    /// <paramref name="keepCases"/> a call keeps every case of its result instead of being
+    /// unwrapped (O4).
+    /// </summary>
+    private Typed CheckExpression(Expression expression, KurzType? expected, bool keepCases = false)
+    {
+        switch (expression)
+        {
+            case IntegerLiteral i:
+                return CheckInteger(i.Value, i.Line, expected, negative: false);
+            case RealLiteral r:
+                return CheckReal(r.Value, r.Line, expected, negative: false);
+            case UnitLiteral u:
+                return CheckUnit(u.Value, u.Line, expected, negative: false);
+            case StringLiteral s:
+                return CheckString(s);
+            case CharLiteral c:
+                return new Typed(Types.Char, new CharConstant(c.CodePoint));
+            case BoolLiteral b:
+                return new Typed(Types.Bool, new BoolConstant(b.Value));
+            case NullLiteral n:
+                NotSupported(n.Line, "null (N1)");
+                return Typed.Error;
+            case NameExpression n:
+                return CheckName(n);
+            case ThisExpression t:
+                NotSupported(t.Line, "this (K7)");
+                return Typed.Error;
+            case MemberAccess m:
+                return CheckMember(m);
+            case CallExpression c:
+                return CheckCall(c, expected, keepCases);
+            case IndexExpression i:
+                return CheckIndex(i);
+            case UnaryExpression u:
+                return CheckUnary(u, expected);
+            case BinaryExpression b:
+                return CheckBinary(b, expected);
+            case RangeExpression r:
+                CheckRange(r);
+                Report(ErrorIds.Syntax, r.Line, "a range stands in a `for` loop (C8)");
+                return Typed.Error;
+            case LambdaExpression l:
+                return CheckLambda(l, expected as FunctionType);
+            case MatchExpression m:
+                return new Typed(CheckMatch(m.Subject, m.Arms, isExpression: true, expected, m.Line).Type);
+            case WithExpression w:
+                return CheckWith(w);
+            case ElseExpression e:
+                return CheckElse(e, isStatement: false, expected);
+            case ParenthesizedExpression p:
+                return CheckExpression(p.Inner, expected, keepCases);
+            default:
+                throw new InvalidOperationException(expression.GetType().Name);
+        }
+    }
+
+    /// <summary>Whether an expression is made only of literals and the operators of T18, T22 and T12, which a written or expected type reaches whole (L17).</summary>
+    private static bool IsLiteralOnly(Expression e) => e switch
+    {
+        IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral => true,
+        StringLiteral s => s.IsPlain,
+        UnaryExpression u => IsLiteralOnly(u.Operand),
+        BinaryExpression b => b.Operator != TokenKind.QuestionQuestion && IsLiteralOnly(b.Left) && IsLiteralOnly(b.Right),
+        ParenthesizedExpression p => IsLiteralOnly(p.Inner),
+        _ => false,
+    };
+
+    /// <summary>The number or time type an expected type reaches a literal with: the type itself, or the one such case of a union (L10, L17, T29).</summary>
+    private static PrimitiveType? Reach(KurzType? expected) => expected switch
+    {
+        PrimitiveType p when Types.IsNumber(p) || Types.IsTime(p) => p,
+        UnionType u => u.Cases.Where(c => c is PrimitiveType p && (Types.IsNumber(p) || Types.IsTime(p))).Cast<PrimitiveType>().ToList() is [var one] ? one : null,
+        _ => null,
+    };
+
+    // ---- literals --------------------------------------------------------------------------------
+
+    private Typed CheckInteger(IntegerLiteralValue literal, int line, KurzType? expected, bool negative)
+    {
+        var value = ParseInteger(literal.Digits, literal.Radix);
+        if (negative)
+        {
+            value = -value;
+        }
+
+        return IntegerValue(value, literal.Suffix, line, expected);
+    }
+
+    private static BigInteger ParseInteger(string digits, int radix)
+    {
+        if (radix == 10)
+        {
+            return BigInteger.Parse(digits, NumberStyles.None, CultureInfo.InvariantCulture);
+        }
+
+        var value = BigInteger.Zero;
+        foreach (var c in digits)
+        {
+            var digit = c is >= '0' and <= '9' ? c - '0' : char.ToUpperInvariant(c) - 'A' + 10;
+            value = value * radix + digit;
+        }
+
+        return value;
+    }
+
+    /// <summary>L10: the type of an integer value by its suffix and its size, or the type the context reaches it with; <c>constant-overflow</c> where it fits neither.</summary>
+    private Typed IntegerValue(BigInteger value, string suffix, int line, KurzType? expected)
+    {
+        var target = Reach(expected);
+        if (suffix.Length == 0 && target is not null)
+        {
+            if (Types.IsInteger(target))
+            {
+                if (!Types.Fits(value, target))
+                {
+                    Report(ErrorIds.ConstantOverflow, line, $"{value} does not fit a `{target}` (L10, T6)");
+                    return Typed.Error;
+                }
+
+                return new Typed(target, new IntegerConstant(value));
+            }
+
+            if (Types.IsFloating(target))
+            {
+                var d = (double)value;
+                if (double.IsInfinity(d))
+                {
+                    Report(ErrorIds.ConstantOverflow, line, "the literal lies outside the range of `double` (T6, L11)");
+                    return Typed.Error;
+                }
+
+                return RealValue(d, target, line);
+            }
+
+            if (Types.IsDecimal(target))
+            {
+                if (BigInteger.Abs(value) > DecimalMax)
+                {
+                    Report(ErrorIds.ConstantOverflow, line, $"{value} does not fit a `decimal` (T6)");
+                    return Typed.Error;
+                }
+
+                return new Typed(Types.Decimal, new DecimalConstant((decimal)value));
+            }
+        }
+
+        PrimitiveType[] ladder = suffix switch
+        {
+            "U" => [Types.UInt, Types.ULong],
+            "L" => [Types.Long, Types.ULong],
+            "UL" => [Types.ULong],
+            _ => [Types.Int, Types.Long, Types.ULong],
+        };
+        foreach (var type in ladder)
+        {
+            if (Types.Fits(value, type))
+            {
+                return new Typed(type, new IntegerConstant(value));
+            }
+        }
+
+        Report(ErrorIds.ConstantOverflow, line, suffix.Length == 0 ? $"{value} fits no integer type (L10, T6)" : $"{value} fits none of the types the suffix `{suffix}` names (L10, T6)");
+        return Typed.Error;
+    }
+
+    private Typed CheckReal(RealLiteralValue literal, int line, KurzType? expected, bool negative)
+    {
+        var target = realKeepsOwnType ? null : Reach(expected);
+        if (literal.Suffix == "m" || (literal.Suffix.Length == 0 && target is not null && Types.IsDecimal(target)))
+        {
+            if (!decimal.TryParse(literal.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var m))
+            {
+                Report(ErrorIds.ConstantOverflow, line, "the literal lies outside the range of `decimal` (T6, L11)");
+                return Typed.Error;
+            }
+
+            return new Typed(Types.Decimal, new DecimalConstant(negative ? -m : m));
+        }
+
+        if (!double.TryParse(literal.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) || double.IsInfinity(d))
+        {
+            Report(ErrorIds.ConstantOverflow, line, "the literal lies outside the range of `double` (T6, L11)");
+            return Typed.Error;
+        }
+
+        var type = literal.Suffix == "f" ? Types.Float : literal.Suffix.Length == 0 && target is not null && Types.IsFloating(target) ? target : Types.Double;
+        return RealValue(negative ? -d : d, type, line);
+    }
+
+    /// <summary>A floating-point value in its type, rounded to <c>float</c> where that is the type; <c>constant-overflow</c> for a literal beyond the range (L11).</summary>
+    private Typed RealValue(double value, PrimitiveType type, int line)
+    {
+        if (type.Kind == Primitive.Float)
+        {
+            var f = (float)value;
+            if (float.IsInfinity(f) && !double.IsInfinity(value))
+            {
+                Report(ErrorIds.ConstantOverflow, line, "the literal lies outside the range of `float` (T6, L11)");
+                return Typed.Error;
+            }
+
+            return new Typed(Types.Float, new RealConstant(f));
+        }
+
+        return new Typed(type, new RealConstant(value));
+    }
+
+    private Typed CheckUnit(UnitLiteralValue literal, int line, KurzType? expected, bool negative)
+    {
+        var (factor, isTime) = literal.Unit switch
+        {
+            "ns" => (BigInteger.One, true),
+            "us" => (new BigInteger(1_000), true),
+            "ms" => (new BigInteger(1_000_000), true),
+            "s" => (new BigInteger(1_000_000_000), true),
+            "min" => (new BigInteger(60_000_000_000), true),
+            "h" => (new BigInteger(3_600_000_000_000), true),
+            "days" => (new BigInteger(86_400_000_000_000), true),
+            "kb" => (new BigInteger(1024), false),
+            "mb" => (new BigInteger(1024 * 1024), false),
+            "gb" => (new BigInteger(1024L * 1024 * 1024), false),
+            _ => throw new InvalidOperationException(literal.Unit),
+        };
+        var dot = literal.Number.IndexOf('.', StringComparison.Ordinal);
+        var digits = literal.Number.Replace(".", "", StringComparison.Ordinal);
+        var fraction = dot < 0 ? 0 : literal.Number.Length - dot - 1;
+        var scaled = BigInteger.Parse(digits.Length == 0 ? "0" : digits, NumberStyles.None, CultureInfo.InvariantCulture) * factor;
+        var divisor = BigInteger.Pow(10, fraction);
+        if (!scaled.IsZero && scaled % divisor != 0)
+        {
+            Report(ErrorIds.InexactLiteral, line, isTime ? "the fraction does not fall on a whole nanosecond (L14)" : "the fraction does not fall on a whole byte (L14)");
+            return Typed.Error;
+        }
+
+        var value = scaled / divisor;
+        if (negative)
+        {
+            value = -value;
+        }
+
+        if (!isTime)
+        {
+            return IntegerValue(value, "", line, expected);
+        }
+
+        var target = Reach(expected);
+        if (target is not null && Types.IsDuration(target))
+        {
+            if (!Types.Fits(value, target))
+            {
+                Report(ErrorIds.ConstantOverflow, line, $"the duration does not fit a `{target}` (T6, T29)");
+                return Typed.Error;
+            }
+
+            return new Typed(target, new IntegerConstant(value));
+        }
+
+        if (Types.Fits(value, Types.Duration))
+        {
+            return new Typed(Types.Duration, new IntegerConstant(value));
+        }
+
+        if (Types.Fits(value, Types.LongDuration))
+        {
+            return new Typed(Types.LongDuration, new IntegerConstant(value));
+        }
+
+        Report(ErrorIds.ConstantOverflow, line, "the duration fits neither `duration` nor `longduration` (T6, T29)");
+        return Typed.Error;
+    }
+
+    /// <summary>L6: every hole holds a value with a text (A2 to A15).</summary>
+    private Typed CheckString(StringLiteral s)
+    {
+        var text = s.IsPlain ? new System.Text.StringBuilder() : null;
+        foreach (var segment in s.Segments)
+        {
+            if (segment is HoleSegment hole)
+            {
+                var t = CheckExpression(hole.Expression, null);
+                if (Types.IsVoid(t.Type))
+                {
+                    Report(ErrorIds.Syntax, hole.Expression.Line, "a call with a `void` success used as a value (O10)");
+                }
+                else if (!HasText(t.Type))
+                {
+                    Report(ErrorIds.NoText, hole.Expression.Line, $"a `{t.Type}` has no text to put into a string (A4, A7, A10)");
+                }
+            }
+            else
+            {
+                text?.Append(((TextSegment)segment).Text);
+            }
+        }
+
+        return new Typed(Types.String, text is null ? null : new StringConstant(text.ToString()));
+    }
+
+    /// <summary>A2 to A15: whether a value of the type has a text for <c>print</c> and an interpolation. The error type has one, so that nothing more is reported.</summary>
+    private static bool HasText(KurzType type) => HasText(type, []);
+
+    /// <summary>
+    /// A data type has a text when each type argument that a field reaches has one, and its fields have one with its own
+    /// type parameters standing for those arguments. The fields of a type are read on the way down and not again inside
+    /// it, so that a type that holds itself ends, and each use of it is still judged on its own type arguments.
+    /// </summary>
+    private static bool HasText(KurzType type, List<DataSymbol> seen) => type switch
+    {
+        PrimitiveType => true,
+        ErrorType => true,
+        ListType l => HasText(l.Element, seen),
+        UnionType u => u.Cases.All(c => HasText(c, seen)),
+        DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
+        TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
+        _ => false, // a function value; a type parameter of a function, which has no limit the checker reads (A10)
+    };
+
+    private static bool ArgumentsHaveText(DataType d, List<DataSymbol> seen) =>
+        d.Symbol.TypeParameters.Zip(d.TypeArguments).All(pair => !d.Symbol.Fields.Any(f => Types.Mentions(f.Type, pair.First)) || HasText(pair.Second, seen));
+
+    private static bool Fields(DataSymbol symbol, List<DataSymbol> seen)
+    {
+        seen.Add(symbol);
+        var result = symbol.Fields.All(f => HasText(f.Type, seen));
+        seen.RemoveAt(seen.Count - 1);
+        return result;
+    }
+
+    private static KurzType SubstituteData(DataType d, KurzType type)
+    {
+        if (d.TypeArguments.Count == 0)
+        {
+            return type;
+        }
+
+        var map = d.Symbol.TypeParameters.Zip(d.TypeArguments).ToDictionary(p => p.First, p => p.Second);
+        return Types.Substitute(type, map);
+    }
+
+    // ---- names and members -----------------------------------------------------------------------
+
+    private Typed CheckName(NameExpression n)
+    {
+        var (variable, _) = Lookup(n.Name);
+        if (variable is not null)
+        {
+            variable.Read = true;
+            return new Typed(variable.Type);
+        }
+
+        if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
+        {
+            Report(ErrorIds.UnknownName, n.Line, $"`{n.Name}` is a top-level variable, which a top-level function does not read (F16, V10)");
+            return Typed.Error;
+        }
+
+        if (dataTypes.TryGetValue(n.Name, out var data))
+        {
+            if (!data.HasFields)
+            {
+                return new Typed(new DataType(data, []), new UnitConstant()); // D8: the bare name is the one value
+            }
+
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here (D2)");
+            return Typed.Error;
+        }
+
+        if (IsUnreadName(n.Name))
+        {
+            return Typed.Error;
+        }
+
+        if (functions.ContainsKey(n.Name) || n.Name == "print")
+        {
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a function, and no value stands here (F11)");
+            return Typed.Error;
+        }
+
+        if (Types.ByName.ContainsKey(n.Name) || n.Name is "List" or "Map")
+        {
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here (T10)");
+            return Typed.Error;
+        }
+
+        Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
+        return Typed.Error;
+    }
+
+    private Typed CheckMember(MemberAccess m)
+    {
+        if (m.Conditional)
+        {
+            NotSupported(m.Line, "`?.` (N5)");
+            CheckExpression(m.Target, null);
+            return Typed.Error;
+        }
+
+        if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
+        {
+            if (IsUnreadName(n.Name))
+            {
+                return Typed.Error;
+            }
+
+            if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
+            {
+                if (HasBody(data))
+                {
+                    NotSupported(m.Line, "a method of a data type (D16)"); // a member its body declares, which the checker does not read
+                    return Typed.Error;
+                }
+
+                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a type and has no member `{m.Member}` (D1, V10)");
+                return Typed.Error;
+            }
+
+            if (IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
+            {
+                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
+                return Typed.Error;
+            }
+        }
+
+        var target = CheckExpression(m.Target, null);
+        return MemberOf(target.Type, m.Member, m.Line);
+    }
+
+    /// <summary>
+    /// The members the reference gives a type: a string's <c>Bytes</c> and <c>Chars</c> (T15), a list's
+    /// <c>Count</c> (M9), a data value's fields (D1). A member no rule gives the type is a name that is not
+    /// visible here, V10's <c>unknown-name</c> (the reading in <c>compiler/README.md</c>); a member of a
+    /// union is <c>type-mismatch</c>, since a union is one of its cases only after a <c>match</c> (D9). A
+    /// type parameter has members only through a limit (T19), so a member of one without a limit is
+    /// <c>unknown-name</c>, and of one with a limit, which the checker does not read, <c>not supported</c>.
+    /// </summary>
+    private Typed MemberOf(KurzType type, string member, int line)
+    {
+        switch (type)
+        {
+            case ErrorType:
+                return Typed.Error;
+            case PrimitiveType { Kind: Primitive.String }:
+                if (member == "Bytes")
+                {
+                    return new Typed(new ListType(Types.Byte));
+                }
+
+                if (member == "Chars")
+                {
+                    return new Typed(new ListType(Types.Char));
+                }
+
+                break;
+            case ListType:
+                if (member == "Count")
+                {
+                    return new Typed(Types.Int);
+                }
+
+                break;
+            case DataType d:
+                {
+                    var field = d.Symbol.Field(member);
+                    if (field is not null)
+                    {
+                        return new Typed(SubstituteData(d, field.Type));
+                    }
+
+                    if (HasBody(d.Symbol))
+                    {
+                        NotSupported(line, "a method of a data type (D16)");
+                        return Typed.Error;
+                    }
+
+                    break;
+                }
+
+            case UnionType:
+                Report(ErrorIds.TypeMismatch, line, $"a `{type}` is one of its cases only after a `match` (D9)");
+                return Typed.Error;
+            case TypeParameterType { Symbol.HasLimit: true }:
+                NotSupported(line, "a member of a type parameter with a limit (T19)");
+                return Typed.Error;
+            default:
+                break;
+        }
+
+        Report(ErrorIds.UnknownName, line, $"a `{type}` has no member `{member}` (V10)");
+        return Typed.Error;
+    }
+
+    /// <summary>D16: whether the type or a base of it writes a body, whose members the checker does not read.</summary>
+    private static bool HasBody(DataSymbol symbol)
+    {
+        for (DataSymbol? s = symbol; s is not null; s = s.Base)
+        {
+            if (s.Declaration.Members is { Count: > 0 })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private Typed CheckIndex(IndexExpression i)
+    {
+        var target = CheckExpression(i.Target, null);
+        var index = CheckExpression(i.Index, Types.Int);
+        if (target.Type is ListType && !index.IsError && !Types.IsInteger(index.Type))
+        {
+            Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not a `{index.Type}` (M9, T2)");
+        }
+
+        switch (target.Type)
+        {
+            case ErrorType:
+                return Typed.Error;
+            case PrimitiveType { Kind: Primitive.String }:
+                Report(ErrorIds.StringIndex, i.Line, "a string is indexed through `.Bytes` or `.Chars` (T15)");
+                return Typed.Error;
+            case ListType l:
+                return new Typed(l.Element);
+            default:
+                Report(ErrorIds.TypeMismatch, i.Line, $"a `{target.Type}` is not indexed (M9)");
+                return Typed.Error;
+        }
+    }
+
+    // ---- operators -------------------------------------------------------------------------------
+
+    private Typed CheckUnary(UnaryExpression u, KurzType? expected)
+    {
+        if (u.Operator == TokenKind.Minus)
+        {
+            // L17: a `-` written directly before a literal belongs to the literal
+            switch (u.Operand)
+            {
+                case IntegerLiteral i:
+                    return CheckInteger(i.Value, i.Line, expected, negative: true);
+                case RealLiteral r:
+                    return CheckReal(r.Value, r.Line, expected, negative: true);
+                case UnitLiteral l:
+                    return CheckUnit(l.Value, l.Line, expected, negative: true);
+                default:
+                    break;
+            }
+        }
+
+        // L17: an operand made of literals takes the type the context reaches it with and folds in it, without T28's promotion, which is
+        // for the operand of a run-time operation; so `short s = -(5)` is a `short`, as `short s = -5` is
+        var literal = IsLiteralOnly(u.Operand);
+        var operand = CheckExpression(u.Operand, u.Operator != TokenKind.Bang && literal ? expected : null);
+        if (operand.IsError)
+        {
+            return Typed.Error;
+        }
+
+        switch (u.Operator)
+        {
+            case TokenKind.Minus:
+                if (Types.IsUnsigned(operand.Type) && !Types.IsNarrow(operand.Type))
+                {
+                    // T9 and T23 judge two operands; whether `-` on one `uint` or `ulong` value is an error or wraps no rule says. `-5U` and
+                    // `uint u = -1` are no such value: the `-` belongs to the literal (L17)
+                    NotSupported(u.Line, $"`-` on a `{operand.Type}`, which no rule gives a meaning");
+                    return Typed.Error;
+                }
+
+                if (Types.IsNumber(operand.Type) || Types.IsDuration(operand.Type))
+                {
+                    var type = Types.IsNarrow(operand.Type) && !literal ? Types.Int : (PrimitiveType)operand.Type; // T28: a narrow operand is promoted under every operator
+                    return Fold(type, u.Line, operand.Constant switch
+                    {
+                        IntegerConstant c => new IntegerConstant(-c.Value),
+                        RealConstant c => new RealConstant(-c.Value),
+                        DecimalConstant c => new DecimalConstant(-c.Value),
+                        _ => null,
+                    });
+                }
+
+                break;
+            case TokenKind.Bang:
+                if (operand.Type is PrimitiveType { Kind: Primitive.Bool })
+                {
+                    return new Typed(Types.Bool, operand.Constant is BoolConstant b ? new BoolConstant(!b.Value) : null);
+                }
+
+                break;
+            case TokenKind.Tilde:
+                if (Types.IsInteger(operand.Type))
+                {
+                    var type = Types.IsNarrow(operand.Type) && !literal ? Types.Int : (PrimitiveType)operand.Type;
+                    return new Typed(type, operand.Constant is IntegerConstant c ? new IntegerConstant(Types.IsUnsigned(type) ? Types.Range(type).Max - c.Value : -c.Value - 1) : null);
+                }
+
+                break;
+            default:
+                throw new InvalidOperationException(u.Operator.ToString());
+        }
+
+        Report(ErrorIds.TypeMismatch, u.Line, $"`{Operator(u.Operator)}` takes no `{operand.Type}` (T18, T22)");
+        return Typed.Error;
+    }
+
+    private static string Operator(TokenKind kind) => kind switch
+    {
+        TokenKind.Plus => "+",
+        TokenKind.Minus => "-",
+        TokenKind.Star => "*",
+        TokenKind.Slash => "/",
+        TokenKind.Percent => "%",
+        TokenKind.PlusPercent => "+%",
+        TokenKind.MinusPercent => "-%",
+        TokenKind.StarPercent => "*%",
+        TokenKind.EqualEqual => "==",
+        TokenKind.NotEqual => "!=",
+        TokenKind.Less => "<",
+        TokenKind.LessEqual => "<=",
+        TokenKind.Greater => ">",
+        TokenKind.GreaterEqual => ">=",
+        TokenKind.AmpersandAmpersand => "&&",
+        TokenKind.BarBar => "||",
+        TokenKind.Bang => "!",
+        TokenKind.Ampersand => "&",
+        TokenKind.Bar => "|",
+        TokenKind.Caret => "^",
+        TokenKind.Tilde => "~",
+        TokenKind.LessLess => "<<",
+        TokenKind.GreaterGreater => ">>",
+        TokenKind.QuestionQuestion => "??",
+        _ => kind.ToString(),
+    };
+
+    private enum OperatorClass
+    {
+        Arithmetic,
+        Wrapping,
+        Comparison,
+        Logical,
+        Bits,
+        Shift,
+    }
+
+    private static OperatorClass ClassOf(TokenKind kind) => kind switch
+    {
+        TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent => OperatorClass.Arithmetic,
+        TokenKind.PlusPercent or TokenKind.MinusPercent or TokenKind.StarPercent => OperatorClass.Wrapping,
+        TokenKind.EqualEqual or TokenKind.NotEqual or TokenKind.Less or TokenKind.LessEqual or TokenKind.Greater or TokenKind.GreaterEqual => OperatorClass.Comparison,
+        TokenKind.AmpersandAmpersand or TokenKind.BarBar => OperatorClass.Logical,
+        TokenKind.Ampersand or TokenKind.Bar or TokenKind.Caret => OperatorClass.Bits,
+        TokenKind.LessLess or TokenKind.GreaterGreater => OperatorClass.Shift,
+        _ => throw new InvalidOperationException(kind.ToString()),
+    };
+
+    /// <summary>
+    /// The two operands, with L17's reach: a written or expected type reaches both when both are
+    /// made of literals; a literal operand takes the type of the other operand when that one has
+    /// one; the count of a shift is an <c>int</c>.
+    /// </summary>
+    private (Typed Left, Typed Right) Operands(Expression left, Expression right, KurzType? expected, OperatorClass cls)
+    {
+        var leftLiteral = IsLiteralOnly(left);
+        var rightLiteral = IsLiteralOnly(right);
+        var reach = cls is OperatorClass.Comparison or OperatorClass.Logical ? null : expected;
+        if (cls == OperatorClass.Shift)
+        {
+            var l = CheckExpression(left, leftLiteral ? reach : null);
+            var r = CheckExpression(right, Types.Int);
+            return (l, r);
+        }
+
+        if (cls == OperatorClass.Logical)
+        {
+            return (CheckExpression(left, Types.Bool), CheckExpression(right, Types.Bool));
+        }
+
+        if (leftLiteral && !rightLiteral)
+        {
+            var r = CheckExpression(right, null);
+            var l = CheckExpression(left, Reach(r.Type));
+            return (l, r);
+        }
+
+        if (rightLiteral && !leftLiteral)
+        {
+            var l = CheckExpression(left, null);
+            var r = CheckExpression(right, Reach(l.Type));
+            return (l, r);
+        }
+
+        return (CheckExpression(left, leftLiteral ? reach : null), CheckExpression(right, rightLiteral ? reach : null));
+    }
+
+    private Typed CheckBinary(BinaryExpression b, KurzType? expected)
+    {
+        if (b.Operator == TokenKind.QuestionQuestion)
+        {
+            NotSupported(b.Line, "`??` (N4)");
+            CheckExpression(b.Left, null);
+            CheckExpression(b.Right, null);
+            return Typed.Error;
+        }
+
+        var cls = ClassOf(b.Operator);
+        var (left, right) = Operands(b.Left, b.Right, expected, cls);
+        if (left.IsError || right.IsError)
+        {
+            return cls is OperatorClass.Comparison or OperatorClass.Logical ? new Typed(Types.Bool) : Typed.Error;
+        }
+
+        var op = Operator(b.Operator);
+        switch (cls)
+        {
+            case OperatorClass.Arithmetic:
+                return Arithmetic(b, left, right);
+            case OperatorClass.Wrapping:
+                {
+                    if (!Types.IsInteger(left.Type) || !Types.IsInteger(right.Type))
+                    {
+                        Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes integer operands, not `{left.Type}` and `{right.Type}` (T12)");
+                        return Typed.Error;
+                    }
+
+                    var common = Types.CommonWrapping((PrimitiveType)left.Type, (PrimitiveType)right.Type);
+                    if (common is null)
+                    {
+                        Report(ErrorIds.SignMix, b.Line, $"`{op}` between a `{left.Type}` and a `{right.Type}` mixes the signedness (T9, T28)");
+                        return Typed.Error;
+                    }
+
+                    common = ConstantType(common, b, left, right); // L17: two literals of one type wrap in that type, `byte b = 200 +% 100` is 44
+                    if (left.Constant is IntegerConstant l && right.Constant is IntegerConstant r)
+                    {
+                        var raw = b.Operator switch
+                        {
+                            TokenKind.PlusPercent => l.Value + r.Value,
+                            TokenKind.MinusPercent => l.Value - r.Value,
+                            _ => l.Value * r.Value,
+                        };
+                        return new Typed(common, new IntegerConstant(Wrap(raw, common)));
+                    }
+
+                    return new Typed(common);
+                }
+
+            case OperatorClass.Comparison:
+                return Comparison(b, left, right);
+            case OperatorClass.Logical:
+                {
+                    if (left.Type is not PrimitiveType { Kind: Primitive.Bool } || right.Type is not PrimitiveType { Kind: Primitive.Bool })
+                    {
+                        Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes two `bool`s, not `{left.Type}` and `{right.Type}` (T18)");
+                        return new Typed(Types.Bool);
+                    }
+
+                    if (left.Constant is BoolConstant l && right.Constant is BoolConstant r)
+                    {
+                        return new Typed(Types.Bool, new BoolConstant(b.Operator == TokenKind.AmpersandAmpersand ? l.Value && r.Value : l.Value || r.Value));
+                    }
+
+                    return new Typed(Types.Bool);
+                }
+
+            case OperatorClass.Bits:
+                {
+                    if (!Types.IsInteger(left.Type) || !Types.IsInteger(right.Type))
+                    {
+                        Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` works on the bits of integers, not on `{left.Type}` and `{right.Type}` (T22)");
+                        return Typed.Error;
+                    }
+
+                    var common = Types.CommonInteger((PrimitiveType)left.Type, (PrimitiveType)right.Type);
+                    if (common is null)
+                    {
+                        Report(ErrorIds.SignMix, b.Line, $"`{op}` between a `{left.Type}` and a `{right.Type}` mixes the signedness (T9)");
+                        return Typed.Error;
+                    }
+
+                    common = ConstantType(common, b, left, right);
+                    if (left.Constant is IntegerConstant l && right.Constant is IntegerConstant r)
+                    {
+                        var value = b.Operator switch
+                        {
+                            TokenKind.Ampersand => l.Value & r.Value,
+                            TokenKind.Bar => l.Value | r.Value,
+                            _ => l.Value ^ r.Value,
+                        };
+                        return new Typed(common, new IntegerConstant(value));
+                    }
+
+                    return new Typed(common);
+                }
+
+            case OperatorClass.Shift:
+                {
+                    if (!Types.IsInteger(left.Type) || !Types.IsInteger(right.Type))
+                    {
+                        Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` shifts the bits of an integer by an integer count, not `{left.Type}` by `{right.Type}` (T22)");
+                        return Typed.Error;
+                    }
+
+                    // T22, T28: a narrow left operand is promoted to `int`, so its width is 32 and the count is taken modulo 32; two operands
+                    // made of literals fold in the type they take (L17). A shift is not arithmetic in the sense of T4 to T6: the bits that
+                    // leave the type are dropped at every width, and no fold of one is `constant-overflow`
+                    var type = IsLiteralOnly(b.Left) && IsLiteralOnly(b.Right) ? (PrimitiveType)left.Type : Types.IsNarrow(left.Type) ? Types.Int : (PrimitiveType)left.Type;
+                    if (left.Constant is IntegerConstant l && right.Constant is IntegerConstant r)
+                    {
+                        var width = Types.IsNarrow(type) ? 32 : Types.Width(type);
+                        var count = (int)(((r.Value % width) + width) % width);
+                        var value = b.Operator == TokenKind.LessLess ? Wrap(l.Value << count, type) : l.Value >> count;
+                        return new Typed(type, new IntegerConstant(value));
+                    }
+
+                    return new Typed(type);
+                }
+
+            default:
+                throw new InvalidOperationException(cls.ToString());
+        }
+    }
+
+    /// <summary>T18, T28, T9, T23, T13, T29: the type of <c>+ - * / %</c> on two operands, and the fold of two constants (T6, T25).</summary>
+    private Typed Arithmetic(BinaryExpression b, Typed left, Typed right)
+    {
+        var op = Operator(b.Operator);
+        PrimitiveType? type = null;
+        if (Types.IsNumber(left.Type) && Types.IsNumber(right.Type))
+        {
+            var l = (PrimitiveType)left.Type;
+            var r = (PrimitiveType)right.Type;
+            if (Types.IsInteger(l) && Types.IsInteger(r))
+            {
+                type = Types.CommonInteger(l, r);
+                if (type is null)
+                {
+                    Report(ErrorIds.SignMix, b.Line, $"`{op}` between a `{l}` and a `{r}` mixes the signedness (T9)");
+                    return Typed.Error;
+                }
+            }
+            else if (Types.IsDecimal(l) || Types.IsDecimal(r))
+            {
+                if (Types.IsFloating(l) || Types.IsFloating(r))
+                {
+                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `decimal` beside a `{(Types.IsFloating(l) ? l : r)}` (T18, T23)");
+                    return Typed.Error;
+                }
+
+                type = Types.Decimal;
+            }
+            else
+            {
+                type = l.Kind == Primitive.Double || r.Kind == Primitive.Double ? Types.Double : Types.Float;
+            }
+        }
+        else if (Types.IsTime(left.Type) && Types.IsTime(right.Type))
+        {
+            type = TimeArithmetic(b.Operator, (PrimitiveType)left.Type, (PrimitiveType)right.Type);
+        }
+
+        if (type is null)
+        {
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, T13)");
+            return Typed.Error;
+        }
+
+        type = ConstantType(type, b, left, right);
+        if (right.Constant is IntegerConstant { Value.IsZero: true } or DecimalConstant { Value: 0m } && b.Operator is TokenKind.Slash or TokenKind.Percent && (Types.IsInteger(type) || Types.IsDecimal(type)))
+        {
+            Report(ErrorIds.ConstantDivideByZero, b.Line, $"`{op}` by a constant zero can never succeed (T25)");
+            return Typed.Error;
+        }
+
+        if (left.Constant is null || right.Constant is null)
+        {
+            return new Typed(type);
+        }
+
+        switch (left.Constant, right.Constant)
+        {
+            case (IntegerConstant l, IntegerConstant r):
+                {
+                    var value = b.Operator switch
+                    {
+                        TokenKind.Plus => l.Value + r.Value,
+                        TokenKind.Minus => l.Value - r.Value,
+                        TokenKind.Star => l.Value * r.Value,
+                        TokenKind.Slash => BigInteger.Divide(l.Value, r.Value),
+                        _ => BigInteger.Remainder(l.Value, r.Value),
+                    };
+                    return Fold(type, b.Line, new IntegerConstant(value));
+                }
+
+            case (RealConstant l, RealConstant r):
+                {
+                    var value = b.Operator switch
+                    {
+                        TokenKind.Plus => l.Value + r.Value,
+                        TokenKind.Minus => l.Value - r.Value,
+                        TokenKind.Star => l.Value * r.Value,
+                        TokenKind.Slash => l.Value / r.Value,
+                        _ => Math.IEEERemainder(l.Value, r.Value) is var rem && double.IsNaN(rem) ? rem : l.Value % r.Value,
+                    };
+                    return new Typed(type, new RealConstant(type.Kind == Primitive.Float ? (float)value : value));
+                }
+
+            case (DecimalConstant l, DecimalConstant r):
+                try
+                {
+                    var value = b.Operator switch
+                    {
+                        TokenKind.Plus => l.Value + r.Value,
+                        TokenKind.Minus => l.Value - r.Value,
+                        TokenKind.Star => l.Value * r.Value,
+                        TokenKind.Slash => l.Value / r.Value,
+                        _ => l.Value % r.Value,
+                    };
+                    return new Typed(type, new DecimalConstant(value));
+                }
+                catch (OverflowException)
+                {
+                    Report(ErrorIds.ConstantOverflow, b.Line, $"the result of `{op}` leaves the range of `decimal` (T6)");
+                    return Typed.Error;
+                }
+
+            default:
+                return new Typed(type); // a mixed pair after a reach that left one side its own type: typed, not folded
+        }
+    }
+
+    /// <summary>L17: an expression made of literals is folded in the type its literals take, without T28's promotion, which is for the operands of a run-time operation; a conversion or another constant that is no literal is promoted (T28).</summary>
+    private static PrimitiveType ConstantType(PrimitiveType promoted, BinaryExpression b, Typed left, Typed right) =>
+        IsLiteralOnly(b.Left) && IsLiteralOnly(b.Right) && left.Constant is IntegerConstant && right.Constant is IntegerConstant && Types.IsInteger(left.Type) && Types.Same(left.Type, right.Type) ? (PrimitiveType)left.Type : promoted;
+
+    /// <summary>C8 judges <c>reversed-range</c> on ends that are expressions made only of literals; a named constant or a call is left to the run time (<c>reversed-range-at-run-time</c>).</summary>
+    private static bool IsLiteralEnd(Expression e) => IsLiteralOnly(e);
+
+    private static PrimitiveType? TimeArithmetic(TokenKind op, PrimitiveType l, PrimitiveType r)
+    {
+        var wide = Types.IsWideTime(l) || Types.IsWideTime(r);
+        var (ld, rd) = (Types.IsDuration(l), Types.IsDuration(r));
+        return (op, ld, rd) switch
+        {
+            (TokenKind.Plus, true, true) or (TokenKind.Minus, true, true) => wide ? Types.LongDuration : Types.Duration,
+            (TokenKind.Plus, false, true) or (TokenKind.Plus, true, false) or (TokenKind.Minus, false, true) => wide ? Types.LongTimestamp : Types.Timestamp,
+            (TokenKind.Minus, false, false) => wide ? Types.LongDuration : Types.Duration,
+            _ => null,
+        };
+    }
+
+    /// <summary>An integer or time constant in its type: <c>constant-overflow</c> when it leaves the range (T6).</summary>
+    private Typed Fold(PrimitiveType type, int line, Constant? constant)
+    {
+        if (constant is IntegerConstant c && (Types.IsInteger(type) || Types.IsTime(type)) && !Types.Fits(c.Value, type))
+        {
+            Report(ErrorIds.ConstantOverflow, line, $"the result leaves the range of `{type}` (T6)");
+            return Typed.Error;
+        }
+
+        return new Typed(type, constant);
+    }
+
+    private static BigInteger Wrap(BigInteger value, PrimitiveType type)
+    {
+        var width = Types.Width(type);
+        var modulus = BigInteger.One << width;
+        var wrapped = ((value % modulus) + modulus) % modulus;
+        if (Types.IsSigned(type) && wrapped >= (modulus >> 1))
+        {
+            wrapped -= modulus;
+        }
+
+        return wrapped;
+    }
+
+    private Typed Comparison(BinaryExpression b, Typed left, Typed right)
+    {
+        var op = Operator(b.Operator);
+        var equality = b.Operator is TokenKind.EqualEqual or TokenKind.NotEqual;
+        var ok = false;
+        if (Types.IsNumber(left.Type) && Types.IsNumber(right.Type))
+        {
+            var l = (PrimitiveType)left.Type;
+            var r = (PrimitiveType)right.Type;
+            if (Types.IsInteger(l) && Types.IsInteger(r))
+            {
+                if (Types.CommonInteger(l, r) is null)
+                {
+                    Report(ErrorIds.SignMix, b.Line, $"`{op}` between a `{l}` and a `{r}` mixes the signedness (T9)");
+                    return new Typed(Types.Bool);
+                }
+
+                ok = true;
+            }
+            else
+            {
+                ok = !((Types.IsDecimal(l) && Types.IsFloating(r)) || (Types.IsFloating(l) && Types.IsDecimal(r)));
+            }
+        }
+        else if (Types.IsTime(left.Type) && Types.IsTime(right.Type))
+        {
+            ok = Types.IsDuration(left.Type) == Types.IsDuration(right.Type);
+        }
+        else if (left.Type is PrimitiveType { Kind: Primitive.Char } && right.Type is PrimitiveType { Kind: Primitive.Char })
+        {
+            ok = true;
+        }
+        else if (equality)
+        {
+            ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
+                || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
+        }
+
+        if (!ok)
+        {
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, D3)");
+            return new Typed(Types.Bool);
+        }
+
+        var result = (left.Constant, right.Constant) switch
+        {
+            (IntegerConstant l, IntegerConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
+            (RealConstant l, RealConstant r) => double.IsNaN(l.Value) || double.IsNaN(r.Value) ? b.Operator == TokenKind.NotEqual : Compare(b.Operator, l.Value.CompareTo(r.Value), true),
+            (DecimalConstant l, DecimalConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
+            (CharConstant l, CharConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
+            (StringConstant l, StringConstant r) => Compare(b.Operator, string.CompareOrdinal(l.Value, r.Value), true),
+            (BoolConstant l, BoolConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
+            _ => (bool?)null,
+        };
+        return new Typed(Types.Bool, result is null ? null : new BoolConstant(result.Value));
+    }
+
+    private static bool? Compare(TokenKind op, int comparison, bool known) => !known ? null : op switch
+    {
+        TokenKind.EqualEqual => comparison == 0,
+        TokenKind.NotEqual => comparison != 0,
+        TokenKind.Less => comparison < 0,
+        TokenKind.LessEqual => comparison <= 0,
+        TokenKind.Greater => comparison > 0,
+        _ => comparison >= 0,
+    };
+
+    /// <summary>C8: the type of a range's numbers, and <c>reversed-range</c> for ends in the wrong order where both are expressions made only of literals, as the rule says.</summary>
+    private KurzType CheckRange(RangeExpression r)
+    {
+        var (start, end) = Operands(r.Start, r.End, null, OperatorClass.Arithmetic);
+        if (start.IsError || end.IsError)
+        {
+            return Types.Error;
+        }
+
+        if (!Types.IsInteger(start.Type) || !Types.IsInteger(end.Type))
+        {
+            Report(ErrorIds.TypeMismatch, r.Line, $"the ends of a range are integers, not `{start.Type}` and `{end.Type}` (C8)");
+            return Types.Error;
+        }
+
+        var type = Types.CommonInteger((PrimitiveType)start.Type, (PrimitiveType)end.Type);
+        if (type is null)
+        {
+            Report(ErrorIds.SignMix, r.Line, $"the ends of a range, a `{start.Type}` and a `{end.Type}`, mix the signedness (C8, T9)");
+            return Types.Error;
+        }
+
+        if (IsLiteralEnd(r.Start) && IsLiteralEnd(r.End) && start.Constant is IntegerConstant s && end.Constant is IntegerConstant e && e.Value < s.Value)
+        {
+            Report(ErrorIds.ReversedRange, r.Line, $"the range ends at {e.Value}, below its start {s.Value} (C8)");
+        }
+
+        return type;
+    }
+
+    // ---- lambdas and with --------------------------------------------------------------------------
+
+    /// <summary>F7, F11, F15: a lambda under the function type expected of it, or with its own type where its parameters are typed.</summary>
+    private Typed CheckLambda(LambdaExpression l, FunctionType? expected)
+    {
+        // after an error on the parameters the body is still read, with them error-typed, so that its own defects and the variables it reads count (E1)
+        var parameterTypes = new List<KurzType>();
+        var failed = false;
+        if (expected is not null && expected.Parameters.Count != l.Parameters.Count)
+        {
+            Report(ErrorIds.TypeMismatch, l.Line, $"the lambda takes {l.Parameters.Count} parameters where `{expected}` takes {expected.Parameters.Count} (F11)");
+            failed = true;
+            expected = null;
+        }
+
+        if (expected is not null)
+        {
+            foreach (var (p, type) in l.Parameters.Zip(expected.Parameters))
+            {
+                if (p.Type is null)
+                {
+                    parameterTypes.Add(type);
+                    continue;
+                }
+
+                var written = Resolve(p.Type);
+                if (!Types.IsError(written) && !Types.Same(written, type))
+                {
+                    Report(ErrorIds.TypeMismatch, p.Line, $"the parameter `{p.Name}` is a `{written}` where `{expected}` passes a `{type}` (F11)");
+                    written = Types.Error; // and the lambda with it, so that the call reports nothing more about it (E1)
+                }
+
+                parameterTypes.Add(written);
+            }
+        }
+        else
+        {
+            if (!failed && l.Parameters.Any(p => p.Type is null))
+            {
+                Report(ErrorIds.CannotInfer, l.Line, "the parameters of the lambda have no type, and nothing around it gives one (F7, T27)");
+                failed = true;
+            }
+
+            parameterTypes.AddRange(l.Parameters.Select(p => failed ? Types.Error : Resolve(p.Type!)));
+        }
+
+        var outer = frame;
+        frame = new Frame
+        {
+            IsLambda = true,
+            Outer = outer,
+            CapturedScope = outer.Scope,
+            ReturnType = expected?.Result,
+            Line = l.Line,
+            TypeParameters = outer.TypeParameters,
+            Reserved = outer.Reserved,
+        };
+        foreach (var (p, type) in l.Parameters.Zip(parameterTypes))
+        {
+            DeclareParameter(p.Name, type, p.Mut, p.Line);
+        }
+
+        KurzType result;
+        if (l.ExpressionBody is not null)
+        {
+            if (expected is null)
+            {
+                var body = CheckExpression(l.ExpressionBody, null);
+                result = body.Type;
+            }
+            else
+            {
+                result = expected.Result;
+                if (Types.IsVoid(result))
+                {
+                    // F11 types the lambda by its parameter, whose result is `void`: a value standing as its body is text no rule gives a
+                    // meaning, E4's `syntax`, as for the expression body of a `void` function (F2, F4; the reading in compiler/README.md)
+                    var body = CheckExpression(l.ExpressionBody, null);
+                    if (!Types.IsVoid(body.Type) && !body.IsError && Unwrap(l.ExpressionBody) is not CallExpression and not ElseExpression)
+                    {
+                        Report(ErrorIds.Syntax, l.Line, "the body of a lambda with a `void` result is a call or a call with `else` (E4, F11, F4)");
+                    }
+                }
+                else
+                {
+                    var body = CheckExpression(l.ExpressionBody, result, keepCases: result is UnionType);
+                    if (Types.IsVoid(body.Type))
+                    {
+                        Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires a `{result}` (F11, T1)");
+                    }
+                    else if (!body.IsError && !Types.IsError(result) && !Types.Assignable(body.Type, result))
+                    {
+                        Report(Types.MismatchId(body.Type, result), l.Line, $"the lambda's result is a `{body.Type}` where `{expected}` requires a `{result}` (F11, T1)");
+                    }
+                }
+            }
+        }
+        else
+        {
+            var flow = CheckBlock(l.BlockBody!);
+            result = frame.ReturnType ?? Types.Void;
+            if (flow == Flow.Completes && !SuccessIsVoid(result) && !Types.IsError(result))
+            {
+                Report(ErrorIds.MissingReturn, l.Line, "the end of the lambda can be reached without a `return` (F3, F7)");
+            }
+        }
+
+        ReportUnused(frame.Scope);
+        frame = outer;
+        return new Typed(failed || parameterTypes.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameterTypes, result));
+    }
+
+    /// <summary>D5: a copy of a data value with fields replaced.</summary>
+    private Typed CheckWith(WithExpression w)
+    {
+        var target = CheckExpression(w.Target, null);
+        if (target.IsError)
+        {
+            foreach (var a in w.Assignments)
+            {
+                CheckExpression(a.Value, null);
+            }
+
+            return Typed.Error;
+        }
+
+        if (target.Type is not DataType d)
+        {
+            Report(ErrorIds.TypeMismatch, w.Line, $"`with` copies a data value, not a `{target.Type}` (D5)");
+            foreach (var a in w.Assignments)
+            {
+                CheckExpression(a.Value, null);
+            }
+
+            return Typed.Error;
+        }
+
+        foreach (var a in w.Assignments)
+        {
+            var field = d.Symbol.Field(a.Field);
+            if (field is null)
+            {
+                Report(ErrorIds.UnknownName, a.Line, $"`{d.Symbol.Name}` has no field `{a.Field}` (D5)");
+                CheckExpression(a.Value, null);
+                continue;
+            }
+
+            var type = SubstituteData(d, field.Type);
+            var value = CheckExpression(a.Value, type);
+            if (!value.IsError && !Types.IsError(type) && !Types.Assignable(value.Type, type))
+            {
+                Report(Types.MismatchId(value.Type, type), a.Line, $"a `{value.Type}` where the field `{a.Field}` is a `{type}` (D5, T1)");
+            }
+        }
+
+        return new Typed(d);
+    }
+}
