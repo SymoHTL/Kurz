@@ -391,15 +391,21 @@ library and nothing that reaches the runtime's primitives or the allocator's ent
 allocate nothing, as the case below does over an `int`, which the test build keeps as calls (§2, an
 assumption there), so that the frame that does not fit is the program's in that build, its number is
 the program's line and the runner compares it as E3 says; the corpus holds no case whose overflow
-lands in the standard library's source *(assumed: the line from the tables for the call that did not
-fit, the name of a library file, which the naming of the standard library gives (§14), and the
-condition on the cases, as §6 marks it)*; in a release build built without its line tables
+lands in the standard library's source *(assumed: the innermost Kurz frame as the one read where the
+call that did not fit was the runtime's, the name of a library file, which the naming of the
+standard library gives (§14), and the condition on the cases, as §6 marks it; the line's reading
+from the tables is decided, as below)*; in a release build built without its line tables
 (§2, the answer decided there, its reading an assumption) the error
-line names no line and is `error: stack-overflow (no line tables: build with --lines)`, and the
+line names no line and is `error: stack-overflow (no line tables: build with --lines)`, unless a note below comes first, and the
 `Crashed` value's place holds the line 0 (§6, an assumption there as to both), since the line of a
 stack overflow comes from those tables (§6, decided there,
 with the assumptions its markers name; the owner, 2026-10-20), and no case pins that, since a case's
-header names a line (E3). An allocation that fails ends the whole process with the exit code 1 and a line on
+header names a line (E3). In either build, where the stack could not be walked, the file that
+holds the tables could not be read or the raising frame has no entry in them, the error line
+carries in place of the line the note that the run-time paragraph of chapter 12 gives for that
+case, the first the crash path meets where more than one holds, and the `Crashed` value's place
+holds the line 0 (§6, an assumption there as to the notes, their order and the line 0).
+An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value
