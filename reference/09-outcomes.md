@@ -381,8 +381,11 @@ process exits with the exit code 1 (O6). The exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
 reference's reading, on which the case stands), the innermost call's line in whichever source that
 call sits, a line of the standard library's source where that call was the library's, so a case pins
-a line of the program only where the call that did not fit was the program's *(assumed: the innermost
-call's line and the library's source, as §6 marks it)*. An allocation that fails ends the whole process with the exit code 1 and a line on
+a line of the program only where the call that did not fit was the program's, and every case of the
+corpus that pins a stack overflow pins a call of the program's own, as the case below does, so that
+its number is the program's line and the runner compares it as E3 says; the corpus holds no case
+whose overflow lands in the standard library's source *(assumed: the innermost call's line, the
+library's source and the cases that pin a call of the program's own, as §6 marks it)*. An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value

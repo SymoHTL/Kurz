@@ -213,10 +213,12 @@ grant. The compiler's memory guarantees cover the Kurz code outside `raw` blocks
 and assembly are unchecked, as a `raw` block is, and so is the foreign code the process runs beside
 them, the C library, the compiler's support library, the cipher library of TLS and a library the
 program takes through the C-ABI, so the guarantees hold while that code writes only the memory it
-owns *(assumed: the runtime's C and assembly and the foreign code outside the guarantees, as §3
-marks it)*. The grant is per package and written like `allow network`. *(the error and the program
-without a project file are a proposed reading)* No case shows a `raw` block that compiles: a grant
-sits in `project.kz`, and a case of the corpus is a single file.
+owns or was handed, inside the bounds it was given, and keeps the invariants the Kurz code relies on
+*(assumed: the runtime's C and assembly and the foreign code outside the guarantees, under the
+condition on what that code writes and keeps, as §3 marks it)*. The grant is per package and written
+like `allow network`. *(the error and the program without a project file are a proposed reading)* No
+case shows a `raw` block that compiles: a grant sits in `project.kz`, and a case of the corpus is a
+single file.
 
 Case: [memory/raw-not-allowed.kz](../corpus/memory/raw-not-allowed.kz)
 ```kurz
