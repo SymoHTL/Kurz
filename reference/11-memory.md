@@ -266,7 +266,7 @@ asm("nop")
 A function marked `naked` before its signature, `naked void Switch(...)`, gets no prologue and no
 epilogue from the compiler; its body is one `asm` statement (R11), and it compiles only in a package
 granted `allow raw` (§3, the owner, 2026-10-21); its body counts as a `raw` block (§3, an assumption
-there). One in a package without the grant, or in a program without a project file, is the compile
+there). One in a package without the grant, or in a program without a project file, which has no grant (R7), is the compile
 error `naked-not-allowed` *(assumed: the id, as §3 marks it; it stands here and not in the table of
 chapter 12)*. `naked` is a core word (L18).
 
