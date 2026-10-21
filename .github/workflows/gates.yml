@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  issues: read  # pr-findings lists the collection ticket at the review cap
   pull-requests: read
 
 jobs:
