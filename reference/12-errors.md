@@ -4,9 +4,9 @@ The errors the corpus cases expect. An id is what a corpus header names: `// exp
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
 raises when it runs (E3). The two tables share one namespace of ids. An id that no case can expect stands in its rule and not
 here: `invalid-source` (L1), since the tools read every case as UTF-8, and
-`naked-not-allowed` and `naked-body` (R12), `asm-operand` (R11) and `counted-pointee` (R10), since a
-case is a single file the compiler's front end reads, and it reads no `naked` function, no operand of an
-`asm` and no pointer type, as R10 to R12 say, while `raw-required` has its row, since its case, an `asm` with no operand, reads with no error; the one exception is
+`naked-not-allowed` and `naked-body` (R12) and `native-not-allowed` and `native-type` (R16), since
+every case runs through the compiler's front end, which reads no `naked` function and no `extern`
+block, as those rules say; the one exception is
 `print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21) and says in it why no case
 expects it.
 
@@ -39,8 +39,10 @@ expects it.
 | `reference-cycle` | R2, R4, R8, R9 | a class that can reach itself through strong fields, one of them `mut` |
 | `weak-not-nullable` | R5 | a `weak` type written without its `?` |
 | `weak-value` | R5 | `weak` in front of a type whose values are not instances of a class |
-| `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file |
-| `raw-required` | R11 | an `asm`, or a read or a write through a raw pointer (R10, whose rule says why no case shows one), outside a `raw` block and outside the body of a `naked` function |
+| `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file, but for a case of the corpus whose header line grants it |
+| `raw-required` | R10, R11, R13 | an `asm`, or a read or a write through a raw pointer (R10), outside a `raw` block and outside the body of a `naked` function; a read or a write of a top-level `static` (R13), a member that shows the memory of a string or a list (R15), or a call of a C function or through a C function type (R16, R17), outside a `raw` block |
+| `asm-operand` | R11 | a breach of the rules of an `asm`'s template and its operands: an operand the template does not use, a name in the template that no operand has, or a word or a register class that is not one of Rust's |
+| `counted-pointee` | R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), `SizeOf` of such a type, or a list's `Pointer` member or `List<T>.FromRaw` of such an element type (R15) |
 | `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
@@ -54,7 +56,7 @@ expects it.
 | `throw-needs-value` | O7 | a bare `throw` anywhere but in an arm of `else` |
 | `break-outside-loop` | C7 | `break` or `continue` with no loop around it, a lambda's body included |
 | `unknown-escape` | L16 | a backslash before a character that starts no escape, or before `u`, `U` or `x` without the digits it takes |
-| `static-state` | K18 | a `static mut` field, or a static field whose type is or holds a class |
+| `static-state` | K18, R13 | a `static mut` field, or a static field whose type is or holds a class, in every package (K18); a top-level `static mut` or `thread static mut` in a package without the grant `allow raw`, of a type a pointer cannot point to, without an initial value or with one that is no constant, or with `pub` before it (R13) |
 | `override-without-virtual` | K7 | `override` on a method that no base class declares, or that the nearest base class declaring it marks neither `virtual` nor `override` |
 | `hides-member` | K7 | a method of a derived class with the name and the parameter types, in order, of a base method it can see, without `override` |
 | `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |

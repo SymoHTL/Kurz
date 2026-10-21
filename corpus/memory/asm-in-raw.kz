@@ -1,0 +1,7 @@
+// expect: output
+// allow: raw
+// rules: R11
+
+raw {
+    asm("nop")
+}

@@ -1,0 +1,7 @@
+// expect: error raw-required at 7
+// allow: raw
+// rules: R13
+
+static mut long total = 0
+
+print(total)

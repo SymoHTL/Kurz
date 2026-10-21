@@ -481,8 +481,18 @@ Two unions with the same first case and the same other cases are one type, whate
 cases after the first, so `List<A | B | C>` and `List<A | C | B>` are one type. The owner chose this
 on 2026-10-21, against two types, the order being part of the type as a generic type is invariant in
 C#, under which a list of one cannot be passed where the other is required; the cost is that the
-compiler orders the cases after the first itself, for the numbers of their tags, and that a reader
-sees one type written two ways.
+compiler orders the cases after the first itself, by the numbers of their tags (below), and that a reader
+sees one type written two ways. A case's tag is the number its type has in the program, one number
+for each type of the program, so that the order the compiler gives the cases after the first is that
+of those numbers, and a case that goes to its own type in another union keeps its tag (§5, the
+owner, 2026-10-21); the cost is that the numbers may differ between two builds of a program. How the
+compiler gives out the numbers is its own, and no form of the language outside `raw` shows them, while
+code that reads a tag through a pointer, the runtime's among it, reads the numbers of its own build;
+the numbers are given out when the whole program is compiled, as every program is (§2); a tag is as
+wide as the largest number among its union's cases needs, a byte while a program has at most 256
+types, so that a union may take a wider tag than a count of its own cases would need; a case that widens or derives
+into another case takes that case's number, with its value converted *(assumed: as §5 marks
+them)*.
 
 Case: [data/union-order-after-the-first.kz](../corpus/data/union-order-after-the-first.kz)
 ```kurz

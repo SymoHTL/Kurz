@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-21
-digest: 9e59adbb866be8bfb872628eee371b9be62461ffa1f5d16a9ffd6d1ed6aedbdc
+generated: 2026-10-22
+digest: 91c7dd28c6e626d012c6123eb47bb58a1081af8b86417364c20d28177fa6cf1d
 ttl_days: 60
 metadata:
   type: reference
@@ -62,14 +62,14 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/kit.py` | 26 | 24 |
 | `tools/lint_ci.py` | 118 | 119 |
 | `tools/lint_knowledge.py` | 91 | 74 |
-| `tools/lint_reference.py` | 82 | 86 |
+| `tools/lint_reference.py` | 86 | 90 |
 | `tools/merge_pr.py` | 154 | 142 |
 | `tools/pr_gates.py` | 117 | 124 |
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 276 | 256 |
 | `tools/tree_gate.py` | 124 | 100 |
-| **total** | 1119 | 1050 |
+| **total** | 1123 | 1054 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -102,8 +102,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 112 |
-| Bullets of the Open section | 6 |
+| Occurrences of the marker *(assumed)* | 122 |
+| Bullets of the Open section | 7 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -115,13 +115,13 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 185 |
-| of them decided | 145 |
+| Rules in the reference | 190 |
+| of them decided | 150 |
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 353 |
-| Compile-error ids | 54 |
+| Corpus cases, none of them run | 370 |
+| Compile-error ids | 56 |
 | Run-time error ids | 7 |
 <!-- /generated:reference -->
 
@@ -141,11 +141,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 19 |
-| Pull requests merged | 16 |
+| Pull requests opened by a writer, or merged | 21 |
+| Pull requests merged | 17 |
 | Merged over red, with a recorded waiver | 11 |
-| Review findings posted: high | 84 |
-| Review findings posted: medium | 1169 |
-| Review findings posted: low | 1443 |
+| Review findings posted: high | 85 |
+| Review findings posted: medium | 1234 |
+| Review findings posted: low | 1519 |
 | Open HAZARD issues | 17 |
 <!-- /generated:forge -->

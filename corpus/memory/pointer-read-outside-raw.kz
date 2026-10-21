@@ -1,0 +1,6 @@
+// expect: error raw-required at 6
+// rules: R10, R14
+
+long m = 64
+p = Ptr<long>(m)
+print(p[0])

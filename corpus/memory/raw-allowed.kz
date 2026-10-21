@@ -1,0 +1,8 @@
+// expect: output
+// | 1
+// allow: raw
+// rules: R7
+
+raw {
+    print(1)
+}
