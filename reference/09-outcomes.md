@@ -372,28 +372,40 @@ Remove(2) else {
 }
 ```
 
-### O11 (decided, §6) A child's stack and the process's heap
+### O11 (decided, §2, §6) A child's stack and the process's heap
 
 An actor that exhausts its stack dies as it does for any exception (O6), with a `Reason` of the
 runtime's `data` type (O7); its parent lives under `on crash restart` and `on crash stop`, and crashes
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
 process exits with the exit code 1 (O6). The exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
-reference's reading, on which the case stands), read, where the frame that did not fit was the
-runtime's, as the line the innermost Kurz call stored, the call into the runtime, the owner's words
-holding with that reading (§6, an assumption there), in whichever source that call sits, the
-standard library's or the allocator's and the scheduler's Kurz code among them, a line of the
-standard library's source where that call was the library's, whose file the line does not name while
-§14 keeps that question open, so a case pins a line of the program only where that call was the
-program's, and every case of the corpus that pins a stack overflow pins a call of the program's own,
-with a recursion that calls nothing of the standard library and nothing that reaches the runtime's
-primitives or the allocator's entry, over values that allocate nothing, as the case below does over
-an `int`, which the test build keeps as calls (§2, an assumption there), so that the frame that does
-not fit is the program's in that build, its number is the program's line and the runner compares it
-as E3 says; the corpus holds no case whose overflow lands in the standard library's source
-*(assumed: the reading of the owner's words where the frame was the runtime's, the innermost Kurz
-call's line in whichever source, the library's source with its file open, and the condition on the
-cases, as §6 marks it)*. An allocation that fails ends the whole process with the exit code 1 and a line on
+reference's reading, on which the case stands), read from the line tables for the call that did
+not fit (§6), the innermost Kurz frame and its call into the runtime where that one was
+the runtime's, so that the owner's words hold with that reading, in whichever source that frame's
+function sits, a line of the standard library's source where that function was the library's, whose
+file the error line names (§6, decided there; the owner, 2026-10-21) and whose function the trace's
+first line names (§6), so a case pins a line of the
+program only where that frame was the program's, and every case of the corpus that pins a stack
+overflow pins a call of the program's own, with a recursion that calls nothing of the standard
+library and nothing that reaches the runtime's primitives or the allocator's entry, over values that
+allocate nothing, as the case below does over an `int`, which the test build keeps as calls (§2, an
+assumption there), so that the frame that does not fit is the program's in that build, its number is
+the program's line and the runner compares it as E3 says; the corpus holds no case whose overflow
+lands in the standard library's source *(assumed: the innermost Kurz frame as the one read where the
+call that did not fit was the runtime's, the name of a library file, which the naming of the
+standard library gives (§14), and the condition on the cases, as §6 marks it; the line's reading
+from the tables is decided, as below)*; in a release build built without its line tables
+(§2, the answer decided there, its reading an assumption) the error
+line names no line and is `error: stack-overflow (no line tables: build with --lines)`, unless a note below comes first, and the
+`Crashed` value's place holds the line 0 (§6, an assumption there as to both), since the line of a
+stack overflow comes from those tables (§6, decided there,
+with the assumptions its markers name; the owner, 2026-10-20), and no case pins that, since a case's
+header names a line (E3). In either build, where the stack could not be walked, the file that
+holds the tables could not be read or the raising frame has no entry in them, the error line
+carries in place of the line the note that the run-time paragraph of chapter 12 gives for that
+case, the first the crash path meets where more than one holds, and the `Crashed` value's place
+holds the line 0 (§6, an assumption there as to the notes, their order and the line 0).
+An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value

@@ -66,7 +66,18 @@ here: `invalid-source` (L1), since the tools read every case as UTF-8.
 
 The exceptions a program can raise, as the header of a case names them. The line is the one that
 holds the construct that raised: the `throw`, the arithmetic, the index, the call of the type, or
-the range of the loop.
+the range of the loop; a stack overflow, or an exception a primitive of the runtime raises, which is
+`print-failed` or a `stack-overflow` at a primitive's entry check, every other id of the table being
+raised by the program's code, a check or a `throw`, with its file and its line as constants (§6, an
+assumption there as to that list and the file), names no line in a release build built without its line
+tables (O11; §6 for the primitive's raise, an assumption there), and in either build where the stack
+could not be walked, the tables could not be read or the raising frame has no entry in them, each with
+its note in place of the line, the first the crash path meets where more than one holds: the walk's,
+the file's, the tables', then the entry's, so that a Windows release build built without `--lines`,
+whose PDB holds names and no lines, writes the note that names `--lines`, and a program whose PDB is
+missing writes the note that the tables could not be read (§6, an assumption there). A raise by code
+keeps its file and its line in each of these builds. The error line names the file and the line where
+a line is known (§6, decided there).
 
 | id | rules | meaning |
 |---|---|---|
@@ -75,7 +86,7 @@ the range of the loop.
 | `divide-by-zero` | T14, T25 | an integer or `decimal` division or remainder by zero |
 | `index-out-of-range` | T14, M9 | an index outside the collection |
 | `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |
-| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the one the innermost Kurz call stored, in whichever source that call sits, also where the frame that did not fit was the runtime's, its file open (§14), and every case that pins it pins a call of the program's own, with a recursion that reaches neither the standard library nor the runtime, kept as calls by the test build (all of it §6, an assumption there) |
+| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the line of the call that did not fit, read from the line tables (§6, decided there as to the tables), the innermost Kurz frame where that one was the runtime's, a line of the standard library's source where that frame's function was the library's, which the error line's file and the trace's first line name; every case that pins it pins a call of the program's own, with a recursion that reaches neither the standard library nor the runtime, kept as calls by the test build (the call, the frame, the library's source and the condition on the cases §6, an assumption there), and a release build built without its line tables names none (§2, the answer decided there, its reading an assumption) |
 
 ## The rules of this chapter
 
@@ -102,15 +113,22 @@ an error and never its message, which stays free to improve.
 
 No case: every corpus case that expects an error names its id and its line.
 
-### E3 (decided, §5, §8) How a case names the exception it expects
+### E3 (decided, §5, §6, §8) How a case names the exception it expects
 
 A corpus case that ends with an exception names it: `// expect: throws <id> at <line>`, with the id from
 the run-time table above and the line counted as for a compile error. The lint checks both as it
-checks a compile error's. So a corpus case for a reversed range (C8), an overflow in a test build (T5), a
+checks a compile error's. The error line names the file and the line (§6, decided there); a case pins the
+line, and the runner checks that the error line names the case's own file, so that a raise that lands
+in a library's source fails the case *(assumed: the runner's check of the file, proposed with the
+record of round 16)*. So a corpus case for a reversed range (C8), an overflow in a test build (T5), a
 conversion that loses its value (T20) or an index out of range (T14) passes only with that
 exception from that line, and a `throw` of the program is `thrown` at the line of the `throw`
 that raised; the bare `throw` of an `else` arm (O5) is such a `throw`, and nothing is raised a
-second time, because nothing catches.
+second time, because nothing catches. The trace of the calls that the runtime writes after the error
+line (§6, where its reading for a case is an assumption) is words to a case: no case pins it, and a
+case passes with or without it *(assumed: the reading of this rule for the trace, since the header
+names an id and a line and nothing of a trace, so that the runner reads the error line and nothing
+after it, proposed with the record of round 16 and not put to the owner)*.
 The program's exit code is pinned with it (O6). The owner chose this on 2026-10-03, against a
 header that says only that something is thrown; the cost is a word the runtime carries in every
 exception.
