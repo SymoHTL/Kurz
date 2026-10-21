@@ -1,0 +1,8 @@
+// expect: error static-state at 5
+// allow: raw
+// rules: R13
+
+pub static mut long total = 0
+raw {
+    total = 1
+}

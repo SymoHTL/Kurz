@@ -373,8 +373,9 @@ instance, mutable or not, lives in one actor's heap, which no other actor reache
 does one inside a `List<Button>`. The owner chose this on 2026-10-03, against one copy per actor.
 *(assumed: that the heap is the reason for an immutable class and for a value that holds one, and
 that a static field of a generic class exists once per type argument, as in C#)* K7's case shows
-a static field that is allowed. In a package granted `allow raw`, a `static mut` field takes R13's
-exception *(assumed: as §3 marks it)*.
+a static field that is allowed. R13's state at the top level of a file, in a package granted `allow
+raw`, is the one exception to the reason of this rule (§3, the owner, 2026-10-21), and a `static mut`
+field stays `static-state` there too *(assumed: as §3 marks it)*.
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
 

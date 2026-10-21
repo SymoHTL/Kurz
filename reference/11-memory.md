@@ -208,9 +208,10 @@ print(before.Left?.Key ?? 0)
 
 Code that touches raw memory sits in `raw` blocks. A `raw` block compiles only in a package that the
 project grants `allow raw`; one in a package without the grant is the compile error
-`raw-not-allowed`, and a program without a `project.kz` has no grant, but for a case of the corpus,
-a single file, which takes the grants of its header's `// allow:` line as a `project.kz` would give
-them to its package (§3, the owner, 2026-10-21). A `raw` block holds the machine instructions no other form of the language expresses, as
+`raw-not-allowed`, and a program without a `project.kz` has no grant. A case of the corpus, a single
+file, takes the grants of its header's `// allow:` line as a `project.kz` would give
+them to its package (§3, the owner, 2026-10-21); in any other file the line is a comment and grants
+nothing *(assumed: as §3 marks it)*. A `raw` block holds the machine instructions no other form of the language expresses, as
 inline assembly (§3, the owner, 2026-10-21), written as R11 says, and the reading and writing through a
 raw pointer (R10).
 The compiler's memory guarantees cover the Kurz code outside `raw` blocks; the runtime is Kurz (§2),
@@ -276,7 +277,13 @@ long m = 64
 p = Ptr<long>(m)
 q = p + 3
 print(q - p)
-print(long(q) - long(p))
+```
+
+Case: [memory/pointer-compare.kz](../corpus/memory/pointer-compare.kz)
+```kurz
+long m = 64
+p = Ptr<long>(m)
+q = p + 3
 print(q > p)
 ```
 
@@ -287,15 +294,13 @@ p = Ptr<long>(m)
 print(p[0])
 ```
 
-Case: [memory/string-pointer.kz](../corpus/memory/string-pointer.kz)
+Case: [memory/string-pointer-read.kz](../corpus/memory/string-pointer-read.kz)
 ```kurz
 s = "hi"
 raw {
     p = s.Pointer
-    print(p != null)
     print(p[1])
 }
-print(s.Bytes.Count)
 ```
 
 ### R11 (decided, §3) Inline assembly
@@ -360,17 +365,22 @@ every case runs, reports `syntax`, so that such a case fails there.
 ### R13 (decided, §3) State outside a function
 
 A package granted `allow raw` declares, at the top level of a file, state that every function of the
-package reaches, `static mut long freeList`, and state of which each thread has its own, `thread
-static mut long stackLimit`, both read and written inside a `raw` block alone, as Rust reads and
-writes a `static mut` only in an `unsafe` block (§3, the owner, 2026-10-21); K18's rule on a `static`
-field takes the exception. `thread` is a word only before `static` in such a declaration and a name
-everywhere else (L18; §3, the owner, 2026-10-21). Such a declaration holds what a pointer points to
-(R10), its initial value is a constant, each thread's value starts at that constant, and a `static
-mut` field of a class in such a package takes the same exception; a declaration of either kind in a
-package without the grant, of another type or with an initial value that is no constant is the
-compile error `static-state`, and a read or a write of one outside a `raw` block is `raw-required`
-(R10) *(assumed: as §3 marks them)*. No case declares a `thread static`: the compiler's front end,
-through which every case runs, reports `syntax` at it.
+package reaches, `static mut long freeList = 0`, and state of which each thread has its own, `thread
+static mut long stackLimit = 0`, both read and written inside a `raw` block alone, as Rust reads and
+writes a `static mut` only in an `unsafe` block (§3, the owner, 2026-10-21); this is the one
+exception to the reason of K18's rule, that no state is reached by every actor. `thread` is a word
+only before `static` in such a declaration and a name everywhere else (L18; §3, the owner,
+2026-10-21). Such state is its package's alone: no `pub` stands before it, and another package calls
+a function of its package (§3, the owner, 2026-10-21). Such a declaration holds what a pointer points
+to (R10) and takes an initial value, which is a constant; each thread's value starts at that
+constant; a declaration that no function reads is no `unused-variable` (V5), being state of its
+package and no variable; a `static` without `mut` at the top level of a file has no meaning there,
+`syntax` (E4) as on any variable; and a `static mut` field of a class stays `static-state` in such a
+package too (K18). A declaration of either kind in a package without the grant, of another type,
+without an initial value or with one that is no constant, or with `pub` before it, is the compile
+error `static-state`, and a read or a write of one outside a `raw` block is `raw-required` (R10)
+*(assumed: as §3 marks them)*. No case declares a `thread static`: the compiler's front end, through
+which every case runs, reports `syntax` at it.
 
 Case: [memory/static-mut-in-raw.kz](../corpus/memory/static-mut-in-raw.kz)
 ```kurz
@@ -402,6 +412,14 @@ static mut long total = 0
 print(total)
 ```
 
+Case: [memory/static-mut-pub.kz](../corpus/memory/static-mut-pub.kz)
+```kurz
+pub static mut long total = 0
+raw {
+    total = 1
+}
+```
+
 Case: [source/thread-as-name.kz](../corpus/source/thread-as-name.kz)
 ```kurz
 thread = 1
@@ -410,9 +428,9 @@ print(thread)
 
 ### R14 (decided, §3) The conversions of a pointer and the size of a type
 
-A conversion between pointers, and of a pointer to and from a number, takes the call form of T10's
+A conversion between pointers, and of a pointer to and from a `long`, takes the call form of T10's
 conversions: `Ptr<Block>(m)` is the pointer to a `Block` at the address `m` holds, `long(b)` the
-address of `b`, a field is reached through a pointer by `(*b).Next`, and the size of a type in bytes
+address `b` holds, a field is reached through a pointer by `(*b).Next`, and the size of a type in bytes
 is `SizeOf<Block>()`, as Rust converts with `as` and reads a size with `size_of::<T>()` (§3, the
 owner, 2026-10-21). `Ptr<T>` names the type `T*` in a conversion alone, `Ptr<T>(x)` takes a pointer
 to any pointee or a `long`, `long(p)` gives the address as a `long`, and `SizeOf<T>()` is a `long`
@@ -420,13 +438,22 @@ and takes what a pointer points to (R10); none of these reads or writes through 
 needs a `raw` block, while `(*b).Next` reads through one and needs it *(assumed: as §3 marks them)*. The untyped pointer is
 `void*`, through which nothing is read or written and which `p + n` does not offset; a conversion of
 another value is `type-mismatch` (T1), and `SizeOf` of a type a pointer cannot point to is
-`counted-pointee` *(assumed: as §3 marks them)*.
+`counted-pointee`. On a target whose pointer is narrower than a `long`, `Ptr<T>(x)` keeps the low
+bits of `x` and `long(p)` gives the address as a number that is never negative; a read or a write
+through `void*` and `p + n` on one are `type-mismatch`, `Ptr<void>(x)` gives a `void*` and
+`SizeOf<void>()` is `type-mismatch`; and another count of type arguments or of arguments in these
+forms is `syntax` (E4) *(assumed: as §3 marks them)*. `Ptr` and `SizeOf` are core words (L18; §3,
+the owner, 2026-10-21).
 
 Case: [memory/pointer-conversion.kz](../corpus/memory/pointer-conversion.kz)
 ```kurz
 long m = 64
 p = Ptr<long>(m)
 print(long(p))
+```
+
+Case: [memory/size-of.kz](../corpus/memory/size-of.kz)
+```kurz
 print(SizeOf<long>())
 ```
 
@@ -437,7 +464,15 @@ print(SizeOf<string>())
 
 Case: [memory/pointer-offset.kz](../corpus/memory/pointer-offset.kz)
 
+Case: [memory/pointer-compare.kz](../corpus/memory/pointer-compare.kz)
+
 Case: [memory/pointer-read-outside-raw.kz](../corpus/memory/pointer-read-outside-raw.kz)
+
+Case: [source/core-word-sizeof.kz](../corpus/source/core-word-sizeof.kz)
+```kurz
+SizeOf = 1
+print(SizeOf)
+```
 
 ### R15 (decided, §3) The memory of a string and a list
 
@@ -445,12 +480,25 @@ A string and a list show their memory inside a `raw` block alone: `s.Pointer` is
 bytes of a string, whose count `s.Bytes.Count` gives (T15), `l.Pointer` the pointer to the first
 element of a list, whose count is `l.Count`, and `string.FromRaw(p, n)` and `List<T>.FromRaw(p, n)`
 make a string of the `n` bytes and a list of the `n` elements at `p`, as Rust's `as_ptr`, `len` and
-`from_raw_parts` do (§3, the owner, 2026-10-21). The layout is the compiler's, defined in one place;
-such a member outside a `raw` block is the compile error `raw-required` (R10); and `FromRaw` takes
-over memory the allocator's entry gave (§2), which the string or the list frees as its own
-*(assumed: as §3 marks them)*.
+`from_raw_parts` do (§3, the owner, 2026-10-21). The layout is the compiler's, defined in one place.
+`s.Pointer` is a `byte*` and `l.Pointer` a `T*`; `l.Pointer` and `List<T>.FromRaw` take a `T` that a
+pointer can point to, another `T` being `counted-pointee` (R10); a write through `s.Pointer` is a
+misuse of `raw` code, a string being immutable; the pointer of an empty string or list is not `null`,
+and nothing is read or written through it; and such a member outside a `raw` block is the compile
+error `raw-required` (R10). `FromRaw` takes over memory the allocator's entry gave (§2), which the
+string or the list frees as its own; a list made so holds room for its `n` elements and takes more as
+it grows; bytes handed to `string.FromRaw` that are not UTF-8 are a misuse of `raw` code; and `n` of 0
+makes an empty string or list *(assumed: as §3 marks them)*.
 
 Case: [memory/string-pointer.kz](../corpus/memory/string-pointer.kz)
+```kurz
+s = "hi"
+raw {
+    print(s.Pointer != null)
+}
+```
+
+Case: [memory/string-pointer-read.kz](../corpus/memory/string-pointer-read.kz)
 
 ### R16 (decided, §2, §13) The functions of C
 
@@ -459,27 +507,30 @@ with no bodies, `extern "C" { long write(int fd, byte* buf, long n) }`, and a ca
 inside a `raw` block, as Rust declares them in an `unsafe extern "C"` block (§13, the owner,
 2026-10-21). A block names the library its functions come from after `in`, `extern "C" in "dbghelp"
 { ... }`, and a block without it takes what the target links by default, the C library among it
-(§13, the owner, 2026-10-21). A function of the package's own that takes the C calling convention
-needs the grant too (§2, §13). A declaration takes the types that the form of a function of the
-package's own takes (§2), and its last parameter may be `...`, for a C function that takes a
-variable count of arguments; a block in a package without the grant is the compile error
-`native-not-allowed`, a call of a declared function outside a `raw` block is `raw-required` (R10),
-and a declaration with a type that cannot cross to C is `native-type` *(assumed: as §13 marks them;
-`native-not-allowed` and `native-type` stand here and not in the table of chapter 12)*. `extern` is
+(§13, the owner, 2026-10-21). A function of the package's own that takes the C calling convention,
+`extern "C" int OnSample(int frames) { ... }`, needs the grant too (§2, §13). A declaration takes the
+types that this form takes (§2), and its last parameter may be `...`, for a C function that takes a
+variable count of arguments; an argument in the place of `...` takes those types but a number smaller
+than an `int`, a `bool` and a `float`, which C would widen and which the developer converts. A block
+in a package without the grant is the compile error `native-not-allowed`; a call of a declared
+function outside a `raw` block is `raw-required` (R10), so that a package that calls one needs `allow
+raw` beside `allow native` (R7); and a declaration with a type that cannot cross to C, or such an
+argument in the place of `...`, is `native-type` *(assumed: as §13 marks them; `native-not-allowed`
+and `native-type` stand here and not in the table of chapter 12)*. `extern` is
 a core word (L18).
 
 No case: a case of R16 needs an `extern` block, at which the compiler's front end, through which
 every case runs, reports `syntax`, so that such a case fails there.
 
-### R17 (decided, §13) The type of a C function
+### R17 (decided, §2, §13) The type of a C function
 
 A function's address passes to C as a value of a C function type, written as a function type (F11)
 after `extern "C"`, `extern "C" (int) => void`, whose value is the name of a function that takes the
 C calling convention, the package's own or one that a block of R16 declares, as Rust writes the type
 `extern "C" fn(i32)` (§13, the owner, 2026-10-21). Such a value is never `null`, its nullable form is
-`(extern "C" (int) => void)?`, a call through it stands inside a `raw` block, as a call of R16's
-functions does, it stands where a raw pointer stands (R10), in a field of `extern "C"` data among
-them, and a lambda or a function that does not take the C calling convention where such a type is
+`(extern "C" (int) => void)?`, a call through it outside a `raw` block is `raw-required` (R10), as a
+call of R16's functions is, it stands where a raw pointer stands (R10), in a field of C-layout data,
+`extern "C" data Point(int X, int Y)` (§2), among them, and a lambda or a function that does not take the C calling convention where such a type is
 required is `type-mismatch` (T1) *(assumed: as §13 marks them)*.
 
 No case: the type starts with `extern`, at which the compiler's front end, through which every case

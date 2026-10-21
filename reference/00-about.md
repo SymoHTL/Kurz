@@ -59,7 +59,7 @@ A case is a single file with no `project.kz`; its `// allow:` line gives it the 
 The ids of both kinds are listed in chapter 12. No tool runs a program or compares its output: the compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
 except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13) and which the suite checks for no diagnostic;
-an error of the type checker is checked only by reading and by the review. `tools/lint_reference.py` keeps the
+it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; what a program prints, and an error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.
 

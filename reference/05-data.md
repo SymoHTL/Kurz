@@ -484,8 +484,11 @@ C#, under which a list of one cannot be passed where the other is required; the 
 compiler orders the cases after the first itself, for the numbers of their tags, and that a reader
 sees one type written two ways. A case's tag is the number its type has in the program, one number
 for each type of the program, so that the order the compiler gives the cases after the first is that
-of those numbers, and a union value converted into another union keeps its tag (§5, the owner,
-2026-10-21); the cost is that the numbers differ between two builds of a program.
+of those numbers, and a case that goes to its own type in another union keeps its tag (§5, the
+owner, 2026-10-21); the cost is that the numbers differ between two builds of a program. How the
+compiler gives out the numbers is its own, and no program reads them; a case that widens or derives
+into another case takes that case's number, with its value converted *(assumed: as §5 marks
+them)*.
 
 Case: [data/union-order-after-the-first.kz](../corpus/data/union-order-after-the-first.kz)
 ```kurz

@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-21
-digest: c573479a25166e4404582a0f49d5c7d7b862ea7bc344bead710b0a161d3c3230
+digest: c7da96abf285ab959dc2a419c49a1e9497326a49e27f848363595816c07d85e5
 ttl_days: 60
 metadata:
   type: reference
@@ -62,14 +62,14 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/kit.py` | 26 | 24 |
 | `tools/lint_ci.py` | 118 | 119 |
 | `tools/lint_knowledge.py` | 91 | 74 |
-| `tools/lint_reference.py` | 84 | 88 |
+| `tools/lint_reference.py` | 85 | 89 |
 | `tools/merge_pr.py` | 154 | 142 |
 | `tools/pr_gates.py` | 117 | 124 |
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 276 | 256 |
 | `tools/tree_gate.py` | 124 | 100 |
-| **total** | 1121 | 1052 |
+| **total** | 1122 | 1053 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -102,7 +102,7 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 118 |
+| Occurrences of the marker *(assumed)* | 121 |
 | Bullets of the Open section | 7 |
 <!-- /generated:design -->
 
@@ -120,7 +120,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 365 |
+| Corpus cases, none of them run | 370 |
 | Compile-error ids | 56 |
 | Run-time error ids | 7 |
 <!-- /generated:reference -->
@@ -141,11 +141,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 20 |
+| Pull requests opened by a writer, or merged | 21 |
 | Pull requests merged | 17 |
 | Merged over red, with a recorded waiver | 11 |
-| Review findings posted: high | 84 |
-| Review findings posted: medium | 1179 |
-| Review findings posted: low | 1459 |
+| Review findings posted: high | 85 |
+| Review findings posted: medium | 1216 |
+| Review findings posted: low | 1491 |
 | Open HAZARD issues | 17 |
 <!-- /generated:forge -->

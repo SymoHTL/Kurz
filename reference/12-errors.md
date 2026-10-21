@@ -39,8 +39,8 @@ expects it.
 | `reference-cycle` | R2, R4, R8, R9 | a class that can reach itself through strong fields, one of them `mut` |
 | `weak-not-nullable` | R5 | a `weak` type written without its `?` |
 | `weak-value` | R5 | `weak` in front of a type whose values are not instances of a class |
-| `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file |
-| `raw-required` | R10, R11, R13 | an `asm`, a read or a write through a raw pointer (R10), a read or a write of a top-level `static` (R13), a member that shows the memory of a string or a list (R15), or a call of a C function or through a C function type (R16, R17), outside a `raw` block and outside the body of a `naked` function |
+| `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file, but for a case of the corpus whose header line grants it |
+| `raw-required` | R10, R11, R13 | an `asm`, or a read or a write through a raw pointer (R10), outside a `raw` block and outside the body of a `naked` function; a read or a write of a top-level `static` (R13), a member that shows the memory of a string or a list (R15), or a call of a C function or through a C function type (R16, R17), outside a `raw` block |
 | `asm-operand` | R11 | a breach of the rules of an `asm`'s template and its operands: an operand the template does not use, a name in the template that no operand has, or a word or a register class that is not one of Rust's |
 | `counted-pointee` | R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), or `SizeOf` of such a type |
 | `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
@@ -56,7 +56,7 @@ expects it.
 | `throw-needs-value` | O7 | a bare `throw` anywhere but in an arm of `else` |
 | `break-outside-loop` | C7 | `break` or `continue` with no loop around it, a lambda's body included |
 | `unknown-escape` | L16 | a backslash before a character that starts no escape, or before `u`, `U` or `x` without the digits it takes |
-| `static-state` | K18, R13 | a `static mut` field, or a static field whose type is or holds a class, but for a `static mut` field of a type a pointer can point to in a package granted `allow raw`; a top-level `static` declaration in a package without that grant, of another type, or with an initial value that is no constant (R13) |
+| `static-state` | K18, R13 | a `static mut` field, or a static field whose type is or holds a class, in every package (K18); a top-level `static mut` or `thread static mut` in a package without the grant `allow raw`, of a type a pointer cannot point to, without an initial value or with one that is no constant, or with `pub` before it (R13) |
 | `override-without-virtual` | K7 | `override` on a method that no base class declares, or that the nearest base class declaring it marks neither `virtual` nor `override` |
 | `hides-member` | K7 | a method of a derived class with the name and the parameter types, in order, of a base method it can see, without `override` |
 | `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |

@@ -564,10 +564,12 @@ public sealed class CheckerTests
     {
         // R13: a `static mut` at the outermost level of a file is chapter 11's state outside a function, which the checker does not read;
         // the uses of its name carry no further error (E1). Inside a block or a function a `static` has no meaning on a variable (V2, V4)
-        Assert.Equal(["1: a `static` declaration at the top level of a file (R13)"], NotSupported("static mut long total = 0\nprint(total)"));
-        Assert.Equal(["2: a `static` declaration at the top level of a file (R13)"], NotSupported("print(1)\nstatic mut long total = 0\ntotal = 2"));
+        Assert.Equal(["1: a `static mut` declaration at the top level of a file (R13)"], NotSupported("static mut long total = 0\nprint(total)"));
+        Assert.Equal(["2: a `static mut` declaration at the top level of a file (R13)"], NotSupported("print(1)\nstatic mut long total = 0\ntotal = 2"));
+        Assert.Equal(["1: a `static mut` declaration at the top level of a file (R13)"], NotSupported("static mut long total = 0\n\nvoid Add() {\n    total = total + 1\n}\n\nAdd()")); // a use inside a function, outside `raw`
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("if true {\n    static mut long total = 0\n    print(total)\n}"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("void F() {\n    static mut long total = 0\n    print(total)\n}\n\nF()"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("static long total = 0\nprint(total)")); // R13 states `static mut` alone
     }
 
     [Fact]
@@ -577,6 +579,10 @@ public sealed class CheckerTests
         // the pointer a conversion gives carries no further error (E1), through an offset and a conversion back among them
         Assert.Equal(["2: `Ptr` (R14)"], NotSupported("long m = 64\np = Ptr<long>(m)\nprint(long(p + 3) - long(p))"));
         Assert.Equal(["1: `SizeOf` (R14)"], NotSupported("print(SizeOf<string>())"));
+        // another count of type arguments or arguments is no form of R14, `syntax` (E4)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(SizeOf())"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(SizeOf<long>(1))"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("long m = 64\nprint(long(Ptr(m)))"));
     }
 
     [Fact]

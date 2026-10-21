@@ -1,0 +1,5 @@
+// expect: output
+// | 8
+// rules: R14
+
+print(SizeOf<long>())
