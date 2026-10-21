@@ -110,6 +110,8 @@ public sealed class LexerTests
     [InlineData("90min", "90", "min")]
     [InlineData("100000days", "100000", "days")]
     [InlineData("1500ms", "1500", "ms")]
+    [InlineData("250us", "250", "us")]
+    [InlineData("1500ns", "1500", "ns")]
     [InlineData("0.0000000001s", "0.0000000001", "s")]
     [InlineData(".5h", ".5", "h")]
     public void Unit_literals_keep_their_number_and_unit(string program, string number, string unit)

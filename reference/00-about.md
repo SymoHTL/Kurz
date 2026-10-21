@@ -57,16 +57,19 @@ by reading it against the rules, and by the review.
 
 ## What every case relies on
 
-### A1 (assumed, §8) `print`
+### A1 (assumed, §6, §8) `print`
 
 `print(value)` writes the text of the value and a line break to standard output; the line break
 is one line feed on every platform (the owner, 2026-10-10, against the platform's own line ending,
 under which the output of a program differs by the machine that runs it; the cost is that a tool on
 Windows that expects the two-byte line break in a program's output reads bare line feeds). The corpus needs
 one way to show a result, and the record's samples use this word. The naming of the standard
-library is open (record, section 14), so the word can change.
+library is open (record, section 14), so the word can change. A `print` whose write fails raises the
+run-time error `print-failed` (§6, the owner, 2026-10-21), at the line of the `print` where the executable
+has its line tables (§6, an assumption there).
 
-No case: every case that expects output shows it.
+No case: every case that expects output shows it, and no case can make a write of standard output
+fail, which `print-failed` needs.
 
 ### A2 (assumed, §8) The text of a value
 
@@ -326,8 +329,8 @@ and a unit whose count is zero left out: `90min` shows `1h 30min`, `3600s` shows
 below a second shows its milliseconds, `1500ms` as `1s 500ms`. Zero shows `0ms`. A remainder
 below a millisecond shows its microseconds and nanoseconds the same way, `1s 250us` and `1us 500ns`,
 when no formatting is chosen (the owner, 2026-10-10, against rounding or cutting to milliseconds); a
-formatting that can be chosen is a question the record lists (section 14), as is whether `us` and
-`ns` are units of a literal (L14). A negative duration
+formatting that can be chosen is a question the record lists (section 14); `us` and `ns` are units of a
+literal as well (L14). A negative duration
 shows `-` before the whole: `-1h 30min`. The case of A8 shows the split for `90min`. A size is an integer (L14) and shows its digits, `1.5kb`
 as `1536`, which the case of L14 shown below prints as well. The owner
 accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is assumed
@@ -346,6 +349,14 @@ Case: [source/unit-literal-fraction.kz](../corpus/source/unit-literal-fraction.k
 print(1.5s)
 print(0.5h)
 print(1.5kb)
+```
+
+Case: [source/unit-literal-micro.kz](../corpus/source/unit-literal-micro.kz)
+```kurz
+print(250us)
+print(1500ns)
+print(0.5us)
+print(1us)
 ```
 
 Case: [values/text-duration.kz](../corpus/values/text-duration.kz)

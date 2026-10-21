@@ -52,9 +52,12 @@ the shapes E4 leaves to it; a corpus case that expects an id of a chapter it doe
 checked for parsing clean and for getting `not supported` from the checker, its expectation read
 against the rules as `reference/00-about.md` says. The second kind, `not supported`, names a
 construct the reference states and this directory does not read; it carries no id, so it can
-never pass for an error a case expects. The front end produces it nowhere, since every form of
-chapters 1 to 11 is read; the checker produces it for the constructs its section lists, and says
-nothing else about a program that uses one. Both sides raise `syntax`, so a case that expects it
+never pass for an error a case expects. The front end produces it nowhere: it reads every form of
+chapters 1 to 11 but those of R10 to R12, and at a pointer type, `&x`, `*p` and a `naked`
+function it reports `syntax` in its place, so that a program holding one gets that id, and
+`asm(...)` parses as a call. No corpus case holds such a form but `memory/asm-outside-raw.kz`,
+whose `asm` parses clean. The checker produces it for the constructs its section lists, and
+says nothing else about a program that uses one. Both sides raise `syntax`, so a case that expects it
 is the front end's when the front end reports an error on it, and the checker's when the front end
 reads it clean. One such case, `data/flags-match.kz`, expects a `syntax` that depends on the type
 of the matched value (D13), which the front end cannot see and the checker does not read; the
@@ -197,7 +200,7 @@ A program that uses one of these gets `not supported` at the construct's line an
 what stands inside the construct is still read, with its diagnostics dropped, so that the variables
 it uses count as used. The list, which is the complete one: a `class`, an `interface`, an `enum`
 or a `flags` type and a value of one (chapter 7, D12, D13, and the A-rules of their text); `null`,
-a nullable type, `?.` and `??` (chapter 4); `weak` (R3, R5), a `raw` block (R7) and `use` (F10);
+a nullable type, `?.` and `??` (chapter 4); `weak` (R3, R5), a `raw` block (R7), `asm` (R11) and `use` (F10);
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; `Map` (M8, M9, M10), an assignment into an index or into a path through one, a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`

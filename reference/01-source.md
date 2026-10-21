@@ -128,9 +128,10 @@ a = 1
 print(a); print(a + 1)
 ```
 
-### L6 (decided, §8) Interpolation is always on
+### L6 (decided, §8) Interpolation is on in every string but an `asm` template
 
 Inside a string literal, `{expression}` is replaced by the text (A2 to A15) of the expression's value.
+The template of an `asm` statement is the one exception: there `{name}` names an operand (R11, §3).
 
 Case: [source/interpolation.kz](../corpus/source/interpolation.kz)
 ```kurz
@@ -482,12 +483,22 @@ this on 2026-10-03, against the keywords of C#, which would take `goto`, `unsafe
 from programs for nothing; the cost is that the list has to be kept. Four words were not in the
 list the owner saw: `equal` and `by` are core words by K8 (the owner, 2026-10-02), `this` is the
 call of the primary constructor (K14) and `virtual` the marker of K7 (both the owner, 2026-10-04).
-The names of the built-in types are core words as well (L19).
+The names of the built-in types are core words as well (L19). `asm` and `naked`, which R11 and R12
+use as syntax, and `extern`, which the boundary with C uses (§2), are core words too, and `out`,
+`inout`, `lateout`, the register classes and `clobber_abi`, the other words of an `asm`'s operands
+(R11), are words inside an `asm` alone (§3, the owner, 2026-10-21), as are `inlateout`, `const`,
+`sym`, `label` and `options` *(assumed: as §3 marks them)*; `in` is a core word already.
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
 equal = 1
 print(equal)
+```
+
+Case: [source/core-word-naked.kz](../corpus/source/core-word-naked.kz)
+```kurz
+naked = 1
+print(naked)
 ```
 
 ### L19 (decided, §8) The names of the built-in types are core words
@@ -582,8 +593,10 @@ print(text)
 
 ### L14 (decided, §4) Literals with a unit
 
-A number directly followed by a unit is a duration or a size. The list of units is fixed: `ms`, `s`,
-`min`, `h` and `days` make a duration (T13); `kb`, `mb` and `gb` make a number of bytes, an integer
+A number directly followed by a unit is a duration or a size. The list of units is fixed: `ns`, `us`,
+`ms`, `s`, `min`, `h` and `days` make a duration (T13), `ns` and `us` by the owner's choice of 2026-10-21,
+against the units as they were, under which the units that the text of a duration (A12) writes below a
+millisecond were no units of a literal; `kb`, `mb` and `gb` make a number of bytes, an integer
 literal (L10) in steps of 1024. The number is a decimal integer or a decimal fraction in the forms of L11, `.5h` included, with `_`
 between its digits: `1.5s` is 1500 ms, `0.5h` is 30 min and `1.5kb` is 1536. A fraction that does
 not fall on a whole nanosecond, or on a whole byte before `kb`, `mb` and `gb`, is the compile error
@@ -594,7 +607,16 @@ compiler). The type of a duration literal is T29's. A number with an exponent (L
 `syntax` as well, since the number is a decimal integer or a decimal fraction and nothing else; and
 the unit is read before any suffix of L11, the longest unit that matches, so `1ms` is a millisecond
 and not `1m` followed by `s`, and only a suffix the writer spells before a unit, `1Ums`, is `syntax`
-(the owner, 2026-10-10, confirming the reading proposed after the review of round 13).
+(the owner, 2026-10-10, confirming the reading proposed after the review of round 13). By that reading
+`1us` is a microsecond and not `1u` followed by `s`.
+
+Case: [source/unit-literal-micro.kz](../corpus/source/unit-literal-micro.kz)
+```kurz
+print(250us)
+print(1500ns)
+print(0.5us)
+print(1us)
+```
 
 Case: [values/text-duration-sub-millisecond.kz](../corpus/values/text-duration-sub-millisecond.kz)
 ```kurz

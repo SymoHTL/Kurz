@@ -1,0 +1,5 @@
+// expect: error raw-required at 4
+// rules: R11
+
+asm("nop")
+// an `asm` outside a `raw` block and outside a `naked` function is raw-required (R11); the front end parses this line as a call with no error, and the id is raised after the parse
