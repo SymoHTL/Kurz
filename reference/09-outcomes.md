@@ -396,7 +396,7 @@ call that did not fit was the runtime's, the name of a library file, which the n
 standard library gives (§14), and the condition on the cases, as §6 marks it; the line's reading
 from the tables is decided, as below)*; in a release build built without its line tables
 (§2, the answer decided there, its reading an assumption) the error
-line names no line and is `error: stack-overflow (no line tables: build with --lines)`, and the
+line names no line and is `error: stack-overflow (no line tables: build with --lines)`, unless a note below comes first, and the
 `Crashed` value's place holds the line 0 (§6, an assumption there as to both), since the line of a
 stack overflow comes from those tables (§6, decided there,
 with the assumptions its markers name; the owner, 2026-10-20), and no case pins that, since a case's
