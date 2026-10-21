@@ -73,23 +73,28 @@ expects it.
 
 The exceptions a program can raise, as the header of a case names them. The line is the one that
 holds the construct that raised: the `throw`, the arithmetic, the index, the call of the type, or
-the range of the loop; a stack overflow, or an exception a primitive of the runtime raises, which is
-`print-failed` or a `stack-overflow` at a primitive's entry check, every other id of the table being
-raised by the program's code, a check or a `throw`, with its file and its line as constants, or, in a
-test build, which keeps the program's checks in the runtime's own code (§2, decided there), by a check
-of that code, which ends the process as a stack fault inside the allocator or the scheduler does
-(O11), at the line a primitive's raise names (§6, an assumption there as to that list and the file,
-decided there as to the runtime's check), names no line in a release build built without its line
+the range of the loop. Every id of the table but `print-failed` and a `stack-overflow` at a
+primitive's entry check is raised by the program's code, a check or a `throw`, with its file and its
+line as constants (§6, an assumption there as to that list and the file), or in a test build by a
+check of the runtime's own code (below). A stack overflow, or an exception a primitive of the
+runtime raises, which is `print-failed` or a `stack-overflow` at a primitive's entry check, names no
+line in a release build built without its line
 tables (O11; §6 for the primitive's raise, an assumption there), and in either build where the stack
 could not be walked, the tables could not be read or the raising frame has no entry in them, each with
 its note in place of the line, the first the crash path meets where more than one holds: the walk's,
 the file's, the tables', then the entry's, so that a Windows release build built without `--lines`,
 whose PDB holds names and no lines, writes the note that names `--lines`, and a program whose PDB is
 missing writes the note that the tables could not be read (§6, an assumption there). A raise by code
-keeps its file and its line in each of these builds. The error line names the file and the line where
-a line is known (§6, decided there). The error line of a `throw` ends with a colon, and the text of
-the thrown value stands on the line below it, before the trace; the error line of every other id
-ends with its line (§6, decided there).
+keeps its file and its line in each of these builds. In a test build, which keeps the program's
+checks in the runtime's own code (§2, decided there), a check of that code is no raise by code: it
+names the line a primitive's raise names, with the same notes where that line is not known, and it
+ends the process as a stack fault inside the allocator or the scheduler does (O11), on Linux and on
+Windows (§6, decided there as to the line and the end of the process, an assumption there as to the
+rest). The error line names the file and the line where a line is known (§6, decided there). The
+error line of a `throw` ends with a colon, and the text of the thrown value stands below it,
+starting on the line below it, before the trace (§6, decided there), written as it is, its own line
+breaks kept, and an empty text as an empty line (§6, an assumption there); the error line of every
+other id ends with its line, or with the note in its place (§6, decided there).
 
 | id | rules | meaning |
 |---|---|---|
