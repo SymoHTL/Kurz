@@ -379,7 +379,10 @@ runtime's `data` type (O7); its parent lives under `on crash restart` and `on cr
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
 process exits with the exit code 1 (O6). The exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
-reference's reading, on which the case stands). An allocation that fails ends the whole process with the exit code 1 and a line on
+reference's reading, on which the case stands), the innermost call's line in whichever source that
+call sits, a line of the standard library's source where that call was the library's, so a case pins
+a line of the program only where the call that did not fit was the program's *(assumed: the innermost
+call's line and the library's source, as §6 marks it)*. An allocation that fails ends the whole process with the exit code 1 and a line on
 standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value
