@@ -486,7 +486,8 @@ call of the primary constructor (K14) and `virtual` the marker of K7 (both the o
 The names of the built-in types are core words as well (L19). `asm` and `naked`, which R11 and R12
 use as syntax, and `extern`, which the boundary with C uses (§2), are core words too, and `out`,
 `inout`, `lateout`, the register classes and `clobber_abi`, the other words of an `asm`'s operands
-(R11), are words inside an `asm` alone (§3, the owner, 2026-10-21).
+(R11), are words inside an `asm` alone (§3, the owner, 2026-10-21), as are `inlateout`, `const`,
+`sym`, `label` and `options` *(assumed: as §3 marks them)*; `in` is a core word already.
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz

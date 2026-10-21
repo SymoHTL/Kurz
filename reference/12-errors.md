@@ -4,8 +4,9 @@ The errors the corpus cases expect. An id is what a corpus header names: `// exp
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
 raises when it runs (E3). The two tables share one namespace of ids. An id that no case can expect stands in its rule and not
 here: `invalid-source` (L1), since the tools read every case as UTF-8, and
-`naked-not-allowed` (R12), since the compiler's front end, through which every case runs, reports `syntax` at a
-`naked` function, as R12 says; the one exception is
+`naked-not-allowed` and `naked-body` (R12), `asm-operand` (R11) and `counted-pointee` (R10), since a
+case is a single file the compiler's front end reads, and it reads no `naked` function, no operand of an
+`asm` and no pointer type, as R10 to R12 say, while `raw-required` has its row, since its case, an `asm` with no operand, reads with no error; the one exception is
 `print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21) and says in it why no case
 expects it.
 
@@ -91,7 +92,7 @@ a line is known (§6, decided there).
 | `divide-by-zero` | T14, T25 | an integer or `decimal` division or remainder by zero |
 | `index-out-of-range` | T14, M9 | an index outside the collection |
 | `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |
-| `stack-overflow` | O11 | the stack of the actor is exhausted; the line is the line of the call that did not fit, read from the line tables (§6, decided there as to the tables), the innermost frame outside the runtime where that one was the runtime's (§6, the owner, 2026-10-21), a line of the standard library's source where that frame's function was the library's, which the error line's file and the trace's first line name; every case that pins it pins a call of the program's own, with a recursion that reaches neither the standard library nor the runtime, kept as calls by the test build (the call confirmed by the owner on 2026-10-10, as O11 cites it; the library's source and the condition on the cases §6, an assumption there), and a release build built without its line tables names none (§2, the answer decided there, its reading an assumption) |
+| `stack-overflow` | O11 | the stack of the actor is exhausted, on Linux and on Windows (on WebAssembly the program ends, §2, and on the ESP32 models and AVR §6 says what an overflow does); the line is the line of the call that did not fit, read from the line tables (§6, decided there as to the tables), the innermost frame outside the runtime where that one was the runtime's (§6, the owner, 2026-10-21), a line of the standard library's source where that frame's function was the library's, which the error line's file and the trace's first line name; every case that pins it pins a call of the program's own, with a recursion that reaches neither the standard library nor the runtime, kept as calls by the test build (the call confirmed by the owner on 2026-10-10, as O11 cites it; the library's source and the condition on the cases §6, an assumption there), and a release build built without its line tables names none (§2, the answer decided there, its reading an assumption) |
 | `print-failed` | A1 | a `print` whose write call returned an error, a closed pipe, whose signal the runtime sets to ignored at its start (§6, an assumption there), a closed handle or a full disk, at the line of the `print` and with none in a release build built without its line tables (§6, decided there as to the id and the row, an assumption there as to the line) (no case: a case has no form that makes a write of standard output fail) |
 
 ## The rules of this chapter

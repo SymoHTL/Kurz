@@ -250,6 +250,8 @@ print(value)
 An exception is for a situation the function cannot recover from. There is no `catch`. An
 exception ends the actor it happens in; top-level code is the root actor, so an exception there
 ends the program with the exit code 1 (the owner, 2026-10-04, against a distinct code such as 70).
+On AVR an exception in any actor ends the program, since nothing there walks the actor's frames
+(§6, the owner, 2026-10-21).
 What was printed before stays printed. A case names the exception it expects (E3); a `throw` of
 the program is the run-time error `thrown`.
 
@@ -379,10 +381,13 @@ An actor that exhausts its stack on Linux or on Windows dies as it does for any 
 runtime's `data` type (O7); its parent lives under `on crash restart` and `on crash stop`, and crashes
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
 process exits with the exit code 1 (O6); on WebAssembly an exhausted stack ends the program, as the
-engine's trap does (§2, the owner, 2026-10-21), with no error line of the program's, since no code
-of it runs after a trap, and with the exit code its engine gives (§2, from the WebAssembly specification
-it checks), and what it does on the ESP32 models and on AVR is open (record, section 14). The
-exception is
+engine's trap does (§2, the owner, 2026-10-21), a trap that the stack's place before the static data
+makes certain (§2, an assumption there), with no error line of the program's, since no code of it runs
+after a trap (§2, from the WebAssembly specification it checks), and with the exit code each engine
+gives of its own, which that specification does not define; on the ESP32 models a watchpoint the runtime sets at each switch catches an overflow at
+the first write past the stack's end, and on AVR nothing checks the stack, so that an overflow there
+writes over memory unnoticed (§6, the owner, 2026-10-21), and a caught overflow on the ESP32 models
+ends the program as ESP-IDF's panic handler ends it *(assumed, as §6 marks it)*. On Linux and on Windows the exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
 reference's reading, on which the case stands), read from the line tables for the call that did
 not fit (§6), the innermost frame outside the runtime and its call into the runtime where that one was
@@ -417,9 +422,11 @@ against an allocation failure as a `Reason`, which would need a reserve to build
 when nothing can be allocated; the cost is a guard page per actor stack and a program that cannot recover from memory pressure; the
 stack probe in every frame larger than that page, so that no frame steps past it, and the signal stack
 per thread for the handler that turns the fault into the exception the owner added to the cost on
-2026-10-10). A stack exhausted inside the allocator or the scheduler ends the process the same
-way, with the exit code 1 and the error line, as an overflow with no actor does, which the handler
-tells by a count per thread that the package's entry raises and its exit lowers, and the error line
+2026-10-10). On Linux and on Windows, a stack exhausted inside the allocator or the scheduler ends the
+process the same way, with the exit code 1 and the error line, as an overflow with no actor does, which the handler
+tells by a count per thread that the package's entry raises and its exit lowers, and that the switch
+saves and clears on its way to an actor and puts back on its way back, so that a fault in an actor's code
+counts as none inside the package (§6, whose answer named the saving at each switch), and the error line
 names the line of the innermost frame outside the runtime, as above, the allocator's or the
 scheduler's own where the fault is there (§6, the owner, 2026-10-21), and no case pins that, since a case's recursion reaches neither (above). The case runs at the
 top level, which is the root actor, so the
