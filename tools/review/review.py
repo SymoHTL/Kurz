@@ -27,6 +27,15 @@ What this script posts and prints is public. Every text that comes from the mode
 exception or from the caller goes through `public`, which replaces a credential-shaped or
 machine-bound string by its label; a text that still holds one is not posted.
 
+The owner's cap (2026-10-21): a pull request gets at most kit.ROUND_CAP review rounds. A run that
+posts (in CI or with --local) labels the pull request kit.ROUND_LABEL plus its round's number before
+its first pass, so a run that fails or is cancelled after it counts too, and a run with nothing to
+review counts none; `--dry-run` and `--plan` post nothing, that label included. On a pull request whose
+labels count kit.ROUND_CAP rounds (kit.review_rounds) every run ends before its first pass as
+`REVIEW DID NOT COMPLETE (cap)`, in CI with the status `error` that names the cap: the refusal is
+inside the job, since a job its `if` skips reports success (knowledge/a-skipped-job-reports-success.md).
+Two runs of one pull request at the same moment read the same count and label the same round.
+
 Exit codes: 0 review completed; 1 did not complete; 2 usage; 3 did not complete because of a usage
 limit (retry after the reset, not now)."""
 import ast
@@ -914,24 +923,26 @@ def review(argv):
     forge = Forge(kit.repo(), call["pr"])
     head, me, notes, told_any = None, None, [], False  # told_any: a post of findings landed, so a failure note says what stands
 
-    def stop(kind, detail):
+    def stop(kind, detail, status=None):
         """Say that the review did not complete, here and on the pull request, and return the exit
         code. Each write goes through the forge's post(), which waits out the forge's rate limit
         while the run has a wait left; whatever a write raises is printed, never raised: a failure
         to report a failure must not start the reporting again. An oversized diff gets no note
-        here: the skip note, posted once per reason, says it."""
+        here: the skip note, posted once per reason, says it. `status` is the description of the
+        error status where the kind alone does not say enough."""
         detail = harmless(public(detail))
         print(f"REVIEW DID NOT COMPLETE ({kind}): {detail}")
         if kind == "usage-limit":
             print("A usage limit is not a crash: retry after the reset the message names, not now.")
         if head and me and not dry:
-            key = note_wanted(notes, "failed", sha=head) if kind != "oversized" else None
+            key = note_wanted(notes, "cap" if kind == "cap" else "failed", sha=head) if kind != "oversized" else None  # the cap's own note, past any failure
             tail = "What it posted before stands; the rest is in the log of the run." if told_any else \
+                "Its review rounds before stand; no further round runs." if kind == "cap" else \
                 "This pull request is not reviewed; what the run found, if anything, is in its log."
             writes = [lambda: forge.note(f"**Automated review did not complete** on `{head[:8]}` ({kind}): {detail[:500]}\n\n"
                                          f"{tail}\n\n{marker('note', key)}")] if key else []
             if in_ci and not local:  # a run off the pipeline posts no status, completed or not
-                writes.append(lambda: forge.status(head, "error", f"review did not complete: {kind}"))
+                writes.append(lambda: forge.status(head, "error", status or f"review did not complete: {kind}"))
             for write in writes:
                 try:
                     write()
@@ -955,6 +966,14 @@ def review(argv):
         notes = [payload for _, payload in marked(issue_comments, me, NOTE_MARK)]
         if pr["state"] != "open":
             return stop("closed", "the pull request is not open")
+        rounds = kit.review_rounds([label["name"] for label in pr["labels"]])
+        if rounds >= kit.ROUND_CAP:  # before any pass: the round that would follow is the one the cap forbids
+            return stop("cap", f"the pull request has had {rounds} review rounds (its label {kit.ROUND_LABEL}{rounds}), and the cap is "
+                               f"{kit.ROUND_CAP} (the owner, 2026-10-21): no further round runs. What is still open goes on the "
+                               f"collection ticket, the open issue labelled {kit.LEFTOVERS_LABEL}, and the pull request merges as "
+                               f"it is at the head round {kit.ROUND_CAP} reviewed, on the approval the cap gives when that round "
+                               f"completed; a head pushed after that round is outside that approval",
+                        status=f"review did not complete: cap: {rounds} review rounds reached, the cap is {kit.ROUND_CAP}")
         if in_ci and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
             return stop("credential", "CLAUDE_CODE_OAUTH_TOKEN is not set as a repository secret")
 
@@ -1003,7 +1022,8 @@ def review(argv):
                     for f in fs if isinstance(f, dict) and isinstance(f.get("file"), str) and isinstance(f.get("title"), str)
                     and isinstance(f.get("severity"), str) and f["severity"] in RANK and a_line(f.get("line"))]
         print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache, "
-              f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}")
+              f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}; "
+              f"{rounds} review rounds before this run, the cap is {kit.ROUND_CAP}")
         for path in sorted(replay):
             print(f"  replayed (unchanged since a converged review): {path}")
         if call["plan"]:  # what a run would read, said before a pass is paid for
@@ -1014,6 +1034,14 @@ def review(argv):
                   f"A pass whose answer could not be read is called once more and billed twice.")
             return 0
 
+        if work and not dry:  # the round is counted before its first pass: a run that fails or is cancelled after it is a bill all the same
+            counted = f"{kit.ROUND_LABEL}{rounds + 1}"
+            try:
+                forge.label(counted)
+            except kit.Refused as e:
+                return stop("failed", f"the label {counted} could not be added ({public(str(e))[:200]}), and whether it landed is "
+                                      f"not known, so this run may count as a round of the {kit.ROUND_CAP} or as none; read the "
+                                      f"labels of the pull request. Nothing was reviewed")
         suffix = fresh_suffix(diff, pr["title"], pr["body"])
 
         def call_of(index):
