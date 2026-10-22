@@ -1213,10 +1213,10 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"nop\", options(fast))\n}", grants: "raw"));
         Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"nop\", clobber_abi(\"D\"))\n}", grants: "raw"));
         Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{x}\", x = in(reg) _)\n}", grants: "raw"));
-        // an operand in an explicit register, or of a class Rust takes only as a clobber, is not read; outside a `raw` block the
-        // statement's `raw-required` is its one diagnostic (E1)
-        Assert.Equal(["3: an operand in an explicit register, or of a class Rust takes only as a clobber (R11)"], NotSupported("mut long n = 1\nraw {\n    asm(\"{x}\", x = out(kreg0) n)\n}\nprint(n)", grants: "raw"));
-        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("mut long n = 0\nasm(\"mov {x}, 1\", x = out(\"rax\") n)\nprint(n)"));
+        // an operand of a class Rust takes only as a clobber is not read; outside a `raw` block the statement's `raw-required` is its one
+        // diagnostic (E1)
+        Assert.Equal(["3: the class `kreg0`, which Rust takes only as a clobber (R11)"], NotSupported("mut long n = 1\nraw {\n    asm(\"{x}\", x = out(kreg0) n)\n}\nprint(n)", grants: "raw"));
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("mut long n = 0\nasm(\"mov {x}, 1\", x = out(kreg0) n)\nprint(n)"));
         // Rust's block of a `label` is a context of its own, so a read through a pointer there stands in a `raw` block of its own
         Assert.Equal([(ErrorIds.RawRequired, 4)], Errors("long* p = null\nraw {\n    asm(\"jmp {l}\", l = label {\n        print(*p)\n    })\n}", grants: "raw"));
         Clean("long* p = null\nraw {\n    asm(\"jmp {l}\", l = label {\n        raw {\n            print(*p)\n        }\n    })\n}", grants: "raw");
@@ -1255,13 +1255,47 @@ public sealed class CheckerTests
     [InlineData("raw {\n    asm(\"} {x}\", x = in(reg) 1)\n}", 2)] // a brace written twice, and nothing more
     [InlineData("mut byte b = 0\nraw {\n    asm(\"{r}\", r = out(reg) b)\n}\nprint(b)", 3)] // `reg` no `byte`
     [InlineData("mut long b = 0\nraw {\n    asm(\"{r}\", r = out(reg_byte) b)\n}\nprint(b)", 3)] // `reg_byte` a byte
-    [InlineData("long* p = null\nraw {\n    asm(\"{r}\", r = in(xmm_reg) p)\n}", 3)] // a vector class no pointer
+    [InlineData("raw {\n    asm(\"nop\", in(\"rzx\") 1)\n}", 2)] // a register of x86-64
+    [InlineData("raw {\n    asm(\"nop\", in(\"rsp\") 1)\n}", 2)] // not the stack pointer
+    [InlineData("raw {\n    asm(\"nop\", out(\"rbx\") _)\n}", 2)] // not LLVM's base pointer
+    [InlineData("raw {\n    asm(\"nop\", in(\"ebp\") 1)\n}", 2)] // not the frame pointer
+    [InlineData("raw {\n    asm(\"nop\", in(\"rip\") 1)\n}", 2)] // not the program counter
+    [InlineData("mut long a = 1\nraw {\n    asm(\"nop\", inout(\"rax\") a,\n        in(\"eax\") 2)\n}\nprint(a)", 4)] // an `inout` an input
+    [InlineData("mut long a = 1\nraw {\n    asm(\"nop\", inlateout(\"rcx\") a,\n        out(\"ecx\") _)\n}\nprint(a)", 4)] // an `inlateout` an output
+    [InlineData("raw {\n    asm(\"nop\", in(\"rax\") 1,\n        out(\"eax\") _)\n}", 3)] // an `out` an input too, as it may write before the inputs are read
+    [InlineData("string s = \"a\"\nraw {\n    asm(\"nop\", in(\"xmm0\") s)\n}", 3)] // the class of a vector register takes the type
+    [InlineData("raw {\n    asm(\"nop\", in(\"rax\") 1,\n        in(\"eax\") 2)\n}", 3)] // a view of an input's register no second input
+    [InlineData("mut byte b = 0\nraw {\n    asm(\"nop\", out(\"rax\") _,\n        out(\"al\") b)\n}\nprint(b)", 4)] // nor of an output's a second output
+    [InlineData("raw {\n    asm(\"{}\", in(\"rdx\") 1,\n        in(reg) 2)\n}", 3)] // the operands without a name before the explicit registers
+    [InlineData("raw {\n    asm(\"{0}\", in(\"rax\") 1)\n}", 2)] // the template names an explicit register nowhere
+    [InlineData("long a = 1\nraw {\n    asm(\"nop\", in(\"al\") a)\n}", 3)] // the class of the register takes the type
+    [InlineData("raw {\n    asm(\"{c}\", c = const {\n    })\n}", 2)] // `const` a value, not a block
+    [InlineData("mut long x = 0\nraw {\n    asm(\"{c}\", c = const 4 => x)\n}\nprint(x)", 3)] // and nothing it writes
+    [InlineData("raw {\n    asm(\"{f}\", f = sym {\n    })\n}", 2)] // `sym` a name, not a block
+    [InlineData("void G() {\n}\n\nmut long x = 0\nraw {\n    asm(\"{f}\", f = sym G => x)\n}\nprint(x)", 6)] // and nothing it writes
     [InlineData("long* p = null\nmut int m = 0\nraw {\n    asm(\"{r}\", r = inout(reg) p => m)\n}\nprint(m)", 4)] // a pointer 64 bits wide
     public void A_breach_of_the_rules_of_an_asm_is_asm_operand(string program, int line)
     {
         // R11: the rest of Rust's rules of the template and of its words, for x86-64, each one `asm-operand` at the operand's or the
         // template's line
         Assert.Equal([(ErrorIds.AsmOperand, line)], Errors(program, grants: "raw"));
+    }
+
+    [Theory]
+    [InlineData("raw {\n    asm(\"nop\", in(\"rzx\") 1)\n}", "name one of its registers, `rax` or `xmm0`, or a register class")]
+    [InlineData("raw {\n    asm(\"nop\", in(\"rsp\") 1)\n}", "name another register")]
+    [InlineData("raw {\n    asm(\"nop\", in(\"rax\") 1, in(\"eax\") 2)\n}", "give one of them another register")]
+    [InlineData("raw {\n    asm(\"nop\", out(\"rax\") _, out(\"al\") _)\n}", "give one of them another register")]
+    [InlineData("raw {\n    asm(\"nop\", out(\"rax\") _, in(\"eax\") 1)\n}", "write `lateout`, or give one of them another register")]
+    [InlineData("raw {\n    asm(\"{c}\", c = const {\n    })\n}", "takes one value after it, `c = const 4`")]
+    [InlineData("raw {\n    asm(\"{}\", in(\"rdx\") 1, in(reg) 2)\n}", "stands before the named ones and those in an explicit register")]
+    public void An_asm_operand_message_names_what_to_change(string program, string remedy)
+    {
+        // R11: the message of each rule an operand in an explicit register, a `const` or a `sym` breaks names the change that keeps it
+        var (diagnostics, _) = Check(program, "raw");
+        var error = Assert.Single(diagnostics.Items);
+        Assert.Equal(ErrorIds.AsmOperand, error.Id);
+        Assert.Contains(remedy, error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1277,6 +1311,14 @@ public sealed class CheckerTests
         Clean("raw {\n    asm(\"{0:h}\", in(reg_abcd) 1)\n}", grants: "raw");
         Clean("raw {\n    asm(\"{} {}\", in(reg) 1, in(reg) 2)\n}", grants: "raw");
         Clean("static mut long t = 0\n\nraw {\n    asm(\"lea rax, {s}\", s = sym t)\n}", grants: "raw");
+        // R11: an operand in an explicit register, which the template names nowhere: a view of a register as the register, an input and
+        // a `lateout` of one register, a clobber, a byte register and a vector register, after the operands without a name, and with
+        // `clobber_abi`, whose outputs are explicit registers; a pointer goes into a vector register as Rust's 64-bit integer
+        Clean("mut long n = 0\nraw {\n    asm(\"syscall\", in(\"rax\") 60, in(\"edi\") 0, lateout(\"rax\") n, out(\"rcx\") _, out(\"r11\") _)\n}\nprint(n)", grants: "raw");
+        Clean("mut byte b = 0\nraw {\n    asm(\"{} {}\", in(reg) 1, in(reg) 2, out(\"al\") b, in(\"xmm0\") 1.5, in(\"r8d\") 3)\n}\nprint(b)", grants: "raw");
+        Clean("void G() {\n}\n\nraw {\n    asm(\"call {f}\", f = sym G, clobber_abi(\"C\"), out(\"rax\") _)\n}", grants: "raw");
+        Clean("long* p = null\nraw {\n    asm(\"{r}\", r = in(xmm_reg) p)\n}", grants: "raw");
+        Clean("extern \"C\" {\n    int abs(int n)\n}\n\nraw {\n    asm(\"{r}\", r = in(xmm_reg) abs)\n}", grants: "raw native");
         Assert.Equal([(ErrorIds.AsmOperand, 2), (ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{x}\", in(reg) 1)\n}", grants: "raw"));
         Assert.Equal([(ErrorIds.AsmOperand, 2), (ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{1}\", in(reg) 1)\n}", grants: "raw"));
         // R10: `&` of a field and of an element; an index that is no offset, and `*` of a value that is no pointer, are `type-mismatch`
@@ -1296,7 +1338,14 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData("mut long n = 0\nraw {\n    asm(\"mov {x}, 1\", x = out(\"rax\") n)\n}\nprint(n)", "raw", "3: an operand in an explicit register, or of a class Rust takes only as a clobber (R11)")]
+    [InlineData("raw {\n    asm(\"fldz\", out(\"st(0)\") _)\n}", "raw", "2: the register `st(0)`, of the class `x87_reg`, which Rust takes only as a clobber (R11)")]
+    [InlineData("raw {\n    asm(\"nop\", in(\"ymm1\") 1.5)\n}", "raw", "2: the register `ymm1`, of the class `ymm_reg`, which Rust gives a target with the feature `avx`, a feature no rule of a build names (R11)")]
+    [InlineData("raw {\n    asm(\"nop\", in(\"xmm16\") 1.5)\n}", "raw", "2: the register `xmm16`, of the class `zmm_reg`, which Rust gives a target with the feature `avx512f`, a feature no rule of a build names (R11)")]
+    [InlineData("raw {\n    asm(\"nop\", in(\"k1\") 1)\n}", "raw", "2: the register `k1`, of the class `kreg`, which Rust gives a target with the feature `avx512f`, a feature no rule of a build names (R11)")]
+    [InlineData("raw {\n    asm(\"nop\", out(\"k0\") _)\n}", "raw", "2: the register `k0`, of the class `kreg0`, which Rust takes only as a clobber (R11)")]
+    [InlineData("raw {\n    asm(\"emms\", out(\"mm0\") _)\n}", "raw", "2: the register `mm0`, of the class `mmx_reg`, which Rust takes only as a clobber (R11)")]
+    [InlineData("raw {\n    asm(\"nop\", out(\"tmm0\") _)\n}", "raw", "2: the register `tmm0`, of the class `tmm_reg`, which Rust takes only as a clobber (R11)")]
+    [InlineData("raw {\n    asm(\"nop\", x = in(\"rax\") 1)\n}", "raw", "2: a name on an operand in an explicit register, which Rust's Reference allows and Rust's compiler refuses (R11)")]
     [InlineData("mut long k = 0\nraw {\n    asm(\"{z}\", z = out(kreg) k)\n}\nprint(k)", "raw", "3: the class `kreg`, which Rust gives a target with the feature `avx512f`, a feature no rule of a build names (R11)")]
     [InlineData("raw {\n    asm(\"{y}\", y = in(ymm_reg) 1.5)\n}", "raw", "2: the class `ymm_reg`, which Rust gives a target with the feature `avx`, a feature no rule of a build names (R11)")]
     [InlineData("long m = 64\np = Ptr<long>(m)\nq = &*p\nprint(q == null)", "", "3: the address of a place through a pointer, `&*p`, `&p[i]` or `&(*b).Next` (R10)")]
@@ -1332,6 +1381,10 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NakedNotAllowed, 1)], Errors("naked void Switch() {\n    asm(\"ret\")\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.NakedBody, 2)], Errors("naked void F() {\n    print(1)\n}\n\nprint(1)", grants: "raw"));
         Assert.Equal([(ErrorIds.NakedBody, 3)], Errors("naked void F() {\n    asm(\"ret\")\n    asm(\"ret\")\n}\n\nprint(1)", grants: "raw"));
+        // R12: an operand in an explicit register, or of a class the checker does not read, is `naked-body` there as any operand but `sym`
+        // and `const`; the template names the first nowhere, and its rules hold the second as any operand of a class (below)
+        Assert.Equal([(ErrorIds.NakedBody, 2)], Errors("naked void F() {\n    asm(\"ret\", in(\"rax\") 1)\n}\n\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.NakedBody, 2), (ErrorIds.AsmOperand, 2)], Errors("naked void F() {\n    asm(\"ret\", out(kreg0) _)\n}\n\nprint(1)", grants: "raw"));
         Assert.Equal([(ErrorIds.NakedBody, 1)], Errors("naked void F() {\n}\n\nprint(1)", grants: "raw"));
         Assert.Equal([(ErrorIds.NakedBody, 2), (ErrorIds.AsmOperand, 2)], Errors("naked void F() {\n    asm(\"ret\", in(reg) 1)\n}\n\nprint(1)", grants: "raw"));
         // R11 counts `clobber_abi` and `options` among the words of the operands, so there they are operands other than `sym` and
@@ -1404,6 +1457,9 @@ public sealed class CheckerTests
         // R14: `Ptr<T>(x)` of a pointer or a `long`, `long(p)` and `SizeOf<T>()`, a `long`, without a `raw` block or a grant
         Clean("long m = 64\np = Ptr<long>(m)\nprint(long(p + 3) - long(p))");
         Clean("int* p = null\nq = Ptr<long>(p)\nv = Ptr<void>(long(q))\nprint(v == null)");
+        // T10 with R14: `Ptr<T>(x)` takes one value, as a conversion does; the parser reads no other count as a conversion
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("p = Ptr<long>()\nprint(p == null)"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("p = Ptr<long>(1, 2)\nprint(p == null)"));
         Assert.Equal("long*", TypeOf("long m = 64\np = Ptr<long>(m)\nprint(p == null)", "p"));
         Assert.Equal("long", TypeOf("s = SizeOf<long>()\nprint(s)", "s"));
         Assert.Equal([(ErrorIds.CountedPointee, 1)], Errors("print(SizeOf<string>())"));

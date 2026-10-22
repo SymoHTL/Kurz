@@ -26,6 +26,69 @@ public sealed partial class Checker
     /// <summary>R11: the classes of x86-64 that Rust takes only as a clobber, through an explicit register.</summary>
     private static readonly HashSet<string> ClobberOnlyClasses = new(StringComparer.Ordinal) { "kreg0", "x87_reg", "mmx_reg", "tmm_reg" };
 
+    /// <summary>
+    /// R11: the registers of x86-64 an operand names in quotes, each with the register it is a view of and its class, as Rust's tables of
+    /// register classes and of register names give them: a smaller view and an alias are the register itself.
+    /// </summary>
+    private static readonly Dictionary<string, (string Base, string Class)> ExplicitRegisters = ExplicitRegistersOfX86_64();
+
+    /// <summary>R11: the registers Rust takes as no operand on x86-64, by the register they are a view of, with Rust's reason.</summary>
+    private static readonly Dictionary<string, string> ReservedRegisters = new(StringComparer.Ordinal)
+    {
+        ["sp"] = "the stack pointer, which the `asm` gives back as it found it",
+        ["bp"] = "the frame pointer",
+        ["bx"] = "the base pointer LLVM keeps for a function with a complex frame",
+        ["ip"] = "the program counter, no register a value goes into",
+    };
+
+    private static Dictionary<string, (string Base, string Class)> ExplicitRegistersOfX86_64()
+    {
+        var registers = new Dictionary<string, (string Base, string Class)>(StringComparer.Ordinal);
+        void Add(string name, string @base, string registerClass) => registers.Add(name, (@base, registerClass));
+        foreach (var (@base, byteView) in new[] { ("ax", "al"), ("bx", "bl"), ("cx", "cl"), ("dx", "dl"), ("si", "sil"), ("di", "dil"), ("bp", "bpl"), ("sp", "spl") })
+        {
+            foreach (var name in new[] { @base, "e" + @base, "r" + @base })
+            {
+                Add(name, @base, "reg");
+            }
+
+            Add(byteView, @base, "reg_byte");
+        }
+
+        foreach (var name in new[] { "ip", "eip", "rip" })
+        {
+            Add(name, "ip", "reg");
+        }
+
+        for (var i = 8; i <= 15; i++)
+        {
+            foreach (var suffix in new[] { "", "w", "d" })
+            {
+                Add($"r{i}{suffix}", $"r{i}", "reg");
+            }
+
+            Add($"r{i}b", $"r{i}", "reg_byte");
+        }
+
+        for (var i = 0; i <= 31; i++)
+        {
+            Add($"xmm{i}", $"xmm{i}", i < 16 ? "xmm_reg" : "zmm_reg"); // xmm16 to xmm31 stand in the class that needs avx512f
+            Add($"ymm{i}", $"xmm{i}", i < 16 ? "ymm_reg" : "zmm_reg");
+            Add($"zmm{i}", $"xmm{i}", "zmm_reg");
+        }
+
+        for (var i = 0; i <= 7; i++)
+        {
+            Add($"k{i}", $"k{i}", i == 0 ? "kreg0" : "kreg");
+            Add($"st({i})", $"st({i})", "x87_reg");
+            Add($"mm{i}", $"mm{i}", "mmx_reg");
+            Add($"tmm{i}", $"tmm{i}", "tmm_reg");
+        }
+
+        Add("st", "st(0)", "x87_reg");
+        return registers;
+    }
+
     private static readonly HashSet<string> ClobberAbis = new(StringComparer.Ordinal) { "C", "system", "efiapi", "win64", "sysv64" };
 
     private static readonly HashSet<string> AsmOptions = new(StringComparer.Ordinal) { "pure", "nomem", "readonly", "preserves_flags", "noreturn", "nostack", "att_syntax", "raw" };
@@ -59,9 +122,10 @@ public sealed partial class Checker
         t is PrimitiveType { Kind: Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double }
         or PointerType or CFunctionType;
 
-    /// <summary>x86-64's <c>xmm_reg</c>: a 32- or 64-bit integer, a <c>float</c> or a <c>double</c>, the scalars among Rust's types for it.</summary>
+    /// <summary>x86-64's <c>xmm_reg</c>: a 32- or 64-bit integer, a <c>float</c> or a <c>double</c>, the scalars among Rust's types for it, and a pointer or a C function, which Rust's table counts as the 64-bit integer.</summary>
     private static bool TakesVector(KurzType t) =>
-        t is PrimitiveType { Kind: Primitive.Int or Primitive.UInt or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double };
+        t is PrimitiveType { Kind: Primitive.Int or Primitive.UInt or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double }
+        or PointerType or CFunctionType;
 
     // ---- raw blocks (R7) -------------------------------------------------------------------------
 
@@ -650,13 +714,14 @@ public sealed partial class Checker
     /// <summary>
     /// R11 with R12: an <c>asm</c> stands inside a <c>raw</c> block or the body of a <c>naked</c> function, and its template and operands follow
     /// Rust's rules for x86-64: Rust's words, the register classes of x86-64 and their types and modifiers, the ABIs of <c>clobber_abi</c> and
-    /// the words of <c>options</c>, positional operands before named ones, each name given to one operand, every operand used by the template and every name
-    /// the template uses an operand's; a breach is <c>asm-operand</c>. An operand that writes a variable without <c>mut</c> is
+    /// the words of <c>options</c>, positional operands before named ones and before those in an explicit register, each name given to one
+    /// operand, every operand but one in an explicit register used by the template and every name the template uses an operand's; an operand in
+    /// an explicit register names a register of x86-64 Rust takes as an operand, and is no view of a register another input, or another
+    /// output, names; a breach is <c>asm-operand</c>. An operand that writes a variable without <c>mut</c> is
     /// <c>assign-immutable</c>. In a <c>naked</c> function an operand other than <c>sym</c> and <c>const</c>, <c>clobber_abi</c> and
-    /// <c>options</c> among them, is <c>naked-body</c>. An operand in an explicit register, of a class Rust takes only as a clobber or of
-    /// one Rust gives a target with a feature is not read: what the template may name of the first is a question R11 leaves to Rust,
-    /// which gives it otherwise than R11's rule that every operand appears in the template, the second needs the first, and no rule
-    /// names the features of a build.
+    /// <c>options</c> among them, is <c>naked-body</c>. An operand of a class Rust takes only as a clobber, or of one Rust gives a target with
+    /// a feature, in a class or an explicit register, is not read: the first needs <c>out</c> with <c>_</c> alone, and no rule names the
+    /// features of a build; nor is a name on an operand in an explicit register, which Rust's Reference allows and Rust's compiler refuses.
     /// </summary>
     private void CheckAsm(AsmStatement a, bool naked)
     {
@@ -665,7 +730,7 @@ public sealed partial class Checker
             RequireRaw(a.Line, "an `asm`", "R11");
         }
 
-        if (a.Operands.Select(UnreadOperand).FirstOrDefault(u => u is not null) is { } unread)
+        if (!naked && a.Operands.Select(UnreadOperand).FirstOrDefault(u => u is not null) is { } unread) // in a `naked` function each such operand is `naked-body`
         {
             if (rawDepth > 0)
             {
@@ -680,6 +745,9 @@ public sealed partial class Checker
         var named = new Dictionary<string, AsmSlot>(StringComparer.Ordinal);
         var options = new Dictionary<string, int>(StringComparer.Ordinal);
         int? clobberLine = null;
+        var inputs = new Dictionary<string, string>(StringComparer.Ordinal);
+        var outputs = new HashSet<string>(StringComparer.Ordinal);
+        var explicitSeen = false;
         foreach (var o in a.Operands)
         {
             if (o.Word is "clobber_abi" or "options")
@@ -695,12 +763,33 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (IsRegisterWord(o.Word) && o.Arguments is [{ Quoted: true } register])
+            {
+                explicitSeen = true;
+                if (naked)
+                {
+                    Report(ErrorIds.NakedBody, o.Line, $"the `asm` of a `naked` function takes `sym` and `const` operands alone, not `{o.Word}` (R12)");
+                    ReadOperandLoosely(o);
+                }
+                else if (ExplicitRegisterError(o, register.Text, inputs, outputs) is { } error)
+                {
+                    Report(ErrorIds.AsmOperand, o.Line, error);
+                    ReadOperandLoosely(o);
+                }
+                else
+                {
+                    CheckAsmOperand(o);
+                }
+
+                continue; // the template names it nowhere, so it holds no slot
+            }
+
             var slot = new AsmSlot(o, IsRegisterWord(o.Word) && o.Arguments is [{ Quoted: false } c] && RegisterClasses.ContainsKey(c.Text) ? c.Text : null); // a class x86-64 does not have is the operand's error, and its modifiers are not judged (E1)
             if (o.Name is null)
             {
-                if (named.Count > 0)
+                if (named.Count > 0 || explicitSeen)
                 {
-                    Report(ErrorIds.AsmOperand, o.Line, "an operand without a name stands before the named ones (R11)");
+                    Report(ErrorIds.AsmOperand, o.Line, "an operand without a name stands before the named ones and those in an explicit register (R11)");
                 }
 
                 positional.Add(slot);
@@ -749,11 +838,51 @@ public sealed partial class Checker
     /// <summary>R11: what of a register operand the checker does not read, with its line, or null.</summary>
     private static (int Line, string Construct)? UnreadOperand(AsmOperand o) => !IsRegisterWord(o.Word) ? null : o.Arguments switch
     {
-        [{ Quoted: true }] => (o.Line, "an operand in an explicit register, or of a class Rust takes only as a clobber (R11)"),
-        [{ Quoted: false } c] when ClobberOnlyClasses.Contains(c.Text) => (o.Line, "an operand in an explicit register, or of a class Rust takes only as a clobber (R11)"),
-        [{ Quoted: false } c] when FeatureClasses.TryGetValue(c.Text, out var feature) => (o.Line, $"the class `{c.Text}`, which Rust gives a target with the feature `{feature}`, a feature no rule of a build names (R11)"),
+        [{ Quoted: true }] when o.Name is not null => (o.Line, "a name on an operand in an explicit register, which Rust's Reference allows and Rust's compiler refuses (R11)"),
+        [{ Quoted: true } r] when ExplicitRegisters.TryGetValue(r.Text, out var register) => UnreadClass(o.Line, register.Class, $"the register `{r.Text}`, of the class `{register.Class}`"),
+        [{ Quoted: false } c] => UnreadClass(o.Line, c.Text, $"the class `{c.Text}`"),
         _ => null,
     };
+
+    private static (int Line, string Construct)? UnreadClass(int line, string registerClass, string what) =>
+        ClobberOnlyClasses.Contains(registerClass) ? (line, $"{what}, which Rust takes only as a clobber (R11)")
+        : FeatureClasses.TryGetValue(registerClass, out var feature) ? (line, $"{what}, which Rust gives a target with the feature `{feature}`, a feature no rule of a build names (R11)")
+        : null;
+
+    /// <summary>
+    /// R11: what an operand in an explicit register breaks of Rust's rules for x86-64, or null: a register x86-64 does not have; one Rust
+    /// takes as no operand; a view of a register another input, or another output, names. An <c>in</c> is an input, a <c>lateout</c> an
+    /// output, an <c>out</c>, an <c>inout</c> and an <c>inlateout</c> both, as Rust's compiler counts them: an <c>out</c> may write its
+    /// register before every input is read, and a <c>lateout</c> is the <c>out</c> whose register the allocator can share with an <c>in</c>.
+    /// </summary>
+    private static string? ExplicitRegisterError(AsmOperand o, string name, Dictionary<string, string> inputs, HashSet<string> outputs)
+    {
+        if (!ExplicitRegisters.TryGetValue(name, out var register))
+        {
+            return $"`{name}` is no register of x86-64, the target the build compiles for: name one of its registers, `rax` or `xmm0`, or a register class (R11)";
+        }
+
+        if (ReservedRegisters.TryGetValue(register.Base, out var reason))
+        {
+            return $"`{name}` is {reason}, and Rust takes it as no operand: name another register (R11)";
+        }
+
+        var input = o.Word != "lateout" && !inputs.TryAdd(register.Base, o.Word);
+        var output = o.Word != "in" && !outputs.Add(register.Base);
+        if (output)
+        {
+            return $"`{name}` is `{register.Base}`, which another output of the `asm` names: give one of them another register (R11)";
+        }
+
+        if (!input)
+        {
+            return null;
+        }
+
+        return o.Word == "out" || inputs[register.Base] == "out"
+            ? $"`{name}` is `{register.Base}`, which an input of the `asm` names, and an `out` may write its register before every input is read: write `lateout`, or give one of them another register (R11)"
+            : $"`{name}` is `{register.Base}`, which another input of the `asm` names: give one of them another register (R11)";
+    }
 
     /// <summary>
     /// R11: Rust's rules of the outputs, for x86-64: <c>pure</c> takes an output that is not <c>_</c>, <c>noreturn</c> no output where no
@@ -780,7 +909,7 @@ public sealed partial class Checker
             Report(ErrorIds.AsmOperand, label.Line, "a `label` operand stands in an `asm` without outputs (R11)");
         }
 
-        if (clobberLine is { } line && outputs.Count > 0)
+        if (clobberLine is { } line && outputs.Any(o => o.Arguments is not [{ Quoted: true }]))
         {
             Report(ErrorIds.AsmOperand, line, "`clobber_abi` takes outputs in explicit registers alone, and an output of a register class is none (R11)");
         }
@@ -818,6 +947,10 @@ public sealed partial class Checker
     {
         switch (o.Word)
         {
+            case "const" or "sym" when o.Value is null || o.Output is not null: // a block after the word, or `=>`
+                Report(ErrorIds.AsmOperand, o.Line, $"`{o.Word}` takes one value after it, `{(o.Word == "const" ? "c = const 4" : "f = sym F")}` (R11)");
+                ReadOperandLoosely(o);
+                return;
             case "const":
                 {
                     var t = CheckExpression(o.Value!, null);
@@ -864,7 +997,11 @@ public sealed partial class Checker
         }
 
         string? registerClass = null;
-        if (o.Arguments is not [{ Quoted: false } argument])
+        if (o.Arguments is [{ Quoted: true } register] && ExplicitRegisters.TryGetValue(register.Text, out var explicitRegister))
+        {
+            registerClass = explicitRegister.Class; // CheckAsm judged the register, and an unread class does not come here
+        }
+        else if (o.Arguments is not [{ Quoted: false } argument])
         {
             Report(ErrorIds.AsmOperand, o.Line, $"`{o.Word}` takes one register class in its parentheses, `{o.Word}(reg)` (R11)");
         }
