@@ -21,7 +21,7 @@ findings  the review policy: every finding the reviewer posted as a review threa
           by kit.review_rounds) a finding on any file is also answered by its move to the
           collection ticket: a reply from someone who may write here that links an open issue
           labelled kit.LEFTOVERS_LABEL, and the errors name that move (MOVE), since no edit follows the
-          third round. Below the cap such a reply is a written reply like any other: it answers a
+          round at the cap. Below the cap such a reply is a written reply like any other: it answers a
           finding on tool, workflow and hook code, and nothing on the other files.
 resolve   not a gate: the session's step after its fix push. Every unresolved thread of the
           reviewer whose files all changed since the finding's commit is resolved, because its
@@ -185,7 +185,7 @@ def leftovers(repo, pr, pages=None):
     return rounds, moved_to(repo, [i["number"] for i in issues if "pull_request" not in i])  # the endpoint lists pull requests too
 
 
-# What a finding still open at the cap asks for: no edit follows the third round, so the error names the move.
+# What a finding still open at the cap asks for: no edit follows the round at the cap, so the error names the move.
 MOVE = f"at the review cap no edit follows: reply with a link to the collection ticket, the open issue labelled {kit.LEFTOVERS_LABEL}, then resolve"
 
 

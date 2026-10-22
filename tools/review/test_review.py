@@ -247,10 +247,16 @@ def run_review(forge, model, argv, ci=False, credential="", started="", diff=Non
 
 def run():
     cases = []
+    # The suite runs at a cap of three: its cases of a second and a third run on one pull request need
+    # rounds below the cap, and its cases at the cap read kit.ROUND_CAP. The owner's cap itself is pinned
+    # by the case "rounds: the cap is the owner's one round" in kit's self-test.
+    cap, kit.ROUND_CAP = kit.ROUND_CAP, 3
     try:
         suite(lambda name, passed, detail="": cases.append((name, bool(passed), detail)))
     except Exception as e:  # a crash still reports the cases that ran, and is itself a failed case
         cases.append(("the suite ran to its end", False, f"{type(e).__name__}: {e}"))
+    finally:
+        kit.ROUND_CAP = cap
     return kit.report(cases)
 
 

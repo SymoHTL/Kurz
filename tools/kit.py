@@ -64,15 +64,15 @@ SKIP_LITERALS = [r"\[skip ci\]", r"\[ci skip\]", r"\[no ci\]", r"\[skip actions\
 # read. The runner shows it as PARTLY, never as a pass, and turns red unless the gate is listed with
 # the issue that records the unread part (PARTLY_OK in tools/gates.py).
 PARTLY = 5
-# The owner's cap on review rounds (2026-10-21): a pull request gets at most ROUND_CAP of them, the
-# rounds before the cap counted. A round is a review run that labelled the pull request: a run with
+# The owner's cap on review rounds (three on 2026-10-21, one since 2026-10-22): a pull request gets
+# at most ROUND_CAP of them, the rounds before the cap counted. A round is a review run that labelled the pull request: a run with
 # files to review puts ROUND_LABEL plus the round's number on before its first pass, so it is a round
 # whatever follows, a limit, a cut-off or a failure before any pass included; a dry run and a count
 # of the batches put none on. The count is the highest such number: a lower label taken off
 # changes nothing, and one label put on by hand counts the rounds no reviewer labelled. What a
 # pull request at the cap still holds goes on the collection ticket, an open issue labelled
 # LEFTOVERS_LABEL.
-ROUND_LABEL, ROUND_CAP, LEFTOVERS_LABEL = "review-round-", 3, "review-leftovers"
+ROUND_LABEL, ROUND_CAP, LEFTOVERS_LABEL = "review-round-", 1, "review-leftovers"
 
 
 def review_rounds(labels):
@@ -303,8 +303,8 @@ def self_test():
                   counted == (12, 0), counted))
     counted = review_rounds(["Review-Round-5", "REVIEW-ROUND-2"])
     cases.append(("rounds: a label in another case is the same label on the forge, so it counts", counted == 5, counted))
-    cases.append(("rounds: the cap is the owner's three rounds (2026-10-21), and its labels carry the names the tools read",
-                  (ROUND_CAP, ROUND_LABEL, LEFTOVERS_LABEL) == (3, "review-round-", "review-leftovers"), (ROUND_CAP, ROUND_LABEL, LEFTOVERS_LABEL)))
+    cases.append(("rounds: the cap is the owner's one round (2026-10-22), and its labels carry the names the tools read",
+                  (ROUND_CAP, ROUND_LABEL, LEFTOVERS_LABEL) == (1, "review-round-", "review-leftovers"), (ROUND_CAP, ROUND_LABEL, LEFTOVERS_LABEL)))
     with scratch("kit-scratch-") as path:
         there = os.path.isdir(path)
     cases.append(("scratch: the directory is there inside the block and gone after it", there and not os.path.exists(path), path))

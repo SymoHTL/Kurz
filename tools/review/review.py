@@ -27,7 +27,8 @@ What this script posts and prints is public. Every text that comes from the mode
 exception or from the caller goes through `public`, which replaces a credential-shaped or
 machine-bound string by its label; a text that still holds one is not posted.
 
-The owner's cap (2026-10-21): a pull request gets at most kit.ROUND_CAP review rounds. A run that
+The owner's cap (one since 2026-10-22, three from 2026-10-21): a pull request gets at most
+kit.ROUND_CAP review rounds. A run that
 posts (in CI or with --local) labels the pull request kit.ROUND_LABEL plus its round's number before
 its first pass, so a run that fails or is cancelled after it counts too, and a run with nothing to
 review counts none; `--dry-run` and `--plan` post nothing, that label included. On a pull request whose
@@ -969,7 +970,7 @@ def review(argv):
         rounds = kit.review_rounds([label["name"] for label in pr["labels"]])
         if rounds >= kit.ROUND_CAP:  # before any pass: the round that would follow is the one the cap forbids
             return stop("cap", f"the pull request has had {rounds} review rounds (its label {kit.ROUND_LABEL}{rounds}), and the cap is "
-                               f"{kit.ROUND_CAP} (the owner, 2026-10-21): no further round runs. What is still open goes on the "
+                               f"{kit.ROUND_CAP} (the owner, 2026-10-22): no further round runs. What is still open goes on the "
                                f"collection ticket, the open issue labelled {kit.LEFTOVERS_LABEL}, and the pull request merges as "
                                f"it is at the head round {kit.ROUND_CAP} reviewed, on the approval the cap gives when that round "
                                f"completed; a head pushed after that round is outside that approval",

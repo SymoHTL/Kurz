@@ -67,14 +67,18 @@ What the rows show:
 - Pull request 33's three open threads of its thirteenth review are the first section of the
   collection ticket (issue 39), and its fifteen lows are on the `review-lows` issue.
 
+**What changed (the owner, 2026-10-22):** the cap is one review round. At three, a pull request took
+11 to 14 USD of review and most of a day, and the rounds and the records around them, not the
+code, set the pace; the rest of the walk above holds with the one round as the round at the cap.
+
 **How to apply:**
 
 - Read the round count on the pull request before a round starts: `gh pr view <N> --json labels`.
-  The third round is the last; the push before it carries every fix that can be made, the lows of
-  the pull request too.
+  The round at the cap is the last, and since 2026-10-22 it is the first: the push before it carries
+  every fix that can be made, the lows of the pull request too.
 - A round is a bill whatever it finds or costs: a run cancelled after its label, one that stopped
   on a limit, and a run of it again are rounds.
-- Keep the change small, so that the three rounds are enough: the bill of a round, and what a round
+- Keep the change small, so that the one round is enough: the bill of a round, and what a round
   finds, grow with the diff ([[what-a-review-pass-costs]]).
 - What the labels do not hold: a label taken off or put on by hand, a second issue with the
   collection label, two runs of one pull request that start at the same moment, and a dry run,

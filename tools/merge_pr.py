@@ -11,7 +11,7 @@ skips what only this tool adds (HAZARD #14).
 A merge needs: the exact head that was looked at; an open pull request into the default branch that
 is not a Draft, not behind its base and has no auto-merge armed; every review thread resolved, and
 resolved by the edit or, on tool, workflow or hook code, the reply that answers it, or, on a pull
-request at the owner's cap of three review rounds, the reply that moves it to the collection ticket
+request at the owner's cap of review rounds (kit.ROUND_CAP), the reply that moves it to the collection ticket
 (tools/pr_gates.py);
 every required check of the ruleset `success` on that head;
 merge rules on the server that are what tools/ruleset.json says, every one of them read: a setting
@@ -26,8 +26,8 @@ between the second reading and the moment the ruleset is restored is caught by n
 nothing else may merge or push meanwhile (the owner's judgment step, HAZARD #27). Exit 3 means the
 ruleset was not read back as active, so it may still be off, until someone reads it back and
 switches it on; so the approval is per item and never standing, except at the review cap: a pull
-request that has had its three review rounds carries the owner's approval of 2026-10-21 to merge
-over red at the head the third round reviewed, when that round completed, for the check `review` and
+request that has had its kit.ROUND_CAP review rounds carries the owner's approval of 2026-10-21, which
+holds for the cap of one since 2026-10-22, to merge over red at the head the round at the cap reviewed, when that round completed, for the check `review` and
 for `gates` when `pr-findings` is its one FAIL; any other red check stays the owner's to approve for
 that head. The caller states it like any other approval and checks those conditions (a judgment step,
 CLAUDE.md, the over-red rule): the tool reads none of them. The tool cannot
