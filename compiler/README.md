@@ -152,7 +152,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   - `asm` is a statement of its own (R11), and `syntax` where a value stands (E4). The string
     literals that open its arguments are its templates, which the lexer reads with no hole (R11,
     L6). Its operands parse in Rust's shape (R11): `name =`, a word, a list in parentheses, a value
-    and `=> place`, or `label` with a block; `const` and `sym` take a value and no list. A word or a
+    and `=> place`, or `label` with a block; `const` takes a value and `sym` a path, both read as a
+    value with no list. A word or a
     register class that is not Rust's parses, and is the checker's (`asm-operand`, R11). Inside the
     value of an operand `=>` splits the operand and starts no lambda, while an argument of a call
     there takes one as any argument does.
@@ -241,13 +242,15 @@ which is the complete one: a `class`, an `interface`, an `enum`
 or a `flags` type and a value of one (chapter 7, D12, D13, and the A-rules of their text); `null`,
 a nullable type, `?.` and `??` (chapter 4); `weak` (R3, R5), a `raw` block (R7), a raw pointer type,
 a read and a write through a pointer and an address `&x` (R10), `asm` (R11), a `naked` function
-(R12), a `static mut` or `thread static mut` declaration at the top level of a file (R13),
+(R12), a `static mut` or `thread static mut` declaration at the top level of a file and
+`thread static` before a function (R13),
 `Ptr<T>(x)` and `SizeOf<T>()` (R14), whose other shapes are `syntax` (E4), a block of C functions,
 whose names a call reaches with no error of its own, and inside a block as a function declared
 there is (F1, F6), a C declaration and another function of one name, at the second of the two, which
 leaves every call of the name unread (K7, M6), while a C declaration of a type's or a built-in's
-name is `redeclared` as a function's is (V9), and a function of the C calling convention, which
-leaves the function and every call of its name unread (R16), the type of a C function, at which a
+name is `redeclared` as a function's is (V9), and a function of the C calling convention, whose
+signature, defaults and body are read with their diagnostics dropped and every call of whose name
+is unread, as for a `naked` function (R16, R12; K7, M6), the type of a C function, at which a
 lambda carries no misfit and no missing type of its parameters, and a data type in C's layout (R17),
 and `use` (F10);
 a second file of a program and what F9 makes visible across files, since the checker reads one

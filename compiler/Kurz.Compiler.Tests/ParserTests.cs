@@ -1051,7 +1051,7 @@ public sealed class ParserTests
     {
         // R11: the templates first, then the operands in Rust's shape, a name and `=` where they have one, `in`, `out`, `inout` with a
         // register class or a register's string, `=>` that splits an operand (a lambda nowhere but in an argument of a call there), `_`,
-        // `sym` and `const`, which take a value and no list, `clobber_abi`, `options` and `label` with its block; a word that is not Rust's parses, and the checker judges it
+        // `const` with a value and `sym` with a path, read as a value with no list, `clobber_abi`, `options` and `label` with its block; a word that is not Rust's parses, and the checker judges it
         // (`asm-operand`)
         Assert.Equal(tree, Tree(program));
     }
@@ -1060,6 +1060,8 @@ public sealed class ParserTests
     [InlineData("int*? p = null", 1)]
     [InlineData("q = &F()", 1)]
     [InlineData("q = &(a + b)", 1)]
+    [InlineData("q = &a?.b.c", 1)]
+    [InlineData("q = &a?.b[0]", 1)]
     [InlineData("extern \"C++\" {\n}", 1)]
     [InlineData("extern \"C\" {\n    long write(int fd, ...) {\n    }\n}", 2)]
     [InlineData("extern \"C\" {\n    int printf(..., byte* format)\n}", 2)]

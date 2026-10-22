@@ -779,7 +779,7 @@ public sealed class Parser
         }
 
         List<AsmArgument>? arguments = null;
-        if (word.Text is not ("const" or "sym") && Match(TokenKind.LeftParen)) // Rust's `const` and `sym` take a value, `const (N * 2)`
+        if (word.Text is not ("const" or "sym") && Match(TokenKind.LeftParen)) // Rust's `const` takes a value, `const (N * 2)`, and `sym` a path, both read as a value the checker judges
         {
             arguments = [];
             if (!At(TokenKind.RightParen))
@@ -1747,9 +1747,19 @@ public sealed class Parser
     /// <summary>The operand <c>&amp;</c> takes: a name, a path with no <c>?.</c>, an element or what a pointer points to, in parentheses or not.</summary>
     private static bool IsPlace(Expression expression) => expression switch
     {
-        NameExpression or IndexExpression or MemberAccess { Conditional: false } or UnaryExpression { Operator: TokenKind.Star } => true,
+        NameExpression or UnaryExpression { Operator: TokenKind.Star } => true,
+        IndexExpression i => HasNoConditionalLink(i.Target),
+        MemberAccess { Conditional: false } m => HasNoConditionalLink(m.Target),
         ParenthesizedExpression p => IsPlace(p.Inner),
         _ => false,
+    };
+
+    /// <summary>A path whose every link is <c>.</c> or an index: <c>a?.b.c</c> holds a <c>?.</c> below its last link.</summary>
+    private static bool HasNoConditionalLink(Expression expression) => expression switch
+    {
+        MemberAccess m => !m.Conditional && HasNoConditionalLink(m.Target),
+        IndexExpression i => HasNoConditionalLink(i.Target),
+        _ => true,
     };
 
     private Expression ParsePostfix()

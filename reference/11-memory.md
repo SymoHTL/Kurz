@@ -329,6 +329,7 @@ print(n)
 Case: [memory/pointer-deref-outside-raw.kz](../corpus/memory/pointer-deref-outside-raw.kz)
 ```kurz
 long n = 5
+// the address of a variable that is not `mut` is a pointer to read through, a write through it being a misuse (R10)
 p = &n
 print(n)
 print(*p)
@@ -337,7 +338,9 @@ print(*p)
 Case: [memory/address-of-counted.kz](../corpus/memory/address-of-counted.kz)
 ```kurz
 s = "hi"
+// the address of a variable that is not `mut` is a pointer to read through (R10), so the counted pointee is the one defect here
 p = &s
+// a pointer compares with `null` outside `raw` (R10)
 print(p == null)
 print(s)
 ```
@@ -677,6 +680,7 @@ extern "C" long Twice(long x) {
 }
 
 extern "C" (long) => long f = Twice
+// a call through a value of the type outside `raw` is `raw-required` (R17), whatever function the value holds
 print(f(4))
 ```
 

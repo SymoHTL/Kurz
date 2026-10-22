@@ -1,7 +1,9 @@
-// expect: error counted-pointee at 5
+// expect: error counted-pointee at 6
 // rules: R10
 
 s = "hi"
+// the address of a variable that is not `mut` is a pointer to read through (R10), so the counted pointee is the one defect here
 p = &s
+// a pointer compares with `null` outside `raw` (R10)
 print(p == null)
 print(s)

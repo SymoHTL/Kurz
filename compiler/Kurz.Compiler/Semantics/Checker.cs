@@ -728,6 +728,7 @@ public sealed partial class Checker
         {
             NotSupported(d.Line, (unsupportedModifiers & Modifiers.Naked) != 0 ? "a `naked` function (R12)"
                 : (unsupportedModifiers & Modifiers.Extern) != 0 ? "a function of the C calling convention, `extern \"C\"` (R16)"
+                : (unsupportedModifiers & Modifiers.Thread) != 0 ? "`thread static` before a function, which R13 states before state alone (R13)"
                 : $"the modifier `{unsupportedModifiers.ToString().ToLowerInvariant()}` of a method (K7, M6)");
             modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped (E1)
         }

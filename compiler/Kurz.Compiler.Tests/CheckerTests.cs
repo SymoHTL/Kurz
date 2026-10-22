@@ -590,7 +590,10 @@ public sealed class CheckerTests
         Assert.Equal(["2: the address of a place, `&x` (R10)", "3: a read through a raw pointer, `*p` (R10)"], NotSupported("long n = 5\np = &n\nprint(*p + 1)"));
         Assert.Equal(["2: the address of a place, `&x` (R10)", "3: a write through a raw pointer (R10)"], NotSupported("mut long n = 5\np = &n\n*p = 7"));
         Assert.Equal(["2: `asm` (R11)"], NotSupported("mut long count = 1\nasm(\"add {r}, 1\", r = inout(reg) count)"));
+        // a function with a modifier the checker does not read has its signature, defaults and body read with their diagnostics dropped,
+        // the `asm` of a `naked` body among them, and every call of its name unread, as for a modifier of a method (K7, M6)
         Assert.Equal(["1: a `naked` function (R12)"], NotSupported("naked void Switch() {\n    asm(\"ret\")\n}\n\nSwitch()"));
+        Assert.Equal(["1: `thread static` before a function, which R13 states before state alone (R13)"], NotSupported("thread static void F() {\n}\n\nF()"));
         Assert.Equal(["1: a `thread static mut` declaration at the top level of a file (R13)"], NotSupported("thread static mut long depth = 0\nprint(depth)"));
         Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)"], NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(-3))"));
         Assert.Equal(["1: a function of the C calling convention, `extern \"C\"` (R16)"], NotSupported("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nprint(Twice(4))"));
@@ -612,14 +615,16 @@ public sealed class CheckerTests
         // a C declaration of a name a type or a built-in has is `redeclared`, as a function of that name is (V9, F6)
         Assert.Equal([(ErrorIds.Redeclared, 4)], ErrorsBeside("data Point(int X)\n\nextern \"C\" {\n    int Point(int n)\n}\n\nprint(Point(1).X)"));
         Assert.Equal([(ErrorIds.Redeclared, 2)], ErrorsBeside("extern \"C\" {\n    int print(int n)\n}\n\nprint(1)"));
-        // a C declaration and another function of one name: `not supported` at the second of the two in source order, in either order and between two
-        // blocks, and a call of the name is not read, whichever function it would pick (K7, M6)
+        // a C declaration and another function of one name: `not supported` at the second of the two in source order, in either order, in
+        // one block and between two, and a call of the name is not read, whichever function it would pick (K7, M6)
         Assert.Equal(["5: a block of C functions, `extern \"C\"` (R16)", "6: a C function and another function of one name (R16)"],
             NotSupported("long abs(long n) {\n    return n\n}\n\nextern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(\"x\"))"));
         Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)", "5: a C function and another function of one name (R16)"],
             NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nlong abs(long n) {\n    return n\n}\n\nprint(abs(\"x\"))"));
         Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)", "3: a C function and another function of one name (R16)"],
             NotSupported("extern \"C\" {\n    int abs(int n)\n    long abs(long n)\n}\n\nprint(abs(1))"));
+        Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)", "5: a block of C functions, `extern \"C\"` (R16)", "6: a C function and another function of one name (R16)"],
+            NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nextern \"C\" {\n    long abs(long n)\n}\n\nprint(abs(1))"));
         // the body of a function of that name is checked all the same
         Assert.Equal([(ErrorIds.UnknownName, 2)], ErrorsBeside("long abs(long n) {\n    return m\n}\n\nextern \"C\" {\n    int abs(int n)\n}"));
 
