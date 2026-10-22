@@ -124,26 +124,38 @@ that sit under a rule by its id. Every one is pinned by a test.
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
   `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
   states no such rule.
-- R10 to R17: the raw forms. `*` and `&` before a value are prefix operators that bind as `-` does,
-  as C# binds them, so `*b.Next` reads through `b.Next`; a line that starts with `*` starts a
-  statement (L4), and `*` or `&` starts the value after `match` and after the `mut` of an argument.
-  `&` takes a name, a path, an element or what a pointer points to, as the left side of an
-  assignment does, and anything else after it is `syntax`. `int*?` is `syntax`, since a pointer holds
-  `null` itself (R10, as C#), and `int?*` parses, a pointer to an `int?`, whose pointee the checker
-  judges. `naked` and `extern "C"` stand among the other modifiers in any order, as C# orders
-  modifiers, `thread` is one only right before `static`, and `extern "C"` right before `(` starts the
-  type of a C function (R17), so the result of a function of the C calling convention is never a
-  type in parentheses alone; `extern` with a string other than `"C"` is `syntax`. A block of C
-  functions holds a declaration with no body on each line, with modifiers, types and defaults the
-  checker judges; `...` stands last in such a declaration and nowhere else, and a variable there is
-  `syntax`, whether the block declares a C library's variables being open in the record (§14).
-  `asm` is a statement of its own and `syntax` where a value stands; the string literals that open
-  its arguments are its templates, which the lexer reads with no hole (R11), and its operands parse
-  in Rust's shape (`name =`, a word, a list in parentheses, a value and `=> place`, or `label` with
-  a block), so a word or a register class that is not Rust's parses and is the checker's
-  (`asm-operand`); inside the value of an operand `=>` splits the operand and starts no lambda, while
-  an argument of a call there takes one as any argument does. R10 to R17 state the forms by their
-  samples and the record's choices, as C# and Rust write them, and none of them names these edges.
+- R10 to R17: the raw forms, each edge with the rule it rests on.
+  - `*` and `&` before a value are prefix operators that bind as `-` does, since R10 writes a pointer
+    as C# writes it, so `*b.Next` reads through `b.Next`. A line that starts with `*` starts a
+    statement (L4), and `*` or `&` starts the value after `match` and after the `mut` of an argument.
+  - `&` takes a place as the front end reads one: a name, a path with no `?.`, an element or what a
+    pointer points to, in parentheses or not. Anything else after it has no meaning in any rule,
+    `syntax` (E4); which of these places R10's "a variable, a field or an element" admits is the
+    checker's.
+  - Every type the parser reads takes the suffix `*`, since R10 lets a pointer type stand anywhere a
+    type stands, a type argument among them, where C# refuses one. Its trial parses take it too, so
+    a statement `a * b = c` declares `b` a pointer to an `a`, as C# reads `a * b = c;`, while
+    `x = a * b` stays a product.
+  - `int*?` is `syntax` (E4): a pointer type is no `T?` (R10), and the record turned `int*?` down as
+    the nullable form (§3, round 17). `int?*` parses as a pointer to an `int?`, and whether that is a
+    pointee is the checker's (R10).
+  - `naked` and `extern "C"` stand among the other modifiers in any order, as C# orders modifiers
+    (R12, R16). `thread` is one only right before `static` (L18, R13).
+  - `extern "C"` right before `(` starts the type of a C function, R17's form. So the result of a
+    function of the C calling convention is never a type in parentheses alone: no type that crosses
+    to C (§2, R16) is written in parentheses. `extern` with a string other than `"C"` has no meaning
+    in any rule, `syntax` (E4).
+  - A block of C functions holds a declaration with no body on each line (R16), with modifiers,
+    types and defaults the checker judges. `...` stands last in such a declaration (R16) and nowhere
+    else (E4). A variable there is `syntax` (E4): no rule gives it a meaning, since §14 holds open
+    whether a block declares a C library's variables, and no case stands on it.
+  - `asm` is a statement of its own (R11), and `syntax` where a value stands (E4). The string
+    literals that open its arguments are its templates, which the lexer reads with no hole (R11,
+    L6). Its operands parse in Rust's shape (R11): `name =`, a word, a list in parentheses, a value
+    and `=> place`, or `label` with a block; `const` and `sym` take a value and no list. A word or a
+    register class that is not Rust's parses, and is the checker's (`asm-operand`, R11). Inside the
+    value of an operand `=>` splits the operand and starts no lambda, while an argument of a call
+    there takes one as any argument does.
 - E4's general clause, applied to shapes no rule names: a modifier written twice (K7: class bodies
   follow C#, which refuses it), type parameters on an `enum` or `flags` type (D12 and D13 give them
   a name and a body), a second `?` on a type (N1 gives one), a second `weak` (R3 and R5 write one),
@@ -220,17 +232,24 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 
 ### What the checker does not read
 
-A program that uses one of these gets `not supported` at the construct's line and nothing else;
-what stands inside the construct is still read, with its diagnostics dropped, so that the variables
-it uses count as used. The list, which is the complete one: a `class`, an `interface`, an `enum`
+A program that uses one of these gets `not supported` at the construct's line and no error that
+comes from the construct (E1). What stands inside the construct is still read, with its diagnostics
+dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
+body of a lambda where a type stands that the checker does not read: these are checked, and an
+error of their own, a name no declaration has among them, is reported beside the line. The list,
+which is the complete one: a `class`, an `interface`, an `enum`
 or a `flags` type and a value of one (chapter 7, D12, D13, and the A-rules of their text); `null`,
 a nullable type, `?.` and `??` (chapter 4); `weak` (R3, R5), a `raw` block (R7), a raw pointer type,
 a read and a write through a pointer and an address `&x` (R10), `asm` (R11), a `naked` function
 (R12), a `static mut` or `thread static mut` declaration at the top level of a file (R13),
 `Ptr<T>(x)` and `SizeOf<T>()` (R14), whose other shapes are `syntax` (E4), a block of C functions,
-whose names a call reaches with no error of its own, and a function of the C calling convention,
-which leaves the function and every call of its name unread (R16), the type of a C function and a
-data type in C's layout (R17), and `use` (F10);
+whose names a call reaches with no error of its own, and inside a block as a function declared
+there is (F1, F6), a C declaration and another function of one name, at the second of the two, which
+leaves every call of the name unread (K7, M6), while a C declaration of a type's or a built-in's
+name is `redeclared` as a function's is (V9), and a function of the C calling convention, which
+leaves the function and every call of its name unread (R16), the type of a C function, at which a
+lambda carries no misfit and no missing type of its parameters, and a data type in C's layout (R17),
+and `use` (F10);
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; `Map` (M8, M9, M10), an assignment into an index or into a path through one, a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`

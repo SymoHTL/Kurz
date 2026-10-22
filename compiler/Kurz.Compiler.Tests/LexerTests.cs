@@ -710,8 +710,10 @@ public sealed class LexerTests
     public void A_string_that_is_no_template_of_asm_keeps_its_holes(string program)
     {
         // L6: outside the templates of R11, an empty hole holds no expression, `syntax` (E4): a literal after another argument of `asm`
-        // or inside an operand is an ordinary one
+        // or inside an operand is an ordinary one. The lexer alone reads these programs, so the `syntax` is the hole's and none of the
+        // parser's (which refuses `asm(x, ...)` too); a literal read as a template would raise nothing
         Assert.Equal((ErrorIds.Syntax, 1), OnlyError(program));
+        Assert.DoesNotContain(Lex(program).Tokens, t => t.Value is StringLiteralValue { IsTemplate: true, PlainText: "{}" });
     }
 
     [Fact]

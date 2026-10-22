@@ -42,7 +42,7 @@ expects it.
 | `counted-pointee` | R10, R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), `SizeOf` of such a type, or a list's `Pointer` member or `List<T>.FromRaw` of such an element type (R15) |
 | `naked-not-allowed` | R12 | a `naked` function in a package without the grant `allow raw`, or in a program without a project file, but for a case of the corpus whose header line grants it; its body raises no `raw-not-allowed` beside it |
 | `naked-body` | R12 | a body of a `naked` function other than one `asm`, or an operand of that `asm` other than `sym` and `const` |
-| `native-not-allowed` | R16 | a block of C functions in a package without the grant `allow native`, or in a program without a project file, but for a case of the corpus whose header line grants it |
+| `native-not-allowed` | R16 | a block of C functions in a package without the grant `allow native`, or in a program without a project file, but for a case of the corpus whose header line grants it; a function of the package's own in the C calling convention needs the grant too (R16), which names no id for one without it, so a case that holds one carries the grant |
 | `native-type` | R16 | a declaration of a block of C functions with a type that cannot cross to C, or an argument in the place of its `...` that is a number smaller than an `int`, a `bool` or a `float` |
 | `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |

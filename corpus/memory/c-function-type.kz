@@ -3,6 +3,7 @@
 // allow: raw native
 // rules: R16, R17
 
+// a value of the type is the name of a function of the C calling convention (R17), which R16 states
 extern "C" long Twice(long x) {
     return x * 2
 }

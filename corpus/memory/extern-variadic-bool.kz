@@ -1,12 +1,11 @@
-// expect: error native-type at 11
+// expect: error native-type at 10
 // allow: raw native
 // rules: R16
 
 extern "C" {
-    int printf(byte* format, ...)
+    int fcntl(int fd, int cmd, ...)
 }
 
-s = "%d"
 raw {
-    printf(s.Pointer, true)
+    fcntl(0, 1, true)
 }

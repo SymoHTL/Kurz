@@ -633,17 +633,17 @@ extern "C" {
 Case: [memory/extern-variadic-bool.kz](../corpus/memory/extern-variadic-bool.kz)
 ```kurz
 extern "C" {
-    int printf(byte* format, ...)
+    int fcntl(int fd, int cmd, ...)
 }
 
-s = "%d"
 raw {
-    printf(s.Pointer, true)
+    fcntl(0, 1, true)
 }
 ```
 
 Case: [memory/c-function-type.kz](../corpus/memory/c-function-type.kz)
 ```kurz
+// a value of the type is the name of a function of the C calling convention (R17), which R16 states
 extern "C" long Twice(long x) {
     return x * 2
 }

@@ -595,15 +595,37 @@ public sealed class CheckerTests
         Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)"], NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(-3))"));
         Assert.Equal(["1: a function of the C calling convention, `extern \"C\"` (R16)"], NotSupported("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nprint(Twice(4))"));
         Assert.Equal(["1: the type of a C function (R17)"], NotSupported("void Run(extern \"C\" (long) => long f) {\n}\n\nprint(1)"));
-        // a lambda where the type of a C function stands is no misfit beside it, typed or not (E1)
+        // a lambda where the type of a C function stands: the checker does not read that type, so it reports no misfit of the lambda
+        // and no missing type of its parameters beside the type's line (E1), and checks the body as any lambda's
         Assert.Equal(["1: the type of a C function (R17)"], NotSupported("void Run(extern \"C\" (long) => long f) {\n}\n\nRun((long x) => x * 2)"));
         Assert.Equal(["1: the type of a C function (R17)"], NotSupported("extern \"C\" (long) => long f = x => x * 2\nprint(1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], ErrorsBeside("extern \"C\" (long) => long f = x => y\nprint(1)"));
+        // the operand of `*` and `&` is checked: a name no declaration has is its own error (V10)
+        Assert.Equal([(ErrorIds.UnknownName, 1)], ErrorsBeside("print(*q)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], ErrorsBeside("p = &q"));
         Assert.Equal(["1: a data type in C's layout, `extern \"C\" data` (R17)"], NotSupported("extern \"C\" data Point(int X, int Y)\nprint(Point(1, 2).X)"));
         // the variables an operand of `asm` and a `label` block use count as used, so none is `unused-variable`
         Assert.Equal(["4: `asm` (R11)"], NotSupported("long a = 1\nmut long b = 2\nlong c = 3\nasm(\"{x} {l}\", x = inout(reg) a => b, l = label {\n    print(c)\n})"));
-        // a block of C functions inside a function makes its names visible there alone (V10)
-        var (nested, _) = Check("void F() {\n    extern \"C\" {\n        int abs(int n)\n    }\n\n    print(abs(-3))\n}\n\nF()\nprint(abs(-3))");
-        Assert.Equal(["2: not supported: a block of C functions, `extern \"C\"` (R16)", "10: error unknown-name: no `abs` is visible here (V10)"], nested.Sorted.Select(d => d.ToString()));
+        // a block of C functions inside a block is `not supported` as a function declared there is (F1, F6), and a call of its names in
+        // that block carries no error of its own (E1)
+        Assert.Equal(["2: a block of C functions inside a block (R16)"], NotSupported("void F() {\n    extern \"C\" {\n        int abs(int n)\n    }\n\n    print(abs(-3))\n}\n\nF()"));
+        // a C declaration of a name a type or a built-in has is `redeclared`, as a function of that name is (V9, F6)
+        Assert.Equal([(ErrorIds.Redeclared, 4)], ErrorsBeside("data Point(int X)\n\nextern \"C\" {\n    int Point(int n)\n}\n\nprint(Point(1).X)"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], ErrorsBeside("extern \"C\" {\n    int print(int n)\n}\n\nprint(1)"));
+        // a C declaration and another function of one name: `not supported` at the second of the two in source order, in either order and between two
+        // blocks, and a call of the name is not read, whichever function it would pick (K7, M6)
+        Assert.Equal(["5: a block of C functions, `extern \"C\"` (R16)", "6: a C function and another function of one name (R16)"],
+            NotSupported("long abs(long n) {\n    return n\n}\n\nextern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(\"x\"))"));
+        Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)", "5: a C function and another function of one name (R16)"],
+            NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nlong abs(long n) {\n    return n\n}\n\nprint(abs(\"x\"))"));
+        Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)", "3: a C function and another function of one name (R16)"],
+            NotSupported("extern \"C\" {\n    int abs(int n)\n    long abs(long n)\n}\n\nprint(abs(1))"));
+        // the body of a function of that name is checked all the same
+        Assert.Equal([(ErrorIds.UnknownName, 2)], ErrorsBeside("long abs(long n) {\n    return m\n}\n\nextern \"C\" {\n    int abs(int n)\n}"));
+
+        // the errors of a program the checker also says `not supported` to
+        static List<(string Id, int Line)> ErrorsBeside(string program) =>
+            Check(program).Diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList();
     }
 
     [Fact]

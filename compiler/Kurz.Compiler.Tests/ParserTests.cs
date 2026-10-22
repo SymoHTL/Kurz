@@ -996,9 +996,14 @@ public sealed class ParserTests
     [InlineData("Block* b = Ptr<Block>(m)", "(declare Block* b (call Ptr<Block> m))")]
     [InlineData("match *p {\n    else => print(0)\n}", "(match (* p) [(else => (call print (int 0)))])")]
     [InlineData("Fill(mut *p)", "(call Fill mut (* p))")]
+    [InlineData("q = &*p", "(assign-or-declare q (& (* p)))")]
+    [InlineData("a * b = c", "(declare a* b c)")]
     public void A_raw_pointer_is_written_as_c_sharp_writes_it(string program, string tree)
     {
-        // R10: the type `int*`, `int**` a pointer to one, `void*` the untyped one (R14), in a declaration, a parameter and a type argument;
+        // R10: the type `int*`, `int**` a pointer to one, `void*` the untyped one (R14), in a declaration and a parameter, and in a type
+        // argument, since R10 lets a pointer type stand anywhere a type stands, where C# refuses one (CS0306); every type the parser
+        // reads takes the suffix, its trial parses among them, so a statement `a * b = c` declares `b` a pointer to an `a`, as C# reads
+        // `a * b = c;`, while `x = a * b` stays a product;
         // the read `*p` and the address `&x` are prefix operators that bind as `-` does, so `*b.Next` reads through `b.Next`; `*p = v` and
         // `(*b).Next = q` write through a pointer; a line that starts with `*` starts a statement, and one that ends in `*` continues (L4);
         // `*` and `&` start a value as `-` does, after `match` and after the `mut` of an argument (M7).
@@ -1025,7 +1030,7 @@ public sealed class ParserTests
         // R12: `naked` before a signature, among the other modifiers in any order, as C# orders modifiers; R13: `thread` is a word only
         // before `static`, and a name everywhere else (L18); R16: a block of C functions with no bodies, on one line or on several, the
         // library after `in`, `...` the last parameter; R16: a function of the package's own in the C calling convention; R17: the type
-        // of a C function, its nullable form in parentheses, and `extern "C"` before `(` starts that type; §2: data in C's layout
+        // of a C function, its nullable form in parentheses, and `extern "C"` before `(` starts that type; R17: data in C's layout
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1041,11 +1046,12 @@ public sealed class ParserTests
     [InlineData("asm(\"\"\"\n    nop\n    nop {x}\n    \"\"\", x = in(reg) 1)", "(asm \"nop\\nnop {x}\" [x = in(reg) (int 1)])")]
     [InlineData("asm(\"{x}\", x = in(reg) Pick(y => y))", "(asm \"{x}\" [x = in(reg) (call Pick (lambda (y) y))])")]
     [InlineData("asm(\"{x}\", x = frobnicate(reg) y)", "(asm \"{x}\" [x = frobnicate(reg) y])")]
+    [InlineData("asm(\"{n}\", n = const (N * 2))", "(asm \"{n}\" [n = const (paren (* N (int 2)))])")]
     public void An_asm_statement_takes_its_operands_as_rust_writes_them(string program, string tree)
     {
         // R11: the templates first, then the operands in Rust's shape, a name and `=` where they have one, `in`, `out`, `inout` with a
         // register class or a register's string, `=>` that splits an operand (a lambda nowhere but in an argument of a call there), `_`,
-        // `sym`, `const`, `clobber_abi`, `options` and `label` with its block; a word that is not Rust's parses, and the checker judges it
+        // `sym` and `const`, which take a value and no list, `clobber_abi`, `options` and `label` with its block; a word that is not Rust's parses, and the checker judges it
         // (`asm-operand`)
         Assert.Equal(tree, Tree(program));
     }
@@ -1068,7 +1074,7 @@ public sealed class ParserTests
     [InlineData("extern \"C\" in dbghelp {\n}", 1)]
     public void A_raw_form_outside_its_shape_is_syntax(string program, int line)
     {
-        // E4: a pointer holds `null` itself, so `int*?` has no meaning (R10, as C#); `&` takes a variable, a field or an element (R10);
+        // E4: a pointer holds `null` itself, so `int*?` has no meaning (R10, as C#); `&` takes a place as the front end reads one (IsPlace);
         // `extern` names the convention "C" (R16, R17); a function of a block of C functions has no body, `...` is its last parameter, and
         // the block declares functions (R16), whether it declares a C library's variables standing open; `asm` is a statement whose
         // templates, string literals, come before its operands (R11); `extern "C" (` starts the type of a C function (R17); `thread`

@@ -29,6 +29,7 @@ public sealed partial class Checker
     private readonly Dictionary<string, string> unsupportedBases = new(StringComparer.Ordinal);
     private readonly HashSet<string> unreadData = new(StringComparer.Ordinal);
     private readonly HashSet<string> unreadFunctions = new(StringComparer.Ordinal);
+    private readonly HashSet<string> cFunctionNames = new(StringComparer.Ordinal); // R16: the names the blocks of C functions at the top level declare
     private readonly HashSet<FunctionSymbol> modifiedFunctions = [];
     private readonly List<FunctionSymbol> unreadOverloads = [];
     private readonly List<(HashSet<string> Types, HashSet<string> Functions)> nestedNames = [];
@@ -159,7 +160,7 @@ public sealed partial class Checker
                     DeclareFunction(f);
                     break;
                 case ExternBlock e:
-                    unreadFunctions.UnionWith(e.Functions.Select(f => f.Name)); // R16: a call of one carries no error of its own (E1)
+                    DeclareCFunctions(e);
                     break;
                 default:
                     break;
@@ -179,6 +180,7 @@ public sealed partial class Checker
         }
 
         RefuseModifiedFunctions();
+        RefuseCFunctionNames();
         CheckDuplicateFunctions();
         CheckDefaults();
         CollectReserved(program.Statements);
@@ -329,7 +331,7 @@ public sealed partial class Checker
                 // does not read; a use of it carries no error of its own (E1)
                 NotSupported(d.Line, "a data type in C's layout, `extern \"C\" data` (R17)");
                 unsupportedTypes.Add(d.Name);
-                unsupportedBases[d.Name] = "a data type in C's layout a data type names (R17)";
+                unsupportedBases[d.Name] = "a data type in C's layout that a data type names (R17)";
             }
 
             return;
@@ -694,6 +696,11 @@ public sealed partial class Checker
             return;
         }
 
+        if (cFunctionNames.Contains(d.Name))
+        {
+            NotSupported(d.Line, "a C function and another function of one name (R16)"); // and its calls are not read (RefuseCFunctionNames)
+        }
+
         if (!functions.TryGetValue(d.Name, out var list))
         {
             list = [];
@@ -751,6 +758,48 @@ public sealed partial class Checker
             }
 
             symbol.Parameters.Add(new ParameterSymbol(p.Name, type, p.Mut, p.Default is not null, p.Line));
+        }
+    }
+
+    /// <summary>
+    /// R16: the names a block of C functions declares, which the checker does not read, so that a call of one carries no error of its
+    /// own (E1). A name a type or a built-in has is <c>redeclared</c> (V9), as a function's is (F6). A name another function or C
+    /// declaration of the file has is <c>not supported</c> at the second of the two in source order: whether a C declaration stands beside the functions
+    /// of its name is no rule's.
+    /// </summary>
+    private void DeclareCFunctions(ExternBlock e)
+    {
+        foreach (var f in e.Functions)
+        {
+            if (dataTypes.ContainsKey(f.Name) || unsupportedTypes.Contains(f.Name) || IsBuiltInName(f.Name))
+            {
+                Report(ErrorIds.Redeclared, f.Line, $"the name `{f.Name}` is declared already (V9)");
+                continue;
+            }
+
+            if (functions.ContainsKey(f.Name) || cFunctionNames.Contains(f.Name))
+            {
+                NotSupported(f.Line, "a C function and another function of one name (R16)");
+            }
+
+            cFunctionNames.Add(f.Name);
+            unreadFunctions.Add(f.Name);
+        }
+    }
+
+    /// <summary>
+    /// R16 with K7, M6: a call of a name that a C declaration has is not read, whichever function of the name it would pick, as for a
+    /// function with a modifier of a method: the C declaration is not read, so the call could carry an error the program does not
+    /// have (E1). The bodies of the other functions of the name are checked all the same.
+    /// </summary>
+    private void RefuseCFunctionNames()
+    {
+        foreach (var name in cFunctionNames)
+        {
+            if (functions.Remove(name, out var list))
+            {
+                unreadOverloads.AddRange(list);
+            }
         }
     }
 
@@ -1159,7 +1208,9 @@ public sealed partial class Checker
                 NotSupported(u.Line, "use (F10)");
                 return Flow.Completes;
             case ExternBlock e:
-                NotSupported(e.Line, "a block of C functions, `extern \"C\"` (R16)"); // its names were declared in the first passes
+                // R16 states a block of C functions with no place; inside a block it is read as a function declared there is (F1, F6):
+                // its names are visible in that block alone (PushNested), and their calls carry no error of their own (E1)
+                NotSupported(e.Line, blockDepth > 0 ? "a block of C functions inside a block (R16)" : "a block of C functions, `extern \"C\"` (R16)");
                 return Flow.Completes;
             case AsmStatement a:
                 NotSupported(a.Line, "`asm` (R11)");

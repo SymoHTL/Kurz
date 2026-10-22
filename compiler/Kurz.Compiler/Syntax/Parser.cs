@@ -277,6 +277,7 @@ public sealed class Parser
         var savedBad = new HashSet<int>(badLines);
         var savedEdits = tokenEdits.Count;
         var savedCommitted = committed;
+        var savedNoLambda = noLambda;
         committed = false;
         var ok = false;
         speculating++;
@@ -289,6 +290,7 @@ public sealed class Parser
         {
             index = saved;
             suppressNewlines = savedSuppress;
+            noLambda = savedNoLambda;
             openBraces = savedBraces;
             pending.RemoveRange(savedPending, pending.Count - savedPending);
             badLines.Clear();
@@ -777,7 +779,7 @@ public sealed class Parser
         }
 
         List<AsmArgument>? arguments = null;
-        if (Match(TokenKind.LeftParen))
+        if (word.Text is not ("const" or "sym") && Match(TokenKind.LeftParen)) // Rust's `const` and `sym` take a value, `const (N * 2)`
         {
             arguments = [];
             if (!At(TokenKind.RightParen))
@@ -1724,15 +1726,16 @@ public sealed class Parser
         }
 
         // R10: `*p` reads through a pointer and `&x` takes the address of a variable, a field or an element, prefix operators as C#
-        // writes them in `unsafe` code, binding as `-` does, so `*p.Next` reads through `p.Next`; `&` of anything else is text no
-        // rule gives a meaning (E4), as the left side of an assignment is
+        // writes them in `unsafe` code, binding as `-` does, so `*p.Next` reads through `p.Next`; the front end reads a place as a
+        // name, a path with no `?.`, an element or what a pointer points to, in parentheses or not (IsPlace), and `&` of anything
+        // else is text no rule gives a meaning (E4)
         if (At(TokenKind.Star) || At(TokenKind.Ampersand))
         {
             var op = Advance();
             var operand = ParseUnary();
             if (op.Kind == TokenKind.Ampersand && !IsPlace(operand))
             {
-                throw new ParseError(op.Line, "`&` takes a variable, a field or an element (R10)");
+                throw new ParseError(op.Line, "`&` takes a variable, a field, an element or what a pointer points to (R10)");
             }
 
             return new UnaryExpression(op.Line, op.Kind, operand);
@@ -1741,6 +1744,7 @@ public sealed class Parser
         return ParsePostfix();
     }
 
+    /// <summary>The operand <c>&amp;</c> takes: a name, a path with no <c>?.</c>, an element or what a pointer points to, in parentheses or not.</summary>
     private static bool IsPlace(Expression expression) => expression switch
     {
         NameExpression or IndexExpression or MemberAccess { Conditional: false } or UnaryExpression { Operator: TokenKind.Star } => true,
