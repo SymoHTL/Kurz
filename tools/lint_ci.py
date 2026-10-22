@@ -563,7 +563,7 @@ MUTATIONS = [
     ("image.yml", "a secret for the registry", "          GH_TOKEN: ${{ github.token }}\n", "          GH_TOKEN: ${{ secrets.GHCR_PAT }}\n",
      "a secret is read"),
     ("ci/Dockerfile", "the base by tag", "FROM ubuntu:24.04@sha256:", "FROM ubuntu:24.04\nLABEL base=sha256:", "named by its digest"),
-    ("ci/Dockerfile", "a second FROM", "\nFROM ubuntu", "\nFROM ubuntu:24.04 AS first\nFROM ubuntu", "named by its digest"),
+    ("ci/Dockerfile", "a second FROM", "\nFROM ubuntu", "\nFROM ubuntu@sha256:" + "0" * 64 + " AS first\nFROM ubuntu", "named by its digest"),
     ("ci/Dockerfile", "an SDK other than global.json's", "ARG DOTNET_SDK=", "ARG DOTNET_SDK=9.0.100\nARG UNUSED=", "while compiler/global.json pins"),
     ("ci/Dockerfile", "the SDK used unchecked", '/tmp/sdk.tar.gz" | sha512sum -c -', '/tmp/sdk.tar.gz" | cat', "ARG DOTNET_SHA512"),
     ("ci/Dockerfile", "gh used unchecked", '/tmp/gh.tar.gz" | sha256sum -c -', '/tmp/gh.tar.gz" | cat', "ARG GH_SHA256"),

@@ -89,27 +89,36 @@ flowchart TD
         Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's and the
         checker's errors against each header and runs no program; the version of the clang the compiler found, printed, and a fail when the compiler
         refused it or found none, which section 2 of the design record (decided there, round 20) requires of this gate,
-        and the image with the pinned LLVM that the job gates runs in, which ci-config refuses as a job in a container,
-        and the install of that release in the workflow compiler-windows, both of which section 2 (decided there, round 20)
+        and the install of that release in the workflow compiler-windows, which section 2 (decided there, round 20)
         requires of this repository's CI: the compiler under
-        compiler/ calls no clang and this gate reads no version (checked 2026-10-20: the sources of both; 2026-10-22: the three workflows), HAZARD issue 37"]
-        G4["ci-config: a pinned fact of a workflow changed. All three workflows: an action not pinned by commit SHA (flow-style
+        compiler/ calls no clang and this gate reads no version (checked 2026-10-20: the sources of both; 2026-10-22: the workflows), HAZARD issue 37.
+        The image with the pinned LLVM that the job gates runs in is G4's since 2026-10-22"]
+        G4["ci-config: a pinned fact of a workflow changed. All four workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
         env of the job's last step (in any case, behind any literal), a workflow- or job-level env, a job-level
-        permissions grant, a job in a container or beside services,
+        permissions grant, a job beside services, a job in a container but the gates job in its image,
         a step that writes GITHUB_ENV or GITHUB_PATH, a step that checks out or fetches by hand,
         the deciding step with any env key but the pinned ones, a key twice in one mapping.
         gates.yml: an if on the job (a skipped job reports success to the required check),
         a path filter, any filter on pull_request, a push trigger for any branch but main, a token other than
-        contents, issues and pull-requests read (issues for the collection ticket, G8), a second job.
+        contents, issues, packages and pull-requests read (issues for the collection ticket, G8; packages for the image),
+        a second job, a job that is not in ghcr.io/symohtl/kurz-ci named by its digest and pulled with the job's
+        token, an SDK step of its own (the image's SDK is the one compiler/global.json pins).
         review.yml: an if, a checkout ref, a concurrency group or permissions other than the pinned ones,
         no start-time step first, the budget anywhere but on the review step,
         a CLI that is not at an exact version.
         compiler-windows.yml: another label than the versioned Windows one, an if, a wider token, a second job,
-        a checkout that keeps the credential, no SDK step or one with a version typed in the workflow,
-        an env on the compiler step; gates.yml carries the same SDK fact. A workflow file without facts here.
-        The image's python3, node, gh and git are pinned by nothing: HAZARD issue 15"]
+        a checkout that keeps the credential, no SDK step, a second one or one with a version typed in the workflow,
+        an env on the compiler step.
+        image.yml: triggers other than a push that changes ci/Dockerfile or the workflow, on any branch, and a dispatch;
+        a token other than contents read and packages write; an if, a second job, a checkout that keeps the credential;
+        a publish step other than the pinned login through standard input, build, push and digest line.
+        ci/Dockerfile: a base not named by its digest, a second FROM, an SDK other than compiler/global.json's, a
+        download used unchecked (the LLVM key by its fingerprint, the SDK by its SHA-512, gh by its SHA-256), an LLVM
+        major that is no number. A workflow file without facts here.
+        The hosted images' python3, node, gh and git, and the gates image's python3, git and LLVM release, are
+        pinned to no version: HAZARD issue 15"]
         G5["merge-checks: live rules on main differ from tools/ruleset.json
         or carry a parameter that file does not name, ruleset not active,
         or a read of the rules that the forge refuses. Two settings turn it red only in a local run

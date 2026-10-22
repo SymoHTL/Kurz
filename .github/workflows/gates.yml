@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     container:
-      image: ghcr.io/symohtl/kurz-ci@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      image: ghcr.io/symohtl/kurz-ci@sha256:50bd0536b02676f8c1ade22ed1e9035d2785af3baee16548876025e39ade8a1b
       credentials:
         username: ${{ github.actor }}
         password: ${{ github.token }}
