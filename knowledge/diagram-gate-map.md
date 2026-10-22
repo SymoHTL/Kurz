@@ -181,11 +181,11 @@ flowchart TD
         other head is reviewed by the run its event starts; a run that started is a bill). A dispatch on
         another ref runs that ref's copy, and the job's if refuses it only in the default branch's copy:
         HAZARD issue 11"]
-        R7["review rounds, the owner's cap of three (2026-10-21): a round is a run that labelled the pull request;
+        R7["review rounds, the owner's cap of one (2026-10-22; three from 2026-10-21): a round is a run that labelled the pull request;
         a run with files to review, in CI or off the pipeline, puts review-round-n on before its first pass,
-        a round whatever follows, and the count is the highest n (kit.review_rounds); at three every run ends
-        before any pass as cap, in CI with the status review at error naming the cap, on the head the third
-        round reviewed too. The end is inside the job: a job its if skips reports success.
+        a round whatever follows, and the count is the highest n (kit.review_rounds); at one every run ends
+        before any pass as cap, in CI with the status review at error naming the cap, on the head the round at the cap
+        reviewed too. The end is inside the job: a job its if skips reports success.
         Red: self-tests (the count, the label before the first pass, the end and its status).
         A label taken off or put on by hand, a second issue with the collection label, two runs that start
         at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
@@ -211,9 +211,9 @@ flowchart TD
         or push in it: HAZARD issue 27.
         Exit 3 when the gate was not read back as on, exit 6 when the waiver record is missing.
         The owner approves each item: judgment step, HAZARD issue 3; at the review cap (R7) the owner's
-        approval of 2026-10-21 is given for the head the third round reviewed, when that round completed,
+        approval of 2026-10-21, which holds for the cap of one since 2026-10-22, is given for the head the round at the cap reviewed, when that round completed,
         for review and for gates when pr-findings is its one FAIL, conditions the caller reads (judgment
-        step). The tool refuses a branch behind its base (M2), so when main moves after the third round
+        step). The tool refuses a branch behind its base (M2), so when main moves after the round at the cap
         the branch is brought up to date as a new head, which only the owner's approval of that head merges"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
@@ -230,7 +230,7 @@ flowchart TD
         X2["samples in the design record and expectations in the corpus are right:
         nothing runs them, HAZARD issue 1"]
         X3["wrap-up: lessons promoted out of private memory: HAZARD issue 6"]
-        X4["one push per review round, and none after the third (R7): judgment step"]
+        X4["one push per review round, and none after the round at the cap (R7): judgment step"]
     end
     W --> P --> G --> M
     P --> R --> M

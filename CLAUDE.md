@@ -179,12 +179,12 @@ Each line names a trap; its evidence is in the entry it links.
   `credential`: the owner fixes the secret. `budget`: run it again; what the run found is posted
   and what converged is replayed, so the next run continues. `base`: the pull request does not
   target `main`, so a status on its head would vouch for a diff nobody reviewed; retarget it, or
-  review it off the pipeline. `cap`: the pull request had its three review rounds; no run follows,
-  and the rule "A pull request gets at most three review rounds" says what does. `rules`,
+  review it off the pipeline. `cap`: the pull request had its one review round; no run follows,
+  and the rule "A pull request gets at most one review round" says what does. `rules`,
   `oversized`, `empty`, `bad-diff`: the line says what to do. A run that labelled the pull
   request is a round whatever kind it ends with (that rule), so running it again after any of
-  them, `budget`, `usage-limit`, `head-moved` and the reviewer's own defects among them, takes a
-  round of the three, and after the third round no run follows.
+  them, `budget`, `usage-limit`, `head-moved` and the reviewer's own defects among them, takes the
+  one round, and after it no run follows.
   `judgment step`
 - A branch behind `main` fails what `main` already fixed: update the branch before debugging. At
   the review cap the update is a new head outside the cap's approval: ask the owner first.
@@ -302,10 +302,10 @@ Gate: review rule "rules for sessions".
   HAZARD (#14).
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
   head**, passed as `--over-red`. An approval is never standing, but for one case: a pull request
-  at the review cap (the rule "A pull request gets at most three review rounds" below) carries the
-  owner's approval of 2026-10-21 to merge over red at the head its third round reviewed, when that
-  round completed, for the check `review` and for `gates` when its table shows `pr-findings` as its
-  one FAIL; a third round that did not complete, any other red check or gate, and a head that took
+  at the review cap (the rule "A pull request gets at most one review round" below) carries the
+  owner's approval of 2026-10-21, which holds for the cap of one since 2026-10-22, to merge over red
+  at the head its round at the cap reviewed, when that round completed, for the check `review` and for `gates` when its table shows `pr-findings` as its
+  one FAIL; a round at the cap that did not complete, any other red check or gate, and a head that took
   `main` after that round need the owner's approval for that head as for any other. Whether those conditions hold is read by the caller, a `judgment step`: the merge tool
   takes `--over-red` as the caller's statement (HAZARD #3). Retired on
   2026-10-21 by that cap: "An approval is never standing" with no case. The tool switches the whole
@@ -322,19 +322,19 @@ Gate: review rule "rules for sessions".
   push once, resolve the threads the push answered, then mark it Ready (the skill `change-walk`,
   step 7), so the one review and the gates run on a head with its threads resolved. Never push
   to cancel a running review; a push to a Ready pull request does cancel it. No fix push follows
-  the third round: the cap below. `judgment step`
-- **A pull request gets at most three review rounds** (the owner, 2026-10-21, after pull request
-  33 took thirteen rounds without converging,
-  [knowledge/rounds-do-not-converge.md](knowledge/rounds-do-not-converge.md)). A round is a
+  the round at the cap: the cap below. `judgment step`
+- **A pull request gets at most one review round** (the owner, 2026-10-22). Retired by it: the cap of
+  three rounds the owner set on 2026-10-21, after pull request 33 took thirteen rounds without
+  converging ([knowledge/rounds-do-not-converge.md](knowledge/rounds-do-not-converge.md)). A round is a
   review run that labelled the pull request: a run with files to review, in CI or off the
   pipeline, puts the label `review-round-<n>` on before its first pass, and it is a round whatever
   follows (a pass, a limit, a cut-off, a failure); a dry run, `--plan` and a run that ends before
   the label (closed, the secret missing, nothing to review, the cap) put none on. The count is the
   highest `n`, the rounds before the cap count, and the rounds a pull request had before the labels
-  are counted by one label put on by hand. At three every further run ends before its first pass
+  are counted by one label put on by hand. At one every further run ends before its first pass
   as `REVIEW DID NOT COMPLETE (cap)`, in CI with the status `review` at `error`, naming the cap; on
-  the head the third round reviewed that error takes the place of the round's status, so at the
-  cap no run is started (no Draft and Ready, no dispatch, no push). What the third round left open
+  the head the round at the cap reviewed that error takes the place of the round's status, so at the
+  cap no run is started (no Draft and Ready, no dispatch, no push). What the round at the cap left open
   goes on the collection ticket, the open issue labelled `review-leftovers`: one section per pull
   request, with the head the findings were made on, the links of its threads and the link of its
   lows on the `review-lows` issue; every open thread gets a reply that links the ticket and is
@@ -363,7 +363,7 @@ Gate: review rule "rules for sessions".
   [knowledge/the-pull-request-shows-the-old-head-after-a-push.md](knowledge/the-pull-request-shows-the-old-head-after-a-push.md));
   a thread answered by a reply is resolved by hand
   ([knowledge/resolve-what-the-edit-answered.md](knowledge/resolve-what-the-edit-answered.md)),
-  and at the cap the same command, with the head the third round reviewed, resolves a thread whose
+  and at the cap the same command, with the head the round at the cap reviewed, resolves a thread whose
   replies all move it to the collection ticket. Gate: `pr-findings`.
 - **The acceptance judge's table is a comment on the pull request, and the description names no
   verdict.** The review reads a verdict in the description as a claim of approval: on 2026-10-10 one
@@ -431,7 +431,7 @@ Gate: review rule "rules for sessions".
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
-| at most three review rounds per pull request, and at the cap a finding moved to the collection ticket (`self-tests`) | the round labels, which anyone who may triage can change, a second issue with the collection label, two runs that start at the same moment, and a dry run, which no label counts (#41) |
+| at most one review round per pull request, and at the cap a finding moved to the collection ticket (`self-tests`) | the round labels, which anyone who may triage can change, a second issue with the collection label, two runs that start at the same moment, and a dry run, which no label counts (#41) |
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
 | | a merge by the button, which skips what only the merge tool does (#14) |
