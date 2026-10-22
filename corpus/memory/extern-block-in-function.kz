@@ -1,0 +1,12 @@
+// expect: error syntax at 6
+// allow: native
+// rules: R16
+
+void F() {
+    extern "C" {
+        int abs(int n)
+    }
+}
+
+F()
+// the grant keeps `native-not-allowed` out, so that the place of the block is the one defect (R16)

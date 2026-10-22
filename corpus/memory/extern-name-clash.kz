@@ -1,0 +1,12 @@
+// expect: error redeclared at 10
+// allow: native
+// rules: R16
+
+long abs(long n) {
+    return n
+}
+
+extern "C" {
+    int abs(int n)
+}
+// the two clash by their name alone, whatever their parameters, since a C declaration has one name (R16)

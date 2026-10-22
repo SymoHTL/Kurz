@@ -1,0 +1,9 @@
+// expect: error native-not-allowed at 4
+// rules: R16
+
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+print(Twice(4))
+// the header grants nothing, and a function of the package's own in the C calling convention needs `allow native` (R16)

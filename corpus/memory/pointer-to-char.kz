@@ -1,0 +1,12 @@
+// expect: output
+// | b
+// allow: raw
+// rules: R10
+
+mut char c = 'a'
+p = &c
+raw {
+    *p = 'b'
+}
+print(c)
+// a `char` holds no counted reference, so a pointer points to it as to a number (R10)

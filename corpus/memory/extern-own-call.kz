@@ -1,0 +1,11 @@
+// expect: output
+// | 8
+// allow: native
+// rules: R16
+
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+print(Twice(4))
+// the header grants `allow native`, and a call of the package's own C function by its name needs no `raw` block (R16)

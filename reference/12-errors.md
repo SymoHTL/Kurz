@@ -13,7 +13,7 @@ expects it.
 |---|---|---|
 | `unused-variable` | V5, V6 | a variable that is never read; a parameter and a loop variable are no variables for this (V13) |
 | `assign-immutable` | V7, V8, D4, K1, F8, K14 | an assignment to a variable or a parameter that is not `mut`, into a path that starts at one (M4: for a `data` value the variable at the root decides, so `root.Left = x` through a `mut` variable is allowed), or to a field of a class instance that is not `mut`; inside a constructor a field without `mut` is assigned once (K14), and a second time is this error |
-| `redeclared` | V9, F16 | a declaration, in any of its forms, of a name that is already visible, or inside a top-level function of the name of a variable at the outermost level of the top-level code |
+| `redeclared` | V9, F16, R16 | a declaration, in any of its forms, of a name that is already visible, or inside a top-level function of the name of a variable at the outermost level of the top-level code; a C declaration of a name that another function of the package, a type or another C declaration has, at the second of the two (R16) |
 | `argument-mismatch` | D11, F13 | a call with an argument whose name no parameter has, two arguments for one parameter, or none for a parameter without a default; a call of a name that has more than one function and fits none of them, at the call (F13) |
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or `.Number` and `From` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
@@ -38,12 +38,12 @@ expects it.
 | `weak-value` | R5 | `weak` in front of a type whose values are not instances of a class |
 | `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file, but for a case of the corpus whose header line grants it |
 | `raw-required` | R10, R11, R13, R16, R17 | an `asm`, or a read or a write through a raw pointer (R10), outside a `raw` block and outside the body of a `naked` function; a read or a write of a top-level `static` (R13), a member that shows the memory of a string or a list (R15), or a call of a function that a block of C functions declares or through a C function type (R16, R17), outside a `raw` block |
-| `asm-operand` | R11 | a breach of the rules of an `asm`'s template and its operands: an operand the template does not use, a name in the template that no operand has, or a word or a register class that is not one of Rust's |
-| `counted-pointee` | R10, R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), `SizeOf` of such a type, or a list's `Pointer` member or `List<T>.FromRaw` of such an element type (R15) |
+| `asm-operand` | R11 | a breach of the rules of an `asm`'s template and its operands: an operand the template does not use, a name in the template that no operand has, a word or a register class that is not one of Rust's, or a register class that the target the build compiles for does not have |
+| `counted-pointee` | R10, R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), `SizeOf` of such a type, or a list's `Pointer` member or `List<T>.FromRaw` of such an element type (R15), or a pointer to any other type that holds a counted reference (R10) |
 | `naked-not-allowed` | R12 | a `naked` function in a package without the grant `allow raw`, or in a program without a project file, but for a case of the corpus whose header line grants it; its body raises no `raw-not-allowed` beside it |
 | `naked-body` | R12 | a body of a `naked` function other than one `asm`, or an operand of that `asm` other than `sym` and `const` |
-| `native-not-allowed` | R16 | a block of C functions in a package without the grant `allow native`, or in a program without a project file, but for a case of the corpus whose header line grants it; a function of the package's own in the C calling convention needs the grant too (R16), which names no id for one without it, so a case that holds one carries the grant |
-| `native-type` | R16 | a declaration of a block of C functions with a type that cannot cross to C, or an argument in the place of its `...` that is a `bool`, a `float` or a number smaller than an `int`; R16 names no id for a type that cannot cross to C in a function of the package's own in the C calling convention, nor R17 in the type of a C function |
+| `native-not-allowed` | R16 | a block of C functions, or a function of the package's own in the C calling convention at its declaration, in a package without the grant `allow native`, or in a program without a project file, but for a case of the corpus whose header line grants it |
+| `native-type` | R16 | a declaration of a block of C functions with a type that cannot cross to C or with a `mut` parameter, or an argument in the place of its `...` that is a `bool`, a `float` or a number smaller than an `int` |
 | `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
@@ -63,7 +63,7 @@ expects it.
 | `no-primary-constructor` | K16 | the short form of inheritance against a base without a primary constructor |
 | `constructor-must-chain` | K14 | a further constructor of a class with a primary constructor that does not call it |
 | `field-unassigned` | K14 | a field without `=`, `mut` or not, that a constructor leaves unassigned on a path or reads before its first assignment, or such a field in a class with a primary constructor |
-| `syntax` | E4, L4, L5, L9, L11, L12, L13, L14, T21, K5, D13 | text that no rule gives a meaning: the C `for` with three parts, `else` on a line of its own, an arm after `else`, a call with a `void` success used as a value, a name with a character outside ASCII or an `@` name (L9), a suffix with a lower-case `l` or an integer suffix after a fraction or an exponent (L11), text after an opening `"""` or before a closing one, or `""""` at the end of a line (L13), a hexadecimal, binary, suffixed literal or one with an exponent before a unit (L14), anything but one code point in a `char` literal (T21), an operator declaration (K5), a `match` on a set of flags (D13), a `;` where no statement ends (L5), a core word where an expression, an untyped lambda parameter or the name of a named argument stands (L12), a trailing comma in the braces of `with` (L4) |
+| `syntax` | E4, L4, L5, L9, L11, L12, L13, L14, T21, K5, D13, R12, R16 | text that no rule gives a meaning: the C `for` with three parts, `else` on a line of its own, an arm after `else`, a call with a `void` success used as a value, a name with a character outside ASCII or an `@` name (L9), a suffix with a lower-case `l` or an integer suffix after a fraction or an exponent (L11), text after an opening `"""` or before a closing one, or `""""` at the end of a line (L13), a hexadecimal, binary, suffixed literal or one with an exponent before a unit (L14), anything but one code point in a `char` literal (T21), an operator declaration (K5), a `match` on a set of flags (D13), a `;` where no statement ends (L5), a core word where an expression, an untyped lambda parameter or the name of a named argument stands (L12), a trailing comma in the braces of `with` (L4), `naked` before a method, a lambda or a function declared inside a block of code (R12), a block of C functions anywhere but at the top level of a file, inside a function, the body of a type or a block of code among them (R16) |
 | `inexact-literal` | L14 | a decimal fraction before a unit that does not fall on a whole nanosecond, or on a whole byte before `kb`, `mb` and `gb` |
 | `missing-member` | K7 | a class that names an interface and lacks one of its methods, a method inherited without `pub` not counting, at the class |
 | `interface-method-private` | K7 | a method that implements a method of an interface the class names, without `pub`, at the method |
@@ -92,14 +92,32 @@ keeps its file and its line in each of these builds. In a test build, which keep
 checks in the runtime's own code, its primitives (§2, decided there), a check of that code, on Linux
 and on Windows, ends the process as a stack fault inside the allocator or the scheduler does (O11),
 at the line of the innermost frame outside the runtime (§6, decided there); that the crash path
-reads that line as it reads a primitive's, that the check is no raise by code, and that it takes a
-primitive's notes where that line is not known, are assumptions there; what it does on the other
-targets is open (§14).
+reads that line as it reads a primitive's, that the check is no raise by code, that it takes a
+primitive's notes where that line is not known, and that it goes through the crash path to its error
+line and its trace and ends the process there, with no `Reason` recorded, no policy run and no
+abandoned frame walked, are assumptions there; what it does on the other targets is open (§14). On
+those two systems, such a check that fires on the crash path itself, in the fault handler, the walk
+of the stack for the line and the trace, the read of the line tables or the write of the error line
+and the trace, ends the process with the exit code 1, the one line
+`error: <id> (no line: raised in the crash path)` and no trace (§6, decided there); that the walk of
+an actor's abandoned frames, the read of the map of counted pointers and the frees that follow it
+count as the crash path too, a check that fires inside the allocator or the scheduler during those
+frees staying open (§14), that the thread's flag of its crash path is set from the raise or the fault
+to the moment the actor's frames are freed and again while the error line and the trace are written, that
+the line is written on a line of its own, after a line break where the stream stands
+inside a line already written, and that a check that fires while that line is written ends the
+process with nothing more written, are assumptions there.
 The error line names the file and the line where a line is known (§6, decided there). The
 error line of a `throw` ends with a colon, and the text of the thrown value stands below it,
 starting on the line below it, before the trace (§6, decided there), written as it is, its own line
-breaks kept, and an empty text as an empty line (§6, an assumption there); the error line of every
-other id ends with its line, or with the note in its place (§6, decided there).
+breaks kept, and an empty text as an empty line (§6, an assumption there), the text made by the
+crash path from the value's `Text()` while the actor that threw still exists, a `throw` crashing its
+actor as no exception is caught (§5), and kept with its stack for that write (§6, decided there),
+the first raising actor's text where one crash leads to another, and a raise while the value's
+`Text()` runs ending the process with the exit code 1 and no trace, whatever the policies would have
+chosen, its error line naming the file and the line that a throw or a check of the program's code
+carries, with nothing below it, and being the fixed line above for a raise that carries none (§6,
+assumptions there); the error line of every other id ends with its line, or with the note in its place (§6, decided there).
 
 | id | rules | meaning |
 |---|---|---|
