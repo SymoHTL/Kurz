@@ -21,6 +21,11 @@ A change to the image:
    first push runs in the image the previous digest names; the second push's run is the first in
    the new one.
 
+The job runs as the container's root while the runner's user owns the checkout, and git refuses a
+clone another user owns (`fatal: detected dubious ownership`, the tree gate's error in the first run
+in the image): `gates.yml` names the workspace in git's `safe.directory` before the gates run, as the
+local command below does for its mount.
+
 A digest names one image for good: a newer base, a newer LLVM point release or a newer package of
 the distribution reaches the gates job only through these three steps.
 
