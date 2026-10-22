@@ -1,0 +1,7 @@
+// expect: error asm-operand at 6
+// allow: raw
+// rules: R11
+
+raw {
+    asm("nop", in("rax") 1, in("eax") 2)
+}

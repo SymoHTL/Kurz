@@ -376,7 +376,7 @@ interpolation (L6); a `"""` block (L13) holds a template of many lines; the oper
 words, `in`, `out`, `inout`, `lateout`, the register classes Rust names for each architecture and
 `clobber_abi` (§3, the owner, 2026-10-21). `{{` and `}}` write a brace, an operand is taken by its name or by
 its position, a modifier after a colon gives the form of its register, `{r:e}`, every operand appears in
-the template, the operands take the rest of Rust's words, `inlateout`, `const`, `sym`, `label` and
+the template but one in an explicit register, `in("rax") 60`, which the template names nowhere, the operands take the rest of Rust's words, `inlateout`, `const`, `sym`, `label` and
 `options(...)`, and a variable an operand writes is `mut` *(assumed: the rest of Rust's rules of the
 template and of its words, as §3 marks them)*. On WebAssembly and on Xtensa the register classes are
 those of Rust's experimental support for them, `local` on wasm32 and `reg`, `freg`, `sreg` and
@@ -416,6 +416,20 @@ Case: [memory/asm-unused-operand.kz](../corpus/memory/asm-unused-operand.kz)
 ```kurz
 raw {
     asm("nop", x = in(reg) 1)
+}
+```
+
+Case: [memory/asm-explicit-register.kz](../corpus/memory/asm-explicit-register.kz)
+```kurz
+raw {
+    asm("nop", in("rax") 1)
+}
+```
+
+Case: [memory/asm-register-twice.kz](../corpus/memory/asm-register-twice.kz)
+```kurz
+raw {
+    asm("nop", in("rax") 1, in("eax") 2)
 }
 ```
 
