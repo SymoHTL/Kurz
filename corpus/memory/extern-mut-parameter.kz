@@ -6,3 +6,4 @@ extern "C" {
     long time(mut long t)
 }
 // C's `time` takes a pointer, which the declaration writes `long*` (R16)
+// a declaration takes a default value and its call a named argument, as every function does, and no `mut` parameter (R16)

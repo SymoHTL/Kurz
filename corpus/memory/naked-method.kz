@@ -7,4 +7,4 @@ class Switcher {
         asm("ret")
     }
 }
-// the grant keeps `naked-not-allowed` out, so that the place of `naked` is the one defect (R12)
+// the grant keeps `naked-not-allowed` out, and a `naked` body counts as a `raw` block, so that the place of `naked` is the one defect (R12)

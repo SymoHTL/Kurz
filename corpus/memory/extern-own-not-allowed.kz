@@ -6,3 +6,4 @@ extern "C" long Twice(long x) {
 }
 
 print(Twice(4))
+// the header grants nothing, and a function of the package's own in the C calling convention needs `allow native` (R16)

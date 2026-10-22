@@ -1,0 +1,8 @@
+// expect: error counted-pointee at 6
+// rules: R10
+
+data Cell(int | string Value)
+
+void Show(Cell* p) {
+}
+// a `Cell` holds a union, and one of the union's cases, the `string`, is a counted reference, so no pointer points to a `Cell` (R10)

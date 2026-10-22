@@ -348,6 +348,15 @@ print(p == null)
 print(s)
 ```
 
+Case: [memory/pointer-to-counted-union-field.kz](../corpus/memory/pointer-to-counted-union-field.kz)
+```kurz
+data Cell(int | string Value)
+
+void Show(Cell* p) {
+}
+// a `Cell` holds a union, and one of the union's cases, the `string`, is a counted reference, so no pointer points to a `Cell` (R10)
+```
+
 Case: [memory/pointer-to-char.kz](../corpus/memory/pointer-to-char.kz)
 ```kurz
 mut char c = 'a'
@@ -356,6 +365,7 @@ raw {
     *p = 'b'
 }
 print(c)
+// a `char` holds no counted reference, so a pointer points to it as to a number (R10)
 ```
 
 ### R11 (decided, §3) Inline assembly
@@ -373,9 +383,9 @@ those of Rust's experimental support for them, `local` on wasm32 and `reg`, `fre
 `breg` on Xtensa; a breach of the template's rules is the compile error `asm-operand`, and an operand
 that writes a variable without `mut` is `assign-immutable`, as any assignment to it is *(assumed: as §3
 marks them)*. A register class is read against the table of the target the build compiles for, so
-that a class of another target is `asm-operand`, and a case names its target in its header, or is
-read for x86-64 where it names none (§3, the owner, 2026-10-22); how the header names the target is
-open (§14), and no case names one. An `asm` outside a `raw` block and outside the body of a
+that a class that target does not have is `asm-operand`, and a case is read for x86-64 where its
+header names no target (§3, the owner, 2026-10-22); how a header names the target is open (§14), and
+no case names one. An `asm` outside a `raw` block and outside the body of a
 `naked` function (R12) is the compile error `raw-required` (R10) *(assumed: the id, as §3 marks it)*.
 `asm` is a core word (L18). The cases of an `asm` in a `raw` block take the grant through their
 header (R7). Every case runs through the compiler's front end, which reads `asm("nop")` with no error
@@ -433,7 +443,10 @@ other than one `asm`, or an operand there other than `sym` and `const`, is the c
 `naked-body`, and instructions that fall through the function's end are a misuse of `raw` code, which
 no compiler checks *(assumed: as §3 marks them)*. `naked` stands before a function at the top level
 of a file alone, `naked extern "C"` among them; before a method, a lambda or a function declared
-inside a block it is `syntax` (E4) (§3, the owner, 2026-10-22). `naked` is a core word (L18).
+inside a block of code it is `syntax` (E4) (§3, the owner, 2026-10-22). A `naked extern "C"` function
+needs `allow raw` and `allow native`, and a `naked` function without `extern "C"` needs `allow raw`
+alone, so that in a package with neither grant a `naked extern "C"` function is `naked-not-allowed`
+and `native-not-allowed` at its declaration *(assumed: as §3 marks it)*. `naked` is a core word (L18).
 
 Case: [memory/naked-not-allowed.kz](../corpus/memory/naked-not-allowed.kz)
 ```kurz
@@ -456,7 +469,7 @@ class Switcher {
         asm("ret")
     }
 }
-// the grant keeps `naked-not-allowed` out, so that the place of `naked` is the one defect (R12)
+// the grant keeps `naked-not-allowed` out, and a `naked` body counts as a `raw` block, so that the place of `naked` is the one defect (R12)
 ```
 
 ### R13 (decided, §3) State outside a function
@@ -639,9 +652,12 @@ default values and its call named arguments (F12), which the call fills in, whil
 in a declaration is `native-type` (§13, the owner, 2026-10-22). A function of the package's own in
 the C calling convention is called by its name with no `raw` block, and in a package without the
 grant it is `native-not-allowed` at its declaration (§13, the owner, 2026-10-22). A block stands at
-the top level of a file alone, and inside a function or any other block it is `syntax` (E4) (§13, the
-owner, 2026-10-22). A C declaration whose name another function of the package, a type or another C
-declaration has is `redeclared` (V9) at the second of the two (§13, the owner, 2026-10-22). `extern` is
+the top level of a file alone, and anywhere else, inside a function, the body of a type or a block of
+code, it is `syntax` (E4) (§13, the owner, 2026-10-22). A C declaration, a declaration in a block of C
+functions, whose name another function of the package, a type or another C declaration has is
+`redeclared` (V9) at the second of the two (§13, the owner, 2026-10-22), the second in one file being
+the later one and across files the one in the file that comes later in D6's order of the paths
+*(assumed: as §13 marks it)*. `extern` is
 a core word (L18).
 
 Case: [memory/extern-not-allowed.kz](../corpus/memory/extern-not-allowed.kz)
@@ -695,6 +711,19 @@ extern "C" {
     long time(mut long t)
 }
 // C's `time` takes a pointer, which the declaration writes `long*` (R16)
+// a declaration takes a default value and its call a named argument, as every function does, and no `mut` parameter (R16)
+```
+
+Case: [memory/extern-default-named.kz](../corpus/memory/extern-default-named.kz)
+```kurz
+extern "C" {
+    int abs(int n = -5)
+}
+
+raw {
+    print(abs(n: -3))
+    print(abs())
+}
 ```
 
 Case: [memory/extern-own-call.kz](../corpus/memory/extern-own-call.kz)
@@ -704,6 +733,7 @@ extern "C" long Twice(long x) {
 }
 
 print(Twice(4))
+// the header grants `allow native`, and a call of the package's own C function by its name needs no `raw` block (R16)
 ```
 
 Case: [memory/extern-own-not-allowed.kz](../corpus/memory/extern-own-not-allowed.kz)
@@ -713,6 +743,7 @@ extern "C" long Twice(long x) {
 }
 
 print(Twice(4))
+// the header grants nothing, and a function of the package's own in the C calling convention needs `allow native` (R16)
 ```
 
 Case: [memory/extern-block-in-function.kz](../corpus/memory/extern-block-in-function.kz)
@@ -736,6 +767,7 @@ long abs(long n) {
 extern "C" {
     int abs(int n)
 }
+// the two clash by their name alone, whatever their parameters, since a C declaration has one name (R16)
 ```
 
 Case: [memory/c-function-type.kz](../corpus/memory/c-function-type.kz)

@@ -9,3 +9,4 @@ raw {
     *p = 'b'
 }
 print(c)
+// a `char` holds no counted reference, so a pointer points to it as to a number (R10)
