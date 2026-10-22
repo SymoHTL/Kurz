@@ -15,6 +15,9 @@ public enum VariableKind
 
     /// <summary>The name an arm of a <c>match</c> binds (C4): immutable, and never <c>unused-variable</c>, as a loop variable is not (V13's reading in <c>compiler/README.md</c>: the arm declares it, not the program's choice).</summary>
     Binding,
+
+    /// <summary>State outside a function (R13), <c>static mut</c> or <c>thread static mut</c> at the top level of a file: visible in every function, read and written inside a <c>raw</c> block alone, and never <c>unused-variable</c>, being state of its package and no variable.</summary>
+    Static,
 }
 
 /// <summary>A variable: its type, whether it is <c>mut</c>, and whether the program has read or changed it (V5, V6, V12).</summary>
@@ -48,12 +51,18 @@ public sealed class TypeParameterSymbol(string name, int line)
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>
 public sealed record ParameterSymbol(string Name, KurzType Type, bool Mut, bool HasDefault, int Line);
 
-/// <summary>A function declared in the file (F1 to F5), or a built-in one.</summary>
+/// <summary>A function declared in the file (F1 to F5), a declaration of a block of C functions (R16), or a built-in one.</summary>
 public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration)
 {
     public string Name { get; } = name;
 
     public FunctionDeclaration? Declaration { get; } = declaration;
+
+    /// <summary>The declaration in a block of C functions (R16) that this symbol is, with no body.</summary>
+    public ExternFunction? CDeclaration { get; init; }
+
+    /// <summary>Whether the function takes the C calling convention: a declaration of a block of C functions (R16), a function of the package's own written <c>extern "C"</c> (R16), or a <c>naked</c> one (R12).</summary>
+    public bool TakesC => CDeclaration is not null || (Declaration is not null && (Declaration.Modifiers & (Modifiers.Extern | Modifiers.Naked)) != 0);
 
     public List<TypeParameterSymbol> TypeParameters { get; } = [];
 
@@ -61,7 +70,7 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
 
     public KurzType ReturnType { get; set; } = Types.Error;
 
-    public int Line => Declaration?.Line ?? 0;
+    public int Line => Declaration?.Line ?? CDeclaration?.Line ?? 0;
 
     public bool IsGeneric => TypeParameters.Count > 0;
 }

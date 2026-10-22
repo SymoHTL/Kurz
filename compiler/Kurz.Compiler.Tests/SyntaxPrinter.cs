@@ -16,7 +16,7 @@ internal static class SyntaxPrinter
     public static string Print(Statement statement) => statement switch
     {
         Block b => $"{{{string.Join(" ", b.Statements.Select(Print))}}}",
-        VariableDeclaration v => $"({(v.Mut ? "mut-" : "")}declare {Mods(v.Modifiers & ~Modifiers.Mut)}{Type(v.Type)}{v.Name} {Print(v.Value)})",
+        VariableDeclaration v => $"({(v.Mut ? "mut-" : "")}declare {Mods(v.Modifiers & ~Modifiers.Mut)}{Type(v.Type)}{v.Name}{(v.Value is null ? "" : " " + Print(v.Value))})",
         AssignOrDeclare a => $"(assign-or-declare {a.Name} {Print(a.Value)})",
         Assignment a => $"(assign {Print(a.Target)} {Print(a.Value)})",
         ExpressionStatement e => Print(e.Expression),
@@ -148,6 +148,7 @@ internal static class SyntaxPrinter
         NameExpression n => n.Name,
         ThisExpression => "this",
         MemberAccess m => $"({(m.Conditional ? "?." : ".")} {Print(m.Target)} {m.Member})",
+        TypeMemberAccess m => $"(. {Type(m.Type).TrimEnd()} {m.Member})",
         CallExpression c => $"(call {Print(c.Callee)}{(c.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", c.TypeArguments.Select(t => Type(t).TrimEnd())) + ">")}{(c.Arguments.Count == 0 ? "" : " " + Arguments(c.Arguments))})",
         IndexExpression i => $"(index {Print(i.Target)} {Print(i.Index)})",
         UnaryExpression u => $"({Op(u.Operator)} {Print(u.Operand)})",

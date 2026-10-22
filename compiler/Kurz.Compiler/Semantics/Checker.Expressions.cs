@@ -30,11 +30,15 @@ public sealed partial class Checker
                 return new Typed(Types.Char, new CharConstant(c.CodePoint));
             case BoolLiteral b:
                 return new Typed(Types.Bool, new BoolConstant(b.Value));
+            case NullLiteral when expected is PointerType p:
+                return new Typed(p, new NullConstant()); // R10: a pointer can be `null`
+            case NullLiteral when expected is not null && Types.IsError(expected):
+                return Typed.Error; // the type it stands for was the error, which was reported (E1)
             case NullLiteral n:
                 NotSupported(n.Line, "null (N1)");
                 return Typed.Error;
             case NameExpression n:
-                return CheckName(n);
+                return CheckName(n, expected);
             case ThisExpression t:
                 NotSupported(t.Line, "this (K7)");
                 return Typed.Error;
@@ -56,6 +60,11 @@ public sealed partial class Checker
                 // a lambda where a type stands that was reported or is not read, the type of a C function (R17) among them: its misfit and
                 // the missing types of its parameters come from that type and are not reported beside its line (E1); a parameter of no type
                 // is error-typed, and the body is checked as any lambda's
+                CheckLambda(l, null, atUnreadType: true);
+                return Typed.Error;
+            case LambdaExpression l when expected is CFunctionType:
+                // R17: a lambda takes Kurz's calling convention and captures, so it is no value of a C function type; its body is checked as any lambda's
+                Report(ErrorIds.TypeMismatch, l.Line, $"a lambda where a `{expected}` is required: a value of a C function type is the name of a function of the C calling convention (R17, T1)");
                 CheckLambda(l, null, atUnreadType: true);
                 return Typed.Error;
             case LambdaExpression l:
@@ -309,6 +318,10 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.NoText, hole.Expression.Line, $"a `{t.Type}` has no text to put into a string (A4, A7, A10)");
                 }
+                else if (HoldsRaw(t.Type, []))
+                {
+                    NotSupported(hole.Expression.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
+                }
             }
             else
             {
@@ -334,6 +347,7 @@ public sealed partial class Checker
         ListType l => HasText(l.Element, seen),
         UnionType u => u.Cases.All(c => HasText(c, seen)),
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
+        PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
         TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
         _ => false, // a function value; a type parameter of a function, which has no limit the checker reads (A10)
     };
@@ -362,12 +376,15 @@ public sealed partial class Checker
 
     // ---- names and members -----------------------------------------------------------------------
 
-    private Typed CheckName(NameExpression n)
+    /// <summary>A name as a value: a variable, the one value of a data type without fields (D8), or the name of a function of the C calling convention as a value of its C function type (R17).</summary>
+    private Typed CheckName(NameExpression n, KurzType? expected = null)
     {
         var (variable, _) = Lookup(n.Name);
         if (variable is not null)
         {
             variable.Read = true;
+            stateRead |= readingConstant && variable.Kind == VariableKind.Static;
+            RequireRawForState(variable, n.Line);
             return new Typed(variable.Type);
         }
 
@@ -390,6 +407,22 @@ public sealed partial class Checker
 
         if (IsUnreadName(n.Name))
         {
+            return Typed.Error;
+        }
+
+        if (cFunctions.TryGetValue(n.Name, out var cFunction))
+        {
+            return CFunctionValue(cFunction, n.Line);
+        }
+
+        if (functions.TryGetValue(n.Name, out var named) && named is [{ TakesC: true } own])
+        {
+            return CFunctionValue(own, n.Line); // a function of the package's own in the C calling convention (R12, R16)
+        }
+
+        if (expected is CFunctionType && functions.ContainsKey(n.Name))
+        {
+            Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` takes Kurz's calling convention, and a `{expected}` is required: a value of a C function type is the name of a function of the C calling convention (R17, T1)");
             return Typed.Error;
         }
 
@@ -473,11 +506,28 @@ public sealed partial class Checker
                     return new Typed(new ListType(Types.Char));
                 }
 
+                if (member == "Pointer")
+                {
+                    RequireRaw(line, "`s.Pointer`", "R15");
+                    return new Typed(new PointerType(Types.Byte)); // R15: the string's UTF-8 bytes
+                }
+
                 break;
-            case ListType:
+            case ListType list:
                 if (member == "Count")
                 {
                     return new Typed(Types.Int);
+                }
+
+                if (member == "Pointer")
+                {
+                    var pointer = PointerTo(list.Element, line, "`l.Pointer`"); // R15: a list of a type a pointer points to
+                    if (!Types.IsError(pointer))
+                    {
+                        RequireRaw(line, "`l.Pointer`", "R15");
+                    }
+
+                    return new Typed(pointer);
                 }
 
                 break;
@@ -529,7 +579,12 @@ public sealed partial class Checker
     private Typed CheckIndex(IndexExpression i)
     {
         var target = CheckExpression(i.Target, null);
-        var index = CheckExpression(i.Index, Types.Int);
+        var index = CheckExpression(i.Index, target.Type is PointerType ? null : Types.Int); // R10: an offset is an `int` or a `long`, so a literal takes the type L10 gives it
+        if (target.Type is PointerType)
+        {
+            return CheckPointerIndex(i, target, index); // R10
+        }
+
         if (target.Type is ListType && !index.IsError && !Types.IsInteger(index.Type))
         {
             Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not a `{index.Type}` (M9, T2)");
@@ -554,13 +609,14 @@ public sealed partial class Checker
 
     private Typed CheckUnary(UnaryExpression u, KurzType? expected)
     {
-        if (u.Operator is TokenKind.Star or TokenKind.Ampersand)
+        if (u.Operator == TokenKind.Star)
         {
-            // R10: a read through a raw pointer and the address of a place, which chapter 11 states and the checker does not read; the
-            // operand is checked, so that a name it uses counts as used and an error of its own is reported
-            NotSupported(u.Line, u.Operator == TokenKind.Star ? "a read through a raw pointer, `*p` (R10)" : "the address of a place, `&x` (R10)");
-            CheckExpression(u.Operand, null);
-            return Typed.Error;
+            return CheckDeref(u); // R10
+        }
+
+        if (u.Operator == TokenKind.Ampersand)
+        {
+            return CheckAddress(u); // R10
         }
 
         if (u.Operator == TokenKind.Minus)
@@ -735,10 +791,20 @@ public sealed partial class Checker
         }
 
         var cls = ClassOf(b.Operator);
+        if (cls == OperatorClass.Comparison && CompareWithNull(b) is { } withNull)
+        {
+            return withNull; // R10: a pointer compares with `null`
+        }
+
         var (left, right) = Operands(b.Left, b.Right, expected, cls);
         if (left.IsError || right.IsError)
         {
             return cls is OperatorClass.Comparison or OperatorClass.Logical ? new Typed(Types.Bool) : Typed.Error;
+        }
+
+        if ((left.Type is PointerType || right.Type is PointerType) && PointerOperation(b, left, right) is { } pointer)
+        {
+            return pointer; // R10, R14
         }
 
         var op = Operator(b.Operator);

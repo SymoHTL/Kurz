@@ -1015,6 +1015,7 @@ public sealed class ParserTests
     [InlineData("naked void Switch() {\n    asm(\"ret\")\n}", "(function naked void Switch() {(asm \"ret\")})")]
     [InlineData("naked pub void S() {\n}", "(function pub naked void S() {})")]
     [InlineData("thread static mut long depth = 0", "(mut-declare static thread long depth (int 0))")]
+    [InlineData("static mut long depth", "(mut-declare static long depth)")]
     [InlineData("thread = 1", "(assign-or-declare thread (int 1))")]
     [InlineData("print(thread.Count)", "(call print (. thread Count))")]
     [InlineData("extern \"C\" {\n    long write(int fd, byte* buf, long n)\n}", "(extern {(c-function long write(int fd, byte* buf, long n))})")]
@@ -1028,7 +1029,8 @@ public sealed class ParserTests
     public void A_function_with_no_frame_thread_state_and_the_forms_of_c_parse(string program, string tree)
     {
         // R12: `naked` before a signature, among the other modifiers in any order, as C# orders modifiers; R13: `thread` is a word only
-        // before `static`, and a name everywhere else (L18); R16: a block of C functions with no bodies, on one line or on several, the
+        // before `static`, and a name everywhere else (L18), and state written without an initial value parses, which the checker
+        // judges (`static-state`); R16: a block of C functions with no bodies, on one line or on several, the
         // library after `in`, `...` the last parameter; R16: a function of the package's own in the C calling convention; R17: the type
         // of a C function, its nullable form in parentheses, and `extern "C"` before `(` starts that type; R17: data in C's layout
         Assert.Equal(tree, Tree(program));
@@ -1074,13 +1076,21 @@ public sealed class ParserTests
     [InlineData("extern \"C\" (int) F() {\n}", 1)]
     [InlineData("static thread mut long x = 0", 1)]
     [InlineData("extern \"C\" in dbghelp {\n}", 1)]
+    [InlineData("void F() {\n    extern \"C\" {\n        int abs(int n)\n    }\n}", 2)]
+    [InlineData("if true {\n    extern \"C\" {\n        int abs(int n)\n    }\n}", 2)]
+    [InlineData("void F() {\n    naked void G() {\n        asm(\"ret\")\n    }\n}", 2)]
+    [InlineData("class C {\n    naked void G() {\n        asm(\"ret\")\n    }\n}", 2)]
+    [InlineData("static mut x", 1)]
+    [InlineData("f = naked (long x) => x\nprint(f(1))", 1)]
     public void A_raw_form_outside_its_shape_is_syntax(string program, int line)
     {
         // E4: a pointer holds `null` itself, so `int*?` has no meaning (R10, as C#); `&` takes a place as the front end reads one (IsPlace);
         // `extern` names the convention "C" (R16, R17); a function of a block of C functions has no body, `...` is its last parameter, and
         // the block declares functions (R16), whether it declares a C library's variables standing open; `asm` is a statement whose
         // templates, string literals, come before its operands (R11); `extern "C" (` starts the type of a C function (R17); `thread`
-        // is a word only before `static` (R13)
+        // is a word only before `static` (R13); a block of C functions stands at the top level of a file alone (R16), and so does a
+        // `naked` function (R12), each read all the same, while before a lambda `naked` is no word of an expression; state takes a
+        // type where it has no initial value (R13)
         Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
     }
 
@@ -1100,12 +1110,14 @@ public sealed class ParserTests
     [InlineData("print(a < b, c > d)", "(call print (< a b), (> c d))")]
     [InlineData("print(a < b, c > .5)", "(call print (< a b), (> c (real .5)))")]
     [InlineData("print(a < b, c > d, e)", "(call print (< a b), (> c d), e)")]
+    [InlineData("ys = List<long>.FromRaw(p, 0)", "(assign-or-declare ys (call (. List<long> FromRaw) p, (int 0)))")]
     public void Type_arguments_follow_a_member_access_too_and_are_told_from_comparisons_as_in_c_sharp(string program, string tree)
     {
         // T19: a call names its type arguments, after a member access too. How they are told from comparisons is a reading (README; a
-        // question for a design round): the list is kept only when `(` follows the `>`; C# (T17: generics as in C#) also keeps it before
-        // `)`, `]`, `,`, `.`, `?` and a few more, which the front end reads as comparisons (the `.5` and `, e` rows), since
-        // the reference has no form for a generic name that is not called; the fact below pins the `)`
+        // question for a design round): the list is kept when `(` follows the `>`, and after a name when a member and its `(` follow,
+        // R15's `List<T>.FromRaw(p, n)`, the one form the reference gives a generic name that is not called; C# (T17: generics as in C#)
+        // also keeps it before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons (the `.5` and `, e` rows); the
+        // fact below pins the `)`
         Assert.Equal(tree, Tree(program));
     }
 

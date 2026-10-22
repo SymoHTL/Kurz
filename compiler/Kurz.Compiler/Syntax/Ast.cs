@@ -79,6 +79,9 @@ public sealed record ThisExpression(int Line) : Expression(Line);
 /// <summary><c>a.B</c>, or <c>a?.B</c> when <paramref name="Conditional"/> (N5). The line is the line of the dot.</summary>
 public sealed record MemberAccess(int Line, Expression Target, string Member, bool Conditional) : Expression(Line);
 
+/// <summary><c>List&lt;T&gt;.FromRaw</c>: a member of a type with type arguments, which R15 writes before a call. The line is the line of the dot.</summary>
+public sealed record TypeMemberAccess(int Line, TypeSyntax Type, string Member) : Expression(Line);
+
 /// <summary>An argument of a call: by position or by name (D11), with <c>mut</c> in front for a <c>mut</c> parameter (M7).</summary>
 public sealed record Argument(int Line, string? Name, bool Mut, Expression Value);
 
@@ -139,9 +142,10 @@ public sealed record Block(int Line, IReadOnlyList<Statement> Statements, int En
 
 /// <summary>
 /// A declaration with <c>mut</c> or a written type (V2, V3, V4, V9): <c>mut x = 1</c>, <c>int x = 1</c>, <c>mut int x = 1</c>. Every
-/// modifier written in front of it stays on the node: which of them a variable may carry is the checker's to say.
+/// modifier written in front of it stays on the node: which of them a variable may carry is the checker's to say. <paramref name="Value"/>
+/// is null on a <c>static mut</c> written without one, which R13 makes <c>static-state</c>.
 /// </summary>
-public sealed record VariableDeclaration(int Line, Modifiers Modifiers, TypeSyntax? Type, string Name, Expression Value) : Statement(Line)
+public sealed record VariableDeclaration(int Line, Modifiers Modifiers, TypeSyntax? Type, string Name, Expression? Value) : Statement(Line)
 {
     public bool Mut => (Modifiers & Modifiers.Mut) != 0;
 }

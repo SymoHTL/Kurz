@@ -27,6 +27,7 @@ public sealed class Parser
     private List<Diagnostic> pending = new(); // reported while speculating: kept when that parse succeeds, dropped when it is rewound
     private bool committed; // the speculative parse has seen the shape of a declaration: an error after that is reported, not rewound
     private bool noLambda; // the value of an operand of `asm`, where `=>` splits the operand (R11) and starts no lambda
+    private int statementDepth; // the statements being parsed around the cursor: 1 at the top level of a file, more inside a block of code (R12, R16)
     private readonly List<(int Index, Token Original)> tokenEdits = new(); // tokens a speculative parse rewrote (`>>`): undone with the rewind
 
     private Parser(SourceText source, IEnumerable<Token> tokens, DiagnosticBag diagnostics)
@@ -490,6 +491,19 @@ public sealed class Parser
 
     private Statement ParseStatement()
     {
+        statementDepth++;
+        try
+        {
+            return ParseOneStatement();
+        }
+        finally
+        {
+            statementDepth--;
+        }
+    }
+
+    private Statement ParseOneStatement()
+    {
         var token = Current;
         if (token.Kind == TokenKind.Keyword && Peek().Kind == TokenKind.Assign)
         {
@@ -520,6 +534,13 @@ public sealed class Parser
                 case "raw": Advance(); return new RawBlock(token.Line, ParseBlockAfter(token.Line, "the `raw` block"));
                 case "extern" when Peek().Kind == TokenKind.StringLiteral
                     && (Peek(2).Kind is TokenKind.LeftBrace or TokenKind.Newline or TokenKind.EndOfFile || Peek(2).IsKeyword("in")):
+                    if (statementDepth > 1)
+                    {
+                        // R16: a block stands at the top level of a file alone; anywhere else it is `syntax` (E4), and it is read all the same,
+                        // so that the rest of the file is read. In the body of a type the declaration's parse refuses it (ParseModifiers)
+                        ReportSyntax(token.Line, "a block of C functions stands at the top level of a file alone (R16)");
+                    }
+
                     return ParseExternBlock(); // R16: `extern "C" {` and `extern "C" in "lib" {`; a declaration does not end its line after `extern "C"`
                 case "asm" when Peek().Kind == TokenKind.LeftParen:
                     return ParseAsm(); // R11: a statement of its own
@@ -1258,6 +1279,11 @@ public sealed class Parser
             return ParseFunctionRest(start.Line, modifiers, type, declared, typeName);
         }
 
+        if (typeName is null && (modifiers & (Modifiers.Static | Modifiers.Mut)) == (Modifiers.Static | Modifiers.Mut) && EndsStatement())
+        {
+            return new VariableDeclaration(start.Line, modifiers, type, declared.Text, null); // R13: state without an initial value, the checker's `static-state`
+        }
+
         if (typeName is not null && EndsStatement())
         {
             // K7, K14: `int x` in a class body, a field a constructor assigns; whether another kind of body may hold one is the checker's
@@ -1269,6 +1295,13 @@ public sealed class Parser
 
     private FunctionDeclaration ParseFunctionRest(int line, Modifiers modifiers, TypeSyntax returnType, Token name, string? typeName)
     {
+        if ((modifiers & Modifiers.Naked) != 0 && (typeName is not null || statementDepth > 1))
+        {
+            // R12: `naked` stands before a function at the top level of a file alone; before a method or a function declared inside a
+            // block of code it is `syntax` (E4), and the function is read all the same
+            ReportSyntax(line, "`naked` stands before a function at the top level of a file alone (R12)");
+        }
+
         var typeParameters = ParseTypeParameters();
         var parameters = ParseParameters(typesOptional: false);
         if (Match(TokenKind.Arrow))
@@ -1790,12 +1823,14 @@ public sealed class Parser
 
             // T19: a call names its type arguments, `First<int>(xs)` and `xs.Map<int>(f)` alike. How they are told from comparisons is
             // a reading (README; a question for a design round): the list is kept when `(` follows the `>`, so `f(a < b, c > (d))` is
-            // the call `a<b, c>(d)` and `a < b, c > d` is two comparisons; C# (T17: generics as in C#) also keeps it before `)`, `]`,
-            // `,`, `.`, `?` and a few more, where this front end reads a comparison, since the reference has no form for a generic
-            // name that is not called
+            // the call `a<b, c>(d)` and `a < b, c > d` is two comparisons, and after a name when a member and its `(` follow the `>`,
+            // R15's `List<T>.FromRaw(p, n)`, the one form the reference gives a generic name that is not called; C# (T17: generics as
+            // in C#) also keeps it before `)`, `]`, `,`, `?` and a few more, where this front end reads a comparison
             if (At(TokenKind.Less) && expression is NameExpression or MemberAccess)
             {
                 List<TypeSyntax>? typeArguments = null;
+                Token? dot = null;
+                Token? member = null;
                 if (Try(() =>
                     {
                         Advance();
@@ -1808,7 +1843,12 @@ public sealed class Parser
                         while (Match(TokenKind.Comma));
                         suppressNewlines--;
                         ExpectGreater();
-                        if (!At(TokenKind.LeftParen))
+                        if (expression is NameExpression && At(TokenKind.Dot) && Peek().Kind is TokenKind.Name or TokenKind.Keyword && Peek(2).Kind == TokenKind.LeftParen)
+                        {
+                            dot = Advance();
+                            member = Advance();
+                        }
+                        else if (!At(TokenKind.LeftParen))
                         {
                             throw Fail("`(`");
                         }
@@ -1816,6 +1856,13 @@ public sealed class Parser
                         typeArguments = list;
                     }))
                 {
+                    if (member is not null)
+                    {
+                        var name = (NameExpression)expression;
+                        expression = new TypeMemberAccess(dot!.Line, new NamedType(name.Line, name.Name, typeArguments!), member.Text);
+                        continue; // the `(` that follows makes the call
+                    }
+
                     expression = new CallExpression(expression.Line, expression, typeArguments!, ParseArguments());
                     continue;
                 }

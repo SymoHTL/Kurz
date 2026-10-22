@@ -7,15 +7,17 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   skipped, the two-byte line break of Windows editors read as one, in a `"""` block too), `Syntax/`
   turns it into tokens and a syntax tree (the syntax of chapters 1 to 11: every declaration,
   statement and expression form the reference shows), `Semantics/` checks a tree the parser read
-  without an error against the rules of chapters 1 to 3, 5, 6 and 8 to 10 (the section "What the
-  checker reads" below) and says `not supported` to a construct of the other chapters, `Corpus/`
-  reads the header of a corpus case in the shape `reference/00-about.md` states.
+  without an error against the rules of chapters 1 to 3, 5, 6, 8 to 10 and the raw forms of 11
+  (the section "What the checker reads" below) and says `not supported` to a construct of the
+  other chapters, `Corpus/` reads the header of a corpus case in the shape `reference/00-about.md`
+  states, its grant line among it (R7).
 - `Kurz.Compiler.Tests/`: xunit tests. Every program the lexer, parser and checker tests read
   stands inline in the test, and the corpus suite reads the cases where they lie, under `corpus/`:
   the tree gate admits no `.kz` file under `compiler/`. That suite runs every corpus case through
   the front end, and every case the front end reads clean through the checker, and checks that
-  the errors each reports are exactly the ones the case's header expects of it; a case that uses
-  a construct the checker does not read must get `not supported` and no error from it.
+  the errors each reports are exactly the ones the case's header expects of it, the checker taking
+  the grants of the case's `// allow:` line as a project file would give them (R7); a case that
+  uses a construct the checker does not read must get `not supported` and no error from it.
 
 ## Building and testing
 
@@ -118,9 +120,10 @@ that sit under a rule by its id. Every one is pinned by a test.
   written before it; K7 shows a field as `Type name`, V2 speaks of variables, and the record's
   actor bodies write `mut users = Map<int, User>()`.
 - T17 with T19: how a call's type arguments are told from comparisons. The front end keeps the list
-  only when `(` follows the `>`, so `a < b, c > (d)` is the call `a<b, c>(d)` and `a < b, c > d` two
-  comparisons; C# also keeps the list before `)`, `]`, `,`, `.`, `?` and a few more, which the front
-  end reads as comparisons, since the reference has no form for a generic name that is not called:
+  when `(` follows the `>`, so `a < b, c > (d)` is the call `a<b, c>(d)` and `a < b, c > d` two
+  comparisons, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`,
+  the one form the reference gives a generic name that is not called; C# also keeps the list
+  before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
   `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
   states no such rule.
@@ -140,7 +143,12 @@ that sit under a rule by its id. Every one is pinned by a test.
     the nullable form (§3, round 17). `int?*` parses as a pointer to an `int?`, and whether that is a
     pointee is the checker's (R10).
   - `naked` and `extern "C"` stand among the other modifiers in any order, as C# orders modifiers
-    (R12, R16). `thread` is one only right before `static` (L18, R13).
+    (R12, R16). `thread` is one only right before `static` (L18, R13). `naked` before a method or
+    before a function declared inside a block of code, and a block of C functions anywhere but at
+    the top level of a file, are `syntax` (R12, R16), raised by the front end, which reads each
+    all the same, so that the rest of the file is read.
+  - `static mut` with a type and a name and no initial value parses as a declaration, which the
+    checker judges (`static-state`, R13); a variable without one is `syntax` everywhere else.
   - `extern "C"` right before `(` starts the type of a C function, R17's form. So the result of a
     function of the C calling convention is never a type in parentheses alone: no type that crosses
     to C (§2, R16) is written in parentheses. `extern` with a string other than `"C"` has no meaning
@@ -199,11 +207,17 @@ The checker (`Semantics/`) takes a tree the parser read without an error and che
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 5 (data types: D1 to D11, D14 and D15), 6 (values: M1 to M5, M7, and
-M9 for lists), 8 (functions, without F9 and F10: it reads one file), 9 (outcomes) and 10 (control
-flow), and the rules of `print` and of a value's text that these chapters reach: A1 to A4, A8, A10
-for a type parameter, A11, A12 and A14. It declares
-every data type and function of the top level first, in source order (both are visible in the
-whole file, F6), resolves the fields and bases of the data types, then the signatures, checks the
+M9 for lists), 8 (functions, without F9 and F10: it reads one file), 9 (outcomes), 10 (control
+flow) and 11's raw forms (R7, R10 to R17), and the rules of `print` and of a value's text that
+these chapters reach: A1 to A4, A8, A10 for a type parameter, A11, A12 and A14. A program's
+grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
+of its `// allow:` line, and a program given none has none, as one without a project file; a
+grant other than these two is none R7 and R16 name, and the checker refuses it as its caller's
+error. A register class is read against x86-64's table with the features every x86-64 target
+has, the target a case is read for where its header names none (R11). It declares every data type, function, block of C functions and state outside
+a function of the top level first, in source order (each is visible in the whole file, F6, R13,
+R16), resolves the fields and bases of the data types and then judges the pointees their fields
+name, then the C declarations and the signatures, checks the state's initial values and the
 defaults, then every function body, then the top level. Every expression gets a type, and an
 expression made of literals and constants gets its value too, so that `byte c = 200 + 100` is
 `constant-overflow` where T6 and L17 put it and `10 / 0` is `constant-divide-by-zero`. A call is
@@ -229,30 +243,41 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `argument-mismatch`, `ambiguous-call`, `cannot-infer`, `duplicate-function`,
 `default-not-constant`, `base-cycle`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`,
-`string-index`, `no-text`, and `syntax` for the shapes E4 leaves to it (the readings below).
+`string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
+`naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, and
+`syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
 
 A program that uses one of these gets `not supported` at the construct's line and no error that
-comes from the construct (E1). What stands inside the construct is still read, with its diagnostics
+comes from the construct (E1), but where the construct holds an error of its own, a grant's or
+`raw-required` (the reading on R7, R12 and R16 below), which is then its one diagnostic. What stands inside the construct is still read, with its diagnostics
 dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: a `class`, an `interface`, an `enum`
 or a `flags` type and a value of one (chapter 7, D12, D13, and the A-rules of their text); `null`,
-a nullable type, `?.` and `??` (chapter 4); `weak` (R3, R5), a `raw` block (R7), a raw pointer type,
-a read and a write through a pointer and an address `&x` (R10), `asm` (R11), a `naked` function
-(R12), a `static mut` or `thread static mut` declaration at the top level of a file and
-`thread static` before a function (R13),
-`Ptr<T>(x)` and `SizeOf<T>()` (R14), whose other shapes are `syntax` (E4), a block of C functions,
-whose names a call reaches with no error of its own, and inside a block as a function declared
-there is (F1, F6), a C declaration and another function of one name, at the second of the two, which
-leaves every call of the name unread (K7, M6), while a C declaration of a type's or a built-in's
-name is `redeclared` as a function's is (V9), and a function of the C calling convention, whose
-signature, defaults and body are read with their diagnostics dropped and every call of whose name
-is unread, as for a `naked` function (R16, R12; K7, M6), the type of a C function, at which a
-lambda carries no misfit and no missing type of its parameters, and a data type in C's layout (R17),
-and `use` (F10);
+a nullable type, `?.` and `??` (chapter 4), `null` where no pointer stands among them; `weak` (R3,
+R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
+address of state outside a function, which R13 says is no variable, where R10 names a variable
+(R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
+R10 says `&x` needs no `raw` block and Rust takes such a place in `unsafe` code alone (R10); an
+operand of `asm` in an explicit register or of a class Rust takes only as a clobber, whose place
+in the template R11 leaves to Rust, which gives it otherwise than R11's rule that every operand
+appears there, an operand of a class Rust gives a target with a feature beyond those every x86-64
+target has, `ymm_reg`, `zmm_reg` and `kreg`, since no rule names the features of a build, and
+`sym` of a function with more than one overload or with type parameters, a symbol being one
+function (R11, R12); `thread
+static` before a function (R13); a `decimal` in a C declaration or in the place of `...`, a
+number of Kurz that no rule says crosses to C, which leaves the declaration and its calls unread
+(R16), a function of the package's own in the C calling convention with type parameters, beside
+another function of its name, with a `mut` parameter or with a type that cannot cross to C, for
+which no rule names an id, which leaves its body read with its diagnostics dropped and its calls
+unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the type of a C
+function does not write, the type of a C function with a type that cannot cross to C, and a data
+type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
+that holds one, which no rule gives, where A4 gives every other value a text derived from its
+type (A4, R10, R17); and `use` (F10);
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; `Map` (M8, M9, M10), an assignment into an index or into a path through one, a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
@@ -393,3 +418,46 @@ round can ask about it by the rule's id.
   type, so a call that a lambda with an inferred result returns unwraps (O2), and the result F7
   infers from the value lists no case: a case the calling function does not list is
   `unlisted-case` (O3).
+- R7 with E1: every `raw` block in a package without the grant is `raw-not-allowed`, one inside
+  another among them, since each is a block the grant would allow; its body is checked as one with
+  the grant is, so a read through a pointer there raises nothing more.
+- R7, R12 and R16 with E1: a `naked` function in a package without `allow raw`, and a function of
+  the C calling convention in one without `allow native`, gets the grant's error alone, and an
+  `asm` outside a `raw` block gets `raw-required` alone, where the list above names a part of them
+  that the checker does not read: that part is read with its diagnostics dropped.
+- R10 with E4 and T1: `&` before the name of a function, a C function or a type is `syntax`, since
+  R10 gives `&` a variable, a field or an element; an offset that is no `int` or `long` and no
+  integer that widens into one (T8, T23), a `ulong` among them, a pointer where a `long` or a
+  pointer to another type stands, and `p - q` or a comparison of pointers to two types are
+  `type-mismatch`, since R14's forms alone convert a pointer and R10 counts elements of one
+  pointee. No type is expected of a literal offset, so it takes the one L10 gives it, a `long` for
+  `p[3000000000]`. `n + p` is the offset `p + n`, as C# writes both.
+- R10 with F11: a function value holds what it captures (F11), counted references among them, so
+  a pointer to a type that holds one is `counted-pointee`.
+- R10 with E1: a read and a write through a pointer outside a `raw` block are a `raw-required`
+  each, so `*p = *q` is two, as Rust reports each operation that needs `unsafe`.
+- R11: each breach of the template's rules is an `asm-operand` of its own, at the line of the
+  template, of the operand or of the word the rule names, so a name the template uses that no
+  operand has and an operand the template does not use are two; a template whose braces or
+  placeholders cannot be read is one, and its operands then count as used (E1).
+- R12 with R11: the body of a `naked` function is `naked-body` at its first statement that is not
+  its one `asm`, at the second `asm` where it holds two, and at the declaration where it holds
+  none; an operand there other than `sym` and `const` is `naked-body`, `clobber_abi` and `options`
+  among them, since R11 counts both among the words of the operands, and the template's rules are
+  checked beside it, so that operand unused by the template is `asm-operand` too, while Rust's rules
+  of the outputs and of `label` are not, every output and `label` there being `naked-body` already.
+- R13 with F12 and V10: a declaration of state gets one `static-state`, judged in the order R13
+  lists its causes: the grant, the type, the initial value, `pub`. The initial value is read where
+  a function's default is, with the functions, types and state of the file visible, the state
+  declared after it among them (F6), and no variable of the top-level code, so such a variable
+  there is `unknown-name`. A read of state in an initial value or a default is no constant, and
+  that error is the value's one, with no `raw-required` beside it (E1). State whose name is
+  `redeclared` is read with its diagnostics dropped, and its name then stands for state of the
+  error type, where no other state has it (E1).
+- R14 with R15 and T1: `void` has no size, so `SizeOf<void>()` and `List<void>.FromRaw(p, n)`,
+  which counts elements of that size, are `type-mismatch`, as R14 says of `p + n`, `p - n` and
+  `p - q` of a `void*`. `Ptr<T>(x)` takes a pointer, a `long` or an integer that widens into one (T8, T23),
+  as a `long` parameter takes it, and a `ulong` is `type-mismatch`.
+- R16: each argument in the place of `...` that C would widen is a `native-type` of its own. A
+  `mut` parameter is `native-type` at the declaration, and a call of the declaration is read with
+  `mut` before that argument or without it (E1).

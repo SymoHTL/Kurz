@@ -23,6 +23,9 @@ public sealed partial class Checker
 
         /// <summary>A construct the checker does not read stands as the argument: it was <c>not supported</c> before the pick, and the pick checks nothing of it (E1).</summary>
         public bool Unread { get; init; }
+
+        /// <summary>The argument has no type of its own and is typed by the parameter it lands on: <c>null</c>, which a pointer takes (R10), or the name of a function of Kurz, which a C function type refuses (R17).</summary>
+        public bool BySlot { get; init; }
     }
 
     private sealed class Candidate
@@ -112,6 +115,11 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
+                    if (cFunctions.TryGetValue(n.Name, out var cFunction))
+                    {
+                        return CallC(cFunction, c, expected); // R16
+                    }
+
                     if (functions.TryGetValue(n.Name, out var candidates))
                     {
                         return ResolveCall(candidates, c, expected);
@@ -130,7 +138,7 @@ public sealed partial class Checker
 
                     if (n.Name == "asm")
                     {
-                        NotSupported(n.Line, "`asm` (R11)");
+                        Report(ErrorIds.Syntax, n.Line, "`asm` is a statement of its own and no value (R11, E4)");
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
                     }
@@ -141,13 +149,10 @@ public sealed partial class Checker
                         var shaped = c.TypeArguments.Count == 1 && c.Arguments.Count == (n.Name == "Ptr" ? 1 : 0);
                         if (shaped)
                         {
-                            NotSupported(n.Line, $"`{n.Name}` (R14)");
-                        }
-                        else
-                        {
-                            Report(ErrorIds.Syntax, n.Line, $"R14 writes `{n.Name}` as `{(n.Name == "Ptr" ? "Ptr<T>(x)" : "SizeOf<T>()")}` (E4)");
+                            return n.Name == "Ptr" ? CheckPtr(c) : CheckSizeOf(c);
                         }
 
+                        Report(ErrorIds.Syntax, n.Line, $"R14 writes `{n.Name}` as `{(n.Name == "Ptr" ? "Ptr<T>(x)" : "SizeOf<T>()")}` (E4)");
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
                     }
@@ -157,6 +162,8 @@ public sealed partial class Checker
                     return Typed.Error;
                 }
 
+            case TypeMemberAccess t:
+                return CheckTypeMemberCall(t, c); // R15
             case MemberAccess m:
                 return CheckMethodCall(m, c);
             default:
@@ -210,6 +217,18 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (type is CFunctionType cf)
+        {
+            RequireRaw(c.Line, "a call through a value of a C function type", "R17");
+            if (RefusesTypeArguments(c, $"a `{type}`"))
+            {
+                return Typed.Error;
+            }
+
+            var cSlots = cf.Parameters.Select((p, i) => new Slot($"#{i}", p, false, false, false)).ToList();
+            return Call([new Candidate { Slots = cSlots, Result = cf.Result }], c, null);
+        }
+
         if (type is not FunctionType f)
         {
             Report(ErrorIds.TypeMismatch, c.Line, $"a `{type}` is no function and cannot be called (F11)");
@@ -257,6 +276,10 @@ public sealed partial class Checker
         else if (!t.IsError && !HasText(t.Type))
         {
             Report(ErrorIds.NoText, c.Line, $"a `{t.Type}` has no text to print (A4, A7, A10)");
+        }
+        else if (HoldsRaw(t.Type, []))
+        {
+            NotSupported(c.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
         }
 
         return new Typed(Types.Void);
@@ -332,6 +355,11 @@ public sealed partial class Checker
             }
 
             return new Typed(target, source.Constant);
+        }
+
+        if (source.Type is PointerType && target.Kind == Primitive.Long)
+        {
+            return new Typed(Types.Long); // R14: the address a pointer holds
         }
 
         Report(ErrorIds.TypeMismatch, c.Line, $"a `{source.Type}` is not converted to a `{target}` (T10, T13)");
@@ -549,6 +577,11 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
+            if (n.Name == "string" && m.Member == "FromRaw")
+            {
+                return CheckFromRaw(c, Types.String, Types.Byte, "string.FromRaw"); // R15
+            }
+
             if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
@@ -726,6 +759,12 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (Unwrap(a.Value) is NullLiteral || (Unwrap(a.Value) is NameExpression kurz && Lookup(kurz.Name).Variable is null && functions.TryGetValue(kurz.Name, out var named) && named is not [{ TakesC: true }]))
+            {
+                pres.Add(new Pre { Argument = a, Typed = Typed.Error, BySlot = true }); // fits every parameter, which Commit types it by
+                continue;
+            }
+
             if (a.Mut && IsElementPath(a.Value))
             {
                 NotSupported(a.Line, "an element of a list passed as `mut` (M7, M9)"); // before the pick, so that no misfit of its type is reported beside it (E1)
@@ -810,6 +849,11 @@ public sealed partial class Checker
                 if (pre.Lambda is not null)
                 {
                     CheckArgumentLoosely(pre.Lambda);
+                }
+
+                if (pre.BySlot)
+                {
+                    CheckExpression(pre.Argument.Value, null); // `null` or a function's name with no parameter to type it
                 }
             }
 
@@ -1230,6 +1274,16 @@ public sealed partial class Checker
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
                     Report(ErrorIds.TypeMismatch, a.Line, $"a `{typed.Type}` where a `{type}` is required (F11, T1)");
+                }
+            }
+            else if (pre.BySlot)
+            {
+                // a `null` on a type parameter that nothing inferred is chapter 4's `null`, which the checker does not read (N1); one on a
+                // parameter whose type was an error carries none of its own (E1)
+                var typed = CheckExpression(a.Value, Unwrap(a.Value) is NullLiteral && Types.IsError(type) && !Types.IsError(slot.Type) ? null : type);
+                if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
+                {
+                    Report(Types.MismatchId(typed.Type, type), a.Line, $"a `{typed.Type}` where a `{type}` is required (T1)");
                 }
             }
             else if (pre.LiteralOnly)
