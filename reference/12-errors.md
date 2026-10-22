@@ -96,21 +96,28 @@ reads that line as it reads a primitive's, that the check is no raise by code, t
 primitive's notes where that line is not known, and that it goes through the crash path to its error
 line and its trace and ends the process there, with no `Reason` recorded, no policy run and no
 abandoned frame walked, are assumptions there; what it does on the other targets is open (§14). On
-those two systems, such a check that fires on the crash path itself, in the fault handler, the walk,
-the read of the tables or the write of the error line and the trace, ends the process with the exit
-code 1, the one line `error: <id> (no line: raised in the crash path)` and no trace (§6, decided
-there); that the walk of an actor's abandoned frames and the frees that follow it count as the crash
-path too, that the line is written on a line of its own, after a line break where the stream stands
+those two systems, such a check that fires on the crash path itself, in the fault handler, the walk
+of the stack for the line and the trace, the read of the line tables or the write of the error line
+and the trace, ends the process with the exit code 1, the one line
+`error: <id> (no line: raised in the crash path)` and no trace (§6, decided there); that the walk of
+an actor's abandoned frames, the read of the map of counted pointers and the frees that follow it
+count as the crash path too, a check that fires inside the allocator or the scheduler during those
+frees staying open (§14), that the thread's flag of its crash path is set from the raise or the fault
+to the moment the actor's frames are freed and again while the error line and the trace are written, that
+the line is written on a line of its own, after a line break where the stream stands
 inside a line already written, and that a check that fires while that line is written ends the
 process with nothing more written, are assumptions there.
 The error line names the file and the line where a line is known (§6, decided there). The
 error line of a `throw` ends with a colon, and the text of the thrown value stands below it,
 starting on the line below it, before the trace (§6, decided there), written as it is, its own line
-breaks kept, and an empty text as an empty line (§6, an assumption there), the text made at the
-throw, while the actor that threw still exists, and kept with its stack for that write (§6, decided
-there), the first raising actor's text where one crash leads to another, and a throw, a check, a
-fault or any other exception raised while the value's `Text()` runs ending the process as such a
-check on the crash path does, whatever the policies would have chosen (§6, assumptions there); the error line of every other id ends with its line, or with the note in its place (§6, decided there).
+breaks kept, and an empty text as an empty line (§6, an assumption there), the text made by the
+crash path from the value's `Text()` while the actor that threw still exists, a `throw` crashing its
+actor as no exception is caught (§5), and kept with its stack for that write (§6, decided there),
+the first raising actor's text where one crash leads to another, and a raise while the value's
+`Text()` runs ending the process with the exit code 1 and no trace, whatever the policies would have
+chosen, its error line naming the file and the line that a throw or a check of the program's code
+carries, with nothing below it, and being the fixed line above for a raise that carries none (§6,
+assumptions there); the error line of every other id ends with its line, or with the note in its place (§6, decided there).
 
 | id | rules | meaning |
 |---|---|---|

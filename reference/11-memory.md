@@ -445,8 +445,10 @@ no compiler checks *(assumed: as §3 marks them)*. `naked` stands before a funct
 of a file alone, `naked extern "C"` among them; before a method, a lambda or a function declared
 inside a block of code it is `syntax` (E4) (§3, the owner, 2026-10-22). A `naked extern "C"` function
 needs `allow raw` and `allow native`, and a `naked` function without `extern "C"` needs `allow raw`
-alone, so that in a package with neither grant a `naked extern "C"` function is `naked-not-allowed`
-and `native-not-allowed` at its declaration *(assumed: as §3 marks it)*. `naked` is a core word (L18).
+alone, R16's grant going with the word `extern "C"` written and not with the C calling convention,
+which a `naked` function takes in any case, so that in a package with neither grant a
+`naked extern "C"` function is `naked-not-allowed` and `native-not-allowed` at its declaration, two
+errors at one line, which no case shows, a case expecting one error *(assumed: as §3 marks it)*. `naked` is a core word (L18).
 
 Case: [memory/naked-not-allowed.kz](../corpus/memory/naked-not-allowed.kz)
 ```kurz
@@ -649,14 +651,19 @@ function outside a `raw` block is `raw-required` (R10), so that a package that c
 raw` beside `allow native` (R7); and a declaration with a type that cannot cross to C, or such an
 argument in the place of `...`, is `native-type` *(assumed: as §13 marks them)*. A declaration takes
 default values and its call named arguments (F12), which the call fills in, while a `mut` parameter
-in a declaration is `native-type` (§13, the owner, 2026-10-22). A function of the package's own in
+in a declaration is `native-type` (§13, the owner, 2026-10-22). In a declaration whose last parameter
+is `...`, the arguments without a name fill the declared parameters in order, those with a default
+among them, and only those beyond them stand in the place of `...`, as C# binds them before its
+`params` array *(assumed: as §13 marks it)*. A function of the package's own in
 the C calling convention is called by its name with no `raw` block, and in a package without the
-grant it is `native-not-allowed` at its declaration (§13, the owner, 2026-10-22). A block stands at
+grant it is `native-not-allowed` at its declaration (§13, the owner, 2026-10-22); a `naked` one
+without `extern "C"` takes R12's grant alone *(assumed: as §3 marks it)*. A block stands at
 the top level of a file alone, and anywhere else, inside a function, the body of a type or a block of
 code, it is `syntax` (E4) (§13, the owner, 2026-10-22). A C declaration, a declaration in a block of C
 functions, whose name another function of the package, a type or another C declaration has is
 `redeclared` (V9) at the second of the two (§13, the owner, 2026-10-22), the second in one file being
-the later one and across files the one in the file that comes later in D6's order of the paths
+the one written after the other and across files the one in the file that comes after the other in
+D6's order of the paths
 *(assumed: as §13 marks it)*. `extern` is
 a core word (L18).
 
