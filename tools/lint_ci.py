@@ -3,16 +3,18 @@
 - all: actions pinned by commit SHA, the hosted runner named by its versioned label (the forge
   offers no digest for a hosted image), a timeout on every job, pip with
   --require-hashes, no job or step that may fail quietly (`continue-on-error`), no step-level `if`,
-  no reusable-workflow job, no job in a container or beside services, no `defaults` and no step
-  with a shell or a working directory of its own, no expression inside a `run:` value (a value
+  no reusable-workflow job, no job beside services, no job in a container but the gates job in the
+  image below, no `defaults` and no step with a shell or a working directory of its own, no expression inside a `run:` value (a value
   reaches a script through `env:`), a secret only as plain `secrets.<NAME>` in the `env:` of the
   job's last step, no key twice in one mapping;
 - gates.yml: runs on a pull request's opening, every push to it, its reopening, its Ready and every edit
   of its title or description (PR_TYPES), and on pushes to main alone, with no path filter and no filter on pull_request; exactly one job,
   `gates`, with no `if` (a
-  skipped job reports success to a required check); read-only token; no secret; one SDK step, which
-  takes its version from compiler/global.json and nothing else; the last step runs
-  the full gate runner and carries nothing but its name, env and run.
+  skipped job reports success to a required check); a token that reads, the packages among it; no
+  secret; the job runs in the repository's image, ghcr.io/symohtl/kurz-ci named by its digest and
+  pulled with the job's own token, and installs no SDK of its own, the image's being the one
+  compiler/global.json pins; the last step runs the full gate runner and carries nothing but its
+  name, env and run.
   Not covered by any trigger: a review that posts its findings and a thread that is resolved start
   no run, so the `gates` check of a head is the verdict of the moment it ran (tools/pr_gates.py);
 - review.yml: pull_request_target plus a manual dispatch; the job's `if` is the pinned rule: a
@@ -30,8 +32,18 @@
   with no `if`, on the versioned Windows label, with a timeout; a token that reads and nothing more;
   no secret; one checkout that keeps no credential, one SDK step from compiler/global.json; the last
   step runs the compiler gate with no env and carries nothing but its name and run. The job is not a
-  required check of the ruleset.
+  required check of the ruleset;
+- image.yml: runs on a push that changes ci/Dockerfile or the workflow itself, on any branch, so that
+  a pull request can name the image its own push built, and on a manual dispatch; exactly one job,
+  `image`, with no `if`; a token that reads the code and writes the packages; one checkout that
+  keeps no credential; the last step logs in with the job's token through standard input, builds
+  ci/Dockerfile under the commit's sha, publishes it and prints its digest, and carries nothing but
+  its name, env and run;
+- ci/Dockerfile: one FROM, its image named by its digest; the .NET SDK of compiler/global.json; each
+  download checked before it is used, the LLVM key by its fingerprint, the SDK by its SHA-512 and gh
+  by its SHA-256; clang of the LLVM major the file names.
 `--self-test` breaks each fact in the real files, one token at a time, and expects its error."""
+import json
 import os
 import re
 import sys
@@ -43,7 +55,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
 
 WORKFLOWS = ".github/workflows"
-FILES = ["compiler-windows.yml", "gates.yml", "review.yml"]
+FILES = ["compiler-windows.yml", "gates.yml", "image.yml", "review.yml"]
+DOCKERFILE = "ci/Dockerfile"
+GLOBAL_JSON = "compiler/global.json"
+IMAGE = "ghcr.io/symohtl/kurz-ci"
+IMAGE_CREDENTIALS = {"username": "${{ github.actor }}", "password": "${{ github.token }}"}
+IMAGE_PATHS = [DOCKERFILE, WORKFLOWS + "/image.yml"]
+IMAGE_ENV = {"GH_TOKEN": "${{ github.token }}", "ACTOR": "${{ github.actor }}", "SHA": "${{ github.sha }}"}
+IMAGE_RUN = "\n".join([
+    'printf \'%s\' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin',
+    'docker build -t "' + IMAGE + ':$SHA" ci',
+    'docker push "' + IMAGE + ':$SHA"',
+    'docker image inspect --format \'{{index .RepoDigests 0}}\' "' + IMAGE + ':$SHA"',
+])
 PR_TYPES = {"opened", "synchronize", "reopened", "ready_for_review", "edited"}
 REVIEW_TYPES = ["opened", "synchronize", "reopened", "ready_for_review"]
 REVIEW_IF = ("(github.event_name == 'workflow_dispatch' && "
@@ -111,7 +135,9 @@ def secret_errors(name, data, allowed):
     return errors
 
 
-def common(name, text, data, secrets, runner="ubuntu-24.04"):
+def common(name, text, data, secrets, runner="ubuntu-24.04", image_job=None):
+    """The facts of every workflow; `image_job` names the one job that may run in a container, whose
+    container the caller checks."""
     errors = []
     # the parsed steps, not the text: a flow-style step or a quoted key is a step too
     for used in [str(s["uses"]) for job in data["jobs"].values() for s in (job.get("steps") or []) if "uses" in s]:
@@ -139,7 +165,7 @@ def common(name, text, data, secrets, runner="ubuntu-24.04"):
                 errors.append(f"{name}: job {jid} has a step that writes GITHUB_ENV or GITHUB_PATH: only the start-time line may")
             if re.search(r"\b(?:git\s+(?:checkout|fetch|pull|switch)|gh\s+pr\s+checkout)\b", run):
                 errors.append(f"{name}: job {jid} has a step that checks out or fetches by hand: that can be pull-request code")
-        if "container" in job or "services" in job:
+        if "services" in job or ("container" in job and jid != image_job):
             errors.append(f"{name}: job {jid} runs in a container or beside services: their images are pinned by no fact")
         if job.get("runs-on") != runner:
             errors.append(f"{name}: job {jid} runner image is not pinned to {runner}")
@@ -172,7 +198,17 @@ def deciding_step(name, steps, command, what, env_keys):
     return errors, last
 
 
-SDK_WITH = {"global-json-file": "compiler/global.json"}
+def checkout_errors(name, steps):
+    """Exactly one checkout, and it keeps no credential in the clone the later steps run in."""
+    checkouts = [s.get("with") or {} for s in steps if "actions/checkout@" in str(s.get("uses", ""))]
+    errors = [] if len(checkouts) == 1 else [f"{name}: expected exactly one checkout, found {len(checkouts)}"]
+    for with_ in checkouts:
+        if with_.get("persist-credentials") is not False:
+            errors.append(f"{name}: the checkout must set persist-credentials: false")
+    return errors
+
+
+SDK_WITH = {"global-json-file": GLOBAL_JSON}
 
 
 def sdk_step_errors(name, steps):
@@ -206,15 +242,23 @@ def gates_facts(text):
         data, on = parse(text)
     except (yaml.YAMLError, ValueError) as e:
         return unreadable(name, e)
-    errors = common(name, text, data, set()) + pr_push_errors(name, on)
-    if data.get("permissions") != {"contents": "read", "issues": "read", "pull-requests": "read"}:
-        errors.append(f"{name}: permissions must be exactly contents: read, issues: read, pull-requests: read")
+    errors = common(name, text, data, set(), image_job="gates") + pr_push_errors(name, on)
+    if data.get("permissions") != {"contents": "read", "issues": "read", "packages": "read", "pull-requests": "read"}:
+        errors.append(f"{name}: permissions must be exactly contents: read, issues: read, packages: read, pull-requests: read")
     if list(data["jobs"]) != ["gates"]:
         errors.append(f"{name}: jobs must be exactly [gates]")
     job = data["jobs"].get("gates") or {}
     if "if" in job:
         errors.append(f"{name}: the job gates may be skipped (`if`), and a skipped job reports success")
-    errors += sdk_step_errors(name, job.get("steps") or [])
+    container = job.get("container")
+    if not (isinstance(container, dict) and set(container) == {"image", "credentials"}
+            and re.fullmatch(re.escape(IMAGE) + r"@sha256:[0-9a-f]{64}", str(container.get("image")))
+            and container.get("credentials") == IMAGE_CREDENTIALS):
+        errors.append(f"{name}: the gates job must run in {IMAGE} named by its digest, @sha256: and 64 hex digits, "
+                      f"pulled with the job's token as {IMAGE_CREDENTIALS}, found {container}")
+    if any(str(s.get("uses", "")).startswith("actions/setup-dotnet@") for s in job.get("steps") or []):
+        errors.append(f"{name}: the gates job takes its SDK from the image, whose {DOCKERFILE} pins the version of "
+                      f"{GLOBAL_JSON}: an SDK step installs another one")
     step, last = deciding_step(name, job.get("steps") or [], '"$RUNNER_TEMP/venv/bin/python" tools/gates.py', "gates", {"GH_TOKEN", "PR_NUMBER"})
     errors += step
     if (last.get("env") or {}).get("PR_NUMBER") != "${{ github.event.pull_request.number }}":
@@ -237,15 +281,60 @@ def compiler_facts(text):
     if "if" in job:
         errors.append(f"{name}: the job compiler-windows may be skipped (`if`), and a skipped job reports success")
     steps = job.get("steps") or []
-    checkouts = [s.get("with") or {} for s in steps if "actions/checkout@" in str(s.get("uses", ""))]
-    if len(checkouts) != 1:
-        errors.append(f"{name}: expected exactly one checkout, found {len(checkouts)}")
-    for with_ in checkouts:
-        if with_.get("persist-credentials") is not False:
-            errors.append(f"{name}: the checkout must set persist-credentials: false")
+    errors += checkout_errors(name, steps)
     errors += sdk_step_errors(name, steps)
     step, _ = deciding_step(name, steps, "python tools/compiler_gate.py", "compiler", set())
     return errors + step
+
+
+def image_facts(text):
+    name = "image.yml"
+    try:
+        data, on = parse(text)
+    except (yaml.YAMLError, ValueError) as e:
+        return unreadable(name, e)
+    errors = common(name, text, data, set())
+    if set(on) != {"push", "workflow_dispatch"} or on.get("push") != {"paths": IMAGE_PATHS} or on.get("workflow_dispatch"):
+        errors.append(f"{name}: triggers must be exactly a push that changes {IMAGE_PATHS}, on any branch, and a manual dispatch")
+    if data.get("permissions") != {"contents": "read", "packages": "write"}:
+        errors.append(f"{name}: permissions must be exactly contents: read, packages: write")
+    if list(data["jobs"]) != ["image"]:
+        errors.append(f"{name}: jobs must be exactly [image]")
+    job = data["jobs"].get("image") or {}
+    if "if" in job:
+        errors.append(f"{name}: the job image may be skipped (`if`)")
+    steps = job.get("steps") or []
+    errors += checkout_errors(name, steps)
+    step, last = deciding_step(name, steps, IMAGE_RUN, "publish", set(IMAGE_ENV))
+    errors += step
+    if (last.get("env") or {}) != IMAGE_ENV:
+        errors.append(f"{name}: the publish step's env must be exactly {IMAGE_ENV}")
+    return errors
+
+
+def dockerfile_facts(text, global_json):
+    """The image's facts, against the SDK version `global_json` pins."""
+    name = DOCKERFILE
+    args = dict(re.findall(r"(?m)^ARG (\w+)=(\S+)$", text))
+    errors = []
+    froms = re.findall(r"(?m)^FROM\s+(\S+)", text)
+    if len(froms) != 1 or not re.fullmatch(r"[\w./-]+(?::[\w.-]+)?@sha256:[0-9a-f]{64}", froms[0]):
+        errors.append(f"{name}: one FROM, its image named by its digest, found {froms}")
+    try:
+        sdk = json.loads(global_json)["sdk"]["version"]
+    except (ValueError, KeyError, TypeError) as e:
+        sdk = None
+        errors.append(f"{name}: {GLOBAL_JSON} names no SDK version: {type(e).__name__}")
+    if args.get("DOTNET_SDK") != sdk:
+        errors.append(f"{name}: ARG DOTNET_SDK is {args.get('DOTNET_SDK')}, while {GLOBAL_JSON} pins {sdk}")
+    for arg, digits, check in (("DOTNET_SHA512", 128, 'echo "$DOTNET_SHA512  /tmp/sdk.tar.gz" | sha512sum -c -'),
+                               ("GH_SHA256", 64, 'echo "$GH_SHA256  /tmp/gh.tar.gz" | sha256sum -c -'),
+                               ("LLVM_KEY", 40, 'grep -qx "fpr:::::::::$LLVM_KEY:"')):
+        if not re.fullmatch(r"[0-9a-fA-F]{%d}" % digits, args.get(arg, "")) or check not in text:
+            errors.append(f"{name}: a download is used unchecked: ARG {arg} of {digits} hex digits and `{check}` must both stand")
+    if not re.fullmatch(r"\d+", args.get("LLVM_MAJOR", "")) or "clang-$LLVM_MAJOR" not in text:
+        errors.append(f"{name}: ARG LLVM_MAJOR must be a major release, and the image must install clang-$LLVM_MAJOR")
+    return errors
 
 
 def review_facts(text):
@@ -307,7 +396,8 @@ def lint(root):
         listed = sorted(os.listdir(os.path.join(root, WORKFLOWS)))
     except OSError as e:
         return [f"{WORKFLOWS} cannot be listed: {type(e).__name__}"], 0
-    for fname, facts in (("compiler-windows.yml", compiler_facts), ("gates.yml", gates_facts), ("review.yml", review_facts)):
+    for fname, facts in (("compiler-windows.yml", compiler_facts), ("gates.yml", gates_facts), ("image.yml", image_facts),
+                         ("review.yml", review_facts)):
         try:
             text = kit.read(os.path.join(root, WORKFLOWS, fname))
         except OSError as e:
@@ -317,6 +407,10 @@ def lint(root):
         errors += facts(text)
     if listed != FILES:
         errors.append(f"workflows are {listed}: a workflow without facts here is unchecked configuration")
+    try:
+        errors += dockerfile_facts(kit.read(os.path.join(root, DOCKERFILE)), kit.read(os.path.join(root, GLOBAL_JSON)))
+    except OSError as e:
+        errors.append(f"{DOCKERFILE}: cannot be read with {GLOBAL_JSON}: {type(e).__name__}")
     return errors, read
 
 
@@ -442,12 +536,40 @@ MUTATIONS = [
     ("review.yml", "the credential on the step that installs the CLI", "      - name: Install the Claude CLI, proven by running it\n",
      "      - name: Install the Claude CLI, proven by running it\n        env:\n"
      "          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n", "a secret is read"),
-    ("gates.yml", "a job in a container", "    timeout-minutes: 25\n", "    timeout-minutes: 25\n    container: python:3\n",
+    ("review.yml", "a job in a container", "    timeout-minutes: 90\n", "    timeout-minutes: 90\n    container: python:3\n",
      "container or beside services"),
-    ("gates.yml", "no SDK step", SDK, "", "SDK step"),
-    ("gates.yml", "the SDK step takes a version typed here", "          global-json-file: compiler/global.json\n",
-     "          dotnet-version: 10.0.x\n", "SDK step"),
-    ("gates.yml", "a second SDK step", SDK, SDK + SDK, "SDK step"),
+    ("gates.yml", "no image", "    container:\n      image:", "    labels:\n      image:", "must run in"),
+    ("gates.yml", "the image by tag", "kurz-ci@sha256:", "kurz-ci:latest@sha256:", "must run in"),
+    ("gates.yml", "another registry's image", "image: ghcr.io/symohtl/kurz-ci@", "image: docker.io/symohtl/kurz-ci@", "must run in"),
+    ("gates.yml", "the image pulled with another credential", "        password: ${{ github.token }}\n",
+     "        password: ${{ github.actor }}\n", "must run in"),
+    ("gates.yml", "a write token on the packages", "  packages: read  # the image the job runs in\n", "  packages: write\n",
+     "permissions must be exactly"),
+    ("gates.yml", "an SDK step of its own", "      - name: Install pinned dependencies\n",
+     SDK + "      - name: Install pinned dependencies\n", "takes its SDK from the image"),
+    ("image.yml", "another trigger", "  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n", "triggers must be exactly"),
+    ("image.yml", "the paths leave out the Dockerfile", "      - ci/Dockerfile\n", "", "triggers must be exactly"),
+    ("image.yml", "pushes to main alone", "  push:\n    paths:", "  push:\n    branches: [main]\n    paths:", "triggers must be exactly"),
+    ("image.yml", "a write token on the code", "  contents: read\n", "  contents: write\n", "permissions must be exactly"),
+    ("image.yml", "the job can be skipped", "  image:\n    runs-on:", "  image:\n    if: github.actor != 'x'\n    runs-on:",
+     "may be skipped"),
+    ("image.yml", "a second job of its own", "\njobs:\n", "\njobs:\n" + PLAIN_JOB, "jobs must be exactly [image]"),
+    ("image.yml", "a floating runner image", "runs-on: ubuntu-24.04", "runs-on: ubuntu-latest", "runner image"),
+    ("image.yml", "the token stays in the checkout", "persist-credentials: false", "persist-credentials: true", "persist-credentials"),
+    ("image.yml", "another tag published", 'docker push "ghcr.io/symohtl/kurz-ci:$SHA"', 'docker push "ghcr.io/symohtl/kurz-ci:latest"',
+     "must be the publish step"),
+    ("image.yml", "the token on the command line", "printf '%s' \"$GH_TOKEN\" | docker login ghcr.io -u \"$ACTOR\" --password-stdin",
+     "docker login ghcr.io -u \"$ACTOR\" -p \"$GH_TOKEN\"", "must be the publish step"),
+    ("image.yml", "a secret for the registry", "          GH_TOKEN: ${{ github.token }}\n", "          GH_TOKEN: ${{ secrets.GHCR_PAT }}\n",
+     "a secret is read"),
+    ("ci/Dockerfile", "the base by tag", "FROM ubuntu:24.04@sha256:", "FROM ubuntu:24.04\nLABEL base=sha256:", "named by its digest"),
+    ("ci/Dockerfile", "a second FROM", "\nFROM ubuntu", "\nFROM ubuntu:24.04 AS first\nFROM ubuntu", "named by its digest"),
+    ("ci/Dockerfile", "an SDK other than global.json's", "ARG DOTNET_SDK=", "ARG DOTNET_SDK=9.0.100\nARG UNUSED=", "while compiler/global.json pins"),
+    ("ci/Dockerfile", "the SDK used unchecked", '/tmp/sdk.tar.gz" | sha512sum -c -', '/tmp/sdk.tar.gz" | cat', "ARG DOTNET_SHA512"),
+    ("ci/Dockerfile", "gh used unchecked", '/tmp/gh.tar.gz" | sha256sum -c -', '/tmp/gh.tar.gz" | cat', "ARG GH_SHA256"),
+    ("ci/Dockerfile", "the LLVM key used unchecked", 'grep -qx "fpr:::::::::$LLVM_KEY:"', 'true', "ARG LLVM_KEY"),
+    ("ci/Dockerfile", "a short hash of the SDK", "ARG DOTNET_SHA512=", "ARG DOTNET_SHA512=ab\nARG UNUSED=", "ARG DOTNET_SHA512"),
+    ("ci/Dockerfile", "no major release of LLVM", "ARG LLVM_MAJOR=", "ARG LLVM_MAJOR=latest\nARG UNUSED=", "ARG LLVM_MAJOR"),
     ("compiler-windows.yml", "edits no longer re-run the compiler job", "ready_for_review, edited]", "ready_for_review]", "pull_request types"),
     ("compiler-windows.yml", "a path filter", "    branches: [main]\n", "    branches: [main]\n    paths: ['compiler/**']\n", "path filter"),
     ("compiler-windows.yml", "another trigger", "    branches: [main]\n", "    branches: [main]\n  workflow_dispatch:\n", "triggers are"),
@@ -466,6 +588,7 @@ MUTATIONS = [
     ("compiler-windows.yml", "no checkout", "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n        with:\n"
      "          persist-credentials: false\n", "", "exactly one checkout"),
     ("compiler-windows.yml", "no SDK step", SDK, "", "SDK step"),
+    ("compiler-windows.yml", "a second SDK step", SDK, SDK + SDK, "SDK step"),
     ("compiler-windows.yml", "the SDK step takes a version typed here", "          global-json-file: compiler/global.json\n",
      "          dotnet-version: 10.0.x\n", "SDK step"),
     ("compiler-windows.yml", "the gate runs with a flag", "run: python tools/compiler_gate.py", "run: python tools/compiler_gate.py --self-test",
@@ -502,9 +625,14 @@ def self_test():
 
 
 def cases_in(base):
-    facts = {"compiler-windows.yml": compiler_facts, "gates.yml": gates_facts, "review.yml": review_facts}
+    facts = {"compiler-windows.yml": compiler_facts, "gates.yml": gates_facts, "image.yml": image_facts, "review.yml": review_facts}
     real = {f: kit.read(os.path.join(kit.ROOT, WORKFLOWS, f)) for f in facts}
+    global_json = kit.read(os.path.join(kit.ROOT, GLOBAL_JSON))
+    facts[DOCKERFILE] = lambda text: dockerfile_facts(text, global_json)
+    real[DOCKERFILE] = kit.read(os.path.join(kit.ROOT, DOCKERFILE))
     cases = [(f"the real {f} is clean", not facts[f](real[f]), facts[f](real[f])) for f in facts]
+    no_sdk = dockerfile_facts(real[DOCKERFILE], "{}")
+    cases.append(("ci/Dockerfile: a global.json that names no SDK is an error", any("names no SDK version" in e for e in no_sdk), no_sdk))
     for fname, case, old, new, needle in MUTATIONS:
         if real[fname].count(old) != 1:
             cases.append((f"{fname}: {case}", False, f"anchor occurs {real[fname].count(old)} times, expected 1"))
@@ -516,17 +644,20 @@ def cases_in(base):
     twice = review_facts(real["review.yml"].replace("  statuses: write\n", "  statuses: write\n  contents: write\n"))
     cases.append(("a key that occurs twice is refused, not read as its last value", any("occurs twice" in e for e in twice), twice))
 
-    def tree(files):
+    def tree(files, image=True):
         root = tempfile.mkdtemp(dir=base)
         os.makedirs(os.path.join(root, WORKFLOWS))
-        for fname in files:
-            with open(os.path.join(root, WORKFLOWS, fname), "w", encoding="utf-8", newline="\n") as f:
-                f.write(real.get(fname, real["gates.yml"]))
+        written = [(os.path.join(WORKFLOWS, fname), real.get(fname, real["gates.yml"])) for fname in files]
+        for rel, text in written + ([(DOCKERFILE, real[DOCKERFILE]), (GLOBAL_JSON, global_json)] if image else []):
+            os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+            with open(os.path.join(root, rel), "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
         return root
 
     for name, root, needle in [("lint: the real workflows are clean", tree(FILES), None),
                                ("lint: a workflow without facts is unchecked configuration", tree(FILES + ["extra.yml"]), "without facts"),
                                ("lint: a missing workflow is an error", tree(["gates.yml"]), "review.yml: cannot be read"),
+                               ("lint: a missing Dockerfile is an error", tree(FILES, image=False), "cannot be read with"),
                                ("lint: no workflows directory is an error", tempfile.mkdtemp(dir=base), "cannot be listed")]:
         errors, read = lint(root)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))

@@ -48,7 +48,7 @@ FLOOR = 5
 # that retired the design-phase rule, after the owner said build on 2026-10-09; a bin/, obj/ or dot-directory
 # segment under it (build outputs, IDE and tool state) is refused whatever the extension and whatever the
 # case of the segment; .gitignore keeps them out of a normal add only as spelled there, and the gate alone
-# covers the other spellings.
+# covers the other spellings. ci/Dockerfile is the image the gates job runs in, by its one name.
 ALLOWED = [
     r"CLAUDE\.md", r"INDEX\.md", r"README\.md", r"LICENSE(?:\.md)?", r"kurz-design\.md",
     r"\.gitattributes", r"\.gitignore",
@@ -56,13 +56,13 @@ ALLOWED = [
     r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz",
     r"tools/(?:[^/]+/)*[^/]+\.(?:py|json|txt)",
     r"compiler/(?:(?!(?i:bin|obj)/|\.)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
-    r"compiler/NuGet\.config",
+    r"compiler/NuGet\.config", r"ci/Dockerfile",
     r"\.review/[^/]+\.yaml", r"\.github/workflows/[^/]+\.yml", r"\.githooks/pre-push",
     r"\.claude/settings\.json", r"\.claude/skills/[^/]+/SKILL\.md",
 ]
 HOLDS = ("this tree holds the design record, the reference, the corpus, the knowledge store, the quality tools, "
-         "the compiler's source, project and text files under compiler/ (outside bin/, obj/ and dot-directories) "
-         "and the repository's own readme, licence, git, session and skill files; the list is ALLOWED in tools/tree_gate.py (CLAUDE.md)")
+         "the compiler's source, project and text files under compiler/ (outside bin/, obj/ and dot-directories), "
+         "the CI image's ci/Dockerfile and the repository's own readme, licence, git, session and skill files; the list is ALLOWED in tools/tree_gate.py (CLAUDE.md)")
 
 
 def check_path(path):
@@ -309,6 +309,7 @@ def cases_in(base):
     expect("a build output under Bin/ in another case is refused",
            {**ok_files, "compiler/Kurz.Compiler/Bin/Debug/Kurz.Compiler.deps.json": b"{}\n"}, "Kurz.Compiler.deps.json: not allowed")
     expect("Kurz library code outside the corpus is refused", {**ok_files, "src/list.kz": b"x = 1\n"}, "not allowed")
+    expect("a file beside the image's Dockerfile under ci/ is refused", {**ok_files, "ci/build.sh": b"true\n"}, "ci/build.sh: not allowed")
     expect("nested knowledge entry is refused", {**ok_files, "knowledge/sub/x.md": b"x\n"}, "not allowed")
     expect("a binary file is refused", {**ok_files, "tools/x.py": b"\xff\xfe\x00"}, "not UTF-8")
     expect("conflict marker", {**ok_files, "CLAUDE.md": ("<" * 7 + " HEAD\n").encode()}, "merge-conflict")
@@ -330,7 +331,7 @@ def cases_in(base):
                  ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push",
                  "compiler/Kurz.sln", "compiler/Kurz.Compiler/Kurz.Compiler.csproj", "compiler/Kurz.Compiler/Lexer.cs",
                  "compiler/global.json", "compiler/README.md", "compiler/.editorconfig",
-                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets", "compiler/NuGet.config"):
+                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets", "compiler/NuGet.config", "ci/Dockerfile"):
         cases.append((f"allowed path: {path}", check_path(path) is None, check_path(path)))
     for label, value in secrets.items():  # one plant per pattern; the error must name that pattern
         expect(f"secret: {label}", {**ok_files, "guides/g.md": value.encode()}, f"credential-shaped string ({label})")

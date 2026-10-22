@@ -10,22 +10,26 @@ on:
 permissions:
   contents: read
   issues: read  # pr-findings lists the collection ticket at the review cap
+  packages: read  # the image the job runs in
   pull-requests: read
 
 jobs:
   # One job, no `if`: a skipped job reports success to a required check. tools/gates.py runs every
-  # gate; its docstring is the one definition of which verdicts turn the run red. Facts of this file
-  # are pinned by tools/lint_ci.py.
+  # gate; its docstring is the one definition of which verdicts turn the run red. The job runs in the
+  # image ci/Dockerfile defines, named by its digest, which holds the SDK compiler/global.json pins and
+  # the LLVM the compiler pins. Facts of this file are pinned by tools/lint_ci.py.
   gates:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    container:
+      image: ghcr.io/symohtl/kurz-ci@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
-        with:
-          global-json-file: compiler/global.json
       - name: Install pinned dependencies
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"

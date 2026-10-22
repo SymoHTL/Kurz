@@ -1,0 +1,35 @@
+name: image
+
+# Builds ci/Dockerfile, the image the gates job runs in, and publishes it to the GitHub container
+# registry under the commit's sha; gates.yml names it by the digest the last line prints. A push that
+# changes the file on any branch builds it, so that a pull request can name the image its own push
+# built. Facts of this file and of ci/Dockerfile are pinned by tools/lint_ci.py.
+on:
+  push:
+    paths:
+      - ci/Dockerfile
+      - .github/workflows/image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and publish the image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker build -t "ghcr.io/symohtl/kurz-ci:$SHA" ci
+          docker push "ghcr.io/symohtl/kurz-ci:$SHA"
+          docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/symohtl/kurz-ci:$SHA"
