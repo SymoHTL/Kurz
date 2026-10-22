@@ -230,7 +230,7 @@ flowchart TD
         X2["samples in the design record and expectations in the corpus are right:
         nothing runs them, HAZARD issue 1"]
         X3["wrap-up: lessons promoted out of private memory: HAZARD issue 6"]
-        X4["one push per review round, and none after the third (R7): judgment step"]
+        X4["one push per review round, and none after the round at the cap (R7): judgment step"]
     end
     W --> P --> G --> M
     P --> R --> M

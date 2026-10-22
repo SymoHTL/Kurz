@@ -1,6 +1,6 @@
 ---
 name: rounds-do-not-converge
-description: Postmortem of 2026-10-21 - pull request 33 took thirteen review rounds in CI from 2026-10-15 to 2026-10-21, ten of them in one night, and the last six each returned 13 to 20 new findings, 3 to 7 of them medium, at 2.63 to 3.98 USD a round, 31.56 USD in all by the runs' own reports, without converging. The owner capped review rounds at three per pull request, the earlier rounds counted; the reviewer labels each round before its first pass and ends a fourth run before any pass, and what the third round leaves open goes on the collection ticket
+description: Postmortem of 2026-10-21 - pull request 33 took thirteen review rounds in CI from 2026-10-15 to 2026-10-21, ten of them in one night, and the last six each returned 13 to 20 new findings, 3 to 7 of them medium, at 2.63 to 3.98 USD a round, 31.56 USD in all by the runs' own reports, without converging. The owner capped review rounds at three per pull request (cut to one on 2026-10-22), the earlier rounds counted; the reviewer labels each round before its first pass and ends the run after the cap before any pass, and what the round at the cap leaves open goes on the collection ticket
 metadata:
   type: feedback
 ---
@@ -49,8 +49,8 @@ What the rows show:
 
 **What changed (the owner, 2026-10-21):**
 
-- A pull request gets at most three review rounds, and the rounds before the cap count (`CLAUDE.md`,
-  "A pull request gets at most three review rounds"). No fix push follows the third: what is still
+- A pull request gets at most three review rounds, and the rounds before the cap count (`CLAUDE.md`, the rule then
+  titled "A pull request gets at most three review rounds"). No fix push follows the third: what is still
   open goes on the collection ticket, the open issue labelled `review-leftovers`, one section per
   pull request with the head the findings were made on, the links of its threads and the link of
   its lows on the `review-lows` issue; each open thread gets a reply that links the ticket and is
@@ -67,9 +67,8 @@ What the rows show:
 - Pull request 33's three open threads of its thirteenth review are the first section of the
   collection ticket (issue 39), and its fifteen lows are on the `review-lows` issue.
 
-**What changed (the owner, 2026-10-22):** the cap is one review round. At three, a pull request took
-11 to 14 USD of review and most of a day, and the rounds and the records around them, not the
-code, set the pace; the rest of the walk above holds with the one round as the round at the cap.
+**What changed (the owner, 2026-10-22):** the cap is one review round. The rest of the walk
+above holds with the one round as the round at the cap.
 
 **How to apply:**
 

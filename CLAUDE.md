@@ -325,8 +325,7 @@ Gate: review rule "rules for sessions".
   the round at the cap: the cap below. `judgment step`
 - **A pull request gets at most one review round** (the owner, 2026-10-22). Retired by it: the cap of
   three rounds the owner set on 2026-10-21, after pull request 33 took thirteen rounds without
-  converging ([knowledge/rounds-do-not-converge.md](knowledge/rounds-do-not-converge.md)); at three
-  rounds a pull request took 11 to 14 USD of review and most of a day. A round is a
+  converging ([knowledge/rounds-do-not-converge.md](knowledge/rounds-do-not-converge.md)). A round is a
   review run that labelled the pull request: a run with files to review, in CI or off the
   pipeline, puts the label `review-round-<n>` on before its first pass, and it is a round whatever
   follows (a pass, a limit, a cut-off, a failure); a dry run, `--plan` and a run that ends before

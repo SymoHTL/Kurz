@@ -112,8 +112,8 @@ the head that will be reviewed is a `judgment step`.
      after any of them, `budget`, `usage-limit`, `head-moved` and the reviewer's own defects among
      them, takes the one round, and after it no run follows.
      `head-moved`: a push arrived; review the new head. `oversized`: split the change. `base`:
-     the pull request must target the default branch. `cap`: the pull request had its three
-     review rounds, and item 8 says what follows. `rules`, `empty`, `bad-diff`: the line says
+     the pull request must target the default branch. `cap`: the pull request had its one
+     review round, and item 8 says what follows. `rules`, `empty`, `bad-diff`: the line says
      what to change. `wrong-model`, `bad-output`, `cli-missing`, `api`, `failed`: a defect of the
      reviewer or the platform; find the cause before any further run.
    - No review can run in CI (no credential, or the reviewer itself is what the pull request
@@ -137,7 +137,7 @@ the head that will be reviewed is a `judgment step`.
 6. Low findings are not threads. The reviewer collects them on the open issue labelled
    `review-lows`; they hold no merge and are fixed together, or with a push that is needed
    anyway. A pull request needs no further round once a round reports nothing above low, and gets
-   none after its third (item 8).
+   none after the round at the cap (item 8).
    Gate: `self-tests` for where the reviewer puts them; fixing them is a `judgment step`.
 7. Order: edit, mark the pull request Draft, push ONE commit with every fix, resolve the threads
    the edits answered, mark it Ready:
