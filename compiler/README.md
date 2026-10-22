@@ -262,10 +262,12 @@ R5); a pointer to a type that holds a type parameter, which R10 judges by the ty
 address of state outside a function, which R13 says is no variable, where R10 names a variable
 (R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
 R10 says `&x` needs no `raw` block and Rust takes such a place in `unsafe` code alone (R10); an
-operand of `asm` in an explicit register or of a class Rust takes only as a clobber, whose place
-in the template R11 leaves to Rust, which gives it otherwise than R11's rule that every operand
-appears there, an operand of a class Rust gives a target with a feature beyond those every x86-64
-target has, `ymm_reg`, `zmm_reg` and `kreg`, since no rule names the features of a build, and
+operand of `asm` of a class Rust takes only as a clobber, `kreg0`, `x87_reg`, `mmx_reg` and
+`tmm_reg`, by the class or by one of its registers, which Rust takes with `out` and `_` alone, an
+operand of a class Rust gives a target with a feature beyond those every x86-64 target has,
+`ymm_reg`, `zmm_reg` and `kreg`, or in one of their registers, `xmm16` to `xmm31` among them,
+since no rule names the features of a build, a name on an operand in an explicit register, which
+Rust's Reference allows and Rust's compiler refuses, the template naming it nowhere, and
 `sym` of a function with more than one overload or with type parameters, a symbol being one
 function (R11, R12); `thread
 static` before a function (R13); a `decimal` in a C declaration or in the place of `...`, a
@@ -440,6 +442,20 @@ round can ask about it by the rule's id.
   template, of the operand or of the word the rule names, so a name the template uses that no
   operand has and an operand the template does not use are two; a template whose braces or
   placeholders cannot be read is one, and its operands then count as used (E1).
+- R11: an operand in an explicit register is read against Rust's tables of x86-64's registers: a
+  smaller view or an alias is the register itself (`eax`, `rax` and `al` are `ax`), and the type a
+  value in it takes is that of the register's class, `reg`, `reg_byte` or `xmm_reg`; `sp`, `bp`,
+  `bx` and `ip` and their views are `asm-operand`, as Rust takes none of them as an operand; a
+  register that two inputs, or two outputs, name is `asm-operand` at the second, an `out`, an
+  `inout` and an `inlateout` being an input and an output each, as Rust's compiler counts them,
+  since an `out` may write its register before every input is read and a `lateout` is, in the
+  Reference's words, "identical to `out` except that the register allocator can reuse a register
+  allocated to an `in`", so an input and a `lateout` of one register are not; such an operand
+  stands after the operands without a name, as Rust's rule says, and the template names it
+  nowhere. `clobber_abi` takes outputs in explicit registers.
+- R11: a pointer and a C function go into `xmm_reg` as into `reg`, since Rust's table counts a
+  pointer and a function pointer as the 64-bit integer, which `xmm_reg` takes; `const` or `sym`
+  with a block after the word, or with `=>`, is `asm-operand`.
 - R12 with R11: the body of a `naked` function is `naked-body` at its first statement that is not
   its one `asm`, at the second `asm` where it holds two, and at the declaration where it holds
   none; an operand there other than `sym` and `const` is `naked-body`, `clobber_abi` and `options`
