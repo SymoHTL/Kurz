@@ -12,27 +12,28 @@ namespace Kurz.Compiler.Tests;
 /// </summary>
 public sealed class CheckerTests
 {
-    private static (DiagnosticBag Diagnostics, Checker Checker) Check(string program)
+    /// <summary>The checker's reading of a program, with the grants a case's header line would give it, <c>raw</c>, <c>native</c> or both (R7).</summary>
+    private static (DiagnosticBag Diagnostics, Checker Checker) Check(string program, string grants = "")
     {
         var diagnostics = new DiagnosticBag();
         var tree = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
         Assert.Empty(diagnostics.Items);
-        var checker = Checker.Check(tree, diagnostics);
+        var checker = Checker.Check(tree, diagnostics, grants.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         return (diagnostics, checker);
     }
 
     /// <summary>The compile errors of a program the checker reads in full, by line.</summary>
-    private static List<(string Id, int Line)> Errors(string program)
+    private static List<(string Id, int Line)> Errors(string program, string grants = "")
     {
-        var (diagnostics, _) = Check(program);
+        var (diagnostics, _) = Check(program, grants);
         Assert.DoesNotContain(diagnostics.Items, d => !d.IsError);
         return diagnostics.Sorted.Select(d => (d.Id, d.Line)).ToList();
     }
 
     /// <summary>What the checker does not read, as <c>line: construct</c>; the helper asserts that no diagnostic of the program is an error.</summary>
-    private static List<string> NotSupported(string program)
+    private static List<string> NotSupported(string program, string grants = "")
     {
-        var (diagnostics, _) = Check(program);
+        var (diagnostics, _) = Check(program, grants);
         Assert.DoesNotContain(diagnostics.Items, d => d.IsError);
         Assert.NotEmpty(diagnostics.Items);
         return diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList();
@@ -46,9 +47,9 @@ public sealed class CheckerTests
         return checker.TopLevelVariables[variable].Text;
     }
 
-    private static void Clean(string program)
+    private static void Clean(string program, string grants = "")
     {
-        var (diagnostics, _) = Check(program);
+        var (diagnostics, _) = Check(program, grants);
         Assert.Empty(diagnostics.Items);
     }
 
@@ -557,93 +558,6 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 8)], elsewhere.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
         var (asType, _) = Check("void F() {\n    int G() => 1\n    G x = G()\n    print(x)\n}\n\nF()");
         Assert.Equal([(ErrorIds.UnknownName, 3)], asType.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line))); // a function's name is no type
-    }
-
-    [Fact]
-    public void A_static_declaration_at_the_top_level_is_not_read_and_one_inside_a_block_has_no_meaning()
-    {
-        // R13: a `static mut` at the outermost level of a file is chapter 11's state outside a function, which the checker does not read;
-        // the uses of its name carry no further error (E1). Inside a block or a function a `static` has no meaning on a variable (V2, V4)
-        Assert.Equal(["1: a `static mut` declaration at the top level of a file (R13)"], NotSupported("static mut long total = 0\nprint(total)"));
-        Assert.Equal(["2: a `static mut` declaration at the top level of a file (R13)"], NotSupported("print(1)\nstatic mut long total = 0\ntotal = 2"));
-        Assert.Equal(["1: a `static mut` declaration at the top level of a file (R13)"], NotSupported("static mut long total = 0\n\nvoid Add() {\n    total = total + 1\n}\n\nAdd()")); // a use inside a function, outside `raw`
-        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("if true {\n    static mut long total = 0\n    print(total)\n}"));
-        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("void F() {\n    static mut long total = 0\n    print(total)\n}\n\nF()"));
-        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("static long total = 0\nprint(total)")); // R13 states `static mut` alone
-        // its initial value is read, so that a variable it uses counts as used (E1)
-        Assert.Equal(["2: a `static mut` declaration at the top level of a file (R13)"], NotSupported("long n = 5\nstatic mut long total = n"));
-        // the state is visible in every function, so a parameter of its name is `redeclared` (V9), and a write in that function goes to the
-        // parameter, as a read does (V8)
-        var (diagnostics, _) = Check("static mut long total = 0\n\nvoid F(long total) {\n    total = 2\n}\n\nF(1)");
-        Assert.Equal([(ErrorIds.Redeclared, 3), (ErrorIds.AssignImmutable, 4)], diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList());
-    }
-
-    [Fact]
-    public void The_raw_forms_of_chapter_11_are_not_read()
-    {
-        // R10: a pointer type, a read through a pointer, an address and a write through a pointer; R11: `asm`, whose operands are read for
-        // the variables they use; R12: a `naked` function; R13: a `thread static mut` at the top level; R16: a block of C functions, whose
-        // names a call reaches with no error of its own (E1), and a function of the C calling convention; R17: the type of a C function and
-        // data in C's layout. Each is `not supported` at its line and carries nothing more (E1)
-        Assert.Equal(["1: a raw pointer type (R10)"], NotSupported("void Fill(byte* buf) {\n}\n\nprint(1)"));
-        Assert.Equal(["2: the address of a place, `&x` (R10)"], NotSupported("long n = 5\np = &n\nprint(p)"));
-        Assert.Equal(["2: the address of a place, `&x` (R10)", "3: a read through a raw pointer, `*p` (R10)"], NotSupported("long n = 5\np = &n\nprint(*p + 1)"));
-        Assert.Equal(["2: the address of a place, `&x` (R10)", "3: a write through a raw pointer (R10)"], NotSupported("mut long n = 5\np = &n\n*p = 7"));
-        Assert.Equal(["2: `asm` (R11)"], NotSupported("mut long count = 1\nasm(\"add {r}, 1\", r = inout(reg) count)"));
-        // a function with a modifier the checker does not read has its signature, defaults and body read with their diagnostics dropped,
-        // the `asm` of a `naked` body among them, and every call of its name unread, as for a modifier of a method (K7, M6)
-        Assert.Equal(["1: a `naked` function (R12)"], NotSupported("naked void Switch() {\n    asm(\"ret\")\n}\n\nSwitch()"));
-        Assert.Equal(["1: `thread static` before a function, which R13 states before state alone (R13)"], NotSupported("thread static void F() {\n}\n\nF()"));
-        Assert.Equal(["1: a `thread static mut` declaration at the top level of a file (R13)"], NotSupported("thread static mut long depth = 0\nprint(depth)"));
-        Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)"], NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(-3))"));
-        Assert.Equal(["1: a function of the C calling convention, `extern \"C\"` (R16)"], NotSupported("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nprint(Twice(4))"));
-        Assert.Equal(["1: the type of a C function (R17)"], NotSupported("void Run(extern \"C\" (long) => long f) {\n}\n\nprint(1)"));
-        // a lambda where the type of a C function stands: the checker does not read that type, so it reports no misfit of the lambda
-        // and no missing type of its parameters beside the type's line (E1), and checks the body as any lambda's
-        Assert.Equal(["1: the type of a C function (R17)"], NotSupported("void Run(extern \"C\" (long) => long f) {\n}\n\nRun((long x) => x * 2)"));
-        Assert.Equal(["1: the type of a C function (R17)"], NotSupported("extern \"C\" (long) => long f = x => x * 2\nprint(1)"));
-        Assert.Equal([(ErrorIds.UnknownName, 1)], ErrorsBeside("extern \"C\" (long) => long f = x => y\nprint(1)"));
-        // the operand of `*` and `&` is checked: a name no declaration has is its own error (V10)
-        Assert.Equal([(ErrorIds.UnknownName, 1)], ErrorsBeside("print(*q)"));
-        Assert.Equal([(ErrorIds.UnknownName, 1)], ErrorsBeside("p = &q"));
-        Assert.Equal(["1: a data type in C's layout, `extern \"C\" data` (R17)"], NotSupported("extern \"C\" data Point(int X, int Y)\nprint(Point(1, 2).X)"));
-        // the variables an operand of `asm` and a `label` block use count as used, so none is `unused-variable`
-        Assert.Equal(["4: `asm` (R11)"], NotSupported("long a = 1\nmut long b = 2\nlong c = 3\nasm(\"{x} {l}\", x = inout(reg) a => b, l = label {\n    print(c)\n})"));
-        // a block of C functions inside a block is `not supported` as a function declared there is (F1, F6), and a call of its names in
-        // that block carries no error of its own (E1)
-        Assert.Equal(["2: a block of C functions inside a block (R16)"], NotSupported("void F() {\n    extern \"C\" {\n        int abs(int n)\n    }\n\n    print(abs(-3))\n}\n\nF()"));
-        // a C declaration of a name a type or a built-in has is `redeclared`, as a function of that name is (V9, F6)
-        Assert.Equal([(ErrorIds.Redeclared, 4)], ErrorsBeside("data Point(int X)\n\nextern \"C\" {\n    int Point(int n)\n}\n\nprint(Point(1).X)"));
-        Assert.Equal([(ErrorIds.Redeclared, 2)], ErrorsBeside("extern \"C\" {\n    int print(int n)\n}\n\nprint(1)"));
-        // a C declaration and another function of one name: `not supported` at the second of the two in source order, in either order, in
-        // one block and between two, and a call of the name is not read, whichever function it would pick (K7, M6)
-        Assert.Equal(["5: a block of C functions, `extern \"C\"` (R16)", "6: a C function and another function of one name (R16)"],
-            NotSupported("long abs(long n) {\n    return n\n}\n\nextern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(\"x\"))"));
-        Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)", "5: a C function and another function of one name (R16)"],
-            NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nlong abs(long n) {\n    return n\n}\n\nprint(abs(\"x\"))"));
-        Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)", "3: a C function and another function of one name (R16)"],
-            NotSupported("extern \"C\" {\n    int abs(int n)\n    long abs(long n)\n}\n\nprint(abs(1))"));
-        Assert.Equal(["1: a block of C functions, `extern \"C\"` (R16)", "5: a block of C functions, `extern \"C\"` (R16)", "6: a C function and another function of one name (R16)"],
-            NotSupported("extern \"C\" {\n    int abs(int n)\n}\n\nextern \"C\" {\n    long abs(long n)\n}\n\nprint(abs(1))"));
-        // the body of a function of that name is checked all the same
-        Assert.Equal([(ErrorIds.UnknownName, 2)], ErrorsBeside("long abs(long n) {\n    return m\n}\n\nextern \"C\" {\n    int abs(int n)\n}"));
-
-        // the errors of a program the checker also says `not supported` to
-        static List<(string Id, int Line)> ErrorsBeside(string program) =>
-            Check(program).Diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList();
-    }
-
-    [Fact]
-    public void A_conversion_of_a_pointer_and_the_size_of_a_type_are_not_read()
-    {
-        // R14: `Ptr<T>(x)` and `SizeOf<T>()` take the call form of T10's conversions, which the checker does not read for a pointer;
-        // the pointer a conversion gives carries no further error (E1), through an offset and a conversion back among them
-        Assert.Equal(["2: `Ptr` (R14)"], NotSupported("long m = 64\np = Ptr<long>(m)\nprint(long(p + 3) - long(p))"));
-        Assert.Equal(["1: `SizeOf` (R14)"], NotSupported("print(SizeOf<string>())"));
-        // another count of type arguments or arguments is no form of R14, `syntax` (E4)
-        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(SizeOf())"));
-        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(SizeOf<long>(1))"));
-        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("long m = 64\nprint(long(Ptr(m)))"));
     }
 
     [Fact]
@@ -1182,6 +1096,406 @@ public sealed class CheckerTests
         Clean("data Node(int Value, List<Node> Children)\n\nprint(Node(1, List<Node>()))");
     }
 
+    // ---- raw code (chapter 11; the grants of R7 and R16, given as a case's header line gives them) -------------------
+
+    [Fact]
+    public void A_grant_is_raw_or_native()
+    {
+        // R7: the header line takes `raw`, `native` or both; the checker takes no other grant
+        Assert.Throws<ArgumentException>(() => Check("print(1)", grants: "network"));
+    }
+
+    [Fact]
+    public void A_raw_block_needs_the_grant_and_its_body_is_checked()
+    {
+        // R7: a `raw` block compiles in a package granted `allow raw`, and a program without a project file has no grant; the body is
+        // checked as any block's, with the grant or without it
+        Clean("raw {\n    print(1)\n}", grants: "raw");
+        Assert.Equal([(ErrorIds.RawNotAllowed, 1)], Errors("raw {\n    print(1)\n}"));
+        Assert.Equal([(ErrorIds.RawNotAllowed, 1)], Errors("raw {\n    print(1)\n}", grants: "native"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("x = 1\nraw {\n    y = x + \"a\"\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.RawNotAllowed, 2), (ErrorIds.TypeMismatch, 3)], Errors("x = 1\nraw {\n    print(x + \"a\")\n}"));
+        // the reading on R7 with E1 (README): each block without the grant is its own error, and a read through a pointer in it is no other
+        Assert.Equal([(ErrorIds.RawNotAllowed, 1), (ErrorIds.RawNotAllowed, 2)], Errors("raw {\n    raw {\n        print(1)\n    }\n}"));
+        Assert.Equal([(ErrorIds.RawNotAllowed, 2)], Errors("long* p = null\nraw {\n    print(*p)\n}"));
+    }
+
+    [Fact]
+    public void A_pointer_stands_anywhere_and_a_read_or_a_write_through_it_stands_in_raw()
+    {
+        // R10: the type, `&x`, `p + n`, `p - q`, the comparisons and `null` need no `raw` block and no grant
+        Clean("void Fill(byte* buf) {\n}\n\nprint(1)");
+        Clean("long n = 5\np = &n\nq = p + 2\nd = q - p\nprint(d)\nprint(p < q)\nprint(p == null)");
+        Assert.Equal("long*", TypeOf("long n = 5\np = &n\nprint(p == null)", "p"));
+        Assert.Equal("long", TypeOf("long n = 5\np = &n\nd = (p + 2) - p\nprint(d)", "d"));
+        // a read or a write through a pointer, `*p`, `p[i]` and `(*b).Next` among them, stands inside a `raw` block
+        Clean("long n = 5\np = &n\nraw {\n    print(*p + 1)\n}", grants: "raw");
+        Clean("mut long n = 5\np = &n\nraw {\n    *p = 7\n}\nprint(n)", grants: "raw");
+        Clean("long* p = null\nraw {\n    print(p[2])\n}", grants: "raw");
+        Clean("data B(long Next)\n\nmut b = B(1)\np = &b\nraw {\n    (*p).Next = 2\n}\nprint(b.Next)", grants: "raw");
+        Assert.Equal([(ErrorIds.RawRequired, 3)], Errors("long n = 5\np = &n\nprint(*p + 1)"));
+        Assert.Equal([(ErrorIds.RawRequired, 3)], Errors("mut long n = 5\np = &n\n*p = 7\nprint(n)"));
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("long* p = null\nprint(p[2])"));
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("long* p = null\np[1] = 3"));
+        Assert.Equal([(ErrorIds.RawRequired, 4)], Errors("data B(long Next)\n\nB* b = null\nprint((*b).Next)"));
+        // what is written through a pointer takes its pointee type (T1)
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("mut long n = 5\np = &n\nraw {\n    *p = \"x\"\n}\nprint(n)", grants: "raw"));
+    }
+
+    [Fact]
+    public void A_pointer_points_to_a_type_that_holds_no_counted_reference()
+    {
+        // R10 (round 21): a number, a `bool`, a `char`, a time type, a `decimal`, another pointer and a `data` value without a counted
+        // reference are pointees; a list, a string and a `data` value that holds one are `counted-pointee`, `&x` among them, and the
+        // `null` of such a pointer carries nothing more (E1)
+        Clean("data P(int X)\n\nchar* c = null\nduration* d = null\ndecimal* m = null\nbool* b = null\nlong** pp = null\nP* q = null\nprint(c == null)\nprint(d == null)\nprint(m == null)\nprint(b == null)\nprint(pp == null)\nprint(q == null)");
+        Assert.Equal([(ErrorIds.CountedPointee, 2)], Errors("xs = List<int>()\np = &xs\nprint(1)"));
+        Assert.Equal([(ErrorIds.CountedPointee, 1)], Errors("string* p = null\nprint(1)"));
+        Assert.Equal([(ErrorIds.CountedPointee, 5)], Errors("data P(int X)\ndata Q(string S)\n\nP* a = null\nQ* b = null\nprint(a == null)\nprint(b == null)"));
+        // a field's pointee is judged after every field is resolved, wherever its type stands (F6), and the field then carries no error
+        // of its own (E1); a parameter whose pointer is the error takes `null` with none either
+        Clean("data Node(Node* Next, long V)\nprint(1)");
+        Assert.Equal([(ErrorIds.CountedPointee, 1)], Errors("data Node(Node* Next, string S)\nprint(1)"));
+        Assert.Equal([(ErrorIds.CountedPointee, 1)], Errors("data A(B* Link)\ndata B(string S)\n\na = A(null)\nlong n = a.Link\nprint(n)"));
+        Assert.Equal([(ErrorIds.CountedPointee, 1)], Errors("void F(string* p) {\n}\n\nF(null)"));
+        // the reading on R10 with F11 (README): a function value holds what it captures, a counted reference
+        Assert.Equal([(ErrorIds.CountedPointee, 3)], Errors("data H((long) => long F)\n\nH* p = null\nprint(p == null)"));
+    }
+
+    [Fact]
+    public void An_offset_a_difference_and_an_address_take_what_R10_names()
+    {
+        // R10: an offset is an `int` or a `long`, `p - q` takes two pointers of one pointee type (T1); R14: `void*` takes no offset and
+        // nothing is read through it; `&x` takes a variable, a field or an element, a function's name being text no rule gives a
+        // meaning (E4); a pointer is no `long` (T1), and an unknown name under `*` or `&` is that name's error alone (V10)
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("long n = 5\np = &n\nprint(p + 1.5)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("long n = 5\nint m = 1\np = &n\nq = &m\nprint(p - q)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("void* v = null\nprint(v + 1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("void* v = null\nraw {\n    print(*v)\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("int F() => 1\n\nprint(&F)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("long* p = null\nlong n = p\nprint(n)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(*q)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("p = &q"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("*q = 5"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("long n = 1\nint m = 2\np = &n\nq = &m\nprint(p < q)"));
+        // the reading on R10 (README): `n + p` is the offset `p + n`, as C# writes both; `p - n` counts back
+        Clean("long m = 64\np = Ptr<long>(m)\nq = 2 + p\nr = p - 1\nprint(q - r)");
+        // an integer that widens into a `long` is an offset (T8, T23), a `ulong` is none, and a literal takes the type L10 gives it
+        Clean("long* p = null\nuint u = 1\nq = p + u\nraw {\n    print(p[u])\n}\nprint(q == null)", grants: "raw");
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("long* p = null\nulong u = 1\nprint(p + u == null)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("long* p = null\nulong u = 1\nraw {\n    print(p[u])\n}", grants: "raw"));
+        Clean("mut long* p = null\nraw {\n    print(p[3000000000])\n    p[3000000000] = 1\n}", grants: "raw");
+        // every comparison takes `null` beside a pointer; a write through a pointer whose type was the error carries nothing more (E1)
+        Clean("long* p = null\nprint(p < null)\nprint(null >= p)");
+        Assert.Equal([(ErrorIds.CountedPointee, 2)], Errors("s = \"hi\"\np = &s\nraw {\n    p[0] = 1\n}", grants: "raw"));
+        // the reading on R10 with E1 (README): a read and a write through a pointer outside `raw` are two, as Rust reports each
+        Assert.Equal([(ErrorIds.RawRequired, 5), (ErrorIds.RawRequired, 5)], Errors("mut long n = 1\nlong m = 2\np = &n\nq = &m\n*p = *q\nprint(n)"));
+    }
+
+    [Fact]
+    public void Inline_assembly_stands_in_raw_and_follows_the_rules_of_its_template()
+    {
+        // R11: an `asm` outside a `raw` block and outside a `naked` body is `raw-required`; an operand that writes a variable without
+        // `mut` is `assign-immutable`
+        Clean("mut long count = 1\nraw {\n    asm(\"add {r}, 1\", r = inout(reg) count)\n}\nprint(count)", grants: "raw");
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("mut long count = 1\nasm(\"add {r}, 1\", r = inout(reg) count)\nprint(count)"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("long count = 1\nraw {\n    asm(\"add {r}, 1\", r = inout(reg) count)\n}\nprint(count)", grants: "raw"));
+        // Rust's template and words: `{{`, a position, a modifier, `options`, `clobber_abi`, `_` as an output, `=>`, `label`, `sym`
+        // and `const`; the variables an operand and a `label` block use count as used
+        Clean("raw {\n    asm(\"{{}} {0}\", in(reg) 1)\n    asm(\"{0:e}\", in(reg) 1)\n    asm(\"nop\", options(nomem, nostack), clobber_abi(\"C\"))\n    asm(\"{x}\", x = out(reg) _)\n}", grants: "raw");
+        Clean("long a = 1\nmut long b = 2\nlong c = 3\nraw {\n    asm(\"{x}\", x = inout(reg) a => b, options(pure, nomem))\n    asm(\"jmp {l}\", l = label {\n        print(c)\n    })\n}\nprint(b)", grants: "raw");
+        Clean("void G() {\n}\n\nraw {\n    asm(\"call {f}\", f = sym G)\n    asm(\"mov rax, {c}\", c = const 4)\n}", grants: "raw");
+        // a breach of the template's rules is `asm-operand`, one for each defect, and a class or a modifier is read against x86-64
+        Assert.Equal([(ErrorIds.AsmOperand, 3), (ErrorIds.AsmOperand, 3)], Errors("mut long count = 1\nraw {\n    asm(\"add {x}, 1\", r = inout(reg) count)\n}\nprint(count)", grants: "raw"));
+        Assert.Equal([(ErrorIds.AsmOperand, 3)], Errors("mut long count = 1\nraw {\n    asm(\"nop\", r = inout(reg) count)\n}\nprint(count)", grants: "raw"));
+        Assert.Equal([(ErrorIds.AsmOperand, 3)], Errors("mut long count = 1\nraw {\n    asm(\"add {r}, 1\", r = inout(freg) count)\n}\nprint(count)", grants: "raw"));
+        Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{0:h}\", in(reg) 1)\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"nop\", options(fast))\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"nop\", clobber_abi(\"D\"))\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{x}\", x = in(reg) _)\n}", grants: "raw"));
+        // an operand in an explicit register, or of a class Rust takes only as a clobber, is not read; outside a `raw` block the
+        // statement's `raw-required` is its one diagnostic (E1)
+        Assert.Equal(["3: an operand in an explicit register, or of a class Rust takes only as a clobber (R11)"], NotSupported("mut long n = 1\nraw {\n    asm(\"{x}\", x = out(kreg0) n)\n}\nprint(n)", grants: "raw"));
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("mut long n = 0\nasm(\"mov {x}, 1\", x = out(\"rax\") n)\nprint(n)"));
+        // Rust's block of a `label` is a context of its own, so a read through a pointer there stands in a `raw` block of its own
+        Assert.Equal([(ErrorIds.RawRequired, 4)], Errors("long* p = null\nraw {\n    asm(\"jmp {l}\", l = label {\n        print(*p)\n    })\n}", grants: "raw"));
+        Clean("long* p = null\nraw {\n    asm(\"jmp {l}\", l = label {\n        raw {\n            print(*p)\n        }\n    })\n}", grants: "raw");
+    }
+
+    [Theory]
+    [InlineData("mut long a = 1\nraw {\n    asm(\"{x}\", x = inout(reg) a, x = in(reg) 2)\n}\nprint(a)", 3)] // each name on one operand
+    [InlineData("raw {\n    asm(\"{x} {}\", x = in(reg) 1, in(reg) 2)\n}", 2)] // the operands without a name first
+    [InlineData("mut long a = 1\nraw {\n    asm(\"{x}\", x = out(reg) a, options(pure))\n}\nprint(a)", 3)] // `pure` with `nomem` or `readonly`
+    [InlineData("raw {\n    asm(\"nop\", options(nomem, readonly))\n}", 2)] // not both
+    [InlineData("raw {\n    asm(\"{c}\", c = const \"x\")\n}", 2)] // `const` an integer constant
+    [InlineData("raw {\n    asm(\"{l}\", l = label 1)\n}", 2)] // `label` a block
+    [InlineData("raw {\n    asm(\"{x}\", x = frobnicate(reg) 1)\n}", 2)] // Rust's words
+    [InlineData("raw {\n    asm(\"{x}\", x = in(reg, reg) 1)\n}", 2)] // one class
+    [InlineData("raw {\n    asm(\"{x}\", x = in(reg))\n}", 2)] // a value after the class
+    [InlineData("mut long b = 1\nraw {\n    asm(\"{x}\", x = in(reg) 1 => b)\n}\nprint(b)", 3)] // `=>` after `inout` and `inlateout` alone
+    [InlineData("mut string s = \"a\"\nraw {\n    asm(\"{x}\", x = inout(reg) s)\n}\nprint(s)", 3)] // a type the class takes
+    [InlineData("int a = 1\nmut long b = 2\nraw {\n    asm(\"{x}\", x = inout(reg) a => b)\n}\nprint(b)", 4)] // two values of one width
+    [InlineData("raw {\n    asm(\"{x}\", x = out(reg) 1 + 2)\n}", 2)] // a place to write
+    [InlineData("raw {\n    asm(\"{s}\", s = sym 4)\n}", 2)] // `sym` a name
+    [InlineData("long n = 1\nraw {\n    asm(\"{s}\", s = sym n)\n}\nprint(n)", 3)] // `sym` no variable
+    [InlineData("raw {\n    asm(\"}\")\n}", 2)] // a brace written twice
+    [InlineData("raw {\n    asm(\"{\")\n}", 2)] // a brace closed
+    [InlineData("raw {\n    asm(\"{c:e}\", c = const 4)\n}", 2)] // a modifier after a register operand
+    [InlineData("raw {\n    asm(\"nop\", o = options(nostack))\n}", 2)] // `options` with no name
+    [InlineData("mut long a = 1\nraw {\n    asm(\"{x}\", x = out(reg) a.Count)\n}\nprint(a)", 3)] // a field of a data value
+    [InlineData("raw {\n    asm(\"nop\", options(pure, nomem))\n}", 2)] // `pure` an output
+    [InlineData("raw {\n    asm(\"{x}\", x = out(reg) _, options(pure, nomem))\n}", 2)] // `pure` an output that is not `_`
+    [InlineData("raw {\n    asm(\n        \"nop\",\n        options(pure, nomem)\n    )\n}", 4)] // at the line of the word the rule names
+    [InlineData("mut long a = 1\nraw {\n    asm(\"{x}\", x = out(reg) a, options(noreturn))\n}\nprint(a)", 3)] // `noreturn` no output
+    [InlineData("mut long a = 1\nraw {\n    asm(\"{x} {l}\", x = out(reg) a, l = label {\n    })\n}\nprint(a)", 3)] // a `label` no output
+    [InlineData("mut long a = 1\nraw {\n    asm(\"{x} {l}\", x = out(reg) a, l = label {\n    }, options(noreturn))\n}\nprint(a)", 3)] // `noreturn` beside a `label`: the label's rule alone
+    [InlineData("mut long a = 1\nraw {\n    asm(\"{x}\", x = out(reg) a, clobber_abi(\"C\"))\n}\nprint(a)", 3)] // `clobber_abi` no output of a class
+    [InlineData("mut long n = 0\nraw {\n    asm(\"mov {x:e}, 1\", x = out(vreg) n)\n}\nprint(n)", 3)] // a class x86-64 has, its modifier then not judged
+    [InlineData("raw {\n    asm(\"{x y}\", in(reg) 1)\n}", 2)] // a placeholder that names no operand's way, and nothing more
+    [InlineData("raw {\n    asm(\"} {x}\", x = in(reg) 1)\n}", 2)] // a brace written twice, and nothing more
+    [InlineData("mut byte b = 0\nraw {\n    asm(\"{r}\", r = out(reg) b)\n}\nprint(b)", 3)] // `reg` no `byte`
+    [InlineData("mut long b = 0\nraw {\n    asm(\"{r}\", r = out(reg_byte) b)\n}\nprint(b)", 3)] // `reg_byte` a byte
+    [InlineData("long* p = null\nraw {\n    asm(\"{r}\", r = in(xmm_reg) p)\n}", 3)] // a vector class no pointer
+    [InlineData("long* p = null\nmut int m = 0\nraw {\n    asm(\"{r}\", r = inout(reg) p => m)\n}\nprint(m)", 4)] // a pointer 64 bits wide
+    public void A_breach_of_the_rules_of_an_asm_is_asm_operand(string program, int line)
+    {
+        // R11: the rest of Rust's rules of the template and of its words, for x86-64, each one `asm-operand` at the operand's or the
+        // template's line
+        Assert.Equal([(ErrorIds.AsmOperand, line)], Errors(program, grants: "raw"));
+    }
+
+    [Fact]
+    public void An_asm_that_follows_the_rules_is_clean_and_a_template_names_what_is_there()
+    {
+        // R11: `lateout`, `inlateout`, `reg_abcd` with `h`, `{}` in order, `sym` of state, the classes of a byte and a vector, and a
+        // pointer in and a `long` out of one register; a name no operand has, or a position the `asm` has none at, leaves the operand
+        // unused too, two breaches
+        Clean("mut byte b = 0\nmut double d = 0.5\nraw {\n    asm(\"{x} {y}\", x = out(reg_byte) b, y = out(xmm_reg) d)\n}\nprint(b)\nprint(d)", grants: "raw");
+        Clean("long* p = null\nmut long n = 0\nraw {\n    asm(\"{r}\", r = inout(reg) p => n)\n}\nprint(n)", grants: "raw");
+        Clean("mut long a = 1\nraw {\n    asm(\"{x}\", x = lateout(reg) a)\n}\nprint(a)", grants: "raw");
+        Clean("mut long a = 1\nraw {\n    asm(\"{x}\", x = inlateout(reg) a)\n}\nprint(a)", grants: "raw");
+        Clean("raw {\n    asm(\"{0:h}\", in(reg_abcd) 1)\n}", grants: "raw");
+        Clean("raw {\n    asm(\"{} {}\", in(reg) 1, in(reg) 2)\n}", grants: "raw");
+        Clean("static mut long t = 0\n\nraw {\n    asm(\"lea rax, {s}\", s = sym t)\n}", grants: "raw");
+        Assert.Equal([(ErrorIds.AsmOperand, 2), (ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{x}\", in(reg) 1)\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.AsmOperand, 2), (ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{1}\", in(reg) 1)\n}", grants: "raw"));
+        // R10: `&` of a field and of an element; an index that is no offset, and `*` of a value that is no pointer, are `type-mismatch`
+        Clean("data P(long X)\n\nmut p = P(1)\nq = &p.X\nprint(q == null)");
+        Clean("xs = List<long>()\nq = &xs[0]\nprint(q == null)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("long* p = null\nraw {\n    print(p[1.5])\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("long n = 1\nraw {\n    print(*n)\n}", grants: "raw"));
+        // R16: `pub` on a C declaration, which another package may call; another modifier has no meaning there (E4); a result that
+        // cannot cross to C and an argument in the place of `...` that C would widen or that cannot cross are `native-type`
+        Clean("extern \"C\" {\n    pub int abs(int n)\n}\n\nprint(1)", grants: "native");
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("extern \"C\" {\n    static int abs(int n)\n}\n\nprint(1)", grants: "native"));
+        Assert.Equal([(ErrorIds.NativeType, 2)], Errors("extern \"C\" {\n    string f()\n}\n\nprint(1)", grants: "native"));
+        Assert.Equal([(ErrorIds.NativeType, 7)], Errors("extern \"C\" {\n    int printf(byte* f, ...)\n}\n\nbyte b = 1\nraw {\n    print(printf(null, b))\n}", grants: "raw native"));
+        Assert.Equal([(ErrorIds.NativeType, 6)], Errors("extern \"C\" {\n    int printf(byte* f, ...)\n}\n\nraw {\n    print(printf(null, \"x\"))\n}", grants: "raw native"));
+        // R13: `void` is no type of state (F4)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("static mut void t = 0\nprint(1)", grants: "raw"));
+    }
+
+    [Theory]
+    [InlineData("mut long n = 0\nraw {\n    asm(\"mov {x}, 1\", x = out(\"rax\") n)\n}\nprint(n)", "raw", "3: an operand in an explicit register, or of a class Rust takes only as a clobber (R11)")]
+    [InlineData("mut long k = 0\nraw {\n    asm(\"{z}\", z = out(kreg) k)\n}\nprint(k)", "raw", "3: the class `kreg`, which Rust gives a target with the feature `avx512f`, a feature no rule of a build names (R11)")]
+    [InlineData("raw {\n    asm(\"{y}\", y = in(ymm_reg) 1.5)\n}", "raw", "2: the class `ymm_reg`, which Rust gives a target with the feature `avx`, a feature no rule of a build names (R11)")]
+    [InlineData("long m = 64\np = Ptr<long>(m)\nq = &*p\nprint(q == null)", "", "3: the address of a place through a pointer, `&*p`, `&p[i]` or `&(*b).Next` (R10)")]
+    [InlineData("long m = 64\np = Ptr<long>(m)\nq = &p[1]\nprint(q == null)", "", "3: the address of a place through a pointer, `&*p`, `&p[i]` or `&(*b).Next` (R10)")]
+    [InlineData("data B(long Next)\n\nB* b = null\nq = &(*b).Next\nprint(q == null)", "", "4: the address of a place through a pointer, `&*p`, `&p[i]` or `&(*b).Next` (R10)")]
+    [InlineData("void G() {\n}\n\nvoid G(int n) {\n}\n\nraw {\n    asm(\"call {f}\", f = sym G)\n}", "raw", "8: `sym` of a function with more than one overload or with type parameters (R11)")]
+    [InlineData("static mut long t = 0\nq = &t\nprint(q == null)", "raw", "2: the address of state outside a function, `&` of a `static mut` (R10, R13)")]
+    [InlineData("void F<T>(T* p) {\n}\n\nprint(1)", "", "1: a pointer to a type that holds a type parameter (R10, T19)")]
+    [InlineData("void Run(extern \"C\" (string) => long f) {\n}\n\nprint(1)", "", "1: a type that cannot cross to C in the type of a C function (R17)")]
+    [InlineData("extern \"C\" {\n    int printf(byte* f, ...)\n}\n\nraw {\n    print(printf(null, 1.5m))\n}", "raw native", "6: a `decimal` in the place of `...`, which no rule says crosses to C (R16)")]
+    [InlineData("extern \"C\" long Id<T>(long x) {\n    return x\n}\n\nprint(1)", "native", "1: a function of the C calling convention with type parameters (R12, R16, T19)")]
+    [InlineData("extern \"C\" long Inc(mut long x) {\n    return x\n}\n\nprint(1)", "native", "1: a `mut` parameter of a function of the C calling convention (R12, R16)")]
+    [InlineData("extern \"C\" long F(long x) {\n    return x\n}\n\nlong F(int x) => 1\n\nprint(1)", "native", "1: a function of the C calling convention beside another function of its name (R12, R16, F12)")]
+    [InlineData("extern \"C\" {\n    int printf(byte* f, ...)\n}\n\nf = printf\nprint(1)", "native", "5: the value of a C function that takes `...`, which the type of a C function does not write (R16, R17)")]
+    [InlineData("long* p = null\nprint(p)", "", "2: the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)")]
+    [InlineData("long* p = null\nprint(\"at {p}\")", "", "2: the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)")]
+    [InlineData("data Block(long* Next)\n\nprint(Block(null))", "", "3: the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)")]
+    [InlineData("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nextern \"C\" (long) => long f = Twice\nprint(f)", "native", "6: the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)")]
+    [InlineData("T Id<T>(T x) => x\nprint(Id(null))", "", "2: null (N1)")]
+    public void A_raw_form_no_rule_gives_an_id_is_not_supported(string program, string grants, string first)
+    {
+        // the README's list: what R10 to R17 leave open, each `not supported` at its line and nothing more (E1)
+        Assert.Equal([first], NotSupported(program, grants));
+    }
+
+    [Fact]
+    public void A_naked_function_needs_the_grant_and_its_body_is_one_asm()
+    {
+        // R12: `allow raw`, else `naked-not-allowed` alone; the body is one `asm` with `sym` and `const` operands alone, else
+        // `naked-body`; a `naked extern "C"` function needs `allow native` too, both errors at its line in a package with neither grant
+        Clean("naked void Switch() {\n    asm(\"ret\")\n}\n\nSwitch()", grants: "raw");
+        Clean("naked void F() {\n    asm(\"call {f}\", f = sym G)\n}\n\nvoid G() {\n}\n\nprint(1)", grants: "raw");
+        Assert.Equal([(ErrorIds.NakedNotAllowed, 1)], Errors("naked void Switch() {\n    asm(\"ret\")\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.NakedBody, 2)], Errors("naked void F() {\n    print(1)\n}\n\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.NakedBody, 3)], Errors("naked void F() {\n    asm(\"ret\")\n    asm(\"ret\")\n}\n\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.NakedBody, 1)], Errors("naked void F() {\n}\n\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.NakedBody, 2), (ErrorIds.AsmOperand, 2)], Errors("naked void F() {\n    asm(\"ret\", in(reg) 1)\n}\n\nprint(1)", grants: "raw"));
+        // R11 counts `clobber_abi` and `options` among the words of the operands, so there they are operands other than `sym` and
+        // `const`; and an output or a `label` there is `naked-body` alone, with no rule of the outputs beside it
+        Assert.Equal([(ErrorIds.NakedBody, 2)], Errors("naked void F() {\n    asm(\"ret\", clobber_abi(\"C\"))\n}\n\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.NakedBody, 2)], Errors("naked void F() {\n    asm(\"ret\", options(att_syntax))\n}\n\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.NakedBody, 2), (ErrorIds.NakedBody, 2)], Errors("naked void F() {\n    asm(\"ret {x} {l}\", x = out(reg) _, l = label {\n    })\n}\n\nprint(1)", grants: "raw"));
+        Clean("naked extern \"C\" void F() {\n    asm(\"ret\")\n}\n\nprint(1)", grants: "raw native");
+        Assert.Equal([(ErrorIds.NativeNotAllowed, 1)], Errors("naked extern \"C\" void F() {\n    asm(\"ret\")\n}\n\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.NakedNotAllowed, 1), (ErrorIds.NativeNotAllowed, 1)], Errors("naked extern \"C\" void F() {\n    asm(\"ret\")\n}\n\nprint(1)"));
+        // the `asm` of a `naked` body takes no `raw` block, and one beside it in the top-level code does
+        Assert.Equal([(ErrorIds.RawRequired, 6)], Errors("naked void F() {\n    asm(\"ret\")\n}\n\nmut long n = 1\nasm(\"{x}\", x = inout(reg) n)\nprint(n)", grants: "raw"));
+    }
+
+    [Fact]
+    public void State_outside_a_function_is_read_and_written_in_raw()
+    {
+        // R13: `static mut` and `thread static mut` at the top level, in a package granted `allow raw`, reached by every function inside
+        // a `raw` block; never read, it is no `unused-variable` (V5)
+        Clean("static mut long total = 0\n\nvoid Add() {\n    raw {\n        total = total + 1\n    }\n}\n\nAdd()", grants: "raw");
+        Clean("static mut long total = 0\nthread static mut long depth = 0\nstatic mut long* head = null\nprint(1)", grants: "raw");
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("static mut long total = 0\nprint(total)", grants: "raw"));
+        // `static-state`: without the grant, with `pub`, of a type that holds a counted reference, without an initial value or with one
+        // that is no constant (F12)
+        Assert.Equal([(ErrorIds.StaticState, 1)], Errors("static mut long total = 0\nprint(1)"));
+        Assert.Equal([(ErrorIds.StaticState, 1)], Errors("pub static mut long t = 0\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.StaticState, 1)], Errors("static mut string s = \"\"\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.StaticState, 1)], Errors("static mut long t\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.StaticState, 1)], Errors("thread static mut long t\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.StaticState, 3)], Errors("long Seed() => 1\n\nstatic mut long t = Seed()\nprint(1)", grants: "raw"));
+        // the reading on R13 with F12 (README): the initial value sees no variable of the top-level code, as a default does not
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("long n = 1\nstatic mut long t = n\nprint(n)", grants: "raw"));
+        // a `static` without `mut`, and one inside a block or a function, has no meaning on a variable (V2, V4)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("static long total = 0\nprint(total)", grants: "raw"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("if true {\n    static mut long total = 0\n    print(total)\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("void F() {\n    static mut long total = 0\n    print(total)\n}\n\nF()", grants: "raw"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("void F() {\n    static mut long t\n    print(t)\n}\n\nF()", grants: "raw"));
+        // the state is visible in every function, so a parameter of its name is `redeclared` (V9), and a write there goes to the parameter
+        Assert.Equal([(ErrorIds.Redeclared, 3), (ErrorIds.AssignImmutable, 4)], Errors("static mut long total = 0\n\nvoid F(long total) {\n    total = 2\n}\n\nF(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("static mut long t = 0\nstatic mut long t = 1\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("static mut long t = 0\nstatic mut string t = \"\"\nraw {\n    t = 1\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.Redeclared, 4)], Errors("void total() {\n}\n\nstatic mut long total = 0\nraw {\n    total = 1\n    print(total)\n}", grants: "raw"));
+        // the state of the file is visible to each initial value and to each default, in either order (F6), and a read of it is no
+        // constant: the value's one error (F12, E1)
+        Assert.Equal([(ErrorIds.StaticState, 1)], Errors("static mut long a = b\nstatic mut long b = 0\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("static mut long a = 0\nstatic mut long b = a + 1\nprint(1)", grants: "raw"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("static mut long total = 0\n\nvoid F(long n = total) {\n    print(n)\n}\n\nF()", grants: "raw"));
+        Assert.Equal(["1: `thread static` before a function, which R13 states before state alone (R13)"], NotSupported("thread static void F() {\n}\n\nF()", grants: "raw"));
+    }
+
+    [Theory]
+    [InlineData("static mut long t = 0\nprint(1)", "", "grant")]
+    [InlineData("pub static mut string s = \"\"\nprint(1)", "raw", "counted reference")]
+    [InlineData("static mut string s\nprint(1)", "raw", "counted reference")]
+    [InlineData("pub static mut long t\nprint(1)", "raw", "takes an initial value")]
+    [InlineData("long Seed() => 1\n\npub static mut long t = Seed()\nprint(1)", "raw", "constant expression")]
+    [InlineData("pub static mut long t = 0\nprint(1)", "raw", "no `pub`")]
+    public void State_is_judged_in_the_order_R13_lists_its_causes(string program, string grants, string cause)
+    {
+        // the reading on R13 (README): the grant, the type, the initial value, `pub`; one `static-state` a declaration, naming the first
+        var (diagnostics, _) = Check(program, grants);
+        var error = Assert.Single(diagnostics.Items);
+        Assert.Equal(ErrorIds.StaticState, error.Id);
+        Assert.Contains(cause, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_conversion_of_a_pointer_and_the_size_of_a_type_need_no_raw()
+    {
+        // R14: `Ptr<T>(x)` of a pointer or a `long`, `long(p)` and `SizeOf<T>()`, a `long`, without a `raw` block or a grant
+        Clean("long m = 64\np = Ptr<long>(m)\nprint(long(p + 3) - long(p))");
+        Clean("int* p = null\nq = Ptr<long>(p)\nv = Ptr<void>(long(q))\nprint(v == null)");
+        Assert.Equal("long*", TypeOf("long m = 64\np = Ptr<long>(m)\nprint(p == null)", "p"));
+        Assert.Equal("long", TypeOf("s = SizeOf<long>()\nprint(s)", "s"));
+        Assert.Equal([(ErrorIds.CountedPointee, 1)], Errors("print(SizeOf<string>())"));
+        Assert.Equal([(ErrorIds.CountedPointee, 2)], Errors("long m = 64\nprint(Ptr<string>(m) == null)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(SizeOf<void>())"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(Ptr<long>(\"x\"))"));
+        // the reading on R14 (README): an integer that widens into a `long` is one there (T8, T23), a `ulong` none; `void*` takes no
+        // `p - n` and no `p - q`, as no `p + n`
+        Clean("int m = 64\np = Ptr<long>(m)\nprint(p == null)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("ulong m = 64\nprint(Ptr<long>(m) == null)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("void* v = null\nprint(v - 1 == null)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("void* v = null\nvoid* w = null\nprint(v - w)"));
+        // another count of type arguments or arguments is no form of R14, `syntax` (E4)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(SizeOf())"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(SizeOf<long>(1))"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("long m = 64\nprint(long(Ptr(m)))"));
+    }
+
+    [Fact]
+    public void The_memory_of_a_string_and_a_list_shows_in_raw()
+    {
+        // R15: `s.Pointer`, `l.Pointer`, `string.FromRaw` and `List<T>.FromRaw` inside a `raw` block, `raw-required` outside it, and a
+        // list of a type that holds a counted reference is `counted-pointee`
+        Clean("s = \"ab\"\nraw {\n    p = s.Pointer\n    print(string.FromRaw(p, 2))\n}", grants: "raw");
+        Clean("xs = List<long>()\nraw {\n    p = xs.Pointer\n    ys = List<long>.FromRaw(p, 0)\n    print(ys.Count)\n}", grants: "raw");
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("s = \"ab\"\nprint(s.Pointer == null)"));
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("byte* p = null\nprint(string.FromRaw(p, 0))"));
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("xs = List<long>()\nprint(xs.Pointer == null)"));
+        Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("long* p = null\nys = List<long>.FromRaw(p, 0)\nprint(ys.Count)"));
+        Assert.Equal([(ErrorIds.CountedPointee, 3)], Errors("xs = List<string>()\nraw {\n    print(xs.Pointer == null)\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.CountedPointee, 2)], Errors("raw {\n    xs = List<string>.FromRaw(Ptr<long>(64), 1)\n    print(xs.Count)\n}", grants: "raw"));
+        // the reading on R14 with R15 (README): `void` has no size, so a list of its elements counts none, `type-mismatch` as `SizeOf<void>()`
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("raw {\n    xs = List<void>.FromRaw(Ptr<void>(64), 2)\n    print(xs.Count)\n}", grants: "raw"));
+    }
+
+    [Fact]
+    public void A_C_function_is_declared_with_the_native_grant_and_called_in_raw()
+    {
+        // R16: a block needs `allow native` and a call of its functions a `raw` block, which needs `allow raw`; a declaration takes
+        // defaults, `null` among them (F12), and its call named arguments; a block names its library after `in`
+        Clean("extern \"C\" {\n    int abs(int n)\n}\n\nraw {\n    print(abs(-3))\n}", grants: "raw native");
+        Clean("extern \"C\" {\n    long write(int fd, byte* buf = null, long n = 0)\n}\n\nraw {\n    print(write(1, n: 2))\n}", grants: "raw native");
+        Clean("extern \"C\" in \"m\" {\n    double cos(double x)\n}\n\nprint(1)", grants: "native");
+        Assert.Equal([(ErrorIds.NativeNotAllowed, 1)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.RawRequired, 5)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(-3))", grants: "raw native"));
+        Assert.Equal([(ErrorIds.RawNotAllowed, 5)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nraw {\n    print(abs(-3))\n}", grants: "native"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nraw {\n    print(abs(\"x\"))\n}", grants: "raw native"));
+        // a type that cannot cross to C, a `mut` parameter, and an argument in the place of `...` that C would widen are `native-type`
+        Assert.Equal([(ErrorIds.NativeType, 2)], Errors("extern \"C\" {\n    int f(string s)\n}\n\nprint(1)", grants: "native"));
+        Assert.Equal([(ErrorIds.NativeType, 2)], Errors("extern \"C\" {\n    int f(mut int s)\n}\n\nprint(1)", grants: "native"));
+        Assert.Equal([(ErrorIds.NativeType, 2)], Errors("extern \"C\" {\n    int f(mut long* p)\n}\n\nmut long* q = null\nraw {\n    print(f(mut q))\n    print(f(q))\n}", grants: "raw native"));
+        Assert.Equal([(ErrorIds.NativeType, 6), (ErrorIds.NativeType, 6)], Errors("extern \"C\" {\n    int printf(byte* f, ...)\n}\n\nraw {\n    print(printf(null, 1, true, 2.5f))\n}", grants: "raw native"));
+        // a function of the package's own in the C calling convention is called with no `raw` block and needs `allow native`
+        Clean("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nprint(Twice(4))", grants: "native");
+        Assert.Equal([(ErrorIds.NativeNotAllowed, 1)], Errors("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nprint(Twice(4))"));
+        // after a grant's error, what R12 and R16 leave open in the declaration is not read and says nothing more (E1)
+        Assert.Equal([(ErrorIds.NativeNotAllowed, 1)], Errors("extern \"C\" long Len(string s) {\n    return 1\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.NakedNotAllowed, 1)], Errors("naked void F<T>() {\n    asm(\"ret\")\n}\n\nprint(1)"));
+        // what no rule says crosses to C is not read
+        Assert.Equal(["2: a `decimal` in a C declaration, which no rule says crosses to C (R16)"], NotSupported("extern \"C\" {\n    int f(decimal d)\n}\n\nprint(1)", grants: "native"));
+        Assert.Equal(["1: a type that cannot cross to C in a function of the C calling convention (R12, R16)"], NotSupported("extern \"C\" long Len(string s) {\n    return 1\n}\n\nprint(Len(\"a\"))", grants: "native"));
+    }
+
+    [Fact]
+    public void A_C_declaration_whose_name_is_taken_is_redeclared_at_the_second()
+    {
+        // R16 with V9: in either order, in one block and across two, against a type and a built-in; the body of the other function is
+        // checked all the same
+        Assert.Equal([(ErrorIds.Redeclared, 5)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nint abs(int n) => n", grants: "native"));
+        Assert.Equal([(ErrorIds.Redeclared, 6)], Errors("long abs(long n) {\n    return n\n}\n\nextern \"C\" {\n    int abs(int n)\n}\n\nprint(abs(1))", grants: "native"));
+        Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("extern \"C\" {\n    int abs(int n)\n    long abs(long n)\n}\n\nprint(1)", grants: "native"));
+        Assert.Equal([(ErrorIds.Redeclared, 6)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nextern \"C\" {\n    long abs(long n)\n}\n\nprint(1)", grants: "native"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("extern \"C\" {\n    int print(int n)\n}\n\nprint(1)", grants: "native"));
+        Assert.Equal([(ErrorIds.Redeclared, 4)], Errors("data Point(int X)\n\nextern \"C\" {\n    int Point(int n)\n}\n\nprint(Point(1).X)", grants: "native"));
+        Assert.Equal([(ErrorIds.UnknownName, 2), (ErrorIds.Redeclared, 6)], Errors("long abs(long n) {\n    return m\n}\n\nextern \"C\" {\n    int abs(int n)\n}", grants: "native"));
+    }
+
+    [Fact]
+    public void A_value_of_a_C_function_type_is_the_name_of_a_C_function()
+    {
+        // R17: the type stands where a pointer stands, without a grant; its value is the name of a function of the C calling convention,
+        // the package's own or a declared one, and a call through it stands in a `raw` block; a lambda or a Kurz function is `type-mismatch`
+        Clean("void Run(extern \"C\" (long) => long f) {\n}\n\nprint(1)");
+        Clean("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nextern \"C\" (long) => long f = Twice\nraw {\n    print(f(4))\n}", grants: "raw native");
+        Clean("extern \"C\" {\n    int abs(int n)\n}\n\nextern \"C\" (int) => int f = abs\nraw {\n    print(f(-3))\n}", grants: "raw native");
+        Clean("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nvoid Run(extern \"C\" (long) => long f) {\n}\n\nRun(Twice)", grants: "native");
+        Assert.Equal([(ErrorIds.RawRequired, 6)], Errors("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nextern \"C\" (long) => long f = Twice\nprint(f(4))", grants: "native"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("void Run(extern \"C\" (long) => long f) {\n}\n\nRun((long x) => x * 2)", grants: "native"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("long Twice(long x) => x * 2\n\nvoid Run(extern \"C\" (long) => long f) {\n}\n\nRun(Twice)", grants: "native"));
+        Assert.Equal(["1: a data type in C's layout, `extern \"C\" data` (R17)"], NotSupported("extern \"C\" data Point(int X, int Y)\nprint(Point(1, 2).X)", grants: "native"));
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
@@ -1194,7 +1508,6 @@ public sealed class CheckerTests
     [InlineData("data User(string Name)\n\nu = User(\"a\")\nprint(u?.Name)", "4: `?.` (N5)")]
     [InlineData("x = 1\nprint(x ?? 2)", "2: `??` (N4)")]
     [InlineData("mut ages = Map<string, int>()\nages[\"Ann\"] = 31", "1: Map (M9)")]
-    [InlineData("raw {\n    print(1)\n}", "1: a raw block (R7)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
     [InlineData("print(string(1))", "1: a conversion to `string` (A5 to A7)")]
@@ -1212,7 +1525,6 @@ public sealed class CheckerTests
     [InlineData("data Counter(int Count) {\n    pub static Counter Zero() => Counter(0)\n}\n\nprint(Counter.Zero().Count)", "2: the body of a data type (D16)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\ndata Sub(int X) : Counter\n\nmut s = Sub(1, 2)\ns.Increment()", "2: the body of a data type (D16)")]
     [InlineData("static int Twice(int n) {\n    return \"x\"\n}\n\nprint(Twice(\"a\"))", "1: the modifier `static` of a method (K7, M6)")]
-    [InlineData("x = 1\nraw {\n    y = x + \"a\"\n}", "2: a raw block (R7)")]
     [InlineData("data User(string Name)\n\nmut u = User(\"a\")\nu?.Name = \"b\"", "4: `?.` (N5)")]
     public void A_construct_of_a_chapter_the_checker_does_not_read_is_not_supported_and_carries_no_error(string program, string first)
     {

@@ -87,6 +87,13 @@ public static class ErrorIds
     public const string WeakNotNullable = "weak-not-nullable";
     public const string WeakValue = "weak-value";
     public const string RawNotAllowed = "raw-not-allowed";
+    public const string RawRequired = "raw-required";
+    public const string CountedPointee = "counted-pointee";
+    public const string NakedNotAllowed = "naked-not-allowed";
+    public const string NakedBody = "naked-body";
+    public const string NativeNotAllowed = "native-not-allowed";
+    public const string NativeType = "native-type";
+    public const string AsmOperand = "asm-operand";
     public const string Semicolon = "semicolon";
     public const string ReservedWord = "reserved-word";
     public const string CaptureAssign = "capture-assign";

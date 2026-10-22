@@ -32,6 +32,9 @@ public sealed record CharConstant(int Value) : Constant;
 /// <summary>The one value of a <c>data</c> type without fields (D8), which F12 counts as a constant.</summary>
 public sealed record UnitConstant : Constant;
 
+/// <summary><c>null</c>, which F12 counts as a constant; the checker types it as a pointer alone (R10).</summary>
+public sealed record NullConstant : Constant;
+
 /// <summary>What the checker knows about an expression: its type, and its value where it is a constant.</summary>
 public readonly record struct Typed(KurzType Type, Constant? Constant = null)
 {

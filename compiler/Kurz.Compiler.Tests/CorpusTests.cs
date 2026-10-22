@@ -29,9 +29,9 @@ public sealed class CorpusTests
     private const int FrontEndErrorFloor = 15;
 
     /// <summary>The checker reads more cases in full than this, and more cases that expect an error it reports than the second floor; fewer means it refuses what it read before.</summary>
-    private const int ReadInFullFloor = 180;
+    private const int ReadInFullFloor = 260;
 
-    private const int CheckerErrorFloor = 55;
+    private const int CheckerErrorFloor = 97;
 
     private static readonly HashSet<string> FrontEndIds =
     [
@@ -40,13 +40,15 @@ public sealed class CorpusTests
 
     /// <summary>
     /// The rules the checker does not read: those of the null chapter, the class chapter and the
-    /// memory chapter, <c>enum</c> and <c>flags</c> (D12, D13, D17 to D20), the body of a data type (D16),
+    /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9), <c>enum</c> and <c>flags</c>
+    /// (D12, D13, D17 to D20), the body of a data type (D16),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
     /// and maps (M6, M8, M10), and the texts of class instances, maps and sets of flags (A5 to A7, A9,
     /// A10, A13, A15). A case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header.
     /// </summary>
     private static bool OutsideTheChecker(string rule) =>
-        rule[0] is 'N' or 'K' or 'R'
+        rule[0] is 'N' or 'K'
+        || rule is "R1" or "R2" or "R3" or "R4" or "R5" or "R6" or "R8" or "R9"
         || rule is "D12" or "D13" or "D16" or "D17" or "D18" or "D19" or "D20" or "F9" or "F10" or "T19" or "M6" or "M8" or "M10"
         || rule is "A5" or "A6" or "A7" or "A9" or "A10" or "A13" or "A15";
 
@@ -164,7 +166,7 @@ public sealed class CorpusTests
         }
 
         var diagnostics = new DiagnosticBag();
-        Checker.Check(tree, diagnostics);
+        Checker.Check(tree, diagnostics, header.Grants);
         var errors = diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList();
         var unsupported = diagnostics.Sorted.Where(IsNotSupported).Select(d => d.ToString()).ToList();
         Assert.Equal(errors.Count + unsupported.Count, diagnostics.Items.Count); // the two kinds, and no third one that the floors would count as read in full
@@ -214,7 +216,7 @@ public sealed class CorpusTests
             }
 
             var diagnostics = new DiagnosticBag();
-            Checker.Check(tree, diagnostics);
+            Checker.Check(tree, diagnostics, header.Grants);
             if (diagnostics.Items.Any(IsNotSupported))
             {
                 notSupported.Add(relativePath);
@@ -243,7 +245,7 @@ public sealed class CorpusTests
             Assert.False(frontEnd.HasErrors, relativePath);
             Assert.False(header.Rules.Any(OutsideTheChecker), $"{relativePath} cites a rule outside the checker ({string.Join(", ", header.Rules)}), so its entry ({construct}) is redundant");
             var diagnostics = new DiagnosticBag();
-            Checker.Check(tree, diagnostics);
+            Checker.Check(tree, diagnostics, header.Grants);
             Assert.True(diagnostics.Items.Any(IsNotSupported), $"{relativePath} is read in full, so its entry ({construct}) is stale");
         }
     }

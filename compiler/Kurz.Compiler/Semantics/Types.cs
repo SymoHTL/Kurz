@@ -112,7 +112,7 @@ public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArg
 /// </summary>
 public sealed record UnionType(IReadOnlyList<KurzType> Cases) : KurzType
 {
-    public override string Text => string.Join(" | ", Cases.Select(c => c is FunctionType or UnionType ? "(" + c.Text + ")" : c.Text));
+    public override string Text => string.Join(" | ", Cases.Select(c => c is FunctionType or UnionType or CFunctionType ? "(" + c.Text + ")" : c.Text));
 
     public bool Equals(UnionType? other) => other is not null && Types.Same(this, other);
 
@@ -127,6 +127,29 @@ public sealed record FunctionType(IReadOnlyList<KurzType> Parameters, KurzType R
     public bool Equals(FunctionType? other) => other is not null && Types.AllSame(Parameters, other.Parameters) && Types.Same(Result, other.Result);
 
     public override int GetHashCode() => HashCode.Combine(Parameters.Count, Result);
+}
+
+/// <summary>
+/// A raw pointer (R10): <c>int*</c>, written as C# writes it in <c>unsafe</c> code, and <c>void*</c>, the untyped pointer, whose
+/// pointee is <c>void</c> (R14). Its pointee holds no counted reference: the checker builds one only for such a pointee (R10).
+/// </summary>
+public sealed record PointerType(KurzType Pointee) : KurzType
+{
+    public override string Text => Pointee is FunctionType or UnionType or CFunctionType ? $"({Pointee.Text})*" : Pointee.Text + "*";
+
+    public bool Equals(PointerType? other) => other is not null && Types.Same(Pointee, other.Pointee);
+
+    public override int GetHashCode() => HashCode.Combine(nameof(PointerType), Pointee);
+}
+
+/// <summary>The type of a C function (R17): <c>extern "C" (int) =&gt; void</c>, whose value is the name of a function of the C calling convention; it captures nothing, and the checker keeps it apart from a function type of F11.</summary>
+public sealed record CFunctionType(IReadOnlyList<KurzType> Parameters, KurzType Result) : KurzType
+{
+    public override string Text => $"extern \"C\" ({string.Join(", ", Parameters.Select(p => p.Text))}) => {(Result is UnionType ? "(" + Result.Text + ")" : Result.Text)}";
+
+    public bool Equals(CFunctionType? other) => other is not null && Types.AllSame(Parameters, other.Parameters) && Types.Same(Result, other.Result);
+
+    public override int GetHashCode() => HashCode.Combine(nameof(CFunctionType), Parameters.Count, Result);
 }
 
 /// <summary>A type parameter inside the generic function or type that declares it (T19).</summary>
@@ -264,6 +287,8 @@ public static class Types
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
             (FunctionType x, FunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
+            (PointerType x, PointerType y) => Same(x.Pointee, y.Pointee),
+            (CFunctionType x, CFunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (TypeParameterType x, TypeParameterType y) => ReferenceEquals(x.Symbol, y.Symbol),
             _ => false,
         };
@@ -509,6 +534,19 @@ public static class Types
                     return parameters.Any(p => p is ErrorType) || result is ErrorType ? Error : new FunctionType(parameters, result);
                 }
 
+            case PointerType p:
+                {
+                    var pointee = Substitute(p.Pointee, map);
+                    return pointee is ErrorType ? Error : new PointerType(pointee);
+                }
+
+            case CFunctionType f:
+                {
+                    var parameters = f.Parameters.Select(p => Substitute(p, map)).ToList();
+                    var result = Substitute(f.Result, map);
+                    return parameters.Any(p => p is ErrorType) || result is ErrorType ? Error : new CFunctionType(parameters, result);
+                }
+
             default:
                 return type;
         }
@@ -524,6 +562,8 @@ public static class Types
             DataType d => d.TypeArguments.Any(a => Mentions(a, parameter)),
             UnionType u => u.Cases.Any(c => Mentions(c, parameter)),
             FunctionType f => f.Parameters.Any(p => Mentions(p, parameter)) || Mentions(f.Result, parameter),
+            PointerType p => Mentions(p.Pointee, parameter),
+            CFunctionType f => f.Parameters.Any(p => Mentions(p, parameter)) || Mentions(f.Result, parameter),
             _ => false,
         };
     }

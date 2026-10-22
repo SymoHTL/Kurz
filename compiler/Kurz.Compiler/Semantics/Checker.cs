@@ -4,10 +4,11 @@ namespace Kurz.Compiler.Semantics;
 
 /// <summary>
 /// The checker: names, scopes and types of a program the parser read without an error, against the
-/// rules of chapters 1 to 3, 5, 6, 8, 9 and 10 of the reference. It reports the compile errors of
+/// rules of chapters 1 to 3, 5, 6, 8, 9 and 10 of the reference and the raw forms of chapter 11, with
+/// the grants a program is given (R7). It reports the compile errors of
 /// the error table those chapters name, each at the line E1 gives it, and <c>not supported</c>
 /// for a construct it does not read, at the construct's line and nothing else: a class and the
-/// other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c> and <c>raw</c>, and
+/// other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c>, and
 /// the rest of the list in the section "What the checker does not read" of <c>compiler/README.md</c>,
 /// which is the one complete list. A value of a construct it does not read has the error type, about
 /// which nothing is reported, so that the one line of the construct carries the one diagnostic
@@ -29,12 +30,15 @@ public sealed partial class Checker
     private readonly Dictionary<string, string> unsupportedBases = new(StringComparer.Ordinal);
     private readonly HashSet<string> unreadData = new(StringComparer.Ordinal);
     private readonly HashSet<string> unreadFunctions = new(StringComparer.Ordinal);
-    private readonly HashSet<string> cFunctionNames = new(StringComparer.Ordinal); // R16: the names the blocks of C functions at the top level declare
+    private readonly Dictionary<string, FunctionSymbol> cFunctions = new(StringComparer.Ordinal); // R16: the C declarations a call can pick, by their one name
+    private readonly List<FunctionSymbol> cDeclared = []; // R16: every C declaration in source order, a redeclared one among them
     private readonly HashSet<FunctionSymbol> modifiedFunctions = [];
     private readonly List<FunctionSymbol> unreadOverloads = [];
     private readonly List<(HashSet<string> Types, HashSet<string> Functions)> nestedNames = [];
     private readonly HashSet<string> reservedTopLevel = new(StringComparer.Ordinal);
-    private readonly HashSet<string> unreadStatics = new(StringComparer.Ordinal); // R13: state every function of the package reaches, which the checker does not read
+    private readonly HashSet<string> stateNames = new(StringComparer.Ordinal); // R13: the names of the state outside a function, declared with the functions and types
+    private readonly List<(VariableDeclaration Declaration, bool Named)> stateDeclarations = [];
+    private readonly Dictionary<string, VariableSymbol> statics = new(StringComparer.Ordinal); // R13: that state, which every function reaches, at the error type while its declaration is not checked
     private readonly Dictionary<DataSymbol, List<DataSymbol>> baseCycles = [];
     private readonly Dictionary<string, KurzType> topLevel = new(StringComparer.Ordinal);
     private readonly List<VariableSymbol> declared = [];
@@ -43,10 +47,18 @@ public sealed partial class Checker
     private bool inElseArm;
     private bool realKeepsOwnType;
     private int blockDepth;
+    private int rawDepth; // R7, R12: the `raw` blocks and `naked` bodies around the code being checked
+    private bool readingConstant; // F12, R13: a default value or the initial value of state is being read, in which a read of state or of raw memory is no constant
+    private bool stateRead; // R13: the value being read as a constant reads state
+    private List<(PointerType Pointer, int Line, string What)>? pendingPointees; // R10: the pointers the fields of data types name, judged after every field is resolved
+    private readonly bool allowRaw;
+    private readonly bool allowNative;
 
-    private Checker(DiagnosticBag diagnostics)
+    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants)
     {
         this.diagnostics = diagnostics;
+        allowRaw = grants.Contains("raw");
+        allowNative = grants.Contains("native");
     }
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
@@ -55,12 +67,24 @@ public sealed partial class Checker
     /// <summary>Every variable the program declares, in the order the checker met them: parameters, locals, loop variables and match bindings.</summary>
     public IReadOnlyList<VariableSymbol> Variables => declared;
 
-    /// <summary>Checks a program the parser read without an error and adds what it finds to <paramref name="diagnostics"/>.</summary>
-    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics)
+    /// <summary>Checks a program the parser read without an error, in a package granted nothing (R7), and adds what it finds to <paramref name="diagnostics"/>.</summary>
+    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics) => Check(program, diagnostics, []);
+
+    /// <summary>
+    /// Checks a program the parser read without an error, in a package granted <paramref name="grants"/>, <c>raw</c> and <c>native</c> as a
+    /// project file or a case's header line gives them (R7, R16), and adds what it finds to <paramref name="diagnostics"/>.
+    /// </summary>
+    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(diagnostics);
-        var checker = new Checker(diagnostics);
+        ArgumentNullException.ThrowIfNull(grants);
+        if (grants.FirstOrDefault(g => g is not ("raw" or "native")) is { } unknown)
+        {
+            throw new ArgumentException($"`{unknown}` is no grant: R7 and R16 name `raw` and `native`", nameof(grants));
+        }
+
+        var checker = new Checker(diagnostics, grants);
         checker.Run(program);
         return checker;
     }
@@ -162,6 +186,9 @@ public sealed partial class Checker
                 case ExternBlock e:
                     DeclareCFunctions(e);
                     break;
+                case VariableDeclaration v when IsState(v):
+                    DeclareState(v);
+                    break;
                 default:
                     break;
             }
@@ -169,19 +196,22 @@ public sealed partial class Checker
 
         RefuseUnreadBases();
         FindBaseCycles();
+        pendingPointees = [];
         foreach (var symbol in dataDeclared.Concat(refusedTypes))
         {
             ResolveData(symbol);
         }
 
+        JudgePendingPointees();
+        ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
         {
             ResolveSignature(f);
         }
 
         RefuseModifiedFunctions();
-        RefuseCFunctionNames();
         CheckDuplicateFunctions();
+        CheckStates();
         CheckDefaults();
         CollectReserved(program.Statements);
 
@@ -224,9 +254,6 @@ public sealed partial class Checker
                 case FunctionDeclaration f:
                     functionNames.Add(f.Name);
                     break;
-                case ExternBlock e:
-                    functionNames.UnionWith(e.Functions.Select(f => f.Name));
-                    break;
                 default:
                     break;
             }
@@ -241,7 +268,7 @@ public sealed partial class Checker
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
 
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
-    private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || unreadStatics.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
+    private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
 
     /// <summary>Runs <paramref name="check"/>, with its diagnostics dropped where <paramref name="f"/> is a function the checker does not read (K7, M6).</summary>
     private void Unread(FunctionSymbol f, Action check)
@@ -272,9 +299,8 @@ public sealed partial class Checker
         {
             switch (s)
             {
-                case VariableDeclaration v when (v.Modifiers & (Modifiers.Static | Modifiers.Mut)) == (Modifiers.Static | Modifiers.Mut):
-                    unreadStatics.Add(v.Name); // R13: reached by every function, so it reserves no name and is no variable of the top-level code
-                    break;
+                case VariableDeclaration v when IsState(v):
+                    break; // R13: state that every function reaches, so it reserves no name and is no variable of the top-level code
                 case VariableDeclaration v:
                     reservedTopLevel.Add(v.Name);
                     break;
@@ -584,12 +610,10 @@ public sealed partial class Checker
             case WeakType w:
                 NotSupported(w.Line, "weak (R3, R5)");
                 return Types.Error;
-            case PointerType p:
-                NotSupported(p.Line, "a raw pointer type (R10)");
-                return Types.Error;
+            case Syntax.PointerType p:
+                return PointerTo(Resolve(p.Pointee), p.Line, "a pointer"); // R10, R14
             case ExternFunctionType f:
-                NotSupported(f.Line, "the type of a C function (R17)");
-                return Types.Error;
+                return ResolveCFunctionType(f); // R17
             default:
                 throw new InvalidOperationException(type.GetType().Name);
         }
@@ -689,16 +713,11 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
-            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)");
+            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
             return;
-        }
-
-        if (cFunctionNames.Contains(d.Name))
-        {
-            NotSupported(d.Line, "a C function and another function of one name (R16)"); // and its calls are not read (RefuseCFunctionNames)
         }
 
         if (!functions.TryGetValue(d.Name, out var list))
@@ -723,18 +742,20 @@ public sealed partial class Checker
             }
         }
 
-        var unsupportedModifiers = d.Modifiers & ~Modifiers.Pub;
+        var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Naked | Modifiers.Extern);
         if (unsupportedModifiers != Modifiers.None)
         {
-            NotSupported(d.Line, (unsupportedModifiers & Modifiers.Naked) != 0 ? "a `naked` function (R12)"
-                : (unsupportedModifiers & Modifiers.Extern) != 0 ? "a function of the C calling convention, `extern \"C\"` (R16)"
-                : (unsupportedModifiers & Modifiers.Thread) != 0 ? "`thread static` before a function, which R13 states before state alone (R13)"
+            NotSupported(d.Line, (unsupportedModifiers & Modifiers.Thread) != 0 ? "`thread static` before a function, which R13 states before state alone (R13)"
                 : $"the modifier `{unsupportedModifiers.ToString().ToLowerInvariant()}` of a method (K7, M6)");
             modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped (E1)
         }
 
         Unread(symbol, () => ResolveTypes(symbol, d));
         typeContext = null;
+        if (symbol.TakesC && !modifiedFunctions.Contains(symbol))
+        {
+            CheckCSignature(symbol, d); // R12, R16
+        }
     }
 
     private void ResolveTypes(FunctionSymbol symbol, FunctionDeclaration d)
@@ -759,48 +780,6 @@ public sealed partial class Checker
             }
 
             symbol.Parameters.Add(new ParameterSymbol(p.Name, type, p.Mut, p.Default is not null, p.Line));
-        }
-    }
-
-    /// <summary>
-    /// R16: the names a block of C functions declares, which the checker does not read, so that a call of one carries no error of its
-    /// own (E1). A name a type or a built-in has is <c>redeclared</c> (V9), as a function's is (F6). A name another function or C
-    /// declaration of the file has is <c>not supported</c> at the second of the two in source order: whether a C declaration stands beside the functions
-    /// of its name is no rule's.
-    /// </summary>
-    private void DeclareCFunctions(ExternBlock e)
-    {
-        foreach (var f in e.Functions)
-        {
-            if (dataTypes.ContainsKey(f.Name) || unsupportedTypes.Contains(f.Name) || IsBuiltInName(f.Name))
-            {
-                Report(ErrorIds.Redeclared, f.Line, $"the name `{f.Name}` is declared already (V9)");
-                continue;
-            }
-
-            if (functions.ContainsKey(f.Name) || cFunctionNames.Contains(f.Name))
-            {
-                NotSupported(f.Line, "a C function and another function of one name (R16)");
-            }
-
-            cFunctionNames.Add(f.Name);
-            unreadFunctions.Add(f.Name);
-        }
-    }
-
-    /// <summary>
-    /// R16 with K7, M6: a call of a name that a C declaration has is not read, whichever function of the name it would pick, as for a
-    /// function with a modifier of a method: the C declaration is not read, so the call could carry an error the program does not
-    /// have (E1). The bodies of the other functions of the name are checked all the same.
-    /// </summary>
-    private void RefuseCFunctionNames()
-    {
-        foreach (var name in cFunctionNames)
-        {
-            if (functions.Remove(name, out var list))
-            {
-                unreadOverloads.AddRange(list);
-            }
         }
     }
 
@@ -895,11 +874,26 @@ public sealed partial class Checker
                 }
             }
         }
+
+        foreach (var f in cDeclared)
+        {
+            frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = f.Line };
+            foreach (var (p, symbol) in f.CDeclaration!.Parameters.Zip(f.Parameters))
+            {
+                if (p.Default is not null)
+                {
+                    Unread(f, () => CheckDefault(p.Default, symbol.Type, p.Line)); // R16 with F12, D11
+                }
+            }
+        }
     }
 
     private void CheckDefault(Expression value, KurzType type, int parameterLine)
     {
+        var reading = readingConstant;
+        readingConstant = true; // a read of state or of raw memory is no constant, and `default-not-constant` is its one error (R13, E1)
         var t = CheckExpression(value, type);
+        readingConstant = reading;
         if (t.IsError || Types.IsError(type))
         {
             return;
@@ -918,6 +912,12 @@ public sealed partial class Checker
     private void CheckFunctionBody(FunctionSymbol f)
     {
         var d = f.Declaration!;
+        if ((d.Modifiers & Modifiers.Naked) != 0)
+        {
+            CheckNakedBody(f); // R12
+            return;
+        }
+
         frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel };
         foreach (var p in f.Parameters)
         {
@@ -1022,7 +1022,7 @@ public sealed partial class Checker
 
             if (!f.IsLambda || f.Outer is null)
             {
-                return (null, false);
+                return statics.TryGetValue(name, out var state) ? (state, false) : (null, false); // R13: state outside a function, which every function reaches
             }
 
             captured = true;
@@ -1033,7 +1033,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || IsUnreadName(name) || IsBuiltInName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
 
     /// <summary>The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9).</summary>
     private static bool IsBuiltInName(string name) => name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map";
@@ -1197,25 +1197,21 @@ public sealed partial class Checker
 
                 return Flow.Ends;
             case RawBlock r:
-                {
-                    NotSupported(r.Line, "a raw block (R7)");
-                    Push();
-                    var flow = CheckBlock(r.Body); // read for the variables it uses, with its diagnostics dropped: the one diagnostic of the construct (E1)
-                    Pop(commit: false);
-                    return flow;
-                }
+                return CheckRawBlock(r);
 
             case UseStatement u:
                 NotSupported(u.Line, "use (F10)");
                 return Flow.Completes;
             case ExternBlock e:
-                // R16 states a block of C functions with no place; inside a block it is read as a function declared there is (F1, F6):
-                // its names are visible in that block alone (PushNested), and their calls carry no error of their own (E1)
-                NotSupported(e.Line, blockDepth > 0 ? "a block of C functions inside a block (R16)" : "a block of C functions, `extern \"C\"` (R16)");
+                // R16: a block stands at the top level of a file alone, as the parser holds it; its declarations were declared and resolved in the first passes
+                if (!allowNative)
+                {
+                    Report(ErrorIds.NativeNotAllowed, e.Line, "a block of C functions needs the grant `allow native`, which this package does not have (R16)");
+                }
+
                 return Flow.Completes;
             case AsmStatement a:
-                NotSupported(a.Line, "`asm` (R11)");
-                ReadAsmLoosely(a);
+                CheckAsm(a, naked: false);
                 return Flow.Completes;
             case FunctionDeclaration f:
                 if (blockDepth > 0)
@@ -1346,20 +1342,21 @@ public sealed partial class Checker
 
     private void CheckVariableDeclaration(VariableDeclaration v)
     {
-        if ((v.Modifiers & (Modifiers.Static | Modifiers.Mut)) == (Modifiers.Static | Modifiers.Mut) && frame.IsTopLevel && frame.Scope.Parent is null)
+        if (IsState(v) && frame.IsTopLevel && frame.Scope.Parent is null)
         {
-            // R13: state outside a function, at the outermost level of a file, which chapter 11 states and the checker does not read;
-            // its uses carry no further error. A `static` without `mut` has no meaning there, as on any variable (below)
-            NotSupported(v.Line, $"a `{((v.Modifiers & Modifiers.Thread) != 0 ? "thread static mut" : "static mut")}` declaration at the top level of a file (R13)");
-            CheckLoosely(v.Value); // the initial value is read, so that the variables it uses count as used
-            DeclareUnreadable(v.Name, VariableKind.Local, v.Line);
-            return;
+            return; // R13: state outside a function, declared and checked before any function's body (CheckStates); a `static` without `mut` has no meaning there, as on any variable (below)
         }
 
         var other = v.Modifiers & ~Modifiers.Mut;
         if (other != Modifiers.None)
         {
             Report(ErrorIds.Syntax, v.Line, $"`{other.ToString().ToLowerInvariant()}` has no meaning on a variable (V2, V4)");
+        }
+
+        if (v.Value is null)
+        {
+            DeclareUnreadable(v.Name, VariableKind.Local, v.Line); // a `static mut` without a value, which has no meaning here: its uses carry nothing more (E1)
+            return;
         }
 
         KurzType? declared = null;
@@ -1401,6 +1398,7 @@ public sealed partial class Checker
         var (variable, captured) = Lookup(a.Name);
         if (variable is not null)
         {
+            RequireRawForState(variable, a.Line);
             if (captured)
             {
                 Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{a.Name}` and cannot assign it (F11)");
@@ -1421,13 +1419,6 @@ public sealed partial class Checker
             }
 
             variable.Changed = true;
-            return;
-        }
-
-        if (unreadStatics.Contains(a.Name))
-        {
-            // R13: an assignment to state outside a function, which the checker does not read; the value is read
-            CheckExpression(a.Value, null);
             return;
         }
 
@@ -1476,17 +1467,9 @@ public sealed partial class Checker
             root = Unwrap(m.Target);
         }
 
-        if (root is UnaryExpression { Operator: TokenKind.Star })
+        if (root is UnaryExpression { Operator: TokenKind.Star } or IndexExpression)
         {
-            NotSupported(a.Line, "a write through a raw pointer (R10)");
-            CheckLoosely(a.Target, a.Value);
-            return;
-        }
-
-        if (root is IndexExpression)
-        {
-            NotSupported(a.Line, "an assignment into an index (M9)");
-            CheckLoosely(a.Target, a.Value);
+            CheckWriteThrough(a, root, members); // R10, or an index into a list (M9)
             return;
         }
 
@@ -1509,6 +1492,7 @@ public sealed partial class Checker
             }
 
             variable.Read = true; // V6: an assignment into a path reads the variable
+            RequireRawForState(variable, a.Line);
             if (Types.IsError(variable.Type))
             {
                 // a value the checker does not read, a class instance among them: whether the path changes is its chapter's question (K1, K2)
