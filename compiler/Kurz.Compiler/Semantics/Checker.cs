@@ -29,6 +29,7 @@ public sealed partial class Checker
     private readonly Dictionary<string, string> unsupportedBases = new(StringComparer.Ordinal);
     private readonly HashSet<string> unreadData = new(StringComparer.Ordinal);
     private readonly HashSet<string> unreadFunctions = new(StringComparer.Ordinal);
+    private readonly HashSet<string> cFunctionNames = new(StringComparer.Ordinal); // R16: the names the blocks of C functions at the top level declare
     private readonly HashSet<FunctionSymbol> modifiedFunctions = [];
     private readonly List<FunctionSymbol> unreadOverloads = [];
     private readonly List<(HashSet<string> Types, HashSet<string> Functions)> nestedNames = [];
@@ -158,6 +159,9 @@ public sealed partial class Checker
                 case FunctionDeclaration f:
                     DeclareFunction(f);
                     break;
+                case ExternBlock e:
+                    DeclareCFunctions(e);
+                    break;
                 default:
                     break;
             }
@@ -176,6 +180,7 @@ public sealed partial class Checker
         }
 
         RefuseModifiedFunctions();
+        RefuseCFunctionNames();
         CheckDuplicateFunctions();
         CheckDefaults();
         CollectReserved(program.Statements);
@@ -218,6 +223,9 @@ public sealed partial class Checker
                     break;
                 case FunctionDeclaration f:
                     functionNames.Add(f.Name);
+                    break;
+                case ExternBlock e:
+                    functionNames.UnionWith(e.Functions.Select(f => f.Name));
                     break;
                 default:
                     break;
@@ -312,6 +320,20 @@ public sealed partial class Checker
                 TypeDeclarationKind.Enum => "an enum a data type names (D12)",
                 _ => "a flags type a data type names (D13)",
             };
+            return;
+        }
+
+        if ((d.Modifiers & Modifiers.Extern) != 0)
+        {
+            if (!clash)
+            {
+                // §2, R17: a data type in C's layout, `extern "C" data Point(int X, int Y)`, which chapter 11 names and the checker
+                // does not read; a use of it carries no error of its own (E1)
+                NotSupported(d.Line, "a data type in C's layout, `extern \"C\" data` (R17)");
+                unsupportedTypes.Add(d.Name);
+                unsupportedBases[d.Name] = "a data type in C's layout that a data type names (R17)";
+            }
+
             return;
         }
 
@@ -562,6 +584,12 @@ public sealed partial class Checker
             case WeakType w:
                 NotSupported(w.Line, "weak (R3, R5)");
                 return Types.Error;
+            case PointerType p:
+                NotSupported(p.Line, "a raw pointer type (R10)");
+                return Types.Error;
+            case ExternFunctionType f:
+                NotSupported(f.Line, "the type of a C function (R17)");
+                return Types.Error;
             default:
                 throw new InvalidOperationException(type.GetType().Name);
         }
@@ -668,6 +696,11 @@ public sealed partial class Checker
             return;
         }
 
+        if (cFunctionNames.Contains(d.Name))
+        {
+            NotSupported(d.Line, "a C function and another function of one name (R16)"); // and its calls are not read (RefuseCFunctionNames)
+        }
+
         if (!functions.TryGetValue(d.Name, out var list))
         {
             list = [];
@@ -693,7 +726,10 @@ public sealed partial class Checker
         var unsupportedModifiers = d.Modifiers & ~Modifiers.Pub;
         if (unsupportedModifiers != Modifiers.None)
         {
-            NotSupported(d.Line, $"the modifier `{unsupportedModifiers.ToString().ToLowerInvariant()}` of a method (K7, M6)");
+            NotSupported(d.Line, (unsupportedModifiers & Modifiers.Naked) != 0 ? "a `naked` function (R12)"
+                : (unsupportedModifiers & Modifiers.Extern) != 0 ? "a function of the C calling convention, `extern \"C\"` (R16)"
+                : (unsupportedModifiers & Modifiers.Thread) != 0 ? "`thread static` before a function, which R13 states before state alone (R13)"
+                : $"the modifier `{unsupportedModifiers.ToString().ToLowerInvariant()}` of a method (K7, M6)");
             modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped (E1)
         }
 
@@ -723,6 +759,48 @@ public sealed partial class Checker
             }
 
             symbol.Parameters.Add(new ParameterSymbol(p.Name, type, p.Mut, p.Default is not null, p.Line));
+        }
+    }
+
+    /// <summary>
+    /// R16: the names a block of C functions declares, which the checker does not read, so that a call of one carries no error of its
+    /// own (E1). A name a type or a built-in has is <c>redeclared</c> (V9), as a function's is (F6). A name another function or C
+    /// declaration of the file has is <c>not supported</c> at the second of the two in source order: whether a C declaration stands beside the functions
+    /// of its name is no rule's.
+    /// </summary>
+    private void DeclareCFunctions(ExternBlock e)
+    {
+        foreach (var f in e.Functions)
+        {
+            if (dataTypes.ContainsKey(f.Name) || unsupportedTypes.Contains(f.Name) || IsBuiltInName(f.Name))
+            {
+                Report(ErrorIds.Redeclared, f.Line, $"the name `{f.Name}` is declared already (V9)");
+                continue;
+            }
+
+            if (functions.ContainsKey(f.Name) || cFunctionNames.Contains(f.Name))
+            {
+                NotSupported(f.Line, "a C function and another function of one name (R16)");
+            }
+
+            cFunctionNames.Add(f.Name);
+            unreadFunctions.Add(f.Name);
+        }
+    }
+
+    /// <summary>
+    /// R16 with K7, M6: a call of a name that a C declaration has is not read, whichever function of the name it would pick, as for a
+    /// function with a modifier of a method: the C declaration is not read, so the call could carry an error the program does not
+    /// have (E1). The bodies of the other functions of the name are checked all the same.
+    /// </summary>
+    private void RefuseCFunctionNames()
+    {
+        foreach (var name in cFunctionNames)
+        {
+            if (functions.Remove(name, out var list))
+            {
+                unreadOverloads.AddRange(list);
+            }
         }
     }
 
@@ -1130,6 +1208,15 @@ public sealed partial class Checker
             case UseStatement u:
                 NotSupported(u.Line, "use (F10)");
                 return Flow.Completes;
+            case ExternBlock e:
+                // R16 states a block of C functions with no place; inside a block it is read as a function declared there is (F1, F6):
+                // its names are visible in that block alone (PushNested), and their calls carry no error of their own (E1)
+                NotSupported(e.Line, blockDepth > 0 ? "a block of C functions inside a block (R16)" : "a block of C functions, `extern \"C\"` (R16)");
+                return Flow.Completes;
+            case AsmStatement a:
+                NotSupported(a.Line, "`asm` (R11)");
+                ReadAsmLoosely(a);
+                return Flow.Completes;
             case FunctionDeclaration f:
                 if (blockDepth > 0)
                 {
@@ -1160,6 +1247,29 @@ public sealed partial class Checker
             default:
                 throw new InvalidOperationException(statement.GetType().Name);
         }
+    }
+
+    /// <summary>R11: the values, places and blocks of an <c>asm</c>'s operands, read with their diagnostics dropped, so that the variables they use count as used (E1).</summary>
+    private void ReadAsmLoosely(AsmStatement a)
+    {
+        Push();
+        foreach (var operand in a.Operands)
+        {
+            foreach (var e in new[] { operand.Value, operand.Output })
+            {
+                if (e is not null)
+                {
+                    CheckExpression(e, null);
+                }
+            }
+
+            if (operand.Body is not null)
+            {
+                CheckBlock(operand.Body);
+            }
+        }
+
+        Pop(commit: false);
     }
 
     /// <summary>F1 with F6: the body of a function declared inside a block, read as a lambda's is, with its parameters error-typed, for the variables around it that it reads.</summary>
@@ -1240,7 +1350,7 @@ public sealed partial class Checker
         {
             // R13: state outside a function, at the outermost level of a file, which chapter 11 states and the checker does not read;
             // its uses carry no further error. A `static` without `mut` has no meaning there, as on any variable (below)
-            NotSupported(v.Line, "a `static mut` declaration at the top level of a file (R13)");
+            NotSupported(v.Line, $"a `{((v.Modifiers & Modifiers.Thread) != 0 ? "thread static mut" : "static mut")}` declaration at the top level of a file (R13)");
             CheckLoosely(v.Value); // the initial value is read, so that the variables it uses count as used
             DeclareUnreadable(v.Name, VariableKind.Local, v.Line);
             return;
@@ -1364,6 +1474,13 @@ public sealed partial class Checker
 
             members.Insert(0, m);
             root = Unwrap(m.Target);
+        }
+
+        if (root is UnaryExpression { Operator: TokenKind.Star })
+        {
+            NotSupported(a.Line, "a write through a raw pointer (R10)");
+            CheckLoosely(a.Target, a.Value);
+            return;
         }
 
         if (root is IndexExpression)

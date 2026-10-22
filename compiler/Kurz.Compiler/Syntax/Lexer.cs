@@ -416,6 +416,7 @@ public sealed class Lexer
             ('{', _) => (TokenKind.LeftBrace, 1),
             ('}', _) => (TokenKind.RightBrace, 1),
             (',', _) => (TokenKind.Comma, 1),
+            ('.', '.') when Peek(2) == '.' => (TokenKind.Ellipsis, 3),
             ('.', '.') when Peek(2) == '<' => (TokenKind.DotDotLess, 3),
             ('.', '.') => (TokenKind.DotDot, 2),
             ('.', _) => (TokenKind.Dot, 1),
@@ -671,12 +672,13 @@ public sealed class Lexer
         }
 
         position++; // the opening quote
+        var template = AtAsmTemplate();
         var parts = new List<StringPart>();
         var buffer = new StringBuilder();
         var failed = false;
         while (!AtEnd && Current != '"' && Current != '\n')
         {
-            if (Current == '{')
+            if (Current == '{' && !template)
             {
                 FlushText(parts, buffer);
                 if (!ReadHole(parts, start))
@@ -714,7 +716,37 @@ public sealed class Lexer
 
         position++; // the closing quote
         FlushText(parts, buffer);
-        Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts));
+        Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts) { IsTemplate = template });
+    }
+
+    /// <summary>
+    /// R11: a string literal that opens the arguments of <c>asm</c>, or follows such a template and a comma, is a template of the
+    /// <c>asm</c>, whose <c>{name}</c> names an operand and is no interpolation (L6); the line breaks between them count for nothing,
+    /// as inside the parentheses of any call (L4).
+    /// </summary>
+    private bool AtAsmTemplate()
+    {
+        var i = tokens.Count - 1;
+        while (i >= 0 && tokens[i].Kind == TokenKind.Newline)
+        {
+            i--;
+        }
+
+        if (i < 0 || tokens[i].Kind is not (TokenKind.LeftParen or TokenKind.Comma))
+        {
+            return false;
+        }
+
+        var opener = tokens[i].Kind;
+        i--;
+        while (i >= 0 && tokens[i].Kind == TokenKind.Newline)
+        {
+            i--;
+        }
+
+        return i >= 0 && (opener == TokenKind.LeftParen
+            ? tokens[i].IsKeyword("asm")
+            : tokens[i].Value is StringLiteralValue { IsTemplate: true });
     }
 
     private static void FlushText(List<StringPart> parts, StringBuilder buffer)
@@ -804,6 +836,7 @@ public sealed class Lexer
     /// <summary>L13 and L15: a <c>"""</c> block.</summary>
     private void LexBlockString(int start)
     {
+        var template = AtAsmTemplate();
         position += 3;
         var afterOpen = position;
         while (!AtEnd && Current is ' ' or '\t' or '\r')
@@ -921,7 +954,7 @@ public sealed class Lexer
             string? why = null;
             while (position < lineEnd)
             {
-                if (Current == '{')
+                if (Current == '{' && !template)
                 {
                     FlushText(parts, buffer);
                     var holeOpen = position;
@@ -983,7 +1016,7 @@ public sealed class Lexer
 
         // the position is right after the closing quotes; the rest of their line is read as code
         FlushText(parts, buffer);
-        Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts));
+        Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts) { IsTemplate = template });
     }
 
     /// <summary>

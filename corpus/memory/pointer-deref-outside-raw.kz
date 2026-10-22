@@ -1,0 +1,8 @@
+// expect: error raw-required at 8
+// rules: R10
+
+long n = 5
+// the address of a variable that is not `mut` is a pointer to read through, a write through it being a misuse (R10)
+p = &n
+print(n)
+print(*p)

@@ -1,0 +1,7 @@
+// expect: error native-type at 6
+// allow: native
+// rules: R16
+
+extern "C" {
+    long strlen(string s)
+}

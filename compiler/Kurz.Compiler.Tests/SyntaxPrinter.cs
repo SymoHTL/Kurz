@@ -30,12 +30,26 @@ internal static class SyntaxPrinter
         ThrowStatement t => t.Value is null ? "(throw)" : $"(throw {Print(t.Value)})",
         RawBlock r => $"(raw {Print(r.Body)})",
         UseStatement u => $"(use {u.Target})",
+        AsmStatement a => $"(asm {string.Join(" ", a.Templates.Select(x => Quote(x.Text)))}{string.Concat(a.Operands.Select(o => " " + Operand(o)))})",
+        ExternBlock e => $"(extern{(e.Library is null ? "" : " in " + Quote(e.Library))} {{{string.Join(" ", e.Functions.Select(CFunction))}}})",
         FunctionDeclaration f => Function(f),
         FieldDeclaration f => $"(field {Mods(f.Modifiers)}{Type(f.Type)}{f.Name}{(f.Value is null ? "" : " " + Print(f.Value))})",
         ConstructorDeclaration c => $"(constructor {Mods(c.Modifiers)}{c.Name}({Parameters(c.Parameters)}){(c.ThisArguments is null ? "" : " this(" + Arguments(c.ThisArguments) + ")")} {Print(c.Body)})",
         TypeDeclaration t => TypeDeclaration(t),
         _ => throw new InvalidOperationException(statement.GetType().Name),
     };
+
+    /// <summary>An operand of an <c>asm</c> as the parser split it: <c>[r = inout(reg) count]</c>, <c>[out("eax") x =&gt; y]</c>.</summary>
+    private static string Operand(AsmOperand o)
+    {
+        var arguments = o.Arguments is null ? "" : "(" + string.Join(", ", o.Arguments.Select(a => a.Quoted ? Quote(a.Text) : a.Text)) + ")";
+        var value = o.Value is null ? "" : " " + Print(o.Value) + (o.Output is null ? "" : " => " + Print(o.Output));
+        var body = o.Body is null ? "" : " " + Print(o.Body);
+        return $"[{(o.Name is null ? "" : o.Name + " = ")}{o.Word}{arguments}{value}{body}]";
+    }
+
+    private static string CFunction(ExternFunction f) =>
+        $"(c-function {Mods(f.Modifiers)}{Type(f.ReturnType)}{f.Name}({Parameters(f.Parameters)}{(f.Variadic ? (f.Parameters.Count == 0 ? "..." : ", ...") : "")}))";
 
     private static string Function(FunctionDeclaration f)
     {
@@ -108,13 +122,17 @@ internal static class SyntaxPrinter
         // a union, a function type or a weak type inside another type is parenthesized, so that each tree prints as itself:
         // `(A | B)?` against `A | B?`, `((int) => int) | B` against `(int) => (int | B)`, `(A | B) | C` against `A | (B | C)`,
         // `weak (A | B)` against `weak A | B`
-        NullableType { Inner: FunctionType or UnionType or WeakType } n => "(" + Type(n.Inner).TrimEnd() + ")? ",
+        NullableType { Inner: FunctionType or UnionType or WeakType or ExternFunctionType } n => "(" + Type(n.Inner).TrimEnd() + ")? ",
         NullableType n => Type(n.Inner).TrimEnd() + "? ",
-        UnionType u => string.Join(" | ", u.Cases.Select(c => c is FunctionType or UnionType ? "(" + Type(c).TrimEnd() + ")" : Type(c).TrimEnd())) + " ",
+        UnionType u => string.Join(" | ", u.Cases.Select(c => c is FunctionType or UnionType or ExternFunctionType ? "(" + Type(c).TrimEnd() + ")" : Type(c).TrimEnd())) + " ",
         FunctionType f => "(" + string.Join(", ", f.Parameters.Select(p => Type(p).TrimEnd())) + ") => " + (f.Result is UnionType ? "(" + Type(f.Result).TrimEnd() + ") " : Type(f.Result)),
         WeakType { Inner: UnionType } w => "weak (" + Type(w.Inner).TrimEnd() + ") ",
         WeakType w => "weak " + Type(w.Inner),
         VoidType => "void ",
+        // a pointer to a union, a function type or a weak type is parenthesized as a nullable one is: `(A | B)*` against `A | B*`
+        PointerType { Pointee: FunctionType or UnionType or WeakType or ExternFunctionType } p => "(" + Type(p.Pointee).TrimEnd() + ")* ",
+        PointerType p => Type(p.Pointee).TrimEnd() + "* ",
+        ExternFunctionType f => "extern \"C\" (" + string.Join(", ", f.Parameters.Select(p => Type(p).TrimEnd())) + ") => " + (f.Result is UnionType ? "(" + Type(f.Result).TrimEnd() + ") " : Type(f.Result)),
         _ => throw new InvalidOperationException(type.GetType().Name),
     };
 

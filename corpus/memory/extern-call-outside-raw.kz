@@ -1,0 +1,9 @@
+// expect: error raw-required at 9
+// allow: native
+// rules: R16
+
+extern "C" {
+    int abs(int n)
+}
+
+print(abs(-3))

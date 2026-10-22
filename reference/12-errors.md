@@ -3,10 +3,7 @@
 The errors the corpus cases expect. An id is what a corpus header names: `// expect: error <id> at
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
 raises when it runs (E3). The two tables share one namespace of ids. An id that no case can expect stands in its rule and not
-here: `invalid-source` (L1), since the tools read every case as UTF-8, and
-`naked-not-allowed` and `naked-body` (R12) and `native-not-allowed` and `native-type` (R16), since
-every case runs through the compiler's front end, which reads no `naked` function and no `extern`
-block, as those rules say; the one exception is
+here: `invalid-source` (L1), since the tools read every case as UTF-8; the one exception is
 `print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21) and says in it why no case
 expects it.
 
@@ -21,7 +18,7 @@ expects it.
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or `.Number` and `From` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
 | `unknown-name` | V10, F16 | a name that is not visible at this place, a top-level variable read inside a top-level function included |
-| `type-mismatch` | T1, T13, T19, N6, C3, O4, K5, C8, D9, T8 | a value of one type where another type is required, a written union type that lists only some of a call's cases (O4), a union where one is required whose first case its first case does not go to, or where one of its other cases goes to none of the cases after the first, or, being none of them, to two of them (D9, the case of two fits an assumption there), a value that is no case of a union and would widen into two of its cases, a literal among them by its own type where the union has two or more number cases (T8), or derive from two of them (D9), an arithmetic operator on two class instances (K5) and a range end that is no integer (C8) included |
+| `type-mismatch` | T1, T13, T19, N6, C3, O4, K5, C8, D9, T8, R17 | a value of one type where another type is required, a written union type that lists only some of a call's cases (O4), a union where one is required whose first case its first case does not go to, or where one of its other cases goes to none of the cases after the first, or, being none of them, to two of them (D9, the case of two fits an assumption there), a value that is no case of a union and would widen into two of its cases, a literal among them by its own type where the union has two or more number cases (T8), or derive from two of them (D9), an arithmetic operator on two class instances (K5) and a range end that is no integer (C8) included |
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
 | `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance, or an interpolation of one, whose `Text()` is not `pub`, from outside its class (A9); the same inside the class is A15's reading |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
@@ -40,9 +37,13 @@ expects it.
 | `weak-not-nullable` | R5 | a `weak` type written without its `?` |
 | `weak-value` | R5 | `weak` in front of a type whose values are not instances of a class |
 | `raw-not-allowed` | R7 | a `raw` block in a package without the grant `allow raw`, or in a program without a project file, but for a case of the corpus whose header line grants it |
-| `raw-required` | R10, R11, R13 | an `asm`, or a read or a write through a raw pointer (R10), outside a `raw` block and outside the body of a `naked` function; a read or a write of a top-level `static` (R13), a member that shows the memory of a string or a list (R15), or a call of a C function or through a C function type (R16, R17), outside a `raw` block |
+| `raw-required` | R10, R11, R13, R16, R17 | an `asm`, or a read or a write through a raw pointer (R10), outside a `raw` block and outside the body of a `naked` function; a read or a write of a top-level `static` (R13), a member that shows the memory of a string or a list (R15), or a call of a function that a block of C functions declares or through a C function type (R16, R17), outside a `raw` block |
 | `asm-operand` | R11 | a breach of the rules of an `asm`'s template and its operands: an operand the template does not use, a name in the template that no operand has, or a word or a register class that is not one of Rust's |
-| `counted-pointee` | R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), `SizeOf` of such a type, or a list's `Pointer` member or `List<T>.FromRaw` of such an element type (R15) |
+| `counted-pointee` | R10, R14 | a pointer to a class, a list, a string or a `data` value that holds counted references, `&x` of a variable of such a type (R10), `SizeOf` of such a type, or a list's `Pointer` member or `List<T>.FromRaw` of such an element type (R15) |
+| `naked-not-allowed` | R12 | a `naked` function in a package without the grant `allow raw`, or in a program without a project file, but for a case of the corpus whose header line grants it; its body raises no `raw-not-allowed` beside it |
+| `naked-body` | R12 | a body of a `naked` function other than one `asm`, or an operand of that `asm` other than `sym` and `const` |
+| `native-not-allowed` | R16 | a block of C functions in a package without the grant `allow native`, or in a program without a project file, but for a case of the corpus whose header line grants it; a function of the package's own in the C calling convention needs the grant too (R16), which names no id for one without it, so a case that holds one carries the grant |
+| `native-type` | R16 | a declaration of a block of C functions with a type that cannot cross to C, or an argument in the place of its `...` that is a `bool`, a `float` or a number smaller than an `int`; R16 names no id for a type that cannot cross to C in a function of the package's own in the C calling convention, nor R17 in the type of a C function |
 | `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |

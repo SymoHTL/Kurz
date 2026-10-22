@@ -52,6 +52,12 @@ public sealed partial class Checker
                 CheckRange(r);
                 Report(ErrorIds.Syntax, r.Line, "a range stands in a `for` loop (C8)");
                 return Typed.Error;
+            case LambdaExpression l when expected is not null && Types.IsError(expected):
+                // a lambda where a type stands that was reported or is not read, the type of a C function (R17) among them: its misfit and
+                // the missing types of its parameters come from that type and are not reported beside its line (E1); a parameter of no type
+                // is error-typed, and the body is checked as any lambda's
+                CheckLambda(l, null, atUnreadType: true);
+                return Typed.Error;
             case LambdaExpression l:
                 return CheckLambda(l, expected as FunctionType);
             case MatchExpression m:
@@ -548,6 +554,15 @@ public sealed partial class Checker
 
     private Typed CheckUnary(UnaryExpression u, KurzType? expected)
     {
+        if (u.Operator is TokenKind.Star or TokenKind.Ampersand)
+        {
+            // R10: a read through a raw pointer and the address of a place, which chapter 11 states and the checker does not read; the
+            // operand is checked, so that a name it uses counts as used and an error of its own is reported
+            NotSupported(u.Line, u.Operator == TokenKind.Star ? "a read through a raw pointer, `*p` (R10)" : "the address of a place, `&x` (R10)");
+            CheckExpression(u.Operand, null);
+            return Typed.Error;
+        }
+
         if (u.Operator == TokenKind.Minus)
         {
             // L17: a `-` written directly before a literal belongs to the literal
@@ -1090,7 +1105,7 @@ public sealed partial class Checker
     // ---- lambdas and with --------------------------------------------------------------------------
 
     /// <summary>F7, F11, F15: a lambda under the function type expected of it, or with its own type where its parameters are typed.</summary>
-    private Typed CheckLambda(LambdaExpression l, FunctionType? expected)
+    private Typed CheckLambda(LambdaExpression l, FunctionType? expected, bool atUnreadType = false)
     {
         // after an error on the parameters the body is still read, with them error-typed, so that its own defects and the variables it reads count (E1)
         var parameterTypes = new List<KurzType>();
@@ -1124,13 +1139,13 @@ public sealed partial class Checker
         }
         else
         {
-            if (!failed && l.Parameters.Any(p => p.Type is null))
+            if (!failed && !atUnreadType && l.Parameters.Any(p => p.Type is null))
             {
                 Report(ErrorIds.CannotInfer, l.Line, "the parameters of the lambda have no type, and nothing around it gives one (F7, T27)");
                 failed = true;
             }
 
-            parameterTypes.AddRange(l.Parameters.Select(p => failed ? Types.Error : Resolve(p.Type!)));
+            parameterTypes.AddRange(l.Parameters.Select(p => failed || p.Type is null ? Types.Error : Resolve(p.Type)));
         }
 
         var outer = frame;

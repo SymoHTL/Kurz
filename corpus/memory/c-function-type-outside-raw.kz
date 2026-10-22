@@ -1,0 +1,11 @@
+// expect: error raw-required at 11
+// allow: native
+// rules: R17
+
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+extern "C" (long) => long f = Twice
+// a call through a value of the type outside `raw` is `raw-required` (R17), whatever function the value holds
+print(f(4))

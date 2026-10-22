@@ -1,0 +1,12 @@
+// expect: output
+// | 3
+// allow: raw native
+// rules: R16
+
+extern "C" {
+    int abs(int n)
+}
+
+raw {
+    print(abs(-3))
+}

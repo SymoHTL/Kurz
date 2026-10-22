@@ -1,0 +1,11 @@
+// expect: error native-type at 10
+// allow: raw native
+// rules: R16
+
+extern "C" {
+    int fcntl(int fd, int cmd, ...)
+}
+
+raw {
+    fcntl(0, 1, true)
+}
