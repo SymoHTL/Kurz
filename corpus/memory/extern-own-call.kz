@@ -1,0 +1,10 @@
+// expect: output
+// | 8
+// allow: native
+// rules: R16
+
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+print(Twice(4))

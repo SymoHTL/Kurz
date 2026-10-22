@@ -1,0 +1,10 @@
+// expect: error asm-operand at 7
+// allow: raw
+// rules: R11
+
+mut long n = 0
+raw {
+    asm("mov {x}, 1", x = out(vreg) n)
+}
+print(n)
+// `vreg` is a register class of AArch64 and not of x86-64; the case names no target, so it is read for x86-64 (R11)

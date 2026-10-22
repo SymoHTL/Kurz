@@ -1,0 +1,10 @@
+// expect: error syntax at 6
+// allow: raw
+// rules: R12
+
+class Switcher {
+    naked void Switch() {
+        asm("ret")
+    }
+}
+// the grant keeps `naked-not-allowed` out, so that the place of `naked` is the one defect (R12)

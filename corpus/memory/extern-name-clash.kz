@@ -1,0 +1,11 @@
+// expect: error redeclared at 10
+// allow: native
+// rules: R16
+
+long abs(long n) {
+    return n
+}
+
+extern "C" {
+    int abs(int n)
+}

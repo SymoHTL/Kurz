@@ -1,0 +1,11 @@
+// expect: output
+// | b
+// allow: raw
+// rules: R10
+
+mut char c = 'a'
+p = &c
+raw {
+    *p = 'b'
+}
+print(c)
