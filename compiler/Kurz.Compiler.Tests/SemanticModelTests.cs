@@ -2,6 +2,7 @@ using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using Kurz.Compiler.Text;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Kurz.Compiler.Tests;
 
@@ -12,7 +13,7 @@ namespace Kurz.Compiler.Tests;
 /// holds: the function a call picks and how its arguments bind, the type a literal takes from the
 /// parameter it lands on, what a lambda captures, and what a name means where it is no variable.
 /// </summary>
-public sealed class SemanticModelTests
+public sealed class SemanticModelTests(ITestOutputHelper output)
 {
     /// <summary>At least this many corpus cases are read without a diagnostic; fewer means the walk looked at too few.</summary>
     private const int CaseFloor = 160;
@@ -81,6 +82,7 @@ public sealed class SemanticModelTests
             entries += walk.Seen;
         }
 
+        output.WriteLine($"{cases} corpus cases walked, {entries} entries looked up");
         Assert.True(cases >= CaseFloor, $"only {cases} corpus cases are read without a diagnostic");
         Assert.True(entries >= EntryFloor, $"only {entries} entries are looked up");
     }
@@ -98,7 +100,7 @@ public sealed class SemanticModelTests
     [Fact]
     public void The_walk_finds_a_node_the_checker_did_not_record()
     {
-        // the positive control of the theory: a tree with an expression the checker never read, the left side of a `with` built by hand
+        // the positive control of the theory: a checked tree with a statement the checker never read, built by hand and put after the others
         var (tree, model) = Clean("x = 4\nprint(x)");
         var stray = new ExpressionStatement(3, new CallExpression(3, new NameExpression(3, "print"), [], [new Argument(3, null, false, new IntegerLiteral(3, new IntegerLiteralValue("1", 10, "")))]));
         var walk = new Walk(model);
@@ -137,12 +139,67 @@ public sealed class SemanticModelTests
     [Fact]
     public void A_literal_argument_has_the_type_of_the_parameter_of_the_function_picked()
     {
+        // the literal 4 is read first on its own, as an `int`, to pick among the functions of the name, then against the parameter of the one picked, whose reading stands
         var (tree, model) = Clean("""
-            void Take(long n) { print(n) }
-            Take(4)
+            void Take(byte b, string s) { print(b) }
+            void Take(long n, int k) { print(n) }
+            Take(4, 2)
             """);
-        var literal = Find<IntegerLiteral>(tree, l => l.Line == 2);
+        var literal = Find<IntegerLiteral>(tree, l => l.Line == 3 && l.Value.Digits == "4");
         Assert.Equal("long", model.TypeOf(literal).Type.Text);
+        Assert.Equal(2, model.CallOf(Find<CallExpression>(tree, c => c.Line == 3)).Function!.Declaration!.Line);
+    }
+
+    [Fact]
+    public void A_minus_before_a_literal_is_one_constant_and_the_literal_under_it_has_no_entry()
+    {
+        var (tree, model) = Clean("sbyte x = -128\nprint(x)");
+        var minus = Find<UnaryExpression>(tree);
+        Assert.Equal("sbyte", model.TypeOf(minus).Type.Text);
+        Assert.Equal(-128, (int)Assert.IsType<IntegerConstant>(model.TypeOf(minus).Constant).Value);
+        Assert.False(model.HasType(minus.Operand));
+    }
+
+    [Fact]
+    public void A_call_that_stands_as_a_value_has_its_success_as_its_type_and_its_whole_result_as_the_calls()
+    {
+        var (tree, model) = Clean("""
+            data NotFound
+            int | NotFound Find(int id) {
+                if id == 1 {
+                    return 10
+                }
+
+                return NotFound
+            }
+
+            int | NotFound Twice(int id) {
+                value = Find(id)
+                return value * 2
+            }
+
+            print(Twice(1) else { NotFound => 0 })
+            """);
+        var call = Find<CallExpression>(tree, c => c.Callee is NameExpression { Name: "Find" });
+        Assert.Equal("int", model.TypeOf(call).Type.Text);
+        Assert.Equal("int | NotFound", model.CallOf(call).Result.Text);
+    }
+
+    [Fact]
+    public void A_sym_operand_records_the_function_or_the_state_it_names()
+    {
+        var (tree, model) = Clean("""
+            static mut long count = 0
+            void G() {
+            }
+
+            raw {
+                asm("call {f}", f = sym G)
+                asm("inc qword ptr [rip + {c}]", c = sym count)
+            }
+            """, "raw");
+        Assert.Equal("G", model.FunctionNameOf(Find<NameExpression>(tree, n => n.Name == "G")).Name);
+        Assert.Same(model.DeclarationOf(Find<VariableDeclaration>(tree)), model.VariableOf(Find<NameExpression>(tree, n => n.Name == "count")));
     }
 
     [Fact]
