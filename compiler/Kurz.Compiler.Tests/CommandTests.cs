@@ -80,9 +80,9 @@ public sealed class CommandTests : IDisposable
     }
 
     /// <summary>
-    /// In this process, with the search over an empty directory given: Windows sets
-    /// <c>ProgramFiles</c> in every process it starts, whatever its parent gave it, so on Windows no
-    /// environment of a child empties the search
+    /// In this process, with the search over an empty directory given: on the Windows runner a child
+    /// process read <c>ProgramFiles</c> as the system's folder whatever its parent set, so on Windows
+    /// no environment of a child empties the search
     /// (knowledge/a-windows-child-gets-its-own-program-files.md).
     /// </summary>
     [Fact]

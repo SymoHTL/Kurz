@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-23
-digest: a47ef852685d7a49e796ad3c5fd1ed79afabbae1785b6dacc370c3f43aef120f
+digest: 6fd563bb3277f9ecc7824b9208e70e7616e8112f137ae4ed8a232ca9951180ff
 ttl_days: 60
 metadata:
   type: reference
@@ -102,7 +102,7 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 136 |
+| Occurrences of the marker *(assumed)* | 135 |
 | Bullets of the Open section | 12 |
 <!-- /generated:design -->
 

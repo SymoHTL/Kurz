@@ -94,11 +94,11 @@ record's assumed reading of round 20). Three answers are refused:
 A refusal, or a search that found nothing, does three things:
 
 - it writes on standard output what the command knows before the clang: `kurz 0.1.0 (LLVM 23)`,
-  or under `--verbose` the first two lines;
+  or under `--verbose` the first two lines (the owner, 2026-10-23);
 - it writes the failure on standard error, in the record's form of the command's own failures;
 - it exits with 1.
 
-The failures read:
+The failures read, in the words the owner kept on 2026-10-23:
 
     error: clang 20.1.2 is not LLVM 23
       note: found at /usr/local/bin/clang
@@ -112,12 +112,14 @@ The failures read:
       note: looked for clang-23 and clang on the path
       help: install LLVM 23
 
-On Windows the note of a search that found nothing also names the installer's directory. Windows
-sets `ProgramFiles` in every process it starts, so that directory is the one under the system's
-Program Files folder ([a Windows child gets its own Program Files](../knowledge/a-windows-child-gets-its-own-program-files.md)).
+On Windows the note of a search that found nothing also names the installer's directory. On the
+Windows runner a child process read `ProgramFiles` as the system's folder whatever its parent set,
+so a test cannot move that directory through a child's environment
+([a Windows child gets its own Program Files](../knowledge/a-windows-child-gets-its-own-program-files.md)).
 
-A command line the command cannot read gets the usage on standard error and the exit code 1. The
-usage is `usage: kurz --version [--verbose]`.
+`--verbose` stands before or after `--version`, as rustc takes `-v` and `-V` in either order (the
+owner, 2026-10-23). Any other command line gets the usage on standard error and the exit code 1.
+The usage is `usage: kurz --version [--verbose]`.
 
 ### Readings the record leaves open to the command
 
@@ -126,18 +128,6 @@ ask about it.
 
 - The compiler's version is the `Version` of `Directory.Build.props`, 0.1.0, with no commit
   appended. Pinned by the literal version in every expectation of `CommandTests`.
-- Before a failure, `--version` writes `kurz 0.1.0 (LLVM 23)`, the one line without the clang;
-  `--version --verbose` writes its first two lines. A caller reads the pinned major whatever the
-  search found. Pinned by `CommandTests.Version_with_no_clang_found_writes_what_it_knows_the_places_looked_at_and_exits_1`.
-- `--verbose` stands before or after `--version`, as rustc takes `-v` and `-V` in either order.
-  Every other command line gets the usage. Pinned by
-  `CommandTests.Both_forms_name_the_clang_found_in_the_words_the_owner_chose` and
-  `CommandTests.A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1`.
-- The words of the failures are the product pass's proposal, taken as its default on 2026-10-22,
-  and the words of the refusal of Apple's clang follow them. They were shown to the owner on
-  2026-10-23 with the question on `--version`, which kept them. The help of a refused clang on
-  the path adds where the pinned one must stand, since the first place decides. Pinned by
-  `ClangTests` and `CommandTests.A_refused_clang_ends_the_command_with_1_and_its_three_lines`.
 - A file that does not start, exits with a code other than 0 or gives no answer in 30 s names no
   release, and is refused as such. Pinned by
   `ClangTests.A_file_whose_answer_names_no_clang_release_is_refused`.
