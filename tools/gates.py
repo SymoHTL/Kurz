@@ -60,12 +60,14 @@ GATES = [
      "package to a source; the dotnet command is missing or ran out of time"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "
-     "a job in a container or beside services; the credential anywhere but the env of the job's last step; "
+     "a job beside services, or in a container but the gates job in the repository's image named by its digest, with no SDK "
+     "step of its own; the credential anywhere but the env of the job's last step; "
      "a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request "
      "or a push trigger not limited to main; a wider token; "
      "a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the "
      "pinned one; the compiler job on another label than its versioned Windows one, an SDK step that does not take its version "
-     "from compiler/global.json; a workflow without facts"),
+     "from compiler/global.json; the image workflow's triggers, token, checkout or publish step; a base of ci/Dockerfile not "
+     "named by its digest, an SDK other than global.json's, or a download it uses unchecked; a workflow without facts"),
     ("merge-checks", ["tools/merge_pr.py", "--assert-settings"], "always",
      "the rules active on main differ from tools/ruleset.json or carry a parameter that file does not name, "
      "the ruleset is not active, it has bypass actors, or auto-merge is allowed; PARTLY where the token cannot read the last two"),

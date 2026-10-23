@@ -50,12 +50,23 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   Gate: `push-hook`, in local runs only, where it is red until that line was run; HAZARD (#4) on
   a clone where nobody runs the gates.
 - What the CI jobs depend on: PyYAML, pinned with the hash of one wheel in
-  `tools/review/requirements.txt` (the CPython 3.12 x86_64 wheel the image has: another Python
+  `tools/review/requirements.txt` (the CPython 3.12 x86_64 wheel the images have: another Python
   fails the install, loudly), and in the review job the Claude CLI, pinned to an exact version in
-  `.github/workflows/review.yml`. The runner is named by its versioned label: the forge offers no
-  digest for a hosted image. Of the image the tools use python3, node (for the CLI), gh (every
-  forge call) and git, none of them pinned: HAZARD (#15).
-  Gate: `ci-config` (pip with `--require-hashes`, the CLI's exact version, the runner label).
+  `.github/workflows/review.yml`. The `gates` job runs in the image `ci/Dockerfile` defines, named
+  in `gates.yml` by its digest: a base named by its digest, clang of the LLVM major the file names,
+  the newest stable one, from the packages LLVM publishes, the SDK `compiler/global.json` pins and gh, each download
+  checked by its hash or its key, as section 2 of the design record says (the owner, 2026-10-22,
+  "Public GHCR image"). `.github/workflows/image.yml` builds it and publishes it to the GitHub
+  container registry on a push that changes it; the walk of a change to it, and the local run of
+  the gates in the same image, are in
+  [knowledge/the-gates-job-runs-in-its-image.md](knowledge/the-gates-job-runs-in-its-image.md).
+  The other jobs run on hosted runners named by their versioned labels: the forge offers no
+  digest for a hosted image. Of those images the tools use python3, node (for the CLI), gh (every
+  forge call) and git, and of the gates image python3, git and the LLVM release, which the
+  distribution's and LLVM's packages give on the day the image is built: none of them pinned to a
+  version, HAZARD (#15).
+  Gate: `ci-config` (pip with `--require-hashes`, the CLI's exact version, the runner labels, the
+  gates image by its digest and the facts of its Dockerfile).
 
 ### Before debugging the diff: stale output and phantom results
 
@@ -197,7 +208,8 @@ rule, each rule with an id and a status, and `corpus/` holds its cases: one smal
 file, with what it prints or the error it raises. `knowledge/` and `guides/` hold what a later
 session must know; `INDEX.md` is their index. `tools/` holds the gates (one runner, `gates.py`),
 the reviewer and the merge tool; `.review/` holds what the reviewer enforces;
-`.github/workflows/` runs both, and the compiler's Windows job. `compiler/` is the compiler's
+`.github/workflows/` runs both, the compiler's Windows job and the build of the image `ci/Dockerfile`
+defines, which the `gates` job runs in. `compiler/` is the compiler's
 directory, the one directory the tree gate's allowlist was widened by for it: there it admits
 `.cs`, `.csproj`, `.sln`, `.props`, `.targets`, `.json`, `.md` and `.editorconfig` files outside
 `bin/`, `obj/` and dot-directories, plus `compiler/NuGet.config` by name, and C# sources and
@@ -424,9 +436,9 @@ Gate: review rule "rules for sessions".
 | what may exist in the tree, and no credential or machine-bound string in files and commit messages (`tree`, the pre-push hook) | future plans stay out (#2) |
 | merge checks on `main` (ruleset; `merge-checks` asserts it on every run and is red while it is off) | per-item approval for a merge over red (#3), and the window in which the ruleset is off (#27) |
 | every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout, a push with `--no-verify` (#4) |
-| workflow facts (`ci-config`) | wrap-up (#6) |
+| workflow facts, and the image the `gates` job runs in, named by its digest, with the facts of its Dockerfile (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
-| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30); the version of the clang the compiler found, and a fail on a refused one or none, which section 2 of the design record (decided there, round 20) requires of the gate, and the image with the pinned LLVM that the job `gates` runs in, which `ci-config` refuses as a job in a container, and the install of that release in the workflow `compiler-windows`, both of which section 2 (decided there, round 20) requires of this repository's CI, while the compiler under `compiler/` calls no clang and the gate reads no version (#37; checked 2026-10-20 against the sources of the compiler and of the gate, and 2026-10-22 against the three workflows) |
+| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30); the version of the clang the compiler found, and a fail on a refused one or none, which section 2 of the design record (decided there, round 20) requires of the gate, and the install of the pinned release in the workflow `compiler-windows`, which section 2 (decided there, round 20) requires of this repository's CI, while the compiler under `compiler/` calls no clang and the gate reads no version (#37; checked 2026-10-20 against the sources of the compiler and of the gate, and 2026-10-22 against the workflows; the image with the pinned LLVM that the job `gates` runs in is `ci-config`'s since 2026-10-22) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
@@ -435,7 +447,7 @@ Gate: review rule "rules for sessions".
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
 | | a merge by the button, which skips what only the merge tool does (#14) |
-| | the image's python3, node, gh and git, which no workflow pins (#15) |
+| | the hosted images' python3, node, gh and git, and the gates image's python3, git and LLVM release, pinned to no version (#15) |
 | | the gates job judging a pull request with the pull request's own gates (#16) |
 | | a review that stopped at the pass cap posting `success` (#17) |
 | | the evidence digest, which a recomputed hash passes (#18) |

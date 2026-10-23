@@ -10,22 +10,30 @@ on:
 permissions:
   contents: read
   issues: read  # pr-findings lists the collection ticket at the review cap
+  packages: read  # the image the job runs in
   pull-requests: read
 
 jobs:
   # One job, no `if`: a skipped job reports success to a required check. tools/gates.py runs every
-  # gate; its docstring is the one definition of which verdicts turn the run red. Facts of this file
-  # are pinned by tools/lint_ci.py.
+  # gate; its docstring is the one definition of which verdicts turn the run red. The job runs in the
+  # image ci/Dockerfile defines, named by its digest, which holds the SDK compiler/global.json pins and
+  # the LLVM the compiler pins. Facts of this file are pinned by tools/lint_ci.py.
   gates:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    container:
+      image: ghcr.io/symohtl/kurz-ci@sha256:50bd0536b02676f8c1ade22ed1e9035d2785af3baee16548876025e39ade8a1b
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
-        with:
-          global-json-file: compiler/global.json
+      # The job runs as the container's root and the runner's user owns the checkout: git refuses
+      # such a clone (`dubious ownership`) unless it is named safe.
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install pinned dependencies
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"

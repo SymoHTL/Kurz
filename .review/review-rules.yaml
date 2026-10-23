@@ -184,13 +184,14 @@ sections:
         the data tags.
 
   - name: workflows and settings
-    files: [".github/*", ".review/*", "tools/ruleset.json", "tools/review/requirements.txt", "tools/review/review.py", ".gitattributes", ".gitignore"]
+    files: [".github/*", "ci/*", ".review/*", "tools/ruleset.json", "tools/review/requirements.txt", "tools/review/review.py", ".gitattributes", ".gitignore"]
     rules:
       - >-
         An action referenced by anything but a full commit SHA (a tag is moved by whoever controls the
         action); a package, CLI or model that is not pinned to an exact version or digest. A hosted
         runner is named by its versioned label, never by a `-latest` label - the forge offers no digest
-        for a hosted image. The python3, node, gh and git of the image are not pinned (HAZARD #15):
+        for a hosted image. The python3, node, gh and git of the hosted images, and the python3, git
+        and LLVM release of the gates image (ci/Dockerfile), are not pinned to a version (HAZARD #15):
         a workflow that pins one of them, or a text that says they are pinned, contradicts that record.
       - A job whose skip would report success to a required check, a step that may fail without failing the run, or a job filtered by path.
       - The review workflow checking out, running or sourcing anything from the pull request.
