@@ -9,10 +9,9 @@ public static class Processes
     /// <summary>
     /// Runs a program to its end with both of its streams captured, or ends it when the time is up;
     /// the exit code with what it wrote. A program that is not there or does not start answers with
-    /// the code -1 and says so on its error stream. <paramref name="environment"/> sets or replaces
-    /// variables of the program's environment.
+    /// the code -1 and says so on its error stream.
     /// </summary>
-    public static (int Code, string Output, string Error) Capture(string file, IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan limit, IReadOnlyDictionary<string, string>? environment = null)
+    public static (int Code, string Output, string Error) Capture(string file, IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan limit)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         var info = new ProcessStartInfo(file)
@@ -28,11 +27,6 @@ public static class Processes
         foreach (var a in arguments)
         {
             info.ArgumentList.Add(a);
-        }
-
-        foreach (var (name, value) in environment ?? new Dictionary<string, string>())
-        {
-            info.Environment[name] = value;
         }
 
         try
