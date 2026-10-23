@@ -105,6 +105,17 @@ print(u)
 print("got {u}")
 ```
 
+A value of a generic `data` type (T19) shows the name its declaration gives, without the type
+arguments: `Pair<int, string>(1, "one")` shows `Pair { First = 1, Second = one }`, as a C# record
+does (§8, the owner, 2026-10-23).
+
+Case: [data/print-generic.kz](../corpus/data/print-generic.kz)
+```kurz
+data Pair<A, B>(A First, B Second)
+
+print(Pair<int, string>(1, "one"))
+```
+
 ### A4 (decided, §8) The text of the other values
 
 The other values have a text that is derived from their type, as a `data` value has (A3). A list
@@ -151,6 +162,20 @@ class Counter(mut int Count)
 
 c = Counter(0)
 print(c)
+```
+
+A value of a union (D9) shows the text of the value of its case: an `int | string` that holds 5
+shows `5`, and a `data` value with a field of that union `Box { V = 5 }`, as a C# record shows a
+field of type `object` (§8, the owner, 2026-10-23).
+
+Case: [data/print-union.kz](../corpus/data/print-union.kz)
+```kurz
+data Box(int | string V)
+
+int | string v = 5
+print(v)
+print(Box(5))
+print(Box("five"))
 ```
 
 ### A5 (decided, §8) How a class declares its text

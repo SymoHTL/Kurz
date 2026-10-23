@@ -166,7 +166,8 @@ No case: actors are outside this reference; that collections are values is shown
 ### M9 (assumed, §4, §5) The collections the corpus uses
 
 `List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method; `Count` is the number
-of items; `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
+of items, an `int`, and a list holds at most as many items as the largest `int`, an `Add` that
+would make it longer raising `allocation-failed` (§4, the owner, 2026-10-23 and 2026-10-24); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
 or beyond raises `index-out-of-range` (T14); `Where(test)` is the list of
 items that pass the test. `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the

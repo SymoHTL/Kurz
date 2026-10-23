@@ -213,8 +213,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// Whether two values of one type are equal: integers, <c>char</c> and <c>bool</c> by their bits, strings by their bytes (T18),
-    /// data by their type and their fields (D3, D15). <c>==</c> takes no union (T18), and a field of a union type compares by no
-    /// equality the record gives, so a data value with one is not compared.
+    /// data by their type and their fields (D3, D15), and the values of a field of a union by their case and that case's values
+    /// (D3, the owner, 2026-10-23).
     /// </summary>
     private string Equal(string left, string right, KurzType type, int line)
     {
@@ -224,8 +224,23 @@ public sealed partial class Emitter
                 return fn.Value($"call i1 {RuntimeFunction("Same")}(%kz.str {left}, %kz.str {right})");
             case PrimitiveType p when Types.IsInteger(p) || p.Kind is Primitive.Char or Primitive.Bool:
                 return fn.Value($"icmp eq {Ir(type)} {left}, {right}");
-            case UnionType:
-                throw Unsupported(line, $"`==` on a data value with a field of the union `{type}` (D3, T18)");
+            case UnionType union:
+                {
+                    var name = Helper($"equal.{Lower.Mangle(type)}", "i1", [Ir(type), Ir(type)], () =>
+                    {
+                        var tag = Tag("%a0", union);
+                        var same = fn.Value($"icmp eq i{Number(layout.TagBits(union))} {tag}, {Tag("%a1", union)}");
+                        var cases = fn.Label("cases");
+                        var differ = fn.Label("differ");
+                        fn.CondBranch(same, cases, differ);
+                        fn.Block(differ);
+                        fn.Return("i1 false");
+                        fn.Block(cases);
+                        ByCase(tag, union, union.Cases, c => fn.Return($"i1 {(c is VoidType ? "true" : Equal(Payload("%a0", union, c), Payload("%a1", union, c), c, line))}"));
+                    });
+                    return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
+                }
+
             case DataType:
                 {
                     var name = Helper($"equal.{Lower.Mangle(type)}", "i1", [Ir(type), Ir(type)], () => EqualBody((DataType)type, line));
@@ -287,17 +302,12 @@ public sealed partial class Emitter
 
     private string And(string a, string b) => a == "true" ? b : fn.Value($"and i1 {a}, {b}");
 
-    /// <summary>A3, A4: the text of a data value, its type's name and its fields, or its name alone without fields; of a block, of the type the block holds.</summary>
+    /// <summary>
+    /// A3, A4: the text of a data value, the name its declaration gives and its fields, or that name alone without fields; of a
+    /// block, of the type the block holds; of a union, the text of its case's value.
+    /// </summary>
     private string DerivedText(string value, KurzType type, int line)
     {
-        switch (type)
-        {
-            case DataType { TypeArguments.Count: > 0 } generic:
-                throw Unsupported(line, $"the text of a value of the generic data type `{generic}` (A3)");
-            case UnionType union:
-                throw Unsupported(line, $"the text of a value of the union `{union}` (A4, D9)");
-        }
-
         var name = Helper($"text.{Lower.Mangle(type)}", "%kz.str", [Ir(type)], () =>
         {
             switch (type)
@@ -313,6 +323,9 @@ public sealed partial class Emitter
                     break;
                 case DataType d:
                     fn.Return($"%kz.str {RecordText(d, Layout.Fields(d).Select((_, i) => fn.Value($"extractvalue {Ir(d)} %a0, {Number(i)}")).ToList(), line)}");
+                    break;
+                case UnionType u:
+                    ByCase(Tag("%a0", u), u, u.Cases.Where(c => c is not VoidType), c => fn.Return($"%kz.str {TextOf(Payload("%a0", u, c), c, line)}"));
                     break;
             }
         });

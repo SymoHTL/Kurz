@@ -179,10 +179,14 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(bare, "throw-bare"), 1, [], "error: thrown at program.kz:6:\nNotFound { Id = 4 }\n");
     }
 
+    [Fact]
+    public void A_data_type_the_emitter_does_not_lay_out_builds_where_no_code_needs_it()
+    {
+        // the owner, 2026-10-23, "At first use"; the theory below has the same type where code needs it
+        Ran(BuildAndRun("data Bag(List<int> Items)\n\nprint(1)\n", "unreached-declaration"), 0, ["1"], "");
+    }
+
     [Theory]
-    [InlineData("data Pair<A, B>(A First, B Second)\n\nprint(Pair<int, string>(1, \"one\"))\n", 3, "the text of a value of the generic data type `Pair<int, string>` (A3)")]
-    [InlineData("data Box(int | string V)\n\nprint(Box(1) == Box(1))\n", 3, "`==` on a data value with a field of the union `int | string` (D3, T18)")]
-    [InlineData("data Box(int | string V)\n\nprint(Box(1))\n", 3, "the text of a value of the union `int | string` (A4, D9)")]
     [InlineData("data User(int Id)\n\nprint(SizeOf<User>())\n", 3, "the size of a `User` (R14)")]
     [InlineData("data Thing(int A)\ndata Box<T>(T V) : Thing\n\nprint(Box<int>(1, 2).V)\n", 4, "a generic data type in a relation of inheritance, `Box<int>` (D6, T19)")]
     [InlineData("data Leaf\ndata Tree<T>(T V, Tree<T> | Leaf Next)\n\nprint(Tree<int>(1, Leaf).V)\n", 4, "a generic data type that holds a value of its own type, `Tree<int>` (D1, T19)")]

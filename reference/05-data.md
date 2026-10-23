@@ -33,7 +33,9 @@ be found in a map). Each field compares by the equality Kurz gives its type, a c
 K5, and NaN equal to NaN is the one thing taken from C#'s `Equals`, which holds for a `double` or `float` among
 the named fields of K5 as well; a method a class names `Equals` plays no part (K5) (the owner,
 2026-10-10, confirming the reading proposed after the review of round 13, and the NaN field under
-K5).
+K5). A field of a union (D9) compares equal when the two values hold the same case and the two
+values of that case are equal, as Rust's derived `PartialEq` compares a field of an enum (§4, the
+owner, 2026-10-23).
 
 Case: [classes/equal-by-nan.kz](../corpus/classes/equal-by-nan.kz)
 ```kurz
@@ -58,6 +60,15 @@ data Point(double X, double Y)
 double z = 0.0
 nan = z / z
 print(Point(nan, 0.0) == Point(nan, 0.0))
+```
+
+Case: [data/equality-union-field.kz](../corpus/data/equality-union-field.kz)
+```kurz
+data Box(int | string V)
+
+print(Box(1) == Box(1))
+print(Box(1) == Box(2))
+print(Box(1) == Box("1"))
 ```
 
 ### D4 (decided, §4) Immutable

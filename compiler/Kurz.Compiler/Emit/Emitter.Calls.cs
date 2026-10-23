@@ -296,13 +296,23 @@ public sealed partial class Emitter
         return fn.Value($"inttoptr i64 {Convert(value, sourceType, Types.Long, source.Line)} to ptr");
     }
 
-    /// <summary>R15: <c>string.FromRaw(p, n)</c>, the string of the <c>n</c> bytes at <c>p</c>, which it takes over.</summary>
+    /// <summary>
+    /// R15: <c>string.FromRaw(p, n)</c>, the string of the <c>n</c> bytes at <c>p</c>, which it takes over; an <c>n</c> above the largest
+    /// <c>int</c> ends the process as a refused allocation does (T15; the owner, 2026-10-23 and 2026-10-24).
+    /// </summary>
     private string EmitStringFromRaw(CallExpression c)
     {
         var info = Model.CallOf(c);
         var arguments = Arguments(c, info, j => j == 0 ? new PointerType(Types.Byte) : Types.Long, _ => false, _ => null, null, cConvention: false);
         var pointer = arguments[0]["ptr ".Length..];
         var count = arguments[1]["i64 ".Length..];
+        var tooLong = fn.Label("too.long");
+        var fits = fn.Label("fits");
+        fn.CondBranch(fn.Value($"icmp sgt i64 {count}, 2147483647"), tooLong, fits);
+        fn.Block(tooLong);
+        fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {count})");
+        fn.Unreachable();
+        fn.Block(fits);
         var withPointer = fn.Value($"insertvalue %kz.str undef, ptr {pointer}, 0");
         return fn.Value($"insertvalue %kz.str {withPointer}, i64 {count}, 1");
     }

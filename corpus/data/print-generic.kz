@@ -1,0 +1,7 @@
+// expect: output
+// | Pair { First = 1, Second = one }
+// rules: A3
+
+data Pair<A, B>(A First, B Second)
+
+print(Pair<int, string>(1, "one"))
