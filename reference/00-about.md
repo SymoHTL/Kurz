@@ -58,10 +58,10 @@ A case is a single file with no `project.kz`; its `// allow:` line gives it the 
 `raw native`, in that order, and each compiler's runner of the corpus reads it; a program outside the
 corpus takes no grant from it *(assumed: as §3 marks it)*.
 
-The ids of both kinds are listed in chapter 12. No tool runs a program or compares its output: the compiler's test suite parses each file and checks the errors of its
+The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
 except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13), whose front end the suite checks for no diagnostic, and which the checker, reading no `flags` type, holds to `not supported` and no error;
-it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; what a program prints, and an error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
+it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; and it builds every case that expects a run and that the compiler emits, runs it, and compares what it prints, its exit code and its error line with the header. What the other cases print, and an error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.
 
@@ -75,8 +75,8 @@ under which the output of a program differs by the machine that runs it; the cos
 Windows that expects the two-byte line break in a program's output reads bare line feeds). The corpus needs
 one way to show a result, and the record's samples use this word. The naming of the standard
 library is open (record, section 14), so the word can change. A `print` whose write fails raises the
-run-time error `print-failed` (§6, the owner, 2026-10-21), at the line of the `print` where the executable
-has its line tables (§6, an assumption there).
+run-time error `print-failed` (§6, the owner, 2026-10-21), at the file and the line of the `print`, which
+the `print` passes, in every build (§6, the owner, 2026-10-23).
 
 No case: every case that expects output shows it, and no case can make a write of standard output
 fail, which `print-failed` needs.

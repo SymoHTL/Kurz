@@ -5,12 +5,23 @@ extern "C" in "kernel32" {
     void* GetStdHandle(uint which)
     int WriteFile(void* file, byte* bytes, uint count, uint* written, void* overlapped)
     void ExitProcess(uint code)
+    void* VirtualAlloc(void* address, ulong size, uint type, uint protection)
+}
+
+// The start of the process: Windows raises no signal at a write to a closed pipe, whose `WriteFile`
+// returns the error itself.
+pub void Start() {
 }
 
 // `count` bytes from `bytes` written to standard output (`fd` 1) or standard error (`fd` 2) in one
-// call of `WriteFile`: the count written, or -1 where the system refused the write. One call takes
-// at most the 4294967295 bytes a `uint` counts.
+// call of `WriteFile`: the count written, or -1 where the system refused the write, and for any other
+// `fd`, as Linux's `write` refuses a descriptor that is not open. One call takes at most the
+// 4294967295 bytes a `uint` counts.
 pub long Write(int fd, byte* bytes, long count) {
+    if fd != 1 && fd != 2 {
+        return -1
+    }
+
     // STD_OUTPUT_HANDLE is the DWORD -11, STD_ERROR_HANDLE the DWORD -12
     mut uint which = 4294967285
     if fd == 2 {
@@ -41,4 +52,16 @@ pub void Exit(int code) {
     raw {
         ExitProcess(uint(code))
     }
+}
+
+// `bytes` bytes of memory from the system, readable, writable and zeroed, by `VirtualAlloc`
+// (`MEM_COMMIT | MEM_RESERVE` is 12288, `PAGE_READWRITE` 4): their address, or null where the system
+// refuses.
+pub byte* Memory(long bytes) {
+    mut byte* p = null
+    raw {
+        p = Ptr<byte>(VirtualAlloc(null, ulong(bytes), 12288, 4))
+    }
+
+    return p
 }

@@ -4,8 +4,9 @@ Kurz is a programming language. This repository is **public**. It holds the desi
 language reference with its conformance corpus, a knowledge store, the quality tools that gate
 them, and `compiler/`, the one directory the tree gate admits for the compiler's files since the
 change that retired the design-phase rule (pull request 29), after the owner said build on 2026-10-09.
-The quality tools compile nothing and run no corpus case; nothing here runs the corpus (HAZARD #1), and
-`compiler/` is where a compiler of Kurz is admitted.
+The quality tools compile nothing; `compiler/` is where a compiler of Kurz is admitted, and its suite
+builds and runs every corpus case the compiler emits, while the expectation of every other case is
+read against its rules (HAZARD #1).
 
 Load [INDEX.md](INDEX.md) first and open an entry when its hook matches the task. Long procedures
 are skills in `.claude/skills/`: `change-walk` (branch, gates, pull request, review, merge) and
@@ -151,10 +152,15 @@ Each line names a trap; its evidence is in the entry it links.
    completed off-pipeline review adds, `ci-config` for the clause of the workflow that skips the
    Ready event of a labelled head; counting and naming the bill, and the go-ahead for a run off the
    pipeline, are a `judgment step`.
-7. **An expectation nobody runs is not a proof.** Nothing runs `corpus/`. The lint checks the
-   shape of a case; whether its expected output or error is right is decided by reading it
-   against the rules it names ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
-   HAZARD (#1); review rule "corpus" carries the defect shapes.
+7. **An expectation nobody runs is not a proof.** The compiler's corpus runner (`RunTests` in
+   `compiler/Kurz.Compiler.Tests/`) builds every case that expects a run and that the compiler
+   emits, runs it, and holds what it prints, its exit code and its error line to the header; it
+   lists each case it does not run with the construct or the reason, refuses a stale entry and
+   has a floor. The lint checks the shape of every case; the expectation of a case the runner does
+   not run is decided by reading it against the rules it names
+   ([knowledge/samples-obey-the-rules-beside-them.md](knowledge/samples-obey-the-rules-beside-them.md)).
+   Gate: `compiler-tests` for the cases the runner runs; HAZARD (#1) for the rest; review rule
+   "corpus" carries the defect shapes.
 
 ## CI
 
@@ -229,12 +235,15 @@ project files nowhere else (since pull
 request 29 retired the design-phase rule, after the owner said build on 2026-10-09). It holds the
 library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Semantics/`
 checks the tree against the rules of chapters 1 to 3, 5, 6, 8 to 10 and 11's raw forms that
-`compiler/README.md` lists, and says `not supported` to the rest, `Corpus/` reads a case header,
-`Build/` finds the clang of the pinned LLVM major, carries and checks the runtime, and is the command `kurz`,
-whose program is `Kurz/`), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through the
-front end and every case it reads clean through the checker, and checks the runtime for every target, and
+`compiler/README.md` lists, and says `not supported` to the rest, `Emit/` turns a program the checker read
+in full and the runtime of its target into LLVM's IR, `Corpus/` reads a case header, `Build/` finds the clang
+of the pinned LLVM major, carries and checks the runtime, builds a program into an executable, and is the
+command `kurz`, whose program is `Kurz/`), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case
+through the front end and every case it reads clean through the checker, builds and runs every case that
+expects a run and that the compiler emits, and checks the runtime for every target, and
 `compiler/README.md`. `runtime/` holds the runtime a built program links, written in Kurz (design record,
-section 2): `common/` and a directory per target, where the tree gate admits `.kz` files, and which the
+section 2): `common/` and a directory per target, where the tree gate admits `.kz` files at any depth and the
+compiler refuses or says `not supported` to a place it does not read, and which the
 build of the compiler embeds. The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
@@ -454,9 +463,9 @@ Gate: review rule "rules for sessions".
 | every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout, a push with `--no-verify` (#4) |
 | workflow facts, the image the `gates` job runs in, named by its digest, with the facts of its Dockerfile, and the LLVM major of that image and of the Windows job's install, held to the compiler's (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
-| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
+| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, every corpus case the compiler emits builds and runs as its header says, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
-| title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
+| title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, and the expectations of the corpus cases the compiler does not emit, being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
 | at most one review round per pull request, and at the cap a finding moved to the collection ticket (`self-tests`) | the round labels, which anyone who may triage can change, a second issue with the collection label, two runs that start at the same moment, and a dry run, which no label counts (#41) |

@@ -600,8 +600,9 @@ holds the tables could not be read or the raising frame has no entry in them, th
 carries in place of the line the note that the run-time paragraph of chapter 12 gives for that
 case, the first the crash path meets where more than one holds, and the `Crashed` value's place
 holds the line 0 (§6, an assumption there as to the notes, their order and the line 0).
-An allocation that fails ends the whole process with the exit code 1 and a line on
-standard error, because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
+An allocation that fails ends the whole process with the exit code 1 and the line
+`error: allocation-failed (<n> bytes)` on standard error, with the size asked for, and no place and no trace (§6, the owner, 2026-10-23,
+as Rust's hook for an allocation error names the size), because the memory the actors' heaps are carved from is the process's, and no actor can run on (the owner, 2026-10-09, against
 both ending the process, under which one runaway recursion in a worker takes the server down, and
 against an allocation failure as a `Reason`, which would need a reserve to build the `Crashed` value
 when nothing can be allocated; the cost is a guard page per actor stack and a program that cannot recover from memory pressure; the

@@ -123,6 +123,29 @@ public sealed partial class Clang
         }
     }
 
+    /// <summary>
+    /// Compiles the IR at <paramref name="irPath"/> and links it into the executable at <paramref name="outputPath"/>, with the
+    /// C library as the platform links it and the libraries the program's C functions come from (R16); on Windows with the
+    /// linker of the same release where the installer put one beside this clang. The failure, with what clang wrote, where it
+    /// does not exit with 0.
+    /// </summary>
+    public void Build(string irPath, string outputPath, IReadOnlyList<string> libraries)
+    {
+        ArgumentNullException.ThrowIfNull(libraries);
+        var arguments = new List<string> { "-O2", irPath, "-o", outputPath };
+        if (OperatingSystem.IsWindows() && File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Path) ?? string.Empty, "lld-link.exe")))
+        {
+            arguments.Add("-fuse-ld=lld");
+        }
+
+        arguments.AddRange(libraries.Select(l => "-l" + l));
+        var (code, _, error) = Processes.Capture(Path, arguments, null, TimeSpan.FromMinutes(2));
+        if (code != 0)
+        {
+            throw new ToolchainException($"{Path} exited with {code.ToString(CultureInfo.InvariantCulture)} and wrote:\n{error.TrimEnd()}");
+        }
+    }
+
     /// <summary>Runs the file with <c>--version</c>; what it wrote, or null where it did not start or did not exit with 0.</summary>
     private static string? Ask(string file)
     {
@@ -138,3 +161,6 @@ public sealed partial class Clang
 /// names the places tried, in order.
 /// </summary>
 public sealed record ClangSearch(Clang? Found, string? Place, string? Version, IReadOnlyList<string> Looked, bool Apple = false);
+
+/// <summary>A failure of clang on a build, saying what clang wrote: the program reached it accepted, so the failure is the toolchain's or the compiler's, never the program's.</summary>
+public sealed class ToolchainException(string message) : Exception(message);
