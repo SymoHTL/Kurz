@@ -5,9 +5,11 @@ working directory and its parents, not the directory of the solution it is given
 packages that the lock files pin (a restore in locked mode refuses a package the lock files do not
 name), from the one package source compiler/NuGet.config names, and with the build servers off, so
 that no MSBuild node or compiler server outlives the command and holds its output open past the
-timeout.
+timeout. After the tests it runs the command it built, `kurz --version`, and prints what the
+command wrote: the compiler's version, the major release of LLVM the compiler pins and the clang
+it found with that clang's release (design record, section 2, round 20).
 
-  compiler_gate.py               build and test; exit 0 when every check passed
+  compiler_gate.py               build, test and ask the command; exit 0 when every check passed
   compiler_gate.py --self-test
 
 Red when: compiler/NuGet.config is missing, is not well-formed XML, does not open its package
@@ -18,7 +20,9 @@ missing or the build fails (the output names the first errors); a test fails; a 
 skipped test is work nobody checked that reads as green); fewer tests passed than FLOOR, or no
 summary line was printed at all, so that a run that tested nothing cannot pass; the test command
 exited non-zero although no test failed (a project that did not build beside one that did); the
-test command ran out of time. The summary line is the one the test runner prints,
+test command ran out of time; `kurz --version` exited with another code than 0, which the command
+does where it refused the clang it found or found none, did not start or ran out of time, or exited
+with 0 and named no clang release. The summary line is the one the test runner prints,
 `Passed! - Failed: 0, Passed: N, Skipped: 0, Total: N`, one per test project, and the counts are
 summed over them."""
 import os
@@ -36,6 +40,10 @@ CONFIG = "compiler/NuGet.config"
 FLOOR = 1000  # below the tests the suites hold, above what is left without either corpus theory (over 300 cases each): a run that lost a project or a corpus theory cannot pass
 TIMEOUT = 900  # seconds for restore, build and tests together
 COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreLockedMode=true", "--disable-build-servers"]
+# the command the test run built, run without a build of its own; the dotnet host reads global.json from CWD as for the tests
+VERSION_COMMAND = ["dotnet", "run", "--project", "Kurz", "-c", "Release", "--no-build", "--", "--version"]
+VERSION_TIMEOUT = 120  # seconds: the command starts and asks one clang for its version
+CLANG_RELEASE = re.compile(r"^clang version: \d+\.\d+\.\d+$", re.M)
 SUMMARY = re.compile(r"^(Passed|Failed)!\s+-\s+Failed:\s+(\d+),\s+Passed:\s+(\d+),\s+Skipped:\s+(\d+),\s+Total:\s+(\d+)", re.M)
 ERROR_LINE = re.compile(r"^.*(?:error [A-Z]+\d+|error MSB\d+|error NU\d+).*$", re.M)
 
@@ -78,6 +86,29 @@ def run_tests(cwd=None, timeout=TIMEOUT, run=subprocess.run):
     return p.returncode, p.stdout + p.stderr
 
 
+def run_version(cwd=None, timeout=VERSION_TIMEOUT, run=subprocess.run):
+    """(exit code, standard output, standard error) of `kurz --version`, run inside compiler/ unless
+    cwd says otherwise. A command that cannot start or ran out of time is a refusal."""
+    try:
+        p = run(VERSION_COMMAND, cwd=cwd or os.path.join(kit.ROOT, CWD), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise kit.Unanswered(f"kurz --version: no answer within {timeout} s") from None
+    except OSError as e:
+        raise kit.Refused(f"kurz --version: {type(e).__name__}: {e}") from None
+    return p.returncode, p.stdout, p.stderr
+
+
+def judge_version(code, output, error):
+    """The errors of a `kurz --version` run: an exit code other than 0, with what the command wrote on
+    standard error, or a 0 with no line that names the release of the clang it found, which would
+    pass a command that asked no clang."""
+    if code != 0:
+        return [f"kurz --version exited {code}: " + " | ".join(line.strip() for line in error.splitlines() if line.strip())[:600]]
+    if not CLANG_RELEASE.search(output):
+        return ["kurz --version exited 0 and named no clang release: nothing was proven"]
+    return []
+
+
 def judge(code, output, floor=FLOOR):
     """(errors, counts) from the test command's exit code and output. counts = (failed, passed, skipped, total)."""
     summaries = SUMMARY.findall(output)
@@ -117,6 +148,13 @@ def main():
     errors, (failed, passed, skipped, total) = judge(code, output)
     if errors:
         print(output[-6000:])
+    try:
+        version_code, version_output, version_error = run_version()
+        print("kurz --version:")
+        print((version_output + version_error).rstrip())
+        errors += judge_version(version_code, version_output, version_error)
+    except kit.Refused as e:
+        errors.append(str(e))
     for e in errors:
         print("ERROR:", e)
     print(f"compiler tests: {passed} passed, {failed} failed, {skipped} skipped, {total} total, {len(errors)} errors")
@@ -132,6 +170,10 @@ CONFIG_TEXT = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- one source -->\
                "    <add key=\"one\" value=\"https://example.invalid/v3/index.json\" />\n"
                "  </packageSources>\n  <packageSourceMapping>\n    <packageSource key=\"one\">\n      <package pattern=\"*\" />\n    </packageSource>\n"
                "  </packageSourceMapping>\n</configuration>\n")
+
+
+VERSION_OUTPUT = "kurz 0.1.0\nLLVM version: 23\nclang: /usr/bin/clang-23\nclang version: 23.1.4\n"
+NO_CLANG = "error: no clang found\n  note: looked for clang-23 and clang on the path\n  help: install LLVM 23\n"
 
 
 def self_test():
@@ -169,6 +211,23 @@ def self_test():
         cases.append(("a run out of time is refused", False, "no exception"))
     except kit.Unanswered as e:
         cases.append(("a run out of time is refused", "within 1 s" in str(e), str(e)))
+    errors = judge_version(0, VERSION_OUTPUT, "")
+    cases.append(("a version run that names the clang it found passes", not errors, errors))
+    errors = judge_version(1, VERSION_OUTPUT.split("clang:")[0], NO_CLANG)
+    cases.append(("a version run that exits 1 is red and names the command's error", any("exited 1" in e and "no clang found" in e for e in errors), errors))
+    errors = judge_version(0, VERSION_OUTPUT.split("clang:")[0], "")
+    cases.append(("a version run that exits 0 and names no clang release is red", any("named no clang release" in e for e in errors), errors))
+    cases.append(("the version run asks the built command for its version, with no build of its own",
+                  VERSION_COMMAND[-2:] == ["--", "--version"] and "--no-build" in VERSION_COMMAND and "Release" in VERSION_COMMAND, VERSION_COMMAND))
+
+    def version_out_of_time(*args, **kwargs):
+        raise subprocess.TimeoutExpired(VERSION_COMMAND, kwargs.get("timeout"))
+
+    try:
+        run_version(timeout=1, run=version_out_of_time)
+        cases.append(("a version run out of time is refused", False, "no exception"))
+    except kit.Unanswered as e:
+        cases.append(("a version run out of time is refused", "within 1 s" in str(e), str(e)))
     with kit.scratch("compiler-gate-") as root:
         cases.append(("a missing package config is red", any("missing" in e for e in config_errors(root)), config_errors(root)))
         os.makedirs(os.path.join(root, "compiler"))

@@ -10,7 +10,9 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   without an error against the rules of chapters 1 to 3, 5, 6, 8 to 10 and the raw forms of 11
   (the section "What the checker reads" below) and says `not supported` to a construct of the
   other chapters, `Corpus/` reads the header of a corpus case in the shape `reference/00-about.md`
-  states, its grant line among it (R7).
+  states, its grant line among it (R7), and `Build/` finds the clang of the release of LLVM the
+  compiler pins and is the command (the section "The command" below).
+- `Kurz/`: the command `kurz`, one line over `Build/Command.cs`.
 - `Kurz.Compiler.Tests/`: xunit tests. Every program the lexer, parser and checker tests read
   stands inline in the test, and the corpus suite reads the cases where they lie, under `corpus/`:
   the tree gate admits no `.kz` file under `compiler/`. That suite runs every corpus case through
@@ -18,6 +20,9 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   the errors each reports are exactly the ones the case's header expects of it, the checker taking
   the grants of the case's `// allow:` line as a project file would give them (R7); a case that
   uses a construct the checker does not read must get `not supported` and no error from it.
+  A second suite takes the clang search over a path and a Program Files directory it makes, with
+  the answers to `--version` it gives, and over this machine's own environment; a third runs the
+  command `kurz` as a process.
 
 ## Building and testing
 
@@ -39,7 +44,71 @@ The gate `compiler-tests` (`tools/compiler_gate.py`) reads `NuGet.config` as XML
 when it is missing, is not well-formed, does not open its package sources with `<clear />` or maps
 no package pattern to a source; runs that command from inside `compiler/`; refuses a failed or a
 skipped test, a run with fewer passed tests than its floor, no summary line, a non-zero exit with
-no failed test, a missing `dotnet` and a run out of time; and is part of every gates run.
+no failed test, a missing `dotnet` and a run out of time; then runs `kurz --version`, the command
+the test run built, prints what it wrote and refuses an exit code other than 0, which the command
+gives where it refused the clang it found or found none, and a 0 with no line that names the clang's
+release; and is part of every gates run.
+
+The suites need the clang of the pinned release on the machine that runs them, as every build
+does (design record, section 2): on a machine without it, the test of this machine's search and
+the test of the command's `--version` fail with the command's own lines, and the gate fails on
+`kurz --version`. The image the `gates` job runs in has it, and so does a local run of the gates in
+that image (`knowledge/the-gates-job-runs-in-its-image.md`); the workflow `compiler-windows`
+installs it on every run.
+
+## The command
+
+`kurz --version` writes the compiler's version, the major release of LLVM the compiler pins and
+the clang it found with that clang's release, on standard output, in the form of the lines
+`rustc -vV` writes, and exits with 0:
+
+    kurz 0.1.0
+    LLVM version: 23
+    clang: /usr/bin/clang-23
+    clang version: 23.1.4
+
+The compiler accepts one major release of LLVM, `Clang.PinnedMajor` in `Build/Clang.cs`, which
+`tools/lint_ci.py` holds the CI image and the Windows job to. The search tries `clang-23` on the
+path, then `clang` on the path, and on Windows then `clang.exe` in `LLVM\bin` under the directory
+the `ProgramFiles` variable names, where the LLVM installer puts it (design record, section 2,
+round 20). It resolves each name through the path's directories itself and runs the file by its
+full path, so that the places the operating system would search beside the path play no part, and
+asks the file it found for `--version`. The first place that holds such a file decides: a clang of
+another major, or a file whose answer names no clang release, is refused, and the search ends
+there. A refusal, or a search that found nothing, writes the first two lines on standard output,
+the failure on standard error in the record's form of the command's own failures, and exits
+with 1:
+
+    error: clang 20.1.2 is not LLVM 23
+      note: found at /usr/local/bin/clang
+      help: install LLVM 23, ahead of this clang on the path
+
+    error: no clang found
+      note: looked for clang-23 and clang on the path
+      help: install LLVM 23
+
+On Windows the note of a search that found nothing also names the installer's directory. A
+command line the command cannot read gets the usage, `usage: kurz --version`, on standard error
+and the exit code 1.
+
+### Readings the record leaves open to the command
+
+Each is the reading of this directory, not a decision, pinned by a test named with it; a design
+round can ask about it.
+
+- Section 2, round 20, names what `--version` writes and not its words: the lines above, pinned by
+  `CommandTests.Version_names_the_compiler_the_pinned_major_and_the_clang_found`; the compiler's
+  version is the `Version` of `Directory.Build.props`, 0.1.0, with no commit appended.
+- Section 2 gives the command's own failures their form and not their words: the lines above, the
+  product pass's proposal, taken as its default on 2026-10-22 and said back to the owner, pinned by `ClangTests` and
+  `CommandTests.Version_with_no_clang_on_the_path_writes_its_first_lines_the_places_looked_at_and_exits_1`;
+  the help of a refused clang on the path adds where the pinned one must stand, since the first
+  place decides.
+- Section 2, round 20: that the first place that holds a clang decides and its refusal ends the
+  search is the record's own reading of the answer, said back to the owner; pinned by
+  `ClangTests.The_first_place_that_holds_a_clang_decides_and_its_refusal_ends_the_search`.
+- `--version` writes its first two lines before a failure as after a success, so that a caller
+  reads the pinned major whatever the search found.
 
 ## What the compiler says about a program
 

@@ -84,15 +84,11 @@ flowchart TD
         no test summary line at all, fewer passed tests than the floor, a skipped test, a non-zero exit with no failed test;
         compiler/NuGet.config missing, without the clear of the inherited sources or without a source mapping;
         a restore outside the lock files (locked mode), an SDK other than the one compiler/global.json pins;
-        dotnet missing or out of time. Read: the output of dotnet test, one summary per test project, summed;
+        dotnet missing or out of time; kurz --version, which it prints, refused the clang it found or found none,
+        or named no clang release. Read: the output of dotnet test, one summary per test project, summed;
         the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
         Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's and the
-        checker's errors against each header and runs no program; the version of the clang the compiler found, printed, and a fail when the compiler
-        refused it or found none, which section 2 of the design record (decided there, round 20) requires of this gate,
-        and the install of that release in the workflow compiler-windows, which section 2 (decided there, round 20)
-        requires of this repository's CI: the compiler under
-        compiler/ calls no clang and this gate reads no version (checked 2026-10-20: the sources of both; 2026-10-22: the workflows), HAZARD issue 37.
-        The image with the pinned LLVM that the job gates runs in is G4's since 2026-10-22"]
+        checker's errors against each header and runs no program"]
         G4["ci-config: a pinned fact of a workflow changed. All four workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
@@ -110,13 +106,17 @@ flowchart TD
         a CLI that is not at an exact version.
         compiler-windows.yml: another label than the versioned Windows one, an if, a wider token, a second job,
         a checkout that keeps the credential, no SDK step, a second one or one with a version typed in the workflow,
-        an env on the compiler step.
+        an env on the compiler step, an LLVM install that is not the pinned script (the archive checked by its
+        SHA-256 before it is unpacked), an LLVM_VERSION of another major than the compiler's Clang.PinnedMajor,
+        an LLVM_SHA256 that is no SHA-256, a third variable in the install's env, no cache of the archive
+        before the install, or one keyed by another release.
         image.yml: triggers other than a push that changes ci/Dockerfile or the workflow, on any branch, and a dispatch;
         a token other than contents read and packages write; an if, a second job, a checkout that keeps the credential;
         a publish step other than the pinned login through standard input, build, push and digest line.
         ci/Dockerfile: a base not named by its digest, a second FROM, an SDK other than compiler/global.json's, a
         download used unchecked (the LLVM key by its fingerprint, the SDK by its SHA-512, gh by its SHA-256), an LLVM
-        major that is no number. A workflow file without facts here.
+        major that is no number or not the compiler's Clang.PinnedMajor, or a compiler that names no such major.
+        A workflow file without facts here.
         The hosted images' python3, node, gh and git, and the gates image's python3, git and LLVM release, are
         pinned to no version: HAZARD issue 15"]
         G5["merge-checks: live rules on main differ from tools/ruleset.json

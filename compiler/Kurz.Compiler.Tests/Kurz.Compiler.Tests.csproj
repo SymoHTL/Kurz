@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kurz.Compiler\Kurz.Compiler.csproj" />
+    <!-- the command, built beside the suite, which runs it as a process -->
+    <ProjectReference Include="..\Kurz\Kurz.csproj" />
   </ItemGroup>
 
 </Project>

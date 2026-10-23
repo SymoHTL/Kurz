@@ -57,7 +57,8 @@ GATES = [
      "floor, a test was skipped, or the test command exited non-zero with no failed test; the restore is not the one the lock "
      "files pin (locked mode) or the SDK not the one global.json pins, which the command reads from inside compiler/; "
      "compiler/NuGet.config is missing, is not well-formed XML, does not open its package sources with a clear or maps no "
-     "package to a source; the dotnet command is missing or ran out of time"),
+     "package to a source; the dotnet command is missing or ran out of time; `kurz --version`, which it prints, refused the "
+     "clang it found or found none, or named no clang release"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "
      "a job beside services, or in a container but the gates job in the repository's image named by its digest, with no SDK "
@@ -66,8 +67,10 @@ GATES = [
      "or a push trigger not limited to main; a wider token; "
      "a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the "
      "pinned one; the compiler job on another label than its versioned Windows one, an SDK step that does not take its version "
-     "from compiler/global.json; the image workflow's triggers, token, checkout or publish step; a base of ci/Dockerfile not "
-     "named by its digest, an SDK other than global.json's, or a download it uses unchecked; a workflow without facts"),
+     "from compiler/global.json, an LLVM install that is not the pinned script, or of another major than the compiler pins, "
+     "or with its archive's cache missing or keyed by another release; the image workflow's triggers, token, checkout or "
+     "publish step; a base of ci/Dockerfile not named by its digest, an SDK other than global.json's, an LLVM major other "
+     "than the compiler's, or a download it uses unchecked; a workflow without facts"),
     ("merge-checks", ["tools/merge_pr.py", "--assert-settings"], "always",
      "the rules active on main differ from tools/ruleset.json or carry a parameter that file does not name, "
      "the ruleset is not active, it has bypass actors, or auto-merge is allowed; PARTLY where the token cannot read the last two"),

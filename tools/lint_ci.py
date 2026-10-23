@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit facts of the three workflows. A one-token YAML fact that nothing compiles gets a check here:
+"""Unit facts of the four workflows and of the image the gates job runs in. A one-token YAML fact that nothing compiles gets a check here:
 - all: actions pinned by commit SHA, the hosted runner named by its versioned label (the forge
   offers no digest for a hosted image), a timeout on every job, pip with
   --require-hashes, no job or step that may fail quietly (`continue-on-error`), no step-level `if`,
@@ -30,9 +30,13 @@
   runs the copy with this repository's token (HAZARD #11); the lint of that branch is its own copy;
 - compiler-windows.yml: the same events as gates.yml, no filter; exactly one job, `compiler-windows`,
   with no `if`, on the versioned Windows label, with a timeout; a token that reads and nothing more;
-  no secret; one checkout that keeps no credential, one SDK step from compiler/global.json; the last
-  step runs the compiler gate with no env and carries nothing but its name and run. The job is not a
-  required check of the ruleset;
+  no secret; one checkout that keeps no credential, one SDK step from compiler/global.json; one cache
+  of LLVM's archive for Windows and after it one step that installs it, running exactly the pinned
+  script, which checks the archive by its SHA-256 before it unpacks it into LLVM's installer
+  directory, with the release in LLVM_VERSION, of the major the compiler pins (Clang.PinnedMajor in
+  compiler/Kurz.Compiler/Build/Clang.cs), the hash in LLVM_SHA256, and the cache keyed by that
+  release; the last step runs the compiler gate with no env and carries nothing but its name and
+  run. The job is not a required check of the ruleset;
 - image.yml: runs on a push that changes ci/Dockerfile or the workflow itself, on any branch, so that
   a pull request can name the image its own push built, and on a manual dispatch; exactly one job,
   `image`, with no `if`; a token that reads the code and writes the packages; one checkout that
@@ -41,7 +45,7 @@
   its name, env and run;
 - ci/Dockerfile: one FROM, its image named by its digest; the .NET SDK of compiler/global.json; each
   download checked before it is used, the LLVM key by its fingerprint, the SDK by its SHA-512 and gh
-  by its SHA-256; clang of the LLVM major the file names.
+  by its SHA-256; clang of the LLVM major the file names, which is the major the compiler pins.
 `--self-test` breaks each fact in the real files, one token at a time, and expects its error."""
 import json
 import os
@@ -57,6 +61,28 @@ import kit  # noqa: E402
 WORKFLOWS = ".github/workflows"
 FILES = ["compiler-windows.yml", "gates.yml", "image.yml", "review.yml"]
 DOCKERFILE = "ci/Dockerfile"
+CLANG_CS = "compiler/Kurz.Compiler/Build/Clang.cs"  # the one definition of the LLVM major the compiler accepts
+PIN = re.compile(r"(?m)^\s*public const int PinnedMajor = (\d+);")
+LLVM_ARCHIVE = "${{ runner.temp }}/llvm-archive"
+LLVM_ENV = {"LLVM_VERSION", "LLVM_SHA256"}
+LLVM_RUN = "\n".join([
+    "$PSNativeCommandUseErrorActionPreference = $true",
+    "$ProgressPreference = 'SilentlyContinue'",
+    '$name = "clang+llvm-$env:LLVM_VERSION-x86_64-pc-windows-msvc.tar.zst"',
+    "$archive = Join-Path $env:RUNNER_TEMP llvm-archive $name",
+    "if (-not (Test-Path $archive)) {",
+    "  New-Item -ItemType Directory -Force (Split-Path $archive) | Out-Null",
+    '  Invoke-WebRequest "https://github.com/llvm/llvm-project/releases/download/llvmorg-$env:LLVM_VERSION/$name" -OutFile $archive',
+    "}",
+    'if ((Get-FileHash -Algorithm SHA256 $archive).Hash -ne $env:LLVM_SHA256) { throw "$name is not the archive LLVM_SHA256 pins" }',
+    "$llvm = Join-Path $env:ProgramFiles LLVM",
+    "if (Test-Path $llvm) { Remove-Item -Recurse -Force $llvm }",
+    "New-Item -ItemType Directory $llvm | Out-Null",
+    "$tar = Join-Path $env:RUNNER_TEMP llvm.tar",
+    "zstd -d -q -f --long=31 $archive -o $tar",
+    "tar -xf $tar -C $llvm --strip-components 1",
+    "& (Join-Path $llvm bin clang.exe) --version",
+])
 GLOBAL_JSON = "compiler/global.json"
 IMAGE = "ghcr.io/symohtl/kurz-ci"
 IMAGE_CREDENTIALS = {"username": "${{ github.actor }}", "password": "${{ github.token }}"}
@@ -266,7 +292,41 @@ def gates_facts(text):
     return errors
 
 
-def compiler_facts(text):
+def read_pin(text):
+    """The LLVM major the compiler pins, from the text of CLANG_CS, or None where it names none."""
+    match = PIN.search(text)
+    return int(match.group(1)) if match else None
+
+
+def llvm_errors(name, steps, pin):
+    """The Windows job's install of the pinned LLVM: one step that runs exactly LLVM_RUN, with nothing in
+    its env but the release, of the major the compiler pins, and its SHA-256; before it one cache of
+    the archive, keyed by that release."""
+    installs = [i for i, s in enumerate(steps) if str(s.get("run", "")).strip() == LLVM_RUN]
+    if len(installs) != 1:
+        return [f"{name}: expected exactly one step that installs the pinned LLVM, running exactly the pinned script, found {len(installs)}"]
+    i = installs[0]
+    step = steps[i]
+    env = step.get("env") or {}
+    errors = []
+    if set(step) - STEP_KEYS:
+        errors.append(f"{name}: the LLVM install may carry only name, env and run, found {sorted(set(step) - STEP_KEYS)}")
+    if set(env) != LLVM_ENV:
+        errors.append(f"{name}: the LLVM install's env must be exactly {sorted(LLVM_ENV)}, found {sorted(env)}")
+    version = str(env.get("LLVM_VERSION", ""))
+    match = re.fullmatch(r"(\d+)\.\d+\.\d+", version)
+    if pin is None or not match or int(match.group(1)) != pin:
+        errors.append(f"{name}: LLVM_VERSION is {version}, while {CLANG_CS} pins LLVM {pin}")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(env.get("LLVM_SHA256", ""))):
+        errors.append(f"{name}: LLVM_SHA256 must be the archive's SHA-256, 64 hex digits")
+    caches = [j for j, s in enumerate(steps) if str(s.get("uses", "")).startswith("actions/cache@")]
+    expected = {"path": LLVM_ARCHIVE, "key": f"llvm-{version}-x86_64-pc-windows-msvc"}
+    if len(caches) != 1 or caches[0] > i or (steps[caches[0]].get("with") or {}) != expected:
+        errors.append(f"{name}: expected one cache of the archive before the install, with exactly {expected}")
+    return errors
+
+
+def compiler_facts(text, pin):
     name = "compiler-windows.yml"
     try:
         data, on = parse(text)
@@ -283,6 +343,7 @@ def compiler_facts(text):
     steps = job.get("steps") or []
     errors += checkout_errors(name, steps)
     errors += sdk_step_errors(name, steps)
+    errors += llvm_errors(name, steps, pin)
     step, _ = deciding_step(name, steps, "python tools/compiler_gate.py", "compiler", set())
     return errors + step
 
@@ -312,8 +373,8 @@ def image_facts(text):
     return errors
 
 
-def dockerfile_facts(text, global_json):
-    """The image's facts, against the SDK version `global_json` pins."""
+def dockerfile_facts(text, global_json, pin):
+    """The image's facts, against the SDK version `global_json` pins and the LLVM major the compiler pins."""
     name = DOCKERFILE
     args = dict(re.findall(r"(?m)^ARG (\w+)=(\S+)$", text))
     errors = []
@@ -334,6 +395,8 @@ def dockerfile_facts(text, global_json):
             errors.append(f"{name}: a download is used unchecked: ARG {arg} of {digits} hex digits and `{check}` must both stand")
     if not re.fullmatch(r"\d+", args.get("LLVM_MAJOR", "")) or "clang-$LLVM_MAJOR" not in text:
         errors.append(f"{name}: ARG LLVM_MAJOR must be a major release, and the image must install clang-$LLVM_MAJOR")
+    if pin is None or args.get("LLVM_MAJOR") != str(pin):
+        errors.append(f"{name}: ARG LLVM_MAJOR is {args.get('LLVM_MAJOR')}, while {CLANG_CS} pins LLVM {pin}")
     return errors
 
 
@@ -396,8 +459,15 @@ def lint(root):
         listed = sorted(os.listdir(os.path.join(root, WORKFLOWS)))
     except OSError as e:
         return [f"{WORKFLOWS} cannot be listed: {type(e).__name__}"], 0
-    for fname, facts in (("compiler-windows.yml", compiler_facts), ("gates.yml", gates_facts), ("image.yml", image_facts),
-                         ("review.yml", review_facts)):
+    try:
+        pin = read_pin(kit.read(os.path.join(root, CLANG_CS)))
+    except OSError as e:
+        pin = None
+        errors.append(f"{CLANG_CS}: cannot be read: {type(e).__name__}")
+    if pin is None:
+        errors.append(f"{CLANG_CS} names no PinnedMajor: the LLVM of the image and of the Windows job is held to nothing")
+    for fname, facts in (("compiler-windows.yml", lambda text: compiler_facts(text, pin)), ("gates.yml", gates_facts),
+                         ("image.yml", image_facts), ("review.yml", review_facts)):
         try:
             text = kit.read(os.path.join(root, WORKFLOWS, fname))
         except OSError as e:
@@ -408,7 +478,7 @@ def lint(root):
     if listed != FILES:
         errors.append(f"workflows are {listed}: a workflow without facts here is unchecked configuration")
     try:
-        errors += dockerfile_facts(kit.read(os.path.join(root, DOCKERFILE)), kit.read(os.path.join(root, GLOBAL_JSON)))
+        errors += dockerfile_facts(kit.read(os.path.join(root, DOCKERFILE)), kit.read(os.path.join(root, GLOBAL_JSON)), pin)
     except OSError as e:
         errors.append(f"{DOCKERFILE}: cannot be read with {GLOBAL_JSON}: {type(e).__name__}")
     return errors, read
@@ -418,6 +488,10 @@ PLAIN_JOB = "  extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    st
 SDK = ("      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0\n"
        "        with:\n"
        "          global-json-file: compiler/global.json\n")
+LLVM_CACHE_STEP = ("      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0\n"
+                   "        with:\n"
+                   "          path: ${{ runner.temp }}/llvm-archive\n"
+                   "          key: llvm-23.1.4-x86_64-pc-windows-msvc\n")
 START = '        run: echo "REVIEW_STARTED=$(date +%s)" >> "$GITHUB_ENV"\n'
 SECRET = "          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n"
 # (file, case, anchor that occurs exactly once, replacement, text the error must contain)
@@ -569,7 +643,7 @@ MUTATIONS = [
     ("ci/Dockerfile", "gh used unchecked", '/tmp/gh.tar.gz" | sha256sum -c -', '/tmp/gh.tar.gz" | cat', "ARG GH_SHA256"),
     ("ci/Dockerfile", "the LLVM key used unchecked", 'grep -qx "fpr:::::::::$LLVM_KEY:"', 'true', "ARG LLVM_KEY"),
     ("ci/Dockerfile", "a short hash of the SDK", "ARG DOTNET_SHA512=", "ARG DOTNET_SHA512=ab\nARG UNUSED=", "ARG DOTNET_SHA512"),
-    ("ci/Dockerfile", "no major release of LLVM", "ARG LLVM_MAJOR=", "ARG LLVM_MAJOR=latest\nARG UNUSED=", "ARG LLVM_MAJOR"),
+    ("ci/Dockerfile", "no major release of LLVM", "ARG LLVM_MAJOR=", "ARG LLVM_MAJOR=latest\nARG UNUSED=", "ARG LLVM_MAJOR must be a major release"),
     ("compiler-windows.yml", "edits no longer re-run the compiler job", "ready_for_review, edited]", "ready_for_review]", "pull_request types"),
     ("compiler-windows.yml", "a path filter", "    branches: [main]\n", "    branches: [main]\n    paths: ['compiler/**']\n", "path filter"),
     ("compiler-windows.yml", "another trigger", "    branches: [main]\n", "    branches: [main]\n  workflow_dispatch:\n", "triggers are"),
@@ -591,6 +665,16 @@ MUTATIONS = [
     ("compiler-windows.yml", "a second SDK step", SDK, SDK + SDK, "SDK step"),
     ("compiler-windows.yml", "the SDK step takes a version typed here", "          global-json-file: compiler/global.json\n",
      "          dotnet-version: 10.0.x\n", "SDK step"),
+    ("compiler-windows.yml", "an LLVM of another major than the compiler's", 'LLVM_VERSION: "23.1.4"', 'LLVM_VERSION: "22.1.8"', "pins LLVM"),
+    ("compiler-windows.yml", "a cache keyed by another release", "key: llvm-23.1.4-", "key: llvm-23.1.3-", "one cache of the archive"),
+    ("compiler-windows.yml", "no cache of the archive", LLVM_CACHE_STEP, "", "one cache of the archive"),
+    ("compiler-windows.yml", "the archive unpacked unchecked",
+     '          if ((Get-FileHash -Algorithm SHA256 $archive).Hash -ne $env:LLVM_SHA256) { throw "$name is not the archive LLVM_SHA256 pins" }\n',
+     "", "installs the pinned LLVM"),
+    ("compiler-windows.yml", "a hash that is no SHA-256", 'LLVM_SHA256: "1a3f2f99', 'LLVM_SHA256: "1a3f2f9', "LLVM_SHA256 must be"),
+    ("compiler-windows.yml", "a third variable in the install's env", '          LLVM_VERSION: "23.1.4"\n',
+     '          LLVM_VERSION: "23.1.4"\n          LLVM_DIR: llvm\n', "install's env must be exactly"),
+    ("ci/Dockerfile", "an LLVM major other than the compiler's", "ARG LLVM_MAJOR=23", "ARG LLVM_MAJOR=22", "pins LLVM"),
     ("compiler-windows.yml", "the gate runs with a flag", "run: python tools/compiler_gate.py", "run: python tools/compiler_gate.py --self-test",
      "must be the compiler step"),
     ("compiler-windows.yml", "a swallowed failure", "run: python tools/compiler_gate.py", "run: python tools/compiler_gate.py || true",
@@ -625,13 +709,24 @@ def self_test():
 
 
 def cases_in(base):
-    facts = {"compiler-windows.yml": compiler_facts, "gates.yml": gates_facts, "image.yml": image_facts, "review.yml": review_facts}
+    clang_cs = kit.read(os.path.join(kit.ROOT, CLANG_CS))
+    pin = read_pin(clang_cs)
+    facts = {"compiler-windows.yml": lambda text: compiler_facts(text, pin), "gates.yml": gates_facts, "image.yml": image_facts,
+             "review.yml": review_facts}
     real = {f: kit.read(os.path.join(kit.ROOT, WORKFLOWS, f)) for f in facts}
     global_json = kit.read(os.path.join(kit.ROOT, GLOBAL_JSON))
-    facts[DOCKERFILE] = lambda text: dockerfile_facts(text, global_json)
+    facts[DOCKERFILE] = lambda text: dockerfile_facts(text, global_json, pin)
     real[DOCKERFILE] = kit.read(os.path.join(kit.ROOT, DOCKERFILE))
     cases = [(f"the real {f} is clean", not facts[f](real[f]), facts[f](real[f])) for f in facts]
-    no_sdk = dockerfile_facts(real[DOCKERFILE], "{}")
+    cases.append(("the compiler's pin is read from its line", pin is not None and pin > 0, pin))
+    cases.append(("a Clang.cs without its pin line names no major", read_pin(clang_cs.replace("public const int PinnedMajor", "public const int Major")) is None, ""))
+    other = compiler_facts(real["compiler-windows.yml"], (pin or 0) + 1)
+    cases.append(("compiler-windows.yml: a compiler that pins another major than the job installs", any("pins LLVM" in e for e in other), other))
+    other = dockerfile_facts(real[DOCKERFILE], global_json, (pin or 0) + 1)
+    cases.append(("ci/Dockerfile: a compiler that pins another major than the image's", any("pins LLVM" in e for e in other), other))
+    no_sdk = dockerfile_facts(real[DOCKERFILE], "{}", pin)
+    late = compiler_facts(real["compiler-windows.yml"].replace(LLVM_CACHE_STEP, "").replace(SDK, LLVM_CACHE_STEP + SDK), pin)
+    cases.append(("compiler-windows.yml: the cache after the install", any("one cache of the archive before the install" in e for e in late), late))
     cases.append(("ci/Dockerfile: a global.json that names no SDK is an error", any("names no SDK version" in e for e in no_sdk), no_sdk))
     for fname, case, old, new, needle in MUTATIONS:
         if real[fname].count(old) != 1:
@@ -644,11 +739,11 @@ def cases_in(base):
     twice = review_facts(real["review.yml"].replace("  statuses: write\n", "  statuses: write\n  contents: write\n"))
     cases.append(("a key that occurs twice is refused, not read as its last value", any("occurs twice" in e for e in twice), twice))
 
-    def tree(files, image=True):
+    def tree(files, image=True, pin=True):
         root = tempfile.mkdtemp(dir=base)
         os.makedirs(os.path.join(root, WORKFLOWS))
         written = [(os.path.join(WORKFLOWS, fname), real.get(fname, real["gates.yml"])) for fname in files]
-        for rel, text in written + ([(DOCKERFILE, real[DOCKERFILE]), (GLOBAL_JSON, global_json)] if image else []):
+        for rel, text in written + [(CLANG_CS, clang_cs if pin else "")] + ([(DOCKERFILE, real[DOCKERFILE]), (GLOBAL_JSON, global_json)] if image else []):
             os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
             with open(os.path.join(root, rel), "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
@@ -658,6 +753,7 @@ def cases_in(base):
                                ("lint: a workflow without facts is unchecked configuration", tree(FILES + ["extra.yml"]), "without facts"),
                                ("lint: a missing workflow is an error", tree(["gates.yml"]), "review.yml: cannot be read"),
                                ("lint: a missing Dockerfile is an error", tree(FILES, image=False), "cannot be read with"),
+                               ("lint: a compiler without its pin is an error", tree(FILES, pin=False), "names no PinnedMajor"),
                                ("lint: no workflows directory is an error", tempfile.mkdtemp(dir=base), "cannot be listed")]:
         errors, read = lint(root)
         cases.append((name, any(needle in e for e in errors) if needle else not errors, errors))
