@@ -1097,5 +1097,6 @@
   {"tool": "tools/compiler_gate.py", "anchor": "CLANG_RELEASE = re.compile(r\"^kurz \\S+ \\(LLVM \\d+, clang \\d+\\.\\d+\\.\\d+ at .+\\)$\", re.M)", "replacement": "CLANG_RELEASE = re.compile(r\"^clang version: \\d+\\.\\d+\\.\\d+$\", re.M)", "expect": "a release outside the one line of `kurz --version` is red"},
   {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "", "expect": "allowed path: runtime/common/runtime.kz"},
   {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "r\"runtime/.*\",", "expect": "a file of the runtime other than Kurz is refused"},
-  {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "r\"runtime/(?:[^/]+/)*[^/]+\\.kz\",", "expect": "a Kurz file at the top of runtime/, outside its directories, is refused"}
+  {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "r\"runtime/(?:[^/]+/)*[^/]+\\.kz\",", "expect": "a Kurz file at the top of runtime/, outside its directories, is refused"},
+  {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "r\"runtime/(?:[^/]+/)[^/]+\\.kz\",", "expect": "allowed path: runtime/linux/x86-64/switch.kz"}
 ]
