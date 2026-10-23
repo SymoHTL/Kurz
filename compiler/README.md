@@ -294,7 +294,7 @@ and its line to the runtime as constants (section 6).
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a list (M9), a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), the text of a value of a
-generic `data` type (A3), `==` on a `data` value
+generic `data` type (A3) and of a union (A4, D9), `==` on a `data` value
 with a field of a union (D3, T18), `SizeOf<T>()` of a `data` type or a union (R14), a
 lambda (F7) and a function value (F11), `float`, `double` and `decimal` (T2), the durations and the
 timestamps (T13), a `mut` parameter given anything but a variable (M7), a `naked` function (R12),

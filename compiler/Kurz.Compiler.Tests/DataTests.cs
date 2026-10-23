@@ -75,10 +75,10 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(Show(byte(7)))
             print(Show("seven"))
             print(Show(-7000000000))
-            print(Box("in a field"))
-            print(Box(long(8)).V)
+            print(Show(Box("in a field").V))
+            print(Show(Box(long(8)).V))
             """;
-        Ran(BuildAndRun(text, "union-sizes"), 0, ["byte 7", "string seven", "long -7000000000", "Box { V = in a field }", "8"], "");
+        Ran(BuildAndRun(text, "union-sizes"), 0, ["byte 7", "string seven", "long -7000000000", "string in a field", "long 8"], "");
     }
 
     [Fact]
@@ -122,20 +122,23 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
             data A(int X, B | Leaf B)
             data B(int Y, A | Leaf A)
 
-            int Sum(Node | Leaf n) => match n {
-                Node x => x.V + Sum(x.Next)
-                Leaf => 0
+            string Show(Node | Leaf n) => match n {
+                Node x => "{x.V} {Show(x.Next)}"
+                Leaf => "."
             }
 
             chain = Node(1, Node(2, Node(3, Leaf)))
-            print(Sum(chain))
-            print(chain)
+            print(Show(chain))
             mut changed = chain
             changed.V = 9
-            print("{changed.V} {chain.V} {Sum(changed)}")
-            print(A(1, B(2, A(3, Leaf))))
+            print(Show(changed))
+            print(Show(chain))
+            match A(1, B(2, A(3, Leaf))).B {
+                B b => print(b.Y)
+                Leaf => print("leaf")
+            }
             """;
-        Ran(BuildAndRun(text, "self-holding"), 0, ["6", "Node { V = 1, Next = Node { V = 2, Next = Node { V = 3, Next = Leaf } } }", "9 1 14", "A { X = 1, B = B { Y = 2, A = A { X = 3, B = Leaf } } }"], "");
+        Ran(BuildAndRun(text, "self-holding"), 0, ["1 2 3 .", "9 2 3 .", "1 2 3 .", "2"], "");
     }
 
     [Fact]
@@ -179,6 +182,7 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Theory]
     [InlineData("data Pair<A, B>(A First, B Second)\n\nprint(Pair<int, string>(1, \"one\"))\n", 3, "the text of a value of the generic data type `Pair<int, string>` (A3)")]
     [InlineData("data Box(int | string V)\n\nprint(Box(1) == Box(1))\n", 3, "`==` on a data value with a field of the union `int | string` (D3, T18)")]
+    [InlineData("data Box(int | string V)\n\nprint(Box(1))\n", 3, "the text of a value of the union `int | string` (A4, D9)")]
     [InlineData("data User(int Id)\n\nprint(SizeOf<User>())\n", 3, "the size of a `User` (R14)")]
     [InlineData("data Thing(int A)\ndata Box<T>(T V) : Thing\n\nprint(Box<int>(1, 2).V)\n", 4, "a generic data type in a relation of inheritance, `Box<int>` (D6, T19)")]
     [InlineData("data Leaf\ndata Tree<T>(T V, Tree<T> | Leaf Next)\n\nprint(Tree<int>(1, Leaf).V)\n", 4, "a generic data type that holds a value of its own type, `Tree<int>` (D1, T19)")]

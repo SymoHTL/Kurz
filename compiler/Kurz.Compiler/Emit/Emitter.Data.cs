@@ -287,12 +287,15 @@ public sealed partial class Emitter
 
     private string And(string a, string b) => a == "true" ? b : fn.Value($"and i1 {a}, {b}");
 
-    /// <summary>A3, A4: the text of a data value, its type's name and its fields, or its name alone without fields; of a block, of the type the block holds; of a union, the text of its case's value.</summary>
+    /// <summary>A3, A4: the text of a data value, its type's name and its fields, or its name alone without fields; of a block, of the type the block holds.</summary>
     private string DerivedText(string value, KurzType type, int line)
     {
-        if (type is DataType { TypeArguments.Count: > 0 } generic)
+        switch (type)
         {
-            throw Unsupported(line, $"the text of a value of the generic data type `{generic}` (A3)");
+            case DataType { TypeArguments.Count: > 0 } generic:
+                throw Unsupported(line, $"the text of a value of the generic data type `{generic}` (A3)");
+            case UnionType union:
+                throw Unsupported(line, $"the text of a value of the union `{union}` (A4, D9)");
         }
 
         var name = Helper($"text.{Lower.Mangle(type)}", "%kz.str", [Ir(type)], () =>
@@ -310,9 +313,6 @@ public sealed partial class Emitter
                     break;
                 case DataType d:
                     fn.Return($"%kz.str {RecordText(d, Layout.Fields(d).Select((_, i) => fn.Value($"extractvalue {Ir(d)} %a0, {Number(i)}")).ToList(), line)}");
-                    break;
-                case UnionType u:
-                    ByCase(Tag("%a0", u), u, u.Cases.Where(c => c is not VoidType), c => fn.Return($"%kz.str {TextOf(Payload("%a0", u, c), c, line)}"));
                     break;
             }
         });
