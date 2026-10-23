@@ -36,7 +36,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   every corpus case that expects a run with the pinned clang and runs it, and checks what it
   prints, its exit code and its error line against the case's header (`RunTests`); a seventh
   builds the programs that pin what no case can, a refused write and a refused allocation among
-  them (`EmitterTests`).
+  them (`EmitterTests`), and an eighth those of data values and unions, with the width of a tag and
+  the copy of a block before a write (`DataTests`).
 
 ## Building and testing
 
@@ -258,8 +259,9 @@ pinned clang compiles at `-O2` and links with the C library as the platform link
 library a block of C functions names (R16). It emits:
 
 - the integers, `bool`, `char` and `string`, and pointers to them and C function types over them
-  (T2, T21, T15, R10, R17); a string is its bytes and their count, and the empty string's bytes
-  are a constant of none, never at the address 0 (R15);
+  (T2, T21, T15, R10, R17); a string is its bytes and their count, at most the largest `int` of
+  them, a longer one, by a join or by `string.FromRaw`, ending the program with `allocation-failed`
+  (T15), and the empty string's bytes are a constant of none, never at the address 0 (R15);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
@@ -268,6 +270,17 @@ library a block of C functions names (R16). It emits:
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20);
 - `if`, `while`, `for` over a range, which raises `reversed-range-at-run-time` (C8), `break`,
   `continue` and `return` (chapter 10), and `throw` of a value (O6);
+- `data` types and their values, made with defaults and arguments by name (D1, D2, D8, D11), their
+  fields (D14), `with` (D5), an assignment into a path (M4), a value of a derived type where its
+  base is required (D6, D7), `==` field by field and never equal across types (D3, D15), and their
+  text, a generic type's under the name its declaration gives (A3);
+- unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
+  number among the cases needs (section 5, round 19), their text, the text of the case's value
+  (A4), `==` on a field of one, by the case and its value (D3), a call whose result is one, kept
+  whole (O4) or used where its success is required, with its other cases passed on to the caller
+  (O1, O2), a success case without a value (O10), `match` with arms of a type, of a value and
+  `else` (C4, C9, O8), postfix `else` after a call (O5), and `throw` of a data value and the bare
+  `throw` of an arm of `else`, which throws the case that reached it (O7);
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), and `==` on strings by
   their bytes (T18);
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
@@ -279,18 +292,35 @@ In a test build every function carries LLVM's attribute that turns no call into 
 recursion runs as deep as the program wrote it (record, section 2). A raise by code passes its file
 and its line to the runtime as constants (section 6).
 
+The layout of a data value and of a union is the compiler's own, which no form of the language
+outside `raw` shows (section 5, round 19; D10), and the owner kept it as described here on
+2026-10-23 ("As built"). A `data` type with neither a base nor a type derived from it, and that
+holds no value of its own type through its fields, is a plain value of its fields whatever its
+size, where D10 names small values. One with a base, a type derived from it or a value of its own
+type in a field is a pointer to a block that holds the number of the value's own type, then its
+fields, the base's first, so that a block of a derived type reads as one of its base (D6, D7).
+`with` and an assignment into a path through such a value copy the block before the write, so that
+no other variable sees it (D4, M4). Pinned by
+`DataTests.A_copy_by_with_of_a_derived_value_through_its_base_keeps_its_type_and_leaves_the_original`,
+`DataTests.An_assignment_into_a_path_through_a_block_copies_the_block_so_that_another_variable_keeps_its_value`
+and `DataTests.A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value`.
+
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
-checker's shape, and no executable: a list (M9), a `data` type, a value of one and `with` (D1, D2,
-D5), a union (D9) and a call whose result is one (O1), `match` (C4), `else` after a call (O4), a
-lambda (F7) and a function value (F11), `float`, `double` and `decimal` (T2), the durations and the
+checker's shape, and no executable: a list (M9), a generic `data` type with a base or a type
+derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
+`data` type or a union (R14), a lambda (F7) and a function value (F11), `float`, `double` and `decimal` (T2), the durations and the
 timestamps (T13), a `mut` parameter given anything but a variable (M7), a `naked` function (R12),
-inline assembly (R11), and a construct of the other chapters the checker does not read. The
-reference counting of section 3 is not emitted either: memory a program takes is never given back,
-so a program that allocates without end runs out of memory and ends with `allocation-failed`. The
-corpus runner lists every case the checker reads in full and the emitter does not emit, 77 of the
-220 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+inline assembly (R11), and a construct of the other chapters the checker does not read. The line
+is the one where code first needs the construct or the type, in the words of the part the emitter
+does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
+The reference counting of section 3 is not emitted either: memory a program takes is never given
+back, so a program that allocates without end runs out of memory and ends with
+`allocation-failed`; a value of a block type takes memory, a plain value and a union none (the
+owner, 2026-10-23, "Accept, documented"). The
+corpus runner lists every case the checker reads in full and the emitter does not emit, 42 of the
+223 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a
@@ -302,9 +332,6 @@ lists so.
 Each is a reading of this directory, not a decision. A test pins each one, and a design round can
 ask about it.
 
-- `s.Bytes.Count` is the count the string holds, read as an `int`, the type M9 gives a count, its
-  low 32 bits: a string of 2 GiB or more is beyond it. Pinned by
-  `EmitterTests.The_count_of_a_strings_bytes_is_read_as_an_int`.
 - A `print` hands its line to one write call, called again for what a call did not take, through a
   buffer per thread that holds the line until that call returns. Pinned by the corpus runner.
 

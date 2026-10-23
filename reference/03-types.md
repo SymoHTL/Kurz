@@ -596,7 +596,12 @@ print(Rest(10, 0))
 
 A string is UTF-8 and immutable. It is indexed through `.Bytes` or `.Chars`; indexing the string
 itself is the compile error `string-index`. No flag changes the encoding: text is converted at
-the edges.
+the edges. A string holds at most as many bytes as the largest `int`, so that `s.Bytes.Count` is an
+`int` that holds every count; an operation that would make a longer string, a `+`, an
+interpolation or `string.FromRaw(p, n)` (R15), raises `allocation-failed` with the count it asked
+for, as C#'s `new string('a', int.MaxValue)` throws `OutOfMemoryException` (§4, the owner,
+2026-10-23 and 2026-10-24). No case shows that sentence: a case would build a string of 2 GiB, and the error line
+of `allocation-failed` names no line a header could expect.
 
 Case: [types/string-bytes.kz](../corpus/types/string-bytes.kz)
 ```kurz

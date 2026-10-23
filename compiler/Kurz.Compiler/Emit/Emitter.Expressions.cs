@@ -3,6 +3,7 @@ using System.Numerics;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using PointerType = Kurz.Compiler.Semantics.PointerType;
+using UnionType = Kurz.Compiler.Semantics.UnionType;
 
 namespace Kurz.Compiler.Emit;
 
@@ -39,6 +40,12 @@ public sealed partial class Emitter
                 return EmitBinary(b, type);
             case ParenthesizedExpression p:
                 return EmitExpression(p.Inner);
+            case WithExpression w:
+                return EmitWith(w);
+            case MatchExpression m:
+                return EmitMatch(m.Subject, m.Arms, type)!;
+            case ElseExpression el:
+                return EmitElse(el, asValue: true) ?? throw new InvalidOperationException($"`else` with a `void` success stands as a value at line {el.Line}: the checker reports it");
             default:
                 throw Unsupported(e.Line, ExpressionName(e));
         }
@@ -48,9 +55,6 @@ public sealed partial class Emitter
     private static string ExpressionName(Expression e) => e switch
     {
         LambdaExpression => "a lambda (F7)",
-        MatchExpression => "`match` (C4)",
-        WithExpression => "`with` (D5)",
-        ElseExpression => "`else` after a call (O4)",
         IndexExpression => "an index into a list (M9)",
         MemberAccess m => $"the member `{m.Member}`",
         ParenthesizedExpression p => ExpressionName(p.Inner),
@@ -75,6 +79,20 @@ public sealed partial class Emitter
                 return StringValue(s.Value);
             case NullConstant when type is PointerType or CFunctionType:
                 return "null";
+            case UnitConstant when type is DataType d && layout.IsBlock(d):
+                {
+                    // D8: the one value of a type without fields, a block that is never written, since a write copies a block first
+                    var name = $"@\"unit.{Lower.Mangle(d)}\"";
+                    if (helpers.Add(name))
+                    {
+                        module.Global($"{name} = private unnamed_addr constant {layout.Block(d.Symbol)} {{ i32 {Number(layout.Number(d))} }}");
+                    }
+
+                    return name;
+                }
+
+            case UnitConstant when type is DataType:
+                return "zeroinitializer"; // D8: a structure of no fields
             default:
                 throw Unsupported(line, $"a constant of type `{type}`");
         }
@@ -121,12 +139,14 @@ public sealed partial class Emitter
         return result ?? StringValue(string.Empty);
     }
 
-    /// <summary>A string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself; every other member is not emitted.</summary>
+    /// <summary>A field of a data value (D1), a string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself; every other member is not emitted.</summary>
     private string EmitMember(MemberAccess m)
     {
         var targetType = TypeOf(m.Target);
         switch (targetType)
         {
+            case DataType d:
+                return Field(EmitExpression(m.Target), d, Layout.FieldIndex(d, m.Member));
             case PrimitiveType { Kind: Primitive.String } when m.Member == "Pointer":
                 return fn.Value($"extractvalue %kz.str {EmitExpression(m.Target)}, 0");
             case ListType when m.Member == "Count" && Unwrap(m.Target) is MemberAccess { Member: "Bytes" } bytes && TypeOf(bytes.Target) is PrimitiveType { Kind: Primitive.String }:
@@ -378,12 +398,9 @@ public sealed partial class Emitter
             throw Unsupported(b.Line, $"`{op}` on a `{leftType}`");
         }
 
-        var equal = leftType switch
-        {
-            PrimitiveType { Kind: Primitive.Bool } => fn.Value($"icmp eq i1 {left}, {right}"),
-            PrimitiveType { Kind: Primitive.String } => fn.Value($"call i1 {RuntimeFunction("Same")}(%kz.str {left}, %kz.str {right})"),
-            _ => throw Unsupported(b.Line, $"`==` on a `{leftType}`"),
-        };
+        // the two sides as the type the other stands in: a derived value beside its base compares as the base, and is never equal to one (D15)
+        var shared = Types.Assignable(leftType, rightType) ? rightType : leftType;
+        var equal = Equal(Convert(left, leftType, shared, b.Line), Convert(right, rightType, shared, b.Line), shared, b.Line);
         return op == TokenKind.EqualEqual ? equal : fn.Value($"xor i1 {equal}, true");
     }
 
@@ -399,7 +416,11 @@ public sealed partial class Emitter
 
     // ---- conversions -----------------------------------------------------------------------------
 
-    /// <summary>A value of <paramref name="from"/> where a <paramref name="to"/> is required (T1): the same type, or an integer widened (T23).</summary>
+    /// <summary>
+    /// A value of <paramref name="from"/> where a <paramref name="to"/> is required (T1): the same type; an integer widened (T23); a
+    /// derived data value as its base (D6), the same block; a value into the one case of a union it goes to (D9, T8 with D9); a union
+    /// into a union (D9 with O1).
+    /// </summary>
     private string Convert(string value, KurzType from, KurzType to, int line)
     {
         if (Types.Same(from, to) || (from is PointerType or CFunctionType && to is PointerType or CFunctionType))
@@ -410,6 +431,22 @@ public sealed partial class Emitter
         if (Types.IsInteger(from) && Types.IsInteger(to))
         {
             return Resize(value, from, to);
+        }
+
+        if (from is DataType && to is DataType)
+        {
+            return value; // D6: a block of the derived type reads as a block of its base
+        }
+
+        if (to is UnionType union)
+        {
+            if (from is UnionType source)
+            {
+                return ConvertUnion(value, source, union, line);
+            }
+
+            var c = Types.CasesFor(from, union.Cases).Single();
+            return MakeUnion(union, c, Convert(value, from, c, line));
         }
 
         throw Unsupported(line, $"a `{from}` where a `{to}` is required");
@@ -453,6 +490,8 @@ public sealed partial class Emitter
                 return fn.Value($"select i1 {value}, %kz.str {StringValue("true")}, %kz.str {StringValue("false")}");
             case PrimitiveType { Kind: Primitive.Char }:
                 return fn.Value($"call %kz.str {RuntimeFunction("TextOfChar")}(i32 {value})");
+            case DataType or UnionType:
+                return DerivedText(value, type, line);
             default:
                 throw Unsupported(line, $"the text of a `{type}`");
         }

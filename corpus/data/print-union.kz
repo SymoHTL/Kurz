@@ -1,0 +1,12 @@
+// expect: output
+// | 5
+// | Box { V = 5 }
+// | Box { V = five }
+// rules: A4
+
+data Box(int | string V)
+
+int | string v = 5
+print(v)
+print(Box(5))
+print(Box("five"))

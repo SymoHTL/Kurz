@@ -54,13 +54,20 @@ pub byte* Allocate(long size) {
     }
 
     if p == null {
-        WriteError("error: allocation-failed (")
-        WriteNumber(ulong(size))
-        WriteError(" bytes)\n")
-        sys.Exit(1)
+        AllocationFailed(size)
     }
 
     return p
+}
+
+// The end of the process for an allocation refused, and for a string asked of more bytes than the
+// largest `int` (T15; the owner, "C#'s limit" on 2026-10-23 and "allocation-failed" on 2026-10-24): `error:
+// allocation-failed (<n> bytes)` and the exit code 1, with no place and no trace (O11).
+pub void AllocationFailed(long size) {
+    WriteError("error: allocation-failed (")
+    WriteNumber(ulong(size))
+    WriteError(" bytes)\n")
+    sys.Exit(1)
 }
 
 // `print` (A1): the text and a line feed, handed to the system's write call in one piece, which is
@@ -220,7 +227,8 @@ pub string TextOfChar(uint point) {
     return text
 }
 
-// Two strings joined (T15): the bytes of the first, then those of the second.
+// Two strings joined (T15): the bytes of the first, then those of the second; more bytes than the
+// largest `int` end the process as a refused allocation does.
 pub string Concat(string first, string second) {
     long a = long(first.Bytes.Count)
     long b = long(second.Bytes.Count)
@@ -230,6 +238,10 @@ pub string Concat(string first, string second) {
 
     if a == 0 {
         return second
+    }
+
+    if a + b > 2147483647 {
+        AllocationFailed(a + b)
     }
 
     mut string text = ""

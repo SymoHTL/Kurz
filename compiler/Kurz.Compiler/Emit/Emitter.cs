@@ -3,6 +3,8 @@ using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using PointerType = Kurz.Compiler.Semantics.PointerType;
+using UnionType = Kurz.Compiler.Semantics.UnionType;
+using VoidType = Kurz.Compiler.Semantics.VoidType;
 
 namespace Kurz.Compiler.Emit;
 
@@ -38,6 +40,9 @@ public sealed partial class Emitter
     private readonly Queue<(FunctionSymbol Function, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name)> pending = new();
     private readonly List<IrFunction> emitted = [];
     private readonly SortedSet<string> libraries = new(StringComparer.Ordinal);
+    private readonly Dictionary<DataSymbol, Unit> dataOwners = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<string> helpers = new(StringComparer.Ordinal);
+    private readonly Layout layout;
 
     // the function being emitted, and the file it is in
     private Unit unit;
@@ -57,6 +62,7 @@ public sealed partial class Emitter
         units = [program, common, sys];
         unit = program;
         this.test = test;
+        layout = new Layout(module);
     }
 
     private SemanticModel Model => unit.Model;
@@ -111,6 +117,7 @@ public sealed partial class Emitter
             Register(u);
         }
 
+        layout.Register(dataOwners.Keys);
         unit = program;
         Begin(new IrFunction("internal void @kz.main()", Attributes()), NoMap, Types.Void);
         foreach (var s in program.Tree.Statements)
@@ -173,7 +180,8 @@ public sealed partial class Emitter
                     DefineStatic(v);
                     break;
                 case TypeDeclaration t:
-                    throw Unsupported(t.Line, $"the declaration of a {t.Kind.ToString().ToLowerInvariant()} type (D1)");
+                    dataOwners[u.Model.DataTypeOf(t)] = u; // the checker reads a data type alone, and says `not supported` to the others
+                    break;
             }
         }
     }
@@ -191,12 +199,12 @@ public sealed partial class Emitter
         statics[variable] = name;
     }
 
-    private static string Zero(KurzType type) => Lower.IrType(type) switch
+    private string Zero(KurzType type) => Ir(type) switch
     {
         "ptr" => "null",
         "i1" => "false",
-        "%kz.str" => "zeroinitializer",
-        _ => "0",
+        var ir when ir.StartsWith('i') => "0",
+        _ => "zeroinitializer",
     };
 
     private void Begin(IrFunction function, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap, KurzType result)
@@ -217,13 +225,13 @@ public sealed partial class Emitter
 
     private KurzType TypeOf(Expression e) => Sub(Model.TypeOf(e).Type);
 
-    private static string Ir(KurzType type) => Lower.IrType(type);
+    private string Ir(KurzType type) => layout.Ir(type);
 
-    private static void RequireSupported(KurzType type, int line)
+    private void RequireSupported(KurzType type, int line)
     {
-        if (!Lower.Supported(type))
+        if (layout.Refusal(type) is { } refusal)
         {
-            throw Unsupported(line, Lower.Refusal(type));
+            throw Unsupported(line, refusal);
         }
     }
 
@@ -320,9 +328,9 @@ public sealed partial class Emitter
             EmitBlock(d.BlockBody!);
             if (!fn.Terminated)
             {
-                if (Types.IsVoid(returnType))
+                if (Types.IsVoid(returnType) || returnType is UnionType { Cases: [VoidType, ..] })
                 {
-                    fn.Return(null);
+                    EmitReturn(null, Types.Void, d.Line); // the end of the body returns the success of a function without a value (F4, O10)
                 }
                 else
                 {
@@ -335,14 +343,20 @@ public sealed partial class Emitter
     }
 
     /// <summary>A parameter's or a result's type in a function's signature: of the C calling convention for a function written <c>extern "C"</c> (R16).</summary>
-    private static string ParameterType(FunctionSymbol f, KurzType type) => f.TakesC ? Lower.CType(type) : Ir(type);
+    private string ParameterType(FunctionSymbol f, KurzType type) => f.TakesC ? Lower.CType(type) : Ir(type);
 
-    /// <summary>Returns a value of <paramref name="type"/> from the function being emitted, converted to its result type (T1).</summary>
+    /// <summary>Returns a value of <paramref name="type"/> from the function being emitted, converted to its result type (T1); without a value, the success of a function whose success is <c>void</c> (O10).</summary>
     private void EmitReturn(string? value, KurzType type, int line)
     {
         if (Types.IsVoid(returnType))
         {
             fn.Return(null);
+            return;
+        }
+
+        if (value is null && returnType is UnionType { Cases: [VoidType, ..] } union)
+        {
+            fn.Return($"{Ir(union)} {MakeUnion(union, Types.Void, null)}");
             return;
         }
 
@@ -475,8 +489,11 @@ public sealed partial class Emitter
             case ThrowStatement t:
                 EmitThrow(t);
                 break;
-            case FunctionDeclaration or ExternBlock or UseStatement:
-                break; // declared at the top level and emitted when called; a `use` brings in a folder for the checker alone
+            case MatchStatement m:
+                EmitMatch(m.Subject, m.Arms, null);
+                break;
+            case FunctionDeclaration or ExternBlock or UseStatement or TypeDeclaration:
+                break; // declared at the top level and emitted when called, a data type laid out where a value of it is made; a `use` brings in a folder for the checker alone
             default:
                 throw Unsupported(statement.Line, StatementName(statement));
         }
@@ -484,7 +501,6 @@ public sealed partial class Emitter
 
     private static string StatementName(Statement statement) => statement switch
     {
-        MatchStatement => "`match` (C4)",
         AsmStatement => "inline assembly (R11)",
         _ => $"the statement `{statement.GetType().Name}`",
     };
@@ -495,6 +511,12 @@ public sealed partial class Emitter
         {
             case CallExpression c:
                 EmitCall(c);
+                break;
+            case ElseExpression el:
+                EmitElse(el, asValue: false);
+                break;
+            case MatchExpression m:
+                EmitMatch(m.Subject, m.Arms, null);
                 break;
             default:
                 throw Unsupported(e.Line, ExpressionName(e.Expression));
@@ -530,11 +552,13 @@ public sealed partial class Emitter
         fn.Block(exit);
     }
 
-    /// <summary>A <c>throw</c> (O6): the text of the value and the place of the throw to the runtime's <c>Throw</c>, which ends the process.</summary>
+    /// <summary>A <c>throw</c> (O6): the text of the value and the place of the throw to the runtime's <c>Throw</c>, which ends the process; a bare <c>throw</c> in an arm of <c>else</c> throws the case value that reached the arm (O7).</summary>
     private void EmitThrow(ThrowStatement t)
     {
-        var value = t.Value ?? throw Unsupported(t.Line, "a `throw` without a value, in an arm of `else` (O7)");
-        var text = TextOf(EmitExpression(value), TypeOf(value), t.Line);
+        var (value, type) = t.Value is null
+            ? elseCase ?? throw new InvalidOperationException($"a bare `throw` outside an arm of `else` at line {t.Line}: the checker reports it")
+            : (EmitExpression(t.Value), TypeOf(t.Value));
+        var text = TextOf(value, type, t.Line);
         fn.Emit($"call void {RuntimeFunction("Throw")}(%kz.str {text}, %kz.str {StringValue(unit.File)}, i32 {Number(t.Line)})");
         fn.Unreachable();
     }
@@ -616,13 +640,16 @@ public sealed partial class Emitter
         fn.Block(exit);
     }
 
-    /// <summary>`x = v`, `*p = v` and `p[i] = v` (R10); an assignment to a field is not emitted.</summary>
+    /// <summary>`x = v`, `*p = v` and `p[i] = v` (R10), and an assignment into a path of a `mut` variable (M4).</summary>
     private void EmitAssignment(Assignment a)
     {
         var targetType = TypeOf(a.Target);
         string place;
         switch (Unwrap(a.Target))
         {
+            case MemberAccess:
+                EmitPathAssignment(a);
+                return;
             case NameExpression n:
                 place = Place(Model.VariableOf(n), n.Line);
                 break;

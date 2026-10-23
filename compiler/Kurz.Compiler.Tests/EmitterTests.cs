@@ -10,8 +10,9 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The emitter's decisions that no corpus case pins: where a refused write and a refused allocation end the program and what they
 /// say (design record, section 6; the owner, 2026-10-23, "Caller passes it" and "Id + size"), the test build's attribute
-/// (section 2), the texts of the integers at their edges (A2), the empty string's pointer (R15), the runtime of every target
-/// emitted, and a construct of the runtime the emitter does not lay out, which is the compiler's defect.
+/// (section 2), the texts of the integers at their edges (A2), a conversion from an unsigned type to a signed one (T20), the empty
+/// string's pointer (R15), the largest string (T15; the owner, 2026-10-23, "C#'s limit"), the runtime of every target emitted, and a
+/// construct of the runtime the emitter does not lay out, which is the compiler's defect.
 /// </summary>
 public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -98,6 +99,24 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, "edges"), 0, ["-9223372036854775808", "18446744073709551615", "-128", "0"], "");
     }
 
+    [Theory]
+    [InlineData("int(Most())", "overflow")] // the high bit set: the cut to 32 bits and its sign extension give the value back
+    [InlineData("sbyte(Most())", "overflow")]
+    [InlineData("long(Most())", "overflow")] // of the same width
+    [InlineData("int(Most() / 8589934592)", "2147483647")] // the largest that fits, the positive control
+    public void A_conversion_from_an_unsigned_type_to_a_signed_one_raises_overflow_above_the_signed_maximum(string conversion, string result)
+    {
+        var run = BuildAndRun($"ulong Most() => 18446744073709551615\n\nprint({conversion})\n", $"narrow-{result}-{conversion.Length}");
+        if (result == "overflow")
+        {
+            Ran(run, 1, [], "error: overflow at program.kz:3\n");
+        }
+        else
+        {
+            Ran(run, 0, [result], "");
+        }
+    }
+
     [Fact]
     public void The_pointer_of_the_empty_string_is_not_null()
     {
@@ -105,12 +124,14 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, "empty-pointer", "raw"), 0, ["true", "0"], "");
     }
 
-    [Fact]
-    public void The_count_of_a_strings_bytes_is_read_as_an_int()
+    [Theory]
+    [InlineData("print(string.FromRaw(Ptr<byte>(16), 2147483647).Bytes.Count)", 0, "2147483647", "")] // the largest that fits, the positive control
+    [InlineData("print(string.FromRaw(Ptr<byte>(16), 2147483648).Bytes.Count)", 1, null, "error: allocation-failed (2147483648 bytes)\n")]
+    [InlineData("print(\"{string.FromRaw(Ptr<byte>(16), 2147483647)}a\")", 1, null, "error: allocation-failed (2147483648 bytes)\n")] // a join
+    public void A_string_holds_at_most_the_largest_int_of_bytes_and_a_longer_one_ends_as_a_refused_allocation(string statement, int code, string? line, string error)
     {
-        // 4294967297 bytes, 2 to the 32 and one, of which an int holds the low 32 bits; no byte is read
-        const string text = "raw {\n    string huge = string.FromRaw(Ptr<byte>(16), 4294967297)\n    print(huge.Bytes.Count)\n}\n";
-        Ran(BuildAndRun(text, "count-as-int", "raw"), 0, ["1"], "");
+        // the owner, "C#'s limit" on 2026-10-23 and "allocation-failed" on 2026-10-24; no byte at the pointer is read
+        Ran(BuildAndRun($"raw {{\n    {statement}\n}}\n", $"string-limit-{code}-{statement.Length}", "raw"), code, line is null ? [] : [line], error);
     }
 
     [Fact]
