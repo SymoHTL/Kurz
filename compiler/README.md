@@ -293,7 +293,8 @@ and its line to the runtime as constants (section 6).
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a list (M9), a generic `data` type with a base or a type
-derived from it (D6, T19), the text of a value of a generic `data` type (A3), `==` on a `data` value
+derived from it (D6, T19) or that holds a value of its own type (D1, T19), the text of a value of a
+generic `data` type (A3), `==` on a `data` value
 with a field of a union (D3, T18), `SizeOf<T>()` of a `data` type or a union (R14), a
 lambda (F7) and a function value (F11), `float`, `double` and `decimal` (T2), the durations and the
 timestamps (T13), a `mut` parameter given anything but a variable (M7), a `naked` function (R12),
@@ -316,14 +317,16 @@ ask about it.
 - `s.Bytes.Count` is the count the string holds, read as an `int`, the type M9 gives a count, its
   low 32 bits: a string of 2 GiB or more is beyond it. Pinned by
   `EmitterTests.The_count_of_a_strings_bytes_is_read_as_an_int`.
-- A `data` type with neither a base nor a type derived from it is a plain value of its fields
-  whatever its size, where D10 names small values; one with either is a pointer to a block that
-  holds the number of the value's own type, then its fields, the base's first, so that a block of a
-  derived type reads as one of its base (D6, D7). `with` and an assignment into a path through such
-  a value copy the block before the write, so that no other variable sees it (D4, M4), and a block
-  is never given back, as no memory is. Pinned by
-  `DataTests.A_copy_by_with_of_a_derived_value_through_its_base_keeps_its_type_and_leaves_the_original`
-  and `DataTests.An_assignment_into_a_path_through_a_block_copies_the_block_so_that_another_variable_keeps_its_value`.
+- A `data` type with neither a base nor a type derived from it, and that holds no value of its own
+  type through its fields, is a plain value of its fields whatever its size, where D10 names small
+  values; one with a base, a type derived from it or a value of its own type in a field is a pointer
+  to a block that holds the number of the value's own type, then its fields, the base's first, so
+  that a block of a derived type reads as one of its base (D6, D7). `with` and an assignment into a
+  path through such a value copy the block before the write, so that no other variable sees it (D4,
+  M4), and a block is never given back, as no memory is. Pinned by
+  `DataTests.A_copy_by_with_of_a_derived_value_through_its_base_keeps_its_type_and_leaves_the_original`,
+  `DataTests.An_assignment_into_a_path_through_a_block_copies_the_block_so_that_another_variable_keeps_its_value`
+  and `DataTests.A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value`.
 - A `print` hands its line to one write call, called again for what a call did not take, through a
   buffer per thread that holds the line until that call returns. Pinned by the corpus runner.
 

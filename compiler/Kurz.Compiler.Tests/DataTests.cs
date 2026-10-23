@@ -114,6 +114,31 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value()
+    {
+        const string text = """
+            data Leaf
+            data Node(int V, Node | Leaf Next)
+            data A(int X, B | Leaf B)
+            data B(int Y, A | Leaf A)
+
+            int Sum(Node | Leaf n) => match n {
+                Node x => x.V + Sum(x.Next)
+                Leaf => 0
+            }
+
+            chain = Node(1, Node(2, Node(3, Leaf)))
+            print(Sum(chain))
+            print(chain)
+            mut changed = chain
+            changed.V = 9
+            print("{changed.V} {chain.V} {Sum(changed)}")
+            print(A(1, B(2, A(3, Leaf))))
+            """;
+        Ran(BuildAndRun(text, "self-holding"), 0, ["6", "Node { V = 1, Next = Node { V = 2, Next = Node { V = 3, Next = Leaf } } }", "9 1 14", "A { X = 1, B = B { Y = 2, A = A { X = 3, B = Leaf } } }"], "");
+    }
+
+    [Fact]
     public void An_arm_of_a_derived_type_takes_a_value_of_its_base_that_holds_it()
     {
         const string text = """
@@ -156,6 +181,7 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("data Box(int | string V)\n\nprint(Box(1) == Box(1))\n", 3, "`==` on a data value with a field of the union `int | string` (D3, T18)")]
     [InlineData("data User(int Id)\n\nprint(SizeOf<User>())\n", 3, "the size of a `User` (R14)")]
     [InlineData("data Thing(int A)\ndata Box<T>(T V) : Thing\n\nprint(Box<int>(1, 2).V)\n", 4, "a generic data type in a relation of inheritance, `Box<int>` (D6, T19)")]
+    [InlineData("data Leaf\ndata Tree<T>(T V, Tree<T> | Leaf Next)\n\nprint(Tree<int>(1, Leaf).V)\n", 4, "a generic data type that holds a value of its own type, `Tree<int>` (D1, T19)")]
     [InlineData("data Bag(List<int> Items)\n\nBag Empty() => Empty()\n\nEmpty()\n", 5, "a value of type `List<int>` (M9)")] // the field of the type the call returns
     public void What_the_emitter_does_not_lay_out_is_not_supported_at_its_line(string text, int line, string message)
     {

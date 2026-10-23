@@ -229,9 +229,9 @@ public sealed partial class Emitter
 
     private void RequireSupported(KurzType type, int line)
     {
-        if (!layout.Supported(type))
+        if (layout.Refusal(type) is { } refusal)
         {
-            throw Unsupported(line, layout.Refusal(type));
+            throw Unsupported(line, refusal);
         }
     }
 
