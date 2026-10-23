@@ -6,7 +6,8 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The clang search over a path and a Program Files directory the test makes, with the answers to
 /// <c>--version</c> given, and the lines of the command's failure for each outcome (design record,
-/// section 2: the places, the pinned major and its refusal); and the search over this machine's own
+/// section 2: the places, the pinned major, its refusal and the refusal of Apple's clang, and the
+/// words of the failures, shown to the owner on 2026-10-23); and the search over this machine's own
 /// environment, which finds the pinned major or fails, on every machine.
 /// </summary>
 public sealed class ClangTests : IDisposable
@@ -42,7 +43,7 @@ public sealed class ClangTests : IDisposable
         var b = Dir("b", "clang-23");
         var search = Clang.Find(PathOf(a, b), null, windows: false, Answers(
             (Path.Combine(a, "clang"), "clang version 20.1.2\n"),
-            (Path.Combine(b, "clang-23"), "Ubuntu clang version 23.1.4 (++20251020091207+0123456789ab-1~exp1~20251020091224.17)\nTarget: x86_64-pc-linux-gnu\n")));
+            (Path.Combine(b, "clang-23"), "Ubuntu clang version 23.1.4 (++20261020091207+0123456789ab-1~exp1~20261020091224.17)\nTarget: x86_64-pc-linux-gnu\n")));
         Assert.Equal((Path.Combine(b, "clang-23"), "23.1.4"), (search.Found?.Path, search.Found?.Version));
         Assert.Equal(["clang-23 on the path"], search.Looked);
     }
@@ -83,6 +84,18 @@ public sealed class ClangTests : IDisposable
     }
 
     [Fact]
+    public void Apple_clang_is_refused_whatever_number_its_answer_names()
+    {
+        var a = Dir("a", "clang");
+        var file = Path.Combine(a, "clang");
+        var search = Clang.Find(PathOf(a), null, windows: false, Answers((file, "Apple clang version 23.0.0 (clang-2300.0.13.3)\nTarget: arm64-apple-darwin25.0.0\n")));
+        Assert.Equal((null, file, null, true), (search.Found, search.Place, search.Version, search.Apple));
+        Assert.Equal(
+            $"error: the clang found is Apple clang, whose version names no LLVM release\n  note: found at {file}\n  help: install LLVM 23, ahead of this clang on the path\n",
+            Command.Failure(search));
+    }
+
+    [Fact]
     public void A_search_that_finds_nothing_names_every_place_it_looked_at()
     {
         var empty = Dir("empty");
@@ -114,8 +127,8 @@ public sealed class ClangTests : IDisposable
 
     [Theory]
     [InlineData("clang version 23.1.4\nTarget: x86_64-pc-windows-msvc\n", "23.1.4")]
-    [InlineData("Ubuntu clang version 23.1.4 (++20251020091207+0123456789ab-1~exp1~20251020091224.17)\n", "23.1.4")]
-    [InlineData("Apple clang version 17.0.0 (clang-1700.0.13.3)\n", "17.0.0")]
+    [InlineData("Ubuntu clang version 23.1.4 (++20261020091207+0123456789ab-1~exp1~20261020091224.17)\n", "23.1.4")]
+    [InlineData("Apple clang version 17.0.0 (clang-1700.0.13.3)\n", null)] // Apple's own number, built from LLVM 19
     [InlineData("gcc (GCC) 13.2.0\n", null)]
     [InlineData("", null)]
     public void The_release_is_read_from_the_answer_as_each_distribution_words_it(string answer, string? release) =>
@@ -127,6 +140,6 @@ public sealed class ClangTests : IDisposable
         // the record's requirement on every machine that builds: a machine without it fails here, with the command's own lines
         var search = Clang.Find();
         Assert.True(search.Found is not null, Command.Failure(search));
-        Assert.StartsWith($"{Clang.PinnedMajor}.", search.Found!.Version, StringComparison.Ordinal);
+        Assert.StartsWith("23.", search.Found!.Version, StringComparison.Ordinal);
     }
 }

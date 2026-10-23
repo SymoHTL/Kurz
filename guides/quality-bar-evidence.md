@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-10-23
-digest: 8313ef755d41fefca491a40f984e23ea8346c4c441efce7705c2c292d223c9d1
+digest: a47ef852685d7a49e796ad3c5fd1ed79afabbae1785b6dacc370c3f43aef120f
 ttl_days: 60
 metadata:
   type: reference
@@ -57,7 +57,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:self-tests -->
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
-| `tools/compiler_gate.py` | 28 | 28 |
+| `tools/compiler_gate.py` | 29 | 29 |
 | `tools/gates.py` | 33 | 23 |
 | `tools/kit.py` | 26 | 24 |
 | `tools/lint_ci.py` | 158 | 153 |
@@ -69,7 +69,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 276 | 256 |
 | `tools/tree_gate.py` | 126 | 102 |
-| **total** | 1170 | 1095 |
+| **total** | 1171 | 1096 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -77,13 +77,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 38 |
+| Entries in INDEX.md | 39 |
 | tagged (untagged) | 2 |
 | tagged HARD | 15 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 5 |
 | tagged RECIPE | 3 |
-| tagged TRAP | 14 |
+| tagged TRAP | 15 |
 | Review rule sections | 12 |
 | Review rules | 69 |
 <!-- /generated:store -->
@@ -102,7 +102,7 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 135 |
+| Occurrences of the marker *(assumed)* | 136 |
 | Bullets of the Open section | 12 |
 <!-- /generated:design -->
 
@@ -141,11 +141,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 27 |
-| Pull requests merged | 25 |
+| Pull requests opened by a writer, or merged | 29 |
+| Pull requests merged | 26 |
 | Merged over red, with a recorded waiver | 11 |
 | Review findings posted: high | 93 |
-| Review findings posted: medium | 1386 |
-| Review findings posted: low | 1676 |
+| Review findings posted: medium | 1398 |
+| Review findings posted: low | 1695 |
 | Open HAZARD issues | 17 |
 <!-- /generated:forge -->
