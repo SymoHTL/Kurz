@@ -1,0 +1,44 @@
+// The runtime's code for Windows (design record, section 2): the functions `runtime/common/` calls as
+// `sys`, over the system's DLLs.
+
+extern "C" in "kernel32" {
+    void* GetStdHandle(uint which)
+    int WriteFile(void* file, byte* bytes, uint count, uint* written, void* overlapped)
+    void ExitProcess(uint code)
+}
+
+// `count` bytes from `bytes` written to standard output (`fd` 1) or standard error (`fd` 2) in one
+// call of `WriteFile`: the count written, or -1 where the system refused the write. One call takes
+// at most the 4294967295 bytes a `uint` counts.
+pub long Write(int fd, byte* bytes, long count) {
+    // STD_OUTPUT_HANDLE is the DWORD -11, STD_ERROR_HANDLE the DWORD -12
+    mut uint which = 4294967285
+    if fd == 2 {
+        which = 4294967284
+    }
+
+    mut long chunk = count
+    if chunk > 4294967295 {
+        chunk = 4294967295
+    }
+
+    mut uint written = 0
+    mut int done = 0
+    raw {
+        done = WriteFile(GetStdHandle(which), bytes, uint(chunk), &written, null)
+    }
+
+    if done == 0 {
+        return -1
+    }
+
+    return long(written)
+}
+
+// The end of the process with the exit code, at once (design record, section 6). The code is 0 or
+// above: `ExitProcess` takes a DWORD, and a negative `int` does not fit the `uint` it is converted to.
+pub void Exit(int code) {
+    raw {
+        ExitProcess(uint(code))
+    }
+}

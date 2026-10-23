@@ -65,7 +65,7 @@ public sealed class CorpusTests
 
     private static bool IsNotSupported(Diagnostic d) => d.Kind == DiagnosticKind.NotSupported;
 
-    private static readonly string Root = FindRoot();
+    internal static readonly string Root = FindRoot();
 
     private static string FindRoot()
     {

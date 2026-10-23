@@ -230,9 +230,12 @@ request 29 retired the design-phase rule, after the owner said build on 2026-10-
 library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Semantics/`
 checks the tree against the rules of chapters 1 to 3, 5, 6, 8 to 10 and 11's raw forms that
 `compiler/README.md` lists, and says `not supported` to the rest, `Corpus/` reads a case header,
-`Build/` finds the clang of the pinned LLVM major and is the command `kurz`, whose program is `Kurz/`),
-the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through the front end and every
-case it reads clean through the checker, and `compiler/README.md`. The map of every gate is
+`Build/` finds the clang of the pinned LLVM major, carries and checks the runtime, and is the command `kurz`,
+whose program is `Kurz/`), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through the
+front end and every case it reads clean through the checker, and checks the runtime for every target, and
+`compiler/README.md`. `runtime/` holds the runtime a built program links, written in Kurz (design record,
+section 2): `common/` and a directory per target, where the tree gate admits `.kz` files, and which the
+build of the compiler embeds. The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
 ## Critical Rules
