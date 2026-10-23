@@ -48,12 +48,14 @@ FLOOR = 5
 # that retired the design-phase rule, after the owner said build on 2026-10-09; a bin/, obj/ or dot-directory
 # segment under it (build outputs, IDE and tool state) is refused whatever the extension and whatever the
 # case of the segment; .gitignore keeps them out of a normal add only as spelled there, and the gate alone
-# covers the other spellings. ci/Dockerfile is the image the gates job runs in, by its one name.
+# covers the other spellings. ci/Dockerfile is the image the gates job runs in, by its one name. runtime/
+# holds the runtime's Kurz, .kz files in its directories, which the build of the compiler embeds (design record,
+# section 2, round 20).
 ALLOWED = [
     r"CLAUDE\.md", r"INDEX\.md", r"README\.md", r"LICENSE(?:\.md)?", r"kurz-design\.md",
     r"\.gitattributes", r"\.gitignore",
     r"knowledge/[^/]+\.md", r"guides/[^/]+\.md",
-    r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz",
+    r"reference/[^/]+\.md", r"corpus/(?:[^/]+/)*[^/]+\.kz", r"runtime/(?:[^/]+/)+[^/]+\.kz",
     r"tools/(?:[^/]+/)*[^/]+\.(?:py|json|txt)",
     r"compiler/(?:(?!(?i:bin|obj)/|\.)[^/]+/)*(?:[^/]+\.(?:cs|csproj|sln|props|targets|json|md)|\.editorconfig)",
     r"compiler/NuGet\.config", r"ci/Dockerfile",
@@ -62,6 +64,7 @@ ALLOWED = [
 ]
 HOLDS = ("this tree holds the design record, the reference, the corpus, the knowledge store, the quality tools, "
          "the compiler's source, project and text files under compiler/ (outside bin/, obj/ and dot-directories), "
+         "the runtime's .kz files in the directories of runtime/, "
          "the CI image's ci/Dockerfile and the repository's own readme, licence, git, session and skill files; the list is ALLOWED in tools/tree_gate.py (CLAUDE.md)")
 
 
@@ -309,6 +312,8 @@ def cases_in(base):
     expect("a build output under Bin/ in another case is refused",
            {**ok_files, "compiler/Kurz.Compiler/Bin/Debug/Kurz.Compiler.deps.json": b"{}\n"}, "Kurz.Compiler.deps.json: not allowed")
     expect("Kurz library code outside the corpus is refused", {**ok_files, "src/list.kz": b"x = 1\n"}, "not allowed")
+    expect("a file of the runtime other than Kurz is refused", {**ok_files, "runtime/common/rt.c": b"int x;\n"}, "rt.c: not allowed")
+    expect("a Kurz file at the top of runtime/, outside its directories, is refused", {**ok_files, "runtime/rt.kz": b"x = 1\n"}, "rt.kz: not allowed")
     expect("a file beside the image's Dockerfile under ci/ is refused", {**ok_files, "ci/build.sh": b"true\n"}, "ci/build.sh: not allowed")
     expect("nested knowledge entry is refused", {**ok_files, "knowledge/sub/x.md": b"x\n"}, "not allowed")
     expect("a binary file is refused", {**ok_files, "tools/x.py": b"\xff\xfe\x00"}, "not UTF-8")
@@ -331,7 +336,8 @@ def cases_in(base):
                  ".review/review-rules.yaml", ".claude/skills/change-walk/SKILL.md", ".githooks/pre-push",
                  "compiler/Kurz.sln", "compiler/Kurz.Compiler/Kurz.Compiler.csproj", "compiler/Kurz.Compiler/Lexer.cs",
                  "compiler/global.json", "compiler/README.md", "compiler/.editorconfig",
-                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets", "compiler/NuGet.config", "ci/Dockerfile"):
+                 "compiler/Directory.Build.props", "compiler/Directory.Build.targets", "compiler/NuGet.config", "ci/Dockerfile",
+                 "runtime/common/runtime.kz", "runtime/linux/x86-64/switch.kz"):
         cases.append((f"allowed path: {path}", check_path(path) is None, check_path(path)))
     for label, value in secrets.items():  # one plant per pattern; the error must name that pattern
         expect(f"secret: {label}", {**ok_files, "guides/g.md": value.encode()}, f"credential-shaped string ({label})")

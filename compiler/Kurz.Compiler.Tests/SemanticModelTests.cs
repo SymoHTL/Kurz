@@ -107,6 +107,11 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
         walk.Program(new ProgramSyntax([.. tree.Statements, stray]));
         Assert.Contains(walk.Missing, m => m.StartsWith("3: call", StringComparison.Ordinal));
         Assert.Contains(walk.Missing, m => m.StartsWith("3: IntegerLiteral", StringComparison.Ordinal));
+
+        // an expression of a kind the walk does not list is named as such, and never passes for a literal
+        var unknown = new Walk(model);
+        unknown.Program(new ProgramSyntax([.. tree.Statements, new ExpressionStatement(4, new ThisExpression(4))]));
+        Assert.Contains("4: an expression the walk does not know, ThisExpression", unknown.Missing);
     }
 
     // ---- facts --------------------------------------------------------------------------------
@@ -725,8 +730,11 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     }
 
                     break;
+                case IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral:
+                    break; // its type and constant are its entry
                 default:
-                    break; // a literal
+                    Missing.Add($"{e.Line}: an expression the walk does not know, {e.GetType().Name}");
+                    break;
             }
         }
 

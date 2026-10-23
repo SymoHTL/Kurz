@@ -1,0 +1,26 @@
+// The runtime's code for Linux (design record, section 2): the functions `runtime/common/` calls as
+// `sys`, over the C library, which a program built for Linux links as the platform links it.
+
+extern "C" {
+    long write(int fd, byte* bytes, long count)
+    void _exit(int status)
+}
+
+// `count` bytes from `bytes` written to the file descriptor `fd` in one call of `write`: the count
+// written, or -1 where the system refused the write.
+pub long Write(int fd, byte* bytes, long count) {
+    mut long written = 0
+    raw {
+        written = write(fd, bytes, count)
+    }
+
+    return written
+}
+
+// The end of the process with the exit code, at once: `_exit` runs no handler of the C library
+// (design record, section 6).
+pub void Exit(int code) {
+    raw {
+        _exit(code)
+    }
+}

@@ -54,12 +54,17 @@ public sealed partial class Checker
     private readonly bool allowRaw;
     private readonly bool allowNative;
     private readonly SemanticModel model = new();
+    private readonly IReadOnlyDictionary<string, Checker> folders; // F10: the folders a `use` of their name can bring in, the runtime's `sys` alone
+    private readonly Dictionary<string, Checker> used = new(StringComparer.Ordinal); // F10: the folders the file's `use` lines brought in
+    private readonly HashSet<UseStatement> uses = new(ReferenceEqualityComparer.Instance); // F10: those `use` lines
+    private readonly List<FunctionSymbol> folderCalls = []; // F10: the functions of another folder the file's calls picked
 
-    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants)
+    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders)
     {
         this.diagnostics = diagnostics;
         allowRaw = grants.Contains("raw");
         allowNative = grants.Contains("native");
+        this.folders = folders;
     }
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
@@ -78,20 +83,33 @@ public sealed partial class Checker
     /// Checks a program the parser read without an error, in a package granted <paramref name="grants"/>, <c>raw</c> and <c>native</c> as a
     /// project file or a case's header line gives them (R7, R16), and adds what it finds to <paramref name="diagnostics"/>.
     /// </summary>
-    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants)
+    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants) =>
+        Check(program, diagnostics, grants, new Dictionary<string, Checker>());
+
+    /// <summary>
+    /// As above, where a `use` at the top of the file brings in a folder <paramref name="folders"/> names, by the name it has there, and the
+    /// file calls the folder's `pub` functions qualified by that name, `sys.Write(...)` (F9, F10). The runtime's `runtime/common/` reaches the
+    /// directory of the build's target so, as the folder `sys` (design record, section 2; the owner, 2026-10-23, "Rust's sys"); a `use` of any
+    /// other name is <c>not supported</c>.
+    /// </summary>
+    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(diagnostics);
         ArgumentNullException.ThrowIfNull(grants);
+        ArgumentNullException.ThrowIfNull(folders);
         if (grants.FirstOrDefault(g => g is not ("raw" or "native")) is { } unknown)
         {
             throw new ArgumentException($"`{unknown}` is no grant: R7 and R16 name `raw` and `native`", nameof(grants));
         }
 
-        var checker = new Checker(diagnostics, grants);
+        var checker = new Checker(diagnostics, grants, folders);
         checker.Run(program);
         return checker;
     }
+
+    /// <summary>The functions of other folders that the file's calls picked (F10), each once.</summary>
+    public IReadOnlyList<FunctionSymbol> FolderCalls => folderCalls.Distinct().ToList();
 
     private enum Flow
     {
@@ -195,6 +213,10 @@ public sealed partial class Checker
                     break;
                 case VariableDeclaration v when IsState(v):
                     DeclareState(v);
+                    break;
+                case UseStatement u when folders.TryGetValue(u.Target, out var folder):
+                    used[u.Target] = folder; // F10: before the bodies are checked, which call the folder's functions
+                    uses.Add(u);
                     break;
                 default:
                     break;
@@ -1008,7 +1030,7 @@ public sealed partial class Checker
         return e;
     }
 
-    private void DeclareParameter(string name, KurzType type, bool mut, int line, Parameter node)
+    private VariableSymbol DeclareParameter(string name, KurzType type, bool mut, int line, Parameter node)
     {
         if (frame.Reserved is not null && frame.Reserved.Contains(name))
         {
@@ -1022,6 +1044,7 @@ public sealed partial class Checker
         var symbol = new VariableSymbol(name, type, mut, VariableKind.Parameter, line);
         frame.Scope.Variables[name] = symbol;
         model.RecordDeclaration(node, symbol);
+        return symbol;
     }
 
     // ---- scopes ----------------------------------------------------------------------------------
@@ -1228,7 +1251,11 @@ public sealed partial class Checker
                 return CheckRawBlock(r);
 
             case UseStatement u:
-                NotSupported(u.Line, "use (F10)");
+                if (!uses.Contains(u))
+                {
+                    NotSupported(u.Line, "use (F10)");
+                }
+
                 return Flow.Completes;
             case ExternBlock e:
                 // R16: a block stands at the top level of a file alone, as the parser holds it; its declarations were declared and resolved in the first passes

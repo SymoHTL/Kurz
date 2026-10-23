@@ -28,7 +28,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   and takes, program by program, what each kind of entry holds.
   A third suite takes the clang search over a path and a Program Files directory it makes, with
   the answers to `--version` it gives, and over this machine's own environment; a fourth runs the
-  command `kurz` as a process, and in the test's own process with a clang search it gives.
+  command `kurz` as a process, and in the test's own process with a clang search it gives; a
+  fifth checks the runtime under `runtime/` (the section "The runtime" below).
 
 ## Building and testing
 
@@ -137,6 +138,30 @@ ask about it.
 - A file that does not start, exits with a code other than 0 or gives no answer in 30 s names no
   release, and is refused as such. Pinned by
   `ClangTests.A_file_whose_answer_names_no_clang_release_is_refused`.
+
+## The runtime
+
+The runtime a built program links is written in Kurz, in `runtime/` at the top of the repository
+(design record, section 2): `runtime/common/` holds the code every target shares, and
+`runtime/linux/` and `runtime/windows/` the code of one target each. The build of the compiler
+embeds every `.kz` file there, by its path from the top of the repository (`Build/Runtime.cs`,
+`Runtime.Files`). Code in `common/` reaches the functions of the target it is built for as the
+folder `sys`: it writes `use sys` and calls `sys.Write(...)`, and `sys` is that target's directory
+(the owner, 2026-10-23, "Rust's sys"). The checker reads `use sys` at the top of a file of
+`common/`, and a call qualified by `sys` picks among the folder's `pub` functions; a function of the
+folder that is not `pub` is `not-visible` there (F9), and a name the folder does not declare is
+`unknown-name` (V10).
+
+`Runtime.CheckEveryTarget` checks the runtime for every target, each folder granted `raw` and
+`native` (R7, R16): the target's directory on its own, then `common/` with it as `sys`. It is also
+red where a function `common/` calls has other parameters or another result in one target's
+directory than in another's; a function only its own directory calls can differ freely (record,
+section 2, round 20). The compiler reads one file in each of the three directories and no directory
+inside them: a second file of a directory, the directory of an architecture
+(`runtime/linux/x86-64/`, round 20) and a directory of a target it does not know are refused, each
+named by its path. The checks and the layout are pinned by `RuntimeTests`, which also holds what the
+compiler carries to the files of the tree. The runtime gives a target's write to standard output and
+its exit, and `common/` one write of a text to standard output; nothing in this tree calls them.
 
 ## What the compiler says about a program
 
@@ -304,7 +329,7 @@ The checker (`Semantics/`) takes a tree the parser read without an error and che
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 5 (data types: D1 to D11, D14 and D15), 6 (values: M1 to M5, M7, and
-M9 for lists), 8 (functions, without F9 and F10: it reads one file), 9 (outcomes), 10 (control
+M9 for lists), 8 (functions, without F9 and F10: it reads one file, but for the runtime's `use sys`), 9 (outcomes), 10 (control
 flow) and 11's raw forms (R7, R10 to R17), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -376,7 +401,7 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); and `use` (F10);
+type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; `Map` (M8, M9, M10), an assignment into an index or into a path through one, a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`

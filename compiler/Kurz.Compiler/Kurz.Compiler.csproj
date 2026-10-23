@@ -12,4 +12,10 @@
     <InternalsVisibleTo Include="Kurz.Compiler.Tests" />
   </ItemGroup>
 
+  <!-- The runtime's Kurz, carried in the compiler (design record, section 2, round 20): every file under
+       runtime/ at the top of the repository, by its path from there, runtime/common/runtime.kz. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../runtime/**/*.kz" LogicalName="runtime/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

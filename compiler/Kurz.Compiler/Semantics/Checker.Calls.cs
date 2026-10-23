@@ -168,6 +168,8 @@ public sealed partial class Checker
 
             case TypeMemberAccess t:
                 return CheckTypeMemberCall(t, c); // R15
+            case MemberAccess { Target: NameExpression folderName } m when used.TryGetValue(folderName.Name, out var folder) && Lookup(folderName.Name).Variable is null:
+                return CheckFolderCall(folder, folderName.Name, m, c, expected);
             case MemberAccess m:
                 return CheckMethodCall(m, c);
             default:
@@ -176,6 +178,35 @@ public sealed partial class Checker
                     return CallValue(callee.Type, c);
                 }
         }
+    }
+
+    /// <summary>F9, F10: a call of a function of a folder a `use` brought in, `sys.Write(...)`; a function of the folder that is not `pub` is not visible here.</summary>
+    private Typed CheckFolderCall(Checker folder, string name, MemberAccess m, CallExpression c, KurzType? expected)
+    {
+        var all = folder.functions.TryGetValue(m.Member, out var list) ? list : [];
+        var visible = all.Where(f => f.Declaration is { } d && d.Modifiers.HasFlag(Modifiers.Pub)).ToList();
+        if (visible.Count == 0)
+        {
+            if (all.Count > 0)
+            {
+                Report(ErrorIds.NotVisible, m.Line, $"`{m.Member}` of the folder `{name}` is not `pub` (F9)");
+            }
+            else
+            {
+                Report(ErrorIds.UnknownName, m.Line, $"the folder `{name}` has no function `{m.Member}` (V10)");
+            }
+
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        var result = ResolveCall(visible, c, expected, out var picked);
+        if (picked is not null)
+        {
+            folderCalls.Add(picked);
+        }
+
+        return result;
     }
 
     /// <summary>The arguments checked for their own defects, where the call itself is already wrong.</summary>
@@ -752,7 +783,10 @@ public sealed partial class Checker
     // ---- overloads, binding and inference ----------------------------------------------------------
 
     /// <summary>F12 to F14, T27: the one function of the name a call picks.</summary>
-    private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected)
+    private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected) => ResolveCall(candidates, c, expected, out _);
+
+    /// <summary>As above, with the function picked, or null where the call is wrong.</summary>
+    private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function)
     {
         var typeArguments = c.TypeArguments.Select(Resolve).ToList(); // once: an error in one is one diagnostic, whatever the number of overloads (E1)
         var list = new List<Candidate>();
@@ -776,7 +810,9 @@ public sealed partial class Checker
             list.Add(candidate);
         }
 
-        return Record(c, CallKind.Function, Call(list, c, expected, out var picked), picked);
+        var typed = Record(c, CallKind.Function, Call(list, c, expected, out var picked), picked);
+        function = typed.IsError ? null : picked?.Function;
+        return typed;
     }
 
     /// <summary>Binds the arguments to each candidate, picks one (F13) and checks the arguments against it.</summary>

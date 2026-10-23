@@ -17,7 +17,7 @@ flowchart TD
         W1["write-time hook, tree_gate.py --hook:
         denies a Write or Edit to a path the allowlist does not hold (under compiler/, since pull request 29 retired the
         design-phase rule: .cs, .csproj, .sln, .props, .targets, .json, .md and .editorconfig files outside bin/, obj/
-        and dot-directories), and every call
+        and dot-directories; under runtime/, .kz files in its directories), and every call
         the gate could not judge; inside or outside the repository is decided by the file system's
         identity of directories, so a path spelled in another case is inside where case is ignored.
         It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
@@ -89,9 +89,14 @@ flowchart TD
         that names a clang release in the command's one-line form. Read: the output of dotnet test, one summary per
         test project, summed;
         the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
+        Inside the suite: the walk of every corpus case the checker reads clean, red on a node a code generator reads
+        that the checker's record (SemanticModel) holds no entry for, or on fewer than 160 cases or 2,900 entries
+        walked; and the runtime under runtime/, embedded in the compiler, red on a file the compiler carries
+        other than the tree's, on a file out of its place, on a diagnostic of its check for any target, or on a
+        function common/ calls that a target's directory gives with other parameters or another result.
         Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's and the
         checker's errors against each header and runs no Kurz program (it starts the command kurz and the clang it
-        finds, and no case's program)"]
+        finds, and no case's program), and the runtime is checked, not run"]
         G4["ci-config: a pinned fact of a workflow changed. All four workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
@@ -184,7 +189,8 @@ flowchart TD
         pull_request_target and workflow_dispatch for .github/workflows/review.yml, active since 2026-10-03
         (read 2026-10-09 from the repository's Actions policies, gh api repos/OWNER/REPO/actions/policies).
         Nothing asserts the policy: HAZARD issue 10"]
-        R5["review rules, .review/review-rules.yaml of the default branch: one section per surface.
+        R5["review rules, .review/review-rules.yaml of the default branch: one section per surface, the
+        section compiler for compiler/ and runtime/.
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).
         The reviewer is a model that is given one batch of the diff: it can miss a defect, it cannot
         see a file outside its batch, and a breach it rates low opens no thread and holds no merge.

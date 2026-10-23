@@ -1,0 +1,15 @@
+// The part of the runtime every target shares (design record, section 2). It reaches the functions of
+// the target the program is built for as the folder `sys`, the target's directory (the owner,
+// 2026-10-23, "Rust's sys").
+use sys
+
+// The bytes of the text written to standard output in one call of the system: the count written,
+// which can be fewer than the text holds, or a negative count where the system refused the write.
+pub long WriteOut(string text) {
+    mut long written = 0
+    raw {
+        written = sys.Write(1, text.Pointer, long(text.Bytes.Count))
+    }
+
+    return written
+}

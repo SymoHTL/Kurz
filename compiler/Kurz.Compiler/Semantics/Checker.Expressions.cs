@@ -1235,9 +1235,10 @@ public sealed partial class Checker
             TypeParameters = outer.TypeParameters,
             Reserved = outer.Reserved,
         };
+        var parameters = new List<VariableSymbol>();
         foreach (var (p, type) in l.Parameters.Zip(parameterTypes))
         {
-            DeclareParameter(p.Name, type, p.Mut, p.Line, p);
+            parameters.Add(DeclareParameter(p.Name, type, p.Mut, p.Line, p));
         }
 
         KurzType result;
@@ -1294,7 +1295,7 @@ public sealed partial class Checker
         }
 
         var lambdaType = new FunctionType(parameterTypes, result);
-        model.RecordLambda(l, new LambdaInfo(l.Parameters.Select(p => model.DeclarationOf(p)).ToList(), lambda.Captures.ToList(), lambdaType));
+        model.RecordLambda(l, new LambdaInfo(parameters, lambda.Captures.ToList(), lambdaType)); // the symbols declared here: a reader of the model never runs while the checker does
         return new Typed(lambdaType);
     }
 
