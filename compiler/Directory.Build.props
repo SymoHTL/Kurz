@@ -5,8 +5,11 @@
        beside each project record the resolved graph: the gate's command line locks the restore to them
        (-p:RestoreLockedMode=true), a plain dotnet test rewrites them. The audit is off: it reads the
        current advisory database from the network, which no file pins, and a new advisory would turn a
-       head nothing changed red. -->
+       head nothing changed red. The version is the compiler's, which the command prints for its version
+       option, with no commit appended. -->
   <PropertyGroup>
+    <Version>0.1.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>14.0</LangVersion>
     <Nullable>enable</Nullable>

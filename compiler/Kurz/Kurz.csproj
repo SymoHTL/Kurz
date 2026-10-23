@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The command `kurz` (design record, section 2). The program is one line over the library's
+       Build/Command.cs, so that the suite tests the command in its process. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>kurz</AssemblyName>
+    <RootNamespace>Kurz</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kurz.Compiler\Kurz.Compiler.csproj" />
+  </ItemGroup>
+
+</Project>

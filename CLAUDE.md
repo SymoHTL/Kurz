@@ -40,8 +40,14 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   is missing, is not well-formed XML, does not open its package sources with `<clear />` or maps no
   package to a source; on a failed test, a skipped test, fewer passed tests than its floor, no
   summary line at all, a non-zero exit with no failed test, a restore outside the lock files, a
-  missing `dotnet` or a run out of time. The same gate runs on Windows in the workflow
-  `compiler-windows`, which the ruleset does not require: a red Windows run holds no merge
+  missing `dotnet` or a run out of time; then it runs `kurz --version`, prints what the command
+  wrote, the compiler's version, the major release of LLVM the compiler pins and the clang it found
+  with that clang's release, and is red where the command refused that clang or found none, as
+  section 2 of the design record requires of it. The suites need the clang of that release, so on
+  a machine without it the gate is red: run the gates in the image the `gates` job runs in
+  ([knowledge/the-gates-job-runs-in-its-image.md](knowledge/the-gates-job-runs-in-its-image.md)).
+  The same gate runs on Windows in the workflow `compiler-windows`, which installs the pinned
+  release on every run and which the ruleset does not require: a red Windows run holds no merge
   (HAZARD #30). Gate: `compiler-tests`, in every gates run.
 - `py -3 tools/lint_reference.py --sync` rewrites every sample in `reference/` from its corpus
   file. Change the `.kz` file, then sync: a sample edited by hand is red until it is overwritten.
@@ -53,8 +59,9 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   `tools/review/requirements.txt` (the CPython 3.12 x86_64 wheel the images have: another Python
   fails the install, loudly), and in the review job the Claude CLI, pinned to an exact version in
   `.github/workflows/review.yml`. The `gates` job runs in the image `ci/Dockerfile` defines, named
-  in `gates.yml` by its digest: a base named by its digest, clang of the LLVM major the file names,
-  the newest stable one, from the packages LLVM publishes, the SDK `compiler/global.json` pins and gh, each download
+  in `gates.yml` by its digest: a base named by its digest, clang of the LLVM major the compiler
+  pins (`Clang.PinnedMajor` in `compiler/Kurz.Compiler/Build/Clang.cs`, the one definition of that
+  major), from the packages LLVM publishes, the SDK `compiler/global.json` pins and gh, each download
   checked by its hash or its key, as section 2 of the design record says (the owner, 2026-10-22,
   "Public GHCR image"). `.github/workflows/image.yml` builds it and publishes it to the GitHub
   container registry on a push that changes it; the walk of a change to it, and the local run of
@@ -64,9 +71,12 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   digest for a hosted image. Of those images the tools use python3, node (for the CLI), gh (every
   forge call) and git, and of the gates image python3, git and the LLVM release, which the
   distribution's and LLVM's packages give on the day the image is built: none of them pinned to a
-  version, HAZARD (#15).
+  version, HAZARD (#15). The Windows job installs the release `LLVM_VERSION` names, of the major the
+  compiler pins, from a cache of LLVM's archive for Windows, which it checks by the SHA-256 in
+  `LLVM_SHA256` before it unpacks it.
   Gate: `ci-config` (pip with `--require-hashes`, the CLI's exact version, the runner labels, the
-  gates image by its digest and the facts of its Dockerfile).
+  gates image by its digest and the facts of its Dockerfile, the LLVM major of the image and of the
+  Windows job against the compiler's).
 
 ### Before debugging the diff: stale output and phantom results
 
@@ -217,7 +227,8 @@ project files nowhere else (since pull
 request 29 retired the design-phase rule, after the owner said build on 2026-10-09). It holds the
 library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Semantics/`
 checks the tree against the rules of chapters 1 to 3, 5, 6, 8 to 10 and 11's raw forms that
-`compiler/README.md` lists, and says `not supported` to the rest, `Corpus/` reads a case header),
+`compiler/README.md` lists, and says `not supported` to the rest, `Corpus/` reads a case header,
+`Build/` finds the clang of the pinned LLVM major and is the command `kurz`, whose program is `Kurz/`),
 the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case through the front end and every
 case it reads clean through the checker, and `compiler/README.md`. The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
@@ -436,9 +447,9 @@ Gate: review rule "rules for sessions".
 | what may exist in the tree, and no credential or machine-bound string in files and commit messages (`tree`, the pre-push hook) | future plans stay out (#2) |
 | merge checks on `main` (ruleset; `merge-checks` asserts it on every run and is red while it is off) | per-item approval for a merge over red (#3), and the window in which the ruleset is off (#27) |
 | every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout, a push with `--no-verify` (#4) |
-| workflow facts, and the image the `gates` job runs in, named by its digest, with the facts of its Dockerfile (`ci-config`) | wrap-up (#6) |
+| workflow facts, the image the `gates` job runs in, named by its digest, with the facts of its Dockerfile, and the LLVM major of that image and of the Windows job's install, held to the compiler's (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
-| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30); the version of the clang the compiler found, and a fail on a refused one or none, which section 2 of the design record (decided there, round 20) requires of the gate, and the install of the pinned release in the workflow `compiler-windows`, which section 2 (decided there, round 20) requires of this repository's CI, while the compiler under `compiler/` calls no clang and the gate reads no version (#37; checked 2026-10-20 against the sources of the compiler and of the gate, and 2026-10-22 against the workflows; the image with the pinned LLVM that the job `gates` runs in is `ci-config`'s since 2026-10-22) |
+| the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples and corpus expectations being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |

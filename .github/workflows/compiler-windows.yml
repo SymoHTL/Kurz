@@ -2,7 +2,9 @@ name: compiler-windows
 
 # The compiler's build and tests on Windows, the owner's platform; the gates job runs the same gate
 # on Linux. Facts of this file are pinned by tools/lint_ci.py. The job is not a required check of
-# the ruleset: a red run here holds no merge until the owner adds it there.
+# the ruleset: a red run here holds no merge until the owner adds it there. No image serves this
+# job, so it installs the LLVM release the compiler pins on every run, from a cache of LLVM's
+# archive for Windows, into the directory LLVM's installer uses (design record, section 2).
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
@@ -21,6 +23,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ runner.temp }}/llvm-archive
+          key: llvm-23.1.4-x86_64-pc-windows-msvc
+      - name: Install the pinned LLVM
+        env:
+          LLVM_VERSION: "23.1.4"
+          LLVM_SHA256: "1a3f2f998e230b5791cc4e2bfe11a1f7c07fe42c96ff44f227c9db0bedfaf091"
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $ProgressPreference = 'SilentlyContinue'
+          $name = "clang+llvm-$env:LLVM_VERSION-x86_64-pc-windows-msvc.tar.zst"
+          $archive = Join-Path $env:RUNNER_TEMP llvm-archive $name
+          if (-not (Test-Path $archive)) {
+            New-Item -ItemType Directory -Force (Split-Path $archive) | Out-Null
+            Invoke-WebRequest "https://github.com/llvm/llvm-project/releases/download/llvmorg-$env:LLVM_VERSION/$name" -OutFile $archive
+          }
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash -ne $env:LLVM_SHA256) { throw "$name is not the archive LLVM_SHA256 pins" }
+          $llvm = Join-Path $env:ProgramFiles LLVM
+          if (Test-Path $llvm) { Remove-Item -Recurse -Force $llvm }
+          New-Item -ItemType Directory $llvm | Out-Null
+          tar -xf $archive -C $llvm --strip-components 1
+          & (Join-Path $llvm bin clang.exe) --version
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         with:
           global-json-file: compiler/global.json
