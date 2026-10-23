@@ -93,10 +93,15 @@ flowchart TD
         that the checker's record (SemanticModel) holds no entry for, or on fewer than 160 cases or 2,900 entries
         walked; and the runtime under runtime/, embedded in the compiler, red on a file the compiler carries
         other than the tree's, on a file out of its place, on a diagnostic of its check for any target, or on a
-        function common/ calls that a target's directory gives with other parameters or another result.
-        Not seen: a corpus expectation that is wrong (HAZARD issue 1): the suite checks the front end's and the
-        checker's errors against each header and runs no Kurz program (it starts the command kurz and the clang it
-        finds, and no case's program), and the runtime is checked, not run"]
+        function common/ calls that a target's directory gives with other parameters or another result;
+        and the corpus runner, which builds every case that expects a run and that the compiler emits with the
+        pinned clang and runs it, red on output, an exit code or an error line other than the header's, on a case
+        the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
+        than 86 cases run; the build command's lines and refusals; and the refused write and the refused allocation,
+        each with its error line.
+        Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
+        (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
+        no program of them"]
         G4["ci-config: a pinned fact of a workflow changed. All four workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
@@ -247,8 +252,8 @@ flowchart TD
         X1["a statement is recorded as decided only after the owner chose it; a proposal nobody
         objected to is recorded as assumed; a question nobody answered goes under Open: judgment step.
         The shape of the record is node R5, rule design record"]
-        X2["samples in the design record and expectations in the corpus are right:
-        nothing runs them, HAZARD issue 1"]
+        X2["samples in the design record, and expectations of the corpus cases the compiler does not emit, are
+        right: nothing runs them, HAZARD issue 1"]
         X3["wrap-up: lessons promoted out of private memory: HAZARD issue 6"]
         X4["one push per review round, and none after the round at the cap (R7): judgment step"]
     end
@@ -276,7 +281,8 @@ flowchart TD
   step installs it. A lock file, `compiler/Directory.Packages.props`, `compiler/Directory.Build.props` or
   `compiler/NuGet.config` changes what the gate restores or builds: G10 and C1.
 - `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.
-- `tools/lint_reference.py` changes a check, or something starts to run the corpus: G9 and X2.
+- `tools/lint_reference.py` changes a check: G9 and X2. The emitter emits more of the corpus, or the runner's
+  lists change: G10 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.
 - `.github/workflows/review.yml`, `tools/review/review.py` or `.review/review-rules.yaml`
   changes: the subgraph R.

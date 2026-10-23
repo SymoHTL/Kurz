@@ -1,20 +1,54 @@
 // The runtime's code for Linux (design record, section 2): the functions `runtime/common/` calls as
-// `sys`, over the C library, which a program built for Linux links as the platform links it.
+// `sys`, over the C library, which a program built for Linux links as the platform links it. It is the
+// code of 64-bit Linux, where C's `size_t` and `ssize_t` are 64 bits as `long` is: the compiler builds
+// for a 64-bit machine alone (compiler/README.md, "The runtime").
 
 extern "C" {
     long write(int fd, byte* bytes, long count)
     void _exit(int status)
+    void* mmap(void* address, long length, int protection, int options, int fd, long offset)
+    void* signal(int number, void* handler)
+    int* __errno_location()
 }
 
-// `count` bytes from `bytes` written to the file descriptor `fd` in one call of `write`: the count
-// written, or -1 where the system refused the write.
-pub long Write(int fd, byte* bytes, long count) {
-    mut long written = 0
+// The start of the process: the signal of a closed pipe, `SIGPIPE` (13), set to ignored, so that a
+// write to a closed pipe returns an error, which `print` raises as `print-failed` (design record,
+// section 6); `SIG_IGN` is the handler 1.
+pub void Start() {
     raw {
+        signal(13, Ptr<void>(1))
+    }
+}
+
+// `count` bytes from `bytes` written to the file descriptor `fd` by `write`, called again where a
+// signal interrupted it (`EINTR`, 4), which is no error: the count written, or -1 where the system
+// refused the write.
+pub long Write(int fd, byte* bytes, long count) {
+    mut long written = -1
+    raw {
+        int* error = __errno_location()
         written = write(fd, bytes, count)
+        while written < 0 && *error == 4 {
+            written = write(fd, bytes, count)
+        }
     }
 
     return written
+}
+
+// `bytes` bytes of memory from the system, readable, writable and zeroed, by `mmap` (`PROT_READ |
+// PROT_WRITE` is 3, `MAP_PRIVATE | MAP_ANONYMOUS` is 34): their address, or null where the system
+// refuses (`MAP_FAILED`, the address -1).
+pub byte* Memory(long bytes) {
+    mut byte* p = null
+    raw {
+        void* got = mmap(null, bytes, 3, 34, -1, 0)
+        if long(got) != -1 {
+            p = Ptr<byte>(got)
+        }
+    }
+
+    return p
 }
 
 // The end of the process with the exit code, at once: `_exit` runs no handler of the C library

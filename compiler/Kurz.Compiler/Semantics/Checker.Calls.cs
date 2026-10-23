@@ -180,7 +180,7 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>F9, F10: a call of a function of a folder a `use` brought in, `sys.Write(...)`; a function of the folder that is not `pub` is not visible here.</summary>
+    /// <summary>A call of a function of a folder a `use` brought in (F10), qualified by the folder's name, `sys.Write(...)`, as the design record's section 2 states it (the owner, 2026-10-23, "Rust's sys"); a function of the folder that is not `pub` is not visible here (F9).</summary>
     private Typed CheckFolderCall(Checker folder, string name, MemberAccess m, CallExpression c, KurzType? expected)
     {
         var all = folder.functions.TryGetValue(m.Member, out var list) ? list : [];

@@ -16,9 +16,9 @@ public sealed record RuntimeFile(string Path, byte[] Bytes);
 
 /// <summary>
 /// The runtime checked for one target: <c>runtime/common/</c>, which reads the target's directory as the folder <c>sys</c>, with its checker,
-/// and the target's directory with its own.
+/// and the target's directory with its own, each with the path of its file.
 /// </summary>
-public sealed record CheckedRuntime(Target Target, ProgramSyntax Common, Checker CommonChecker, ProgramSyntax Sys, Checker SysChecker);
+public sealed record CheckedRuntime(Target Target, string CommonPath, ProgramSyntax Common, Checker CommonChecker, string SysPath, ProgramSyntax Sys, Checker SysChecker);
 
 /// <summary>
 /// The runtime a built program links, written in Kurz, one per target (design record, section 2, round 17): the files under
@@ -27,10 +27,11 @@ public sealed record CheckedRuntime(Target Target, ProgramSyntax Common, Checker
 /// functions of the target it is built for as the folder <c>sys</c>, which is that target's directory (<c>use sys</c>,
 /// <c>sys.Write(...)</c>; the owner, 2026-10-23, "Rust's sys"), and every target's directory gives the functions <c>common/</c> calls,
 /// each with the same parameters and the same result (round 20, "Called from outside"). Both folders are checked granted
-/// <c>raw</c> and <c>native</c> (R7, R16), with every target's directory in every check, so that the code of no target is checked only in
-/// a build for it (the record's reading of round 20).
-/// The compiler reads one file in each of the three directories and no directory inside them: a folder of several files, and the
-/// directory of an architecture inside a target's (round 20), are refused by <see cref="Layout"/>.
+/// <c>raw</c> and <c>native</c> (R7, R16); <see cref="CheckEveryTarget"/> checks every target in turn, so that the code of no target is
+/// checked only in a build for it (the record's reading of round 20).
+/// The compiler reads one file in each of the three directories and no directory inside them: a folder of several files, which section 8
+/// makes one namespace, and the directory of an architecture inside a target's, where round 20 places that code, are <c>not supported</c>
+/// by <see cref="Layout"/>.
 /// </summary>
 public static class Runtime
 {
@@ -47,7 +48,10 @@ public static class Runtime
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "no directory of the runtime"),
     };
 
-    /// <summary>What is wrong with the files' places: a file outside <c>common/</c> and the targets' directories, a directory inside one of them, a directory of no file or of more than one.</summary>
+    /// <summary>
+    /// What is wrong with the files' places: a file outside <c>common/</c> and the targets' directories and a directory of no file, and what
+    /// the compiler does not read there, a directory inside a target's and a directory of more than one file.
+    /// </summary>
     public static IReadOnlyList<string> Layout(IReadOnlyList<RuntimeFile> files)
     {
         ArgumentNullException.ThrowIfNull(files);
@@ -56,7 +60,12 @@ public static class Runtime
         foreach (var file in files)
         {
             var parts = file.Path.Split('/');
-            if (parts.Length != 3 || parts[0] != "runtime" || !folders.Contains(parts[1]) || !parts[2].EndsWith(".kz", StringComparison.Ordinal))
+            var known = parts.Length >= 3 && parts[0] == "runtime" && folders.Contains(parts[1]) && parts[^1].EndsWith(".kz", StringComparison.Ordinal);
+            if (known && parts.Length == 4 && parts[1] != "common")
+            {
+                errors.Add($"{file.Path}: not supported: a directory inside a target's, where round 20 places the code of an architecture (design record, section 2): the compiler reads one file in each directory of the runtime");
+            }
+            else if (!known || parts.Length != 3)
             {
                 errors.Add($"{file.Path}: the runtime is `runtime/common/<file>.kz` and `runtime/<target>/<file>.kz`, a target being one of {string.Join(", ", folders.Skip(1))}");
             }
@@ -65,9 +74,13 @@ public static class Runtime
         foreach (var folder in folders)
         {
             var count = files.Count(f => f.Path.StartsWith($"{Prefix}{folder}/", StringComparison.Ordinal) && f.Path.Count(ch => ch == '/') == 2);
-            if (count != 1)
+            if (count == 0)
             {
-                errors.Add($"{Prefix}{folder}/ holds {count} files: the compiler reads one file in each directory of the runtime");
+                errors.Add($"{Prefix}{folder}/ holds 0 files: the compiler reads one file in each directory of the runtime");
+            }
+            else if (count > 1)
+            {
+                errors.Add($"{Prefix}{folder}/: not supported: a directory of {count} files, which section 8 makes one folder: the compiler reads one file in each directory of the runtime");
             }
         }
 
@@ -92,12 +105,13 @@ public static class Runtime
         var commonDiagnostics = new DiagnosticBag();
         var commonChecker = Checker.Check(common, commonDiagnostics, ["raw", "native"], new Dictionary<string, Checker> { ["sys"] = sysChecker });
         errors.AddRange(commonDiagnostics.Sorted.Select(d => Line(commonPath, d)));
-        return new CheckedRuntime(target, common, commonChecker, sys, sysChecker);
+        return new CheckedRuntime(target, commonPath, common, commonChecker, sysPath, sys, sysChecker);
     }
 
     /// <summary>
     /// The runtime checked for every target, with the rule that every target's directory gives the functions <c>common/</c> calls with the
-    /// same parameters and the same result: what is wrong, one line each, or nothing.
+    /// same parameters and the same result: what is wrong, one line each, or nothing. A line of <c>common/</c> that the check for every
+    /// target reports stands once; one that only the check for some targets reports names them.
     /// </summary>
     public static IReadOnlyList<string> CheckEveryTarget() => CheckEveryTarget(Files);
 
@@ -112,10 +126,20 @@ public static class Runtime
         }
 
         var called = new Dictionary<Target, SortedSet<string>>();
+        var reported = new Dictionary<Target, List<string>>();
         foreach (var target in Enum.GetValues<Target>())
         {
-            var checkedRuntime = Check(files, target, errors);
+            reported[target] = [];
+            var checkedRuntime = Check(files, target, reported[target]);
             called[target] = new SortedSet<string>(checkedRuntime.CommonChecker.FolderCalls.Select(Signature), StringComparer.Ordinal);
+        }
+
+        foreach (var line in reported.Values.SelectMany(l => l).Distinct(StringComparer.Ordinal))
+        {
+            var targets = reported.Where(r => r.Value.Contains(line, StringComparer.Ordinal)).Select(r => Directory(r.Key)).ToList();
+            errors.Add(targets.Count == reported.Count || !line.StartsWith($"{Prefix}common/", StringComparison.Ordinal)
+                ? line
+                : $"{line} (in the check for {string.Join(" and ", targets)})");
         }
 
         var first = Enum.GetValues<Target>()[0];
@@ -166,8 +190,7 @@ public static class Runtime
         return (file.Path, diagnostics.HasErrors ? new ProgramSyntax([]) : tree);
     }
 
-    private static string Line(string path, Diagnostic d) =>
-        d.IsError ? $"{path}:{d.Line}: {d.Id}: {d.Message}" : $"{path}:{d.Line}: not supported: {d.Message}";
+    private static string Line(string path, Diagnostic d) => d.At(path);
 
     private static List<RuntimeFile> Embedded()
     {

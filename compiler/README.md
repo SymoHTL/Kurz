@@ -12,9 +12,12 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   other chapters, and keeps what it found out, node by node, for a code generator
   (`Semantics/SemanticModel.cs`: the type and constant of every expression, the variable or
   function every name means, the variable every declaration makes, the function every call picks
-  with the parameter each argument fills, what every lambda captures), `Corpus/` reads the header of a corpus case in the shape `reference/00-about.md`
+  with the parameter each argument fills, what every lambda captures), `Emit/` turns a program the
+  checker read in full, with the runtime of its target, into LLVM's IR (the section "What the
+  emitter emits" below), `Corpus/` reads the header of a corpus case in the shape `reference/00-about.md`
   states, its grant line among it (R7), and `Build/` finds the clang of the release of LLVM the
-  compiler pins and is the command (the section "The command" below).
+  compiler pins, carries and checks the runtime, builds a program from its source to an executable
+  and is the command (the section "The command" below).
 - `Kurz/`: the command `kurz`, one line over `Build/Command.cs`.
 - `Kurz.Compiler.Tests/`: xunit tests. Every program the lexer, parser and checker tests read
   stands inline in the test, and the corpus suite reads the cases where they lie, under `corpus/`:
@@ -29,7 +32,11 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   A third suite takes the clang search over a path and a Program Files directory it makes, with
   the answers to `--version` it gives, and over this machine's own environment; a fourth runs the
   command `kurz` as a process, and in the test's own process with a clang search it gives; a
-  fifth checks the runtime under `runtime/` (the section "The runtime" below).
+  fifth checks the runtime under `runtime/` (the section "The runtime" below). A sixth builds
+  every corpus case that expects a run with the pinned clang and runs it, and checks what it
+  prints, its exit code and its error line against the case's header (`RunTests`); a seventh
+  builds the programs that pin what no case can, a refused write and a refused allocation among
+  them (`EmitterTests`).
 
 ## Building and testing
 
@@ -57,9 +64,9 @@ gives where it refused the clang it found or found none, and a 0 with no line th
 release; and is part of every gates run.
 
 The suites need the clang of the pinned release on the machine that runs them, as every build
-does (design record, section 2): on a machine without it, the test of this machine's search and
-the test of the command's `--version` fail with the command's own lines, and the gate fails on
-`kurz --version`. The image the `gates` job runs in has it, and so does a local run of the gates in
+does (design record, section 2): on a machine without it, the test of this machine's search, the
+tests of the command's `--version` and `build` and every test that builds a program fail, the last
+with the command's own lines, and the gate fails on `kurz --version`. The image the `gates` job runs in has it, and so does a local run of the gates in
 that image (`knowledge/the-gates-job-runs-in-its-image.md`); the workflow `compiler-windows`
 installs it on every run.
 
@@ -125,8 +132,57 @@ so a test cannot move that directory through a child's environment
 ([a Windows child gets its own Program Files](../knowledge/a-windows-child-gets-its-own-program-files.md)).
 
 `--verbose` stands before or after `--version`, as rustc takes `-v` and `-V` in either order (the
-owner, 2026-10-23). Any other command line gets the usage on standard error and the exit code 1.
-The usage is `usage: kurz --version [--verbose]`.
+owner, 2026-10-23).
+
+`kurz build [--release] file.kz [-o output]` builds the program for the machine that builds,
+the test build unless `--release` says otherwise, into the executable beside the source, named
+after it, `hello.exe` on Windows, or where `-o` says (design record, section 2). It writes over an
+executable that is there, writes nothing on standard output, and exits with 0. A program the
+compiler refuses gets its lines on standard error, one per diagnostic in the order of their lines,
+and no executable, and the command exits with 1:
+
+    hello.kz:3: unknown-name: `y` is not declared
+    hello.kz:1: not supported: a value of type `List<int>` (M9)
+
+The file is named as the command line gave it. The command grants a program neither `raw` nor
+`native` (R7, R16): a program that needs them is refused with the grant's error. It refuses to
+write over its source and over a directory, as rustc does, and those refusals, an output in a
+directory that is not there, a source it cannot read, a machine it has no runtime for and a clang
+that did not build the program are its own failures, in the record's form, each exiting with 1:
+
+    error: the executable would be written over its source
+      note: both are hello
+      help: name another output with -o
+
+    error: the output is a directory
+      note: out is a directory
+      help: name a file with -o
+
+    error: the output's directory does not exist
+      note: <the directory's full path> is not there
+      help: name a file in a directory that exists with -o
+
+    error: the source cannot be read
+      note: <what the system said, the file's full path in it>
+      help: name a Kurz source file that can be read
+
+    error: no runtime for this system
+      note: the runtime has a directory for 64-bit Linux and one for 64-bit Windows
+      help: build on 64-bit Linux or Windows
+
+    error: clang did not build the program
+      note: /usr/bin/clang-23 exited with 1 and wrote:
+        <what clang wrote>
+      help: check that the clang found runs; the compiler accepted the program, so a clang that runs and fails on it is the compiler's defect
+
+The search for clang runs after the program was accepted, and its failures are those above. The
+build writes the IR into a directory of its own under the system's temporary directory, which it
+removes after clang's run.
+
+Any other command line gets the usage on standard error and the exit code 1:
+
+    usage: kurz --version [--verbose]
+           kurz build [--release] <file.kz> [-o <output>]
 
 ### Readings the record leaves open to the command
 
@@ -138,6 +194,11 @@ ask about it.
 - A file that does not start, exits with a code other than 0 or gives no answer in 30 s names no
   release, and is refused as such. Pinned by
   `ClangTests.A_file_whose_answer_names_no_clang_release_is_refused`.
+- `build` takes its options before or after the file, each once, and nothing else; the words of
+  its own failures are this directory's, in the record's form. Pinned by `CommandTests`.
+- `build` builds for a 64-bit machine alone: the emitter lays a pointer out in 8 bytes, and the
+  runtime declares C's `size_t` as a `long`. Pinned by
+  `CommandTests.The_target_is_a_64_bit_Linux_or_Windows_machine`.
 
 ## The runtime
 
@@ -147,7 +208,8 @@ The runtime a built program links is written in Kurz, in `runtime/` at the top o
 embeds every `.kz` file there, by its path from the top of the repository (`Build/Runtime.cs`,
 `Runtime.Files`). Code in `common/` reaches the functions of the target it is built for as the
 folder `sys`: it writes `use sys` and calls `sys.Write(...)`, and `sys` is that target's directory
-(the owner, 2026-10-23, "Rust's sys"). The checker reads `use sys` at the top of a file of
+with the directory of the build's architecture read into it (the owner, 2026-10-23, "Rust's sys"),
+a directory this compiler does not read (below). The checker reads `use sys` at the top of a file of
 `common/`, and a call qualified by `sys` picks among the folder's `pub` functions; a function of the
 folder that is not `pub` is `not-visible` there (F9), and a name the folder does not declare is
 `unknown-name` (V10).
@@ -156,12 +218,95 @@ folder that is not `pub` is `not-visible` there (F9), and a name the folder does
 `native` (R7, R16): the target's directory on its own, then `common/` with it as `sys`. It is also
 red where a function `common/` calls has other parameters or another result in one target's
 directory than in another's; a function only its own directory calls can differ freely (record,
-section 2, round 20). The compiler reads one file in each of the three directories and no directory
-inside them: a second file of a directory, the directory of an architecture
-(`runtime/linux/x86-64/`, round 20) and a directory of a target it does not know are refused, each
-named by its path. The checks and the layout are pinned by `RuntimeTests`, which also holds what the
-compiler carries to the files of the tree. The runtime gives a target's write to standard output and
-its exit, and `common/` one write of a text to standard output; nothing in this tree calls them.
+section 2, round 20). A line of `common/` that the check for every target reports stands once, and one
+that the check for some targets reports names them, `(in the check for windows)`. The compiler
+reads one file in each of the three directories and no directory inside them: a second file of a
+directory, which section 8 makes one folder, and the directory of an architecture inside a
+target's (`runtime/linux/x86-64/`, where round 20 places that code) are `not supported`, and a
+directory of a target it does not know, a directory inside `common/` and a directory of no file are
+refused, each named by its path. The checks and the layout are pinned by `RuntimeTests`, which also
+holds what the compiler carries to the files of the tree.
+
+A build checks the runtime for its target and emits it into the program's module, its functions
+under IR names of their own; nothing of it is compiled apart (record, section 2, round 17). The
+emitted `main` calls the runtime's `Start`, then the program's top level, then `Finish`, which ends
+the process with the exit code 0 through the target's `Exit`, the runtime's one exit (section 6).
+`common/` gives what the emitted code calls: `Print`, the text of an integer and of a `char`, the
+joining and the comparison of two strings, `Raise` for an exception of the run-time table and
+`Throw`, and `Allocate`, which takes memory from the system's `Memory` in pieces of a mebibyte per
+thread, and an allocation of more than a quarter of that in a piece of its own, and frees nothing:
+the reference counting of section 3 is not emitted. A target's directory gives `Start`, `Write`,
+`Exit` and `Memory`: on Linux over the C library, `Start` setting the signal of a closed pipe to
+ignored and `Write` calling again where a signal interrupted it (section 6), on Windows over
+`kernel32`. The Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
+
+The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
+run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
+a `throw`, with the thrown value's text on the line below it. A `print` passes its file and its line
+to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
+no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
+2026-10-23, "Caller passes it"). An allocation the system refuses ends the process with
+`error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
+size"). Both end with the exit code 1. `EmitterTests` pins both, the first in a test and in a release
+build, the second with a runtime whose `Memory` refuses every request.
+
+## What the emitter emits
+
+The emitter (`Emit/`) takes a program the checker read without an error and without `not
+supported`, with the runtime checked for its target, and writes one LLVM module of both, which the
+pinned clang compiles at `-O2` and links with the C library as the platform links it, and with the
+library a block of C functions names (R16). It emits:
+
+- the integers, `bool`, `char` and `string`, and pointers to them and C function types over them
+  (T2, T21, T15, R10, R17); a string is its bytes and their count, and the empty string's bytes
+  are a constant of none, never at the address 0 (R15);
+- variables, assignments, functions with their defaults and arguments by name (D11), `mut`
+  parameters given a variable (M7), and a generic function once per list of type arguments it is
+  called with (T19, T27);
+- the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
+  value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
+  operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20);
+- `if`, `while`, `for` over a range, which raises `reversed-range-at-run-time` (C8), `break`,
+  `continue` and `return` (chapter 10), and `throw` of a value (O6);
+- `print` and the text of a value in a string's holes (A1, A2, A8, L6), and `==` on strings by
+  their bytes (T18);
+- the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
+  and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`
+  and `string.FromRaw(p, n)` (R15), state outside a function, `thread static` among it (R13),
+  calls of C functions with `...` (R16) and of a C function value (R17).
+
+In a test build every function carries LLVM's attribute that turns no call into a jump, so that a
+recursion runs as deep as the program wrote it (record, section 2). A raise by code passes its file
+and its line to the runtime as constants (section 6).
+
+### What the emitter does not emit
+
+A program that uses one of these gets one `not supported` at the construct's line, in the
+checker's shape, and no executable: a list (M9), a `data` type, a value of one and `with` (D1, D2,
+D5), a union (D9) and a call whose result is one (O1), `match` (C4), `else` after a call (O4), a
+lambda (F7) and a function value (F11), `float`, `double` and `decimal` (T2), the durations and the
+timestamps (T13), a `mut` parameter given anything but a variable (M7), a `naked` function (R12),
+inline assembly (R11), and a construct of the other chapters the checker does not read. The
+reference counting of section 3 is not emitted either: memory a program takes is never given back,
+so a program that allocates without end runs out of memory and ends with `allocation-failed`. The
+corpus runner lists every case the checker reads in full and the emitter does not emit, 77 of the
+220 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+checker says `not supported` to are held by the checker's theory and not built. The crash path is
+not emitted: a stack overflow
+ends the program with the system's signal and not with its error line, and no exception writes a
+trace (section 6), so `outcomes/stack-overflow.kz` is built and not run, the one case the runner
+lists so.
+
+### Readings the record leaves open to the emitter
+
+Each is a reading of this directory, not a decision. A test pins each one, and a design round can
+ask about it.
+
+- `s.Bytes.Count` is the count the string holds, read as an `int`, the type M9 gives a count, its
+  low 32 bits: a string of 2 GiB or more is beyond it. Pinned by
+  `EmitterTests.The_count_of_a_strings_bytes_is_read_as_an_int`.
+- A `print` hands its line to one write call, called again for what a call did not take, through a
+  buffer per thread that holds the line until that call returns. Pinned by the corpus runner.
 
 ## What the compiler says about a program
 
@@ -329,7 +474,7 @@ The checker (`Semantics/`) takes a tree the parser read without an error and che
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 5 (data types: D1 to D11, D14 and D15), 6 (values: M1 to M5, M7, and
-M9 for lists), 8 (functions, without F9 and F10: it reads one file, but for the runtime's `use sys`), 9 (outcomes), 10 (control
+M9 for lists), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow) and 11's raw forms (R7, R10 to R17), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those

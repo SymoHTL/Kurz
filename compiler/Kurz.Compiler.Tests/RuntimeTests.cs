@@ -10,7 +10,8 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The runtime's Kurz under <c>runtime/</c> (design record, section 2): what the compiler carries is the files of the repository, every
 /// target's check is clean, and every target's directory gives the functions <c>common/</c> calls with the same parameters and result; and
-/// the checker's reading of a folder that a `use` brings in, <c>sys</c> (F9, F10; the owner, 2026-10-23, "Rust's sys").
+/// the checker's reading of a folder that a `use` brings in, <c>sys</c> (F9, F10, and for the qualified call the design record's section 2:
+/// the owner, 2026-10-23, "Rust's sys").
 /// </summary>
 public sealed class RuntimeTests
 {
@@ -71,11 +72,22 @@ public sealed class RuntimeTests
     [Fact]
     public void A_function_common_calls_with_another_result_or_a_mut_parameter_on_one_target_is_named()
     {
-        Assert.NotEmpty(Runtime.CheckEveryTarget(Runtime3(Common, "pub long Write(int fd) => 0\n", "pub int Write(int fd) => 0\n")));
-        Assert.NotEmpty(Runtime.CheckEveryTarget(Runtime3(
+        // the result: both targets' checks accept the call, and only the comparison tells them apart
+        var result = Runtime.CheckEveryTarget(Runtime3(Common, "pub long Write(int fd) => 0\n", "pub int Write(int fd) => 0\n"));
+        Assert.Equal(
+            [
+                "runtime/windows/: `common/` calls `long Write(int)` of runtime/linux/, which this directory does not give with the same parameters and result",
+                "runtime/linux/: `common/` calls `int Write(int)` of runtime/windows/, which this directory does not give with the same parameters and result",
+            ],
+            result);
+
+        // a `mut` parameter: the target without it refuses the call in its own check, and the comparison names the signature it lacks
+        var mutated = Runtime.CheckEveryTarget(Runtime3(
             "use sys\n\npub long Out() {\n    mut n = 1\n    return sys.Write(mut n)\n}\n",
             "pub long Write(mut int fd) => 0\n",
-            "pub long Write(int fd) => 0\n")));
+            "pub long Write(int fd) => 0\n"));
+        Assert.Contains("runtime/windows/: `common/` calls `long Write(mut int)` of runtime/linux/, which this directory does not give with the same parameters and result", mutated);
+        Assert.Contains(mutated, e => e.StartsWith("runtime/common/a.kz:5: ", StringComparison.Ordinal) && e.EndsWith(" (in the check for windows)", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -91,15 +103,24 @@ public sealed class RuntimeTests
     public void A_function_a_target_lacks_is_named_at_the_call_of_common()
     {
         var errors = Runtime.CheckEveryTarget(Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Put(int fd) => 0\n"));
-        Assert.Contains(errors, e => e.StartsWith("runtime/common/a.kz:3: unknown-name:", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.StartsWith("runtime/common/a.kz:3: unknown-name:", StringComparison.Ordinal) && e.EndsWith(" (in the check for windows)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_defect_of_common_that_every_target_reports_stands_once()
+    {
+        var errors = Runtime.CheckEveryTarget(Runtime3(Common + "print(q)\n", "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n"));
+        Assert.Equal(errors.Distinct(), errors);
+        Assert.Single(errors, e => e.StartsWith("runtime/common/a.kz:4: unknown-name:", StringComparison.Ordinal) && !e.Contains("(in the check for", StringComparison.Ordinal));
     }
 
     [Theory]
-    [InlineData("runtime/common/b.kz", "runtime/common/ holds 2 files")] // two files in one directory
-    [InlineData("runtime/linux/x86-64/a.kz", "runtime/linux/x86-64/a.kz: the runtime is")] // the directory of an architecture
+    [InlineData("runtime/common/b.kz", "runtime/common/: not supported: a directory of 2 files")] // two files in one directory, which section 8 makes one folder
+    [InlineData("runtime/linux/x86-64/a.kz", "runtime/linux/x86-64/a.kz: not supported: a directory inside a target's")] // the directory of an architecture, which round 20 places there
+    [InlineData("runtime/common/x86-64/a.kz", "runtime/common/x86-64/a.kz: the runtime is")] // a directory inside common/, which no round places
     [InlineData("runtime/macos/a.kz", "runtime/macos/a.kz: the runtime is")] // a target the compiler does not know
     [InlineData("runtime/a.kz", "runtime/a.kz: the runtime is")] // a file beside the directories
-    public void A_file_the_compiler_does_not_read_in_its_place_is_refused(string path, string error)
+    public void A_file_the_compiler_does_not_read_in_its_place_is_refused_or_not_supported(string path, string error)
     {
         var files = Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
         Assert.Empty(Runtime.Layout(files)); // the positive control

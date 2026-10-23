@@ -57,7 +57,7 @@ public sealed partial class Checker
     private readonly IReadOnlyDictionary<string, Checker> folders; // F10: the folders a `use` of their name can bring in, the runtime's `sys` alone
     private readonly Dictionary<string, Checker> used = new(StringComparer.Ordinal); // F10: the folders the file's `use` lines brought in
     private readonly HashSet<UseStatement> uses = new(ReferenceEqualityComparer.Instance); // F10: those `use` lines
-    private readonly List<FunctionSymbol> folderCalls = []; // F10: the functions of another folder the file's calls picked
+    private readonly List<FunctionSymbol> folderCalls = []; // design record, section 2: the functions of another folder the file's qualified calls picked
 
     private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders)
     {
@@ -88,9 +88,9 @@ public sealed partial class Checker
 
     /// <summary>
     /// As above, where a `use` at the top of the file brings in a folder <paramref name="folders"/> names, by the name it has there, and the
-    /// file calls the folder's `pub` functions qualified by that name, `sys.Write(...)` (F9, F10). The runtime's `runtime/common/` reaches the
-    /// directory of the build's target so, as the folder `sys` (design record, section 2; the owner, 2026-10-23, "Rust's sys"); a `use` of any
-    /// other name is <c>not supported</c>.
+    /// file calls the folder's `pub` functions qualified by that name, `sys.Write(...)`: the `use` is F10's and the `pub` F9's, while the
+    /// qualified call is stated by the design record's section 2 alone, where the runtime's `runtime/common/` reaches the directory of the
+    /// build's target so, as the folder `sys` (the owner, 2026-10-23, "Rust's sys"); a `use` of any other name is <c>not supported</c>.
     /// </summary>
     public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders)
     {
@@ -108,7 +108,7 @@ public sealed partial class Checker
         return checker;
     }
 
-    /// <summary>The functions of other folders that the file's calls picked (F10), each once.</summary>
+    /// <summary>The functions of other folders that the file's qualified calls picked (design record, section 2), each once.</summary>
     public IReadOnlyList<FunctionSymbol> FolderCalls => folderCalls.Distinct().ToList();
 
     private enum Flow

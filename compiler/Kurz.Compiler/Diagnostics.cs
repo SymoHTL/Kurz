@@ -27,6 +27,12 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
 
     public bool IsError => Kind == DiagnosticKind.Error;
 
+    /// <summary>
+    /// The diagnostic as the command writes it, the file's name and the line in front: <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> (design
+    /// record, section 2), or <c>hello.kz:3: not supported: &lt;text&gt;</c>.
+    /// </summary>
+    public string At(string file) => IsError ? $"{file}:{Line}: {Id}: {Message}" : $"{file}:{Line}: not supported: {Message}";
+
     /// <summary>The diagnostic as one line: <c>4: error syntax: ...</c>, or <c>4: not supported: ...</c>.</summary>
     public override string ToString() =>
         IsError ? $"{Line}: error {Id}: {Message}" : $"{Line}: not supported: {Message}";
