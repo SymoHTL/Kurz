@@ -97,7 +97,7 @@ flowchart TD
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
         pinned clang and runs it, red on output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 86 cases run; the build command's lines and refusals; and the refused write and the refused allocation,
+        than 121 cases run; the build command's lines and refusals; and the refused write and the refused allocation,
         each with its error line.
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs

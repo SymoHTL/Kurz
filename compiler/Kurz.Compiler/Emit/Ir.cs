@@ -156,6 +156,13 @@ internal sealed class IrFunction
         Terminated = true;
     }
 
+    /// <summary>Ends the block with a terminator of its own: a <c>switch</c>.</summary>
+    public void Terminate(string instruction)
+    {
+        Emit(instruction);
+        Terminated = true;
+    }
+
     public void Return(string? typedValue)
     {
         Emit(typedValue is null ? "ret void" : $"ret {typedValue}");

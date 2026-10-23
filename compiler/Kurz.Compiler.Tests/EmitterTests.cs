@@ -98,6 +98,23 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, "edges"), 0, ["-9223372036854775808", "18446744073709551615", "-128", "0"], "");
     }
 
+    [Theory]
+    [InlineData("int(Most())", "overflow")] // the high bit set: the cut to 32 bits and its sign extension give the value back
+    [InlineData("sbyte(Most())", "overflow")]
+    [InlineData("int(Most() / 8589934592)", "2147483647")] // the largest that fits, the positive control
+    public void A_narrowing_from_an_unsigned_type_to_a_signed_one_raises_overflow_above_the_signed_maximum(string conversion, string result)
+    {
+        var run = BuildAndRun($"ulong Most() => 18446744073709551615\n\nprint({conversion})\n", $"narrow-{result}-{conversion.Length}");
+        if (result == "overflow")
+        {
+            Ran(run, 1, [], "error: overflow at program.kz:3\n");
+        }
+        else
+        {
+            Ran(run, 0, [result], "");
+        }
+    }
+
     [Fact]
     public void The_pointer_of_the_empty_string_is_not_null()
     {

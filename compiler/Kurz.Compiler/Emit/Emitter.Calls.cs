@@ -9,16 +9,11 @@ public sealed partial class Emitter
 {
     // ---- calls -----------------------------------------------------------------------------------
 
-    /// <summary>The value of a call, null for a <c>void</c> one.</summary>
+    /// <summary>The value of a call, null for a <c>void</c> one; of a call whose result is a union and that stands for its success, the success, with every other case leaving the function (O2, O3).</summary>
     private string? EmitCall(CallExpression c)
     {
         var info = Model.CallOf(c);
         var result = Sub(info.Result);
-        if (result is UnionType)
-        {
-            throw Unsupported(c.Line, $"a call whose result is the union `{result}` (O1)");
-        }
-
         var value = info.Kind switch
         {
             CallKind.Print => EmitPrint(c),
@@ -27,12 +22,17 @@ public sealed partial class Emitter
             CallKind.CFunction => EmitCFunctionCall(c, info),
             CallKind.Value => EmitValueCall(c),
             CallKind.PointerConversion => EmitPointerConversion(c),
-            CallKind.SizeOf => Number(Lower.Size(Sub(info.Target!))),
+            CallKind.SizeOf => SizeOf(Sub(info.Target!), c.Line),
             CallKind.FromRaw when info.Target is PrimitiveType { Kind: Primitive.String } => EmitStringFromRaw(c),
             CallKind.ListNew or CallKind.ListAdd or CallKind.ListWhere or CallKind.FromRaw => throw Unsupported(c.Line, "a list (M9)"),
-            CallKind.DataNew => throw Unsupported(c.Line, "a `data` value (D2)"),
+            CallKind.DataNew => EmitConstruction(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),
         };
+        if (result is UnionType union && !Types.Same(TypeOf(c), union))
+        {
+            return Propagate(value ?? throw new InvalidOperationException($"a call at line {c.Line} without a value"), union, c.Line); // the checker typed the call as its success (O2)
+        }
+
         return Types.IsVoid(result) ? null : value;
     }
 
@@ -60,7 +60,7 @@ public sealed partial class Emitter
             j => Types.Substitute(f.Parameters[j].Type, instanceMap),
             j => f.Parameters[j].Mut,
             j => f.Declaration!.Parameters[j].Default,
-            f,
+            owners[f],
             f.TakesC);
         var result = Types.Substitute(f.ReturnType, instanceMap);
         var call = $"call {ParameterType(f, result)} {name}({string.Join(", ", arguments)})";
@@ -80,7 +80,7 @@ public sealed partial class Emitter
             libraries.Add(library);
         }
 
-        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => declaration.Parameters[j].Default, f, cConvention: true);
+        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => declaration.Parameters[j].Default, owners[f], cConvention: true);
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             if (info.Binding[i] < 0)
@@ -138,9 +138,9 @@ public sealed partial class Emitter
     /// The arguments of a call in the order of the parameter slots (D11): the argument bound to the slot, converted to its type, or
     /// the slot's default; a <c>mut</c> slot gets the address of the caller's variable (M7). The arguments are evaluated in the
     /// order they are written; an argument in the place of a C declaration's <c>...</c> (binding -1) is the caller's to add. A
-    /// default is read in the file of <paramref name="declaredBy"/>, which the call may stand outside of.
+    /// default is read in the file <paramref name="declaredIn"/> that declares it, which the call may stand outside of.
     /// </summary>
-    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, Expression?> slotDefault, FunctionSymbol? declaredBy, bool cConvention)
+    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, Expression?> slotDefault, Unit? declaredIn, bool cConvention)
     {
         var values = new string?[c.Arguments.Count];
         for (var i = 0; i < c.Arguments.Count; i++)
@@ -185,7 +185,7 @@ public sealed partial class Emitter
             else
             {
                 var d = slotDefault(j) ?? throw new InvalidOperationException($"the slot {j} of the call at line {c.Line} has no argument and no default");
-                value = EmitDefault(declaredBy!, d, type);
+                value = EmitDefault(declaredIn!, d, type);
             }
 
             arguments.Add($"{(cConvention ? Lower.CType(type) : Ir(type))} {value}");
@@ -194,11 +194,11 @@ public sealed partial class Emitter
         return arguments;
     }
 
-    /// <summary>A parameter's default (D11), read in the file that declares the function.</summary>
-    private string EmitDefault(FunctionSymbol declaredBy, Expression d, KurzType type)
+    /// <summary>A parameter's or a field's default (D11), read in the file that declares it.</summary>
+    private string EmitDefault(Unit declaredIn, Expression d, KurzType type)
     {
         var caller = unit;
-        unit = owners[declaredBy];
+        unit = declaredIn;
         try
         {
             return Convert(EmitExpression(d), TypeOf(d), type, d.Line);
@@ -256,8 +256,9 @@ public sealed partial class Emitter
                 var back = fn.Value($"{(toSigned ? "sext" : "zext")} {Ir(to)} {cut} to {Ir(from)}");
                 var same = fn.Value($"icmp eq {Ir(from)} {back}, {value}");
                 misfit = fn.Value($"xor i1 {same}, true");
-                if (fromSigned && !toSigned)
+                if (fromSigned != toSigned)
                 {
+                    // negative, or from an unsigned type the high bit set, which the cut and its sign extension give back unchanged
                     misfit = fn.Value($"or i1 {misfit}, {fn.Value($"icmp slt {Ir(from)} {value}, 0")}");
                 }
             }
@@ -275,6 +276,11 @@ public sealed partial class Emitter
 
         return Resize(value, from, to);
     }
+
+    /// <summary>R14: the bytes a value of a number, <c>bool</c>, <c>char</c>, a string or a pointer takes; the layout of a data value and of a union is the compiler's, which a program does not read.</summary>
+    private static string SizeOf(KurzType type, int line) => type is DataType or UnionType
+        ? throw Unsupported(line, $"the size of a `{type}` (R14)")
+        : Number(Lower.Size(type));
 
     /// <summary>R14: <c>Ptr&lt;T&gt;(x)</c> of a pointer is the same address, and of a <c>long</c> the address the number holds.</summary>
     private string EmitPointerConversion(CallExpression c)
