@@ -9,7 +9,10 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   statement and expression form the reference shows), `Semantics/` checks a tree the parser read
   without an error against the rules of chapters 1 to 3, 5, 6, 8 to 10 and the raw forms of 11
   (the section "What the checker reads" below) and says `not supported` to a construct of the
-  other chapters, `Corpus/` reads the header of a corpus case in the shape `reference/00-about.md`
+  other chapters, and keeps what it found out, node by node, for a code generator
+  (`Semantics/SemanticModel.cs`: the type and constant of every expression, the variable or
+  function every name means, the variable every declaration makes, the function every call picks
+  with the parameter each argument fills, what every lambda captures), `Corpus/` reads the header of a corpus case in the shape `reference/00-about.md`
   states, its grant line among it (R7), and `Build/` finds the clang of the release of LLVM the
   compiler pins and is the command (the section "The command" below).
 - `Kurz/`: the command `kurz`, one line over `Build/Command.cs`.
@@ -20,8 +23,11 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   the errors each reports are exactly the ones the case's header expects of it, the checker taking
   the grants of the case's `// allow:` line as a project file would give them (R7); a case that
   uses a construct the checker does not read must get `not supported` and no error from it.
-  A second suite takes the clang search over a path and a Program Files directory it makes, with
-  the answers to `--version` it gives, and over this machine's own environment; a third runs the
+  A second suite walks the tree of every corpus case the checker reads without a diagnostic and
+  checks that the checker's record of it holds an entry for every node a code generator reads,
+  and takes, program by program, what each kind of entry holds.
+  A third suite takes the clang search over a path and a Program Files directory it makes, with
+  the answers to `--version` it gives, and over this machine's own environment; a fourth runs the
   command `kurz` as a process, and in the test's own process with a clang search it gives.
 
 ## Building and testing

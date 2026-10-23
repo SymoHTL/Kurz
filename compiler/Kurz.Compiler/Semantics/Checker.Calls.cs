@@ -5,6 +5,8 @@ namespace Kurz.Compiler.Semantics;
 
 public sealed partial class Checker
 {
+    private static readonly IReadOnlyDictionary<TypeParameterSymbol, KurzType> NoMap = new Dictionary<TypeParameterSymbol, KurzType>();
+
     /// <summary>A parameter as a call binds it: of a function (F12), a primary constructor (D1) or a function value (F11).</summary>
     private sealed record Slot(string Name, KurzType Type, bool Mut, bool HasDefault, bool GenericPosition);
 
@@ -83,6 +85,8 @@ public sealed partial class Checker
                     if (variable is not null)
                     {
                         variable.Read = true;
+                        model.RecordName(n, variable);
+                        model.RecordType(n, new Typed(variable.Type));
                         return CallValue(variable.Type, c);
                     }
 
@@ -226,7 +230,7 @@ public sealed partial class Checker
             }
 
             var cSlots = cf.Parameters.Select((p, i) => new Slot($"#{i}", p, false, false, false)).ToList();
-            return Call([new Candidate { Slots = cSlots, Result = cf.Result }], c, null);
+            return Record(c, CallKind.Value, Call([new Candidate { Slots = cSlots, Result = cf.Result }], c, null, out var cPicked), cPicked);
         }
 
         if (type is not FunctionType f)
@@ -243,7 +247,7 @@ public sealed partial class Checker
 
         var slots = f.Parameters.Select((p, i) => new Slot($"#{i}", p, false, false, false)).ToList();
         var candidate = new Candidate { Slots = slots, Result = f.Result };
-        return Call([candidate], c, null);
+        return Record(c, CallKind.Value, Call([candidate], c, null, out var picked), picked);
     }
 
     private Typed CheckPrint(CallExpression c)
@@ -282,6 +286,7 @@ public sealed partial class Checker
             NotSupported(c.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
         }
 
+        model.RecordCall(c, new CallInfo(CallKind.Print, null, null, null, NoMap, [0], 1, Types.Void));
         return new Typed(Types.Void);
     }
 
@@ -335,6 +340,18 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        var converted = ConvertKind(target, c, source);
+        if (!converted.IsError)
+        {
+            model.RecordCall(c, new CallInfo(CallKind.Conversion, null, null, target, NoMap, [0], 1, target));
+        }
+
+        return converted;
+    }
+
+    /// <summary>T10, T13, R14: a value that typed, converted to a number type, a time type or, from a pointer, a <c>long</c>.</summary>
+    private Typed ConvertKind(PrimitiveType target, CallExpression c, Typed source)
+    {
         if (Types.IsNumber(source.Type) && Types.IsNumber(target))
         {
             return ConvertNumber(source, target, c.Line);
@@ -505,7 +522,14 @@ public sealed partial class Checker
         }
 
         var element = Resolve(c.TypeArguments[0]);
-        return Types.IsError(element) ? Typed.Error : new Typed(new ListType(element));
+        if (Types.IsError(element))
+        {
+            return Typed.Error;
+        }
+
+        var list = new ListType(element);
+        model.RecordCall(c, new CallInfo(CallKind.ListNew, null, null, null, NoMap, [], 0, list));
+        return new Typed(list);
     }
 
     /// <summary>D2, D7, D11: a data value made by the type's name with the base's fields first.</summary>
@@ -548,7 +572,14 @@ public sealed partial class Checker
         }
 
         var arguments = data.TypeParameters.Select(p => candidate.Map.TryGetValue(p, out var t) ? t : Types.Error).ToList();
-        return new Typed(arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments));
+        if (arguments.Any(Types.IsError))
+        {
+            return Typed.Error;
+        }
+
+        var made = new DataType(data, arguments);
+        model.RecordCall(c, new CallInfo(CallKind.DataNew, null, data, null, candidate.Map, candidate.Binding, candidate.Slots.Count, made));
+        return new Typed(made);
     }
 
     /// <summary>M5, M9, T15: a call of a member: a list's <c>Add</c> and <c>Where</c>; a data value's field of function type.</summary>
@@ -609,7 +640,7 @@ public sealed partial class Checker
                         }
 
                         var candidate = new Candidate { Slots = [new Slot("item", list.Element, false, false, false)], Result = Types.Void };
-                        var result = Call([candidate], c, null);
+                        var result = Record(c, CallKind.ListAdd, Call([candidate], c, null, out var picked), picked);
                         if (!result.IsError)
                         {
                             MutReceiver(m.Target, c.Line, "`Add` changes the list it is called on"); // after the call's own error nothing more (E1)
@@ -627,7 +658,7 @@ public sealed partial class Checker
 
                         var test = new FunctionType([list.Element], Types.Bool);
                         var candidate = new Candidate { Slots = [new Slot("test", test, false, false, false)], Result = list };
-                        return Call([candidate], c, null);
+                        return Record(c, CallKind.ListWhere, Call([candidate], c, null, out var picked), picked);
                     }
 
                 default:
@@ -642,6 +673,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        model.RecordType(m, member); // the callee is the field's value (F11)
         return CallValue(member.Type, c);
     }
 
@@ -744,11 +776,14 @@ public sealed partial class Checker
             list.Add(candidate);
         }
 
-        return Call(list, c, expected);
+        return Record(c, CallKind.Function, Call(list, c, expected, out var picked), picked);
     }
 
     /// <summary>Binds the arguments to each candidate, picks one (F13) and checks the arguments against it.</summary>
-    private Typed Call(List<Candidate> candidates, CallExpression c, KurzType? expected)
+    private Typed Call(List<Candidate> candidates, CallExpression c, KurzType? expected) => Call(candidates, c, expected, out _);
+
+    /// <summary>As above, with the candidate picked, or null where none was.</summary>
+    private Typed Call(List<Candidate> candidates, CallExpression c, KurzType? expected, out Candidate? picked)
     {
         var pres = new List<Pre>();
         foreach (var a in c.Arguments)
@@ -811,7 +846,7 @@ public sealed partial class Checker
         // `ambiguous-call` nor a misfit is reported beside its error, which the arguments' diagnostics below carry
         var open = candidates.Count > 1 && pres.Any(p => p.Lambda is null && p.Typed.IsError);
         var fitting = candidates.Where(x => x.Fits).ToList();
-        Candidate? picked = null;
+        picked = null;
         if (fitting.Count == 1)
         {
             picked = fitting[0];
@@ -863,6 +898,18 @@ public sealed partial class Checker
         Commit(picked, pres);
         var result = Types.Substitute(picked.Result, picked.Map);
         return new Typed(result);
+    }
+
+    /// <summary>Records what a call that typed calls: the candidate picked, its type arguments, its binding and its whole result.</summary>
+    private Typed Record(CallExpression c, CallKind kind, Typed typed, Candidate? picked, IReadOnlyList<int>? binding = null)
+    {
+        if (picked is not null && !typed.IsError)
+        {
+            var map = picked.Map.Count == 0 ? NoMap : picked.Map;
+            model.RecordCall(c, new CallInfo(kind, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
+        }
+
+        return typed;
     }
 
     /// <summary>D11: arguments without a name fill the parameters in order, arguments by name follow them; what does not fit is <c>argument-mismatch</c>.</summary>

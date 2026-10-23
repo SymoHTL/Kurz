@@ -53,6 +53,7 @@ public sealed partial class Checker
     private List<(PointerType Pointer, int Line, string What)>? pendingPointees; // R10: the pointers the fields of data types name, judged after every field is resolved
     private readonly bool allowRaw;
     private readonly bool allowNative;
+    private readonly SemanticModel model = new();
 
     private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants)
     {
@@ -66,6 +67,9 @@ public sealed partial class Checker
 
     /// <summary>Every variable the program declares, in the order the checker met them: parameters, locals, loop variables and match bindings.</summary>
     public IReadOnlyList<VariableSymbol> Variables => declared;
+
+    /// <summary>What the checker found out, by node, for a code generator (<see cref="SemanticModel"/>).</summary>
+    public SemanticModel Model => model;
 
     /// <summary>Checks a program the parser read without an error, in a package granted nothing (R7), and adds what it finds to <paramref name="diagnostics"/>.</summary>
     public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics) => Check(program, diagnostics, []);
@@ -122,6 +126,9 @@ public sealed partial class Checker
         public HashSet<string>? Reserved { get; init; }
 
         public Scope Scope { get; set; } = new();
+
+        /// <summary>The variables of the functions around this lambda that its body reads (F11, F15).</summary>
+        public HashSet<VariableSymbol> Captures { get; } = [];
     }
 
     private sealed class Scope
@@ -364,6 +371,7 @@ public sealed partial class Checker
         }
 
         var symbol = new DataSymbol(d.Name, d);
+        model.RecordDataType(d, symbol);
         foreach (var p in d.TypeParameters)
         {
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
@@ -708,6 +716,7 @@ public sealed partial class Checker
     private void DeclareFunction(FunctionDeclaration d)
     {
         var symbol = new FunctionSymbol(d.Name, d);
+        model.RecordFunction(d, symbol);
         foreach (var p in d.TypeParameters)
         {
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
@@ -919,9 +928,9 @@ public sealed partial class Checker
         }
 
         frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel };
-        foreach (var p in f.Parameters)
+        foreach (var (p, node) in f.Parameters.Zip(d.Parameters))
         {
-            DeclareParameter(p.Name, p.Type, p.Mut, p.Line);
+            DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node);
         }
 
         var returnType = f.ReturnType;
@@ -977,6 +986,17 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>Records the type of an expression the checker read without <see cref="CheckExpression"/>, and of each expression inside the parentheses around it.</summary>
+    private void RecordThrough(Expression e, Typed typed)
+    {
+        model.RecordType(e, typed);
+        while (e is ParenthesizedExpression p)
+        {
+            e = p.Inner;
+            model.RecordType(e, typed);
+        }
+    }
+
     /// <summary>The expression inside every pair of parentheses around it.</summary>
     private static Expression Unwrap(Expression e)
     {
@@ -988,7 +1008,7 @@ public sealed partial class Checker
         return e;
     }
 
-    private void DeclareParameter(string name, KurzType type, bool mut, int line)
+    private void DeclareParameter(string name, KurzType type, bool mut, int line, Parameter node)
     {
         if (frame.Reserved is not null && frame.Reserved.Contains(name))
         {
@@ -999,7 +1019,9 @@ public sealed partial class Checker
             Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)"); // a function's, a type's or `print`'s name, as for a local
         }
 
-        frame.Scope.Variables[name] = new VariableSymbol(name, type, mut, VariableKind.Parameter, line);
+        var symbol = new VariableSymbol(name, type, mut, VariableKind.Parameter, line);
+        frame.Scope.Variables[name] = symbol;
+        model.RecordDeclaration(node, symbol);
     }
 
     // ---- scopes ----------------------------------------------------------------------------------
@@ -1016,6 +1038,11 @@ public sealed partial class Checker
             {
                 if (s.Variables.TryGetValue(name, out var v))
                 {
+                    for (var g = frame; captured && g != f; g = g.Outer!)
+                    {
+                        g.Captures.Add(v); // every lambda between the use and the function that declares the variable captures it
+                    }
+
                     return (v, captured);
                 }
             }
@@ -1055,29 +1082,30 @@ public sealed partial class Checker
         }
     }
 
-    private void Declare(string name, KurzType type, bool mut, VariableKind kind, int line)
+    private void Declare(string name, KurzType type, bool mut, VariableKind kind, int line, object node)
     {
         var symbol = new VariableSymbol(name, type, mut, kind, line);
         frame.Scope.Variables[name] = symbol;
         declared.Add(symbol);
+        model.RecordDeclaration(node, symbol);
     }
 
     /// <summary>Declares the variable, or, where the name is <c>redeclared</c>, binds it in this scope to the error type, so that its uses carry no further error and change no variable outside (E1).</summary>
-    private void DeclareChecked(string name, KurzType type, bool mut, VariableKind kind, int line)
+    private void DeclareChecked(string name, KurzType type, bool mut, VariableKind kind, int line, object node)
     {
         if (!Redeclares(name, line))
         {
-            Declare(name, type, mut, kind, line);
+            Declare(name, type, mut, kind, line, node);
         }
         else
         {
-            DeclareUnreadable(name, kind, line);
+            DeclareUnreadable(name, kind, line, node);
         }
     }
 
-    private void DeclareUnreadable(string name, VariableKind kind, int line)
+    private void DeclareUnreadable(string name, VariableKind kind, int line, object node)
     {
-        Declare(name, Types.Error, true, kind, line);
+        Declare(name, Types.Error, true, kind, line, node);
         frame.Scope.Variables[name].Read = true;
     }
 
@@ -1355,7 +1383,7 @@ public sealed partial class Checker
 
         if (v.Value is null)
         {
-            DeclareUnreadable(v.Name, VariableKind.Local, v.Line); // a `static mut` without a value, which has no meaning here: its uses carry nothing more (E1)
+            DeclareUnreadable(v.Name, VariableKind.Local, v.Line, v); // a `static mut` without a value, which has no meaning here: its uses carry nothing more (E1)
             return;
         }
 
@@ -1372,7 +1400,7 @@ public sealed partial class Checker
 
         if (Redeclares(v.Name, v.Line))
         {
-            DeclareUnreadable(v.Name, VariableKind.Local, v.Line); // bound before the value is read: the uses of a redeclared name, in the value too, carry no further error (E1)
+            DeclareUnreadable(v.Name, VariableKind.Local, v.Line, v); // bound before the value is read: the uses of a redeclared name, in the value too, carry no further error (E1)
             CheckExpression(v.Value, declared, keepCases: declared is UnionType);
             return;
         }
@@ -1389,7 +1417,7 @@ public sealed partial class Checker
             Report(Types.MismatchId(t.Type, declared), v.Value.Line, $"a `{t.Type}` where a `{declared}` is required (T1)");
         }
 
-        Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line);
+        Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
     }
 
     /// <summary>V8: an assignment where the name is visible, a declaration where it is not; F16 inside a top-level function.</summary>
@@ -1419,6 +1447,7 @@ public sealed partial class Checker
             }
 
             variable.Changed = true;
+            model.RecordAssignment(a, variable);
             return;
         }
 
@@ -1426,7 +1455,7 @@ public sealed partial class Checker
         {
             // F16: the declaration on the left is the one error; the read on the right reports nothing more
             Report(ErrorIds.Redeclared, a.Line, $"`{a.Name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
-            DeclareUnreadable(a.Name, VariableKind.Local, a.Line);
+            DeclareUnreadable(a.Name, VariableKind.Local, a.Line, a);
             CheckExpression(a.Value, null);
             return;
         }
@@ -1446,7 +1475,7 @@ public sealed partial class Checker
             type = Types.Error;
         }
 
-        Declare(a.Name, type, false, VariableKind.Local, a.Line);
+        Declare(a.Name, type, false, VariableKind.Local, a.Line, a);
     }
 
     /// <summary>M4, D4: an assignment into a path of fields from a variable; a path through an index is not read (M9's map is not read).</summary>
@@ -1492,6 +1521,8 @@ public sealed partial class Checker
             }
 
             variable.Read = true; // V6: an assignment into a path reads the variable
+            model.RecordName(name, variable);
+            model.RecordType(name, new Typed(variable.Type));
             RequireRawForState(variable, a.Line);
             if (Types.IsError(variable.Type))
             {
@@ -1532,6 +1563,7 @@ public sealed partial class Checker
             {
                 last = field;
                 current = SubstituteData(d, field.Type);
+                model.RecordType(m, new Typed(current));
                 continue;
             }
 
@@ -1580,13 +1612,13 @@ public sealed partial class Checker
         switch (Unwrap(e.Expression))
         {
             case CallExpression c:
-                CheckCall(c, null, keepCases: false);
+                RecordThrough(e.Expression, CheckCall(c, null, keepCases: false));
                 break;
             case ElseExpression el:
-                CheckElse(el, isStatement: true, expected: null);
+                RecordThrough(e.Expression, CheckElse(el, isStatement: true, expected: null));
                 break;
             case MatchExpression m:
-                CheckMatch(m.Subject, m.Arms, isExpression: false, expected: null, m.Line);
+                RecordThrough(e.Expression, new Typed(CheckMatch(m.Subject, m.Arms, isExpression: false, expected: null, m.Line).Type));
                 break;
             default:
                 // F5 lists what a statement is, and a value on its own is none: text no rule gives a meaning, E4's `syntax` (the reading in compiler/README.md)
@@ -1605,6 +1637,7 @@ public sealed partial class Checker
         if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
+            RecordThrough(f.Collection, new Typed(element)); // a range has the type of its numbers (C8)
         }
         else
         {
@@ -1623,7 +1656,7 @@ public sealed partial class Checker
         }
 
         PushScope();
-        DeclareChecked(f.Variable, element, false, VariableKind.Loop, f.VariableLine);
+        DeclareChecked(f.Variable, element, false, VariableKind.Loop, f.VariableLine, f);
         frame.LoopDepth++;
         CheckBlock(f.Body);
         frame.LoopDepth--;

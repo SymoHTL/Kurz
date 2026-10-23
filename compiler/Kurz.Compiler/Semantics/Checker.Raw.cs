@@ -365,6 +365,17 @@ public sealed partial class Checker
     /// <summary>The type of a place <c>&amp;</c> takes: a variable, a field of a data value that is a place, an element of a list or through a pointer, or what a pointer points to; null where an error was reported or the type is not known.</summary>
     private KurzType? PlaceType(Expression place, int line)
     {
+        var type = PlaceTypeCore(place, line);
+        if (type is not null)
+        {
+            RecordThrough(place, new Typed(type)); // a place read without CheckExpression: a name, a field, and the parentheses around them
+        }
+
+        return type;
+    }
+
+    private KurzType? PlaceTypeCore(Expression place, int line)
+    {
         switch (Unwrap(place))
         {
             case NameExpression n when Lookup(n.Name).Variable is null && (functions.ContainsKey(n.Name) || cFunctions.ContainsKey(n.Name) || dataTypes.ContainsKey(n.Name)):
@@ -492,6 +503,7 @@ public sealed partial class Checker
 
         if (other.Type is PointerType)
         {
+            RecordThrough(leftNull ? b.Left : b.Right, new Typed(other.Type, new NullConstant())); // R10: the `null` of the other side's pointer type
             return new Typed(Types.Bool);
         }
 
@@ -533,6 +545,7 @@ public sealed partial class Checker
 
             var offset = CheckExpression(index.Index, null); // an `int` or a `long`, so a literal takes the type L10 gives it
             current = ThroughPointer(target, index.Line, "an index");
+            model.RecordType(index, new Typed(current));
             if (!offset.IsError && !IsOffset(offset.Type))
             {
                 Report(ErrorIds.TypeMismatch, index.Line, $"an index through a pointer is an `int` or a `long`, not a `{offset.Type}` (R10)");
@@ -543,6 +556,7 @@ public sealed partial class Checker
         {
             var star = (UnaryExpression)root;
             current = ThroughPointer(CheckExpression(star.Operand, null), star.Line, "`*`");
+            model.RecordType(star, new Typed(current));
         }
 
         if (!Types.IsError(current))
@@ -560,6 +574,7 @@ public sealed partial class Checker
             if (current is DataType d && d.Symbol.Field(m.Member) is { } field)
             {
                 current = SubstituteData(d, field.Type);
+                model.RecordType(m, new Typed(current));
                 continue;
             }
 
@@ -605,6 +620,7 @@ public sealed partial class Checker
 
         if (source.Type is PointerType || IsOffset(source.Type))
         {
+            model.RecordCall(c, new CallInfo(CallKind.PointerConversion, null, null, pointer, NoMap, [0], 1, pointer));
             return new Typed(pointer);
         }
 
@@ -647,7 +663,13 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        return Types.IsError(PointerTo(type, c.Line, "`SizeOf<T>()`")) ? Typed.Error : new Typed(Types.Long);
+        if (Types.IsError(PointerTo(type, c.Line, "`SizeOf<T>()`")))
+        {
+            return Typed.Error;
+        }
+
+        model.RecordCall(c, new CallInfo(CallKind.SizeOf, null, null, type, NoMap, [], 0, Types.Long));
+        return new Typed(Types.Long);
     }
 
     /// <summary>R15: <c>string.FromRaw(p, n)</c> and <c>List&lt;T&gt;.FromRaw(p, n)</c> make a string of the <c>n</c> bytes and a list of the <c>n</c> elements at <c>p</c>, inside a <c>raw</c> block.</summary>
@@ -674,7 +696,13 @@ public sealed partial class Checker
 
         RequireRaw(c.Line, $"`{form}`", "R15");
         var candidate = new Candidate { Slots = [new Slot("p", pointer, false, false, false), new Slot("n", Types.Long, false, false, false)], Result = result };
-        return Call([candidate], c, null);
+        var typed = Call([candidate], c, null, out var picked);
+        if (picked is not null && !typed.IsError)
+        {
+            model.RecordCall(c, new CallInfo(CallKind.FromRaw, null, null, result, NoMap, picked.Binding, 2, result));
+        }
+
+        return typed;
     }
 
     /// <summary>R15: <c>List&lt;T&gt;.FromRaw(p, n)</c>; a member of another type with type arguments is one no rule gives it (V10).</summary>
@@ -1132,13 +1160,17 @@ public sealed partial class Checker
 
                     variable.Read |= read || members.Count > 0; // V6: a write into a path reads the variable, as an assignment's does
                     variable.Changed = true;
+                    model.RecordName(n, variable);
                     var type = variable.Type;
+                    RecordThrough(members.Count == 0 ? place : members[0].Target, new Typed(type));
                     foreach (var m in members.TakeWhile(_ => !Types.IsError(type)))
                     {
                         var data = (DataType)type;
                         type = SubstituteData(data, data.Symbol.Field(m.Member)!.Type);
+                        model.RecordType(m, new Typed(type));
                     }
 
+                    RecordThrough(place, new Typed(type));
                     return type;
                 }
 
@@ -1172,6 +1204,7 @@ public sealed partial class Checker
         var (variable, _) = Lookup(n.Name);
         if (variable is { Kind: VariableKind.Static })
         {
+            model.RecordName(n, variable);
             return;
         }
 
@@ -1182,7 +1215,13 @@ public sealed partial class Checker
             return;
         }
 
-        if (cFunctions.ContainsKey(n.Name) || IsUnreadName(n.Name))
+        if (cFunctions.TryGetValue(n.Name, out var cFunction))
+        {
+            model.RecordFunctionName(n, cFunction);
+            return;
+        }
+
+        if (IsUnreadName(n.Name))
         {
             return;
         }
@@ -1192,6 +1231,10 @@ public sealed partial class Checker
             if (list.Count > 1 || list[0].IsGeneric)
             {
                 NotSupported(o.Line, "`sym` of a function with more than one overload or with type parameters (R11)");
+            }
+            else
+            {
+                model.RecordFunctionName(n, list[0]);
             }
 
             return;
@@ -1335,9 +1378,9 @@ public sealed partial class Checker
     {
         var d = f.Declaration!;
         frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel };
-        foreach (var p in f.Parameters)
+        foreach (var (p, node) in f.Parameters.Zip(d.Parameters))
         {
-            DeclareParameter(p.Name, p.Type, p.Mut, p.Line);
+            DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node);
         }
 
         rawDepth++;
@@ -1413,7 +1456,9 @@ public sealed partial class Checker
                 continue;
             }
 
-            statics[v.Name] = new VariableSymbol(v.Name, CheckState(v), true, VariableKind.Static, v.Line);
+            var state = new VariableSymbol(v.Name, CheckState(v), true, VariableKind.Static, v.Line);
+            statics[v.Name] = state;
+            model.RecordDeclaration(v, state);
         }
     }
 
@@ -1559,6 +1604,7 @@ public sealed partial class Checker
         foreach (var f in e.Functions)
         {
             var symbol = new FunctionSymbol(f.Name, null) { CDeclaration = f };
+            model.RecordCFunction(f, symbol);
             cDeclared.Add(symbol);
             if (IsDeclaredName(f.Name) || stateNames.Contains(f.Name))
             {
@@ -1709,10 +1755,18 @@ public sealed partial class Checker
         var declared = f.CDeclaration.Parameters;
         arguments = arguments.Select((a, i) => a.Mut && (a.Name is null ? i < declared.Count && declared[i].Mut : declared.Any(p => p.Name == a.Name && p.Mut)) ? a with { Mut = false } : a).ToList();
         var slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, false, p.HasDefault, false)).ToList();
-        var result = Call([new Candidate { Function = f, Slots = slots, Result = f.ReturnType }], c with { Arguments = arguments }, expected);
+        var result = Call([new Candidate { Function = f, Slots = slots, Result = f.ReturnType }], c with { Arguments = arguments }, expected, out var picked);
         foreach (var a in variadic)
         {
             CheckVariadicArgument(a);
+        }
+
+        if (picked is not null)
+        {
+            // the binding of the call as written: the arguments in the place of `...` stand between the positional ones and the named ones
+            var first = f.Parameters.Count;
+            var binding = c.Arguments.Select((_, i) => i < first || i >= first + variadic.Count ? picked.Binding[i < first ? i : i - variadic.Count] : -1).ToList();
+            Record(c, CallKind.CFunction, result, picked, binding);
         }
 
         return result;
