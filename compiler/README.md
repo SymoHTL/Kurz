@@ -22,7 +22,7 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   uses a construct the checker does not read must get `not supported` and no error from it.
   A second suite takes the clang search over a path and a Program Files directory it makes, with
   the answers to `--version` it gives, and over this machine's own environment; a third runs the
-  command `kurz` as a process.
+  command `kurz` as a process, and in the test's own process with a clang search it gives.
 
 ## Building and testing
 
@@ -58,57 +58,79 @@ installs it on every run.
 
 ## The command
 
-`kurz --version` writes the compiler's version, the major release of LLVM the compiler pins and
-the clang it found with that clang's release, on standard output, in the form of the lines
-`rustc -vV` writes, and exits with 0:
+`kurz --version` writes one line on standard output, as `rustc -V` writes one: the compiler's
+version, the major release of LLVM the compiler pins, and the clang it found with that clang's
+release. It exits with 0. `kurz --version --verbose` writes the same on lines of their own, as
+`rustc -vV` does (design record, section 2; the owner, 2026-10-23):
+
+    kurz 0.1.0 (LLVM 23, clang 23.1.4 at /usr/bin/clang-23)
 
     kurz 0.1.0
     LLVM version: 23
     clang: /usr/bin/clang-23
     clang version: 23.1.4
 
-The compiler accepts one major release of LLVM, `Clang.PinnedMajor` in `Build/Clang.cs`, which
-`tools/lint_ci.py` holds the CI image and the Windows job to. The search tries `clang-23` on the
-path, then `clang` on the path, and on Windows then `clang.exe` in `LLVM\bin` under the directory
-the `ProgramFiles` variable names, where the LLVM installer puts it (design record, section 2,
-round 20). It resolves each name through the path's directories itself and runs the file by its
-full path, so that the places the operating system would search beside the path play no part, and
-asks the file it found for `--version`. The first place that holds such a file decides: a clang of
-another major, or a file whose answer names no clang release, is refused, and the search ends
-there. A refusal, or a search that found nothing, writes the first two lines on standard output,
-the failure on standard error in the record's form of the command's own failures, and exits
-with 1:
+The compiler accepts one major release of LLVM, `Clang.PinnedMajor` in `Build/Clang.cs`.
+`tools/lint_ci.py` holds the CI image and the Windows job to it.
+
+The search tries three places, in order (design record, section 2, round 20):
+
+1. `clang-23` on the path;
+2. `clang` on the path;
+3. on Windows, `clang.exe` in `LLVM\bin` under the directory the `ProgramFiles` variable names,
+   where the LLVM installer puts it.
+
+The search resolves each name through the path's directories itself and runs the file by its full
+path, so the places the operating system would search beside the path play no part. It asks the
+file it found for `--version`.
+
+The first place that holds such a file decides, and a refusal ends the search there (the
+record's assumed reading of round 20). Three answers are refused:
+
+- a clang of another major;
+- Apple's clang, whose version is Apple's own and names no LLVM release (the owner, 2026-10-23);
+- a file whose answer names no clang release.
+
+A refusal, or a search that found nothing, does three things:
+
+- it writes on standard output what the command knows before the clang: `kurz 0.1.0 (LLVM 23)`,
+  or under `--verbose` the first two lines (the owner, 2026-10-23);
+- it writes the failure on standard error, in the record's form of the command's own failures;
+- it exits with 1.
+
+The failures read, in the words the owner kept on 2026-10-23:
 
     error: clang 20.1.2 is not LLVM 23
       note: found at /usr/local/bin/clang
+      help: install LLVM 23, ahead of this clang on the path
+
+    error: the clang found is Apple clang, whose version names no LLVM release
+      note: found at /usr/bin/clang
       help: install LLVM 23, ahead of this clang on the path
 
     error: no clang found
       note: looked for clang-23 and clang on the path
       help: install LLVM 23
 
-On Windows the note of a search that found nothing also names the installer's directory. A
-command line the command cannot read gets the usage, `usage: kurz --version`, on standard error
-and the exit code 1.
+On Windows the note of a search that found nothing also names the installer's directory. On the
+Windows runner a child process read `ProgramFiles` as the system's folder whatever its parent set,
+so a test cannot move that directory through a child's environment
+([a Windows child gets its own Program Files](../knowledge/a-windows-child-gets-its-own-program-files.md)).
+
+`--verbose` stands before or after `--version`, as rustc takes `-v` and `-V` in either order (the
+owner, 2026-10-23). Any other command line gets the usage on standard error and the exit code 1.
+The usage is `usage: kurz --version [--verbose]`.
 
 ### Readings the record leaves open to the command
 
-Each is the reading of this directory, not a decision, pinned by a test named with it; a design
-round can ask about it.
+Each is a reading of this directory, not a decision. A test pins each one, and a design round can
+ask about it.
 
-- Section 2, round 20, names what `--version` writes and not its words: the lines above, pinned by
-  `CommandTests.Version_names_the_compiler_the_pinned_major_and_the_clang_found`; the compiler's
-  version is the `Version` of `Directory.Build.props`, 0.1.0, with no commit appended.
-- Section 2 gives the command's own failures their form and not their words: the lines above, the
-  product pass's proposal, taken as its default on 2026-10-22 and said back to the owner, pinned by `ClangTests` and
-  `CommandTests.Version_with_no_clang_on_the_path_writes_its_first_lines_the_places_looked_at_and_exits_1`;
-  the help of a refused clang on the path adds where the pinned one must stand, since the first
-  place decides.
-- Section 2, round 20: that the first place that holds a clang decides and its refusal ends the
-  search is the record's own reading of the answer, said back to the owner; pinned by
-  `ClangTests.The_first_place_that_holds_a_clang_decides_and_its_refusal_ends_the_search`.
-- `--version` writes its first two lines before a failure as after a success, so that a caller
-  reads the pinned major whatever the search found.
+- The compiler's version is the `Version` of `Directory.Build.props`, 0.1.0, with no commit
+  appended. Pinned by the literal version in every expectation of `CommandTests`.
+- A file that does not start, exits with a code other than 0 or gives no answer in 30 s names no
+  release, and is refused as such. Pinned by
+  `ClangTests.A_file_whose_answer_names_no_clang_release_is_refused`.
 
 ## What the compiler says about a program
 

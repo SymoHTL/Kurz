@@ -61,7 +61,8 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   `.github/workflows/review.yml`. The `gates` job runs in the image `ci/Dockerfile` defines, named
   in `gates.yml` by its digest: a base named by its digest, clang of the LLVM major the compiler
   pins (`Clang.PinnedMajor` in `compiler/Kurz.Compiler/Build/Clang.cs`, the one definition of that
-  major), from the packages LLVM publishes, the SDK `compiler/global.json` pins and gh, each download
+  major, to which `ci-config` holds the image's `LLVM_MAJOR` and the Windows job's release), from the
+  packages LLVM publishes, the SDK `compiler/global.json` pins and gh, each download
   checked by its hash or its key, as section 2 of the design record says (the owner, 2026-10-22,
   "Public GHCR image"). `.github/workflows/image.yml` builds it and publishes it to the GitHub
   container registry on a push that changes it; the walk of a change to it, and the local run of
@@ -69,7 +70,8 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   [knowledge/the-gates-job-runs-in-its-image.md](knowledge/the-gates-job-runs-in-its-image.md).
   The other jobs run on hosted runners named by their versioned labels: the forge offers no
   digest for a hosted image. Of those images the tools use python3, node (for the CLI), gh (every
-  forge call) and git, and of the gates image python3, git and the LLVM release, which the
+  forge call) and git, of the Windows image zstd and tar, which unpack LLVM's archive there, and of
+  the gates image python3, git and the point release of the pinned LLVM major, which the
   distribution's and LLVM's packages give on the day the image is built: none of them pinned to a
   version, HAZARD (#15). The Windows job installs the release `LLVM_VERSION` names, of the major the
   compiler pins, from a cache of LLVM's archive for Windows, which it checks by the SHA-256 in
@@ -458,7 +460,7 @@ Gate: review rule "rules for sessions".
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
 | | a merge by the button, which skips what only the merge tool does (#14) |
-| | the hosted images' python3, node, gh and git, and the gates image's python3, git and LLVM release, pinned to no version (#15) |
+| | the hosted images' python3, node, gh and git, the Windows image's zstd and tar, and the gates image's python3, git and LLVM point release, pinned to no version (#15) |
 | | the gates job judging a pull request with the pull request's own gates (#16) |
 | | a review that stopped at the pass cap posting `success` (#17) |
 | | the evidence digest, which a recomputed hash passes (#18) |

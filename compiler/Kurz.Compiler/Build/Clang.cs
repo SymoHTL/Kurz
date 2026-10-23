@@ -9,7 +9,9 @@ namespace Kurz.Compiler.Build;
 /// <c>clang</c> on the path, then on Windows <c>clang.exe</c> in <c>LLVM\bin</c> under the directory the
 /// <c>ProgramFiles</c> variable names, where the LLVM installer puts it without adding it to the path.
 /// The first place that holds such a file gives the clang taken, and its refusal ends the search, so
-/// that of two installs the one ahead on the path wins (the record's reading of round 20). Each name is
+/// that of two installs the one ahead on the path wins (the record's reading of round 20). Apple's
+/// clang numbers its own releases, so its answer names no LLVM release and it is refused (the owner,
+/// 2026-10-23). Each name is
 /// resolved through the path's directories here and the file is run by its full path, so that the
 /// places the operating system would search beside the path (on Windows the program's own directory,
 /// the current directory and the system directories) play no part.
@@ -40,6 +42,9 @@ public sealed partial class Clang
     [GeneratedRegex(@"clang version (\d+)\.(\d+)\.(\d+)")]
     private static partial Regex VersionText();
 
+    [GeneratedRegex(@"^Apple clang version ", RegexOptions.Multiline)]
+    private static partial Regex AppleText();
+
     /// <summary>The search over the variables <c>PATH</c> and <c>ProgramFiles</c> of this process, asking each candidate itself.</summary>
     public static ClangSearch Find() =>
         Find(Environment.GetEnvironmentVariable("PATH"), Environment.GetEnvironmentVariable("ProgramFiles"), OperatingSystem.IsWindows(), Ask);
@@ -67,18 +72,28 @@ public sealed partial class Clang
             var version = answer is null ? null : ReadVersion(answer);
             return version is not null && Major(version) == PinnedMajor
                 ? new ClangSearch(new Clang(file, version), file, version, looked)
-                : new ClangSearch(null, file, version, looked);
+                : new ClangSearch(null, file, version, looked, answer is not null && IsApple(answer));
         }
 
         return new ClangSearch(null, null, null, looked);
     }
 
-    /// <summary>The release a <c>--version</c> answer names, <c>23.1.4</c>, or null where it names none.</summary>
+    /// <summary>
+    /// The LLVM release a <c>--version</c> answer names, <c>23.1.4</c>, or null where it names none, as
+    /// Apple's clang does: the number in its answer is Apple's own (Apple clang 17 is built from LLVM 19).
+    /// </summary>
     public static string? ReadVersion(string answer)
     {
         ArgumentNullException.ThrowIfNull(answer);
         var match = VersionText().Match(answer);
-        return match.Success ? $"{match.Groups[1].Value}.{match.Groups[2].Value}.{match.Groups[3].Value}" : null;
+        return match.Success && !IsApple(answer) ? $"{match.Groups[1].Value}.{match.Groups[2].Value}.{match.Groups[3].Value}" : null;
+    }
+
+    /// <summary>Whether the answer to <c>--version</c> is Apple's clang's, whose first line names it so.</summary>
+    public static bool IsApple(string answer)
+    {
+        ArgumentNullException.ThrowIfNull(answer);
+        return AppleText().IsMatch(answer);
     }
 
     private static int Major(string version) => int.Parse(version.Split('.')[0], CultureInfo.InvariantCulture);
@@ -118,7 +133,8 @@ public sealed partial class Clang
 
 /// <summary>
 /// What the search found: <see cref="Found"/>, the clang of the pinned major; or at <see cref="Place"/>
-/// a file it refused, with the release it named (<see cref="Version"/>), or none where it named none;
-/// or no file at any place. <see cref="Looked"/> names the places tried, in order.
+/// a file it refused, with the release it named (<see cref="Version"/>), or none where it named none,
+/// <see cref="Apple"/> where the file is Apple's clang; or no file at any place. <see cref="Looked"/>
+/// names the places tried, in order.
 /// </summary>
-public sealed record ClangSearch(Clang? Found, string? Place, string? Version, IReadOnlyList<string> Looked);
+public sealed record ClangSearch(Clang? Found, string? Place, string? Version, IReadOnlyList<string> Looked, bool Apple = false);

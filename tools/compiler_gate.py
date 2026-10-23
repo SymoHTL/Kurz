@@ -6,8 +6,9 @@ packages that the lock files pin (a restore in locked mode refuses a package the
 name), from the one package source compiler/NuGet.config names, and with the build servers off, so
 that no MSBuild node or compiler server outlives the command and holds its output open past the
 timeout. After the tests it runs the command it built, `kurz --version`, and prints what the
-command wrote: the compiler's version, the major release of LLVM the compiler pins and the clang
-it found with that clang's release (design record, section 2, round 20).
+command wrote, one line: the compiler's version, the major release of LLVM the compiler pins and
+the clang it found with that clang's release (design record, section 2, round 20, and the owner's
+one line of 2026-10-23).
 
   compiler_gate.py               build, test and ask the command; exit 0 when every check passed
   compiler_gate.py --self-test
@@ -22,7 +23,7 @@ summary line was printed at all, so that a run that tested nothing cannot pass; 
 exited non-zero although no test failed (a project that did not build beside one that did); the
 test command ran out of time; `kurz --version` exited with another code than 0, which the command
 does where it refused the clang it found or found none, did not start or ran out of time, or exited
-with 0 and named no clang release. The summary line is the one the test runner prints,
+with 0 and wrote no line that names a clang release in the command's form. The summary line is the one the test runner prints,
 `Passed! - Failed: 0, Passed: N, Skipped: 0, Total: N`, one per test project, and the counts are
 summed over them."""
 import os
@@ -43,7 +44,7 @@ COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreL
 # the command the test run built, run without a build of its own; the dotnet host reads global.json from CWD as for the tests
 VERSION_COMMAND = ["dotnet", "run", "--project", "Kurz", "-c", "Release", "--no-build", "--", "--version"]
 VERSION_TIMEOUT = 120  # seconds: the command starts and asks one clang for its version
-CLANG_RELEASE = re.compile(r"^clang version: \d+\.\d+\.\d+$", re.M)
+CLANG_RELEASE = re.compile(r"^kurz \S+ \(LLVM \d+, clang \d+\.\d+\.\d+ at .+\)$", re.M)
 SUMMARY = re.compile(r"^(Passed|Failed)!\s+-\s+Failed:\s+(\d+),\s+Passed:\s+(\d+),\s+Skipped:\s+(\d+),\s+Total:\s+(\d+)", re.M)
 ERROR_LINE = re.compile(r"^.*(?:error [A-Z]+\d+|error MSB\d+|error NU\d+).*$", re.M)
 
@@ -172,7 +173,8 @@ CONFIG_TEXT = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- one source -->\
                "  </packageSourceMapping>\n</configuration>\n")
 
 
-VERSION_OUTPUT = "kurz 0.1.0\nLLVM version: 23\nclang: /usr/bin/clang-23\nclang version: 23.1.4\n"
+VERSION_OUTPUT = "kurz 0.1.0 (LLVM 23, clang 23.1.4 at /usr/bin/clang-23)\n"
+NO_CLANG_LINE = "kurz 0.1.0 (LLVM 23)\n"
 NO_CLANG = "error: no clang found\n  note: looked for clang-23 and clang on the path\n  help: install LLVM 23\n"
 
 
@@ -213,10 +215,12 @@ def self_test():
         cases.append(("a run out of time is refused", "within 1 s" in str(e), str(e)))
     errors = judge_version(0, VERSION_OUTPUT, "")
     cases.append(("a version run that names the clang it found passes", not errors, errors))
-    errors = judge_version(1, VERSION_OUTPUT.split("clang:")[0], NO_CLANG)
+    errors = judge_version(1, NO_CLANG_LINE, NO_CLANG)
     cases.append(("a version run that exits 1 is red and names the command's error", any("exited 1" in e and "no clang found" in e for e in errors), errors))
-    errors = judge_version(0, VERSION_OUTPUT.split("clang:")[0], "")
+    errors = judge_version(0, NO_CLANG_LINE, "")
     cases.append(("a version run that exits 0 and names no clang release is red", any("named no clang release" in e for e in errors), errors))
+    errors = judge_version(0, "kurz 0.1.0\nLLVM version: 23\nclang: /usr/bin/clang-23\nclang version: 23.1.4\n", "")
+    cases.append(("a release outside the one line of `kurz --version` is red", any("named no clang release" in e for e in errors), errors))
     cases.append(("the version run asks the built command for its version, with no build of its own",
                   VERSION_COMMAND[-2:] == ["--", "--version"] and "--no-build" in VERSION_COMMAND and "Release" in VERSION_COMMAND, VERSION_COMMAND))
 

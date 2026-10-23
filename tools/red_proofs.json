@@ -1093,5 +1093,6 @@
   {"tool": "tools/lint_ci.py", "anchor": "    if pin is None or args.get(\"LLVM_MAJOR\") != str(pin):", "replacement": "    if pin is None:", "expect": "ci/Dockerfile: a compiler that pins another major than the image's"},
   {"tool": "tools/lint_ci.py", "anchor": "PIN = re.compile(r\"(?m)^\\s*public const int PinnedMajor = (\\d+);\")", "replacement": "PIN = re.compile(r\"(?m)^\\s*public const int PinnedMinor = (\\d+);\")", "expect": "the compiler's pin is read from its line"},
   {"tool": "tools/lint_ci.py", "anchor": "    return int(match.group(1)) if match else None", "replacement": "    return int(match.group(1)) if match else 23", "expect": "a Clang.cs without its pin line names no major"},
-  {"tool": "tools/lint_ci.py", "anchor": "    if pin is None:\n        errors.append(f\"{CLANG_CS} names no PinnedMajor", "replacement": "    if False:\n        errors.append(f\"{CLANG_CS} names no PinnedMajor", "expect": "lint: a compiler without its pin is an error"}
+  {"tool": "tools/lint_ci.py", "anchor": "    if pin is None:\n        errors.append(f\"{CLANG_CS} names no PinnedMajor", "replacement": "    if False:\n        errors.append(f\"{CLANG_CS} names no PinnedMajor", "expect": "lint: a compiler without its pin is an error"},
+  {"tool": "tools/compiler_gate.py", "anchor": "CLANG_RELEASE = re.compile(r\"^kurz \\S+ \\(LLVM \\d+, clang \\d+\\.\\d+\\.\\d+ at .+\\)$\", re.M)", "replacement": "CLANG_RELEASE = re.compile(r\"^clang version: \\d+\\.\\d+\\.\\d+$\", re.M)", "expect": "a release outside the one line of `kurz --version` is red"}
 ]
