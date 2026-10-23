@@ -16,6 +16,13 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckExpression(Expression expression, KurzType? expected, bool keepCases = false)
     {
+        var typed = CheckExpressionCore(expression, expected, keepCases);
+        model.RecordType(expression, typed); // the last reading stands: a call's literal argument is read a second time, against the parameter of the function picked
+        return typed;
+    }
+
+    private Typed CheckExpressionCore(Expression expression, KurzType? expected, bool keepCases)
+    {
         switch (expression)
         {
             case IntegerLiteral i:
@@ -383,6 +390,7 @@ public sealed partial class Checker
         if (variable is not null)
         {
             variable.Read = true;
+            model.RecordName(n, variable);
             stateRead |= readingConstant && variable.Kind == VariableKind.Static;
             RequireRawForState(variable, n.Line);
             return new Typed(variable.Type);
@@ -412,11 +420,13 @@ public sealed partial class Checker
 
         if (cFunctions.TryGetValue(n.Name, out var cFunction))
         {
+            model.RecordFunctionName(n, cFunction);
             return CFunctionValue(cFunction, n.Line);
         }
 
         if (functions.TryGetValue(n.Name, out var named) && named is [{ TakesC: true } own])
         {
+            model.RecordFunctionName(n, own);
             return CFunctionValue(own, n.Line); // a function of the package's own in the C calling convention (R12, R16)
         }
 
@@ -1227,7 +1237,7 @@ public sealed partial class Checker
         };
         foreach (var (p, type) in l.Parameters.Zip(parameterTypes))
         {
-            DeclareParameter(p.Name, type, p.Mut, p.Line);
+            DeclareParameter(p.Name, type, p.Mut, p.Line, p);
         }
 
         KurzType result;
@@ -1276,8 +1286,16 @@ public sealed partial class Checker
         }
 
         ReportUnused(frame.Scope);
+        var lambda = frame;
         frame = outer;
-        return new Typed(failed || parameterTypes.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameterTypes, result));
+        if (failed || parameterTypes.Any(Types.IsError) || Types.IsError(result))
+        {
+            return Typed.Error;
+        }
+
+        var lambdaType = new FunctionType(parameterTypes, result);
+        model.RecordLambda(l, new LambdaInfo(l.Parameters.Select(p => model.DeclarationOf(p)).ToList(), lambda.Captures.ToList(), lambdaType));
+        return new Typed(lambdaType);
     }
 
     /// <summary>D5: a copy of a data value with fields replaced.</summary>

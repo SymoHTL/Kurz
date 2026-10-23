@@ -50,6 +50,7 @@ public sealed partial class Checker
                     {
                         // a subject the checker could not type: the arms name cases of a type it does not know, so nothing is resolved
                         var type = known ? Resolve(tp.Type) : Types.Error;
+                        model.RecordPattern(tp, type);
                         if (known && !Types.IsError(type))
                         {
                             if (!cases.Any(c => IsCaseOf(type, c)))
@@ -69,7 +70,7 @@ public sealed partial class Checker
 
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line);
+                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
                         }
 
                         break;
@@ -250,6 +251,7 @@ public sealed partial class Checker
         }
 
         var result = CallResult(call, expected);
+        model.RecordType(call, result); // the call's whole result: the arms take its cases after the success (O5)
         if (result.IsError)
         {
             CheckArmsLoosely(e.Arms);
@@ -278,6 +280,7 @@ public sealed partial class Checker
                 case TypePattern tp:
                     {
                         var type = Resolve(tp.Type);
+                        model.RecordPattern(tp, type);
                         if (Types.IsError(type))
                         {
                             armWrong = true; // the type carries its own diagnostic, and which case the arm meant is unknown (E1)
@@ -301,7 +304,7 @@ public sealed partial class Checker
 
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line);
+                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
                         }
 
                         break;
@@ -350,7 +353,7 @@ public sealed partial class Checker
                         var type = Resolve(tp.Type);
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line);
+                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
                         }
 
                         break;

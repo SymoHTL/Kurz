@@ -84,7 +84,7 @@ public sealed class CorpusTests
     }
 
     /// <summary>Every case file, as a path relative to corpus/ with forward slashes, in a fixed order.</summary>
-    private static List<string> CaseFiles()
+    internal static List<string> CaseFiles()
     {
         var corpus = Path.Combine(Root, "corpus");
         return Directory.EnumerateFiles(corpus, "*.kz", SearchOption.AllDirectories)
@@ -104,7 +104,7 @@ public sealed class CorpusTests
         return data;
     }
 
-    private static (CaseHeader Header, ProgramSyntax Tree, DiagnosticBag FrontEnd) ReadCase(string relativePath)
+    internal static (CaseHeader Header, ProgramSyntax Tree, DiagnosticBag FrontEnd) ReadCase(string relativePath)
     {
         var bytes = File.ReadAllBytes(Path.Combine(Root, "corpus", relativePath));
         var source = SourceText.FromBytes(relativePath, bytes, out var invalid);
