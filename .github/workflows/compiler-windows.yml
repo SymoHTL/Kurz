@@ -2,7 +2,7 @@ name: compiler-windows
 
 # The compiler's build and tests on Windows, the owner's platform; the gates job runs the same gate
 # on Linux. Facts of this file are pinned by tools/lint_ci.py. The job is not a required check of
-# the ruleset: a red run here holds no merge until the owner adds it there. No image serves this
+# the ruleset: a red run here holds no merge (HAZARD #30). No image serves this
 # job, so it installs the LLVM release the compiler pins on every run, from a cache of LLVM's
 # archive for Windows, into the directory LLVM's installer uses (design record, section 2). That
 # archive is a zstd frame with a window of 1 GiB, which the zstd reader of the runner's tar refuses
