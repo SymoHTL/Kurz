@@ -78,7 +78,9 @@ LLVM_RUN = "\n".join([
     "$llvm = Join-Path $env:ProgramFiles LLVM",
     "if (Test-Path $llvm) { Remove-Item -Recurse -Force $llvm }",
     "New-Item -ItemType Directory $llvm | Out-Null",
-    "tar -xf $archive -C $llvm --strip-components 1",
+    "$tar = Join-Path $env:RUNNER_TEMP llvm.tar",
+    "zstd -d -q -f --long=31 $archive -o $tar",
+    "tar -xf $tar -C $llvm --strip-components 1",
     "& (Join-Path $llvm bin clang.exe) --version",
 ])
 GLOBAL_JSON = "compiler/global.json"
