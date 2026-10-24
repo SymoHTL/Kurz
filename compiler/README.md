@@ -348,11 +348,14 @@ count, and a call that gives a `mut` parameter holds each other argument that ho
 time of the call, so that a write through the parameter copies the list and leaves the argument as
 it was (M3, M7). Counted are a list, a plain `data` value that holds one in a field and a union
 with a case that holds one; a `throw` and a raise end the process, and no count is lowered there.
-A value of a block type is never freed, and the lists it holds are never let go of. Pinned by
+A value of a block type is never freed, and the lists it holds are never let go of: the memory of
+such a value, which the answer of 2026-10-23 leaves ungiven back (below), is read to hold the lists
+in its fields, a reading of this directory, not a decision. Pinned by
 `ListTests`: the values the counting keeps apart; a system that refuses every request for memory
 after sixteen, within which a program that makes and drops lists through every way out of a block
 for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
-inaccessible, under which the same programs print the same lines; the target's own `Release`, after
+inaccessible, under which the values' programs and twenty rounds of the same program print the
+same lines; the target's own `Release`, after
 which a write into a freed block of more than 262144 bytes ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
 the same lists all kept do not; the number of `allocation-failed` past the limit, with the limit
@@ -374,7 +377,8 @@ chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
 The reference counting of section 3 is emitted for lists and the values that hold them (above) and
-for nothing else: memory a string or a value of a block type takes is never given back, so a
+for nothing else: memory a string or a value of a block type takes is never given back, the lists
+a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
 corpus runner lists every case the checker reads in full and the emitter does not emit, 33 of the

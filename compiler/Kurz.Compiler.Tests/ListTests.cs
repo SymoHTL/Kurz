@@ -314,6 +314,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var fenced = Edited(Fence);
         Ran(BuildAndRun(Values, fenced, "list-values-fenced"), 0, ValuesPrint, "");
         Ran(BuildAndRun(Sharing, fenced, "list-sharing-fenced"), 0, SharingPrint, "");
+        // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
+        Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process
         var writer = Edited([.. Fence, ("runtime/common/runtime.kz", "pub void Start() {\n    sys.Start()\n", "pub void Start() {\n    sys.Start()\n    byte* p = Allocate(16)\n    raw {\n        std.Free(p, 16)\n        p[0] = 1\n    }\n")]);
