@@ -144,7 +144,7 @@ compiler refuses gets its lines on standard error, one per diagnostic in the ord
 and no executable, and the command exits with 1:
 
     hello.kz:3: unknown-name: `y` is not declared
-    hello.kz:1: not supported: a value of type `List<int>` (M9)
+    hello.kz:1: not supported: a value of type `double` (T2)
 
 The file is named as the command line gave it. The command grants a program neither `raw` nor
 `native` (R7, R16): a program that needs them is refused with the grant's error. It refuses to
@@ -207,7 +207,7 @@ ask about it.
 The runtime a built program links is written in Kurz, in `runtime/` at the top of the repository
 (design record, section 2): `runtime/common/` holds the code every target shares, and
 `runtime/linux/` and `runtime/windows/` the code of one target each. The standard library's Kurz
-code is in `std/`: the allocator of section 3 (the owner, 2026-10-24, "A std/ directory now"), at
+code is in `std/`: the allocator of section 3 and the block of a list (the owner, 2026-10-24, "A std/ directory now"), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
@@ -239,16 +239,23 @@ under IR names of their own; nothing of it is compiled apart (record, section 2,
 emitted `main` calls the runtime's `Start`, then the program's top level, then `Finish`, which ends
 the process with the exit code 0 through the target's `Exit`, the runtime's one exit (section 6).
 `common/` gives what the emitted code calls: `Print`, the text of an integer and of a `char`, the
-joining and the comparison of two strings, `Raise` for an exception of the run-time table and
-`Throw`, and `Allocate`, which takes its memory from the allocator's entry, `std/`'s `Allocate`
-(record, section 2), and ends the process where the entry gives null (the owner, 2026-10-24, "Null,
-runtime ends it"), as Rust's `handle_alloc_error` does for the null of its allocator's `alloc`. The entry takes memory from the system's `Memory` in
-pieces of a mebibyte per thread, and an allocation of more than a quarter of that in a piece of its
-own, gives null where the system refuses, and frees nothing: the reference counting of section 3 is
-not emitted. A target's directory gives `Start`, `Write`,
-`Exit` and `Memory`: on Linux over the C library, `Start` setting the signal of a closed pipe to
-ignored and `Write` calling again where a signal interrupted it (section 6), on Windows over
-`kernel32`. The Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
+joining and the comparison of two strings, the text of a list from the texts of its items,
+`Raise` for an exception of the run-time table and `Throw`, and `Allocate`, which takes its memory
+from the allocator's entry, `std/`'s `Allocate` (record, section 2), and ends the process where the
+entry gives null (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
+returns null and leaves the end of the process to a caller, which its documentation encourages to
+call `handle_alloc_error`. The entry gives a block of one of fifteen size classes, the powers of two
+from 16 to 262144 bytes: the block of its class freed last, else one carved from the thread's
+memory, which it takes from the system's `Memory` a mebibyte at a time; an allocation of more than
+262144 bytes takes memory of its own from `Memory`. It gives null where the system refuses. `std/`'s
+`Free` takes a block back with the size it was asked for, as Rust's `GlobalAlloc::dealloc` takes
+the layout a block was allocated with: a block of a size class to the front of its class's free
+blocks, where the next request of the class takes it, and a larger one to the system through the
+target's `Release`; the mebibytes a thread carved from stay its own. A target's directory gives
+`Start`, `Write`, `Exit`, `Memory` and `Release`: on Linux over the C library, `Start` setting the
+signal of a closed pipe to ignored and `Write` calling again where a signal interrupted it (section
+6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
+Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
@@ -291,6 +298,11 @@ library a block of C functions names (R16). It emits:
   (O1, O2), a success case without a value (O10), `match` with arms of a type, of a value and
   `else` (C4, C9, O8), postfix `else` after a call (O5), and `throw` of a data value and the bare
   `throw` of an arm of `else`, which throws the case that reached it (O7);
+- lists (M9): `List<T>()`, `Add`, `Count` and `list[i]`, which raises `index-out-of-range` for an
+  index below 0 or at `Count` or beyond (T14), `for` over a list, which walks the list as it was when
+  the loop started (C6), their text (A4), and lists of every type the emitter lays out, in
+  variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
+  program with `allocation-failed` and the bytes of its items after the `Add` (M9);
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), and `==` on strings by
   their bytes (T18);
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
@@ -317,21 +329,51 @@ no other variable sees it (D4, M4). Pinned by
 `DataTests.An_assignment_into_a_path_through_a_block_copies_the_block_so_that_another_variable_keeps_its_value`
 and `DataTests.A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value`.
 
+A list is the address of its block, null for a list without items, which takes no block, as Rust's
+`Vec::new` allocates nothing. The block holds the count of the list values that hold it, 8 bytes,
+the count of its items and the count it has room for, 4 bytes each, and from its 16th byte the
+items, each laid out as its type is (`std/std.kz`). A copy of a list copies the address and raises
+the count. An `Add` writes in place where one value holds the block and it has room, grows the
+block where it has none, as Rust's `Vec` grows, to twice its room, at least 8 items of a byte, 4 of
+up to a kibibyte and 1 of more, and where other values hold the block it copies the items into a
+block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). Its argument is
+evaluated before the list, so an argument that changes the list through a `mut` parameter keeps its
+change, the order M4 takes for a path assignment, an assumption of the record (section 4). The count
+is lowered where a holder ends: at the end of the block that declared a variable, and at a
+`return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
+the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
+nothing keeps; and where a value that holds the list ends. At zero the lists the items hold are let
+go of in turn, and the block goes back to `Free`. A parameter borrows its argument and changes no
+count, and a call that gives a `mut` parameter holds each other argument that holds a list for the
+time of the call, so that a write through the parameter copies the list and leaves the argument as
+it was (M3, M7). Counted are a list, a plain `data` value that holds one in a field and a union
+with a case that holds one; a `throw` and a raise end the process, and no count is lowered there.
+A value of a block type is never freed, and the lists it holds are never let go of. Pinned by
+`ListTests`: the values the counting keeps apart; a system that refuses every request for memory
+after sixteen, within which a program that makes and drops lists through every way out of a block
+for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
+inaccessible, under which the same programs print the same lines; and the number of
+`allocation-failed` past the limit, with the limit lowered in the library's text, and for a growth
+the system refuses.
+
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
-checker's shape, and no executable: a list (M9), a generic `data` type with a base or a type
+checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a lambda (F7) and a function value (F11), `float`, `double` and `decimal` (T2), the durations and the
 timestamps (T13), a `mut` parameter given anything but a variable (M7), a `naked` function (R12),
-inline assembly (R11), and a construct of the other chapters the checker does not read. The line
+inline assembly (R11), a list's `Where` and an assignment into an index (M9), an `Add` on a list in
+a field (M5), `==` on a value that holds a list (D3), a list's `Pointer` and `List<T>.FromRaw`
+(R15), `s.Bytes` and `s.Chars` as a list, `s.Bytes.Count` aside (T15), and a construct of the other
+chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
-The reference counting of section 3 is not emitted either: memory a program takes is never given
-back, so a program that allocates without end runs out of memory and ends with
-`allocation-failed`; a value of a block type takes memory, a plain value and a union none (the
-owner, 2026-10-23, "Accept, documented"). The
-corpus runner lists every case the checker reads in full and the emitter does not emit, 43 of the
+The reference counting of section 3 is emitted for lists and the values that hold them (above) and
+for nothing else: memory a string or a value of a block type takes is never given back, so a
+program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
+value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
+corpus runner lists every case the checker reads in full and the emitter does not emit, 33 of the
 226 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow

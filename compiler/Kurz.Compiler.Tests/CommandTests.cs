@@ -139,7 +139,7 @@ public sealed class CommandTests : IDisposable
 
     [Theory]
     [InlineData("print(1)\nprint(y)\n", ":2: unknown-name: ")] // a compile error, in the record's form
-    [InlineData("print(List<int>().Count)\n", ":1: not supported: the member `Count` of a value of type `List<int>` (M9)\n")] // the emitter's not supported
+    [InlineData("print(1.5)\n", ":1: not supported: a value of type `double` (T2)\n")] // the emitter's not supported
     [InlineData("string s = \"\"\nraw {\n    print(s.Pointer != null)\n}\n", ":2: raw-not-allowed: ")] // the command grants no `raw`
     [InlineData("extern \"C\" {\n    int abs(int n)\n}\n\nprint(1)\n", ":1: native-not-allowed: ")] // nor `native`
     public void Build_of_a_program_the_compiler_refuses_writes_its_lines_and_no_executable_and_exits_1(string text, string line)

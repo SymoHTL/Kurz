@@ -1,43 +1,343 @@
 // The standard library's Kurz code (design record, section 2; the owner, 2026-10-24, "A std/ directory
 // now"), which the compiler compiles with every program, as it compiles the runtime: the allocator of
-// section 3. It takes its memory from the system through the runtime's boundary call, reached as the
-// folder `sys`, the directory of the target the program is built for, and the runtime reaches it as
-// the folder `std`, through its allocation entry, `Allocate` (the owner, 2026-10-24, "As built";
-// compiler/README.md, "The runtime").
+// section 3 and the block of a list. It takes its memory from the system through the runtime's
+// boundary call, reached as the folder `sys`, the directory of the target the program is built for,
+// and the runtime reaches it as the folder `std`, through its allocation entry, `Allocate` (the owner,
+// 2026-10-24, "As built"; compiler/README.md, "The runtime"). The emitted code calls the functions of
+// a list's block.
 use sys
 
-// The memory the allocator hands out next, and the bytes left behind it, of each thread (R13).
+// The memory the allocator carves blocks from, and the bytes left behind it, of each thread (R13).
 thread static mut byte* chunk = null
 thread static mut long left = 0
 
-// The allocation entry (design record, section 2): `size` bytes, at an address that is a multiple of
-// 16, which nothing frees: the reference counting of section 3 is not emitted. Memory comes from the
-// system in pieces of a mebibyte, and an allocation of more than a quarter of that in a piece of its
-// own. Null where the system refuses, for which the runtime's `Allocate` ends the process (the owner,
-// 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc` returns null and its callers
-// that cease execution are encouraged to call `handle_alloc_error`.
-pub byte* Allocate(long size) {
-    long rounded = (size + 15) / 16 * 16
+// The first free block of each size class of each thread, as its address, 0 where the class has none:
+// fifteen classes, the powers of two from 16 to 262144 bytes, in a table carved at the thread's first
+// allocation of no more than 262144 bytes. A free block holds the address of the next free block of
+// its class in its first 8 bytes.
+thread static mut long* heads = null
+
+// The size class of a request of at most 262144 bytes, counted from 0: the smallest power of two from
+// 16 that holds it.
+long Class(long size) {
+    mut long k = 0
+    mut long room = 16
+    while room < size {
+        room = room * 2
+        k = k + 1
+    }
+
+    return k
+}
+
+// `room` bytes carved from the thread's memory, which takes a new piece of a mebibyte from the system
+// where the rest of the piece is too small; null where the system refuses. The rest of a piece left
+// behind is not carved again.
+byte* Carve(long room) {
     mut byte* p = null
     raw {
-        if rounded > 262144 {
-            p = sys.Memory(rounded)
-        } else {
-            if rounded > left {
-                chunk = sys.Memory(1048576)
-                left = 1048576
-                if chunk == null {
-                    left = 0
-                }
+        if room > left {
+            chunk = sys.Memory(1048576)
+            left = 1048576
+            if chunk == null {
+                left = 0
             }
+        }
 
-            if chunk != null {
-                p = chunk
-                chunk = chunk + rounded
-                left = left - rounded
+        if chunk != null {
+            p = chunk
+            chunk = chunk + room
+            left = left - room
+        }
+    }
+
+    return p
+}
+
+// The table of the thread's size classes, carved at its first use from memory the system gave
+// zeroed, so every class starts without a free block; null where the system refuses.
+long* Heads() {
+    mut long* table = null
+    raw {
+        if heads == null {
+            heads = Ptr<long>(Carve(128))
+        }
+
+        table = heads
+    }
+
+    return table
+}
+
+// The allocation entry (design record, section 2): `size` bytes, at an address that is a multiple of
+// 16. A request of more than 262144 bytes takes memory of its own from the system. A smaller one takes
+// a block of its size class: the one of that class freed last, or one carved from the thread's memory,
+// whose pieces the system gives a mebibyte at a time. A block used again holds what was written into
+// it before. Null where the system refuses, for which the runtime's `Allocate` ends the process (the
+// owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc` returns null and its
+// callers that cease execution are encouraged to call `handle_alloc_error`.
+pub byte* Allocate(long size) {
+    mut byte* p = null
+    if size > 262144 {
+        raw {
+            p = sys.Memory((size + 15) / 16 * 16)
+        }
+
+        return p
+    }
+
+    long* table = Heads()
+    raw {
+        if table != null {
+            long k = Class(size)
+            long head = table[k]
+            if head != 0 {
+                p = Ptr<byte>(head)
+                table[k] = *Ptr<long>(p)
+            } else {
+                mut long room = 16
+                mut long i = 0
+                while i < k {
+                    room = room * 2
+                    i = i + 1
+                }
+
+                p = Carve(room)
             }
         }
     }
 
     return p
+}
+
+// A block the allocation entry gave, given back with the `size` it was asked for, as Rust's
+// `GlobalAlloc::dealloc` takes the layout a block was allocated with: a block of more than 262144
+// bytes to the system, a smaller one to the front of its size class's free blocks, where the next
+// request of that class takes it. Where the table of size classes cannot be carved, the block is not
+// used again.
+pub void Free(byte* p, long size) {
+    if size > 262144 {
+        raw {
+            sys.Release(p, (size + 15) / 16 * 16)
+        }
+
+        return
+    }
+
+    long* table = Heads()
+    raw {
+        if table != null {
+            long k = Class(size)
+            *Ptr<long>(p) = table[k]
+            table[k] = long(p)
+        }
+    }
+}
+
+// The block of a list (M9, R15). A list value is the address of its block, null for a list without
+// items, which takes no block, as Rust's `Vec::new` allocates nothing. A block holds the count of the
+// list values that hold it, 8 bytes, the count of its items and the count it has room for, 4 bytes
+// each, and from its 16th byte the items, each `item` bytes, as the item's type is laid out. A list
+// value is copied without its items, and a write into a block that other values hold first copies
+// the block (M3: storage is shared until one side writes; section 3: the counting is inserted by the
+// compiler). The emitted code holds the counts of the items' own blocks.
+
+// The count of the list's items.
+pub int ListCount(byte* block) {
+    mut int count = 0
+    raw {
+        if block != null {
+            count = *Ptr<int>(block + 8)
+        }
+    }
+
+    return count
+}
+
+// The address of the list's first item, of a list that has one.
+pub byte* ListItems(byte* block) {
+    mut byte* items = null
+    raw {
+        items = block + 16
+    }
+
+    return items
+}
+
+// One more list value holds the block.
+pub void ListRetain(byte* block) {
+    raw {
+        if block != null {
+            *Ptr<long>(block) = *Ptr<long>(block) + 1
+        }
+    }
+}
+
+// One list value less holds the block: whether it was the last, after which the caller lets go of
+// the items' own blocks and frees the block with `ListFree`.
+pub bool ListRelease(byte* block) {
+    mut bool last = false
+    raw {
+        if block != null {
+            long count = *Ptr<long>(block) - 1
+            *Ptr<long>(block) = count
+            last = count == 0
+        }
+    }
+
+    return last
+}
+
+// The block given back to the allocator, its room counted in items of `item` bytes.
+pub void ListFree(byte* block, long item) {
+    mut long room = 0
+    raw {
+        room = long(*Ptr<int>(block + 12))
+    }
+
+    Free(block, 16 + room * item)
+}
+
+// Whether the list can take one more item in place: it has a block, no other list value holds it,
+// and it has room.
+pub bool ListHasRoom(byte* block) {
+    mut bool room = false
+    raw {
+        if block != null {
+            room = *Ptr<long>(block) == 1 && *Ptr<int>(block + 8) < *Ptr<int>(block + 12)
+        }
+    }
+
+    return room
+}
+
+// Whether another list value holds the block too.
+pub bool ListShared(byte* block) {
+    mut bool shared = false
+    raw {
+        if block != null {
+            shared = *Ptr<long>(block) > 1
+        }
+    }
+
+    return shared
+}
+
+// The room a full block grows to, as Rust's `Vec` grows: twice its room, at least 8 items of a byte,
+// 4 of up to a kibibyte and 1 of more, at most the largest `int`.
+long Grown(long room, long item) {
+    mut long first = 1
+    if item == 1 {
+        first = 8
+    } else if item <= 1024 {
+        first = 4
+    }
+
+    mut long grown = room * 2
+    if grown < first {
+        grown = first
+    }
+
+    if grown > 2147483647 {
+        grown = 2147483647
+    }
+
+    return grown
+}
+
+// A new block, held by one list value, with the `count` items of `block` and room for one more: its
+// room where it has room left, else the grown room. A list holds at most the largest `int` of items
+// (M9): one more gives null, with `asked` set to the count after the `Add` times `item` (the owner,
+// 2026-10-24, "Items after the Add"); a block the system refuses gives null, with `asked` set to the
+// bytes asked for.
+byte* Moved(byte* block, long count, long room, long item, mut long asked) {
+    if count == 2147483647 {
+        asked = (count + 1) * item
+        return null
+    }
+
+    mut long grown = room
+    if count == room {
+        grown = Grown(room, item)
+    }
+
+    long bytes = 16 + grown * item
+    mut byte* p = null
+    raw {
+        p = Allocate(bytes)
+        if p == null {
+            asked = bytes
+        } else {
+            *Ptr<long>(p) = 1
+            *Ptr<int>(p + 8) = int(count)
+            *Ptr<int>(p + 12) = int(grown)
+            long n = count * item
+            mut long i = 0
+            while i < n {
+                p[16 + i] = block[16 + i]
+                i = i + 1
+            }
+        }
+    }
+
+    return p
+}
+
+// For an `Add` to a list no other value holds: a block with room for one more item, the block itself
+// where it has room, else a grown block with its items, the old block freed; a first block for a list
+// without one. Null, with `asked` set, as `Moved` gives it.
+pub byte* ListGrow(byte* block, long item, mut long asked) {
+    mut long count = 0
+    mut long room = 0
+    raw {
+        if block != null {
+            count = long(*Ptr<int>(block + 8))
+            room = long(*Ptr<int>(block + 12))
+        }
+    }
+
+    if count < room {
+        return block
+    }
+
+    byte* p = Moved(block, count, room, item, mut asked)
+    if p != null && block != null {
+        Free(block, 16 + room * item)
+    }
+
+    return p
+}
+
+// For a write to a block other list values hold (M3): a copy of its items' bytes with room for one
+// more, the old block held by one value less, which never frees it. The caller counts the copied
+// items' own blocks. Null, with `asked` set, as `Moved` gives it.
+pub byte* ListCopy(byte* block, long item, mut long asked) {
+    mut long count = 0
+    mut long room = 0
+    raw {
+        count = long(*Ptr<int>(block + 8))
+        room = long(*Ptr<int>(block + 12))
+    }
+
+    byte* p = Moved(block, count, room, item, mut asked)
+    if p != null {
+        raw {
+            *Ptr<long>(block) = *Ptr<long>(block) - 1
+        }
+    }
+
+    return p
+}
+
+// The address the next item goes to, in a block with room for it, whose count of items it raises by
+// one.
+pub byte* ListPush(byte* block, long item) {
+    mut byte* slot = null
+    raw {
+        int count = *Ptr<int>(block + 8)
+        *Ptr<int>(block + 8) = count + 1
+        slot = block + 16 + long(count) * item
+    }
+
+    return slot
 }

@@ -24,7 +24,10 @@ public sealed partial class Emitter
             CallKind.PointerConversion => EmitPointerConversion(c),
             CallKind.SizeOf => SizeOf(Sub(info.Target!), c.Line),
             CallKind.FromRaw when info.Target is PrimitiveType { Kind: Primitive.String } => EmitStringFromRaw(c),
-            CallKind.ListNew or CallKind.ListAdd or CallKind.ListWhere or CallKind.FromRaw => throw Unsupported(c.Line, "a list (M9)"),
+            CallKind.ListNew => "null", // M9: a list without items, which takes no block
+            CallKind.ListAdd => EmitListAddCall(c),
+            CallKind.ListWhere => throw Unsupported(c.Line, "`Where` (M9)"),
+            CallKind.FromRaw => throw Unsupported(c.Line, "`List<T>.FromRaw` (R15)"),
             CallKind.DataNew => EmitConstruction(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),
         };
@@ -34,6 +37,12 @@ public sealed partial class Emitter
         }
 
         return Types.IsVoid(result) ? null : value;
+    }
+
+    private string? EmitListAddCall(CallExpression c)
+    {
+        EmitListAdd(c);
+        return null;
     }
 
     /// <summary>A1: the text of the value, with the file and the line of the `print`, to the runtime's <c>Print</c>, which raises <c>print-failed</c> at that place (the owner, 2026-10-23, "Caller passes it").</summary>
@@ -60,7 +69,8 @@ public sealed partial class Emitter
             j => Types.Substitute(f.Parameters[j].Type, instanceMap),
             j => f.Parameters[j].Mut,
             j => Default(f.Declaration!.Parameters[j].Default, owners[f]),
-            f.TakesC);
+            f.TakesC,
+            owned: false);
         var result = Types.Substitute(f.ReturnType, instanceMap);
         var call = $"call {ParameterType(f, result)} {name}({string.Join(", ", arguments)})";
         return Types.IsVoid(result) ? Emitted(call) : fn.Value(call);
@@ -79,7 +89,7 @@ public sealed partial class Emitter
             libraries.Add(library);
         }
 
-        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(declaration.Parameters[j].Default, owners[f]), cConvention: true);
+        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(declaration.Parameters[j].Default, owners[f]), cConvention: true, owned: false);
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             if (info.Binding[i] < 0)
@@ -138,18 +148,28 @@ public sealed partial class Emitter
     /// the slot's default; a <c>mut</c> slot gets the address of the caller's variable (M7). The arguments are evaluated in the
     /// order they are written; an argument in the place of a C declaration's <c>...</c> (binding -1) is the caller's to add. A
     /// default is read in the file that declares it, which <paramref name="slotDefault"/> gives with it and which the call may stand
-    /// outside of.
+    /// outside of. With <paramref name="owned"/> the slots hold the values, as a data value's fields do; else the callee borrows
+    /// them for the call, and where a <c>mut</c> slot can change a variable a borrowed value was read from, the call holds that value
+    /// once more, so the callee's parameter keeps its own value (M3, M7).
     /// </summary>
-    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention)
+    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned)
     {
         var values = new string?[c.Arguments.Count];
+        var changes = Enumerable.Range(0, info.SlotCount).Any(slotMut);
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             var slot = info.Binding[i];
             if (slot >= 0 && !slotMut(slot))
             {
                 var a = c.Arguments[i].Value;
-                values[i] = Convert(EmitExpression(a), TypeOf(a), Sub(slotType(slot)), a.Line);
+                var value = owned ? Owned(a) : EmitExpression(a);
+                if (!owned && changes && Counted(TypeOf(a)) && !IsTemp(value))
+                {
+                    Retain(value, TypeOf(a));
+                    Temp(value, TypeOf(a));
+                }
+
+                values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line);
             }
         }
 
@@ -185,7 +205,7 @@ public sealed partial class Emitter
             else
             {
                 var (d, declaredIn) = slotDefault(j) ?? throw new InvalidOperationException($"the slot {j} of the call at line {c.Line} has no argument and no default");
-                value = EmitDefault(declaredIn, d, type);
+                value = EmitDefault(declaredIn, d, type, owned);
             }
 
             arguments.Add($"{(cConvention ? Lower.CType(type) : Ir(type))} {value}");
@@ -197,13 +217,13 @@ public sealed partial class Emitter
     private static (Expression Value, Unit File)? Default(Expression? d, Unit declaredIn) => d is null ? null : (d, declaredIn);
 
     /// <summary>A parameter's or a field's default (D11), read in the file that declares it.</summary>
-    private string EmitDefault(Unit declaredIn, Expression d, KurzType type)
+    private string EmitDefault(Unit declaredIn, Expression d, KurzType type, bool owned)
     {
         var caller = unit;
         unit = declaredIn;
         try
         {
-            return Convert(EmitExpression(d), TypeOf(d), type, d.Line);
+            return Convert(owned ? Owned(d) : EmitExpression(d), TypeOf(d), type, d.Line);
         }
         finally
         {
@@ -305,7 +325,7 @@ public sealed partial class Emitter
     private string EmitStringFromRaw(CallExpression c)
     {
         var info = Model.CallOf(c);
-        var arguments = Arguments(c, info, j => j == 0 ? new PointerType(Types.Byte) : Types.Long, _ => false, _ => null, cConvention: false);
+        var arguments = Arguments(c, info, j => j == 0 ? new PointerType(Types.Byte) : Types.Long, _ => false, _ => null, cConvention: false, owned: false);
         var pointer = arguments[0]["ptr ".Length..];
         var count = arguments[1]["i64 ".Length..];
         var tooLong = fn.Label("too.long");

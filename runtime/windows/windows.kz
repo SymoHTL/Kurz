@@ -6,6 +6,7 @@ extern "C" in "kernel32" {
     int WriteFile(void* file, byte* bytes, uint count, uint* written, void* overlapped)
     void ExitProcess(uint code)
     void* VirtualAlloc(void* address, ulong size, uint type, uint protection)
+    int VirtualFree(void* address, ulong size, uint type)
 }
 
 // The start of the process: Windows raises no signal at a write to a closed pipe, whose `WriteFile`
@@ -64,4 +65,13 @@ pub byte* Memory(long bytes) {
     }
 
     return p
+}
+
+// Memory `Memory` gave, given back to the system by `VirtualFree`, which takes the whole of what one
+// `VirtualAlloc` reserved (`MEM_RELEASE` is 32768, with the size 0); `bytes` is the size `Memory` was
+// asked for, which the release does not need.
+pub void Release(byte* p, long bytes) {
+    raw {
+        VirtualFree(Ptr<void>(p), 0, 32768)
+    }
 }

@@ -36,7 +36,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>The runtime of this machine's target with the target's <c>Memory</c> refusing every request, as a system out of memory does.</summary>
-    private static CheckedRuntime RuntimeWithoutMemory(Target target)
+    internal static CheckedRuntime RuntimeWithoutMemory(Target target)
     {
         var path = $"runtime/{Runtime.Directory(target)}/";
         var files = Runtime.Files.Select(f => f.Path.StartsWith(path, StringComparison.Ordinal)
@@ -152,13 +152,13 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var target = Builder.HostTarget!.Value;
         var path = $"runtime/{Runtime.Directory(target)}/";
         var files = Runtime.Files.Select(f => f.Path.StartsWith(path, StringComparison.Ordinal)
-            ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub void Start() {", "pub void Start() {\n    print(List<int>().Count)", StringComparison.Ordinal)))
+            ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub void Start() {", "pub void Start() {\n    print(1.5)", StringComparison.Ordinal)))
             : f).ToList();
         var errors = new List<string>();
         var runtime = Runtime.Check(files, target, errors);
         Assert.Empty(errors);
         var e = Assert.Throws<InvalidOperationException>(() => Compile("print(1)\n", runtime));
         Assert.StartsWith($"{path}{Runtime.Directory(target)}.kz:", e.Message, StringComparison.Ordinal);
-        Assert.Contains("(M9)", e.Message, StringComparison.Ordinal);
+        Assert.Contains("(T2)", e.Message, StringComparison.Ordinal);
     }
 }
