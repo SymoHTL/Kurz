@@ -259,14 +259,14 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_data_type_the_emitter_does_not_lay_out_builds_where_no_code_needs_it()
     {
         // the owner, 2026-10-23, "At first use"; the theory below has the same type where code needs it
-        Ran(BuildAndRun("data Bag(List<int> Items)\n\nprint(1)\n", "unreached-declaration"), 0, ["1"], "");
+        Ran(BuildAndRun("data Bag(double Weight)\n\nprint(1)\n", "unreached-declaration"), 0, ["1"], "");
     }
 
     [Theory]
     [InlineData("data User(int Id)\n\nprint(SizeOf<User>())\n", 3, "the size of a `User` (R14)")]
     [InlineData("data Thing(int A)\ndata Box<T>(T V) : Thing\n\nprint(Box<int>(1, 2).V)\n", 4, "a generic data type in a relation of inheritance, `Box<int>` (D6, T19)")]
     [InlineData("data Leaf\ndata Tree<T>(T V, Tree<T> | Leaf Next)\n\nprint(Tree<int>(1, Leaf).V)\n", 4, "a generic data type that holds a value of its own type, `Tree<int>` (D1, T19)")]
-    [InlineData("data Bag(List<int> Items)\n\nBag Empty() => Empty()\n\nEmpty()\n", 5, "a value of type `List<int>` (M9)")] // the field of the type the call returns
+    [InlineData("data Bag(double Weight)\n\nBag Empty() => Empty()\n\nEmpty()\n", 5, "a value of type `double` (T2)")] // the field of the type the call returns
     public void What_the_emitter_does_not_lay_out_is_not_supported_at_its_line(string text, int line, string message)
     {
         var compilation = Compile(text);

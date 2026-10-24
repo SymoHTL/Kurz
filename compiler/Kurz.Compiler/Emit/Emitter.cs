@@ -33,6 +33,7 @@ public sealed partial class Emitter
     private readonly IrModule module = new();
     private readonly Unit program;
     private readonly Unit common;
+    private readonly Unit std;
     private readonly IReadOnlyList<Unit> units;
     private readonly Dictionary<FunctionSymbol, Unit> owners = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionSymbol, string?> cLibraries = new(ReferenceEqualityComparer.Instance);
@@ -52,7 +53,7 @@ public sealed partial class Emitter
     private Dictionary<VariableSymbol, string> slots = new(ReferenceEqualityComparer.Instance);
     private IReadOnlyDictionary<TypeParameterSymbol, KurzType> map = NoMap;
     private KurzType returnType = Types.Void;
-    private readonly Stack<(string Break, string Continue)> loops = new();
+    private readonly Stack<(string Break, string Continue, int Regions, int Scopes)> loops = new();
 
     /// <summary>
     /// A file the module holds code of: the program, a folder of the runtime or the standard library, with the prefix of its functions' IR
@@ -64,6 +65,7 @@ public sealed partial class Emitter
     {
         this.program = program;
         this.common = common;
+        this.std = std;
         units = [program, common, sys, std];
         unit = program;
         this.test = test;
@@ -132,10 +134,13 @@ public sealed partial class Emitter
 
         unit = program;
         Begin(new IrFunction("internal void @kz.main()", Attributes()), NoMap, Types.Void);
-        foreach (var s in program.Tree.Statements)
+        InScope(() =>
         {
-            EmitStatement(s);
-        }
+            foreach (var s in program.Tree.Statements)
+            {
+                EmitStatement(s);
+            }
+        });
 
         if (!fn.Terminated)
         {
@@ -233,6 +238,8 @@ public sealed partial class Emitter
         map = instanceMap;
         returnType = result;
         loops.Clear();
+        regions = [];
+        scopes = [];
     }
 
     private void End() => emitted.Add(fn);
@@ -339,8 +346,7 @@ public sealed partial class Emitter
 
         if (d.ExpressionBody is not null)
         {
-            var value = EmitExpression(d.ExpressionBody);
-            EmitReturn(value, TypeOf(d.ExpressionBody), d.ExpressionBody.Line);
+            InRegion(() => EmitReturn(Owned(d.ExpressionBody), TypeOf(d.ExpressionBody), d.ExpressionBody.Line));
         }
         else
         {
@@ -364,28 +370,35 @@ public sealed partial class Emitter
     /// <summary>A parameter's or a result's type in a function's signature: of the C calling convention for a function written <c>extern "C"</c> (R16).</summary>
     private string ParameterType(FunctionSymbol f, KurzType type) => f.TakesC ? Lower.CType(type) : Ir(type);
 
-    /// <summary>Returns a value of <paramref name="type"/> from the function being emitted, converted to its result type (T1); without a value, the success of a function whose success is <c>void</c> (O10).</summary>
+    /// <summary>
+    /// Returns a value of <paramref name="type"/>, which the result holds, from the function being emitted, converted to its result
+    /// type (T1); without a value, the success of a function whose success is <c>void</c> (O10). The function lets go of its
+    /// temporaries and its variables first.
+    /// </summary>
     private void EmitReturn(string? value, KurzType type, int line)
     {
         if (Types.IsVoid(returnType))
         {
+            Leaving(0, 0);
             fn.Return(null);
             return;
         }
 
         if (value is null && returnType is UnionType { Cases: [VoidType, ..] } union)
         {
+            Leaving(0, 0);
             fn.Return($"{Ir(union)} {MakeUnion(union, Types.Void, null)}");
             return;
         }
 
         var converted = Convert(value ?? throw new InvalidOperationException($"a return without a value at line {line}"), type, returnType, line);
+        Leaving(0, 0);
         fn.Return($"{Ir(returnType)} {converted}");
     }
 
     // ---- statements ------------------------------------------------------------------------------
 
-    private void EmitBlock(Block block)
+    private void EmitBlock(Block block) => InScope(() =>
     {
         foreach (var s in block.Statements)
         {
@@ -396,14 +409,14 @@ public sealed partial class Emitter
 
             EmitStatement(s);
         }
-    }
+    });
 
     /// <summary>A type the emitter does not lay out, met anywhere inside the statement, is the one diagnostic, at the statement's line.</summary>
     private void EmitStatement(Statement statement)
     {
         try
         {
-            EmitStatementCore(statement);
+            InRegion(() => EmitStatementCore(statement));
         }
         catch (NotSupportedException e)
         {
@@ -427,10 +440,11 @@ public sealed partial class Emitter
                 {
                     var variable = Model.DeclarationOf(v);
                     var type = Sub(variable.Type);
-                    var value = EmitExpression(v.Value ?? throw new InvalidOperationException($"a variable without a value at line {v.Line}"));
+                    var value = Owned(v.Value ?? throw new InvalidOperationException($"a variable without a value at line {v.Line}"));
                     var slot = fn.Alloca(Ir(type), v.Name);
                     fn.Emit($"store {Ir(type)} {Convert(value, TypeOf(v.Value), type, v.Value.Line)}, ptr {slot}");
                     slots[variable] = slot;
+                    Declare(slot, type);
                     break;
                 }
 
@@ -438,10 +452,11 @@ public sealed partial class Emitter
                 {
                     var variable = Model.DeclarationOf(a);
                     var type = Sub(variable.Type);
-                    var value = EmitExpression(a.Value);
+                    var value = Owned(a.Value);
                     var slot = fn.Alloca(Ir(type), a.Name);
                     fn.Emit($"store {Ir(type)} {Convert(value, TypeOf(a.Value), type, a.Value.Line)}, ptr {slot}");
                     slots[variable] = slot;
+                    Declare(slot, type);
                     break;
                 }
 
@@ -449,8 +464,8 @@ public sealed partial class Emitter
                 {
                     var variable = Model.AssignedVariableOf(a);
                     var type = Sub(variable.Type);
-                    var value = EmitExpression(a.Value);
-                    fn.Emit($"store {Ir(type)} {Convert(value, TypeOf(a.Value), type, a.Value.Line)}, ptr {Place(variable, a.Line)}");
+                    var value = Owned(a.Value);
+                    Store(Convert(value, TypeOf(a.Value), type, a.Value.Line), type, Place(variable, a.Line));
                     break;
                 }
 
@@ -469,10 +484,11 @@ public sealed partial class Emitter
                     var body = fn.Label("do");
                     var exit = fn.Label("done");
                     fn.Block(check);
-                    var condition = EmitExpression(w.Condition);
+                    string condition = null!;
+                    InRegion(() => condition = EmitExpression(w.Condition)); // each round lets go of what its test made
                     fn.CondBranch(condition, body, exit);
                     fn.Block(body);
-                    loops.Push((exit, check));
+                    loops.Push((exit, check, regions.Count, scopes.Count));
                     EmitBlock(w.Body);
                     loops.Pop();
                     if (!fn.Terminated)
@@ -488,9 +504,11 @@ public sealed partial class Emitter
                 EmitForIn(f);
                 break;
             case BreakStatement:
+                Leaving(loops.Peek().Regions, loops.Peek().Scopes);
                 fn.Branch(loops.Peek().Break);
                 break;
             case ContinueStatement:
+                Leaving(loops.Peek().Regions, loops.Peek().Scopes);
                 fn.Branch(loops.Peek().Continue);
                 break;
             case ReturnStatement r:
@@ -500,7 +518,7 @@ public sealed partial class Emitter
                 }
                 else
                 {
-                    var value = EmitExpression(r.Value);
+                    var value = Owned(r.Value);
                     EmitReturn(value, TypeOf(r.Value), r.Value.Line);
                 }
 
@@ -529,7 +547,11 @@ public sealed partial class Emitter
         switch (Unwrap(e.Expression))
         {
             case CallExpression c:
-                EmitCall(c);
+                if (EmitCall(c) is { } value)
+                {
+                    Temp(value, TypeOf(c)); // a result nothing holds: the statement's end lets go of it
+                }
+
                 break;
             case ElseExpression el:
                 EmitElse(el, asValue: false);
@@ -549,7 +571,8 @@ public sealed partial class Emitter
         var then = fn.Label("then");
         var otherwise = fn.Label("else");
         var exit = fn.Label("endif");
-        var condition = EmitExpression(i.Condition);
+        string condition = null!;
+        InRegion(() => condition = EmitExpression(i.Condition));
         fn.CondBranch(condition, then, i.Else is null ? exit : otherwise);
         fn.Block(then);
         EmitBlock(i.Then);
@@ -591,9 +614,15 @@ public sealed partial class Emitter
 
     private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>C8, C6: a range runs its numbers in order, both ends read once, an end below the start the exception before the first round; a `for` over anything else is not emitted.</summary>
+    /// <summary>C8, C6: a range runs its numbers in order, both ends read once, an end below the start the exception before the first round; a list its items (<see cref="EmitForInList"/>); a `for` over anything else is not emitted.</summary>
     private void EmitForIn(ForInStatement f)
     {
+        if (TypeOf(f.Collection) is ListType list)
+        {
+            EmitForInList(f, list);
+            return;
+        }
+
         if (Unwrap(f.Collection) is not RangeExpression range)
         {
             throw Unsupported(f.Collection.Line, $"a `for` over a `{TypeOf(f.Collection)}` (C6)");
@@ -624,7 +653,7 @@ public sealed partial class Emitter
             fn.Block(body);
             var i = fn.Value($"load {ir}, ptr {counter}");
             fn.Emit($"store {ir} {i}, ptr {slot}");
-            loops.Push((exit, next));
+            loops.Push((exit, next, regions.Count, scopes.Count));
             EmitBlock(f.Body);
             loops.Pop();
             fn.Block(next);
@@ -646,7 +675,7 @@ public sealed partial class Emitter
             fn.CondBranch(more, body, exit);
             fn.Block(body);
             fn.Emit($"store {ir} {i}, ptr {slot}");
-            loops.Push((exit, next));
+            loops.Push((exit, next, regions.Count, scopes.Count));
             EmitBlock(f.Body);
             loops.Pop();
             fn.Block(next);
@@ -682,8 +711,19 @@ public sealed partial class Emitter
                 throw Unsupported(a.Line, $"an assignment to {ExpressionName(a.Target)}");
         }
 
-        var value = Convert(EmitExpression(a.Value), TypeOf(a.Value), targetType, a.Value.Line);
-        fn.Emit($"store {Ir(targetType)} {value}, ptr {place}");
+        var value = Convert(Owned(a.Value), TypeOf(a.Value), targetType, a.Value.Line);
+        Store(value, targetType, place);
+    }
+
+    /// <summary>A value stored into a place that held one of the type: the place lets go of the old value after it holds the new one.</summary>
+    private void Store(string value, KurzType type, string place)
+    {
+        var old = Counted(type) ? fn.Value($"load {Ir(type)}, ptr {place}") : null;
+        fn.Emit($"store {Ir(type)} {value}, ptr {place}");
+        if (old is not null)
+        {
+            Release(old, type);
+        }
     }
 
     /// <summary>Where a variable lives: its slot in the function, or the global of state outside a function (R13).</summary>

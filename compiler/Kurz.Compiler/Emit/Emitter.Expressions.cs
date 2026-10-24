@@ -31,9 +31,11 @@ public sealed partial class Emitter
             case MemberAccess m:
                 return EmitMember(m);
             case CallExpression c:
-                return EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it");
+                return Temp(EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it"), type);
             case IndexExpression i when TypeOf(i.Target) is PointerType p:
                 return fn.Value($"load {Ir(type)}, ptr {ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index)}");
+            case IndexExpression i when TypeOf(i.Target) is ListType list:
+                return EmitListIndex(i, list);
             case UnaryExpression u:
                 return EmitUnary(u, type);
             case BinaryExpression b:
@@ -41,11 +43,11 @@ public sealed partial class Emitter
             case ParenthesizedExpression p:
                 return EmitExpression(p.Inner);
             case WithExpression w:
-                return EmitWith(w);
+                return Temp(EmitWith(w), type);
             case MatchExpression m:
-                return EmitMatch(m.Subject, m.Arms, type)!;
+                return Temp(EmitMatch(m.Subject, m.Arms, type)!, type);
             case ElseExpression el:
-                return EmitElse(el, asValue: true) ?? throw new InvalidOperationException($"`else` with a `void` success stands as a value at line {el.Line}: the checker reports it");
+                return Temp(EmitElse(el, asValue: true) ?? throw new InvalidOperationException($"`else` with a `void` success stands as a value at line {el.Line}: the checker reports it"), type);
             default:
                 throw Unsupported(e.Line, ExpressionName(e));
         }
@@ -139,7 +141,7 @@ public sealed partial class Emitter
         return result ?? StringValue(string.Empty);
     }
 
-    /// <summary>A field of a data value (D1), a string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself; every other member is not emitted.</summary>
+    /// <summary>A field of a data value (D1), a string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself, and a list's <c>Count</c> (M9); every other member is not emitted.</summary>
     private string EmitMember(MemberAccess m)
     {
         var targetType = TypeOf(m.Target);
@@ -155,6 +157,13 @@ public sealed partial class Emitter
                     var count = fn.Value($"extractvalue %kz.str {EmitExpression(bytes.Target)}, 1");
                     return fn.Value($"trunc i64 {count} to i32");
                 }
+
+            case PrimitiveType { Kind: Primitive.String } when m.Member is "Bytes" or "Chars":
+                throw Unsupported(m.Line, $"`s.{m.Member}` as a list (T15)");
+            case ListType when m.Member == "Count":
+                return ListCount(EmitExpression(m.Target));
+            case ListType when m.Member == "Pointer":
+                throw Unsupported(m.Line, "`l.Pointer` (R15)");
 
             default:
                 throw Unsupported(m.Line, $"the member `{m.Member}` of {Lower.Refusal(targetType)}");
@@ -229,8 +238,8 @@ public sealed partial class Emitter
                     var done = fn.Label("logic");
                     fn.CondBranch(left, isAnd ? right : done, isAnd ? done : right);
                     fn.Block(right);
-                    var r = EmitExpression(b.Right);
-                    fn.Emit($"store i1 {r}, ptr {slot}");
+                    InRegion(() => fn.Emit($"store i1 {EmitExpression(b.Right)}, ptr {slot}")); // what the right side makes is let go of where it ran
+
                     fn.Branch(done);
                     fn.Block(done);
                     return fn.Value($"load i1, ptr {slot}");
@@ -492,6 +501,8 @@ public sealed partial class Emitter
                 return fn.Value($"call %kz.str {RuntimeFunction("TextOfChar")}(i32 {value})");
             case DataType or UnionType:
                 return DerivedText(value, type, line);
+            case ListType list:
+                return ListText(value, list, line);
             default:
                 throw Unsupported(line, $"the text of a `{type}`");
         }

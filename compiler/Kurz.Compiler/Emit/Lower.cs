@@ -7,8 +7,8 @@ namespace Kurz.Compiler.Emit;
 /// signed and unsigned alike (the operations tell them apart); a <c>bool</c> is <c>i1</c>; a
 /// <c>char</c> is its code point as <c>i32</c>; a string is <c>%kz.str</c>, a pointer to UTF-8 bytes
 /// and their count, the pointer of an empty string pointing at a constant of no bytes and never
-/// <c>null</c> (R15); a pointer and a C function value are <c>ptr</c> (R10, R17). Every other type is
-/// not emitted: <see cref="Supported"/> says so.
+/// <c>null</c> (R15); a pointer and a C function value are <c>ptr</c> (R10, R17), and so is a list, the
+/// address of its block (M9). Every other type is not emitted: <see cref="Supported"/> says so.
 /// </summary>
 internal static class Lower
 {
@@ -25,7 +25,7 @@ internal static class Lower
             _ => throw new NotSupportedException(Refusal(p)),
         },
         VoidType => "void",
-        PointerType or CFunctionType => "ptr",
+        PointerType or CFunctionType or ListType => "ptr",
         TypeParameterType t => throw new InvalidOperationException($"the type parameter `{t}` was not substituted"),
         _ => throw new NotSupportedException(Refusal(type)),
     };

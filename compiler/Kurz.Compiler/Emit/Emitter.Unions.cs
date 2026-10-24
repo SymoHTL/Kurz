@@ -103,14 +103,17 @@ public sealed partial class Emitter
             var next = fn.Label("next");
             Test(arm.Pattern, value, type, tag, union?.Cases ?? [type], body, next);
             fn.Block(body);
-            if (slot is null)
+            InScope(() =>
             {
-                EmitStatement(arm.Body);
-            }
-            else
-            {
-                ArmValue(arm.Body, result!, slot);
-            }
+                if (slot is null)
+                {
+                    EmitStatement(arm.Body);
+                }
+                else
+                {
+                    InRegion(() => ArmValue(arm.Body, result!, slot));
+                }
+            });
 
             if (!fn.Terminated)
             {
@@ -125,13 +128,13 @@ public sealed partial class Emitter
         return slot is null ? null : fn.Value($"load {Ir(result!)}, ptr {slot}");
     }
 
-    /// <summary>C9: an arm of a <c>match</c> used as a value: its value converted to the match's type, or its <c>throw</c>.</summary>
+    /// <summary>C9: an arm of a <c>match</c> used as a value: its value converted to the match's type, which the match's value holds, or its <c>throw</c>.</summary>
     private void ArmValue(Statement body, KurzType result, string slot)
     {
         switch (body)
         {
             case ExpressionStatement es:
-                fn.Emit($"store {Ir(result)} {Convert(EmitExpression(es.Expression), TypeOf(es.Expression), result, es.Line)}, ptr {slot}");
+                fn.Emit($"store {Ir(result)} {Convert(Owned(es.Expression), TypeOf(es.Expression), result, es.Line)}, ptr {slot}");
                 break;
             default:
                 EmitStatement(body);
@@ -253,6 +256,7 @@ public sealed partial class Emitter
     {
         var result = returnType as UnionType ?? throw new InvalidOperationException($"a case leaves a function whose result is no union at line {line}: the checker reports it (O3)");
         var rest = result.Cases.Skip(1).ToList();
+        Leaving(0, 0); // the case's value goes to the result, which holds it
         ByCase(Tag(value, union), union, cases, c =>
         {
             var target = Types.CasesFor(c, rest).Single();
@@ -282,6 +286,10 @@ public sealed partial class Emitter
         {
             fn.Emit($"store {Ir(success)} {Payload(value, union, success)}, ptr {slot}");
         }
+        else if (success is not VoidType && Counted(success))
+        {
+            Release(Payload(value, union, success), success); // a success nothing holds
+        }
 
         fn.Branch(done);
         fn.Block(cases);
@@ -310,7 +318,7 @@ public sealed partial class Emitter
                 throw new InvalidOperationException($"an arm of `else` that names no case type at line {arm.Line}: the checker reports it (O5)");
             }
 
-            ElseArm(arm.Body, success, slot);
+            InScope(() => InRegion(() => ElseArm(arm.Body, success, slot)));
             elseCase = outer;
             if (!fn.Terminated)
             {
@@ -341,10 +349,14 @@ public sealed partial class Emitter
         {
             case ExpressionStatement es when success is not VoidType:
                 {
-                    var value = Convert(EmitExpression(es.Expression), TypeOf(es.Expression), success, es.Line);
+                    var value = Convert(Owned(es.Expression), TypeOf(es.Expression), success, es.Line);
                     if (slot is not null)
                     {
                         fn.Emit($"store {Ir(success)} {value}, ptr {slot}");
+                    }
+                    else
+                    {
+                        Temp(value, success); // a recovered value nothing holds: the arm's end lets go of it
                     }
 
                     break;
