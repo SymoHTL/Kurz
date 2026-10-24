@@ -1,12 +1,9 @@
 // expect: output
 // | 5
-// | Box { V = 5 }
-// | Box { V = five }
+// | five
 // rules: A4
 
-data Box(int | string V)
-
 int | string v = 5
+int | string w = "five"
 print(v)
-print(Box(5))
-print(Box("five"))
+print(w)

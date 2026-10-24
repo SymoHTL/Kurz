@@ -35,7 +35,9 @@ the named fields of K5 as well; a method a class names `Equals` plays no part (K
 2026-10-10, confirming the reading proposed after the review of round 13, and the NaN field under
 K5). A field of a union (D9) compares equal when the two values hold the same case and the two
 values of that case are equal, as Rust's derived `PartialEq` compares a field of an enum (§4, the
-owner, 2026-10-23).
+owner, 2026-10-23). The two values of that case compare as a field of the case's type does, so a
+`double` or `float` case that holds NaN equals itself, as a C# record calls `Equals` on a field of
+type `object` (§4, the owner, 2026-10-24).
 
 Case: [classes/equal-by-nan.kz](../corpus/classes/equal-by-nan.kz)
 ```kurz
@@ -60,6 +62,16 @@ data Point(double X, double Y)
 double z = 0.0
 nan = z / z
 print(Point(nan, 0.0) == Point(nan, 0.0))
+```
+
+Case: [data/equality-union-nan.kz](../corpus/data/equality-union-nan.kz)
+```kurz
+data Box(double | string V)
+
+double z = 0.0
+nan = z / z
+print(Box(nan) == Box(nan))
+print(Box(nan) == Box("NaN"))
 ```
 
 Case: [data/equality-union-field.kz](../corpus/data/equality-union-field.kz)

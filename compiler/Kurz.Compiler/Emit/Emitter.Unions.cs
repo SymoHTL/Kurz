@@ -300,10 +300,14 @@ public sealed partial class Emitter
                 taken.Add(armType);
                 elseCase = (fn.Value($"load {Ir(armType)}, ptr {caseSlot}"), armType);
             }
-            else
+            else if (arm.Pattern is ElsePattern)
             {
                 hasElse = true;
                 elseCase = (value, union);
+            }
+            else
+            {
+                throw new InvalidOperationException($"an arm of `else` that names no case type at line {arm.Line}: the checker reports it (O5)");
             }
 
             ElseArm(arm.Body, success, slot);

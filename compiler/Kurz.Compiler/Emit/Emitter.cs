@@ -41,6 +41,7 @@ public sealed partial class Emitter
     private readonly List<IrFunction> emitted = [];
     private readonly SortedSet<string> libraries = new(StringComparer.Ordinal);
     private readonly Dictionary<DataSymbol, Unit> dataOwners = new(ReferenceEqualityComparer.Instance);
+    private readonly List<(Unit Unit, VariableDeclaration Declaration)> state = [];
     private readonly HashSet<string> helpers = new(StringComparer.Ordinal);
     private readonly Layout layout;
 
@@ -118,6 +119,12 @@ public sealed partial class Emitter
         }
 
         layout.Register(dataOwners.Keys);
+        foreach (var (u, v) in state)
+        {
+            unit = u;
+            DefineStatic(v); // after the layout knows which data types are blocks
+        }
+
         unit = program;
         Begin(new IrFunction("internal void @kz.main()", Attributes()), NoMap, Types.Void);
         foreach (var s in program.Tree.Statements)
@@ -156,7 +163,7 @@ public sealed partial class Emitter
     /// <summary>The attributes of every function the module defines: in a test build, no call turned into a jump (design record, section 2).</summary>
     private string[] Attributes() => test ? ["\"disable-tail-calls\"=\"true\""] : [];
 
-    /// <summary>The functions, the C declarations and the state outside a function of a file (R13, R16), each by its symbol.</summary>
+    /// <summary>The functions, the C declarations, the data types and the state outside a function of a file (R13, R16), each by its symbol.</summary>
     private void Register(Unit u)
     {
         unit = u;
@@ -177,7 +184,7 @@ public sealed partial class Emitter
 
                     break;
                 case VariableDeclaration v when (v.Modifiers & Modifiers.Static) != 0:
-                    DefineStatic(v);
+                    state.Add((u, v));
                     break;
                 case TypeDeclaration t:
                     dataOwners[u.Model.DataTypeOf(t)] = u; // the checker reads a data type alone, and says `not supported` to the others
@@ -193,10 +200,17 @@ public sealed partial class Emitter
         var type = variable.Type;
         RequireSupported(type, v.Line);
         var name = $"@\"s.{unit.Prefix}.{v.Name}\"";
-        var initial = v.Value is null ? Zero(type) : Constant(Model.TypeOf(v.Value).Constant ?? throw new InvalidOperationException($"state without a constant at {unit.File}:{v.Line}"), type, v.Line);
+        var initial = v.Value is null ? Zero(type) : StaticConstant(Model.TypeOf(v.Value), type, v.Line);
         var thread = (v.Modifiers & Modifiers.Thread) != 0 ? "thread_local " : string.Empty;
         module.Global($"{name} = internal {thread}global {Ir(type)} {initial}");
         statics[variable] = name;
+    }
+
+    /// <summary>The constant a static starts at, as its type holds it: a data value without fields as the block of its own type, which a block of its base holds (D6, D8).</summary>
+    private string StaticConstant(Typed value, KurzType type, int line)
+    {
+        var constant = value.Constant ?? throw new InvalidOperationException($"state without a constant at {unit.File}:{line}");
+        return Constant(constant, value.Type is DataType && type is DataType ? Sub(value.Type) : type, line);
     }
 
     private string Zero(KurzType type) => Ir(type) switch

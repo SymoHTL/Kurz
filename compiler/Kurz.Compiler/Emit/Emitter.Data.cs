@@ -14,12 +14,12 @@ public sealed partial class Emitter
     {
         var type = (DataType)Sub(info.Result);
         var fields = Layout.Fields(type);
-        var arguments = Arguments(c, info, j => fields[j], _ => false, j => FieldDefault(type.Symbol, j), dataOwners[type.Symbol], cConvention: false);
+        var arguments = Arguments(c, info, j => fields[j], _ => false, j => FieldDefault(type.Symbol, j), cConvention: false);
         return Make(type, arguments.Select((a, j) => a[(Ir(fields[j]).Length + 1)..]).ToList());
     }
 
-    /// <summary>The default written for the field in the slot, in the declaration of the type that declares the field (D7, D11).</summary>
-    private static Expression FieldDefault(DataSymbol symbol, int slot)
+    /// <summary>The default written for the field in the slot, in the declaration of the type that declares the field, and the file of that declaration (D7, D11).</summary>
+    private (Expression Value, Unit File) FieldDefault(DataSymbol symbol, int slot)
     {
         var own = symbol.Declaration.PrimaryConstructor ?? [];
         var inherited = symbol.Fields.Count - own.Count;
@@ -28,7 +28,7 @@ public sealed partial class Emitter
             return FieldDefault(symbol.Base ?? throw new InvalidOperationException($"`{symbol.Name}` has inherited fields and no base"), slot);
         }
 
-        return own[slot - inherited].Default ?? throw new InvalidOperationException($"the field {slot} of `{symbol.Name}` has no argument and no default");
+        return (own[slot - inherited].Default ?? throw new InvalidOperationException($"the field {slot} of `{symbol.Name}` has no argument and no default"), dataOwners[symbol]);
     }
 
     /// <summary>A data value of these field values: a plain value built in registers, or a block from the allocator that starts with the number of its type.</summary>
@@ -169,9 +169,10 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// M4: an assignment into a path of a <c>mut</c> variable, short for nested <c>with</c>: the value is read first, then each data
-    /// value on the path changes in place, a plain value in its variable or its field, and a block after it was copied into the
-    /// place that held it, since another variable may hold the same block.
+    /// M4: an assignment into a path of a <c>mut</c> variable, short for nested <c>with</c>: the value is read first, then the path in
+    /// the variable as the value left it (the owner, 2026-10-24, "Value first"); each data value on the path changes in place, a plain
+    /// value in its variable or its field, and a block after it was copied into the place that held it, since another variable may
+    /// hold the same block.
     /// </summary>
     private void EmitPathAssignment(Assignment a)
     {
@@ -324,8 +325,10 @@ public sealed partial class Emitter
                 case DataType d:
                     fn.Return($"%kz.str {RecordText(d, Layout.Fields(d).Select((_, i) => fn.Value($"extractvalue {Ir(d)} %a0, {Number(i)}")).ToList(), line)}");
                     break;
+                case UnionType u when u.Cases.Any(c => c is VoidType):
+                    throw new InvalidOperationException($"the text of a `{u}` at line {line}: a success without a value has none, `no-text`, which the checker reports (A7)");
                 case UnionType u:
-                    ByCase(Tag("%a0", u), u, u.Cases.Where(c => c is not VoidType), c => fn.Return($"%kz.str {TextOf(Payload("%a0", u, c), c, line)}"));
+                    ByCase(Tag("%a0", u), u, u.Cases, c => fn.Return($"%kz.str {TextOf(Payload("%a0", u, c), c, line)}"));
                     break;
             }
         });

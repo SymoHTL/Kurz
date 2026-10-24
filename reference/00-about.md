@@ -116,6 +116,16 @@ data Pair<A, B>(A First, B Second)
 print(Pair<int, string>(1, "one"))
 ```
 
+A field of a union shows the text of its case's value inside the braces (A4).
+
+Case: [data/print-union-field.kz](../corpus/data/print-union-field.kz)
+```kurz
+data Box(int | string V)
+
+print(Box(5))
+print(Box("five"))
+```
+
 ### A4 (decided, §8) The text of the other values
 
 The other values have a text that is derived from their type, as a `data` value has (A3). A list
@@ -166,17 +176,18 @@ print(c)
 
 A value of a union (D9) shows the text of the value of its case: an `int | string` that holds 5
 shows `5`, and a `data` value with a field of that union `Box { V = 5 }`, as a C# record shows a
-field of type `object` (§8, the owner, 2026-10-23).
+field of type `object` (§8, the owner, 2026-10-23). A union with a case that has no text has none
+itself (A7).
 
 Case: [data/print-union.kz](../corpus/data/print-union.kz)
 ```kurz
-data Box(int | string V)
-
 int | string v = 5
+int | string w = "five"
 print(v)
-print(Box(5))
-print(Box("five"))
+print(w)
 ```
+
+Case: [data/print-union-field.kz](../corpus/data/print-union-field.kz)
 
 ### A5 (decided, §8) How a class declares its text
 
@@ -318,6 +329,29 @@ data Box(Counter Item)
 
 b = Box(Counter(1))
 print(b)
+```
+
+A value of a union (D9) with a case that has no text, an instance of such a class or the success
+without a value (O10), has no text either: printing one, or putting it into an interpolated string,
+is `no-text` (§8, the owner, 2026-10-24).
+
+Case: [classes/print-union-without-text.kz](../corpus/classes/print-union-without-text.kz)
+```kurz
+class Counter(mut int Count)
+
+int | Counter v = Counter(1)
+print(v)
+```
+
+Case: [outcomes/print-void-union.kz](../corpus/outcomes/print-void-union.kz)
+```kurz
+data NotFound
+
+void Show(void | NotFound v) {
+    print(v)
+}
+
+Show(NotFound)
 ```
 
 ### A8 (assumed, §8) The text of the remaining values

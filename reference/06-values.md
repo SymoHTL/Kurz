@@ -39,11 +39,29 @@ Case: [values/copy-on-assign.kz](../corpus/values/copy-on-assign.kz)
 ### M4 (decided, §4) Assigning into a path
 
 Assigning to a field at the end of a path that starts at a `mut` variable changes that variable's
-value. It is short for nested `with` (D5). On an immutable variable it is the compile error
+value. It is short for nested `with` (D5). The value is evaluated first, then the path, in the
+variable as the value left it: a `mut` argument in the value that changes the variable keeps its
+change (§4, the owner, 2026-10-24). On an immutable variable it is the compile error
 `assign-immutable` (D4). A class instance on the path starts the path anew: from a `mut` field of
 the instance on, the rest of the path is as if it started at a `mut` variable, whatever holds the
 instance (K2), and a field of the instance that is not `mut` ends the path as an immutable variable
 would (K1). *(proposed reading of K2 for paths)*
+
+Case: [values/path-assign-order.kz](../corpus/values/path-assign-order.kz)
+```kurz
+data Address(string City)
+data Customer(string Name, Address Home)
+
+string Move(mut Customer moved) {
+    moved = Customer("Bea", Address("Linz"))
+    return "Wien"
+}
+
+mut c = Customer("Ann", Address("Graz"))
+c.Home.City = Move(mut c)
+print(c.Name)
+print(c.Home.City)
+```
 
 Case: [values/path-assign.kz](../corpus/values/path-assign.kz)
 ```kurz
@@ -167,7 +185,8 @@ No case: actors are outside this reference; that collections are values is shown
 
 `List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method; `Count` is the number
 of items, an `int`, and a list holds at most as many items as the largest `int`, an `Add` that
-would make it longer raising `allocation-failed` (§4, the owner, 2026-10-23 and 2026-10-24); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
+would make it longer raising `allocation-failed` with the bytes the grown list would take, its items
+times the size of an item (§4, the owner, 2026-10-23 and 2026-10-24); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
 or beyond raises `index-out-of-range` (T14); `Where(test)` is the list of
 items that pass the test. `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the

@@ -80,7 +80,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before.</summary>
-    private const int RunFloor = 124;
+    private const int RunFloor = 126;
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
@@ -89,6 +89,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ["control/for-in.kz"] = "a value of type `List<int>` (M9)",
         ["control/range-exclusive.kz"] = "a value of type `List<int>` (M9)",
         ["data/equality-nan.kz"] = "a value of type `double` (T2)",
+        ["data/equality-union-nan.kz"] = "a value of type `double` (T2)",
         ["data/union-order-after-the-first.kz"] = "a value of type `List<A | C | B>` (M9)",
         ["functions/capture-read.kz"] = "a value of type `List<int>` (M9)",
         ["functions/capture-value.kz"] = "a value of type `() => int` (F11)",

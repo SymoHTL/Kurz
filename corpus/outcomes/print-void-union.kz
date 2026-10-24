@@ -1,0 +1,10 @@
+// expect: error no-text at 7
+// rules: A7
+
+data NotFound
+
+void Show(void | NotFound v) {
+    print(v)
+}
+
+Show(NotFound)

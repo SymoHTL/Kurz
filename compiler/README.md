@@ -271,7 +271,7 @@ library a block of C functions names (R16). It emits:
 - `if`, `while`, `for` over a range, which raises `reversed-range-at-run-time` (C8), `break`,
   `continue` and `return` (chapter 10), and `throw` of a value (O6);
 - `data` types and their values, made with defaults and arguments by name (D1, D2, D8, D11), their
-  fields (D14), `with` (D5), an assignment into a path (M4), a value of a derived type where its
+  fields (D14), `with` (D5), an assignment into a path, its value first (M4), a value of a derived type where its
   base is required (D6, D7), `==` field by field and never equal across types (D3, D15), and their
   text, a generic type's under the name its declaration gives (A3);
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
@@ -285,7 +285,9 @@ library a block of C functions names (R16). It emits:
   their bytes (T18);
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`
-  and `string.FromRaw(p, n)` (R15), state outside a function, `thread static` among it (R13),
+  and `string.FromRaw(p, n)` (R15), state outside a function, `thread static` among it, laid out
+  after the layout knows the program's data types, a `data` value without fields as its initial
+  value (R13),
   calls of C functions with `...` (R16) and of a C function value (R17).
 
 In a test build every function carries LLVM's attribute that turns no call into a jump, so that a
@@ -319,8 +321,8 @@ The reference counting of section 3 is not emitted either: memory a program take
 back, so a program that allocates without end runs out of memory and ends with
 `allocation-failed`; a value of a block type takes memory, a plain value and a union none (the
 owner, 2026-10-23, "Accept, documented"). The
-corpus runner lists every case the checker reads in full and the emitter does not emit, 42 of the
-223 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+corpus runner lists every case the checker reads in full and the emitter does not emit, 43 of the
+226 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a
