@@ -97,7 +97,7 @@ public sealed partial class Checker
             if (!reported.Contains(a) && ReferenceEquals(h.Variable, passed.Variable) && Overlaps(h.Path, passed.Path) && !Copied(h.Type))
             {
                 reported.Add(a);
-                Report(ErrorIds.MutAtCall, a.Line, $"{h.Text} is still in use while the call that takes `mut {passed.Path}` runs, and a `{h.Type}` is not copied (M7)");
+                Report(ErrorIds.MutAtCall, a.Line, $"{h.Text} is still in use while the call that takes `mut {passed.Path}` runs, and a `{h.Type}` is not copied: copy it into a variable of its own on a line before (M7)");
             }
         }
     }

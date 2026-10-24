@@ -803,6 +803,17 @@ public sealed class CheckerTests
         Clean("data End\ndata Node(int V, Node | End Next)\n\nint Cut(mut Node node) {\n    node = Node(0, End)\n    return 1\n}\n\nint Value(Node node, int n) => node.V + n\n\nmut first = Node(1, End)\nprint(Value(first, Cut(mut first)))"); // a data type that holds itself and no list is copied
         Assert.Equal([(ErrorIds.MutAtCall, 13)], Errors("data Person(int Id)\ndata Member(List<int> Items) : Person\n\nint Reset(mut Person q) {\n    q = Person(2)\n    return 0\n}\n\nint Size(Person q, int n) => q.Id + n\n\nmut Person p = Member(1, List<int>())\nprint(p.Id)\nprint(Size(p, Reset(mut p)))")); // a type derived from it holds a list
         Assert.Equal([(ErrorIds.MutAtCall, 6)], Errors("T Same<T>(mut T a) => a\n\nT Pick<T>(T a, T b) => a\n\nvoid Run<T>(mut T v) {\n    v = Pick(v, Same(mut v))\n}")); // a type parameter is not copied
+        Clean("int Later(mut duration d) {\n    d = d + 1ms\n    return 1\n}\n\nint Keep(duration d, int n) => n\n\nmut duration t = 1ms\nprint(Keep(t, Later(mut t)))"); // a time is copied
+        Assert.Equal([(ErrorIds.MutAtCall, 9)], Errors("int Swap(mut (int) => int g) {\n    g = x => x\n    return 1\n}\n\nint Keep((int) => int g, int n) => n\n\nmut (int) => int f = x => x + 1\nprint(Keep(f, Swap(mut f)))")); // a function value is not copied
+        Clean("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nint Swap(mut extern \"C\" (long) => long g) {\n    g = Twice\n    return 1\n}\n\nint Keep(extern \"C\" (long) => long g, int n) => n\n\nmut extern \"C\" (long) => long f = Twice\nprint(Keep(f, Swap(mut f)))", "native"); // the type of a C function is copied
+
+        // the text names what is read, the path passed as `mut` and the type that is not copied, and how to keep the value
+        List<string> Said(string program) => Check(program).Diagnostics.Sorted.Select(d => d.Message).ToList();
+        const string fix = ": copy it into a variable of its own on a line before (M7)";
+        Assert.Equal(["`numbers` is still in use while the call that takes `mut numbers` runs, and a `List<int>` is not copied" + fix], Said(grow + "mut numbers = List<int>()\nprint(Sum(numbers, Grow(mut numbers)))"));
+        Assert.Equal(["`cart.Items` is still in use while the call that takes `mut cart` runs, and a `List<int>` is not copied" + fix], Said(cart + "print(Count(cart.Items, Clear(mut cart)))"));
+        Assert.Equal(["an item of `rows` is still in use while the call that takes `mut rows` runs, and a `List<int>` is not copied" + fix], Said("int Clear(mut List<List<int>> all) {\n    all = List<List<int>>()\n    return 0\n}\n\nint Sum(List<int> row, int n) => row.Count + n\n\nmut rows = List<List<int>>()\nprint(Sum(rows[0], Clear(mut rows)))"));
+        Assert.Equal(["a lambda that reads `numbers` is still in use while the call that takes `mut numbers` runs, and a `List<int>` is not copied" + fix], Said(grow + "int Apply(() => int f, int n) => f() + n\n\nmut numbers = List<int>()\nprint(Apply(() => numbers.Count, Grow(mut numbers)))"));
     }
 
     // ---- control flow (chapter 10) --------------------------------------------------------------------

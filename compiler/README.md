@@ -773,13 +773,16 @@ round can ask about it by the rule's id.
 - M7 with M4: what stands after `mut` is a path of data fields from a `mut` variable; two fields
   of one variable are two values and may both be passed; the same path twice, or a path and one it
   is a prefix of, is `mut-at-call`.
-- M7's reads (the owner, 2026-10-24): the checker reads each expression of a statement whole, in
-  the order it runs: a call's receiver or the value it calls, then its arguments as written (D11),
-  an operator's left operand, an index's target and a `with`'s target before what follows them. The
-  subject of a `match` and the call of an `else` hold nothing for the arms but the names the arms
-  bind, which are variables of their own (M3); either side of `??` is its value; a statement inside
-  an arm is read on its own, while a `mut` argument in it still runs within the expression around
-  the arm; and one `mut-at-call` is reported for each argument after `mut`, at its line (E1).
+- M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24: the checker
+  reads each expression of a statement whole, in the order it runs: a call's receiver or the value
+  it calls, then its arguments as written (D11), an operator's left operand, an index's target and a
+  `with`'s target before what follows them. The subject of a `match` and the call of an `else` hold
+  nothing for the arms but the names the arms bind, which are variables of their own (M3); either
+  side of `??` is its value; a statement inside an arm is read on its own, while a `mut` argument in
+  it still runs within the expression around the arm; and one `mut-at-call` is reported for each
+  argument after `mut`, at its line (E1). A `mut` method changes its receiver only as a statement of
+  its own: the one the checker reads, `Add`, has a `void` success, which stands as no value (O10),
+  and a method of a data type is not read (D16).
 - D9 with C4: a value of a union stands where a union is required only, since a union is one of its
   cases only after a `match`: a `byte | short` is no `int`, and a union of two data types derived
   from one base no value of the base; each is `type-mismatch`.
