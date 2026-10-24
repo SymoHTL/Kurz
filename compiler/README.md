@@ -337,15 +337,16 @@ the count. An `Add` writes in place where one value holds the block and it has r
 block where it has none, as Rust's `Vec` grows, to twice its room, at least 8 items of a byte, 4 of
 up to a kibibyte and 1 of more, and where other values hold the block it copies the items into a
 block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). An argument that
-changes the list through a `mut` parameter is `mut-at-call` (M7), so the order in which an `Add` reads
-its argument and its list is not seen. The count
+changes the list through a `mut` parameter is `changed-while-held` (M7), so the order in which an `Add`
+reads its argument and its list is not seen. The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
 nothing keeps; and where a value that holds the list ends. At zero the lists the items hold are let
 go of in turn, and the block goes back to `Free`. A parameter borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
-what a call takes as `mut` that the expression still holds when the call runs (M7), and no state
+what a call takes as `mut` that the expression still holds when the call runs, or when an assignment
+or a `mut` method in an arm's statement inside the expression changes it (M7), and no state
 outside a function holds a list, which R13 refuses, so a callee reaches a list its caller lent it
 through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
@@ -386,7 +387,7 @@ a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
 corpus runner lists every case the checker reads in full and the emitter does not emit, 33 of the
-229 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+230 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a
@@ -599,7 +600,7 @@ the error type, which fits anywhere and is reported nowhere again.
 
 It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign-mix`,
 `constant-overflow`, `constant-divide-by-zero`, `inexact-literal`, `redeclared`, `unknown-name`,
-`unused-variable`, `assign-immutable`, `capture-assign`, `mut-required`, `mut-at-call`,
+`unused-variable`, `assign-immutable`, `capture-assign`, `mut-required`, `mut-at-call`, `changed-while-held`,
 `argument-mismatch`, `ambiguous-call`, `cannot-infer`, `duplicate-function`,
 `default-not-constant`, `base-cycle`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`,
@@ -773,16 +774,16 @@ round can ask about it by the rule's id.
 - M7 with M4: what stands after `mut` is a path of data fields from a `mut` variable; two fields
   of one variable are two values and may both be passed; the same path twice, or a path and one it
   is a prefix of, is `mut-at-call`.
-- M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24: the checker
-  reads each expression of a statement whole, in the order it runs: a call's receiver or the value
-  it calls, then its arguments as written (D11), an operator's left operand, an index's target and a
-  `with`'s target before what follows them. The subject of a `match` and the call of an `else` hold
-  nothing for the arms but the names the arms bind, which are variables of their own (M3); either
-  side of `??` is its value; a statement inside an arm is read on its own, while a `mut` argument in
-  it still runs within the expression around the arm; and one `mut-at-call` is reported for each
-  argument after `mut`, at its line (E1). A `mut` method changes its receiver only as a statement of
-  its own: the one the checker reads, `Add`, has a `void` success, which stands as no value (O10),
-  and a method of a data type is not read (D16).
+- M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
+  the checker reads each expression of a statement whole, in the order it runs: a call's receiver or
+  the value it calls, then its arguments as written (D11), an operator's left operand, an index's
+  target and a `with`'s target before what follows them. Either side of `??` is its value, a reading
+  no program shows, since the checker says `not supported` to `??` (chapter 4). A statement inside an arm is read on its own, while
+  what it changes, a `mut` argument, an assignment or a `mut` method, changes it within the
+  expression around the arm; and one `changed-while-held` is reported for each change, at its line,
+  however many reads it meets and statements it stands in (E1). `Add`, the one `mut` method the
+  checker reads (a method of a data type is not, D16), takes its receiver as `mut`, against its
+  argument, and, having a `void` success (O10), stands only as a statement, an arm's among them.
 - D9 with C4: a value of a union stands where a union is required only, since a union is one of its
   cases only after a `match`: a `byte | short` is no `int`, and a union of two data types derived
   from one base no value of the base; each is `type-mismatch`.

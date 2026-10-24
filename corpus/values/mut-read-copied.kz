@@ -3,6 +3,7 @@
 // | 32
 // | 2
 // | 8
+// | [3, 4, 3]
 // rules: M7
 
 data Point(int X, int Y)
@@ -26,3 +27,8 @@ mut p = Point(1, 2)
 q = p with { X = Shift(mut p) }
 print(q.Y)
 print(p.Y)
+mut xs = List<int>()
+xs.Add(3)
+xs.Add(4)
+xs.Add(xs[0])
+print(xs)

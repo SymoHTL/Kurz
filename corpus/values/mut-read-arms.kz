@@ -1,0 +1,43 @@
+// expect: output
+// | 13
+// | 6
+// rules: M7
+
+data Empty
+data NotFound
+
+int Swap(mut List<int> | Empty v) {
+    v = Empty
+    return 1
+}
+
+List<int> | Empty Make() {
+    mut xs = List<int>()
+    xs.Add(1)
+    xs.Add(2)
+    xs.Add(3)
+    return xs
+}
+
+int | NotFound Look(List<int> all) {
+    if all.Count > 3 {
+        return all.Count
+    }
+    return NotFound
+}
+
+int Grow(mut List<int> all) {
+    all.Add(5)
+    return all.Count
+}
+
+mut List<int> | Empty u = Make()
+print(match u {
+    List<int> l => Swap(mut u) * 10 + l.Count
+    Empty => 0
+})
+mut numbers = List<int>()
+numbers.Add(1)
+print(Look(numbers) else {
+    NotFound => Grow(mut numbers) + 4
+})

@@ -674,7 +674,7 @@ public sealed partial class Checker
                         var result = Record(c, CallKind.ListAdd, Call([candidate], c, null, out var picked), picked);
                         if (!result.IsError)
                         {
-                            MutReceiver(m.Target, c.Line, "`Add` changes the list it is called on"); // after the call's own error nothing more (E1)
+                            MutReceiver(c, m.Target, c.Line, "`Add` changes the list it is called on"); // after the call's own error nothing more (E1)
                         }
 
                         return result;
@@ -708,8 +708,11 @@ public sealed partial class Checker
         return CallValue(member.Type, c);
     }
 
-    /// <summary>M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable is not changed (F11). A path through an index is not read (M9).</summary>
-    private void MutReceiver(Expression receiver, int line, string what)
+    /// <summary>
+    /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
+    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7).
+    /// </summary>
+    private void MutReceiver(CallExpression call, Expression receiver, int line, string what)
     {
         var members = new List<MemberAccess>();
         var root = Unwrap(receiver);
@@ -750,6 +753,11 @@ public sealed partial class Checker
         else if (!variable.Mut)
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{name.Name}` was declared without `mut` (M5)");
+        }
+        else
+        {
+            var path = string.Join(".", members.Select(m => m.Member).Prepend(name.Name));
+            changes[call] = new Change(variable, path, line, $"`{((MemberAccess)call.Callee).Member}` changes `{path}`");
         }
 
         variable.Changed = true;
@@ -1461,7 +1469,7 @@ public sealed partial class Checker
         }
         else
         {
-            mutArguments[a] = (variable, path);
+            changes[a] = new Change(variable, path, a.Line, $"the call that takes `mut {path}` runs");
         }
 
         paths.Add(path);

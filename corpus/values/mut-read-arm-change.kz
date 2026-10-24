@@ -1,0 +1,21 @@
+// expect: error changed-while-held at 18
+// rules: M7
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int Sum(List<int> xs, int n) => xs.Count + n
+
+mut numbers = List<int>()
+print(Sum(numbers, Find(2) else {
+    NotFound => {
+        numbers = List<int>()
+        5
+    }
+}))

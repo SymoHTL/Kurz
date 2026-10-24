@@ -1,4 +1,4 @@
-// expect: error mut-at-call at 12
+// expect: error changed-while-held at 12
 // rules: M7
 
 data Cart(List<int> Items)

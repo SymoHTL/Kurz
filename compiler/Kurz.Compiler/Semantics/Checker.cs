@@ -1471,6 +1471,10 @@ public sealed partial class Checker
             {
                 Report(ErrorIds.AssignImmutable, a.Line, $"`{a.Name}` was declared without `mut` (V7)");
             }
+            else
+            {
+                changes[a] = new Change(variable, a.Name, a.Line, $"an assignment changes `{a.Name}`"); // M7, in an arm inside an expression
+            }
 
             var value = CheckExpression(a.Value, variable.Type, keepCases: variable.Type is UnionType);
             if (Types.IsVoid(value.Type))
@@ -1546,6 +1550,7 @@ public sealed partial class Checker
         }
 
         KurzType current;
+        VariableSymbol? changed = null;
         if (root is NameExpression name)
         {
             var (variable, captured) = Lookup(name.Name);
@@ -1571,6 +1576,10 @@ public sealed partial class Checker
             else if (!variable.Mut)
             {
                 Report(ErrorIds.AssignImmutable, a.Line, $"`{name.Name}` was declared without `mut`: nothing reachable through it changes (D4, M4)");
+            }
+            else
+            {
+                changed = variable;
             }
 
             variable.Changed = true;
@@ -1613,6 +1622,12 @@ public sealed partial class Checker
 
             current = Types.Error;
             last = null;
+        }
+
+        if (changed is not null && last is not null && !Types.IsError(current))
+        {
+            var path = string.Join(".", members.Select(m => m.Member).Prepend(changed.Name));
+            changes[a] = new Change(changed, path, a.Line, $"an assignment changes `{path}`"); // M7, in an arm inside an expression
         }
 
         var value = CheckExpression(a.Value, Types.IsError(current) ? null : current, keepCases: current is UnionType);

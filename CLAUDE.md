@@ -315,11 +315,14 @@ Gate: review rule "rules for sessions".
 - **A value the emitter borrows names what keeps its source unchanged while it is used.** A list
   read from a variable, a field or an item takes no count of its own (`compiler/README.md`), so a
   construct that keeps what it read past a call or a statement either takes a count or rests on a
-  refusal of the checker; two that did neither reached `main` with pull request 63
+  refusal of the checker; two that did neither reached `main` with pull request 63, and a refusal
+  whose walk missed an assignment in an arm reached it with pull request 64
   ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
-  such construct has a line in a fenced program of `ListTests`. Gate: `compiler-tests`
-  (`ListTests.No_block_is_read_or_written_after_it_is_freed`) for the shapes those programs hold;
-  a borrowing construct no program reaches: review rule "compiler".
+  such construct has a line in a fenced program of `ListTests`, and a refusal counts every form that
+  changes a place. Gate: `compiler-tests`
+  (`ListTests.No_block_is_read_or_written_after_it_is_freed`, and `CheckerTests` for the changes
+  the walk counts) for the shapes those tests hold; a borrowing construct no program reaches, and a
+  change the walk does not count: review rule "compiler".
 
 ### A public repository
 

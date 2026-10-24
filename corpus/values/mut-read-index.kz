@@ -1,4 +1,4 @@
-// expect: error mut-at-call at 11
+// expect: error changed-while-held at 11
 // rules: M7
 
 int Last(mut List<int> xs) {

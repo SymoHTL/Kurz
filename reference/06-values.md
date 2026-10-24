@@ -41,9 +41,10 @@ Case: [values/copy-on-assign.kz](../corpus/values/copy-on-assign.kz)
 Assigning to a field at the end of a path that starts at a `mut` variable changes that variable's
 value. It stores what nested `with` (D5) over the variable stores, with the variable read after the value: the value is evaluated first, then the path, in the
 variable as the value left it: a `mut` argument in the value that changes the variable keeps its
-change (§4, the owner, 2026-10-24). A call of a `mut` method on a variable whose argument changes the
-variable, `xs.Add(F(mut xs))`, is `mut-at-call` (M7). On an immutable variable it is the compile error
-`assign-immutable` (D4). A class instance on the path starts the path anew: from a `mut` field of
+change (§4, the owner, 2026-10-24). A `mut` method takes its receiver as `mut` (M5), so a call of
+one on the variable whose argument changes the variable, `xs.Add(F(mut xs))`, is M7's
+`changed-while-held` where M7 holds the receiver. An assignment into a path of an immutable
+variable is the compile error `assign-immutable` (D4). A class instance on the path starts the path anew: from a `mut` field of
 the instance on, the rest of the path is as if it started at a `mut` variable, whatever holds the
 instance (K2), and a field of the instance that is not `mut` ends the path as an immutable variable
 would (K1). *(proposed reading of K2 for paths)*
@@ -133,18 +134,38 @@ while the function runs (M3). *(proposed: the forms after `mut`, and the two fur
 `mut-at-call`)*
 
 Within one expression, a read of what a call takes as `mut`, of a value that holds it or of one it
-holds (the variable itself, a path of fields, an item of a list), is `mut-at-call` where the
-expression still holds the read's value when the call runs: as an argument of that call or of a call
-around it given before the argument the call stands in, as the receiver of a method or the target of
-`with` or of an index around the call, as an operand of an operator around it written before the
-operand the call stands in, and in a lambda made before the call that reads the variable (§4, the
-owner, 2026-10-24). A read that makes a new value first (`numbers.Count`, `numbers[0] + 1`), a read
-that runs after the call has ended, and a read of a type that holds no list, a number, a `bool`, a
-`char`, a pointer, or a `data` value or a union of such types, which the expression holds as a copy,
-hold no such value (§4, the owner, 2026-10-24); two fields of one variable stay two values.
-*(assumed, as §4 marks it: a time and the type of a C function are copied, a `string`, a function
-value and a type parameter are not, a `data` type is copied where every type derived from it is,
-and a hole of an interpolation makes a new value)*
+holds (the variable itself, a path of fields, an item of a list), is the compile error
+`changed-while-held` where the expression still holds the read's value when the call runs (§4, the
+owner, 2026-10-24 and 2026-10-25). A call takes as `mut` what stands after `mut` among its arguments,
+and a `mut` method its receiver (M5), so `rows.Add(rows[0])` for a list of lists `rows` is that error
+(§4, the owner, 2026-10-25). The expression holds the value of a read made as any other argument of
+that call, before or after the argument after `mut`; as an argument of a call around it given before
+the argument the call stands in; as the receiver of a method or the target of `with` or of an index
+around the call; as an operand of an operator around it written before the operand the call stands
+in; and in a lambda made before the call that reads the variable, which holds a copy of what it reads
+from the moment it is made (F11, F15), so the reads in its body are held, not reads after the call
+(§4, the owner, 2026-10-24). An assignment of the variable or of a path into it, and a `mut` method
+called on it, in a statement of an `else` arm's block inside the expression, change it as such a call
+does while the expression holds the read's value (§4, the owner, 2026-10-25). Three reads hold no such
+value. A read that makes a new value first: the result of an operator, a call or a method
+(`numbers.Count`, `numbers[0] + 1`, `Same(numbers)` for a function that returns its list) *(proposed:
+the result of a call is a value of its own, M3)*. A read that runs after the call has ended. A read of
+a copied type, which the expression holds as a copy: a number, a `bool`, a `char`, a pointer, a time,
+the type of a C function, and a `data` value or a union made only of such types that holds no value of
+its own type, so that a lambda that reads an `int` holds the value from before the call (§4, the
+owner, 2026-10-24 and 2026-10-25). A list, a `string`, a function value, a type parameter and a `data`
+type that holds a value of its own type are not copied (§4, the owner, 2026-10-25). Two fields of one
+variable stay two values. The error stands at the line of what changes the value, an argument after
+`mut`, the call of a `mut` method or an assignment, once for each of them however many reads it meets.
+*(assumed, as §4 marks it: one error per change, E1; a `data` type is copied where every type derived
+from it is; a hole of an interpolation makes a new value)* The reads of an expression run left to
+right as written: a call's receiver before its arguments, an operand before the one after it, and the
+target of `with` or of an index before what follows it, as F12 has a call's arguments and as Rust
+evaluates operands, so a copied read before a `mut` call holds the value from before the call. The
+subject of a `match` and the call of an `else` hold nothing for the arms but the names the arms bind,
+which are variables of their own (M3), so an arm may pass the subject's variable as `mut`. *(proposed:
+the order of operands and of `with`, where F12 names arguments alone; the arms, which §4 does not
+name)*
 
 Case: [values/mut-parameter.kz](../corpus/values/mut-parameter.kz)
 ```kurz
@@ -292,6 +313,36 @@ mut numbers = List<int>()
 print(Apply(() => numbers.Count, Grow(mut numbers)))
 ```
 
+Case: [values/mut-read-add-item.kz](../corpus/values/mut-read-add-item.kz)
+```kurz
+mut rows = List<List<int>>()
+rows.Add(List<int>())
+rows.Add(rows[0])
+print(rows.Count)
+```
+
+Case: [values/mut-read-arm-change.kz](../corpus/values/mut-read-arm-change.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+int Sum(List<int> xs, int n) => xs.Count + n
+
+mut numbers = List<int>()
+print(Sum(numbers, Find(2) else {
+    NotFound => {
+        numbers = List<int>()
+        5
+    }
+}))
+```
+
 Case: [values/mut-read-copied.kz](../corpus/values/mut-read-copied.kz)
 ```kurz
 data Point(int X, int Y)
@@ -315,6 +366,11 @@ mut p = Point(1, 2)
 q = p with { X = Shift(mut p) }
 print(q.Y)
 print(p.Y)
+mut xs = List<int>()
+xs.Add(3)
+xs.Add(4)
+xs.Add(xs[0])
+print(xs)
 ```
 
 Case: [values/mut-read-new-value.kz](../corpus/values/mut-read-new-value.kz)
@@ -326,12 +382,17 @@ int Grow(mut List<int> xs) {
 
 int Pair(int a, int b) => a * 10 + b
 
+List<int> Same(List<int> all) => all
+
+int Total(List<int> all, int n) => all.Count * 10 + n
+
 mut numbers = List<int>()
 numbers.Add(4)
 print(Pair(numbers.Count, Grow(mut numbers)))
 print(Pair(numbers[0] + 1, Grow(mut numbers)))
 numbers.Add(numbers.Count)
 print(numbers)
+print(Total(Same(numbers), Grow(mut numbers)))
 ```
 
 Case: [values/mut-read-after.kz](../corpus/values/mut-read-after.kz)
@@ -347,6 +408,48 @@ mut numbers = List<int>()
 numbers.Add(4)
 print(Sum(Grow(mut numbers), numbers))
 print(Grow(mut numbers) + numbers.Count)
+```
+
+Case: [values/mut-read-arms.kz](../corpus/values/mut-read-arms.kz)
+```kurz
+data Empty
+data NotFound
+
+int Swap(mut List<int> | Empty v) {
+    v = Empty
+    return 1
+}
+
+List<int> | Empty Make() {
+    mut xs = List<int>()
+    xs.Add(1)
+    xs.Add(2)
+    xs.Add(3)
+    return xs
+}
+
+int | NotFound Look(List<int> all) {
+    if all.Count > 3 {
+        return all.Count
+    }
+    return NotFound
+}
+
+int Grow(mut List<int> all) {
+    all.Add(5)
+    return all.Count
+}
+
+mut List<int> | Empty u = Make()
+print(match u {
+    List<int> l => Swap(mut u) * 10 + l.Count
+    Empty => 0
+})
+mut numbers = List<int>()
+numbers.Add(1)
+print(Look(numbers) else {
+    NotFound => Grow(mut numbers) + 4
+})
 ```
 
 ### M8 (decided, §4) One family of collections

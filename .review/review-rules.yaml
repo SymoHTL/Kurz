@@ -109,6 +109,12 @@ sections:
         a corpus case the tests skip; and a case header read in another shape than the one this batch
         cites from reference/00-about.md.
       - A dependency, tool or runtime version that is not pinned exactly, or a build step that fetches what no file pins.
+      - >-
+        Where this batch shows the emitter or the checker's walk of M7 - a value read from a variable, a field or
+        an item with no count of its own and kept past a call, a statement or an arm that can change the place it
+        came from, with neither a count taken nor a refusal of the checker named for it; and a form that changes a
+        place inside an expression (an argument after `mut`, a `mut` method, an assignment, in an arm's statement
+        too) that the walk does not count as a change (knowledge/a-borrow-outlives-its-source.md).
 
   - name: knowledge and guides
     files: ["knowledge/*", "guides/*", "INDEX.md"]
