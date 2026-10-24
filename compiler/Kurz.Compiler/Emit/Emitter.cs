@@ -13,8 +13,9 @@ public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries);
 
 /// <summary>
 /// The code generator: LLVM IR, as text, for a program the checker read without an error and without <c>not supported</c>, from
-/// the syntax tree and the checker's <see cref="SemanticModel"/>, together with the runtime of the target it is built for, which
-/// is Kurz too and is emitted into the same module from its own trees and models (design record, section 2): the program's top-level
+/// the syntax tree and the checker's <see cref="SemanticModel"/>, together with the runtime of the target it is built for and the
+/// standard library, which are Kurz too and are emitted into the same module from their own trees and models (design record,
+/// section 2): the program's top-level
 /// code is the function <c>kz.main</c>, and the module's <c>main</c>, which the C library's start calls, calls the runtime's
 /// <c>Start</c>, then <c>kz.main</c>, then the runtime's <c>Finish</c>, the runtime's one exit. It emits the integers,
 /// <c>bool</c>, <c>char</c> and <c>string</c>, functions and their generic instances, the statements of chapter 10, <c>throw</c>,
@@ -53,14 +54,17 @@ public sealed partial class Emitter
     private KurzType returnType = Types.Void;
     private readonly Stack<(string Break, string Continue)> loops = new();
 
-    /// <summary>A file the module holds code of: the program, or a folder of the runtime, with the prefix of its functions' IR names.</summary>
+    /// <summary>
+    /// A file the module holds code of: the program, a folder of the runtime or the standard library, with the prefix of its functions' IR
+    /// names; <c>Runtime</c> marks the compiler's own code, the runtime's and the standard library's.
+    /// </summary>
     private sealed record Unit(string Prefix, string File, ProgramSyntax Tree, SemanticModel Model, bool Runtime);
 
-    private Emitter(Unit program, Unit common, Unit sys, bool test)
+    private Emitter(Unit program, Unit common, Unit sys, Unit std, bool test)
     {
         this.program = program;
         this.common = common;
-        units = [program, common, sys];
+        units = [program, common, sys, std];
         unit = program;
         this.test = test;
         layout = new Layout(module);
@@ -89,6 +93,7 @@ public sealed partial class Emitter
             new Unit("f", file, tree, checker.Model, false),
             new Unit("rt.common", runtime.CommonPath, runtime.Common, runtime.CommonChecker.Model, true),
             new Unit("rt.sys", runtime.SysPath, runtime.Sys, runtime.SysChecker.Model, true),
+            new Unit("std", runtime.StdPath, runtime.Std, runtime.StdChecker.Model, true),
             testBuild);
         try
         {
@@ -287,7 +292,7 @@ public sealed partial class Emitter
         }
         catch (UnsupportedException e) when (unit.Runtime)
         {
-            // the runtime is the compiler's own code: a construct of it the emitter does not lay out is a defect of the compiler
+            // the runtime and the standard library are the compiler's own code: a construct of them the emitter does not lay out is a defect of the compiler
             throw new InvalidOperationException($"{unit.File}:{e.Line}: the emitter does not lay out {e.Construct}", e);
         }
         finally

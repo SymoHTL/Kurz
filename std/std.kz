@@ -1,0 +1,41 @@
+// The standard library's Kurz code (design record, section 2; the owner, 2026-10-24, "A std/ directory
+// now"), which the compiler compiles with every program, as it compiles the runtime: the allocator of
+// section 3. It takes its memory from the system through the runtime's boundary call, reached as the
+// folder `sys`, the directory of the target the program is built for, and the runtime reaches it as
+// the folder `std`, through its allocation entry, `Allocate` (compiler/README.md, "The runtime").
+use sys
+
+// The memory the allocator hands out next, and the bytes left behind it, of each thread (R13).
+thread static mut byte* chunk = null
+thread static mut long left = 0
+
+// The allocation entry (design record, section 2): `size` bytes, at an address that is a multiple of
+// 16, which nothing frees: the reference counting of section 3 is not emitted. Memory comes from the
+// system in pieces of a mebibyte, and an allocation of more than a quarter of that in a piece of its
+// own. Null where the system refuses, for which the runtime's `Allocate` ends the process, as Rust's
+// `GlobalAlloc::alloc` returns null and its caller calls `handle_alloc_error`.
+pub byte* Allocate(long size) {
+    long rounded = (size + 15) / 16 * 16
+    mut byte* p = null
+    raw {
+        if rounded > 262144 {
+            p = sys.Memory(rounded)
+        } else {
+            if rounded > left {
+                chunk = sys.Memory(1048576)
+                left = 1048576
+                if chunk == null {
+                    left = 0
+                }
+            }
+
+            if chunk != null {
+                p = chunk
+                chunk = chunk + rounded
+                left = left - rounded
+            }
+        }
+    }
+
+    return p
+}

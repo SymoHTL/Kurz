@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-23
-digest: 6fd563bb3277f9ecc7824b9208e70e7616e8112f137ae4ed8a232ca9951180ff
+generated: 2026-10-24
+digest: 6459b9c2afaf27073cc7c9845b51a0f969775ca96c794abb22445979178a910e
 ttl_days: 60
 metadata:
   type: reference
@@ -68,8 +68,8 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
 | `tools/review/review.py` | 276 | 256 |
-| `tools/tree_gate.py` | 126 | 102 |
-| **total** | 1171 | 1096 |
+| `tools/tree_gate.py` | 133 | 109 |
+| **total** | 1178 | 1103 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -102,7 +102,7 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 135 |
+| Occurrences of the marker *(assumed)* | 136 |
 | Bullets of the Open section | 12 |
 <!-- /generated:design -->
 
@@ -120,9 +120,9 @@ nothing in this repository executes Kurz.
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 398 |
+| Corpus cases, none of them run | 406 |
 | Compile-error ids | 60 |
-| Run-time error ids | 7 |
+| Run-time error ids | 8 |
 <!-- /generated:reference -->
 
 ## The forge
@@ -141,11 +141,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 29 |
-| Pull requests merged | 26 |
+| Pull requests opened by a writer, or merged | 34 |
+| Pull requests merged | 32 |
 | Merged over red, with a recorded waiver | 11 |
-| Review findings posted: high | 93 |
-| Review findings posted: medium | 1398 |
-| Review findings posted: low | 1695 |
+| Review findings posted: high | 100 |
+| Review findings posted: medium | 1477 |
+| Review findings posted: low | 1790 |
 | Open HAZARD issues | 17 |
 <!-- /generated:forge -->

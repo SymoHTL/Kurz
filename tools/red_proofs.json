@@ -1098,5 +1098,8 @@
   {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "", "expect": "allowed path: runtime/common/runtime.kz"},
   {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "r\"runtime/.*\",", "expect": "a file of the runtime other than Kurz is refused"},
   {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "r\"runtime/(?:[^/]+/)*[^/]+\\.kz\",", "expect": "a Kurz file at the top of runtime/, outside its directories, is refused"},
-  {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "r\"runtime/(?:[^/]+/)[^/]+\\.kz\",", "expect": "allowed path: runtime/linux/x86-64/switch.kz"}
+  {"tool": "tools/tree_gate.py", "anchor": "r\"runtime/(?:[^/]+/)+[^/]+\\.kz\",", "replacement": "r\"runtime/(?:[^/]+/)[^/]+\\.kz\",", "expect": "allowed path: runtime/linux/x86-64/switch.kz"},
+  {"tool": "tools/tree_gate.py", "anchor": "r\"std/(?:[^/]+/)*[^/]+\\.kz\",", "replacement": "", "expect": "allowed path: std/std.kz"},
+  {"tool": "tools/tree_gate.py", "anchor": "r\"std/(?:[^/]+/)*[^/]+\\.kz\",", "replacement": "r\"std/.*\",", "expect": "a file of the standard library other than Kurz is refused"},
+  {"tool": "tools/tree_gate.py", "anchor": "r\"std/(?:[^/]+/)*[^/]+\\.kz\",", "replacement": "r\"std/[^/]+\\.kz\",", "expect": "allowed path: std/alloc/size.kz"}
 ]

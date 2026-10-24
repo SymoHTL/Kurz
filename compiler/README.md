@@ -32,7 +32,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   A third suite takes the clang search over a path and a Program Files directory it makes, with
   the answers to `--version` it gives, and over this machine's own environment; a fourth runs the
   command `kurz` as a process, and in the test's own process with a clang search it gives; a
-  fifth checks the runtime under `runtime/` (the section "The runtime" below). A sixth builds
+  fifth checks the runtime under `runtime/` and the standard library under `std/` (the section "The
+  runtime" below). A sixth builds
   every corpus case that expects a run with the pinned clang and runs it, and checks what it
   prints, its exit code and its error line against the case's header (`RunTests`); a seventh
   builds the programs that pin what no case can, a refused write and a refused allocation among
@@ -205,25 +206,30 @@ ask about it.
 
 The runtime a built program links is written in Kurz, in `runtime/` at the top of the repository
 (design record, section 2): `runtime/common/` holds the code every target shares, and
-`runtime/linux/` and `runtime/windows/` the code of one target each. The build of the compiler
-embeds every `.kz` file there, by its path from the top of the repository (`Build/Runtime.cs`,
-`Runtime.Files`). Code in `common/` reaches the functions of the target it is built for as the
+`runtime/linux/` and `runtime/windows/` the code of one target each. The standard library's Kurz
+code is in `std/` at the top of the repository, beside `runtime/`: the allocator of section 3 (the
+owner, 2026-10-24, "A std/ directory now"). The build of the compiler embeds every `.kz` file of
+both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
+compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
 folder `sys`: it writes `use sys` and calls `sys.Write(...)`, and `sys` is that target's directory
 with the directory of the build's architecture read into it (the owner, 2026-10-23, "Rust's sys"),
 a directory this compiler does not read (below). The checker reads `use sys` at the top of a file of
 `common/`, and a call qualified by `sys` picks among the folder's `pub` functions; a function of the
 folder that is not `pub` is `not-visible` there (F9), and a name the folder does not declare is
-`unknown-name` (V10).
+`unknown-name` (V10). `std/` reaches the target's directory as `sys` in the same way, and `common/`
+reaches `std/` as the folder `std`, `use std` and `std.Allocate(...)`.
 
 `Runtime.CheckEveryTarget` checks the runtime for every target, each folder granted `raw` and
-`native` (R7, R16): the target's directory on its own, then `common/` with it as `sys`. It is also
-red where a function `common/` calls has other parameters or another result in one target's
-directory than in another's; a function only its own directory calls can differ freely (record,
-section 2, round 20). A line of `common/` that the check for every target reports stands once, and one
-that the check for some targets reports names them, `(in the check for windows)`. The compiler
-reads one file in each of the three directories and no directory inside them: a second file of a
-directory, which section 8 makes one folder, and the directory of an architecture inside a
-target's (`runtime/linux/x86-64/`, where round 20 places that code) are `not supported`, and a
+`native` (R7, R16): the target's directory on its own, then `std/` with it as `sys`, then `common/`
+with it as `sys` and `std/` as `std`. It is also red where a function `common/` or `std/` calls has
+other parameters or another result in one target's directory than in another's, the line naming
+which of the two calls it; a function only its own directory calls can differ freely (record,
+section 2, round 20). A line of `common/` or `std/` that the check for every target reports stands
+once, and one that the check for some targets reports names them, `(in the check for windows)`. The
+compiler reads one file in each of the four directories and no directory inside them: a second file
+of a directory, which section 8 makes one folder, the directory of an architecture inside a
+target's (`runtime/linux/x86-64/`, where round 20 places that code) and a directory inside `std/`
+are `not supported`, and a
 directory of a target it does not know, a directory inside `common/` and a directory of no file are
 refused, each named by its path. The checks and the layout are pinned by `RuntimeTests`, which also
 holds what the compiler carries to the files of the tree.
@@ -234,9 +240,12 @@ emitted `main` calls the runtime's `Start`, then the program's top level, then `
 the process with the exit code 0 through the target's `Exit`, the runtime's one exit (section 6).
 `common/` gives what the emitted code calls: `Print`, the text of an integer and of a `char`, the
 joining and the comparison of two strings, `Raise` for an exception of the run-time table and
-`Throw`, and `Allocate`, which takes memory from the system's `Memory` in pieces of a mebibyte per
-thread, and an allocation of more than a quarter of that in a piece of its own, and frees nothing:
-the reference counting of section 3 is not emitted. A target's directory gives `Start`, `Write`,
+`Throw`, and `Allocate`, which takes its memory from the allocator's entry, `std/`'s `Allocate`
+(record, section 2), and ends the process where the entry gives null, as Rust's `handle_alloc_error`
+does for the null of its allocator's `alloc`. The entry takes memory from the system's `Memory` in
+pieces of a mebibyte per thread, and an allocation of more than a quarter of that in a piece of its
+own, gives null where the system refuses, and frees nothing: the reference counting of section 3 is
+not emitted. A target's directory gives `Start`, `Write`,
 `Exit` and `Memory`: on Linux over the C library, `Start` setting the signal of a closed pipe to
 ignored and `Write` calling again where a signal interrupted it (section 6), on Windows over
 `kernel32`. The Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
@@ -254,7 +263,8 @@ build, the second with a runtime whose `Memory` refuses every request.
 ## What the emitter emits
 
 The emitter (`Emit/`) takes a program the checker read without an error and without `not
-supported`, with the runtime checked for its target, and writes one LLVM module of both, which the
+supported`, with the runtime checked for its target and the standard library, and writes one LLVM
+module of the three, which the
 pinned clang compiles at `-O2` and links with the C library as the platform links it, and with the
 library a block of C functions names (R16). It emits:
 

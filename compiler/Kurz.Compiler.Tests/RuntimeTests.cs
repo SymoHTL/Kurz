@@ -8,8 +8,9 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The runtime's Kurz under <c>runtime/</c> (design record, section 2): what the compiler carries is the files of the repository, every
-/// target's check is clean, and every target's directory gives the functions <c>common/</c> calls with the same parameters and result; and
+/// The runtime's Kurz under <c>runtime/</c> and the standard library's under <c>std/</c> (design record, section 2; the owner, 2026-10-24,
+/// "A std/ directory now"): what the compiler carries is the files of the repository, every target's check is clean, and every target's
+/// directory gives the functions <c>common/</c> and <c>std/</c> call with the same parameters and result; and
 /// the checker's reading of a folder that a `use` brings in, <c>sys</c> (F9, F10, and for the qualified call the design record's section 2:
 /// the owner, 2026-10-23, "Rust's sys").
 /// </summary>
@@ -17,16 +18,19 @@ public sealed class RuntimeTests
 {
     private static string RuntimeDirectory => Path.Combine(CorpusTests.Root, "runtime");
 
+    private static string StdDirectory => Path.Combine(CorpusTests.Root, "std");
+
     private static RuntimeFile File(string path, string text) => new(path, Encoding.UTF8.GetBytes(text));
 
     [Fact]
-    public void The_compiler_carries_every_file_of_the_runtime_directory_as_it_is()
+    public void The_compiler_carries_every_file_of_the_runtime_and_std_directories_as_it_is()
     {
-        var onDisk = Directory.EnumerateFiles(RuntimeDirectory, "*", SearchOption.AllDirectories)
-            .Select(f => new RuntimeFile("runtime/" + Path.GetRelativePath(RuntimeDirectory, f).Replace('\\', '/'), System.IO.File.ReadAllBytes(f)))
+        var onDisk = new[] { ("runtime/", RuntimeDirectory), ("std/", StdDirectory) }
+            .SelectMany(d => Directory.EnumerateFiles(d.Item2, "*", SearchOption.AllDirectories)
+                .Select(f => new RuntimeFile(d.Item1 + Path.GetRelativePath(d.Item2, f).Replace('\\', '/'), System.IO.File.ReadAllBytes(f))))
             .OrderBy(f => f.Path, StringComparer.Ordinal)
             .ToList();
-        Assert.Equal(["runtime/common/runtime.kz", "runtime/linux/linux.kz", "runtime/windows/windows.kz"], onDisk.Select(f => f.Path));
+        Assert.Equal(["runtime/common/runtime.kz", "runtime/linux/linux.kz", "runtime/windows/windows.kz", "std/std.kz"], onDisk.Select(f => f.Path));
         Assert.Equal(onDisk.Select(f => f.Path), Runtime.Files.Select(f => f.Path));
         foreach (var (disk, carried) in onDisk.Zip(Runtime.Files))
         {
@@ -44,16 +48,22 @@ public sealed class RuntimeTests
             var checkedRuntime = Runtime.Check(target, errors);
             Assert.Empty(errors);
             Assert.NotEmpty(checkedRuntime.CommonChecker.FolderCalls); // the rule of the same functions compares something
+            Assert.Contains(checkedRuntime.StdChecker.FolderCalls, f => f.Name == "Memory"); // and of std's, the allocator's memory
+            Assert.Contains(checkedRuntime.CommonChecker.FolderCalls, f => f.Name == "Allocate"); // common reaches the allocator's entry
             Assert.NotEmpty(checkedRuntime.Common.Statements);
             Assert.NotEmpty(checkedRuntime.Sys.Statements);
+            Assert.NotEmpty(checkedRuntime.Std.Statements);
         }
     }
 
-    private static List<RuntimeFile> Runtime3(string common, string linux, string windows) =>
+    private const string Std = "pub long Zero() => 0\n";
+
+    private static List<RuntimeFile> Runtime3(string common, string linux, string windows, string std = Std) =>
     [
         File("runtime/common/a.kz", common),
         File("runtime/linux/a.kz", linux),
         File("runtime/windows/a.kz", windows),
+        File("std/a.kz", std),
     ];
 
     private const string Common = "use sys\n\npub long Out() => sys.Write(1)\n";
@@ -91,6 +101,40 @@ public sealed class RuntimeTests
     }
 
     [Fact]
+    public void A_function_std_calls_with_other_parameters_on_one_target_is_named_as_stds()
+    {
+        const string common = "pub long One() => 1\n";
+        const string std = "use sys\n\npub long Out() => sys.Write(1)\n";
+        Assert.Empty(Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n", std))); // the positive control
+
+        var errors = Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub int Write(int fd) => 0\n", std));
+        Assert.Equal(
+            [
+                "runtime/windows/: `std/` calls `long Write(int)` of runtime/linux/, which this directory does not give with the same parameters and result",
+                "runtime/linux/: `std/` calls `int Write(int)` of runtime/windows/, which this directory does not give with the same parameters and result",
+            ],
+            errors);
+    }
+
+    [Fact]
+    public void Common_reaches_the_pub_functions_of_std_and_its_calls_of_std_are_no_target_function()
+    {
+        const string common = "use std\nuse sys\n\npub long Out() => std.Twice(sys.Write(1))\n";
+        const string std = "pub long Twice(long n) => n * 2\n";
+        Assert.Empty(Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n", std)));
+
+        var hidden = Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n", "long Twice(long n) => n * 2\n"));
+        Assert.Single(hidden, e => e.StartsWith("runtime/common/a.kz:4: not-visible:", StringComparison.Ordinal) && !e.Contains("(in the check for", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_defect_of_std_that_one_target_reports_names_that_target()
+    {
+        var errors = Runtime.CheckEveryTarget(Runtime3(Common, "pub long Write(int fd) => 0\npub long Put() => 0\n", "pub long Write(int fd) => 0\n", "use sys\n\npub long P() => sys.Put()\n"));
+        Assert.Contains(errors, e => e.StartsWith("std/a.kz:3: unknown-name:", StringComparison.Ordinal) && e.EndsWith(" (in the check for windows)", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void A_helper_only_its_own_directory_calls_differs_between_targets_freely()
     {
         Assert.Empty(Runtime.CheckEveryTarget(Runtime3(
@@ -120,6 +164,9 @@ public sealed class RuntimeTests
     [InlineData("runtime/common/x86-64/a.kz", "runtime/common/x86-64/a.kz: the runtime is")] // a directory inside common/, which no round places
     [InlineData("runtime/macos/a.kz", "runtime/macos/a.kz: the runtime is")] // a target the compiler does not know
     [InlineData("runtime/a.kz", "runtime/a.kz: the runtime is")] // a file beside the directories
+    [InlineData("std/b.kz", "std/: not supported: a directory of 2 files")] // two files in std/, which section 8 makes one folder
+    [InlineData("std/alloc/a.kz", "std/alloc/a.kz: not supported: a directory inside std/")] // a folder of its own inside std/
+    [InlineData("std/a.c", "std/a.c: the runtime is")] // a file of std/ that is no Kurz
     public void A_file_the_compiler_does_not_read_in_its_place_is_refused_or_not_supported(string path, string error)
     {
         var files = Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
@@ -135,6 +182,10 @@ public sealed class RuntimeTests
         var files = Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
         files.RemoveAt(2);
         Assert.Contains("runtime/windows/ holds 0 files: the compiler reads one file in each directory of the runtime", Runtime.Layout(files));
+
+        var withoutStd = Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
+        withoutStd.RemoveAt(3);
+        Assert.Equal(["std/ holds 0 files: the compiler reads one file of the standard library"], Runtime.Layout(withoutStd));
     }
 
     // ---- the checker's reading of `use sys` ------------------------------------------------------
