@@ -1,0 +1,11 @@
+// expect: output
+// | true
+// | false
+// rules: D3
+
+data Box(double | string V)
+
+double z = 0.0
+nan = z / z
+print(Box(nan) == Box(nan))
+print(Box(nan) == Box("NaN"))

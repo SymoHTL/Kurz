@@ -418,8 +418,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A value of <paramref name="from"/> where a <paramref name="to"/> is required (T1): the same type; an integer widened (T23); a
-    /// derived data value as its base (D6), the same block; a value into the one case of a union it goes to (D9, T8 with D9); a union
-    /// into a union (D9 with O1).
+    /// derived data value as its base (D6), the same block, and no data value as a type it does not derive from; a value into the one
+    /// case of a union it goes to (D9, T8 with D9); a union into a union (D9 with O1).
     /// </summary>
     private string Convert(string value, KurzType from, KurzType to, int line)
     {
@@ -433,7 +433,7 @@ public sealed partial class Emitter
             return Resize(value, from, to);
         }
 
-        if (from is DataType && to is DataType)
+        if (from is DataType && to is DataType && Types.Assignable(from, to))
         {
             return value; // D6: a block of the derived type reads as a block of its base
         }

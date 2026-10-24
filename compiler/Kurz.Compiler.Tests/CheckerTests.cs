@@ -1019,10 +1019,12 @@ public sealed class CheckerTests
     [Fact]
     public void Data_values_compare_by_content_within_one_type()
     {
-        // D3, D15: `==` between a derived value and its base compiles; between unrelated data types it is type-mismatch
+        // D3, D15: `==` between a derived value and its base compiles; between unrelated data types, and two types derived from one
+        // base, it is type-mismatch
         Clean("data Point(int X, int Y)\n\nprint(Point(1, 2) == Point(1, 2))");
         Clean("data User(int Id)\ndata Admin(int Level) : User\n\nprint(Admin(1, 3) == User(1))");
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data A(int X)\ndata B(int X)\n\nprint(A(1) == B(1))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data User(int Id)\ndata Admin(int Level) : User\ndata Guest(int Visits) : User\n\nprint(Admin(1, 3) == Guest(1, 3))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("data A(int X)\nprint(A(1) < A(2))"));
     }
 

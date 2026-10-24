@@ -9,16 +9,17 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The emitter's decisions on data values, unions and outcomes that no corpus case pins: the number of a type as a union's tag and
 /// the tag's width (design record, section 5, round 19), a block for a data type in a relation of inheritance, copied before a write
-/// (section 4, D5, D6, M4), the arm of a derived type over a value of its base (C4), the text of a thrown value (O7), and what the
-/// emitter says `not supported` to.
+/// (section 4, D5, D6, M4), the order of a path assignment (M4), a static of a block type (R13), the arm of a derived type over a
+/// value of its base (C4), a literal arm on a union (C9), an <c>else</c> used as a statement (O5), the text of a thrown value (O7),
+/// and what the emitter says `not supported` to.
 /// </summary>
 public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    private Compilation Compile(string text) => Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true);
+    private Compilation Compile(string text, params string[] grants) => Builder.Compile(SourceText.FromString("program.kz", text), grants, toolchain.Runtime, testBuild: true);
 
-    private (int Code, IReadOnlyList<string> Output, string Error) BuildAndRun(string text, string name)
+    private (int Code, IReadOnlyList<string> Output, string Error) BuildAndRun(string text, string name, params string[] grants)
     {
-        var compilation = Compile(text);
+        var compilation = Compile(text, grants);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         return Toolchain.Run(toolchain.Build(compilation.Program, name));
     }
@@ -114,6 +115,44 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void An_assignment_into_a_path_follows_the_path_in_the_variable_as_its_value_left_it()
+    {
+        // M4, the owner, 2026-10-24, "Value first": the block on the path is the one the `mut` argument stored
+        const string text = """
+            data Base(int X)
+            data Derived(int Y) : Base
+            data Holder(Base B)
+
+            int Swap(mut Holder held) {
+                held = Holder(Derived(7, 8))
+                return 5
+            }
+
+            mut h = Holder(Derived(1, 2))
+            h.B.X = Swap(mut h)
+            print(h.B)
+            """;
+        Ran(BuildAndRun(text, "path-order-block"), 0, ["Derived { X = 5, Y = 8 }"], "");
+    }
+
+    [Fact]
+    public void A_static_of_a_type_in_a_relation_of_inheritance_is_a_block_of_the_type_of_its_value()
+    {
+        const string text = """
+            data Base
+            data Leaf : Base
+
+            static mut Base b = Leaf
+
+            raw {
+                print(b)
+                print(b == Leaf)
+            }
+            """;
+        Ran(BuildAndRun(text, "static-block", "raw"), 0, ["Leaf", "true"], "");
+    }
+
+    [Fact]
     public void A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value()
     {
         const string text = """
@@ -160,6 +199,43 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(User("Bea") == Admin("Bea", 0))
             """;
         Ran(BuildAndRun(text, "derived-arm"), 0, ["admin 2", "user Bea", "false"], "");
+    }
+
+    [Fact]
+    public void A_literal_arm_on_a_union_takes_the_case_the_literal_is_read_as()
+    {
+        // C9: the checker reads the literal as the union's case of its kind (T8 with D9), here `long` and `byte`
+        const string text = """
+            long | string v = 5
+            match v {
+                5 => print("five")
+                else => print("other")
+            }
+            byte | string w = 7
+            match w {
+                6 => print("six")
+                7 => print("seven")
+                else => print("other")
+            }
+            """;
+        Ran(BuildAndRun(text, "literal-union"), 0, ["five", "seven"], "");
+    }
+
+    [Fact]
+    public void An_else_used_as_a_statement_recovers_with_a_value_it_drops()
+    {
+        // O5: an arm recovers with a value of the success, which a statement does not keep
+        const string text = """
+            data NotFound
+
+            int | NotFound Find(int id) => NotFound
+
+            Find(1) else {
+                NotFound => 0
+            }
+            print("done")
+            """;
+        Ran(BuildAndRun(text, "else-statement"), 0, ["done"], "");
     }
 
     [Fact]

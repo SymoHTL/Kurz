@@ -1,0 +1,17 @@
+// expect: output
+// | Bea
+// | Wien
+// rules: M4
+
+data Address(string City)
+data Customer(string Name, Address Home)
+
+string Move(mut Customer moved) {
+    moved = Customer("Bea", Address("Linz"))
+    return "Wien"
+}
+
+mut c = Customer("Ann", Address("Graz"))
+c.Home.City = Move(mut c)
+print(c.Name)
+print(c.Home.City)

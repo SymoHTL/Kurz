@@ -59,8 +59,7 @@ public sealed partial class Emitter
             info,
             j => Types.Substitute(f.Parameters[j].Type, instanceMap),
             j => f.Parameters[j].Mut,
-            j => f.Declaration!.Parameters[j].Default,
-            owners[f],
+            j => Default(f.Declaration!.Parameters[j].Default, owners[f]),
             f.TakesC);
         var result = Types.Substitute(f.ReturnType, instanceMap);
         var call = $"call {ParameterType(f, result)} {name}({string.Join(", ", arguments)})";
@@ -80,7 +79,7 @@ public sealed partial class Emitter
             libraries.Add(library);
         }
 
-        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => declaration.Parameters[j].Default, owners[f], cConvention: true);
+        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(declaration.Parameters[j].Default, owners[f]), cConvention: true);
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             if (info.Binding[i] < 0)
@@ -138,9 +137,10 @@ public sealed partial class Emitter
     /// The arguments of a call in the order of the parameter slots (D11): the argument bound to the slot, converted to its type, or
     /// the slot's default; a <c>mut</c> slot gets the address of the caller's variable (M7). The arguments are evaluated in the
     /// order they are written; an argument in the place of a C declaration's <c>...</c> (binding -1) is the caller's to add. A
-    /// default is read in the file <paramref name="declaredIn"/> that declares it, which the call may stand outside of.
+    /// default is read in the file that declares it, which <paramref name="slotDefault"/> gives with it and which the call may stand
+    /// outside of.
     /// </summary>
-    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, Expression?> slotDefault, Unit? declaredIn, bool cConvention)
+    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention)
     {
         var values = new string?[c.Arguments.Count];
         for (var i = 0; i < c.Arguments.Count; i++)
@@ -184,8 +184,8 @@ public sealed partial class Emitter
             }
             else
             {
-                var d = slotDefault(j) ?? throw new InvalidOperationException($"the slot {j} of the call at line {c.Line} has no argument and no default");
-                value = EmitDefault(declaredIn!, d, type);
+                var (d, declaredIn) = slotDefault(j) ?? throw new InvalidOperationException($"the slot {j} of the call at line {c.Line} has no argument and no default");
+                value = EmitDefault(declaredIn, d, type);
             }
 
             arguments.Add($"{(cConvention ? Lower.CType(type) : Ir(type))} {value}");
@@ -193,6 +193,8 @@ public sealed partial class Emitter
 
         return arguments;
     }
+
+    private static (Expression Value, Unit File)? Default(Expression? d, Unit declaredIn) => d is null ? null : (d, declaredIn);
 
     /// <summary>A parameter's or a field's default (D11), read in the file that declares it.</summary>
     private string EmitDefault(Unit declaredIn, Expression d, KurzType type)
@@ -303,7 +305,7 @@ public sealed partial class Emitter
     private string EmitStringFromRaw(CallExpression c)
     {
         var info = Model.CallOf(c);
-        var arguments = Arguments(c, info, j => j == 0 ? new PointerType(Types.Byte) : Types.Long, _ => false, _ => null, null, cConvention: false);
+        var arguments = Arguments(c, info, j => j == 0 ? new PointerType(Types.Byte) : Types.Long, _ => false, _ => null, cConvention: false);
         var pointer = arguments[0]["ptr ".Length..];
         var count = arguments[1]["i64 ".Length..];
         var tooLong = fn.Label("too.long");
