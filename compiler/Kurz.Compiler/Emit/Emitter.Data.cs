@@ -14,7 +14,7 @@ public sealed partial class Emitter
     {
         var type = (DataType)Sub(info.Result);
         var fields = Layout.Fields(type);
-        var arguments = Arguments(c, info, j => fields[j], _ => false, j => FieldDefault(type.Symbol, j), cConvention: false);
+        var arguments = Arguments(c, info, j => fields[j], _ => false, j => FieldDefault(type.Symbol, j), cConvention: false, owned: true);
         return Make(type, arguments.Select((a, j) => a[(Ir(fields[j]).Length + 1)..]).ToList());
     }
 
@@ -84,7 +84,11 @@ public sealed partial class Emitter
             : fn.Value($"extractvalue {Ir(type)} {value}, {Number(index)}");
     }
 
-    /// <summary>D5: a copy of the value with the fields replaced, the values read in the order written after the value; a block is copied whole, as the type of the value it holds, so that a derived value stays one.</summary>
+    /// <summary>
+    /// D5: a copy of the value with the fields replaced, the values read in the order written after the value; a block is copied
+    /// whole, as the type of the value it holds, so that a derived value stays one. The copy holds its replaced fields' values and,
+    /// a plain value, the lists of the fields it keeps once more.
+    /// </summary>
     private string EmitWith(WithExpression w)
     {
         var type = (DataType)TypeOf(w.Target);
@@ -93,7 +97,7 @@ public sealed partial class Emitter
         var replaced = w.Assignments.Select(a =>
         {
             var index = Layout.FieldIndex(type, a.Field);
-            return (Index: index, Value: Convert(EmitExpression(a.Value), TypeOf(a.Value), fields[index], a.Value.Line));
+            return (Index: index, Value: Convert(Owned(a.Value), TypeOf(a.Value), fields[index], a.Value.Line));
         }).ToList();
         if (layout.IsBlock(type))
         {
@@ -104,6 +108,14 @@ public sealed partial class Emitter
             }
 
             return copy;
+        }
+
+        for (var i = 0; i < fields.Count; i++)
+        {
+            if (Counted(fields[i]) && !replaced.Exists(r => r.Index == i))
+            {
+                Retain(fn.Value($"extractvalue {Ir(type)} {value}, {Number(i)}"), fields[i]);
+            }
         }
 
         foreach (var (index, v) in replaced)
@@ -172,7 +184,7 @@ public sealed partial class Emitter
     /// M4: an assignment into a path of a <c>mut</c> variable, short for nested <c>with</c>: the value is read first, then the path in
     /// the variable as the value left it (the owner, 2026-10-24, "Value first"); each data value on the path changes in place, a plain
     /// value in its variable or its field, and a block after it was copied into the place that held it, since another variable may
-    /// hold the same block.
+    /// hold the same block. The field lets go of its old value, unless the field is in a block copied here, whose old block keeps it.
     /// </summary>
     private void EmitPathAssignment(Assignment a)
     {
@@ -186,15 +198,17 @@ public sealed partial class Emitter
 
         var root = (NameExpression)target;
         var variable = Model.VariableOf(root);
-        var value = Convert(EmitExpression(a.Value), TypeOf(a.Value), TypeOf(a.Target), a.Value.Line);
+        var value = Convert(Owned(a.Value), TypeOf(a.Value), TypeOf(a.Target), a.Value.Line);
         var place = Place(variable, root.Line);
         var type = Sub(variable.Type);
+        var copied = false;
         foreach (var m in members)
         {
             var data = (DataType)type;
             var index = Layout.FieldIndex(data, m.Member);
             if (layout.IsBlock(data))
             {
+                copied = true;
                 var copy = CopyBlock(fn.Value($"load ptr, ptr {place}"), data.Symbol);
                 fn.Emit($"store ptr {copy}, ptr {place}");
                 place = FieldPointer(layout.Block(data.Symbol), copy, index);
@@ -207,7 +221,14 @@ public sealed partial class Emitter
             type = Layout.Fields(data)[index];
         }
 
-        fn.Emit($"store {Ir(type)} {value}, ptr {place}");
+        if (copied)
+        {
+            fn.Emit($"store {Ir(type)} {value}, ptr {place}");
+        }
+        else
+        {
+            Store(value, type, place);
+        }
     }
 
     // ---- equality (D3, D15) and text (A3, A4) ----------------------------------------------------
@@ -370,7 +391,9 @@ public sealed partial class Emitter
         }
 
         var saved = fn;
+        var (savedRegions, savedScopes) = (regions, scopes);
         fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})", Attributes());
+        (regions, scopes) = ([], []); // a helper makes no temporary and has no variable
         try
         {
             body();
@@ -379,6 +402,7 @@ public sealed partial class Emitter
         finally
         {
             fn = saved;
+            (regions, scopes) = (savedRegions, savedScopes);
         }
 
         return name;

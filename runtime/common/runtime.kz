@@ -243,6 +243,56 @@ pub string Concat(string first, string second) {
     return text
 }
 
+// The text of a list (A4): the texts of its `count` items, one or more, which `texts` holds as a
+// string is laid out, the address of its bytes and their count, 8 bytes each, between `[` and `]`
+// and with `, ` between them; more bytes than the largest `int` end the process as a refused
+// allocation does.
+pub string ListText(byte* texts, long count) {
+    mut long total = 2 * count
+    raw {
+        mut long i = 0
+        while i < count {
+            total = total + *Ptr<long>(texts + i * 16 + 8)
+            i = i + 1
+        }
+    }
+
+    if total > 2147483647 {
+        AllocationFailed(total)
+    }
+
+    mut string text = ""
+    raw {
+        byte* p = Allocate(total)
+        p[0] = 91
+        mut long at = 1
+        mut long i = 0
+        while i < count {
+            if i > 0 {
+                p[at] = 44
+                p[at + 1] = 32
+                at = at + 2
+            }
+
+            byte* from = Ptr<byte>(*Ptr<long>(texts + i * 16))
+            long n = *Ptr<long>(texts + i * 16 + 8)
+            mut long j = 0
+            while j < n {
+                p[at + j] = from[j]
+                j = j + 1
+            }
+
+            at = at + n
+            i = i + 1
+        }
+
+        p[at] = 93
+        text = string.FromRaw(p, total)
+    }
+
+    return text
+}
+
 // Whether two strings hold the same bytes (T18).
 pub bool Same(string first, string second) {
     long a = long(first.Bytes.Count)

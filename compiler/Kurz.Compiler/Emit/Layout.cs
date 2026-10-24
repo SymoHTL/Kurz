@@ -127,8 +127,8 @@ internal sealed class Layout(IrModule module)
 
     /// <summary>
     /// The <c>not supported</c> of the part of the type the emitter does not lay out, or null where it lays out all of it: what
-    /// <see cref="Lower.Supported"/> takes, data whose fields it lays out, unless the type is generic and a block, and unions of such
-    /// cases. A type met again inside itself is read once.
+    /// <see cref="Lower.Supported"/> takes, data whose fields it lays out, unless the type is generic and a block, unions of such
+    /// cases and lists of such items. A type met again inside itself is read once.
     /// </summary>
     public string? Refusal(KurzType type)
     {
@@ -146,6 +146,7 @@ internal sealed class Layout(IrModule module)
                 DataType d when d.Symbol.IsGeneric && recursive.Contains(d.Symbol) => $"a generic data type that holds a value of its own type, `{d}` (D1, T19)",
                 DataType d => Fields(d).Select(Refusal).FirstOrDefault(r => r is not null),
                 UnionType u => u.Cases.Where(c => c is not VoidType).Select(Refusal).FirstOrDefault(r => r is not null),
+                ListType l => Refusal(l.Element),
                 _ => Lower.Supported(type) ? null : Lower.Refusal(type),
             };
         }

@@ -7,6 +7,7 @@ extern "C" {
     long write(int fd, byte* bytes, long count)
     void _exit(int status)
     void* mmap(void* address, long length, int protection, int options, int fd, long offset)
+    int munmap(void* address, long length)
     void* signal(int number, void* handler)
     int* __errno_location()
 }
@@ -49,6 +50,13 @@ pub byte* Memory(long bytes) {
     }
 
     return p
+}
+
+// Memory `Memory` gave, `bytes` bytes of it from its start, given back to the system by `munmap`.
+pub void Release(byte* p, long bytes) {
+    raw {
+        munmap(Ptr<void>(p), bytes)
+    }
 }
 
 // The end of the process with the exit code, at once: `_exit` runs no handler of the C library
