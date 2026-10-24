@@ -50,8 +50,9 @@ FLOOR = 5
 # case of the segment; .gitignore keeps them out of a normal add only as spelled there, and the gate alone
 # covers the other spellings. ci/Dockerfile is the image the gates job runs in, by its one name. runtime/
 # holds the runtime's Kurz, .kz files in its directories, which the build of the compiler embeds (design record,
-# section 2, round 20), and std/ the standard library's, .kz files at any depth, which it embeds too (the owner,
-# 2026-10-24, "A std/ directory now").
+# section 2, round 20), and std/ the standard library's (the owner, 2026-10-24, "A std/ directory now"), .kz
+# files at any depth, as the build embeds std/**/*.kz, where the compiler says not supported to a place it does
+# not read.
 ALLOWED = [
     r"CLAUDE\.md", r"INDEX\.md", r"README\.md", r"LICENSE(?:\.md)?", r"kurz-design\.md",
     r"\.gitattributes", r"\.gitignore",

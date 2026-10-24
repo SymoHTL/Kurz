@@ -207,8 +207,8 @@ ask about it.
 The runtime a built program links is written in Kurz, in `runtime/` at the top of the repository
 (design record, section 2): `runtime/common/` holds the code every target shares, and
 `runtime/linux/` and `runtime/windows/` the code of one target each. The standard library's Kurz
-code is in `std/` at the top of the repository, beside `runtime/`: the allocator of section 3 (the
-owner, 2026-10-24, "A std/ directory now"). The build of the compiler embeds every `.kz` file of
+code is in `std/`: the allocator of section 3 (the owner, 2026-10-24, "A std/ directory now"), at
+the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
 folder `sys`: it writes `use sys` and calls `sys.Write(...)`, and `sys` is that target's directory
@@ -217,7 +217,7 @@ a directory this compiler does not read (below). The checker reads `use sys` at 
 `common/`, and a call qualified by `sys` picks among the folder's `pub` functions; a function of the
 folder that is not `pub` is `not-visible` there (F9), and a name the folder does not declare is
 `unknown-name` (V10). `std/` reaches the target's directory as `sys` in the same way, and `common/`
-reaches `std/` as the folder `std`, `use std` and `std.Allocate(...)`.
+reaches `std/` as the folder `std`, `use std` and `std.Allocate(...)` (the owner, 2026-10-24, "As built").
 
 `Runtime.CheckEveryTarget` checks the runtime for every target, each folder granted `raw` and
 `native` (R7, R16): the target's directory on its own, then `std/` with it as `sys`, then `common/`
@@ -241,8 +241,8 @@ the process with the exit code 0 through the target's `Exit`, the runtime's one 
 `common/` gives what the emitted code calls: `Print`, the text of an integer and of a `char`, the
 joining and the comparison of two strings, `Raise` for an exception of the run-time table and
 `Throw`, and `Allocate`, which takes its memory from the allocator's entry, `std/`'s `Allocate`
-(record, section 2), and ends the process where the entry gives null, as Rust's `handle_alloc_error`
-does for the null of its allocator's `alloc`. The entry takes memory from the system's `Memory` in
+(record, section 2), and ends the process where the entry gives null (the owner, 2026-10-24, "Null,
+runtime ends it"), as Rust's `handle_alloc_error` does for the null of its allocator's `alloc`. The entry takes memory from the system's `Memory` in
 pieces of a mebibyte per thread, and an allocation of more than a quarter of that in a piece of its
 own, gives null where the system refuses, and frees nothing: the reference counting of section 3 is
 not emitted. A target's directory gives `Start`, `Write`,

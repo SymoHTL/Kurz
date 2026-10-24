@@ -39,7 +39,7 @@ Case: [values/copy-on-assign.kz](../corpus/values/copy-on-assign.kz)
 ### M4 (decided, §4) Assigning into a path
 
 Assigning to a field at the end of a path that starts at a `mut` variable changes that variable's
-value. It is short for nested `with` (D5). The value is evaluated first, then the path, in the
+value. It is short for nested `with` (D5) in what it stores, and not in its order: the value is evaluated first, then the path, in the
 variable as the value left it: a `mut` argument in the value that changes the variable keeps its
 change (§4, the owner, 2026-10-24). On an immutable variable it is the compile error
 `assign-immutable` (D4). A class instance on the path starts the path anew: from a `mut` field of
@@ -186,7 +186,8 @@ No case: actors are outside this reference; that collections are values is shown
 `List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method; `Count` is the number
 of items, an `int`, and a list holds at most as many items as the largest `int`, an `Add` that
 would make it longer raising `allocation-failed` with the bytes the grown list would take, its items
-times the size of an item (§4, the owner, 2026-10-23 and 2026-10-24); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
+times the size of an item: the count after the `Add` times the item's size in its layout, padding
+included, a pointer's 8 for a type laid out as a block (§4, the owner, 2026-10-23 and 2026-10-24); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
 or beyond raises `index-out-of-range` (T14); `Where(test)` is the list of
 items that pass the test. `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the

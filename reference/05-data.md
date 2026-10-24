@@ -37,7 +37,8 @@ K5). A field of a union (D9) compares equal when the two values hold the same ca
 values of that case are equal, as Rust's derived `PartialEq` compares a field of an enum (§4, the
 owner, 2026-10-23). The two values of that case compare as a field of the case's type does, so a
 `double` or `float` case that holds NaN equals itself, as a C# record calls `Equals` on a field of
-type `object` (§4, the owner, 2026-10-24).
+type `object` (§4, the owner, 2026-10-24); there Kurz departs from Rust's `PartialEq`, which
+compares the two values with their `==`, under which NaN is unequal to itself (§4).
 
 Case: [classes/equal-by-nan.kz](../corpus/classes/equal-by-nan.kz)
 ```kurz

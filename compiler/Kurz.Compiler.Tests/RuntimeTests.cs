@@ -10,7 +10,7 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The runtime's Kurz under <c>runtime/</c> and the standard library's under <c>std/</c> (design record, section 2; the owner, 2026-10-24,
 /// "A std/ directory now"): what the compiler carries is the files of the repository, every target's check is clean, and every target's
-/// directory gives the functions <c>common/</c> and <c>std/</c> call with the same parameters and result; and
+/// directory gives the functions <c>common/</c> and <c>std/</c> call with the same parameters and result (the owner, 2026-10-24, "As built"); and
 /// the checker's reading of a folder that a `use` brings in, <c>sys</c> (F9, F10, and for the qualified call the design record's section 2:
 /// the owner, 2026-10-23, "Rust's sys").
 /// </summary>
@@ -49,7 +49,7 @@ public sealed class RuntimeTests
             Assert.Empty(errors);
             Assert.NotEmpty(checkedRuntime.CommonChecker.FolderCalls); // the rule of the same functions compares something
             Assert.Contains(checkedRuntime.StdChecker.FolderCalls, f => f.Name == "Memory"); // and of std's, the allocator's memory
-            Assert.Contains(checkedRuntime.CommonChecker.FolderCalls, f => f.Name == "Allocate"); // common reaches the allocator's entry
+            Assert.Contains(checkedRuntime.CommonChecker.FolderCalls, f => f.Name == "Allocate" && checkedRuntime.Std.Statements.Contains(f.Declaration)); // common reaches std's entry
             Assert.NotEmpty(checkedRuntime.Common.Statements);
             Assert.NotEmpty(checkedRuntime.Sys.Statements);
             Assert.NotEmpty(checkedRuntime.Std.Statements);
@@ -101,7 +101,7 @@ public sealed class RuntimeTests
     }
 
     [Fact]
-    public void A_function_std_calls_with_other_parameters_on_one_target_is_named_as_stds()
+    public void A_function_std_calls_with_another_result_on_one_target_is_named_as_stds()
     {
         const string common = "pub long One() => 1\n";
         const string std = "use sys\n\npub long Out() => sys.Write(1)\n";
@@ -122,6 +122,12 @@ public sealed class RuntimeTests
         const string common = "use std\nuse sys\n\npub long Out() => std.Twice(sys.Write(1))\n";
         const string std = "pub long Twice(long n) => n * 2\n";
         Assert.Empty(Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n", std)));
+
+        var errors = new List<string>();
+        var checkedRuntime = Runtime.Check(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n", std), Target.Linux, errors);
+        Assert.Empty(errors);
+        Assert.Contains(checkedRuntime.CommonChecker.FolderCalls, f => f.Name == "Twice"); // the positive control: common calls std's `Twice`
+        Assert.Equal(["long Write(int)"], Runtime.TargetCalls(checkedRuntime)["common/"]); // and the rule of the same functions does not count it
 
         var hidden = Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n", "long Twice(long n) => n * 2\n"));
         Assert.Single(hidden, e => e.StartsWith("runtime/common/a.kz:4: not-visible:", StringComparison.Ordinal) && !e.Contains("(in the check for", StringComparison.Ordinal));
@@ -166,7 +172,7 @@ public sealed class RuntimeTests
     [InlineData("runtime/a.kz", "runtime/a.kz: the runtime is")] // a file beside the directories
     [InlineData("std/b.kz", "std/: not supported: a directory of 2 files")] // two files in std/, which section 8 makes one folder
     [InlineData("std/alloc/a.kz", "std/alloc/a.kz: not supported: a directory inside std/")] // a folder of its own inside std/
-    [InlineData("std/a.c", "std/a.c: the runtime is")] // a file of std/ that is no Kurz
+    [InlineData("std/a.c", "std/a.c: the standard library is `std/<file>.kz`")] // a file of std/ that is no Kurz
     public void A_file_the_compiler_does_not_read_in_its_place_is_refused_or_not_supported(string path, string error)
     {
         var files = Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");

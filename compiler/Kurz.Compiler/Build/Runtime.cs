@@ -39,9 +39,10 @@ public sealed record CheckedRuntime(
 /// <c>sys.Write(...)</c>; the owner, 2026-10-23, "Rust's sys"), and every target's directory gives the functions <c>common/</c> calls,
 /// each with the same parameters and the same result (round 20, "Called from outside"). The standard library's Kurz code, the allocator
 /// of section 3, is under <c>std/</c> at the top of the repository, which the build of the compiler embeds too and the compiler compiles
-/// with every program as it compiles the runtime: it reaches the target's directory as the folder <c>sys</c>, and <c>common/</c> reaches it
-/// as the folder <c>std</c> (the owner, 2026-10-24, "A std/ directory now"), so a function of a target's directory that <c>std/</c> calls is
-/// one that every target's directory gives too. Every folder is checked granted <c>raw</c> and <c>native</c> (R7, R16);
+/// with every program as it compiles the runtime (the owner, 2026-10-24, "A std/ directory now"; its place and its one file <c>std/std.kz</c>
+/// are the record's assumptions): it reaches the target's directory as the folder <c>sys</c>, <c>common/</c> reaches it as the folder
+/// <c>std</c>, and a function of a target's directory that <c>std/</c> calls is one that every target's directory gives too (the owner,
+/// 2026-10-24, "As built"). Every folder is checked granted <c>raw</c> and <c>native</c> (R7, R16);
 /// <see cref="CheckEveryTarget"/> checks every target in turn, so that the code of no target is checked only in a build for it (the
 /// record's reading of round 20).
 /// The compiler reads one file in each of the four directories and no directory inside them: a folder of several files, which section 8
@@ -98,7 +99,9 @@ public static class Runtime
             }
             else if (!known || parts.Length != 3)
             {
-                errors.Add($"{file.Path}: the runtime is `runtime/common/<file>.kz` and `runtime/<target>/<file>.kz`, a target being one of {string.Join(", ", folders.Skip(1))}, and the standard library `std/<file>.kz`");
+                errors.Add(parts[0] == "std"
+                    ? $"{file.Path}: the standard library is `std/<file>.kz`"
+                    : $"{file.Path}: the runtime is `runtime/common/<file>.kz` and `runtime/<target>/<file>.kz`, a target being one of {string.Join(", ", folders.Skip(1))}, and the standard library `std/<file>.kz`");
             }
         }
 
@@ -165,15 +168,7 @@ public static class Runtime
         foreach (var target in Enum.GetValues<Target>())
         {
             reported[target] = [];
-            var checkedRuntime = Check(files, target, reported[target]);
-            // the calls of the target's directory, which common/'s calls of std/ are not
-            var given = new HashSet<FunctionDeclaration>(checkedRuntime.Sys.Statements.OfType<FunctionDeclaration>(), ReferenceEqualityComparer.Instance);
-            bool Given(FunctionSymbol f) => f.Declaration is { } d && given.Contains(d);
-            called[target] = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal)
-            {
-                ["common/"] = new(checkedRuntime.CommonChecker.FolderCalls.Where(Given).Select(Signature), StringComparer.Ordinal),
-                [StdDirectory] = new(checkedRuntime.StdChecker.FolderCalls.Where(Given).Select(Signature), StringComparer.Ordinal),
-            };
+            called[target] = TargetCalls(Check(files, target, reported[target]));
         }
 
         foreach (var line in reported.Values.SelectMany(l => l).Distinct(StringComparer.Ordinal))
@@ -208,6 +203,21 @@ public static class Runtime
         }
 
         return errors;
+    }
+
+    /// <summary>
+    /// The functions of the target's directory that <c>common/</c> and <c>std/</c> call, by their signatures, keyed by the caller's
+    /// directory: the calls of <c>common/</c> into <c>std/</c> are no calls of the target's.
+    /// </summary>
+    internal static Dictionary<string, SortedSet<string>> TargetCalls(CheckedRuntime checkedRuntime)
+    {
+        var given = new HashSet<FunctionDeclaration>(checkedRuntime.Sys.Statements.OfType<FunctionDeclaration>(), ReferenceEqualityComparer.Instance);
+        bool Given(FunctionSymbol f) => f.Declaration is { } d && given.Contains(d);
+        return new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal)
+        {
+            ["common/"] = new(checkedRuntime.CommonChecker.FolderCalls.Where(Given).Select(Signature), StringComparer.Ordinal),
+            [StdDirectory] = new(checkedRuntime.StdChecker.FolderCalls.Where(Given).Select(Signature), StringComparer.Ordinal),
+        };
     }
 
     /// <summary>A function's result, name and parameters, <c>long Write(int, byte*, long)</c>, a <c>mut</c> parameter marked.</summary>
