@@ -830,8 +830,13 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 15)], Errors(arm + "        numbers.Add(1)\n        5\n    }\n}))"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 17)], Errors(arm + "        k = 1\n        if k == 1 {\n            numbers = List<int>()\n        }\n        5\n    }\n}))"));
         Clean(arm + "        mut others = List<int>()\n        others.Add(1)\n        others.Count\n    }\n}))"); // a variable of the arm's own
+        Clean(find + "mut numbers = List<int>()\nprint(Find(2) else {\n    NotFound => {\n        numbers = List<int>()\n        5\n    }\n})\nprint(numbers.Count)"); // an arm's change that nothing holds
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ndata Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => xs.Count + n\n\nmut cart = Cart(List<int>())\nprint(Count(cart.Items, Find(2) else {\n    NotFound => {\n        cart.Items = List<int>()\n        5\n    }\n}))")); // a path assignment
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 22)], Errors(grow + "int Foo(List<int> xs, int n) => n\n\n" + find + "mut numbers = List<int>()\nprint(Sum(numbers, Find(2) else {\n    NotFound => {\n        print(Foo(numbers, Grow(mut numbers)))\n        5\n    }\n}))")); // one change, two holders: one error
+
+        // a read through `?.` and a value of a type with a generic base are not read (N5, T19), so the walk meets no held read of them
+        Assert.Equal(["11: `?.` (N5)"], NotSupported("data Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => n\n\nint Clear(mut Cart c) {\n    c = Cart(List<int>())\n    return 0\n}\n\nmut cart = Cart(List<int>())\nprint(Count(cart?.Items, Clear(mut cart)))"));
+        Assert.Equal(["2: a generic data type as a base (T19)"], NotSupported("data Base<T>(T X)\ndata Derived(List<int> Items) : Base<int>\n\nint Reset(mut Base<int> b) {\n    b = Base(2)\n    return 0\n}\n\nint Size(Base<int> b, int n) => n\n\nmut Base<int> p = Base(1)\nprint(Size(p, Reset(mut p)))"));
 
         // a `mut` method takes its receiver as `mut`: an argument that holds a part of it is held, a copied one is not
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 3)], Errors("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)"));
