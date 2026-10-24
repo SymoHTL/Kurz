@@ -14,7 +14,8 @@
 
   <!-- The runtime's Kurz, carried in the compiler (design record, section 2, round 20): every file under
        runtime/ at the top of the repository, by its path from there, runtime/common/runtime.kz; and the
-       standard library's, every file under std/, as std/std.kz (the owner, 2026-10-24, "A std/ directory now"). -->
+       standard library's, every file under std/ (the owner, 2026-10-24, "A std/ directory now"), of which the
+       compiler reads the one file std/std.kz (design record, section 2, an assumption there). -->
   <ItemGroup>
     <EmbeddedResource Include="../../runtime/**/*.kz" LogicalName="runtime/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="../../std/**/*.kz" LogicalName="std/%(RecursiveDir)%(Filename)%(Extension)" />

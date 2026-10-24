@@ -1,7 +1,7 @@
 // The part of the runtime every target shares (design record, section 2). It reaches the functions of
 // the target the program is built for as the folder `sys`, the target's directory (the owner,
 // 2026-10-23, "Rust's sys"), and the standard library's allocator as the folder `std` (the owner,
-// 2026-10-24, "A std/ directory now"). The emitted code calls its `pub` functions: `Start` before the
+// 2026-10-24, "A std/ directory now" and "As built"). The emitted code calls its `pub` functions: `Start` before the
 // program's first statement and `Finish` after its last, and the others where the program allocates,
 // prints, makes the text of a value, joins or compares strings, or raises an exception
 // (compiler/README.md, "The runtime").
