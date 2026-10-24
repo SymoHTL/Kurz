@@ -779,41 +779,70 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_read_of_what_a_call_takes_as_mut_that_the_expression_still_holds_is_mut_at_call()
+    public void A_read_the_expression_still_holds_while_a_call_or_an_arm_changes_it_is_changed_while_held()
     {
-        // M7 (the owner, 2026-10-24), beside the corpus's cases: a call deeper inside, an arm, paths, one error for each argument
-        // after `mut` (E1), and the record's assumptions on a `string`, a hole, a type derived from a data type and a type parameter
+        // M7 (the owner, 2026-10-24 and 2026-10-25), beside the corpus's cases: a call deeper inside, an arm, paths, one error for
+        // each change (E1), what an arm's statement changes, a `mut` method's receiver, and the copied types
         var grow = "int Grow(mut List<int> xs) {\n    xs.Add(5)\n    return xs.Count\n}\n\nint Sum(List<int> xs, int n) => xs.Count + n\n\n";
-        Assert.Equal([(ErrorIds.MutAtCall, 9)], Errors(grow + "mut numbers = List<int>()\nprint(Sum(numbers, 1 + Grow(mut numbers)))"));
-        Assert.Equal([(ErrorIds.MutAtCall, 11)], Errors(grow + "mut numbers = List<int>()\nk = 1\nprint(Sum(numbers, match k {\n    1 => Grow(mut numbers)\n    else => 0\n}))"));
-        Assert.Equal([(ErrorIds.MutAtCall, 11)], Errors(grow + "mut numbers = List<int>()\nk = 1\nmatch k {\n    1 => print(Sum(numbers, Grow(mut numbers)))\n    else => print(0)\n}")); // an arm's statement, read once
-        Assert.Equal([(ErrorIds.MutAtCall, 11)], Errors(grow + "int Three(List<int> a, List<int> b, int n) => n\n\nmut numbers = List<int>()\nprint(Three(numbers, numbers, Grow(mut numbers)))"));
-        Assert.Equal([(ErrorIds.MutAtCall, 11), (ErrorIds.MutAtCall, 11)], Errors(grow + "int Both(List<int> a, int m, int n) => m + n\n\nmut numbers = List<int>()\nprint(Both(numbers, Grow(mut numbers), Grow(mut numbers)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(grow + "mut numbers = List<int>()\nprint(Sum(numbers, 1 + Grow(mut numbers)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11)], Errors(grow + "mut numbers = List<int>()\nk = 1\nprint(Sum(numbers, match k {\n    1 => Grow(mut numbers)\n    else => 0\n}))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11)], Errors(grow + "mut numbers = List<int>()\nk = 1\nmatch k {\n    1 => print(Sum(numbers, Grow(mut numbers)))\n    else => print(0)\n}")); // an arm's statement, read once
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11)], Errors(grow + "int Three(List<int> a, List<int> b, int n) => n\n\nmut numbers = List<int>()\nprint(Three(numbers, numbers, Grow(mut numbers)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11), (ErrorIds.ChangedWhileHeld, 11)], Errors(grow + "int Both(List<int> a, int m, int n) => m + n\n\nmut numbers = List<int>()\nprint(Both(numbers, Grow(mut numbers), Grow(mut numbers)))"));
         Clean(grow + "mut numbers = List<int>()\nprint(Sum(numbers, 0) + Grow(mut numbers))"); // the call around the read has ended
 
         var cart = "data Cart(List<int> Items, List<int> Seen)\n\nint Clear(mut Cart c) {\n    c = Cart(List<int>(), List<int>())\n    return 0\n}\n\nint Drop(mut List<int> xs) {\n    xs = List<int>()\n    return 0\n}\n\nint Count(List<int> xs, int n) => xs.Count + n\n\nint Size(Cart c, int n) => c.Items.Count + n\n\nmut cart = Cart(List<int>(), List<int>())\n";
-        Assert.Equal([(ErrorIds.MutAtCall, 18)], Errors(cart + "print(Count(cart.Items, Clear(mut cart)))")); // a path into the variable
-        Assert.Equal([(ErrorIds.MutAtCall, 18)], Errors(cart + "print(Size(cart, Drop(mut cart.Items)))")); // the value that holds the path
-        Assert.Equal([(ErrorIds.MutAtCall, 18)], Errors(cart + "print(Count(cart.Items, Drop(mut cart.Items)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 18)], Errors(cart + "print(Count(cart.Items, Clear(mut cart)))")); // a path into the variable
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 18)], Errors(cart + "print(Size(cart, Drop(mut cart.Items)))")); // the value that holds the path
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 18)], Errors(cart + "print(Count(cart.Items, Drop(mut cart.Items)))"));
         Clean(cart + "print(Count(cart.Seen, Drop(mut cart.Items)))"); // two fields of one variable are two values
 
         var name = "string Name(mut string t) {\n    t = \"b\"\n    return \"c\"\n}\n\nmut s = \"a\"\n";
-        Assert.Equal([(ErrorIds.MutAtCall, 7)], Errors(name + "print(s == Name(mut s))")); // a `string` is not copied
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors(name + "print(s == Name(mut s))")); // a `string` is not copied
         Clean(name + "print(\"{s}{Name(mut s)}\")"); // a hole is made text where it stands
-        Clean("data End\ndata Node(int V, Node | End Next)\n\nint Cut(mut Node node) {\n    node = Node(0, End)\n    return 1\n}\n\nint Value(Node node, int n) => node.V + n\n\nmut first = Node(1, End)\nprint(Value(first, Cut(mut first)))"); // a data type that holds itself and no list is copied
-        Assert.Equal([(ErrorIds.MutAtCall, 13)], Errors("data Person(int Id)\ndata Member(List<int> Items) : Person\n\nint Reset(mut Person q) {\n    q = Person(2)\n    return 0\n}\n\nint Size(Person q, int n) => q.Id + n\n\nmut Person p = Member(1, List<int>())\nprint(p.Id)\nprint(Size(p, Reset(mut p)))")); // a type derived from it holds a list
-        Assert.Equal([(ErrorIds.MutAtCall, 6)], Errors("T Same<T>(mut T a) => a\n\nT Pick<T>(T a, T b) => a\n\nvoid Run<T>(mut T v) {\n    v = Pick(v, Same(mut v))\n}")); // a type parameter is not copied
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors("data End\ndata Node(int V, Node | End Next)\n\nint Cut(mut Node node) {\n    node = Node(0, End)\n    return 1\n}\n\nint Value(Node node, int n) => node.V + n\n\nmut first = Node(1, End)\nprint(Value(first, Cut(mut first)))")); // a data type that holds itself is not copied, as a Rust `Box`
+        Clean("data Inner(int A)\ndata Outer(Inner X, Inner Y)\n\nint Cut(mut Outer o) {\n    o = Outer(Inner(0), Inner(0))\n    return 1\n}\n\nint Value(Outer o, int n) => o.Y.A + n\n\nmut first = Outer(Inner(1), Inner(2))\nprint(Value(first, Cut(mut first)))"); // a type met twice is no type that holds itself
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 13)], Errors("data Person(int Id)\ndata Member(List<int> Items) : Person\n\nint Reset(mut Person q) {\n    q = Person(2)\n    return 0\n}\n\nint Size(Person q, int n) => q.Id + n\n\nmut Person p = Member(1, List<int>())\nprint(p.Id)\nprint(Size(p, Reset(mut p)))")); // a type derived from it holds a list
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors("T Same<T>(mut T a) => a\n\nT Pick<T>(T a, T b) => a\n\nvoid Run<T>(mut T v) {\n    v = Pick(v, Same(mut v))\n}")); // a type parameter is not copied
         Clean("int Later(mut duration d) {\n    d = d + 1ms\n    return 1\n}\n\nint Keep(duration d, int n) => n\n\nmut duration t = 1ms\nprint(Keep(t, Later(mut t)))"); // a time is copied
-        Assert.Equal([(ErrorIds.MutAtCall, 9)], Errors("int Swap(mut (int) => int g) {\n    g = x => x\n    return 1\n}\n\nint Keep((int) => int g, int n) => n\n\nmut (int) => int f = x => x + 1\nprint(Keep(f, Swap(mut f)))")); // a function value is not copied
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors("int Swap(mut (int) => int g) {\n    g = x => x\n    return 1\n}\n\nint Keep((int) => int g, int n) => n\n\nmut (int) => int f = x => x + 1\nprint(Keep(f, Swap(mut f)))")); // a function value is not copied
         Clean("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nint Swap(mut extern \"C\" (long) => long g) {\n    g = Twice\n    return 1\n}\n\nint Keep(extern \"C\" (long) => long g, int n) => n\n\nmut extern \"C\" (long) => long f = Twice\nprint(Keep(f, Swap(mut f)))", "native"); // the type of a C function is copied
 
-        // the text names what is read, the path passed as `mut` and the type that is not copied, and how to keep the value
-        List<string> Said(string program) => Check(program).Diagnostics.Sorted.Select(d => d.Message).ToList();
-        const string fix = ": copy it into a variable of its own on a line before (M7)";
-        Assert.Equal(["`numbers` is still in use while the call that takes `mut numbers` runs, and a `List<int>` is not copied" + fix], Said(grow + "mut numbers = List<int>()\nprint(Sum(numbers, Grow(mut numbers)))"));
-        Assert.Equal(["`cart.Items` is still in use while the call that takes `mut cart` runs, and a `List<int>` is not copied" + fix], Said(cart + "print(Count(cart.Items, Clear(mut cart)))"));
-        Assert.Equal(["an item of `rows` is still in use while the call that takes `mut rows` runs, and a `List<int>` is not copied" + fix], Said("int Clear(mut List<List<int>> all) {\n    all = List<List<int>>()\n    return 0\n}\n\nint Sum(List<int> row, int n) => row.Count + n\n\nmut rows = List<List<int>>()\nprint(Sum(rows[0], Clear(mut rows)))"));
-        Assert.Equal(["a lambda that reads `numbers` is still in use while the call that takes `mut numbers` runs, and a `List<int>` is not copied" + fix], Said(grow + "int Apply(() => int f, int n) => f() + n\n\nmut numbers = List<int>()\nprint(Apply(() => numbers.Count, Grow(mut numbers)))"));
+        // the text names what is read and what changes it, and how to keep the value, as R11's messages name the change (the rest of
+        // the text stays free to improve, E2)
+        void Names(string program, string read, string change)
+        {
+            var error = Assert.Single(Check(program).Diagnostics.Items);
+            Assert.Equal(ErrorIds.ChangedWhileHeld, error.Id);
+            Assert.StartsWith(read + " is still in use while " + change + ",", error.Message, StringComparison.Ordinal);
+            Assert.Contains("copy it into a variable of its own on a line before", error.Message, StringComparison.Ordinal);
+        }
+
+        Names(grow + "mut numbers = List<int>()\nprint(Sum(numbers, Grow(mut numbers)))", "`numbers`", "the call that takes `mut numbers` runs");
+        Names(cart + "print(Count(cart.Items, Clear(mut cart)))", "`cart.Items`", "the call that takes `mut cart` runs");
+        Names("int Clear(mut List<List<int>> all) {\n    all = List<List<int>>()\n    return 0\n}\n\nint Sum(List<int> row, int n) => row.Count + n\n\nmut rows = List<List<int>>()\nprint(Sum(rows[0], Clear(mut rows)))", "an item of `rows`", "the call that takes `mut rows` runs");
+        Names(grow + "int Apply(() => int f, int n) => f() + n\n\nmut numbers = List<int>()\nprint(Apply(() => numbers.Count, Grow(mut numbers)))", "a lambda that reads `numbers`", "the call that takes `mut numbers` runs");
+
+        // an assignment and a `mut` method in a statement of an `else` arm's block change what the expression holds, at their line
+        var find = "data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\n";
+        var arm = find + "int Sum(List<int> xs, int n) => xs.Count + n\n\nmut numbers = List<int>()\nprint(Sum(numbers, Find(2) else {\n    NotFound => {\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 15)], Errors(arm + "        numbers = List<int>()\n        5\n    }\n}))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 15)], Errors(arm + "        numbers.Add(1)\n        5\n    }\n}))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 17)], Errors(arm + "        k = 1\n        if k == 1 {\n            numbers = List<int>()\n        }\n        5\n    }\n}))"));
+        Clean(arm + "        mut others = List<int>()\n        others.Add(1)\n        others.Count\n    }\n}))"); // a variable of the arm's own
+        Clean(find + "mut numbers = List<int>()\nprint(Find(2) else {\n    NotFound => {\n        numbers = List<int>()\n        5\n    }\n})\nprint(numbers.Count)"); // an arm's change that nothing holds
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ndata Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => xs.Count + n\n\nmut cart = Cart(List<int>())\nprint(Count(cart.Items, Find(2) else {\n    NotFound => {\n        cart.Items = List<int>()\n        5\n    }\n}))")); // a path assignment
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 22)], Errors(grow + "int Foo(List<int> xs, int n) => n\n\n" + find + "mut numbers = List<int>()\nprint(Sum(numbers, Find(2) else {\n    NotFound => {\n        print(Foo(numbers, Grow(mut numbers)))\n        5\n    }\n}))")); // one change, two holders: one error
+
+        // a read through `?.` and a value of a type with a generic base are not read (N5, T19), so the walk meets no held read of them
+        Assert.Equal(["11: `?.` (N5)"], NotSupported("data Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => n\n\nint Clear(mut Cart c) {\n    c = Cart(List<int>())\n    return 0\n}\n\nmut cart = Cart(List<int>())\nprint(Count(cart?.Items, Clear(mut cart)))"));
+        Assert.Equal(["2: a generic data type as a base (T19)"], NotSupported("data Base<T>(T X)\ndata Derived(List<int> Items) : Base<int>\n\nint Reset(mut Base<int> b) {\n    b = Base(2)\n    return 0\n}\n\nint Size(Base<int> b, int n) => n\n\nmut Base<int> p = Base(1)\nprint(Size(p, Reset(mut p)))"));
+
+        // a `mut` method takes its receiver as `mut`: an argument that holds a part of it is held, a copied one is not
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 3)], Errors("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)"));
+        Clean("mut xs = List<int>()\nxs.Add(1)\nxs.Add(xs[0])\nxs.Add(xs.Count)\nprint(xs)");
+        Names("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)", "an item of `rows`", "`Add` changes `rows`");
+        Names(arm + "        numbers = List<int>()\n        5\n    }\n}))", "`numbers`", "an assignment changes `numbers`");
     }
 
     // ---- control flow (chapter 10) --------------------------------------------------------------------

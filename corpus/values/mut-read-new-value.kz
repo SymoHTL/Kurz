@@ -2,6 +2,7 @@
 // | 12
 // | 53
 // | [4, 5, 5, 3]
+// | 45
 // rules: M7
 
 int Grow(mut List<int> xs) {
@@ -11,9 +12,14 @@ int Grow(mut List<int> xs) {
 
 int Pair(int a, int b) => a * 10 + b
 
+List<int> Same(List<int> all) => all
+
+int Total(List<int> all, int n) => all.Count * 10 + n
+
 mut numbers = List<int>()
 numbers.Add(4)
 print(Pair(numbers.Count, Grow(mut numbers)))
 print(Pair(numbers[0] + 1, Grow(mut numbers)))
 numbers.Add(numbers.Count)
 print(numbers)
+print(Total(Same(numbers), Grow(mut numbers)))

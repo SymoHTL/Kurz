@@ -50,7 +50,7 @@ LIVING = a diagram kept current with the system it draws.
 
 ## The compiler
 
-- [A borrow outlives its source](knowledge/a-borrow-outlives-its-source.md) POSTMORTEM HARD — the counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran: `G(xs, F(mut xs))` inside one expression, which the checker refuses since the owner's answers of 2026-10-24 (M7), and the name an arm binds while the arm changes its subject, which printed the items of a later list (2026-10-24) and holds a count of its own since. Every borrowing construct names what keeps its source unchanged, or takes a count, and has a line in a fenced program of `ListTests`.
+- [A borrow outlives its source](knowledge/a-borrow-outlives-its-source.md) POSTMORTEM HARD — the counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran: `G(xs, F(mut xs))` inside one expression, which the checker refuses since the owner's answers of 2026-10-24 (M7), the name an arm binds while the arm changes its subject, which printed the items of a later list (2026-10-24) and holds a count of its own since, and an assignment in an `else` arm's block inside the expression, which the checker's walk of M7 did not count as a change (2026-10-25, `changed-while-held` since). Every borrowing construct names what keeps its source unchanged, or takes a count, and has a line in a fenced program of `ListTests`; a refusal counts every form that changes a place, wherever a statement stands inside an expression.
 
 ## The quality bar
 

@@ -10,8 +10,15 @@ public sealed partial class Checker
     // the expressions the checker read as parts of the expression around them, the value of an arm among them (M7)
     private readonly HashSet<Expression> inline = new(ReferenceEqualityComparer.Instance);
 
-    // the arguments after `mut` the checker took, with the variable and the path of fields each one passes (M7)
-    private readonly Dictionary<Argument, (VariableSymbol Variable, string Path)> mutArguments = new(ReferenceEqualityComparer.Instance);
+    // what changes a variable within an expression, by its node: an argument after `mut` the checker took, the call of a `mut`
+    // method on a variable and an assignment, with the variable and the path of fields each one changes (M7)
+    private readonly Dictionary<object, Change> changes = new(ReferenceEqualityComparer.Instance);
+
+    // the changes reported, so that each one is reported once, however many reads and statements meet it (E1)
+    private readonly HashSet<object> reported = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>A change of a variable or of a path of fields from it, at its line, and how the error names it.</summary>
+    private readonly record struct Change(VariableSymbol Variable, string Path, int Line, string Text);
 
     /// <summary>
     /// A value of a variable that an expression holds: the variable, the path of fields it was read through, which stops at an item of
@@ -24,12 +31,14 @@ public sealed partial class Checker
         other == path || other.StartsWith(path + ".", StringComparison.Ordinal) || path.StartsWith(other + ".", StringComparison.Ordinal);
 
     /// <summary>
-    /// M7 (the owner, 2026-10-24): within one expression, a read of what a call takes as <c>mut</c>, of a value that holds it or of
-    /// one it holds, whose value the expression still holds when that call runs, is <c>mut-at-call</c>, once for each argument
-    /// after <c>mut</c> (E1). A read that makes a new value first, a read after the call, and a read of a type that is copied hold
-    /// no such value. The lambdas of the expression are expressions of their own, read when they are called.
+    /// M7 (the owner, 2026-10-24 and 2026-10-25): within one expression, a read of what a call takes as <c>mut</c>, an argument
+    /// after <c>mut</c> or the receiver of a <c>mut</c> method, of a value that holds it or of one it holds, whose value the
+    /// expression still holds when that call runs, or when an assignment or a <c>mut</c> method in a statement of an arm changes
+    /// it, is <c>changed-while-held</c>, once for each change (E1). A read that makes a new value first, a read after the call,
+    /// and a read of a type that is copied hold no such value. The lambdas of the expression are expressions of their own, read
+    /// when they are called, and change nothing they read (F11).
     /// </summary>
-    private void CheckReads(Expression expression) => Reads(expression, new HashSet<Argument>(ReferenceEqualityComparer.Instance));
+    private void CheckReads(Expression expression) => Reads(expression);
 
     /// <summary>A statement's expression read by the check of its own form, with its parts read as parts of it, and then its reads (M7).</summary>
     private Typed CheckWhole(Expression e, Func<Typed> check)
@@ -41,16 +50,16 @@ public sealed partial class Checker
         return typed;
     }
 
-    private void Reads(Expression e, HashSet<Argument> reported)
+    private void Reads(Expression e)
     {
         foreach (var part in Parts(e))
         {
-            Reads(part, reported);
+            Reads(part);
         }
 
         if (e is LambdaExpression { ExpressionBody: { } body })
         {
-            Reads(body, reported);
+            Reads(body);
         }
 
         // the parts the expression holds while the next ones run, in the order they run: a call's receiver or the value it calls
@@ -64,40 +73,49 @@ public sealed partial class Checker
             _ => [],
         };
 
+        // a call's own changes: an argument after `mut` against all it holds, the receiver of a `mut` method against its arguments
         if (e is CallExpression call)
         {
             foreach (var a in call.Arguments.Where(a => a.Mut))
             {
-                if (mutArguments.TryGetValue(a, out var passed))
+                if (changes.TryGetValue(a, out var change))
                 {
                     foreach (var (held, _) in ordered)
                     {
-                        Conflict(held, a, passed, reported);
+                        Conflict(held, a, change);
                     }
+                }
+            }
+
+            if (changes.TryGetValue(call, out var receiver))
+            {
+                foreach (var (held, _) in ordered.Skip(1))
+                {
+                    Conflict(held, call, receiver);
                 }
             }
         }
 
         for (var j = 1; j < ordered.Count; j++)
         {
-            foreach (var (a, passed) in Muts(ordered[j].Part))
+            foreach (var (node, change) in Muts(ordered[j].Part))
             {
                 for (var i = 0; i < j; i++)
                 {
-                    Conflict(ordered[i].Held, a, passed, reported);
+                    Conflict(ordered[i].Held, node, change);
                 }
             }
         }
     }
 
-    private void Conflict(IReadOnlyList<Held> held, Argument a, (VariableSymbol Variable, string Path) passed, HashSet<Argument> reported)
+    private void Conflict(IReadOnlyList<Held> held, object node, Change change)
     {
         foreach (var h in held)
         {
-            if (!reported.Contains(a) && ReferenceEquals(h.Variable, passed.Variable) && Overlaps(h.Path, passed.Path) && !Copied(h.Type))
+            if (!reported.Contains(node) && ReferenceEquals(h.Variable, change.Variable) && Overlaps(h.Path, change.Path) && !Copied(h.Type))
             {
-                reported.Add(a);
-                Report(ErrorIds.MutAtCall, a.Line, $"{h.Text} is still in use while the call that takes `mut {passed.Path}` runs, and a `{h.Type}` is not copied: copy it into a variable of its own on a line before (M7)");
+                reported.Add(node);
+                Report(ErrorIds.ChangedWhileHeld, change.Line, $"{h.Text} is still in use while {change.Text}, and a `{h.Type}` is not copied: copy it into a variable of its own on a line before (M7)");
             }
         }
     }
@@ -132,11 +150,14 @@ public sealed partial class Checker
         _ => [],
     };
 
-    /// <summary>The arguments after <c>mut</c> that the checker took in the calls that run while the expression runs, the statements of its arms included.</summary>
-    private IEnumerable<(Argument Argument, (VariableSymbol Variable, string Path) Passed)> Muts(Expression e)
+    /// <summary>
+    /// The changes made while the expression runs: the arguments after <c>mut</c> and the <c>mut</c> methods of its calls, and the
+    /// assignments and the calls in the statements of its arms.
+    /// </summary>
+    private IEnumerable<(object Node, Change Change)> Muts(Expression e)
     {
         var own = e is CallExpression c
-            ? c.Arguments.Where(a => a.Mut && mutArguments.ContainsKey(a)).Select(a => (a, mutArguments[a]))
+            ? c.Arguments.Where(a => a.Mut).Prepend<object>(c).SelectMany(ChangeOf)
             : [];
         return e switch
         {
@@ -146,13 +167,13 @@ public sealed partial class Checker
         };
     }
 
-    private IEnumerable<(Argument Argument, (VariableSymbol Variable, string Path) Passed)> Muts(Statement s) => s switch
+    private IEnumerable<(object Node, Change Change)> Muts(Statement s) => s switch
     {
         ExpressionStatement es => Muts(es.Expression),
         Block b => b.Statements.SelectMany(Muts),
         VariableDeclaration { Value: { } v } => Muts(v),
-        AssignOrDeclare a => Muts(a.Value),
-        Assignment a => Muts(a.Value),
+        AssignOrDeclare a => ChangeOf(a).Concat(Muts(a.Value)),
+        Assignment a => ChangeOf(a).Concat(Muts(a.Value)),
         IfStatement i => Muts(i.Condition).Concat(Muts(i.Then)).Concat(i.Else is null ? [] : Muts(i.Else)),
         WhileStatement w => Muts(w.Condition).Concat(Muts(w.Body)),
         ForInStatement f => Muts(f.Collection).Concat(Muts(f.Body)),
@@ -162,6 +183,9 @@ public sealed partial class Checker
         RawBlock r => Muts(r.Body),
         _ => [],
     };
+
+    private IEnumerable<(object Node, Change Change)> ChangeOf(object node) =>
+        changes.TryGetValue(node, out var change) ? [(node, change)] : [];
 
     /// <summary>What a call holds while its arguments run: the receiver of a method, or the value of a variable or a field it calls (F11).</summary>
     private IReadOnlyList<Held> Callee(CallExpression c) =>
@@ -203,21 +227,35 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// M7, the owner's "Rust's Copy line" (2026-10-24): whether a value of the type holds no list, so that the expression holds a
-    /// copy of it: a number, a <c>bool</c>, a <c>char</c>, a pointer, and a <c>data</c> value or a union of such types; a time and
-    /// the type of a C function too, and a <c>data</c> type only where every type derived from it is, while a <c>string</c>, a
-    /// function value and a type parameter are not (the record's assumption, section 4). A type the checker could not tell is
-    /// copied, so that its error stays the one reported (E1).
+    /// M7, the owner's "Rust's Copy line" (2026-10-24) and "Rust's Copy set" (2026-10-25): whether the expression holds a copy of a
+    /// value of the type: a number, a <c>bool</c>, a <c>char</c>, a pointer, a time, the type of a C function, and a <c>data</c>
+    /// value or a union made only of such types that holds no value of its own type, as Rust's <c>Copy</c> types; a <c>data</c>
+    /// type only where every type derived from it is too (the record's assumption, section 4). A type the checker could not tell
+    /// is copied, so that its error stays the one reported (E1).
     /// </summary>
     private bool Copied(KurzType type) => Copied(type, []);
 
-    private bool Copied(KurzType type, HashSet<DataSymbol> seen) => type switch
+    private bool Copied(KurzType type, HashSet<DataSymbol> path) => type switch
     {
         PrimitiveType p => p.Kind != Primitive.String,
         PointerType or CFunctionType or VoidType or ErrorType => true,
-        UnionType u => u.Cases.All(c => Copied(c, seen)),
-        DataType d => !seen.Add(d.Symbol) || (d.Symbol.Fields.All(f => Copied(SubstituteData(d, f.Type), seen))
-            && dataTypes.Values.Where(x => x.Base == d.Symbol).All(x => Copied(new DataType(x, x.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen))),
+        UnionType u => u.Cases.All(c => Copied(c, path)),
+        DataType d => CopiedData(d, path),
         _ => false, // a list, a string, a function value, a type parameter
     };
+
+    // the data types on the way to this one: a type met again holds a value of its own type, as a Rust type does through a `Box`,
+    // which is not `Copy`
+    private bool CopiedData(DataType d, HashSet<DataSymbol> path)
+    {
+        if (!path.Add(d.Symbol))
+        {
+            return false;
+        }
+
+        var copied = d.Symbol.Fields.All(f => Copied(SubstituteData(d, f.Type), path))
+            && dataTypes.Values.Where(x => x.Base == d.Symbol).All(x => Copied(new DataType(x, x.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), path));
+        path.Remove(d.Symbol);
+        return copied;
+    }
 }

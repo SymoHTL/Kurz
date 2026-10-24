@@ -1,4 +1,4 @@
-// expect: error mut-at-call at 13
+// expect: error changed-while-held at 13
 // rules: M7
 
 int Clear(mut List<List<int>> all) {

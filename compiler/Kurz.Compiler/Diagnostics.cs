@@ -86,6 +86,7 @@ public static class ErrorIds
     public const string NullableUnchecked = "nullable-unchecked";
     public const string MutRequired = "mut-required";
     public const string MutAtCall = "mut-at-call";
+    public const string ChangedWhileHeld = "changed-while-held";
     public const string UnlistedCase = "unlisted-case";
     public const string MatchNotExhaustive = "match-not-exhaustive";
     public const string BracesRequired = "braces-required";

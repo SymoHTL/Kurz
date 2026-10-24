@@ -1,4 +1,4 @@
-// expect: error mut-at-call at 10
+// expect: error changed-while-held at 10
 // rules: M7
 
 int Grow(mut List<int> xs) {

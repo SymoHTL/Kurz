@@ -1,4 +1,4 @@
-// expect: error mut-at-call at 9
+// expect: error changed-while-held at 9
 // rules: M7
 
 void Fill(mut List<int> xs, List<int> seen) {
