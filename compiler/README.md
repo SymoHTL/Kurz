@@ -355,9 +355,10 @@ for 3000 rounds ends, and the same lists all kept do not; an allocator that make
 inaccessible, under which the same programs print the same lines; the target's own `Release`, after
 which a write into a freed block of more than 262144 bytes ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
-the same lists all kept do not; and the number of
-`allocation-failed` past the limit, with the limit lowered in the library's text, and for a growth
-the system refuses.
+the same lists all kept do not; the number of `allocation-failed` past the limit, with the limit
+lowered in the library's text, for items of 1, 8 and 16 bytes, a padded `data` value, a list and a
+value of a block type, and for a growth the system refuses; and `index-out-of-range` for an index
+below 0, at `Count` and beyond.
 
 ### What the emitter does not emit
 

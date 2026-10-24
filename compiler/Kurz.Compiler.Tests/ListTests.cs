@@ -13,9 +13,12 @@ namespace Kurz.Compiler.Tests;
 /// </summary>
 public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    // nested lists, a list in a data value and in `with`, a path assignment, a list of strings, a loop's `continue`, and the texts
+    // nested lists, a list in a data value and in `with`, a path assignment, a list of strings, a loop's `continue`, a list in a
+    // value laid out as a block, and the texts
     private const string Values = """
         data Cart(string Owner, List<int> Items)
+        data Leaf
+        data Tree(List<int> Items, Tree | Leaf Next)
 
         List<int> Range(int n) {
             mut xs = List<int>()
@@ -63,6 +66,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
             print(Sum(r))
         }
+        t = Tree(Range(2), Leaf)
+        mut ts = t.Items
+        ts.Add(9)
+        print(t)
+        print(ts)
         """;
 
     private static readonly string[] ValuesPrint =
@@ -78,6 +86,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[a, b]",
         "3",
         "1",
+        "Tree { Items = [0, 1], Next = Leaf }", // a list a block holds: the block keeps it (M3)
+        "[0, 1, 9]",
     ];
 
     // a `mut` parameter beside a parameter given the same variable, a loop over a list that the loop adds to, an `Add` whose argument
@@ -345,14 +355,34 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void An_Add_past_the_limit_reports_the_bytes_of_the_items_after_it()
+    [Theory]
+    [InlineData("long", "1", 32)]
+    [InlineData("byte", "byte(1)", 4)]
+    [InlineData("string", "\"a\"", 64)] // its bytes' address and their count
+    [InlineData("List<int>", "List<int>()", 32)] // the address of its block
+    [InlineData("Padded", "Padded(1, byte(2))", 64)] // 9 bytes of fields, padded to the `long`'s alignment
+    [InlineData("Tree", "Tree(1, Leaf)", 32)] // a block: the list holds its address
+    public void An_Add_past_the_limit_reports_the_bytes_of_the_items_after_it(string type, string item, int bytes)
     {
         // the owner, 2026-10-24, "Items after the Add": the limit of the largest `int` lowered to 3 in the library's text, so that a
-        // fourth `Add` of a `long` asks for 4 times 8 bytes
-        const string text = "mut xs = List<long>()\nxs.Add(1)\nxs.Add(2)\nxs.Add(3)\nxs.Add(4)\nprint(xs.Count)\n";
-        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-limit"), 1, [], "error: allocation-failed (32 bytes)\n");
-        Ran(BuildAndRun(text, toolchain.Runtime, "list-below-limit"), 0, ["4"], ""); // the positive control
+        // fourth `Add` asks for 4 times the bytes one item takes in the list
+        var add = $"xs.Add({item})\n";
+        var text = $"data Padded(long A, byte B)\ndata Leaf\ndata Tree(int V, Tree | Leaf Next)\n\nmut xs = List<{type}>()\n{add}{add}{add}{add}print(xs.Count)\n";
+        var name = new string(type.Where(char.IsLetter).ToArray());
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-limit-" + name), 1, [], $"error: allocation-failed ({bytes} bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-below-limit-" + name), 0, ["4"], ""); // the positive control
+    }
+
+    [Theory]
+    [InlineData("-1", "minus")]
+    [InlineData("2", "count")]
+    [InlineData("100000", "far")]
+    [InlineData("-2147483648", "smallest")]
+    public void An_index_below_0_or_at_Count_or_beyond_raises_index_out_of_range_at_its_line(string index, string name)
+    {
+        // T14, M9: the read before it is the positive control, an index inside the list
+        var text = $"mut xs = List<int>()\nxs.Add(4)\nxs.Add(5)\nprint(xs[1])\nprint(xs[{index}])\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-index-" + name), 1, ["5"], "error: index-out-of-range at program.kz:5\n");
     }
 
     [Fact]
