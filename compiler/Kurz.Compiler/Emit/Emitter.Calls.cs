@@ -149,13 +149,12 @@ public sealed partial class Emitter
     /// order they are written; an argument in the place of a C declaration's <c>...</c> (binding -1) is the caller's to add. A
     /// default is read in the file that declares it, which <paramref name="slotDefault"/> gives with it and which the call may stand
     /// outside of. With <paramref name="owned"/> the slots hold the values, as a data value's fields do; else the callee borrows
-    /// them for the call, and where a <c>mut</c> slot can change a variable a borrowed value was read from, the call holds that value
-    /// once more, so the callee's parameter keeps its own value (M3, M7).
+    /// them for the call, which no <c>mut</c> slot of the call or of a call inside its arguments changes, since the checker refuses
+    /// a read of what a call takes as <c>mut</c> while the expression still holds its value (M7).
     /// </summary>
     private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned)
     {
         var values = new string?[c.Arguments.Count];
-        var changes = Enumerable.Range(0, info.SlotCount).Any(slotMut);
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             var slot = info.Binding[i];
@@ -163,12 +162,6 @@ public sealed partial class Emitter
             {
                 var a = c.Arguments[i].Value;
                 var value = owned ? Owned(a) : EmitExpression(a);
-                if (!owned && changes && Counted(TypeOf(a)) && !IsTemp(value))
-                {
-                    Retain(value, TypeOf(a));
-                    Temp(value, TypeOf(a));
-                }
-
                 values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line);
             }
         }

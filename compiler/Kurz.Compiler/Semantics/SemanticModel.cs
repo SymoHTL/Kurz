@@ -125,6 +125,9 @@ public sealed class SemanticModel
 
     public LambdaInfo LambdaOf(LambdaExpression lambda) => lambdas.TryGetValue(lambda, out var l) ? l : throw Missing("lambda", lambda.Line);
 
+    /// <summary>Whether the checker read the lambda.</summary>
+    public bool HasLambda(LambdaExpression lambda) => lambdas.ContainsKey(lambda);
+
     /// <summary>The type an arm's pattern names (C4, O5).</summary>
     public KurzType PatternTypeOf(TypePattern pattern) => patterns.TryGetValue(pattern, out var t) ? t : throw Missing("pattern", pattern.Line);
 

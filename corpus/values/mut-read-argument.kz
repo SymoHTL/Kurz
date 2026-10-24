@@ -1,0 +1,12 @@
+// expect: error mut-at-call at 12
+// rules: M7
+
+int Grow(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count
+}
+
+int Sum(List<int> xs, int n) => xs.Count + n
+
+mut numbers = List<int>()
+print(Sum(numbers, Grow(mut numbers)))

@@ -75,9 +75,6 @@ public sealed partial class Emitter
         return value;
     }
 
-    /// <summary>Whether the value is a temporary of a region being emitted.</summary>
-    private bool IsTemp(string value) => regions.Any(r => r.Exists(t => t.Value == value));
-
     private bool Take(string value)
     {
         for (var r = regions.Count - 1; r >= 0; r--)
@@ -328,14 +325,14 @@ public sealed partial class Emitter
         var block = fn.Value("load ptr, ptr %a0");
         var push = fn.Label("push");
         var reserve = fn.Label("reserve");
-        fn.CondBranch(fn.Value($"call i1 {StdFunction("ListHasRoom")}(ptr {block})"), push, reserve);
+        fn.CondBranch(fn.Value($"call i1 {StdFunction("ListHasRoom")}(ptr {block})"), push, reserve); // room in a block no other value holds
         fn.Block(reserve);
         var copy = fn.Label("copy");
         var grow = fn.Label("grow");
         var failed = fn.Label("failed");
         fn.CondBranch(fn.Value($"call i1 {StdFunction("ListShared")}(ptr {block})"), copy, grow);
         fn.Block(copy);
-        var copied = fn.Value($"call ptr {StdFunction("ListCopy")}(ptr {block}, i64 {size}, ptr {asked})");
+        var copied = fn.Value($"call ptr {StdFunction("ListCopy")}(ptr {block}, i64 {size}, ptr {asked})"); // which lowers the old block's count
         var keep = fn.Label("copied");
         fn.CondBranch(fn.Value($"icmp eq ptr {copied}, null"), failed, keep);
         fn.Block(keep);

@@ -1174,6 +1174,15 @@ public sealed partial class Checker
 
     private Flow CheckStatement(Statement statement)
     {
+        var depth = expressionDepth;
+        expressionDepth = 0; // a statement in a lambda's block or in an arm has expressions of its own (M7)
+        var flow = CheckStatementCore(statement);
+        expressionDepth = depth;
+        return flow;
+    }
+
+    private Flow CheckStatementCore(Statement statement)
+    {
         switch (statement)
         {
             case Block b:
@@ -1639,10 +1648,10 @@ public sealed partial class Checker
         switch (Unwrap(e.Expression))
         {
             case CallExpression c:
-                RecordThrough(e.Expression, CheckCall(c, null, keepCases: false));
+                RecordThrough(e.Expression, CheckWhole(e.Expression, () => CheckCall(c, null, keepCases: false)));
                 break;
             case ElseExpression el:
-                RecordThrough(e.Expression, CheckElse(el, isStatement: true, expected: null));
+                RecordThrough(e.Expression, CheckWhole(e.Expression, () => CheckElse(el, isStatement: true, expected: null)));
                 break;
             case MatchExpression m:
                 RecordThrough(e.Expression, new Typed(CheckMatch(m.Subject, m.Arms, isExpression: false, expected: null, m.Line).Type));

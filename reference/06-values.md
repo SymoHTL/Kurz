@@ -41,9 +41,8 @@ Case: [values/copy-on-assign.kz](../corpus/values/copy-on-assign.kz)
 Assigning to a field at the end of a path that starts at a `mut` variable changes that variable's
 value. It stores what nested `with` (D5) over the variable stores, with the variable read after the value: the value is evaluated first, then the path, in the
 variable as the value left it: a `mut` argument in the value that changes the variable keeps its
-change (§4, the owner, 2026-10-24). A call of a `mut` method on a variable, `xs.Add(F(mut xs))`,
-takes the same order, its arguments first, then the method on the variable as they left it *(assumed:
-as §4 marks it)*. On an immutable variable it is the compile error
+change (§4, the owner, 2026-10-24). A call of a `mut` method on a variable whose argument changes the
+variable, `xs.Add(F(mut xs))`, is `mut-at-call` (M7). On an immutable variable it is the compile error
 `assign-immutable` (D4). A class instance on the path starts the path anew: from a `mut` field of
 the instance on, the rest of the path is as if it started at a `mut` variable, whatever holds the
 instance (K2), and a field of the instance that is not `mut` ends the path as an immutable variable
@@ -133,6 +132,20 @@ and a path into it, is `mut-at-call` too: each `mut` parameter is the only way i
 while the function runs (M3). *(proposed: the forms after `mut`, and the two further uses of
 `mut-at-call`)*
 
+Within one expression, a read of what a call takes as `mut`, of a value that holds it or of one it
+holds (the variable itself, a path of fields, an item of a list), is `mut-at-call` where the
+expression still holds the read's value when the call runs: as an argument of that call or of a call
+around it given before the argument the call stands in, as the receiver of a method or the target of
+`with` or of an index around the call, as an operand of an operator around it written before the
+operand the call stands in, and in a lambda made before the call that reads the variable (§4, the
+owner, 2026-10-24). A read that makes a new value first (`numbers.Count`, `numbers[0] + 1`), a read
+that runs after the call has ended, and a read of a type that holds no list, a number, a `bool`, a
+`char`, a pointer, or a `data` value or a union of such types, which the expression holds as a copy,
+hold no such value (§4, the owner, 2026-10-24); two fields of one variable stay two values.
+*(assumed, as §4 marks it: a time and the type of a C function are copied, a `string`, a function
+value and a type parameter are not, a `data` type is copied where every type derived from it is,
+and a hole of an interpolation makes a new value)*
+
 Case: [values/mut-parameter.kz](../corpus/values/mut-parameter.kz)
 ```kurz
 void Fill(mut List<int> xs) {
@@ -177,6 +190,165 @@ Fill(mut numbers)
 print(numbers.Count)
 ```
 
+Case: [values/mut-read-argument.kz](../corpus/values/mut-read-argument.kz)
+```kurz
+int Grow(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count
+}
+
+int Sum(List<int> xs, int n) => xs.Count + n
+
+mut numbers = List<int>()
+print(Sum(numbers, Grow(mut numbers)))
+```
+
+Case: [values/mut-read-same-call.kz](../corpus/values/mut-read-same-call.kz)
+```kurz
+void Fill(mut List<int> xs, List<int> seen) {
+    xs.Add(seen.Count)
+}
+
+mut numbers = List<int>()
+Fill(mut numbers, numbers)
+print(numbers.Count)
+```
+
+Case: [values/mut-read-receiver.kz](../corpus/values/mut-read-receiver.kz)
+```kurz
+int Grow(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count
+}
+
+mut numbers = List<int>()
+numbers.Add(Grow(mut numbers))
+print(numbers.Count)
+```
+
+Case: [values/mut-read-with.kz](../corpus/values/mut-read-with.kz)
+```kurz
+data Cart(List<int> Items, int Total)
+
+int Clear(mut Cart c) {
+    c = Cart(List<int>(), 0)
+    return 1
+}
+
+mut cart = Cart(List<int>(), 0)
+next = cart with { Total = Clear(mut cart) }
+print(next.Total)
+```
+
+Case: [values/mut-read-index.kz](../corpus/values/mut-read-index.kz)
+```kurz
+int Last(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count - 1
+}
+
+mut numbers = List<int>()
+numbers.Add(4)
+print(numbers[Last(mut numbers)])
+```
+
+Case: [values/mut-read-operand.kz](../corpus/values/mut-read-operand.kz)
+```kurz
+data Cart(List<int> Items)
+
+Cart Cleared(mut Cart c) {
+    c = Cart(List<int>())
+    return c
+}
+
+mut cart = Cart(List<int>())
+print(cart == Cleared(mut cart))
+```
+
+Case: [values/mut-read-item.kz](../corpus/values/mut-read-item.kz)
+```kurz
+int Clear(mut List<List<int>> all) {
+    all = List<List<int>>()
+    return 0
+}
+
+int Sum(List<int> row, int n) => row.Count + n
+
+mut rows = List<List<int>>()
+rows.Add(List<int>())
+print(Sum(rows[0], Clear(mut rows)))
+```
+
+Case: [values/mut-read-lambda.kz](../corpus/values/mut-read-lambda.kz)
+```kurz
+int Grow(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count
+}
+
+int Apply(() => int f, int n) => f() + n
+
+mut numbers = List<int>()
+print(Apply(() => numbers.Count, Grow(mut numbers)))
+```
+
+Case: [values/mut-read-copied.kz](../corpus/values/mut-read-copied.kz)
+```kurz
+data Point(int X, int Y)
+
+int Bump(mut int count) {
+    count = count + 10
+    return count
+}
+
+int Shift(mut Point point) {
+    point = Point(7, 8)
+    return 5
+}
+
+int Pair(int a, int b) => a * 100 + b
+
+mut n = 1
+print(Pair(n, Bump(mut n)))
+print(n + Bump(mut n))
+mut p = Point(1, 2)
+q = p with { X = Shift(mut p) }
+print(q.Y)
+print(p.Y)
+```
+
+Case: [values/mut-read-new-value.kz](../corpus/values/mut-read-new-value.kz)
+```kurz
+int Grow(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count
+}
+
+int Pair(int a, int b) => a * 10 + b
+
+mut numbers = List<int>()
+numbers.Add(4)
+print(Pair(numbers.Count, Grow(mut numbers)))
+print(Pair(numbers[0] + 1, Grow(mut numbers)))
+numbers.Add(numbers.Count)
+print(numbers)
+```
+
+Case: [values/mut-read-after.kz](../corpus/values/mut-read-after.kz)
+```kurz
+int Grow(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count
+}
+
+int Sum(int n, List<int> xs) => n * 10 + xs.Count
+
+mut numbers = List<int>()
+numbers.Add(4)
+print(Sum(Grow(mut numbers), numbers))
+print(Grow(mut numbers) + numbers.Count)
+```
+
 ### M8 (decided, §4) One family of collections
 
 There is one family of collections, and every value can cross between actors.
@@ -190,7 +362,8 @@ of items, an `int`, and a list holds at most as many items as the largest `int`,
 would make it longer raising `allocation-failed` with the bytes of its items, a 64-bit number: the count
 after the `Add` times the item's size in its layout, padding included, the size of a pointer for a
 type laid out as a block, 8 bytes on a 64-bit target (§4, the owner, 2026-10-23 and 2026-10-24); a
-growth the system refuses raises it with the bytes the allocator was asked for (§4); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
+growth the system refuses raises it with the bytes the allocator was asked for, the whole request with
+the list's own counts, before the allocator rounds it up (§4); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
 or beyond raises `index-out-of-range` (T14); `Where(test)` is the list of
 items that pass the test. `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the

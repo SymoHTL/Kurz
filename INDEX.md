@@ -48,6 +48,10 @@ LIVING = a diagram kept current with the system it draws.
 - [YAML plain scalar traps](knowledge/yaml-plain-scalar-traps.md) HARD — in a YAML list a colon-space turns a bullet into a mapping and a leading quote ends it early; PyYAML keeps the last of two duplicate keys silently (2026-10-01). Quote the bullet or use `>-`, and read YAML through `kit.load_yaml`, which refuses a repeated key.
 - [One package source per restore](knowledge/one-package-source-per-restore.md) TRAP — with central package management a restore that sees two package sources and no source mapping fails on NU1507 once warnings are errors, and the sources come from every NuGet.config up the tree and in the user profile (2026-10-10): `compiler/NuGet.config` clears them, names the one source and maps every package to it; the gate restores in locked mode against the lock files.
 
+## The compiler
+
+- [A borrow outlives its source](knowledge/a-borrow-outlives-its-source.md) POSTMORTEM HARD — the counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran: `G(xs, F(mut xs))` inside one expression, which the checker refuses since the owner's answers of 2026-10-24 (M7), and the name an arm binds while the arm changes its subject, which printed the items of a later list (2026-10-24) and holds a count of its own since. Every borrowing construct names what keeps its source unchanged, or takes a count, and has a line in a fenced program of `ListTests`.
+
 ## The quality bar
 
 - [Gate map](knowledge/diagram-gate-map.md) LIVING — every gate, hook, server-side rule and process law by where it runs, with what turns it red or the HAZARD issue that stands in for it; a "review rule" named as a gate is a model reading one batch of a diff.

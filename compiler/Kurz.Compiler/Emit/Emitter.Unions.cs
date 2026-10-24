@@ -101,10 +101,21 @@ public sealed partial class Emitter
         {
             var body = fn.Label("arm");
             var next = fn.Label("next");
-            Test(arm.Pattern, value, type, tag, union?.Cases ?? [type], body, next);
+            var bound = Test(arm.Pattern, value, type, tag, union?.Cases ?? [type], body, next);
             fn.Block(body);
             InScope(() =>
             {
+                if (arm.Pattern is TypePattern { Binding: not null } tp)
+                {
+                    // the name holds the value as a variable does, so that the arm can change the subject's variable (M3)
+                    var bindingType = Sub(Model.PatternTypeOf(tp));
+                    if (Counted(bindingType))
+                    {
+                        Retain(fn.Value($"load {Ir(bindingType)}, ptr {bound}"), bindingType);
+                        Declare(bound!, bindingType);
+                    }
+                }
+
                 if (slot is null)
                 {
                     EmitStatement(arm.Body);

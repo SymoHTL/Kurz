@@ -1,0 +1,16 @@
+// expect: output
+// | 22
+// | 6
+// rules: M7
+
+int Grow(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count
+}
+
+int Sum(int n, List<int> xs) => n * 10 + xs.Count
+
+mut numbers = List<int>()
+numbers.Add(4)
+print(Sum(Grow(mut numbers), numbers))
+print(Grow(mut numbers) + numbers.Count)

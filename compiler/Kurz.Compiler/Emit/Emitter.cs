@@ -346,7 +346,8 @@ public sealed partial class Emitter
 
         if (d.ExpressionBody is not null)
         {
-            InRegion(() => EmitReturn(Owned(d.ExpressionBody), TypeOf(d.ExpressionBody), d.ExpressionBody.Line));
+            // the value of a `void` function's body is no result: it stays a temporary, which the return lets go of (F4)
+            InRegion(() => EmitReturn(Types.IsVoid(returnType) ? EmitExpression(d.ExpressionBody) : Owned(d.ExpressionBody), TypeOf(d.ExpressionBody), d.ExpressionBody.Line));
         }
         else
         {

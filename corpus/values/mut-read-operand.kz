@@ -1,0 +1,12 @@
+// expect: error mut-at-call at 12
+// rules: M7
+
+data Cart(List<int> Items)
+
+Cart Cleared(mut Cart c) {
+    c = Cart(List<int>())
+    return c
+}
+
+mut cart = Cart(List<int>())
+print(cart == Cleared(mut cart))

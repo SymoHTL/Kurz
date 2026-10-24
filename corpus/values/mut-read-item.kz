@@ -1,0 +1,13 @@
+// expect: error mut-at-call at 13
+// rules: M7
+
+int Clear(mut List<List<int>> all) {
+    all = List<List<int>>()
+    return 0
+}
+
+int Sum(List<int> row, int n) => row.Count + n
+
+mut rows = List<List<int>>()
+rows.Add(List<int>())
+print(Sum(rows[0], Clear(mut rows)))

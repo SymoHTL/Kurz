@@ -1,0 +1,13 @@
+// expect: error mut-at-call at 12
+// rules: M7
+
+data Cart(List<int> Items, int Total)
+
+int Clear(mut Cart c) {
+    c = Cart(List<int>(), 0)
+    return 1
+}
+
+mut cart = Cart(List<int>(), 0)
+next = cart with { Total = Clear(mut cart) }
+print(next.Total)
