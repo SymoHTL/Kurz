@@ -236,15 +236,19 @@ request 29 retired the design-phase rule, after the owner said build on 2026-10-
 library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Semantics/`
 checks the tree against the rules of chapters 1 to 3, 5, 6, 8 to 10 and 11's raw forms that
 `compiler/README.md` lists, and says `not supported` to the rest, `Emit/` turns a program the checker read
-in full and the runtime of its target into LLVM's IR, `Corpus/` reads a case header, `Build/` finds the clang
-of the pinned LLVM major, carries and checks the runtime, builds a program into an executable, and is the
+in full, the runtime of its target and the standard library into LLVM's IR, `Corpus/` reads a case header,
+`Build/` finds the clang of the pinned LLVM major, carries and checks the runtime and the standard library,
+builds a program into an executable, and is the
 command `kurz`, whose program is `Kurz/`), the xunit suite `Kurz.Compiler.Tests`, which runs every corpus case
 through the front end and every case it reads clean through the checker, builds and runs every case that
-expects a run and that the compiler emits, and checks the runtime for every target, and
+expects a run and that the compiler emits, and checks the runtime and the standard library for every target, and
 `compiler/README.md`. `runtime/` holds the runtime a built program links, written in Kurz (design record,
 section 2): `common/` and a directory per target, where the tree gate admits `.kz` files at any depth and the
 compiler refuses or says `not supported` to a place it does not read, and which the
-build of the compiler embeds. The map of every gate is
+build of the compiler embeds. `std/` holds the standard library's Kurz code, the allocator of section 3
+(design record, section 2: the owner, 2026-10-24), where the tree gate admits `.kz` files at any depth and the
+compiler refuses or says `not supported` to a place it does not read, and which the build of the compiler embeds too and
+a build compiles with every program, as it compiles the runtime. The map of every gate is
 [knowledge/diagram-gate-map.md](knowledge/diagram-gate-map.md).
 
 ## Critical Rules

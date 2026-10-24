@@ -88,7 +88,7 @@ sections:
       - Library, runtime or compiler code dressed as a case. A case is a small program with an expectation.
 
   - name: compiler
-    files: ["compiler/*", "runtime/*"]
+    files: ["compiler/*", "runtime/*", "std/*"]
     rules:
       - >-
         Where this batch quotes or cites the reference rule a construct rests on - a construct, an error id,
