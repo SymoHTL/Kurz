@@ -352,7 +352,10 @@ A value of a block type is never freed, and the lists it holds are never let go 
 `ListTests`: the values the counting keeps apart; a system that refuses every request for memory
 after sixteen, within which a program that makes and drops lists through every way out of a block
 for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
-inaccessible, under which the same programs print the same lines; and the number of
+inaccessible, under which the same programs print the same lines; the target's own `Release`, after
+which a write into a freed block of more than 262144 bytes ends the process, and under which lists
+of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
+the same lists all kept do not; and the number of
 `allocation-failed` past the limit, with the limit lowered in the library's text, and for a growth
 the system refuses.
 

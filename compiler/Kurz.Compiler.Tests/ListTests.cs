@@ -239,6 +239,42 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         """));
 
     /// <summary>
+    /// The runtime of this machine's target whose system refuses a request that would take what it gave and was not given back past
+    /// 64 mebibytes; its own `Memory` and `Release` run behind the count.
+    /// </summary>
+    private static CheckedRuntime Bytes() => Edited(
+        (TargetFile, "pub byte* Memory(long bytes) {", """
+            thread static mut long live = 0
+
+            pub byte* Memory(long bytes) {
+                mut long total = 0
+                raw {
+                    live = live + bytes
+                    total = live
+                }
+
+                if total > 67108864 {
+                    return null
+                }
+
+                return Granted(bytes)
+            }
+
+            byte* Granted(long bytes) {
+            """),
+        (TargetFile, "pub void Release(byte* p, long bytes) {", """
+            pub void Release(byte* p, long bytes) {
+                raw {
+                    live = live - bytes
+                }
+
+                Released(p, bytes)
+            }
+
+            void Released(byte* p, long bytes) {
+            """));
+
+    /// <summary>
     /// The edits that make the allocator take every block from pages of its own and make them unreachable when the block is freed, so
     /// that a read or a write of a freed block ends the process with the system's signal; nothing is used again.
     /// </summary>
@@ -289,6 +325,27 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_block_of_more_than_262144_bytes_goes_back_to_the_system()
+    {
+        // the target's own `Release`: a write into such a block after its `Free` ends the process with the system's signal
+        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string write = "    byte* p = Allocate(300000)\n    raw {\n        p[0] = 1\n        std.Free(p, 300000)\n        p[0] = 2\n    }\n";
+        var run = BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + write)), "list-large-freed");
+        Assert.NotEqual(0, run.Code);
+        Assert.Empty(run.Output);
+        var kept = Edited(("runtime/common/runtime.kz", start, start + write.Replace("        std.Free(p, 300000)\n", "", StringComparison.Ordinal)));
+        Ran(BuildAndRun("print(1)\n", kept, "list-large-kept"), 0, ["1"], ""); // the positive control: the block not freed
+
+        // the lists of 70000 items grow through blocks of 262160 and 524304 bytes, 150 mebibytes in 200 rounds were none of them given back
+        const string rounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";
+        Ran(BuildAndRun(rounds, Bytes(), "list-large-rounds"), 0, ["14000000"], "");
+        const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 70000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
+        run = BuildAndRun(held, Bytes(), "list-large-held"); // the positive control: the same lists, all of them held
+        Assert.Equal(1, run.Code);
+        Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void An_Add_past_the_limit_reports_the_bytes_of_the_items_after_it()
     {
         // the owner, 2026-10-24, "Items after the Add": the limit of the largest `int` lowered to 3 in the library's text, so that a
@@ -314,6 +371,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("data Box(List<int> Items)\n\nmut b = Box(List<int>())\nb.Items.Add(1)\n", 4, "an `Add` on a list in a field (M5)", null)]
     [InlineData("data Box(List<int> Items)\n\na = Box(List<int>())\nb = Box(List<int>())\nprint(a == b)\n", 5, "`==` on a `List<int>`", null)] // D3 compares the fields
     [InlineData("s = \"ab\"\nprint(s.Bytes[0])\n", 2, "`s.Bytes` as a list (T15)", null)]
+    [InlineData("data Box(List<int> Items)\n\nvoid Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nmut b = Box(List<int>())\nFill(mut b.Items)\n", 8, "a `mut` parameter given anything but a variable (M7)", null)]
     public void What_the_emitter_does_not_lay_out_of_a_list_is_not_supported_at_its_line(string text, int line, string message, string? grant)
     {
         var compilation = Compile(text, toolchain.Runtime, grant is null ? [] : [grant]);
