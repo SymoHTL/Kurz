@@ -98,7 +98,7 @@ flowchart TD
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
         pinned clang and runs it, red on output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 126 cases run; the build command's lines and refusals; and the refused write and the refused allocation,
+        than 139 cases run; the build command's lines and refusals; and the refused write and the refused allocation,
         each with its error line; DataTests, red on a tag wider or narrower than the largest type number among the
         cases needs, two layouts for one union, a value that does not come back out of a union, a block not copied
         before a write, a path assignment that does not evaluate its value first, a static of a type with a base laid
@@ -107,7 +107,10 @@ flowchart TD
         another line or in other words; and EmitterTests on the largest string, red on a join or a string.FromRaw of
         more bytes than the largest int that ends otherwise than in allocation-failed with that count, and on a
         conversion from an unsigned type to a signed one, red on a value above the signed maximum that raises no
-        overflow in a test build.
+        overflow in a test build; and ListTests, red on a list's block read or written after it was freed, under an
+        allocator that makes every freed block inaccessible (a borrow that outlived its source, the name an arm
+        binds among the programs), on lists made and dropped that outgrow a system giving sixteen pieces, and on
+        the number allocation-failed reports.
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
         no program of them"]

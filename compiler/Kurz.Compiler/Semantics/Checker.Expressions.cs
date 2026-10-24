@@ -16,8 +16,20 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckExpression(Expression expression, KurzType? expected, bool keepCases = false)
     {
+        if (expressionDepth > 0)
+        {
+            inline.Add(expression);
+        }
+
+        expressionDepth++;
         var typed = CheckExpressionCore(expression, expected, keepCases);
+        expressionDepth--;
         model.RecordType(expression, typed); // the last reading stands: a call's literal argument is read a second time, against the parameter of the function picked
+        if (expressionDepth == 0)
+        {
+            CheckReads(expression); // M7, over the whole expression once its parts are read
+        }
+
         return typed;
     }
 

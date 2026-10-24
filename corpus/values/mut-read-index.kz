@@ -1,0 +1,11 @@
+// expect: error mut-at-call at 11
+// rules: M7
+
+int Last(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count - 1
+}
+
+mut numbers = List<int>()
+numbers.Add(4)
+print(numbers[Last(mut numbers)])

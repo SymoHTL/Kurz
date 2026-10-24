@@ -310,6 +310,17 @@ Gate: review rule "rules for sessions".
 - **An error a case expects has an id in the error table** (`reference/12-errors.md`), and the
   table names the rules that raise it. Gate: `reference`.
 
+### The compiler
+
+- **A value the emitter borrows names what keeps its source unchanged while it is used.** A list
+  read from a variable, a field or an item takes no count of its own (`compiler/README.md`), so a
+  construct that keeps what it read past a call or a statement either takes a count or rests on a
+  refusal of the checker; two that did neither reached `main` with pull request 63
+  ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
+  such construct has a line in a fenced program of `ListTests`. Gate: `compiler-tests`
+  (`ListTests.No_block_is_read_or_written_after_it_is_freed`) for the shapes those programs hold;
+  a borrowing construct no program reaches: review rule "compiler".
+
 ### A public repository
 
 - **Future plans stay out**: what gets built when, steps, milestones, schedules, the order in

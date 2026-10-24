@@ -1,0 +1,19 @@
+// expect: output
+// | 12
+// | 53
+// | [4, 5, 5, 3]
+// rules: M7
+
+int Grow(mut List<int> xs) {
+    xs.Add(5)
+    return xs.Count
+}
+
+int Pair(int a, int b) => a * 10 + b
+
+mut numbers = List<int>()
+numbers.Add(4)
+print(Pair(numbers.Count, Grow(mut numbers)))
+print(Pair(numbers[0] + 1, Grow(mut numbers)))
+numbers.Add(numbers.Count)
+print(numbers)

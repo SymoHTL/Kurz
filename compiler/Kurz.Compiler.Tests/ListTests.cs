@@ -9,7 +9,8 @@ namespace Kurz.Compiler.Tests;
 /// The emitter's decisions on lists that no corpus case pins (M9; design record, section 3; the owner, 2026-10-24, "Full counting
 /// now" and "Items after the Add"): a list is a value whose storage is shared until one side writes (M3), the counting frees a
 /// block nothing holds, which the allocator gives out again, no block is read after it is freed, the number `allocation-failed`
-/// reports past the limit and for a refused growth, and what the emitter says `not supported` to.
+/// reports past the limit and for a refused growth, and what the emitter says `not supported` to; what the checker refuses of a
+/// read beside a `mut` call (M7) the corpus pins.
 /// </summary>
 public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -90,22 +91,27 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[0, 1, 9]",
     ];
 
-    // a `mut` parameter beside a parameter given the same variable, a loop over a list that the loop adds to, an `Add` whose argument
-    // changes the list, and many short lists
+    // a `mut` parameter beside a parameter given a copy of the same list, a loop over a list that the loop adds to, the name an arm
+    // binds while the arm changes the subject's variable, and many short lists
     private const string Sharing = """
+        data Empty
+
         void Fill(mut List<int> xs, List<int> seen) {
             xs.Add(7)
             print(seen.Count)
         }
 
-        int Grow(mut List<int> xs) {
-            xs.Add(5)
-            return xs.Count
+        List<int> | Empty Pair() {
+            mut xs = List<int>()
+            xs.Add(1)
+            xs.Add(2)
+            return xs
         }
 
         mut a = List<int>()
         a.Add(1)
-        Fill(mut a, a)
+        before = a
+        Fill(mut a, before)
         print(a.Count)
         mut b = a
         for x in b {
@@ -113,9 +119,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
         print(a)
         print(b)
-        mut ys = List<int>()
-        ys.Add(Grow(mut ys))
-        print(ys)
+        mut List<int> | Empty u = Pair()
+        match u {
+            List<int> l => {
+                u = Empty
+                mut ys = List<int>()
+                ys.Add(7)
+                ys.Add(8)
+                print(l)
+            }
+            Empty => print(0)
+        }
         mut i = 0
         while i < 1000 {
             mut t = List<int>()
@@ -132,12 +146,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "2",
         "[1, 7]",
         "[1, 7, 1, 7]", // the loop walks the list as it was when it started (C6)
-        "[5, 1]", // the argument first, then the list as the argument left it (M4's order, assumed for a method's receiver)
+        "[1, 2]", // the name keeps the value it was bound to (M3), and the freed block the next lists take is not its own
         "1000",
     ];
 
     // every way out of a block a list is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
-    // result nothing holds, a `with` and a copy written to
+    // result nothing holds, the body of a `void` function, a `with` and a copy written to
     private const string Rounds = """
         data Pair(List<int> A, int B)
 
@@ -158,6 +172,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
             return 0
         }
+
+        void Drop(int n) => Make(n)
 
         mut round = 0
         mut total = 0
@@ -181,6 +197,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 total = total + c.Count
             }
             Make(1000)
+            Drop(1000)
             total = total + Early(1000) + q.A.Count + b.Count - a.Count
         }
         print(round)
@@ -201,6 +218,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         Assert.Equal(lines, run.Output);
         Assert.Equal((code, error), (run.Code, run.Error));
+    }
+
+    /// <summary>The run ended with the system's signal before it printed: neither 0 nor the runtime's error exit 1, and no error line of the runtime.</summary>
+    private static void Crashed((int Code, IReadOnlyList<string> Output, string Error) run)
+    {
+        Assert.True(run.Code is not 0 and not 1, $"exit {run.Code}");
+        Assert.Empty(run.Output);
+        Assert.DoesNotContain("error:", run.Error, StringComparison.Ordinal);
     }
 
     /// <summary>The runtime and the standard library of this machine's target with each file's text edited where <paramref name="edits"/> names its path; each text it replaces is there.</summary>
@@ -319,9 +344,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // the positive control: a write into a freed block under the same allocator ends the process
         var writer = Edited([.. Fence, ("runtime/common/runtime.kz", "pub void Start() {\n    sys.Start()\n", "pub void Start() {\n    sys.Start()\n    byte* p = Allocate(16)\n    raw {\n        std.Free(p, 16)\n        p[0] = 1\n    }\n")]);
-        var run = BuildAndRun("print(1)\n", writer, "list-fence-control");
-        Assert.NotEqual(0, run.Code);
-        Assert.Empty(run.Output);
+        Crashed(BuildAndRun("print(1)\n", writer, "list-fence-control"));
     }
 
     [Fact]
@@ -342,9 +365,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // the target's own `Release`: a write into such a block after its `Free` ends the process with the system's signal
         const string start = "pub void Start() {\n    sys.Start()\n";
         const string write = "    byte* p = Allocate(300000)\n    raw {\n        p[0] = 1\n        std.Free(p, 300000)\n        p[0] = 2\n    }\n";
-        var run = BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + write)), "list-large-freed");
-        Assert.NotEqual(0, run.Code);
-        Assert.Empty(run.Output);
+        Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + write)), "list-large-freed"));
         var kept = Edited(("runtime/common/runtime.kz", start, start + write.Replace("        std.Free(p, 300000)\n", "", StringComparison.Ordinal)));
         Ran(BuildAndRun("print(1)\n", kept, "list-large-kept"), 0, ["1"], ""); // the positive control: the block not freed
 
@@ -352,7 +373,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string rounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";
         Ran(BuildAndRun(rounds, Bytes(), "list-large-rounds"), 0, ["14000000"], "");
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 70000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
-        run = BuildAndRun(held, Bytes(), "list-large-held"); // the positive control: the same lists, all of them held
+        var run = BuildAndRun(held, Bytes(), "list-large-held"); // the positive control: the same lists, all of them held
         Assert.Equal(1, run.Code);
         Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
     }

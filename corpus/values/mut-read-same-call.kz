@@ -1,0 +1,10 @@
+// expect: error mut-at-call at 9
+// rules: M7
+
+void Fill(mut List<int> xs, List<int> seen) {
+    xs.Add(seen.Count)
+}
+
+mut numbers = List<int>()
+Fill(mut numbers, numbers)
+print(numbers.Count)

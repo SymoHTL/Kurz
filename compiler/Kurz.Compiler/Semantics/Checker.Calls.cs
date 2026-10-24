@@ -1455,9 +1455,13 @@ public sealed partial class Checker
         {
             Report(ErrorIds.MutRequired, a.Line, $"`{name.Name}` was declared without `mut` and cannot be passed as `mut` (M7)");
         }
-        else if (paths.Any(other => other == path || other.StartsWith(path + ".", StringComparison.Ordinal) || path.StartsWith(other + ".", StringComparison.Ordinal)))
+        else if (paths.Any(other => Overlaps(other, path)))
         {
             Report(ErrorIds.MutAtCall, a.Line, $"`{path}` is passed as `mut` twice (M7)");
+        }
+        else
+        {
+            mutArguments[a] = (variable, path);
         }
 
         paths.Add(path);

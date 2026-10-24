@@ -1,0 +1,28 @@
+// expect: output
+// | 111
+// | 32
+// | 2
+// | 8
+// rules: M7
+
+data Point(int X, int Y)
+
+int Bump(mut int count) {
+    count = count + 10
+    return count
+}
+
+int Shift(mut Point point) {
+    point = Point(7, 8)
+    return 5
+}
+
+int Pair(int a, int b) => a * 100 + b
+
+mut n = 1
+print(Pair(n, Bump(mut n)))
+print(n + Bump(mut n))
+mut p = Point(1, 2)
+q = p with { X = Shift(mut p) }
+print(q.Y)
+print(p.Y)
