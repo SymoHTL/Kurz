@@ -387,7 +387,7 @@ a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
 corpus runner lists every case the checker reads in full and the emitter does not emit, 33 of the
-230 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+231 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a

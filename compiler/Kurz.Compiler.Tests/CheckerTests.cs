@@ -806,7 +806,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors("T Same<T>(mut T a) => a\n\nT Pick<T>(T a, T b) => a\n\nvoid Run<T>(mut T v) {\n    v = Pick(v, Same(mut v))\n}")); // a type parameter is not copied
         Clean("int Later(mut duration d) {\n    d = d + 1ms\n    return 1\n}\n\nint Keep(duration d, int n) => n\n\nmut duration t = 1ms\nprint(Keep(t, Later(mut t)))"); // a time is copied
         Clean("int Swap(mut (int) => int g) {\n    g = x => x\n    return 1\n}\n\nint Keep((int) => int g, int n) => n\n\nmut (int) => int f = x => x + 1\nprint(Keep(f, Swap(mut f)))"); // a function value is copied (the owner, 2026-10-25, "Copied")
-        Clean("data Rule((int) => int Step, int Limit)\n\nint Swap(mut Rule r) {\n    r = Rule(x => x, 0)\n    return 1\n}\n\nint Keep(Rule r, int n) => n\n\nmut rule = Rule(x => x + 1, 5)\nprint(Keep(rule, Swap(mut rule)))"); // and so is a data value of one and a copied type
+        Clean("data Rule((int) => int Step, int Limit)\n\nint Swap(mut Rule r) {\n    r = Rule(x => x, 0)\n    return 1\n}\n\nint Keep(Rule r, int n) => n\n\nmut rule = Rule(x => x + 1, 5)\nprint(Keep(rule, Swap(mut rule)))"); // and so is a data value of one and a copied type (the owner, 2026-10-25, "Copied too")
         Clean("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nint Swap(mut extern \"C\" (long) => long g) {\n    g = Twice\n    return 1\n}\n\nint Keep(extern \"C\" (long) => long g, int n) => n\n\nmut extern \"C\" (long) => long f = Twice\nprint(Keep(f, Swap(mut f)))", "native"); // the type of a C function is copied
 
         // the text names what is read and what changes it, and how to keep the value, as R11's messages name the change (the rest of
