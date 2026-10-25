@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
+using FunctionType = Kurz.Compiler.Semantics.FunctionType;
 using PointerType = Kurz.Compiler.Semantics.PointerType;
 using UnionType = Kurz.Compiler.Semantics.UnionType;
 
@@ -25,17 +26,17 @@ public sealed partial class Emitter
             case StringLiteral s:
                 return EmitInterpolation(s);
             case NameExpression n when Model.IsVariable(n):
-                return fn.Value($"load {Ir(type)}, ptr {Place(Model.VariableOf(n), n.Line)}");
+                return HeldCopy(n, fn.Value($"load {Ir(type)}, ptr {Place(Model.VariableOf(n), n.Line)}"), type);
             case NameExpression n:
                 return Instance(Model.FunctionNameOf(n), NoMap); // R17: a function of the C calling convention as a value, its address
             case MemberAccess m:
-                return EmitMember(m);
+                return HeldCopy(m, EmitMember(m), type);
             case CallExpression c:
                 return Temp(EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it"), type);
             case IndexExpression i when TypeOf(i.Target) is PointerType p:
                 return fn.Value($"load {Ir(type)}, ptr {ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index)}");
             case IndexExpression i when TypeOf(i.Target) is ListType list:
-                return EmitListIndex(i, list);
+                return HeldCopy(i, EmitListIndex(i, list), type);
             case UnaryExpression u:
                 return EmitUnary(u, type);
             case BinaryExpression b:
@@ -48,9 +49,27 @@ public sealed partial class Emitter
                 return Temp(EmitMatch(m.Subject, m.Arms, type)!, type);
             case ElseExpression el:
                 return Temp(EmitElse(el, asValue: true) ?? throw new InvalidOperationException($"`else` with a `void` success stands as a value at line {el.Line}: the checker reports it"), type);
+            case LambdaExpression l:
+                return EmitLambda(l, (FunctionType)type);
             default:
                 throw Unsupported(e.Line, ExpressionName(e));
         }
+    }
+
+    /// <summary>
+    /// A read the checker found its expression holds while a call in it changes the place it was read from, of a type it copies
+    /// (M7, the owner, 2026-10-25, "Copied"): a value of its own, a temporary of the region, so that the function values in it keep
+    /// their environments past the change.
+    /// </summary>
+    private string HeldCopy(Expression e, string value, KurzType type)
+    {
+        if (!Model.IsHeldCopy(e) || !Counted(type))
+        {
+            return value;
+        }
+
+        Retain(value, type);
+        return Temp(value, type);
     }
 
     /// <summary>What an expression the emitter does not lay out is, for its <c>not supported</c>.</summary>

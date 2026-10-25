@@ -82,6 +82,7 @@ public sealed class SemanticModel
     private readonly Dictionary<CallExpression, CallInfo> calls = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypePattern, KurzType> patterns = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionDeclaration, FunctionSymbol> functions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
@@ -128,6 +129,13 @@ public sealed class SemanticModel
     /// <summary>Whether the checker read the lambda.</summary>
     public bool HasLambda(LambdaExpression lambda) => lambdas.ContainsKey(lambda);
 
+    /// <summary>
+    /// Whether the expression is a read of a copied type that its expression still holds when something changes the place it was
+    /// read from (M7): a read the code generator copies, so that a function value in it keeps what it holds (the owner, 2026-10-25,
+    /// "Copied", at a count and a release per such read).
+    /// </summary>
+    public bool IsHeldCopy(Expression expression) => heldCopies.Contains(expression);
+
     /// <summary>The type an arm's pattern names (C4, O5).</summary>
     public KurzType PatternTypeOf(TypePattern pattern) => patterns.TryGetValue(pattern, out var t) ? t : throw Missing("pattern", pattern.Line);
 
@@ -151,6 +159,8 @@ public sealed class SemanticModel
     internal void RecordAssignment(AssignOrDeclare assignment, VariableSymbol variable) => assignments[assignment] = variable;
 
     internal void RecordLambda(LambdaExpression lambda, LambdaInfo info) => lambdas[lambda] = info;
+
+    internal void RecordHeldCopy(Expression expression) => heldCopies.Add(expression);
 
     internal void RecordPattern(TypePattern pattern, KurzType type) => patterns[pattern] = type;
 

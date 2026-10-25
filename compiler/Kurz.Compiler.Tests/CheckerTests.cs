@@ -840,11 +840,21 @@ public sealed class CheckerTests
         Assert.Equal(["11: `?.` (N5)"], NotSupported("data Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => n\n\nint Clear(mut Cart c) {\n    c = Cart(List<int>())\n    return 0\n}\n\nmut cart = Cart(List<int>())\nprint(Count(cart?.Items, Clear(mut cart)))"));
         Assert.Equal(["2: a generic data type as a base (T19)"], NotSupported("data Base<T>(T X)\ndata Derived(List<int> Items) : Base<int>\n\nint Reset(mut Base<int> b) {\n    b = Base(2)\n    return 0\n}\n\nint Size(Base<int> b, int n) => n\n\nmut Base<int> p = Base(1)\nprint(Size(p, Reset(mut p)))"));
 
-        // a `mut` method changes its receiver after its arguments ran, so a read of it there is held by nothing that the change
-        // meets (the owner, 2026-10-25, "Allow, as Rust's clone"); the receiver is held while a call in its argument changes it
+        // `Add` changes its receiver after its argument ran, so a read of it there is held by nothing that the change meets (the
+        // owner, 2026-10-25, "Allow, as Rust's clone"); the receiver is held while a call in its argument changes it
         Clean("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)");
         Clean("mut xs = List<int>()\nxs.Add(1)\nxs.Add(xs[0])\nxs.Add(xs.Count)\nprint(xs)");
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("List<int> Take(mut List<List<int>> all) {\n    all = List<List<int>>()\n    return List<int>()\n}\n\nmut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(Take(mut rows))\nprint(rows.Count)"));
+
+        // a lambda in that argument that reads the receiver holds it while `Add` changes it, as its value or an arm's (the owner,
+        // 2026-10-25, "Refuse, as Rust's borrow"); a copy on a line before passes
+        var fs = "mut fs = List<() => int>()\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 2)], Errors(fs + "fs.Add(() => fs.Count)\nprint(fs.Count)"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 2)], Errors(fs + "fs.Add((() => fs.Count))\nprint(fs.Count)"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 3)], Errors(fs + "k = 1\nfs.Add(match k {\n    1 => () => fs.Count\n    else => () => 0\n})\nprint(fs.Count)"));
+        Clean(fs + "n = fs.Count\nfs.Add(() => n)\nprint(fs.Count)");
+        Clean(fs + "mut others = List<int>()\nfs.Add(() => others.Count)\nprint(fs.Count)");
+        Names(fs + "fs.Add(() => fs.Count)\nprint(fs.Count)", "a lambda that reads `fs`", "`Add` changes `fs`");
         Names(arm + "        numbers.Add(1)\n        5\n    }\n}))", "`numbers`", "`Add` changes `numbers`");
         Names(arm + "        numbers = List<int>()\n        5\n    }\n}))", "`numbers`", "an assignment changes `numbers`");
     }

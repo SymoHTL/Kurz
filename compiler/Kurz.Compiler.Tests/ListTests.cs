@@ -8,7 +8,8 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The emitter's decisions on lists that no corpus case pins (M9; design record, section 3; the owner, 2026-10-24, "Full counting
 /// now" and "Items after the Add"): a list is a value whose storage is shared until one side writes (M3), the counting frees a
-/// block nothing holds, which the allocator gives out again, no block is read after it is freed, the number `allocation-failed`
+/// block nothing holds, which the allocator gives out again, and a lambda's environment as it frees a list's block (the owner,
+/// 2026-10-25, "Pair + heap env"), no block is read after it is freed, the number `allocation-failed`
 /// reports past the limit and for a refused growth, and what the emitter says `not supported` to; what the checker refuses of a
 /// read beside a `mut` call (M7) the corpus pins.
 /// </summary>
@@ -92,14 +93,30 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     ];
 
     // a `mut` parameter beside a parameter given a copy of the same list, a loop over a list that the loop adds to, the name an arm
-    // binds while the arm changes the subject's variable, and many short lists
+    // binds while the arm changes the subject's variable, many short lists, a function value and a data value that holds one read
+    // beside a call that changes their variables, a lambda's list whose variable changed, and the items `Where` keeps
     private const string Sharing = """
         data Empty
         data Row(List<int> Cells)
+        data Rule(() => int Step, int Limit)
 
         void Fill(mut List<int> xs, List<int> seen) {
             xs.Add(7)
             print(seen.Count)
+        }
+
+        int Keep(() => int f, int ignored) => f()
+
+        int Swap(mut () => int f) {
+            f = () => 0
+            return 0
+        }
+
+        int KeepRule(Rule r, int ignored) => r.Step()
+
+        int SwapRule(mut Rule r) {
+            r = Rule(() => 0, 0)
+            return 0
         }
 
         List<int> | Empty Pair() {
@@ -161,6 +178,26 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             c = c + 1
         }
         print(cells[8].Cells)
+        mut held = List<int>()
+        held.Add(5)
+        held.Add(6)
+        mut read = () => held.Count
+        held = List<int>()
+        print(Keep(read, Swap(mut read)))
+        mut steps = List<int>()
+        steps.Add(1)
+        mut rule = Rule(() => steps.Count, 1)
+        steps = List<int>()
+        print(KeepRule(rule, SwapRule(mut rule)))
+        mut nested = List<List<int>>()
+        mut one = List<int>()
+        one.Add(9)
+        nested.Add(one)
+        nested.Add(List<int>())
+        one = List<int>()
+        survivors = nested.Where(inner => inner.Count > 0)
+        nested = List<List<int>>()
+        print(survivors)
         """;
 
     private static readonly string[] SharingPrint =
@@ -173,10 +210,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "1000",
         "[3]", // an item read for its own list's `Add` across two growths, held by the list's slot alone (M7)
         "[4]", // the same for an item that holds a list
+        "2", // the value a call is given beside a `mut` call that replaces it, a function value whose environment it alone held (M7, "Copied")
+        "1", // the same for a data value that holds one ("Copied too"), and a lambda's list that only its environment holds (F15)
+        "[[9]]", // an item `Where` keeps, which only the source list held before the source was let go of
     ];
 
     // every way out of a block a list is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
-    // result nothing holds, the body of a `void` function, a `with` and a copy written to
+    // result nothing holds, the body of a `void` function, a `with`, a copy written to, and a lambda's environment in a variable and
+    // in a list
     private const string Rounds = """
         data Pair(List<int> A, int B)
 
@@ -223,7 +264,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
             Make(1000)
             Drop(1000)
-            total = total + Early(1000) + q.A.Count + b.Count - a.Count
+            l = Make(1000)
+            h = () => l.Count
+            mut hs = List<() => int>()
+            hs.Add(h)
+            hs.Add(() => Make(1000).Count)
+            total = total + Early(1000) + q.A.Count + b.Count - a.Count + hs[0]() + hs[1]() - 2000
         }
         print(round)
         print(total)
@@ -457,5 +503,34 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var diagnostic = Assert.Single(compilation.Diagnostics.Items);
         Assert.Equal((line, message), (diagnostic.Line, diagnostic.Message));
         Assert.False(diagnostic.IsError);
+    }
+
+    [Fact]
+    public void Where_calls_its_test_once_for_each_item_in_order()
+    {
+        // M9 says what `Where` gives, not when it runs its test: once for each item, in order, as Rust's `filter` and `collect` run it
+        const string text = "mut xs = List<int>()\nxs.Add(3)\nxs.Add(1)\nxs.Add(2)\nkept = xs.Where(x => {\n    print(x)\n    return x > 1\n})\nprint(kept)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-where-order"), 0, ["3", "1", "2", "[3, 2]"], "");
+    }
+
+    [Fact]
+    public void An_environment_the_system_refuses_reports_its_bytes()
+    {
+        // the count, the address of the function that lets go of it, and the `int` the lambda read, padded to the count's alignment
+        const string text = "n = 1\nf = () => n\nprint(f())\n";
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "lambda-refused"), 1, [], "error: allocation-failed (24 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "lambda-granted"), 0, ["1"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_mut_parameter_of_a_lambda_is_not_supported_at_its_line()
+    {
+        // a function type passes no `mut` (F11), so no caller's variable sees what such a parameter is given (M7)
+        var compilation = Compile("void Run((int) => int f) {\n    print(f(1))\n}\n\nRun((mut int x) => x)\n", toolchain.Runtime);
+        Assert.Null(compilation.Program);
+        var diagnostic = Assert.Single(compilation.Diagnostics.Items);
+        Assert.Equal((5, "a `mut` parameter of a lambda (M7)"), (diagnostic.Line, diagnostic.Message));
+        Assert.False(diagnostic.IsError);
+        Assert.NotNull(Compile("void Run((int) => int f) {\n    print(f(1))\n}\n\nRun((int x) => x)\n", toolchain.Runtime).Program); // the positive control
     }
 }
