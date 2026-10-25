@@ -95,6 +95,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // binds while the arm changes the subject's variable, and many short lists
     private const string Sharing = """
         data Empty
+        data Row(List<int> Cells)
 
         void Fill(mut List<int> xs, List<int> seen) {
             xs.Add(7)
@@ -138,6 +139,28 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             i = i + 1
         }
         print(i)
+        mut rows = List<List<int>>()
+        mut row = List<int>()
+        row.Add(3)
+        rows.Add(row)
+        row = List<int>()
+        mut k = 0
+        while k < 8 {
+            rows.Add(rows[0])
+            k = k + 1
+        }
+        print(rows[8])
+        mut cells = List<Row>()
+        mut kept = List<int>()
+        kept.Add(4)
+        cells.Add(Row(kept))
+        kept = List<int>()
+        mut c = 0
+        while c < 8 {
+            cells.Add(cells[0])
+            c = c + 1
+        }
+        print(cells[8].Cells)
         """;
 
     private static readonly string[] SharingPrint =
@@ -148,6 +171,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[1, 7, 1, 7]", // the loop walks the list as it was when it started (C6)
         "[1, 2]", // the name keeps the value it was bound to (M3), and the freed block the next lists take is not its own
         "1000",
+        "[3]", // an item read for its own list's `Add` across two growths, held by the list's slot alone (M7)
+        "[4]", // the same for an item that holds a list
     ];
 
     // every way out of a block a list is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a

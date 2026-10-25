@@ -387,7 +387,7 @@ a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
 corpus runner lists every case the checker reads in full and the emitter does not emit, 33 of the
-230 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+231 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a
@@ -782,8 +782,13 @@ round can ask about it by the rule's id.
   what it changes, a `mut` argument, an assignment or a `mut` method, changes it within the
   expression around the arm; and one `changed-while-held` is reported for each change, at its line,
   however many reads it meets and statements it stands in (E1). `Add`, the one `mut` method the
-  checker reads (a method of a data type is not, D16), takes its receiver as `mut`, against its
-  argument, and, having a `void` success (O10), stands only as a statement, an arm's among them.
+  checker reads (a method of a data type is not, D16), changes its receiver after its argument ran,
+  so a read of the receiver in its argument meets no change (the owner, 2026-10-25, "Allow, as Rust's
+  clone"), while a call in its argument that changes the receiver is the error; the emitter's `Add`
+  counts its item before the list grows. Having a `void` success (O10), it stands only as a
+  statement, an arm's among them. A function value is copied (the owner, 2026-10-25, "Copied"): the
+  emitter emits none (F11, above), so no read of one is borrowed; where one holds counted captures,
+  the answer's cost is a count and a release per such read, as the design record says.
 - D9 with C4: a value of a union stands where a union is required only, since a union is one of its
   cases only after a `match`: a `byte | short` is no `int`, and a union of two data types derived
   from one base no value of the base; each is `type-mismatch`.

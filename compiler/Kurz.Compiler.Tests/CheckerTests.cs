@@ -805,7 +805,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 13)], Errors("data Person(int Id)\ndata Member(List<int> Items) : Person\n\nint Reset(mut Person q) {\n    q = Person(2)\n    return 0\n}\n\nint Size(Person q, int n) => q.Id + n\n\nmut Person p = Member(1, List<int>())\nprint(p.Id)\nprint(Size(p, Reset(mut p)))")); // a type derived from it holds a list
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors("T Same<T>(mut T a) => a\n\nT Pick<T>(T a, T b) => a\n\nvoid Run<T>(mut T v) {\n    v = Pick(v, Same(mut v))\n}")); // a type parameter is not copied
         Clean("int Later(mut duration d) {\n    d = d + 1ms\n    return 1\n}\n\nint Keep(duration d, int n) => n\n\nmut duration t = 1ms\nprint(Keep(t, Later(mut t)))"); // a time is copied
-        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors("int Swap(mut (int) => int g) {\n    g = x => x\n    return 1\n}\n\nint Keep((int) => int g, int n) => n\n\nmut (int) => int f = x => x + 1\nprint(Keep(f, Swap(mut f)))")); // a function value is not copied
+        Clean("int Swap(mut (int) => int g) {\n    g = x => x\n    return 1\n}\n\nint Keep((int) => int g, int n) => n\n\nmut (int) => int f = x => x + 1\nprint(Keep(f, Swap(mut f)))"); // a function value is copied (the owner, 2026-10-25, "Copied")
+        Clean("data Rule((int) => int Step, int Limit)\n\nint Swap(mut Rule r) {\n    r = Rule(x => x, 0)\n    return 1\n}\n\nint Keep(Rule r, int n) => n\n\nmut rule = Rule(x => x + 1, 5)\nprint(Keep(rule, Swap(mut rule)))"); // and so is a data value of one and a copied type (the owner, 2026-10-25, "Copied too")
         Clean("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nint Swap(mut extern \"C\" (long) => long g) {\n    g = Twice\n    return 1\n}\n\nint Keep(extern \"C\" (long) => long g, int n) => n\n\nmut extern \"C\" (long) => long f = Twice\nprint(Keep(f, Swap(mut f)))", "native"); // the type of a C function is copied
 
         // the text names what is read and what changes it, and how to keep the value, as R11's messages name the change (the rest of
@@ -828,6 +829,7 @@ public sealed class CheckerTests
         var arm = find + "int Sum(List<int> xs, int n) => xs.Count + n\n\nmut numbers = List<int>()\nprint(Sum(numbers, Find(2) else {\n    NotFound => {\n";
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 15)], Errors(arm + "        numbers = List<int>()\n        5\n    }\n}))"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 15)], Errors(arm + "        numbers.Add(1)\n        5\n    }\n}))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ndata Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => xs.Count + n\n\nmut cart = Cart(List<int>())\nprint(Count(cart.Items, Find(2) else {\n    NotFound => {\n        cart.Items.Add(1)\n        5\n    }\n}))")); // a `mut` method on a path
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 17)], Errors(arm + "        k = 1\n        if k == 1 {\n            numbers = List<int>()\n        }\n        5\n    }\n}))"));
         Clean(arm + "        mut others = List<int>()\n        others.Add(1)\n        others.Count\n    }\n}))"); // a variable of the arm's own
         Clean(find + "mut numbers = List<int>()\nprint(Find(2) else {\n    NotFound => {\n        numbers = List<int>()\n        5\n    }\n})\nprint(numbers.Count)"); // an arm's change that nothing holds
@@ -838,10 +840,12 @@ public sealed class CheckerTests
         Assert.Equal(["11: `?.` (N5)"], NotSupported("data Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => n\n\nint Clear(mut Cart c) {\n    c = Cart(List<int>())\n    return 0\n}\n\nmut cart = Cart(List<int>())\nprint(Count(cart?.Items, Clear(mut cart)))"));
         Assert.Equal(["2: a generic data type as a base (T19)"], NotSupported("data Base<T>(T X)\ndata Derived(List<int> Items) : Base<int>\n\nint Reset(mut Base<int> b) {\n    b = Base(2)\n    return 0\n}\n\nint Size(Base<int> b, int n) => n\n\nmut Base<int> p = Base(1)\nprint(Size(p, Reset(mut p)))"));
 
-        // a `mut` method takes its receiver as `mut`: an argument that holds a part of it is held, a copied one is not
-        Assert.Equal([(ErrorIds.ChangedWhileHeld, 3)], Errors("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)"));
+        // a `mut` method changes its receiver after its arguments ran, so a read of it there is held by nothing that the change
+        // meets (the owner, 2026-10-25, "Allow, as Rust's clone"); the receiver is held while a call in its argument changes it
+        Clean("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)");
         Clean("mut xs = List<int>()\nxs.Add(1)\nxs.Add(xs[0])\nxs.Add(xs.Count)\nprint(xs)");
-        Names("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)", "an item of `rows`", "`Add` changes `rows`");
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("List<int> Take(mut List<List<int>> all) {\n    all = List<List<int>>()\n    return List<int>()\n}\n\nmut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(Take(mut rows))\nprint(rows.Count)"));
+        Names(arm + "        numbers.Add(1)\n        5\n    }\n}))", "`numbers`", "`Add` changes `numbers`");
         Names(arm + "        numbers = List<int>()\n        5\n    }\n}))", "`numbers`", "an assignment changes `numbers`");
     }
 

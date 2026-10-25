@@ -23,13 +23,16 @@ change the place it came from. Three shapes in which something could reached `ma
   the fix, the program printed `[7, 8]`, the items of a list made after the assignment in the freed
   block, instead of `[1, 2]`. It was found while the guard was being proved unreachable, not by a
   test: the fenced programs of `ListTests` held no arm that changes its subject.
-- **Through an arm's statement.** `Sum(numbers, Find(2) else { NotFound => { numbers = List<int>(); 5 } })`:
-  the checker's walk of M7 (pull request 64) counted the `mut` arguments in an arm's statements as
-  changes and not an assignment or a `mut` method, so `Sum` was given a block the assignment freed.
-  Built on 2026-10-25, the program ended with `error: index-out-of-range` at `Sum`'s read: the
-  freed block had been given out again for the list of one item. The review of pull request 64
-  found it, at the cap; the owner answered on 2026-10-25 that it is a compile error,
-  `changed-while-held`, as Rust's E0506, and the walk counts every statement that changes a place.
+- **Through an arm's statement.** `numbers` held `[1, 2]`, and
+  `Sum(numbers, Find(2) else { NotFound => { numbers = List<int>(); numbers.Add(5); 5 } })` called
+  a `Sum` that made a list of two items of its own and then read `xs[0] + xs[1]`: the checker's walk
+  of M7 (pull request 64) counted the `mut` arguments in an arm's statements as changes and not an
+  assignment or a `mut` method, so `Sum` was given a block the assignment freed. Built on
+  2026-10-25, the program ended with `error: index-out-of-range` at `Sum`'s read: the freed block
+  had been given out again for the arm's list of one item. The review of pull request 64 found it,
+  at the cap; the owner answered on 2026-10-25 that it is a compile error, `changed-while-held`, as
+  Rust's E0506, and since pull request 65 the walk counts an assignment, a `mut` method and a `mut`
+  argument in a statement of the arm's block, nested statements among them.
 
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the
@@ -38,11 +41,13 @@ defect; one whose freed blocks are given out again shows it as wrong output, not
 **How to apply:** every construct of the emitter that reads a place and keeps what it read past a
 call or a statement names what keeps the place unchanged: the checker's refusal within one
 expression (M7, `Semantics/Checker.Reads.cs`), no state outside a function that holds a list (R13),
-the count a loop holds of its collection (C6), the count the name an arm binds holds. A construct
+the count a loop holds of its collection (C6), the count the name an arm binds holds, the count
+`Add` takes of its item before its list grows (`rows.Add(rows[0])`, which the owner allowed on
+2026-10-25). A construct
 that has none takes a count of what it read. Each one gets a line in a fenced program of `ListTests`
 (an allocator that makes every freed block inaccessible), where a read after the free ends the run
 with the system's signal. A refusal of the checker names every form that changes a place, a `mut`
-argument, a `mut` method, an assignment, in every place a statement can stand inside an expression,
+argument, a `mut` method on a variable or a path of fields, an assignment, in every place a statement can stand inside an expression,
 each with a refused case and an allowed one. Gate: `compiler-tests` for the shapes those programs
 and the checker's tests hold; a new borrowing construct that no program reaches, and a change the
 walk does not count: review rule "compiler". Related:

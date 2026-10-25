@@ -35,8 +35,9 @@ public sealed partial class Checker
     /// after <c>mut</c> or the receiver of a <c>mut</c> method, of a value that holds it or of one it holds, whose value the
     /// expression still holds when that call runs, or when an assignment or a <c>mut</c> method in a statement of an arm changes
     /// it, is <c>changed-while-held</c>, once for each change (E1). A read that makes a new value first, a read after the call,
-    /// and a read of a type that is copied hold no such value. The lambdas of the expression are expressions of their own, read
-    /// when they are called, and change nothing they read (F11).
+    /// a read of a type that is copied and a read in a <c>mut</c> method's own arguments, which run before it changes its
+    /// receiver, hold no such value. The lambdas of the expression are expressions of their own, read when they are called, and
+    /// change nothing they read (F11).
     /// </summary>
     private void CheckReads(Expression expression) => Reads(expression);
 
@@ -73,7 +74,8 @@ public sealed partial class Checker
             _ => [],
         };
 
-        // a call's own changes: an argument after `mut` against all it holds, the receiver of a `mut` method against its arguments
+        // a call's own changes: an argument after `mut` against all it holds; a `mut` method changes its receiver after its
+        // arguments ran, so against nothing of its own (the owner, 2026-10-25, "Allow, as Rust's clone")
         if (e is CallExpression call)
         {
             foreach (var a in call.Arguments.Where(a => a.Mut))
@@ -84,14 +86,6 @@ public sealed partial class Checker
                     {
                         Conflict(held, a, change);
                     }
-                }
-            }
-
-            if (changes.TryGetValue(call, out var receiver))
-            {
-                foreach (var (held, _) in ordered.Skip(1))
-                {
-                    Conflict(held, call, receiver);
                 }
             }
         }
@@ -227,21 +221,21 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// M7, the owner's "Rust's Copy line" (2026-10-24) and "Rust's Copy set" (2026-10-25): whether the expression holds a copy of a
-    /// value of the type: a number, a <c>bool</c>, a <c>char</c>, a pointer, a time, the type of a C function, and a <c>data</c>
-    /// value or a union made only of such types that holds no value of its own type, as Rust's <c>Copy</c> types; a <c>data</c>
-    /// type only where every type derived from it is too (the record's assumption, section 4). A type the checker could not tell
-    /// is copied, so that its error stays the one reported (E1).
+    /// M7, the owner's "Rust's Copy line" (2026-10-24), "Rust's Copy set", "Copied" and "Copied too" (2026-10-25): whether the
+    /// expression holds a copy of a value of the type: a number, a <c>bool</c>, a <c>char</c>, a pointer, a time, the type of a C
+    /// function, a function value, and a <c>data</c> value or a union made only of such types that holds no value of its own type,
+    /// as Rust's <c>Copy</c> types; a <c>data</c> type only where every type derived from it is too (the record's assumption,
+    /// section 4). A type the checker could not tell is copied, so that its error stays the one reported (E1).
     /// </summary>
     private bool Copied(KurzType type) => Copied(type, []);
 
     private bool Copied(KurzType type, HashSet<DataSymbol> path) => type switch
     {
         PrimitiveType p => p.Kind != Primitive.String,
-        PointerType or CFunctionType or VoidType or ErrorType => true,
+        PointerType or CFunctionType or FunctionType or VoidType or ErrorType => true,
         UnionType u => u.Cases.All(c => Copied(c, path)),
         DataType d => CopiedData(d, path),
-        _ => false, // a list, a string, a function value, a type parameter
+        _ => false, // a list, a string, a type parameter
     };
 
     // the data types on the way to this one: a type met again holds a value of its own type, as a Rust type does through a `Box`,
