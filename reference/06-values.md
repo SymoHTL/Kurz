@@ -41,9 +41,9 @@ Case: [values/copy-on-assign.kz](../corpus/values/copy-on-assign.kz)
 Assigning to a field at the end of a path that starts at a `mut` variable changes that variable's
 value. It stores what nested `with` (D5) over the variable stores, with the variable read after the value: the value is evaluated first, then the path, in the
 variable as the value left it: a `mut` argument in the value that changes the variable keeps its
-change (§4, the owner, 2026-10-24). A `mut` method takes its receiver as `mut` (M5), so a call of
-one on the variable whose argument changes the variable, `xs.Add(F(mut xs))`, is M7's
-`changed-while-held` where M7 holds the receiver. An assignment into a path of an immutable
+change (§4, the owner, 2026-10-24). A `mut` method takes its receiver as `mut` (M5), and M7 holds the receiver while
+the method's arguments run, so a call of one on the variable whose argument changes the variable,
+`xs.Add(F(mut xs))`, is M7's `changed-while-held`. An assignment into a path of an immutable
 variable is the compile error `assign-immutable` (D4). A class instance on the path starts the path anew: from a `mut` field of
 the instance on, the rest of the path is as if it started at a `mut` variable, whatever holds the
 instance (K2), and a field of the instance that is not `mut` ends the path as an immutable variable
@@ -137,24 +137,31 @@ Within one expression, a read of what a call takes as `mut`, of a value that hol
 holds (the variable itself, a path of fields, an item of a list), is the compile error
 `changed-while-held` where the expression still holds the read's value when the call runs (§4, the
 owner, 2026-10-24 and 2026-10-25). A call takes as `mut` what stands after `mut` among its arguments,
-and a `mut` method its receiver (M5), so `rows.Add(rows[0])` for a list of lists `rows` is that error
-(§4, the owner, 2026-10-25). The expression holds the value of a read made as any other argument of
-that call, before or after the argument after `mut`; as an argument of a call around it given before
+and a `mut` method its receiver (M5), which the method changes after its own arguments ran, so a read
+of the receiver in them holds nothing while it changes: `rows.Add(rows[0])` for a list of lists `rows`
+passes, and `xs.Add(F(mut xs))` is the error (§4, the owner, 2026-10-24 and 2026-10-25). The
+expression holds the value of a read made as any other argument of that call without `mut` in front
+of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
+value is `mut-at-call`, above); as an argument of a call around it given before
 the argument the call stands in; as the receiver of a method or the target of `with` or of an index
 around the call; as an operand of an operator around it written before the operand the call stands
-in; and in a lambda made before the call that reads the variable, which holds a copy of what it reads
-from the moment it is made (F11, F15), so the reads in its body are held, not reads after the call
-(§4, the owner, 2026-10-24). An assignment of the variable or of a path into it, and a `mut` method
-called on it, in a statement of an `else` arm's block inside the expression, change it as such a call
-does while the expression holds the read's value (§4, the owner, 2026-10-25). Three reads hold no such
-value. A read that makes a new value first: the result of an operator, a call or a method
-(`numbers.Count`, `numbers[0] + 1`, `Same(numbers)` for a function that returns its list) *(proposed:
-the result of a call is a value of its own, M3)*. A read that runs after the call has ended. A read of
+in; and in a lambda made before the call that reads the variable, which holds the variables it reads from
+the moment it is made (F11, F15), whatever its body makes of them, so `() => numbers.Count` holds
+`numbers` and the reads in its body are not reads after the call (§4, the owner, 2026-10-24). An assignment of the variable or of a path into it, and a `mut` method
+called on either, in a statement of an `else` arm's block inside the expression, nested statements
+among them, change it as such a call does while the expression holds the read's value (§4,
+the owner, 2026-10-25). That block is the one an arm has inside an expression: an arm of a `match`
+used as a value is its value (C9), and a block there is `syntax`, as `compiler/README.md` reads C9. Three reads hold no such
+value. A read that makes a new value first: the result of an operator other than `??`, whose value
+is one of its sides, and of a call or a method (`numbers.Count`, `numbers[0] + 1`, `Same(numbers)` for
+a function that returns its list), where an index is no such operator and its item is held (above)
+*(proposed: the result of a call is a value of its own, M3)*. A read that runs after the call has ended. A read of
 a copied type, which the expression holds as a copy: a number, a `bool`, a `char`, a pointer, a time,
 the type of a C function, and a `data` value or a union made only of such types that holds no value of
 its own type, so that a lambda that reads an `int` holds the value from before the call (§4, the
-owner, 2026-10-24 and 2026-10-25). A list, a `string`, a function value, a type parameter and a `data`
-type that holds a value of its own type are not copied (§4, the owner, 2026-10-25). Two fields of one
+owner, 2026-10-24 and 2026-10-25). A list, a `string`, a type parameter and a `data` type that holds a
+value of its own type are not copied; a function value is, and so is a `data` value or a union made only
+of function values and copied types (§4, the owner, 2026-10-25). Two fields of one
 variable stay two values. The error stands at the line of what changes the value, an argument after
 `mut`, the call of a `mut` method or an assignment, once for each of them however many reads it meets.
 *(assumed, as §4 marks it: one error per change, E1; a `data` type is copied where every type derived
@@ -164,7 +171,8 @@ target of `with` or of an index before what follows it, as F12 has a call's argu
 evaluates operands, so a copied read before a `mut` call holds the value from before the call. The
 subject of a `match` and the call of an `else` hold nothing for the arms but the names the arms bind,
 which are variables of their own (M3), so an arm may pass the subject's variable as `mut`. *(proposed:
-the order of operands and of `with`, where F12 names arguments alone; the arms, which §4 does not
+a call's receiver before its arguments, an operand before the one after it and the target of `with`
+and of an index before what follows it, where F12 names arguments alone; the arms, which §4 does not
 name)*
 
 Case: [values/mut-parameter.kz](../corpus/values/mut-parameter.kz)
@@ -316,8 +324,12 @@ print(Apply(() => numbers.Count, Grow(mut numbers)))
 Case: [values/mut-read-add-item.kz](../corpus/values/mut-read-add-item.kz)
 ```kurz
 mut rows = List<List<int>>()
-rows.Add(List<int>())
+mut row = List<int>()
+row.Add(3)
+rows.Add(row)
+row = List<int>()
 rows.Add(rows[0])
+print(rows[1])
 print(rows.Count)
 ```
 
