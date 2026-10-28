@@ -382,12 +382,17 @@ for c in "ab".Chars {
 A `float` shows the shortest digits that read back as the same `float`, not the digits of the
 `double` it would widen to: `0.1f` shows `0.1`, as C# prints it, and not `0.10000000149011612`. The
 owner accepted this reading by its id on 2026-10-09, in round 13, without its text shown, so it is
-assumed and not decided.
+assumed and not decided. A `float` takes the exponent form from `1E+09` up, as .NET Core 3.0 and
+later print a `float`: `123456790f` shows `123456790` and `1e9f` shows `1E+09` (the owner,
+2026-10-28, "As C# prints a float", against the bounds of a `double`, under which `1e9f` shows
+`1000000000`); below `1E-04` it takes it as a `double` does (A14).
 
 Case: [values/text-float.kz](../corpus/values/text-float.kz)
 ```kurz
 print(0.1f)
 print(2.5f)
+print(123456790f)
+print(1e9f)
 ```
 
 ### A12 (assumed, §8) The text of a duration
@@ -455,19 +460,30 @@ print(Access.None)
 
 "What C# prints" is what .NET Core 3.0 and later print with the invariant culture, which is the
 shortest digits that read back as the same number (A4), with `.` as the separator: an exponent form
-for a nonzero magnitude of `1E+15` or more or below `1E-04`, so that `1E-05` is the first power of
-ten it shows and `0.0001` the last without it, `0` for zero, `-0` for a negative zero, `Infinity` and `-Infinity` for the
-infinities, and `NaN`. Older .NET and other cultures print some of these differently (`0` for a
-negative zero, a `∞` sign, a `,`), and none of that is meant. The owner accepted this reading by its
-id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided; that the
+for a nonzero magnitude of `1E+17` or more or below `1E-04`, so that `1E+16` shows `10000000000000000`,
+`1E-05` is the first power of ten below that bound it shows and `0.0001` the last without it, `0` for
+zero, `-0` for a negative zero, `Infinity` and `-Infinity` for the infinities, and `NaN`. Older .NET
+and other cultures print some of these differently (`0` for a negative zero, a `∞` sign, a `,`,
+`1E+15` for `1e15`), and none of that is meant. The owner accepted this reading by its
+id on 2026-10-09, in round 13, without its text shown, so it is assumed and not decided, but for the
+bound `1E+17`, which the owner chose (below); that the
 exponent form starts below `1E-04`, at `1E-05` for the powers of ten, came from the first review of
-2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)*
+2026-10-10, and was not put to the owner by its text. *(assumed: that sentence)* The bound `1E+17` is
+the owner's (2026-10-28, "As .NET prints: 1E+17"): .NET 10 writes `1e15` as `1000000000000000`, as
+the source of .NET Core 3.0 has it, where the exponent form starts when the part before the point
+would take more places than 17 and than the count of the digits; against keeping `1E+15`, the bound
+of .NET Framework's shorter format, which this rule named before. Where .NET writes a text that does
+not read back as the value, as .NET 10 writes the power of two `2.9802322387695312E-08` as
+`2.980232238769531E-08`, the text is the shortest digits that do, as A4 says. *(assumed: A4's digits
+over such a text of .NET's, which .NET promises to read back)*
 
 Case: [values/text-double-special.kz](../corpus/values/text-double-special.kz)
 ```kurz
 double z = 0.0
-print(1e15)
-print(1e14)
+print(1e16)
+print(1e17)
+print(0.0001)
+print(0.00001)
 print(-0.0)
 print(1.0 / z)
 ```

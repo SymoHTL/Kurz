@@ -92,6 +92,10 @@ public sealed partial class Emitter
                 return IntegerText(i.Value, type);
             case IntegerConstant i when type is PrimitiveType { Kind: Primitive.Char }:
                 return IntegerText(i.Value, Types.Int);
+            case RealConstant r when type is PrimitiveType { Kind: Primitive.Double }:
+                return RealText(r.Value);
+            case RealConstant r when type is PrimitiveType { Kind: Primitive.Float }:
+                return RealText((float)r.Value);
             case BoolConstant b:
                 return b.Value ? "true" : "false";
             case CharConstant c:
@@ -132,6 +136,9 @@ public sealed partial class Emitter
 
         return bits.ToString(CultureInfo.InvariantCulture);
     }
+
+    /// <summary>The LLVM literal of a <c>double</c>, and of a <c>float</c>, which a <c>double</c> holds exactly: its 64 bits as a <c>double</c>, in hexadecimal.</summary>
+    private static string RealText(double value) => "0x" + BitConverter.DoubleToInt64Bits(value).ToString("X16", CultureInfo.InvariantCulture);
 
     /// <summary>A <c>%kz.str</c> constant, written as an operand is, without its type: the pointer to the bytes of the text and their count; an empty text points at a constant of no bytes, never at <c>null</c> (R15).</summary>
     private string StringValue(string text)
@@ -205,6 +212,11 @@ public sealed partial class Emitter
             case TokenKind.Minus:
                 {
                     var x = Convert(EmitExpression(u.Operand), TypeOf(u.Operand), type, u.Line);
+                    if (Types.IsFloating(type))
+                    {
+                        return fn.Value($"fneg {Ir(type)} {x}"); // the sign turned, of a zero, an infinity and NaN as well
+                    }
+
                     return Arithmetic("sub", IntegerText(BigInteger.Zero, type), x, type, u.Line, checkedBuild: test);
                 }
 
@@ -268,13 +280,28 @@ public sealed partial class Emitter
                 return PointerArithmetic(b, pointer, rightType);
             case TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent:
                 {
-                    if (!Types.IsInteger(type))
+                    if (!Types.IsInteger(type) && !Types.IsFloating(type))
                     {
                         throw Unsupported(b.Line, $"`{op}` on a `{type}`");
                     }
 
                     var l = Convert(EmitExpression(b.Left), leftType, type, b.Line);
                     var r = Convert(EmitExpression(b.Right), rightType, type, b.Line);
+                    if (Types.IsFloating(type))
+                    {
+                        // T18, T25: IEEE 754's operations, as C# has them: by zero `/` gives an infinity or NaN and `%` NaN, and `%` is the
+                        // remainder of the division toward zero
+                        var instruction = op switch
+                        {
+                            TokenKind.Plus => "fadd",
+                            TokenKind.Minus => "fsub",
+                            TokenKind.Star => "fmul",
+                            TokenKind.Slash => "fdiv",
+                            _ => "frem",
+                        };
+                        return fn.Value($"{instruction} {Ir(type)} {l}, {r}");
+                    }
+
                     return op switch
                     {
                         TokenKind.Plus => Arithmetic("add", l, r, type, b.Line, checkedBuild: test),
@@ -403,6 +430,16 @@ public sealed partial class Emitter
         var op = b.Operator;
         var left = EmitExpression(b.Left);
         var right = EmitExpression(b.Right);
+        if (Types.IsFloating(leftType) || Types.IsFloating(rightType))
+        {
+            // T18, T23: both sides as the wider floating-point type, an integer side widened into it; NaN is equal to nothing and
+            // unequal to everything, itself among them, and 0 equals -0, as in C#
+            var common = leftType is PrimitiveType { Kind: Primitive.Double } || rightType is PrimitiveType { Kind: Primitive.Double } ? Types.Double : Types.Float;
+            var l = Convert(left, leftType, common, b.Line);
+            var r = Convert(right, rightType, common, b.Line);
+            return fn.Value($"fcmp {FloatingCondition(op)} {Ir(common)} {l}, {r}");
+        }
+
         if (Types.IsInteger(leftType) && Types.IsInteger(rightType))
         {
             var common = Types.CommonInteger((PrimitiveType)leftType, (PrimitiveType)rightType) ?? throw Unsupported(b.Line, $"a comparison of a `{leftType}` and a `{rightType}`");
@@ -442,10 +479,21 @@ public sealed partial class Emitter
         _ => signed ? "sge" : "uge",
     };
 
+    private static string FloatingCondition(TokenKind op) => op switch
+    {
+        TokenKind.EqualEqual => "oeq",
+        TokenKind.NotEqual => "une",
+        TokenKind.Less => "olt",
+        TokenKind.LessEqual => "ole",
+        TokenKind.Greater => "ogt",
+        _ => "oge",
+    };
+
     // ---- conversions -----------------------------------------------------------------------------
 
     /// <summary>
-    /// A value of <paramref name="from"/> where a <paramref name="to"/> is required (T1): the same type; an integer widened (T23); a
+    /// A value of <paramref name="from"/> where a <paramref name="to"/> is required (T1): the same type; an integer widened (T23); an
+    /// integer or a <c>float</c> into a floating-point type (T23); a
     /// derived data value as its base (D6), the same block, and no data value as a type it does not derive from; a value into the one
     /// case of a union it goes to (D9, T8 with D9); a union into a union (D9 with O1).
     /// </summary>
@@ -459,6 +507,11 @@ public sealed partial class Emitter
         if (Types.IsInteger(from) && Types.IsInteger(to))
         {
             return Resize(value, from, to);
+        }
+
+        if ((Types.IsInteger(from) || Types.IsFloating(from)) && Types.IsFloating(to))
+        {
+            return ToFloating(value, from, to);
         }
 
         if (from is DataType && to is DataType && Types.Assignable(from, to))
@@ -498,6 +551,56 @@ public sealed partial class Emitter
         return fn.Value($"trunc {Ir(from)} {value} to {Ir(to)}");
     }
 
+    /// <summary>
+    /// T23, T26: an integer as the nearest value a floating-point type holds, a <c>float</c> as the <c>double</c> that holds it, and a
+    /// <c>double</c> as the nearest <c>float</c>, an infinity beyond its range, NaN and the infinities kept.
+    /// </summary>
+    private string ToFloating(string value, KurzType from, KurzType to)
+    {
+        if (Types.IsInteger(from))
+        {
+            return fn.Value($"{(Types.IsSigned(from) ? "sitofp" : "uitofp")} {Ir(from)} {value} to {Ir(to)}");
+        }
+
+        return fn.Value($"{(Lower.Size(from) < Lower.Size(to) ? "fpext" : "fptrunc")} {Ir(from)} {value} to {Ir(to)}");
+    }
+
+    /// <summary>
+    /// T26: a floating-point value into an integer type, its fraction dropped toward zero. A value beyond the type's range, an
+    /// infinity and NaN raise <c>overflow</c> in a test build; in a release build they give the type's largest or smallest value,
+    /// and NaN 0, as LLVM's saturating conversion does.
+    /// </summary>
+    private string FromFloating(string value, KurzType from, KurzType to, int line)
+    {
+        var ir = Ir(from);
+        var instruction = Types.IsSigned(to) ? "fptosi" : "fptoui";
+        if (!test)
+        {
+            var intrinsic = $"llvm.{instruction}.sat.{Ir(to)}.{(ir == "float" ? "f32" : "f64")}";
+            module.Declare($"declare {Ir(to)} @{intrinsic}({ir})");
+            return fn.Value($"call {Ir(to)} @{intrinsic}({ir} {value})");
+        }
+
+        // it fits above the smallest value minus one and below the largest plus one, which no NaN is; where the floating-point
+        // type cannot hold the smallest minus one, it holds nothing between that and the smallest
+        var (min, max) = Types.Range(to);
+        var low = Holds(from, min - 1)
+            ? fn.Value($"fcmp ogt {ir} {value}, {RealText((double)(min - 1))}")
+            : fn.Value($"fcmp oge {ir} {value}, {RealText((double)min)}");
+        var high = fn.Value($"fcmp olt {ir} {value}, {RealText((double)(max + 1))}");
+        var fail = fn.Label("overflow");
+        var ok = fn.Label("fits");
+        fn.CondBranch(fn.Value($"and i1 {low}, {high}"), ok, fail);
+        fn.Block(fail);
+        Raise(ErrorIds.Overflow, line);
+        fn.Block(ok);
+        return fn.Value($"{instruction} {ir} {value} to {Ir(to)}");
+    }
+
+    /// <summary>Whether the floating-point type holds the integer exactly.</summary>
+    private static bool Holds(KurzType type, BigInteger value) =>
+        type is PrimitiveType { Kind: Primitive.Float } ? new BigInteger((float)value) == value : new BigInteger((double)value) == value;
+
     // ---- the text of a value (A2, A3, A8) --------------------------------------------------------
 
     /// <summary>The text of a value as `print` and an interpolation show it (A1, L6), as a <c>%kz.str</c>, made by the runtime.</summary>
@@ -518,6 +621,10 @@ public sealed partial class Emitter
                 return fn.Value($"select i1 {value}, %kz.str {StringValue("true")}, %kz.str {StringValue("false")}");
             case PrimitiveType { Kind: Primitive.Char }:
                 return fn.Value($"call %kz.str {RuntimeFunction("TextOfChar")}(i32 {value})");
+            case PrimitiveType { Kind: Primitive.Double }:
+                return fn.Value($"call %kz.str {RuntimeFunction("TextOfDouble")}(i64 {fn.Value($"bitcast double {value} to i64")})"); // A4, A14: from its bits
+            case PrimitiveType { Kind: Primitive.Float }:
+                return fn.Value($"call %kz.str {RuntimeFunction("TextOfFloat")}(i32 {fn.Value($"bitcast float {value} to i32")})"); // A8, A11
             case DataType or UnionType:
                 return DerivedText(value, type, line);
             case ListType list:

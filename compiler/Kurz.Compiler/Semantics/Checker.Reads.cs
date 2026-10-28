@@ -273,8 +273,9 @@ public sealed partial class Checker
     // the data types on the way to this one: a type holds what its type arguments hold, whether a field stores them or not, as
     // Rust's `PhantomData<T>` keeps the borrow of its argument (the owner, 2026-10-28, "Counts, as Rust"), so `Q<() => int>`
     // holds one for any `data Q<T>`; a type met again on the way has its fields read at the first meeting, so it answers by its
-    // type arguments alone, `Box<() => int>` inside a `Box<Box<() => int>>`; each argument is smaller than the type, so a type
-    // that holds itself with other arguments, `P<List<T>>` in a `P<T>`, ends the walk
+    // type arguments alone, `Q<() => int>` through the field `N` of a `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`;
+    // each argument is smaller than the type, so a type that holds itself with other arguments, `P<List<T>>` in a `P<T>`, ends
+    // the walk
     private bool DataHoldsFunction(DataType d, HashSet<DataSymbol> path)
     {
         if (d.TypeArguments.Any(a => HoldsFunction(a, path)))
