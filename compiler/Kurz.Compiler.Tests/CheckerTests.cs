@@ -875,9 +875,18 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(chain + "mut qs = List<P<() => int>>()\nqs.Add(P<() => int>(() => qs.Count, List<P<List<() => int>>>()))\nprint(qs.Count)"));
         Clean(chain + "mut ps = List<P<int>>()\nps.Add(P<int>(Count(() => ps.Count), List<P<List<int>>>()))\nprint(ps.Count)");
 
-        // a type argument that no field uses holds nothing, met again or not
-        Clean("data Q<T>(int X, List<Q<() => int>> N)\n\nList<Q<() => int>> Keep(() => int g) => List<Q<() => int>>()\n\nmut qs = List<List<Q<() => int>>>()\nqs.Add(Keep(() => qs.Count))\nprint(qs.Count)");
-        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors("data R<T>(T X, List<R<() => int>> N)\n\nList<R<() => int>> Keep(() => int g) => List<R<() => int>>()\n\nmut rs = List<List<R<() => int>>>()\nrs.Add(Keep(() => rs.Count))\nprint(rs.Count)"));
+        // a data type holds what its type arguments hold, whether a field stores them or not (the owner, 2026-10-28, "Counts, as
+        // Rust"): an argument no field uses, one that only the type itself uses, and a field whose type, met again, has such an
+        // argument; a type whose arguments and fields hold none passes
+        static string Kept(string data, string type) => $"{data}\n\nList<{type}> Keep(() => int g) => List<{type}>()\n\nmut qs = List<List<{type}>>()\nqs.Add(Keep(() => qs.Count))\nprint(qs.Count)";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(Kept("data Q<T>(int X)", "Q<() => int>")));
+        Clean(Kept("data Q<T>(int X)", "Q<int>"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(Kept("data Q<T>(int X, List<Q<T>> N)", "Q<() => int>")));
+        Clean(Kept("data Q<T>(int X, List<Q<T>> N)", "Q<int>"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(Kept("data Q<T>(int X, List<Q<() => int>> N)", "Q<int>")));
+        Clean(Kept("data Q<T>(int X, List<Q<int>> N)", "Q<int>"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(Kept("data R<T>(T X, List<R<() => int>> N)", "R<int>")));
+        Clean(Kept("data R<T>(T X, List<R<int>> N)", "R<int>"));
         Clean(fs + "mut others = List<int>()\nfs.Add(() => others.Count)\nprint(fs.Count)");
         Names(fs + "fs.Add(() => fs.Count)\nprint(fs.Count)", "a lambda that reads `fs`", "`Add` changes `fs`");
         Names(arm + "        numbers.Add(1)\n        5\n    }\n}))", "`numbers`", "`Add` changes `numbers`");

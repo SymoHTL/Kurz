@@ -1,0 +1,10 @@
+// expect: error changed-while-held at 9
+// rules: M7
+
+data Tag<T>(int Id)
+
+Tag<() => int> Mark(() => int f) => Tag<() => int>(f())
+
+mut ts = List<Tag<() => int>>()
+ts.Add(Mark(() => ts.Count))
+print(ts.Count)

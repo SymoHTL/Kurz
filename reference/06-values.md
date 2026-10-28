@@ -147,16 +147,21 @@ call or a `with` there that the argument's value can keep, a value of a type tha
 value: `fs.Add(Wrap(() => fs.Count))` is the error (§4, the owner, 2026-10-25). A value inside the
 argument of a type that can hold none ends what it keeps, so `xs.Add(Count(() => xs.Count))` and
 `xs.Add(Count(Wrap(() => xs.Count)))`, whose `Count` gives an `int`, pass (§4, the owner, 2026-10-25
-and 2026-10-28). A type that can hold a function value is a function type, a type parameter, a list
-or a union that holds one, and a `data` type when a field of it or of a type derived from it holds
-one, so that a type argument no field of its type uses holds nothing (§4, the owner, 2026-10-28). A
-map, a nullable type and a class can hold one where a type they hold can *(assumed, as §4 marks
-it)*. Whether another `mut` method takes `Add`'s exception is open (§14), with two options: the
-exception for every `mut` method that stores what its argument gave before it changes its receiver,
-as `Add` stores its counted item before the list grows, or for `Add` alone. While it is open, the
-rule above holds for such a method with its conditions: a read of the receiver whose value the
-argument still holds when the method runs is the error, and a copied read or one that makes a new
-value first is not. The
+and 2026-10-28). `Add` lets go of what its argument made besides its item, a lambda's environment
+among them, before the list grows, so that no count they hold makes it copy the items (§4, the
+owner, 2026-10-28, "Pass, as Rust"). A type that can hold a function value is a function type, a
+type parameter, a list or a union that holds one, and a `data` type when one of its type arguments
+holds one, whether a field stores it or not, or when a field of it or of a type derived from it
+holds one (§4, the owner, 2026-10-28, "confirmed" and "Counts, as Rust"): `Q<() => int>` holds one
+for any `data Q<T>`, so `qs.Add(Keep(() => qs.Count))`, with a `Keep` that gives a list of them, is
+the error. A field's type is read with the type's arguments in place of its parameters, so a field
+of type `T` holds what the argument for `T` holds, and a map holds one where its key or its value
+type can, a nullable type where the type it makes nullable can, and a class where a field of it or
+of a class derived from it can *(assumed, as §4 marks them)*. Whether another `mut` method takes
+`Add`'s exception is open (§14), with two options: the exception for every `mut` method that stores
+what its argument gave before it changes its receiver, as `Add` stores its counted item before the
+list grows, or for `Add` alone. While it is open, the rule above holds for such a method as for any
+call that takes its receiver as `mut`, with every condition it states. The
 expression holds the value of a read made as any other argument of that call without `mut` in front
 of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
 value is `mut-at-call`, above); as an argument of a call around it given before
@@ -397,6 +402,17 @@ data Box<T>(T V)
 mut bs = List<Box<Box<() => int>>>()
 bs.Add(Box<Box<() => int>>(Box<() => int>(() => bs.Count)))
 print(bs.Count)
+```
+
+Case: [values/mut-read-lambda-unused-argument.kz](../corpus/values/mut-read-lambda-unused-argument.kz)
+```kurz
+data Tag<T>(int Id)
+
+Tag<() => int> Mark(() => int f) => Tag<() => int>(f())
+
+mut ts = List<Tag<() => int>>()
+ts.Add(Mark(() => ts.Count))
+print(ts.Count)
 ```
 
 Case: [values/mut-read-arm-change.kz](../corpus/values/mut-read-arm-change.kz)

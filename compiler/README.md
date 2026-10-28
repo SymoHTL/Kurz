@@ -347,8 +347,7 @@ changes the list through a `mut` parameter is `changed-while-held` (M7), so the 
 reads its argument and its list is not seen. What `Add`'s argument made besides its item, the
 environment of a lambda it gave to a call among them, is let go of before the list is read, so that
 no count it held makes the list copy its items: the environment counts what its lambda read (F15),
-as section 4 states (the owner, 2026-10-28, "Pass, as Rust": "the environment is let go of before the list
-grows, so `Add` copies nothing"). The count
+as M7 states (section 4, the owner, 2026-10-28, "Pass, as Rust"). The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
@@ -813,12 +812,13 @@ round can ask about it by the rule's id.
   can hold one, so `fs.Add(Wrap(() => fs.Count))` is the error, and a value of a type that can hold
   none ends it, so `xs.Add(Count(() => xs.Count))` and `xs.Add(Count(Wrap(() => xs.Count)))`, whose
   `Count` gives an `int`, are not (the owner, 2026-10-25, "Refuse if it can keep it", and 2026-10-28,
-  "Pass, as Rust"). A type parameter can hold one, and so can a `data` type when it or a type derived
-  from it holds one (section 4, the owner, 2026-10-28, "confirmed"), and a generic type holds one
-  where a type argument that one of its fields uses can, at any depth: a type met again on the way,
-  `Box` in `Box<Box<() => int>>`, answers by the type arguments its fields use, which ends the walk
-  for a type that holds itself with other arguments, and `Q<() => int>` in a
-  `data Q<T>(int X, List<Q<() => int>> N)` holds none. A map, a nullable type and a class, which
+  "Pass, as Rust"). As M7 says, a type parameter can hold one, and so can a
+  `data` type when one of its type arguments can, whether a field stores it or not (section 4, the
+  owner, 2026-10-28, "Counts, as Rust"), or when a field of it, its type read with the type's
+  arguments in place of its parameters as section 4 assumes, or of a type derived from it can
+  ("confirmed"), at any depth: a type met again on the way, `Box` in `Box<Box<() => int>>`, answers by its type arguments
+  alone, since its fields were read at the first meeting, which ends the walk for a type that holds
+  itself with other arguments, `P<List<T>>` in a `P<T>`. A map, a nullable type and a class, which
   section 4 assumes can hold one, the checker says `not supported` to (M9, N1, chapter 7) before the
   walk asks. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
