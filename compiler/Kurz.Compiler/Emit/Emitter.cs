@@ -150,10 +150,17 @@ public sealed partial class Emitter
         End();
         var start = RuntimeFunction("Start");
         var finish = RuntimeFunction("Finish");
-        while (pending.Count > 0)
+        while (pending.Count > 0 || lambdas.Count > 0)
         {
-            var (function, instanceMap, name) = pending.Dequeue();
-            EmitFunction(function, instanceMap, name);
+            if (pending.Count > 0)
+            {
+                var (function, instanceMap, name) = pending.Dequeue();
+                EmitFunction(function, instanceMap, name);
+            }
+            else
+            {
+                EmitLambdaFunction(lambdas.Dequeue());
+            }
         }
 
         var main = new IrFunction("i32 @main()", Attributes());
@@ -344,19 +351,34 @@ public sealed partial class Emitter
             }
         }
 
-        if (d.ExpressionBody is not null)
+        EmitBody(d.ExpressionBody, d.BlockBody, d.Line);
+        End();
+    }
+
+    /// <summary>The body of a function or a lambda, which returns from the function being emitted.</summary>
+    private void EmitBody(Expression? expressionBody, Block? blockBody, int line)
+    {
+        if (expressionBody is not null && Types.IsVoid(TypeOf(expressionBody)))
+        {
+            InRegion(() => EmitEffect(expressionBody, expressionBody.Line)); // a call with a `void` success, as a `void` lambda's body is (F11)
+            if (!fn.Terminated)
+            {
+                EmitReturn(null, Types.Void, line);
+            }
+        }
+        else if (expressionBody is not null)
         {
             // the value of a `void` function's body is no result: it stays a temporary, which the return lets go of (F4)
-            InRegion(() => EmitReturn(Types.IsVoid(returnType) ? EmitExpression(d.ExpressionBody) : Owned(d.ExpressionBody), TypeOf(d.ExpressionBody), d.ExpressionBody.Line));
+            InRegion(() => EmitReturn(Types.IsVoid(returnType) ? EmitExpression(expressionBody) : Owned(expressionBody), TypeOf(expressionBody), expressionBody.Line));
         }
         else
         {
-            EmitBlock(d.BlockBody!);
+            EmitBlock(blockBody!);
             if (!fn.Terminated)
             {
                 if (Types.IsVoid(returnType) || returnType is UnionType { Cases: [VoidType, ..] })
                 {
-                    EmitReturn(null, Types.Void, d.Line); // the end of the body returns the success of a function without a value (F4, O10)
+                    EmitReturn(null, Types.Void, line); // the end of the body returns the success of a function without a value (F4, O10)
                 }
                 else
                 {
@@ -364,8 +386,6 @@ public sealed partial class Emitter
                 }
             }
         }
-
-        End();
     }
 
     /// <summary>A parameter's or a result's type in a function's signature: of the C calling convention for a function written <c>extern "C"</c> (R16).</summary>
@@ -474,7 +494,7 @@ public sealed partial class Emitter
                 EmitAssignment(a);
                 break;
             case ExpressionStatement e:
-                EmitExpressionStatement(e);
+                EmitEffect(e.Expression, e.Line);
                 break;
             case IfStatement i:
                 EmitIf(i);
@@ -543,9 +563,10 @@ public sealed partial class Emitter
         _ => $"the statement `{statement.GetType().Name}`",
     };
 
-    private void EmitExpressionStatement(ExpressionStatement e)
+    /// <summary>An expression that stands as a statement: a call, an <c>else</c> or a <c>match</c>, run for what it does.</summary>
+    private void EmitEffect(Expression expression, int line)
     {
-        switch (Unwrap(e.Expression))
+        switch (Unwrap(expression))
         {
             case CallExpression c:
                 if (EmitCall(c) is { } value)
@@ -561,7 +582,7 @@ public sealed partial class Emitter
                 EmitMatch(m.Subject, m.Arms, null);
                 break;
             default:
-                throw Unsupported(e.Line, ExpressionName(e.Expression));
+                throw Unsupported(line, ExpressionName(expression));
         }
     }
 

@@ -137,9 +137,15 @@ Within one expression, a read of what a call takes as `mut`, of a value that hol
 holds (the variable itself, a path of fields, an item of a list), is the compile error
 `changed-while-held` where the expression still holds the read's value when the call runs (§4, the
 owner, 2026-10-24 and 2026-10-25). A call takes as `mut` what stands after `mut` among its arguments,
-and a `mut` method its receiver (M5), which the method changes after its own arguments ran, so a read
-of the receiver in them holds nothing while it changes: `rows.Add(rows[0])` for a list of lists `rows`
-passes, and `xs.Add(F(mut xs))` is the error (§4, the owner, 2026-10-24 and 2026-10-25). The
+and a `mut` method its receiver (M5). `Add` changes its receiver after its argument ran and counts
+the item it stores before the list grows, so a read of the receiver in its argument holds nothing
+while `Add` changes it: `rows.Add(rows[0])` for a list of lists `rows` passes, and `xs.Add(F(mut xs))`
+is the error (§4, the owner, 2026-10-24 and 2026-10-25). A lambda in that argument that reads the
+receiver holds it while `Add` changes it, so `fs.Add(() => fs.Count)` for a list of function values is
+the error, and so does a lambda given to a call or a `with` there whose value is of a type that can
+hold a function value, `fs.Add(Wrap(() => fs.Count))`, while one given to a call that gives an `int`
+holds nothing past that call (§4, the owner, 2026-10-25). What another `mut` method does with such an argument is open
+(§14). The
 expression holds the value of a read made as any other argument of that call without `mut` in front
 of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
 value is `mut-at-call`, above); as an argument of a call around it given before
@@ -151,11 +157,13 @@ the moment it is made (F11, F15), whatever its body makes of them, so `() => num
 called on either, in a statement of an `else` arm's block inside the expression, nested statements
 among them, change it as such a call does while the expression holds the read's value (§4,
 the owner, 2026-10-25). That block is the one an arm has inside an expression: an arm of a `match`
-used as a value is its value (C9), and a block there is `syntax`, as `compiler/README.md` reads C9. Three reads hold no such
+used as a value is its value (§5, C9). *(proposed: a block as such an arm is `syntax`, E4, which §5
+does not name)* Three reads hold no such
 value. A read that makes a new value first: the result of an operator other than `??`, whose value
 is one of its sides, and of a call or a method (`numbers.Count`, `numbers[0] + 1`, `Same(numbers)` for
 a function that returns its list), where an index is no such operator and its item is held (above)
-*(proposed: the result of a call is a value of its own, M3)*. A read that runs after the call has ended. A read of
+*(proposed: the result of a call is a value of its own, M3; `??` and an index, which §4 does not
+name)*. A read that runs after the call has ended. A read of
 a copied type, which the expression holds as a copy: a number, a `bool`, a `char`, a pointer, a time,
 the type of a C function, and a `data` value or a union made only of such types that holds no value of
 its own type, so that a lambda that reads an `int` holds the value from before the call (§4, the
@@ -331,6 +339,32 @@ row = List<int>()
 rows.Add(rows[0])
 print(rows[1])
 print(rows.Count)
+```
+
+Case: [values/mut-read-lambda-add.kz](../corpus/values/mut-read-lambda-add.kz)
+```kurz
+mut counts = List<() => int>()
+counts.Add(() => counts.Count)
+print(counts.Count)
+```
+
+Case: [values/mut-read-lambda-kept.kz](../corpus/values/mut-read-lambda-kept.kz)
+```kurz
+() => int Wrap(() => int f) => f
+
+mut counts = List<() => int>()
+counts.Add(Wrap(() => counts.Count))
+print(counts.Count)
+```
+
+Case: [values/mut-read-lambda-ends.kz](../corpus/values/mut-read-lambda-ends.kz)
+```kurz
+int Count(() => int f) => f()
+
+mut xs = List<int>()
+xs.Add(Count(() => xs.Count))
+xs.Add(Count(() => xs.Count))
+print(xs)
 ```
 
 Case: [values/mut-read-arm-change.kz](../corpus/values/mut-read-arm-change.kz)

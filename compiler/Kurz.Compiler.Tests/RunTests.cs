@@ -80,22 +80,15 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before.</summary>
-    private const int RunFloor = 141;
+    private const int RunFloor = 149;
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
     {
         ["data/equality-nan.kz"] = "a value of type `double` (T2)",
         ["data/equality-union-nan.kz"] = "a value of type `double` (T2)",
-        ["functions/capture-read.kz"] = "`Where` (M9)",
-        ["functions/capture-value.kz"] = "a value of type `() => int` (F11)",
-        ["functions/function-type-void.kz"] = "a value of type `(int) => void` (F11)",
-        ["functions/function-type.kz"] = "a value of type `(int) => int` (F11)",
-        ["functions/lambda.kz"] = "`Where` (M9)",
-        ["functions/top-level-lambda-reserves-nothing.kz"] = "a value of type `(int) => int` (F11)",
         ["memory/asm-explicit-register.kz"] = "inline assembly (R11)",
         ["memory/asm-in-raw.kz"] = "inline assembly (R11)",
-        ["source/continuation.kz"] = "`Where` (M9)",
         ["source/number-literal-forms.kz"] = "a value of type `double` (T2)",
         ["source/number-literals.kz"] = "a value of type `double` (T2)",
         ["source/unit-literal-fraction.kz"] = "a value of type `duration` (T13)",

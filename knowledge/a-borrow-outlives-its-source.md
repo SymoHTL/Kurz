@@ -43,7 +43,9 @@ call or a statement names what keeps the place unchanged: the checker's refusal 
 expression (M7, `Semantics/Checker.Reads.cs`), no state outside a function that holds a list (R13),
 the count a loop holds of its collection (C6), the count the name an arm binds holds, the count
 `Add` takes of its item before its list grows (`rows.Add(rows[0])`, which the owner allowed on
-2026-10-25). A construct
+2026-10-25), the count a lambda's environment takes of each value the lambda reads (F15), and the
+count the emitter takes of a read of a copied type that the checker marks as met by a change, a
+function value beside `Swap(mut f)` (`SemanticModel.IsHeldCopy`, the owner's "Copied", 2026-10-25). A construct
 that has none takes a count of what it read. Each one gets a line in a fenced program of `ListTests`
 (an allocator that makes every freed block inaccessible), where a read after the free ends the run
 with the system's signal. A refusal of the checker names every form that changes a place, a `mut`

@@ -4,9 +4,10 @@ using System.Text;
 namespace Kurz.Compiler.Emit;
 
 /// <summary>
-/// The text of one LLVM IR module as it is built: the type of a string, <c>%kz.str</c>, the string
-/// constants, the state outside a function (R13), the declarations of the C functions the code calls
-/// (R16), and the functions emitted, each rendered by its <see cref="IrFunction"/>.
+/// The text of one LLVM IR module as it is built: the types of a string, <c>%kz.str</c>, and of a
+/// function value, <c>%kz.fn</c>, the string constants, the state outside a function (R13), the
+/// declarations of the C functions the code calls (R16), and the functions emitted, each rendered by
+/// its <see cref="IrFunction"/>.
 /// </summary>
 internal sealed class IrModule
 {
@@ -18,6 +19,7 @@ internal sealed class IrModule
     public IrModule()
     {
         globals.AppendLine("%kz.str = type { ptr, i64 }");
+        globals.AppendLine("%kz.fn = type { ptr, ptr }");
     }
 
     /// <summary>The global that holds the UTF-8 bytes of a string literal, as <c>ptr</c>, with their count.</summary>

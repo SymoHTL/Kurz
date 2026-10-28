@@ -1,5 +1,6 @@
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
+using FunctionType = Kurz.Compiler.Semantics.FunctionType;
 using UnionType = Kurz.Compiler.Semantics.UnionType;
 using VoidType = Kurz.Compiler.Semantics.VoidType;
 
@@ -16,7 +17,8 @@ namespace Kurz.Compiler.Emit;
 /// or a parameter is borrowed: the place it goes to counts it once more. A variable lets go of its value at the end of its block,
 /// and at a <c>return</c>, a <c>break</c> and a <c>continue</c> that leave the block; a <c>throw</c> ends the process. A parameter
 /// is borrowed from the caller for the call. The blocks of data types in a relation of inheritance or that hold themselves are
-/// never freed, so what they hold keeps the count it was stored with, and values of every other type are not counted.
+/// never freed, so what they hold keeps the count it was stored with. A function value is counted as a list is, by the
+/// environment of its lambda (<see cref="EmitLambda"/>), and values of every other type are not counted.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -24,10 +26,10 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    /// <summary>Whether a value of the type holds the block of a list: a list, a plain data value with a field that does, a union with a case that does.</summary>
+    /// <summary>Whether a value of the type holds the block of a list or the environment of a lambda: a list, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType => true,
+        ListType or FunctionType => true,
         DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
@@ -177,6 +179,12 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is FunctionType)
+        {
+            fn.Emit($"call void {RetainEnvironment()}(%kz.fn {value})");
+            return;
+        }
+
         var name = Helper($"retain.{Lower.Mangle(type)}", "void", [Ir(type)], () => EachHeld("%a0", type, Retain));
         fn.Emit($"call void {name}({Ir(type)} {value})");
     }
@@ -184,6 +192,12 @@ public sealed partial class Emitter
     /// <summary>One holder less of every block the value holds; a list's block that loses its last holder lets go of its items and is freed.</summary>
     private void Release(string value, KurzType type)
     {
+        if (type is FunctionType)
+        {
+            fn.Emit($"call void {ReleaseEnvironment()}(%kz.fn {value})");
+            return;
+        }
+
         var name = Helper($"release.{Lower.Mangle(type)}", "void", [Ir(type)], () =>
         {
             if (type is ListType list)
@@ -299,7 +313,8 @@ public sealed partial class Emitter
     /// <summary>
     /// M9: <c>list.Add(item)</c> on a <c>mut</c> variable or parameter. The item is read first, then the list the variable holds as
     /// the item left it, as a path assignment reads its value first (M4); a block other values hold is copied before the write (M3),
-    /// and a full one grows.
+    /// and a full one grows. What the argument made besides the item is let go of before the list is read, so that a lambda it gave
+    /// to a call holds no count of the list when the list grows (F15).
     /// </summary>
     private void EmitListAdd(CallExpression c)
     {
@@ -311,7 +326,8 @@ public sealed partial class Emitter
         }
 
         var argument = c.Arguments[0].Value;
-        var item = Convert(Owned(argument), TypeOf(argument), list.Element, argument.Line);
+        string item = null!;
+        InRegion(() => item = Convert(Owned(argument), TypeOf(argument), list.Element, argument.Line));
         var place = Place(Model.VariableOf(n), n.Line);
         var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", Ir(list.Element)], () => AddBody(list.Element));
         fn.Emit($"call void {add}(ptr {place}, {Ir(list.Element)} {item})");
@@ -357,6 +373,42 @@ public sealed partial class Emitter
         var slot = fn.Value($"call ptr {StdFunction("ListPush")}(ptr {fn.Value("load ptr, ptr %a0")}, i64 {size})");
         fn.Emit($"store {Ir(element)} %a1, ptr {slot}");
         fn.Return(null);
+    }
+
+    /// <summary>
+    /// M9: <c>list.Where(test)</c>, a new list of the items the test gives <c>true</c> for, in their order, each held once more by
+    /// the new list; the test is called once for each item, in order, as Rust's <c>filter</c> and <c>collect</c> call it.
+    /// </summary>
+    private string EmitListWhere(CallExpression c, CallInfo info)
+    {
+        var list = (ListType)Sub(info.Result);
+        var source = EmitExpression(((MemberAccess)Unwrap(c.Callee)).Target);
+        var test = Arguments(c, info, _ => new FunctionType([list.Element], Types.Bool), _ => false, _ => null, cConvention: false, owned: false).Single();
+        var element = Ir(list.Element);
+        var name = Helper($"where.{Lower.Mangle(list)}", "ptr", ["ptr", "%kz.fn"], () =>
+        {
+            var kept = fn.Alloca("ptr", "kept");
+            fn.Emit($"store ptr null, ptr {kept}");
+            var code = fn.Value("extractvalue %kz.fn %a1, 0");
+            var environment = fn.Value("extractvalue %kz.fn %a1, 1");
+            EachItem("%a0", list.Element, item =>
+            {
+                var keep = fn.Label("keep");
+                var next = fn.Label("next");
+                fn.CondBranch(fn.Value($"call i1 {code}(ptr {environment}, {element} {item})"), keep, next);
+                fn.Block(keep);
+                if (Counted(list.Element))
+                {
+                    Retain(item, list.Element);
+                }
+
+                var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", element], () => AddBody(list.Element));
+                fn.Emit($"call void {add}(ptr {kept}, {element} {item})");
+                fn.Block(next);
+            });
+            fn.Return($"ptr {fn.Value($"load ptr, ptr {kept}")}");
+        });
+        return fn.Value($"call ptr {name}(ptr {source}, {test})");
     }
 
     /// <summary>

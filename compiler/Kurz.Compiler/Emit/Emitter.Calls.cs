@@ -1,5 +1,6 @@
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
+using FunctionType = Kurz.Compiler.Semantics.FunctionType;
 using PointerType = Kurz.Compiler.Semantics.PointerType;
 using UnionType = Kurz.Compiler.Semantics.UnionType;
 
@@ -26,7 +27,7 @@ public sealed partial class Emitter
             CallKind.FromRaw when info.Target is PrimitiveType { Kind: Primitive.String } => EmitStringFromRaw(c),
             CallKind.ListNew => "null", // M9: a list without items, which takes no block
             CallKind.ListAdd => EmitListAddCall(c),
-            CallKind.ListWhere => throw Unsupported(c.Line, "`Where` (M9)"),
+            CallKind.ListWhere => EmitListWhere(c, info),
             CallKind.FromRaw => throw Unsupported(c.Line, "`List<T>.FromRaw` (R15)"),
             CallKind.DataNew => EmitConstruction(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),
@@ -127,9 +128,14 @@ public sealed partial class Emitter
         return "void";
     }
 
-    /// <summary>R17: a call of a value of a C function type, through its address, in the C calling convention; a call of a Kurz function value is not emitted.</summary>
+    /// <summary>R17: a call of a value of a C function type, through its address, in the C calling convention; F11: a call of a function value, through its code, with its environment.</summary>
     private string EmitValueCall(CallExpression c)
     {
+        if (TypeOf(c.Callee) is FunctionType function)
+        {
+            return EmitFunctionValueCall(c, function);
+        }
+
         var type = TypeOf(c.Callee) as CFunctionType ?? throw Unsupported(c.Line, $"a call of a value of type `{TypeOf(c.Callee)}` (F11)");
         var callee = EmitExpression(c.Callee);
         var arguments = new List<string>();
@@ -150,7 +156,8 @@ public sealed partial class Emitter
     /// default is read in the file that declares it, which <paramref name="slotDefault"/> gives with it and which the call may stand
     /// outside of. With <paramref name="owned"/> the slots hold the values, as a data value's fields do; else the callee borrows
     /// them for the call, which no <c>mut</c> slot of the call or of a call inside its arguments changes, since the checker refuses
-    /// a read of what a call takes as <c>mut</c> while the expression still holds its value (M7).
+    /// a read of what a call takes as <c>mut</c> while the expression still holds its value (M7), and the read of a copied type it
+    /// takes is a value of its own (<see cref="HeldCopy"/>).
     /// </summary>
     private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned)
     {

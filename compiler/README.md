@@ -298,11 +298,16 @@ library a block of C functions names (R16). It emits:
   (O1, O2), a success case without a value (O10), `match` with arms of a type, of a value and
   `else` (C4, C9, O8), postfix `else` after a call (O5), and `throw` of a data value and the bare
   `throw` of an arm of `else`, which throws the case that reached it (O7);
-- lists (M9): `List<T>()`, `Add`, `Count` and `list[i]`, which raises `index-out-of-range` for an
-  index below 0 or at `Count` or beyond (T14), `for` over a list, which walks the list as it was when
+- lists (M9): `List<T>()`, `Add`, `Count`, `list[i]`, which raises `index-out-of-range` for an
+  index below 0 or at `Count` or beyond (T14), `Where`, which calls its test once for each item, in
+  order, and gives a new list of the items it kept, `for` over a list, which walks the list as it was when
   the loop started (C6), their text (A4), and lists of every type the emitter lays out, in
   variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
   program with `allocation-failed` and the bytes of its items after the `Add` (M9);
+- lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
+  of its environment, which holds the values the lambda read when it was made (F15); a lambda that
+  reads no variable has none and allocates nothing, and a call of a function value calls its code
+  with its environment (section 4, the owner, 2026-10-25, "Pair + heap env");
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), and `==` on strings by
   their bytes (T18);
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
@@ -338,7 +343,9 @@ block where it has none, as Rust's `Vec` grows, to twice its room, at least 8 it
 up to a kibibyte and 1 of more, and where other values hold the block it copies the items into a
 block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). An argument that
 changes the list through a `mut` parameter is `changed-while-held` (M7), so the order in which an `Add`
-reads its argument and its list is not seen. The count
+reads its argument and its list is not seen. What `Add`'s argument made besides its item, the
+environment of a lambda it gave to a call among them, is let go of before the list is read, so that
+no count it held makes the list copy its items (F15). The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
@@ -346,48 +353,58 @@ nothing keeps; and where a value that holds the list ends. At zero the lists the
 go of in turn, and the block goes back to `Free`. A parameter borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
 what a call takes as `mut` that the expression still holds when the call runs, or when an assignment
-or a `mut` method in an arm's statement inside the expression changes it (M7), and no state
+or a `mut` method in an arm's statement inside the expression changes it (M7), and such a read of a
+type that is copied, a function value among them, is counted once more, as a value the expression
+made (the owner, 2026-10-25, "Copied"), and no state
 outside a function holds a list, which R13 refuses, so a callee reaches a list its caller lent it
 through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
-Counted are a list, a plain `data` value that holds one in a field and a union with a case that
-holds one; a `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
+Counted are a list, a function value, a plain `data` value that holds one of them in a field and a
+union with a case that holds one. The environment of a lambda that reads variables starts with the
+count of the function values that hold it, 8 bytes, and the address of the function that lets go
+of it, then holds each value the lambda read, counted once more where its type is counted; it is
+counted as a list's block is, and at zero the values it holds are let go of and it goes back to
+`Free` (section 4, "Pair + heap env"); a `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
 and a raise end the process with their error line, and no count is lowered there.
 A value of a block type is never freed, and the lists it holds are never let go of: the memory of
 such a value, which the answer of 2026-10-23 leaves ungiven back (below), is read to hold the lists
 in its fields, a reading of this directory, not a decision. Pinned by
-`ListTests`: the values the counting keeps apart, the name an arm binds among them; a system that
+`ListTests`: the values the counting keeps apart, the name an arm binds among them, a function value
+and a `data` value that holds one read beside a call that replaces them, a lambda's list that only
+its environment holds and the items `Where` keeps; a system that
 refuses every request for memory after sixteen, within which a program that makes and drops lists
-through every way out of a block, the body of a `void` function among them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
+through every way out of a block, the body of a `void` function and a lambda's environment among
+them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
 inaccessible, under which the values' programs and twenty rounds of the same program print the
 same lines; the target's own `Release`, after
 which a write into a freed block of more than 262144 bytes ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
 the same lists all kept do not; the number of `allocation-failed` past the limit, with the limit
 lowered in the library's text, for items of 1, 8 and 16 bytes, a padded `data` value, a list and a
-value of a block type, and for a growth the system refuses; and `index-out-of-range` for an index
-below 0, at `Count` and beyond.
+value of a block type, and for a growth the system refuses, and for an environment; the order of
+the calls of `Where`'s test; the release of such an environment before the `Add` in the IR; and
+`index-out-of-range` for an index below 0, at `Count` and beyond.
 
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), a lambda (F7) and a function value (F11), `float`, `double` and `decimal` (T2), the durations and the
-timestamps (T13), a `mut` parameter given anything but a variable (M7), a `naked` function (R12),
-inline assembly (R11), a list's `Where` and an assignment into an index (M9), an `Add` on a list in
+`data` type or a union (R14), `float`, `double` and `decimal` (T2), the durations and the
+timestamps (T13), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
+(M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` on a list in
 a field (M5), `==` on a value that holds a list (D3), a list's `Pointer` and `List<T>.FromRaw`
 (R15), `s.Bytes` and `s.Chars` as a list, `s.Bytes.Count` aside (T15), and a construct of the other
 chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
-The reference counting of section 3 is emitted for lists and the values that hold them (above) and
-for nothing else: memory a string or a value of a block type takes is never given back, the lists
+The reference counting of section 3 is emitted for lists, the environments of lambdas and the
+values that hold them (above) and for nothing else: memory a string or a value of a block type takes is never given back, the lists
 a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
-corpus runner lists every case the checker reads in full and the emitter does not emit, 33 of the
-231 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+corpus runner lists every case the checker reads in full and the emitter does not emit, 26 of the
+232 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a
@@ -786,9 +803,16 @@ round can ask about it by the rule's id.
   so a read of the receiver in its argument meets no change (the owner, 2026-10-25, "Allow, as Rust's
   clone"), while a call in its argument that changes the receiver is the error; the emitter's `Add`
   counts its item before the list grows. Having a `void` success (O10), it stands only as a
-  statement, an arm's among them. A function value is copied (the owner, 2026-10-25, "Copied"): the
-  emitter emits none (F11, above), so no read of one is borrowed; where one holds counted captures,
-  the answer's cost is a count and a release per such read, as the design record says.
+  statement, an arm's among them. A lambda in its argument that reads the receiver, as the
+  argument's value or an arm's, holds the receiver while `Add` changes it (the owner, 2026-10-25,
+  "Refuse, as Rust's borrow"), and so does one given to a call or a `with` there whose value is of a
+  type that can hold a function value: the checker follows the value through every part whose type
+  can hold one, a type parameter among them, so `fs.Add(Wrap(() => fs.Count))` is the error and
+  `xs.Add(Count(() => xs.Count))`, whose `Count` gives an `int`, is not (the owner, 2026-10-25,
+  "Refuse if it can keep it"). A function value is copied (the owner, 2026-10-25, "Copied"), and
+  so is a `data` value or a union made of function values and copied types ("Copied too"): the
+  checker marks a read of one that a change meets while the expression holds it, and the emitter
+  counts it once more for the expression (above), the cost the design record names.
 - D9 with C4: a value of a union stands where a union is required only, since a union is one of its
   cases only after a `match`: a `byte | short` is no `int`, and a union of two data types derived
   from one base no value of the base; each is `type-mismatch`.
