@@ -3,8 +3,8 @@
 // 2026-10-23, "Rust's sys"), and the standard library's allocator as the folder `std` (the owner,
 // 2026-10-24, "A std/ directory now" and "As built"). The emitted code calls its `pub` functions: `Start` before the
 // program's first statement and `Finish` after its last, and the others where the program allocates,
-// prints, makes the text of a value, joins or compares strings, or raises an exception
-// (compiler/README.md, "The runtime").
+// prints, makes the text of a value, joins or compares strings, computes with a `decimal`, or raises an
+// exception (compiler/README.md, "The runtime").
 use std
 use sys
 
@@ -789,8 +789,10 @@ ulong Pow5(int i, mut ulong high) {
 }
 
 // 2^(125 + n - 1) / 5^i plus one, n the bits of 5^i, i from 0 to 291: the low 64 returned, the high 64 into
-// `high`. Computed from the power of the row above it divided by 5^offset, then corrected by
-// `InversePow5Offsets`.
+// `high`. Computed from the inverse power of the row above it, itself, times 5^offset, where Rust's `ryu`
+// multiplies it less one and adds one, so the two-bit corrections of `InversePow5Offsets` are a table of
+// this function's own, each stored one above the difference. `FloatingTests` holds the texts they give
+// against what .NET writes.
 ulong InversePow5(int i, mut ulong high) {
     int row = (i + 25) / 26
     int offset = row * 26 - i
@@ -858,7 +860,9 @@ ulong Multiply(ulong a, ulong b, mut ulong high) {
 // The 64 bits of the 128-bit number `high`:`low` from bit `distance` up, 0 < distance < 64.
 ulong ShiftRight(ulong low, ulong high, int distance) => (high << (64 - distance)) | (low >> distance)
 
-// m times the 128-bit number `high`:`low`, shifted right by j bits, j at least 64, as 64 bits (m below 2^55).
+// m times the 128-bit number `high`:`low`, shifted right by j bits, as 64 bits (m below 2^55); j lies above 64
+// for every exponent, as `FloatingTests` reaches through the largest value with each, so that `ShiftRight` takes
+// a distance from 1 to 63.
 ulong MulShift64(ulong m, ulong low, ulong high, int j) {
     mut ulong high1 = 0
     ulong low1 = Multiply(m, high, mut high1)
@@ -1015,4 +1019,999 @@ uint InversePow5Offsets(int row) => match row {
     16 => 0xAAA6A955
     17 => 0x5AAAAAAA
     else => 0x56
+}
+
+// ---- decimal (T2) ----------------------------------------------------------------------------------
+//
+// A `decimal` is C#'s System.Decimal, which the emitted code passes as two 64-bit words: the low 64 bits of its 96-bit
+// integer, then the high 32 bits with System.Decimal's flags above them, the scale in bits 48 to 55 and the sign in bit 63.
+// Its value is the integer divided by ten to the scale, from 0 to 28. The operations compute what System.Decimal computes,
+// digit for digit and scale for scale (section 4); a zero they compute has no sign (the owner, 2026-10-28, "None, as
+// rust_decimal"). A result that leaves the range makes them return false, which the emitted code raises as `overflow` in
+// every build (the owner, 2026-10-28, "Raise in every build"); the emitted code raises `divide-by-zero` before a division
+// or a remainder by zero (T25).
+
+// The sum of two `decimal`s: the exact sum at the larger of the two scales, brought into 96 bits by `Fit`. The emitted code
+// subtracts by turning the sign of the second.
+pub bool DecimalAdd(ulong aLow, ulong aHigh, ulong bLow, ulong bHigh, mut ulong low, mut ulong high) {
+    int aScale = DecimalScale(aHigh)
+    int bScale = DecimalScale(bHigh)
+    mut ulong a0 = aLow
+    mut ulong a1 = aHigh & 4294967295
+    mut ulong a2 = 0
+    mut ulong b0 = bLow
+    mut ulong b1 = bHigh & 4294967295
+    mut ulong b2 = 0
+    mut int scale = aScale
+    if aScale < bScale {
+        ScaleUp(mut a0, mut a1, mut a2, bScale - aScale)
+        scale = bScale
+    } else if bScale < aScale {
+        ScaleUp(mut b0, mut b1, mut b2, aScale - bScale)
+    }
+
+    mut bool negative = aHigh >> 63 == 1
+    if negative == (bHigh >> 63 == 1) {
+        Add192(mut a0, mut a1, mut a2, b0, b1, b2)
+    } else if Below192(a0, a1, a2, b0, b1, b2) {
+        Subtract192(mut b0, mut b1, mut b2, a0, a1, a2)
+        a0 = b0
+        a1 = b1
+        a2 = b2
+        negative = !negative
+    } else {
+        Subtract192(mut a0, mut a1, mut a2, b0, b1, b2)
+    }
+
+    return Fit(a0, a1, a2, scale, negative, mut low, mut high)
+}
+
+// The product of two `decimal`s: the exact product at the sum of the two scales, brought into 96 bits and a scale of at most
+// 28 by `Fit`. Two numbers of 32 bits whose scales add up to more than 47 give 0 at the scale 0, and so does a zero beside a
+// number of more than 32 bits, as System.Decimal gives them.
+pub bool DecimalMultiply(ulong aLow, ulong aHigh, ulong bLow, ulong bHigh, mut ulong low, mut ulong high) {
+    int scale = DecimalScale(aHigh) + DecimalScale(bHigh)
+    bool negative = (aHigh ^ bHigh) >> 63 == 1
+    ulong a1 = aHigh & 4294967295
+    ulong b1 = bHigh & 4294967295
+    low = 0
+    high = 0
+    if a1 == 0 && aLow <= 4294967295 && b1 == 0 && bLow <= 4294967295 {
+        if scale > 47 {
+            return true
+        }
+
+        return Fit(aLow * bLow, 0, 0, scale, negative, mut low, mut high)
+    }
+
+    mut ulong p1 = 0
+    ulong p0 = Multiply(aLow, bLow, mut p1)
+    mut ulong p2 = a1 * b1
+    mut ulong h = 0
+    ulong l = Multiply(aLow, b1, mut h)
+    p1 = p1 +% l
+    if p1 < l {
+        h = h + 1
+    }
+
+    p2 = p2 + h
+    h = 0
+    ulong m = Multiply(a1, bLow, mut h)
+    p1 = p1 +% m
+    if p1 < m {
+        h = h + 1
+    }
+
+    p2 = p2 + h
+    if (p0 | p1 | p2) == 0 {
+        return true
+    }
+
+    return Fit(p0, p1, p2, scale, negative, mut low, mut high)
+}
+
+// The quotient of two `decimal`s, the divisor not zero. The integer quotient at the difference of the scales; where it is
+// exact, that, at the scale 0 where the difference is below 0. Otherwise as many more digits as fit 96 bits and the scale 28,
+// up to nine at a time, rounded half to even by the remainder, and its zeros at the end removed down to the scale 0
+// (System.Decimal's VarDecDiv).
+pub bool DecimalDivide(ulong aLow, ulong aHigh, ulong bLow, ulong bHigh, mut ulong low, mut ulong high) {
+    mut int scale = DecimalScale(aHigh) - DecimalScale(bHigh)
+    bool negative = (aHigh ^ bHigh) >> 63 == 1
+    ulong b1 = bHigh & 4294967295
+    mut ulong q0 = 0
+    mut ulong q1 = 0
+    mut ulong r0 = 0
+    mut ulong r1 = 0
+    Divide96(aLow, aHigh & 4294967295, bLow, b1, mut q0, mut q1, mut r0, mut r1)
+    bool inexact = (r0 | r1) != 0
+    low = 0
+    high = 0
+    mut bool going = true
+    while going {
+        if (r0 | r1) == 0 {
+            if scale >= 0 {
+                going = false
+            } else {
+                mut int step = -scale
+                if step > 9 {
+                    step = 9
+                }
+
+                if !MultiplyFits(mut q0, mut q1, Pow10(step)) {
+                    return false
+                }
+
+                scale = scale + step
+            }
+        } else {
+            int step = ScaleRoom(q0, q1, scale)
+            if step == 0 {
+                if scale < 0 {
+                    return false
+                }
+
+                // round by the remainder: twice it beside the divisor, a tie to the even quotient
+                ulong t0 = r0 << 1
+                ulong t1 = (r1 << 1) | (r0 >> 63)
+                if t1 > b1 || (t1 == b1 && (t0 > bLow || (t0 == bLow && (q0 & 1) == 1))) {
+                    q0 = q0 +% 1
+                    if q0 == 0 {
+                        q1 = q1 + 1
+                    }
+
+                    if q1 > 4294967295 {
+                        // 2^96, one digit too many: 2^96 / 10 rounded, 7922816251426433759354395034
+                        if scale == 0 {
+                            return false
+                        }
+
+                        q0 = 11068046444225730970
+                        q1 = 429496729
+                        scale = scale - 1
+                    }
+                }
+
+                going = false
+            } else {
+                // q times 10^step fits; the digits the remainder gives are added to it
+                ulong power = Pow10(step)
+                MultiplyFits(mut q0, mut q1, power)
+                mut ulong n0 = r0
+                mut ulong n1 = r1
+                mut ulong n2 = 0
+                MultiplyBy(mut n0, mut n1, mut n2, power)
+                ulong digits = DivideBy96(n0, n1, bLow, b1, mut r0, mut r1)
+                q0 = q0 +% digits
+                if q0 < digits {
+                    q1 = q1 + 1
+                }
+
+                scale = scale + step
+                if q1 > 4294967295 {
+                    // one digit too many: the 97 bits divided by 10, rounded half to even by that digit and the remainder
+                    scale = scale - 1
+                    if scale < 0 {
+                        return false
+                    }
+
+                    mut ulong w0 = q0
+                    mut ulong w1 = q1
+                    mut ulong w2 = 0
+                    ulong digit = DivideSmall(mut w0, mut w1, mut w2, 10)
+                    q0 = w0
+                    q1 = w1
+                    if digit > 5 || (digit == 5 && ((r0 | r1) != 0 || (q0 & 1) == 1)) {
+                        q0 = q0 +% 1
+                        if q0 == 0 {
+                            q1 = q1 + 1
+                        }
+                    }
+
+                    going = false
+                }
+            }
+        }
+    }
+
+    if inexact {
+        Unscale(mut q0, mut q1, mut scale)
+    }
+
+    low = q0
+    high = Pack(q1, scale, negative && (q0 | q1) != 0)
+    return true
+}
+
+// The remainder of two `decimal`s, the divisor not zero: the dividend itself where it is zero or below the divisor in
+// magnitude; otherwise the exact remainder at the larger of the two scales, with the sign of the dividend (T18; System.Decimal's
+// VarDecMod).
+pub void DecimalRemainder(ulong aLow, ulong aHigh, ulong bLow, ulong bHigh, mut ulong low, mut ulong high) {
+    int aScale = DecimalScale(aHigh)
+    int bScale = DecimalScale(bHigh)
+    ulong a1 = aHigh & 4294967295
+    ulong b1 = bHigh & 4294967295
+    bool negative = aHigh >> 63 == 1
+    low = aLow
+    high = Pack(a1, aScale, negative && (aLow | a1) != 0)
+    if (aLow | a1) == 0 {
+        return
+    }
+
+    int order = CompareMagnitudes(aLow, a1, aScale, bLow, b1, bScale)
+    if order < 0 {
+        return
+    }
+
+    mut int scale = aScale
+    if bScale > aScale {
+        scale = bScale
+    }
+
+    low = 0
+    high = Pack(0, scale, false)
+    if order == 0 {
+        return
+    }
+
+    mut ulong q0 = 0
+    mut ulong q1 = 0
+    mut ulong r0 = 0
+    mut ulong r1 = 0
+    if aScale >= bScale {
+        // the divisor at the dividend's scale, which stays below the dividend
+        mut ulong d0 = bLow
+        mut ulong d1 = b1
+        mut ulong d2 = 0
+        ScaleUp(mut d0, mut d1, mut d2, aScale - bScale)
+        Divide96(aLow, a1, d0, d1, mut q0, mut q1, mut r0, mut r1)
+    } else {
+        // the dividend at the divisor's scale, nine digits at a time, each time only its remainder kept
+        Divide96(aLow, a1, bLow, b1, mut q0, mut q1, mut r0, mut r1)
+        mut int rest = bScale - aScale
+        while rest > 0 {
+            mut int step = rest
+            if step > 9 {
+                step = 9
+            }
+
+            mut ulong n0 = r0
+            mut ulong n1 = r1
+            mut ulong n2 = 0
+            MultiplyBy(mut n0, mut n1, mut n2, Pow10(step))
+            DivideBy96(n0, n1, bLow, b1, mut r0, mut r1)
+            rest = rest - step
+        }
+    }
+
+    low = r0
+    high = Pack(r1, scale, negative && (r0 | r1) != 0)
+}
+
+// -1, 0 or 1 as the first `decimal` is below, equal to or above the second, by their values: 1.5 equals 1.50, and 0 equals -0.
+pub int DecimalCompare(ulong aLow, ulong aHigh, ulong bLow, ulong bHigh) {
+    ulong a1 = aHigh & 4294967295
+    ulong b1 = bHigh & 4294967295
+    bool aZero = (aLow | a1) == 0
+    bool bZero = (bLow | b1) == 0
+    if aZero && bZero {
+        return 0
+    }
+
+    bool aNegative = !aZero && aHigh >> 63 == 1
+    bool bNegative = !bZero && bHigh >> 63 == 1
+    if aNegative != bNegative {
+        if aNegative {
+            return -1
+        }
+
+        return 1
+    }
+
+    int order = CompareMagnitudes(aLow, a1, DecimalScale(aHigh), bLow, b1, DecimalScale(bHigh))
+    if aNegative {
+        return -order
+    }
+
+    return order
+}
+
+// A `double`, given its 64 bits, as a `decimal` (T26): its exact binary value, rounded half to even at the largest scale up to
+// 28 at which the digits fit 96 bits, and its zeros at the end removed down to the scale 0 (the owner, 2026-10-28, "Exact
+// binary value"); a zero has no sign. False for NaN, an infinity and a magnitude of 2^96 or more, which the emitted code raises
+// as `overflow` in every build (the owner, 2026-10-28, "Raise in every build"). A `float` comes as the `double` that holds it.
+pub bool DecimalFromDouble(ulong bits, mut ulong low, mut ulong high) {
+    int exponent = int((bits >> 52) & 2047)
+    ulong fraction = bits & 4503599627370495
+    low = 0
+    high = 0
+    if exponent >= 1119 {
+        return false
+    }
+
+    if exponent == 0 && fraction == 0 {
+        return true
+    }
+
+    mut ulong m = fraction
+    mut int e2 = -1074
+    if exponent != 0 {
+        m = fraction | 4503599627370496
+        e2 = exponent - 1075
+    }
+
+    bool negative = bits >> 63 == 1
+    if e2 >= 0 {
+        // an integer below 2^96
+        low = m << e2
+        mut ulong top = 0
+        if e2 > 0 {
+            top = m >> (64 - e2)
+        }
+
+        high = Pack(top, 0, negative)
+        return true
+    }
+
+    mut int scale = 28
+    mut ulong d0 = 0
+    mut ulong d1 = 0
+    mut bool fits = false
+    while !fits {
+        mut ulong w0 = m
+        mut ulong w1 = 0
+        mut ulong w2 = 0
+        ScaleUp(mut w0, mut w1, mut w2, scale)
+        fits = ShiftRound(w0, w1, w2, -e2, mut d0, mut d1)
+        if !fits {
+            scale = scale - 1
+        }
+    }
+
+    Unscale(mut d0, mut d1, mut scale)
+    low = d0
+    high = Pack(d1, scale, negative && (d0 | d1) != 0)
+    return true
+}
+
+// A `decimal` as a `double`, as C# computes it (the owner, 2026-10-28, "As C# computes it"): the 96-bit integer as a `double`,
+// its low 64 bits and its high 32 bits each converted, divided by ten to the scale as a `double`, the sign turned for a
+// negative one. A `float` is this `double` rounded, as C# rounds it.
+pub double DecimalToDouble(ulong low, ulong high) {
+    double value = (double(low) + double(high & 4294967295) * 18446744073709551616.0) / DoublePower10(DecimalScale(high))
+    if high >> 63 == 1 {
+        return -value
+    }
+
+    return value
+}
+
+// The integer part of a `decimal`'s magnitude, its fraction dropped (T26), into `magnitude`; false where it takes more than
+// 64 bits.
+pub bool DecimalTruncate(ulong low, ulong high, mut ulong magnitude) {
+    mut ulong q0 = low
+    mut ulong q1 = high & 4294967295
+    mut ulong q2 = 0
+    mut int scale = DecimalScale(high)
+    while scale > 0 {
+        mut int step = scale
+        if step > 9 {
+            step = 9
+        }
+
+        DivideSmall(mut q0, mut q1, mut q2, Pow10(step))
+        scale = scale - step
+    }
+
+    magnitude = q0
+    return q1 == 0
+}
+
+// The text of a `decimal` (A8): the digits it holds, as many after the point as its scale says, `1.50` for 1.50m and `0.00` for
+// a zero at the scale 2, and `-` before them where its sign is set, a negative zero's too (the owner, 2026-10-28, "Sign, as
+// Rust").
+pub string TextOfDecimal(ulong low, ulong high) {
+    int scale = DecimalScale(high)
+    bool negative = high >> 63 == 1
+    mut ulong q0 = low
+    mut ulong q1 = high & 4294967295
+    mut ulong q2 = 0
+    ulong r1 = DivideSmall(mut q0, mut q1, mut q2, 1000000000)
+    ulong r2 = DivideSmall(mut q0, mut q1, mut q2, 1000000000)
+    mut ulong bottom = r2 * 1000000000 + r1
+    mut ulong top = q0
+    mut long count = DigitCount(bottom)
+    if top > 0 {
+        count = 18 + DigitCount(top)
+    }
+
+    if count < long(scale) + 1 {
+        count = long(scale) + 1
+    }
+
+    mut long length = count
+    if scale > 0 {
+        length = length + 1
+    }
+
+    if negative {
+        length = length + 1
+    }
+
+    mut string text = ""
+    raw {
+        byte* p = Allocate(length)
+        mut long i = length - 1
+        mut long j = 0
+        while j < count {
+            if scale > 0 && j == long(scale) {
+                p[i] = 46
+                i = i - 1
+            }
+
+            mut ulong digit = 0
+            if j < 18 {
+                digit = bottom % 10
+                bottom = bottom / 10
+            } else {
+                digit = top % 10
+                top = top / 10
+            }
+
+            p[i] = byte(digit + 48)
+            i = i - 1
+            j = j + 1
+        }
+
+        if negative {
+            p[0] = 45
+        }
+
+        text = string.FromRaw(p, length)
+    }
+
+    return text
+}
+
+// The scale of a `decimal`, from its high word.
+int DecimalScale(ulong high) => int((high >> 48) & 255)
+
+// The high word of a `decimal`: the high 32 bits of its integer, its scale and its sign.
+ulong Pack(ulong top, int scale, bool negative) {
+    mut ulong high = top | (ulong(scale) << 48)
+    if negative {
+        high = high | 9223372036854775808
+    }
+
+    return high
+}
+
+// The 192-bit magnitude w2:w1:w0 at `scale` (0 to 56) as a `decimal`, as System.Decimal brings a result into its 96 bits and its
+// scales (ScaleResult): divided by the fewest powers of ten that leave at most 96 bits and a scale of at most 28, and rounded
+// half to even once, by all the digits removed; where the rounding reaches 2^96, by one digit more. A zero has no sign. False
+// where the scale would fall below 0.
+bool Fit(ulong w0, ulong w1, ulong w2, int scale, bool negative, mut ulong low, mut ulong high) {
+    mut ulong v0 = w0
+    mut ulong v1 = w1
+    mut ulong v2 = w2
+    mut int s = scale
+    mut int cut = 0
+    if s > 28 {
+        cut = s - 28
+    }
+
+    // a lower bound of the digits to remove: 77 / 256 is below log10(2)
+    int bits = Bits192(v0, v1, v2)
+    if bits > 96 {
+        int least = ((bits - 96) * 77) >> 8
+        if least > cut {
+            cut = least
+        }
+    }
+
+    if cut > s {
+        return false
+    }
+
+    mut ulong remainder = 0
+    mut ulong divisor = 1
+    mut ulong sticky = 0
+    while cut > 0 || v2 != 0 || v1 > 4294967295 {
+        if cut == 0 {
+            if s == 0 {
+                return false
+            }
+
+            cut = 1
+        }
+
+        mut int step = cut
+        if step > 9 {
+            step = 9
+        }
+
+        sticky = sticky | remainder
+        divisor = Pow10(step)
+        remainder = DivideSmall(mut v0, mut v1, mut v2, divisor)
+        cut = cut - step
+        s = s - step
+    }
+
+    if divisor > 1 {
+        ulong half = divisor / 2
+        if remainder > half || (remainder == half && (sticky != 0 || (v0 & 1) == 1)) {
+            v0 = v0 +% 1
+            if v0 == 0 {
+                v1 = v1 + 1
+            }
+
+            if v1 > 4294967295 {
+                // 2^96, one digit too many: 2^96 / 10 rounded, 7922816251426433759354395034
+                if s == 0 {
+                    return false
+                }
+
+                v0 = 11068046444225730970
+                v1 = 429496729
+                s = s - 1
+            }
+        }
+    }
+
+    low = v0
+    high = Pack(v1, s, negative && (v0 | v1) != 0)
+    return true
+}
+
+// The trailing zeros of the 96-bit integer q1:q0 removed while the scale stays at least 0.
+void Unscale(mut ulong q0, mut ulong q1, mut int scale) {
+    while scale > 0 {
+        mut ulong t0 = q0
+        mut ulong t1 = q1
+        mut ulong t2 = 0
+        if DivideSmall(mut t0, mut t1, mut t2, 10) != 0 {
+            return
+        }
+
+        q0 = t0
+        q1 = t1
+        scale = scale - 1
+    }
+}
+
+// -1, 0 or 1 as the magnitude a1:a0 at `aScale` is below, equal to or above b1:b0 at `bScale`, compared at the larger scale.
+int CompareMagnitudes(ulong a0, ulong a1, int aScale, ulong b0, ulong b1, int bScale) {
+    mut ulong x0 = a0
+    mut ulong x1 = a1
+    mut ulong x2 = 0
+    mut ulong y0 = b0
+    mut ulong y1 = b1
+    mut ulong y2 = 0
+    if aScale < bScale {
+        ScaleUp(mut x0, mut x1, mut x2, bScale - aScale)
+    } else if bScale < aScale {
+        ScaleUp(mut y0, mut y1, mut y2, aScale - bScale)
+    }
+
+    if Below192(x0, x1, x2, y0, y1, y2) {
+        return -1
+    }
+
+    if Below192(y0, y1, y2, x0, x1, x2) {
+        return 1
+    }
+
+    return 0
+}
+
+// The 96-bit a1:a0 divided by the 96-bit b1:b0, not zero: the quotient into q1:q0 and the remainder into r1:r0. A divisor of 32
+// bits divides word by word; a wider one gives a quotient below 2^64, found 32 bits at a time.
+void Divide96(ulong a0, ulong a1, ulong b0, ulong b1, mut ulong q0, mut ulong q1, mut ulong r0, mut ulong r1) {
+    if b1 == 0 && b0 <= 4294967295 {
+        mut ulong w0 = a0
+        mut ulong w1 = a1
+        mut ulong w2 = 0
+        r0 = DivideSmall(mut w0, mut w1, mut w2, b0)
+        r1 = 0
+        q0 = w0
+        q1 = w1
+        return
+    }
+
+    mut ulong x0 = 0
+    mut ulong x1 = 0
+    ulong upper = DivideBy96((a1 << 32) | (a0 >> 32), 0, b0, b1, mut x0, mut x1)
+    ulong lower = DivideBy96((x0 << 32) | (a0 & 4294967295), (x1 << 32) | (x0 >> 32), b0, b1, mut r0, mut r1)
+    q0 = (upper << 32) | lower
+    q1 = 0
+}
+
+// The 128-bit n1:n0 divided by the 96-bit b1:b0, not zero, where the quotient is below 2^32: the quotient returned and the
+// remainder into r1:r0. A divisor of more than 32 bits: the quotient estimated from the top 32 bits of the divisor plus one,
+// which is never above it and at most four below it, then corrected.
+ulong DivideBy96(ulong n0, ulong n1, ulong b0, ulong b1, mut ulong r0, mut ulong r1) {
+    if b1 == 0 && b0 <= 4294967295 {
+        r0 = n0 % b0
+        r1 = 0
+        return n0 / b0
+    }
+
+    mut int shift = Bits(b0) - 32
+    if b1 != 0 {
+        shift = Bits(b1) + 32
+    }
+
+    mut ulong top = b1
+    mut ulong head = n1
+    if shift < 64 {
+        top = ShiftRight(b0, b1, shift)
+        head = ShiftRight(n0, n1, shift)
+    }
+
+    mut ulong q = head / (top + 1)
+    mut ulong h = 0
+    ulong m0 = Multiply(q, b0, mut h)
+    ulong m1 = h + q * b1
+    mut ulong x0 = n0 -% m0
+    mut ulong x1 = n1 - m1
+    if n0 < m0 {
+        x1 = x1 - 1
+    }
+
+    while x1 > b1 || (x1 == b1 && x0 >= b0) {
+        if x0 < b0 {
+            x1 = x1 - 1
+        }
+
+        x0 = x0 -% b0
+        x1 = x1 - b1
+        q = q + 1
+    }
+
+    r0 = x0
+    r1 = x1
+    return q
+}
+
+// The largest power of ten, at most 9 and at most 28 - scale, by which the 96-bit q1:q0 can be multiplied and stay below
+// 2^96: q at most (2^96 - 1) / 10^k (System.Decimal's SearchScale).
+int ScaleRoom(ulong q0, ulong q1, int scale) {
+    mut int k = 28 - scale
+    if k > 9 {
+        k = 9
+    }
+
+    while k > 0 && (q1 > RoomHigh(k) || (q1 == RoomHigh(k) && q0 > RoomLow(k))) {
+        k = k - 1
+    }
+
+    return k
+}
+
+// (2^96 - 1) / 10^k rounded down, k from 1 to 9: the high 32 bits, then the low 64.
+ulong RoomHigh(int k) => match k {
+    1 => 429496729
+    2 => 42949672
+    3 => 4294967
+    4 => 429496
+    5 => 42949
+    6 => 4294
+    7 => 429
+    8 => 42
+    else => 4
+}
+
+ulong RoomLow(int k) => match k {
+    1 => 11068046444225730969
+    2 => 17708874310761169551
+    3 => 5460236245818027278
+    4 => 13458744476178488859
+    5 => 12413920891843579855
+    6 => 17843461755522954439
+    7 => 9163043805036116090
+    8 => 17518374046842208063
+    else => 5441186219426131129
+}
+
+// The 96-bit q1:q0 times m, in place, where the product stays below 2^96; false where it does not.
+bool MultiplyFits(mut ulong q0, mut ulong q1, ulong m) {
+    mut ulong w0 = q0
+    mut ulong w1 = q1
+    mut ulong w2 = 0
+    MultiplyBy(mut w0, mut w1, mut w2, m)
+    if w2 != 0 || w1 > 4294967295 {
+        return false
+    }
+
+    q0 = w0
+    q1 = w1
+    return true
+}
+
+// w2:w1:w0 divided by 2^k, k at least 1, rounded half to even into d1:d0; false where the result reaches 2^96.
+bool ShiftRound(ulong w0, ulong w1, ulong w2, int k, mut ulong d0, mut ulong d1) {
+    d0 = BitsFrom(w0, w1, w2, k)
+    d1 = BitsFrom(w0, w1, w2, k + 64)
+    ulong d2 = BitsFrom(w0, w1, w2, k + 128)
+    bool half = (BitsFrom(w0, w1, w2, k - 1) & 1) == 1
+    if half && (AnyBelow(w0, w1, w2, k - 1) || (d0 & 1) == 1) {
+        d0 = d0 +% 1
+        if d0 == 0 {
+            d1 = d1 + 1
+        }
+    }
+
+    return d2 == 0 && d1 <= 4294967295
+}
+
+// The 64 bits of w2:w1:w0 from bit `from` up; the bits above 191 are 0.
+ulong BitsFrom(ulong w0, ulong w1, ulong w2, int from) {
+    if from >= 192 {
+        return 0
+    }
+
+    int bit = from % 64
+    ulong low = Word192(w0, w1, w2, from / 64)
+    if bit == 0 {
+        return low
+    }
+
+    return (low >> bit) | (Word192(w0, w1, w2, from / 64 + 1) << (64 - bit))
+}
+
+// Whether any bit of w2:w1:w0 below bit `to` is set.
+bool AnyBelow(ulong w0, ulong w1, ulong w2, int to) {
+    if to >= 192 {
+        return (w0 | w1 | w2) != 0
+    }
+
+    int word = to / 64
+    if (word >= 1 && w0 != 0) || (word >= 2 && w1 != 0) {
+        return true
+    }
+
+    return (Word192(w0, w1, w2, word) & ((ulong(1) << (to % 64)) -% 1)) != 0
+}
+
+// The word i, 0 to 2, of w2:w1:w0, and 0 above it.
+ulong Word192(ulong w0, ulong w1, ulong w2, int i) => match i {
+    0 => w0
+    1 => w1
+    2 => w2
+    else => 0
+}
+
+// The 192-bit w2:w1:w0 times ten to the n, n from 0 to 28, in place.
+void ScaleUp(mut ulong w0, mut ulong w1, mut ulong w2, int n) {
+    mut int rest = n
+    while rest > 0 {
+        mut int step = rest
+        if step > 19 {
+            step = 19
+        }
+
+        MultiplyBy(mut w0, mut w1, mut w2, Pow10(step))
+        rest = rest - step
+    }
+}
+
+// The 192-bit w2:w1:w0 times m, in place; the bits above 192 returned.
+ulong MultiplyBy(mut ulong w0, mut ulong w1, mut ulong w2, ulong m) {
+    mut ulong h0 = 0
+    ulong p0 = Multiply(w0, m, mut h0)
+    mut ulong h1 = 0
+    ulong p1 = Multiply(w1, m, mut h1)
+    mut ulong h2 = 0
+    ulong p2 = Multiply(w2, m, mut h2)
+    w0 = p0
+    w1 = p1 +% h0
+    mut ulong carry = 0
+    if w1 < h0 {
+        carry = 1
+    }
+
+    ulong sum = p2 +% h1
+    mut ulong over = h2
+    if sum < h1 {
+        over = over + 1
+    }
+
+    w2 = sum +% carry
+    if w2 < carry {
+        over = over + 1
+    }
+
+    return over
+}
+
+// The 192-bit w2:w1:w0 divided by d, from 1 to 2^32 - 1, in place; the remainder returned.
+ulong DivideSmall(mut ulong w0, mut ulong w1, mut ulong w2, ulong d) {
+    mut ulong r = 0
+    w2 = DivideWord(w2, d, mut r)
+    w1 = DivideWord(w1, d, mut r)
+    w0 = DivideWord(w0, d, mut r)
+    return r
+}
+
+// One word of a long division by d, below 2^32: the remainder so far, below d, in front of the word's two halves; the
+// word of the quotient returned and the new remainder into r.
+ulong DivideWord(ulong word, ulong d, mut ulong r) {
+    ulong top = (r << 32) | (word >> 32)
+    ulong upper = top / d
+    ulong bottom = ((top - upper * d) << 32) | (word & 4294967295)
+    ulong lower = bottom / d
+    r = bottom - lower * d
+    return (upper << 32) | lower
+}
+
+// a2:a1:a0 plus b2:b1:b0, in place, where the sum stays below 2^192.
+void Add192(mut ulong a0, mut ulong a1, mut ulong a2, ulong b0, ulong b1, ulong b2) {
+    ulong s0 = a0 +% b0
+    mut ulong c0 = 0
+    if s0 < b0 {
+        c0 = 1
+    }
+
+    ulong t1 = a1 +% b1
+    mut ulong c1 = 0
+    if t1 < b1 {
+        c1 = 1
+    }
+
+    ulong s1 = t1 +% c0
+    if s1 < c0 {
+        c1 = 1
+    }
+
+    a0 = s0
+    a1 = s1
+    a2 = a2 + b2 + c1
+}
+
+// a2:a1:a0 minus b2:b1:b0, in place, where a is not below b.
+void Subtract192(mut ulong a0, mut ulong a1, mut ulong a2, ulong b0, ulong b1, ulong b2) {
+    mut ulong borrow = 0
+    if a0 < b0 {
+        borrow = 1
+    }
+
+    mut ulong next = 0
+    if a1 < b1 || (a1 == b1 && borrow == 1) {
+        next = 1
+    }
+
+    a0 = a0 -% b0
+    a1 = a1 -% b1 -% borrow
+    a2 = a2 - b2 - next
+}
+
+// Whether a2:a1:a0 is below b2:b1:b0.
+bool Below192(ulong a0, ulong a1, ulong a2, ulong b0, ulong b1, ulong b2) {
+    if a2 != b2 {
+        return a2 < b2
+    }
+
+    if a1 != b1 {
+        return a1 < b1
+    }
+
+    return a0 < b0
+}
+
+// The count of bits of w2:w1:w0 up to its highest one.
+int Bits192(ulong w0, ulong w1, ulong w2) {
+    if w2 != 0 {
+        return 128 + Bits(w2)
+    }
+
+    if w1 != 0 {
+        return 64 + Bits(w1)
+    }
+
+    return Bits(w0)
+}
+
+// The count of bits of a word up to its highest one, 0 for 0.
+int Bits(ulong value) {
+    mut ulong v = value
+    mut int n = 0
+    if v >> 32 != 0 {
+        v = v >> 32
+        n = 32
+    }
+
+    if v >> 16 != 0 {
+        v = v >> 16
+        n = n + 16
+    }
+
+    if v >> 8 != 0 {
+        v = v >> 8
+        n = n + 8
+    }
+
+    if v >> 4 != 0 {
+        v = v >> 4
+        n = n + 4
+    }
+
+    if v >> 2 != 0 {
+        v = v >> 2
+        n = n + 2
+    }
+
+    if v >> 1 != 0 {
+        v = v >> 1
+        n = n + 1
+    }
+
+    return n + int(v)
+}
+
+// The count of decimal digits of a number, 1 for 0.
+long DigitCount(ulong value) {
+    mut long count = 1
+    mut ulong rest = value / 10
+    while rest > 0 {
+        count = count + 1
+        rest = rest / 10
+    }
+
+    return count
+}
+
+// Ten to the n, n from 0 to 19.
+ulong Pow10(int n) => match n {
+    0 => 1
+    1 => 10
+    2 => 100
+    3 => 1000
+    4 => 10000
+    5 => 100000
+    6 => 1000000
+    7 => 10000000
+    8 => 100000000
+    9 => 1000000000
+    10 => 10000000000
+    11 => 100000000000
+    12 => 1000000000000
+    13 => 10000000000000
+    14 => 100000000000000
+    15 => 1000000000000000
+    16 => 10000000000000000
+    17 => 100000000000000000
+    18 => 1000000000000000000
+    else => 10000000000000000000
+}
+
+// Ten to the n as a `double`, n from 0 to 28, each the `double` nearest it, as C#'s table of them.
+double DoublePower10(int n) => match n {
+    0 => 1.0
+    1 => 1e1
+    2 => 1e2
+    3 => 1e3
+    4 => 1e4
+    5 => 1e5
+    6 => 1e6
+    7 => 1e7
+    8 => 1e8
+    9 => 1e9
+    10 => 1e10
+    11 => 1e11
+    12 => 1e12
+    13 => 1e13
+    14 => 1e14
+    15 => 1e15
+    16 => 1e16
+    17 => 1e17
+    18 => 1e18
+    19 => 1e19
+    20 => 1e20
+    21 => 1e21
+    22 => 1e22
+    23 => 1e23
+    24 => 1e24
+    25 => 1e25
+    26 => 1e26
+    27 => 1e27
+    else => 1e28
 }

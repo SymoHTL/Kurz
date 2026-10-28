@@ -1,0 +1,19 @@
+// expect: output
+// | 3.00
+// | 0.3333333333333333333333333333
+// | 0.6666666666666666666666666667
+// | 2.5
+// | true
+// | -1.5
+// rules: T30
+
+decimal Times(decimal a, decimal b) => a * b
+decimal Over(decimal a, decimal b) => a / b
+decimal Remainder(decimal a, decimal b) => a % b
+
+print(Times(1.50m, 2))
+print(Over(1m, 3m))
+print(Over(2m, 3m))
+print(Over(5m, 2m))
+print(Times(1.5m, 1m) == 1.50m)
+print(Remainder(-7.5m, 2m))

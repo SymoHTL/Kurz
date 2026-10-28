@@ -1033,9 +1033,11 @@ public sealed partial class Checker
                         TokenKind.Minus => l.Value - r.Value,
                         TokenKind.Star => l.Value * r.Value,
                         TokenKind.Slash => l.Value / r.Value,
-                        _ => l.Value % r.Value,
+                        _ => Remainder(l.Value, r.Value),
                     };
-                    return new Typed(type, new DecimalConstant(value));
+
+                    // a zero these compute has no sign, where System.Decimal can set it (the owner, 2026-10-28, "None, as rust_decimal")
+                    return new Typed(type, new DecimalConstant(value == 0m && decimal.IsNegative(value) ? decimal.Negate(value) : value));
                 }
                 catch (OverflowException)
                 {
@@ -1045,6 +1047,32 @@ public sealed partial class Checker
 
             default:
                 return new Typed(type); // a mixed pair after a reach that left one side its own type: typed, not folded
+        }
+    }
+
+    /// <summary>
+    /// <c>%</c> on two <c>decimal</c>s (T30): the exact remainder at the larger scale, with the dividend's sign, which always fits;
+    /// System.Decimal raises <c>OverflowException</c> for some that fit, <c>4294967295m % 0.9999999999999999999999999999m</c> among
+    /// them, and those are computed here (the owner, 2026-10-28, "Exact remainder").
+    /// </summary>
+    private static decimal Remainder(decimal a, decimal b)
+    {
+        try
+        {
+            return a % b;
+        }
+        catch (OverflowException)
+        {
+            static BigInteger Magnitude(decimal d)
+            {
+                var bits = decimal.GetBits(d);
+                return (new BigInteger((uint)bits[2]) << 64) | (new BigInteger((uint)bits[1]) << 32) | (uint)bits[0];
+            }
+
+            var scale = Math.Max(a.Scale, b.Scale);
+            var r = BigInteger.Remainder(Magnitude(a) * BigInteger.Pow(10, scale - a.Scale), Magnitude(b) * BigInteger.Pow(10, scale - b.Scale));
+            var mask = new BigInteger(uint.MaxValue);
+            return new decimal((int)(uint)(r & mask), (int)(uint)((r >> 32) & mask), (int)(uint)(r >> 64), decimal.IsNegative(a), (byte)scale);
         }
     }
 

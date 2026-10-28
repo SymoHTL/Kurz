@@ -6,7 +6,8 @@ namespace Kurz.Compiler.Emit;
 /// How each Kurz type is laid out in the emitted IR. Integers are the LLVM integer of their width,
 /// signed and unsigned alike (the operations tell them apart); a <c>bool</c> is <c>i1</c>; a
 /// <c>char</c> is its code point as <c>i32</c>; a <c>float</c> and a <c>double</c> are LLVM's
-/// <c>float</c> and <c>double</c>, IEEE 754's binary32 and binary64 (T2); a string is
+/// <c>float</c> and <c>double</c>, IEEE 754's binary32 and binary64 (T2); a <c>decimal</c> is
+/// <c>%kz.dec</c>, C#'s 16 bytes of System.Decimal as two 64-bit words (T2, <see cref="Emitter"/>); a string is
 /// <c>%kz.str</c>, a pointer to UTF-8 bytes
 /// and their count, the pointer of an empty string pointing at a constant of no bytes and never
 /// <c>null</c> (R15); a pointer and a C function value are <c>ptr</c> (R10, R17), and so is a list, the
@@ -27,6 +28,7 @@ internal static class Lower
             Primitive.Bool => "i1",
             Primitive.Float => "float",
             Primitive.Double => "double",
+            Primitive.Decimal => "%kz.dec",
             Primitive.String => "%kz.str",
             _ => throw new NotSupportedException(Refusal(p)),
         },
@@ -44,15 +46,15 @@ internal static class Lower
         "i16" => 2,
         "i32" or "float" => 4,
         "i64" or "double" or "ptr" => 8,
-        "%kz.str" or "%kz.fn" => 16,
+        "%kz.str" or "%kz.fn" or "%kz.dec" => 16,
         var other => throw new InvalidOperationException($"no size for `{other}`"),
     };
 
-    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, pointers to them and C function types over them.</summary>
+    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, pointers to them and C function types over them.</summary>
     public static bool Supported(KurzType type) => type switch
     {
         PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt
-            or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Bool or Primitive.Char or Primitive.String,
+            or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Decimal or Primitive.Bool or Primitive.Char or Primitive.String,
         VoidType => true,
         PointerType p => Supported(p.Pointee),
         CFunctionType f => f.Parameters.All(Supported) && Supported(f.Result),
@@ -64,7 +66,6 @@ internal static class Lower
     {
         var rule = type switch
         {
-            PrimitiveType { Kind: Primitive.Decimal } => "T2",
             PrimitiveType { Kind: Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp } => "T13",
             ListType => "M9",
             DataType => "D1",

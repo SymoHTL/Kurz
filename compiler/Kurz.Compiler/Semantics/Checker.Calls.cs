@@ -495,9 +495,11 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T6: a <c>double</c> inside decimal's range rounded to decimal's precision: its exact binary value at
-    /// the largest scale up to 28 whose digits fit decimal's 96 bits, rounded half to even. The conversion
-    /// of the runtime library keeps 15 significant digits, so that <c>decimal(0.1) - 0.1m</c> would be 0.
+    /// T6, T26: a <c>double</c> inside decimal's range rounded to decimal's precision: its exact binary value at
+    /// the largest scale up to 28 whose digits fit decimal's 96 bits, rounded half to even, and its zeros at the
+    /// end removed down to the scale 0, a zero's among them, which has no sign (the owner, 2026-10-28, "Exact
+    /// binary value"). The conversion of the runtime library keeps 15 significant digits, so that
+    /// <c>decimal(0.1) - 0.1m</c> would be 0.
     /// </summary>
     private static decimal ToDecimal(double value)
     {
@@ -523,7 +525,7 @@ public sealed partial class Checker
                 continue;
             }
 
-            while (scale > 0 && digits % 10 == 0 && !digits.IsZero)
+            while (scale > 0 && digits % 10 == 0)
             {
                 digits /= 10;
                 scale--;

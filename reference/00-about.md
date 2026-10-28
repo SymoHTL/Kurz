@@ -357,7 +357,11 @@ Show(NotFound)
 ### A8 (assumed, §8) The text of the remaining values
 
 A `float` shows what a `double` shows (A4), in the sense of A11. A `decimal` shows the digits it
-holds. A `char` shows its character. A duration shows its value split into units, `1h 30min`, as A12
+holds, `1.50m` as `1.50`, with a `-` before a zero whose sign is set, `-(0.0m)` as `-0.0`, as a
+`double` shows `-0` (the owner, 2026-10-28, "Sign, as Rust", as rust_decimal shows such a zero,
+against no sign, as C# shows none; the cost is that an amount can show as `-0.00`; which zeros
+have a sign is T30). A `char` shows its character. A duration shows its value split into units, `1h
+30min`, as A12
 says. A set of flags (D13) shows its names with ` | ` between them, in the order of
 A13. A `double` without a fraction, one that needs an exponent and one that is no number show what
 C# prints for them: `1`, `1E+21`, `NaN`; which C# that is, and what the other special values show,
@@ -375,6 +379,15 @@ print(Access.Read | Access.Write)
 for c in "ab".Chars {
     print(c)
 }
+```
+
+Case: [values/text-decimal.kz](../corpus/values/text-decimal.kz)
+```kurz
+decimal Negate(decimal a) => -a
+
+print(1.50m)
+print(Negate(0.0m))
+print(Negate(Negate(0.0m)))
 ```
 
 ### A11 (assumed, §8) The text of a `float`
@@ -459,7 +472,8 @@ print(Access.None)
 ### A14 (assumed, §8) Which C# a `double` prints like
 
 "What C# prints" is what .NET Core 3.0 and later print with the invariant culture, which is the
-shortest digits that read back as the same number (A4), with `.` as the separator: an exponent form
+shortest digits that read back as the same number (A4) where .NET's text reads back (below), with
+`.` as the separator: an exponent form
 for a nonzero magnitude of `1E+17` or more or below `1E-04`, so that `1E+16` shows `10000000000000000`,
 `1E-05` is the first power of ten below that bound it shows and `0.0001` the last without it, `0` for
 zero, `-0` for a negative zero, `Infinity` and `-Infinity` for the infinities, and `NaN`. Older .NET
@@ -475,7 +489,10 @@ would take more places than 17 and than the count of the digits; against keeping
 of .NET Framework's shorter format, which this rule named before. Where .NET writes a text that does
 not read back as the value, as .NET 10 writes the power of two `2.9802322387695312E-08` as
 `2.980232238769531E-08`, the text is the shortest digits that do, as A4 says. *(assumed: A4's digits
-over such a text of .NET's, which .NET promises to read back)*
+over such a text of .NET's, which .NET promises to read back)* Of two such texts equally near the
+value, the text is the one whose last digit is even, as Ryu and Rust's `ryu` crate take it: 2^-25,
+`2.98023223876953125E-08`, shows `2.9802322387695312E-08` and not `2.9802322387695313E-08`.
+*(assumed: the tie, which no answer named)*
 
 Case: [values/text-double-special.kz](../corpus/values/text-double-special.kz)
 ```kurz

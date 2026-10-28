@@ -236,8 +236,10 @@ public sealed partial class Emitter
     /// <summary>
     /// T10, T20: a conversion written as a call of an integer type or of <c>char</c>; a value that does not fit raises
     /// <c>overflow</c> in a test build and wraps in a release build. T23, T26: one written as a call of <c>float</c> or <c>double</c>
-    /// rounds; one from a floating-point value into an integer type drops the fraction, and a value that does not fit raises
-    /// <c>overflow</c> in a test build and saturates in a release build. R14: <c>long(p)</c> is the address a pointer holds.
+    /// rounds; one from a floating-point value or a <c>decimal</c> into an integer type drops the fraction, and a value that does not
+    /// fit raises <c>overflow</c> in a test build and saturates in a release build; one into a <c>decimal</c> takes an integer as it is
+    /// and a floating-point value's exact value, rounded, and raises <c>overflow</c> in every build where that value does not fit. A
+    /// <c>char</c> takes none of these, which the checker refuses. R14: <c>long(p)</c> is the address a pointer holds.
     /// </summary>
     private string EmitConversion(CallExpression c, KurzType target)
     {
@@ -249,17 +251,33 @@ public sealed partial class Emitter
             return fn.Value($"ptrtoint ptr {value} to i64");
         }
 
-        var from = sourceType is PrimitiveType { Kind: Primitive.Char } ? Types.UInt : sourceType;
-        var to = target is PrimitiveType { Kind: Primitive.Char } ? Types.UInt : target;
-        if (Types.IsFloating(to) && (Types.IsInteger(from) || Types.IsFloating(from)))
+        if (Types.IsFloating(target) && (Types.IsInteger(sourceType) || Types.IsFloating(sourceType)))
         {
-            return ToFloating(value, from, to);
+            return ToFloating(value, sourceType, target);
         }
 
-        if (Types.IsFloating(from) && Types.IsInteger(to))
+        if (Types.IsFloating(sourceType) && Types.IsInteger(target))
         {
-            return FromFloating(value, from, to, c.Line);
+            return FromFloating(value, sourceType, target, c.Line);
         }
+
+        if (Types.IsDecimal(target))
+        {
+            return Types.IsDecimal(sourceType) ? value
+                : Types.IsInteger(sourceType) ? DecimalFromInteger(value, sourceType)
+                : Types.IsFloating(sourceType) ? DecimalFromFloating(value, sourceType, c.Line)
+                : throw Unsupported(c.Line, $"a conversion from `{sourceType}` to `{target}`");
+        }
+
+        if (Types.IsDecimal(sourceType))
+        {
+            return Types.IsFloating(target) ? DecimalToFloating(value, target)
+                : Types.IsInteger(target) ? DecimalToInteger(value, target, c.Line)
+                : throw Unsupported(c.Line, $"a conversion from `{sourceType}` to `{target}`");
+        }
+
+        var from = sourceType is PrimitiveType { Kind: Primitive.Char } ? Types.UInt : sourceType;
+        var to = target is PrimitiveType { Kind: Primitive.Char } ? Types.UInt : target;
 
         if (!Types.IsInteger(from) || !Types.IsInteger(to))
         {

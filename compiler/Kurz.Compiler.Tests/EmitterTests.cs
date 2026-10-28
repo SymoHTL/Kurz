@@ -99,6 +99,14 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, "edges"), 0, ["-9223372036854775808", "18446744073709551615", "-128", "0"], "");
     }
 
+    [Fact]
+    public void A_function_whose_first_instruction_starts_a_block_enters_it_from_the_entry_block()
+    {
+        // a `mut` parameter is the caller's storage, so no store comes before the loop's first block
+        const string text = "void Down(mut int n) {\n    while n > 0 {\n        n = n - 1\n    }\n}\n\nmut int k = 3\nDown(mut k)\nprint(k)\n";
+        Ran(BuildAndRun(text, "loop-first"), 0, ["0"], "");
+    }
+
     [Theory]
     [InlineData("int(Most())", "overflow")] // the high bit set: the cut to 32 bits and its sign extension give the value back
     [InlineData("sbyte(Most())", "overflow")]
@@ -152,13 +160,13 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var target = Builder.HostTarget!.Value;
         var path = $"runtime/{Runtime.Directory(target)}/";
         var files = Runtime.Files.Select(f => f.Path.StartsWith(path, StringComparison.Ordinal)
-            ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub void Start() {", "pub void Start() {\n    print(1.5m)", StringComparison.Ordinal)))
+            ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub void Start() {", "pub void Start() {\n    print(1.5s)", StringComparison.Ordinal)))
             : f).ToList();
         var errors = new List<string>();
         var runtime = Runtime.Check(files, target, errors);
         Assert.Empty(errors);
         var e = Assert.Throws<InvalidOperationException>(() => Compile("print(1)\n", runtime));
         Assert.StartsWith($"{path}{Runtime.Directory(target)}.kz:", e.Message, StringComparison.Ordinal);
-        Assert.Contains("(T2)", e.Message, StringComparison.Ordinal);
+        Assert.Contains("(T13)", e.Message, StringComparison.Ordinal);
     }
 }

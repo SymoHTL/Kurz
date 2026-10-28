@@ -385,9 +385,46 @@ part modulo the target's width, which means nothing to anyone and costs a modulo
 conversion, and against counting a dropped fraction as a loss, which would have put a rounding
 call on every conversion. Into `float` or `double` the IEEE 754 rules of C# hold: `float(d)`
 rounds a `double`, becomes an infinity beyond the range, and keeps NaN and an infinity as they
-are; nothing of that is a loss. Into `decimal`, which has neither, an infinity, NaN and a value
-beyond its range lose the value as an integer target does, and rounding is no loss. *(assumed: the
-targets other than integers, which the question did not name)*
+are; nothing of that is a loss *(assumed: the `float` and `double` targets, which the question of
+2026-10-03 did not name)*. Into `decimal`, which has neither, NaN, an infinity and a value beyond
+its range raise `overflow` (E3) in every build, a release build too, as C# throws for them (the
+owner, 2026-10-28, "Raise in every build", against saturating in a release build and throwing in a
+test build as an integer target does, which this rule assumed before; the cost is a release program
+that ends with an error line instead of a clamped amount). A `double` becomes its exact binary value
+rounded half to even at the largest scale up to 28 whose digits fit `decimal`'s 96 bits, its zeros
+at the end removed down to the scale 0: `decimal(0.1)` is `0.1000000000000000055511151231` (the
+owner, 2026-10-28, "Exact binary value", against the shortest digits that read back as the same
+`double`, `0.1`, as the Rust crate rust_decimal's `from_f64` gives them, and against the 15
+significant digits C# keeps; the cost is surprising digits for almost every `double`; rust_decimal's
+`from_f64_retain` comes near it and differs in the last digits, `123.456` giving
+`123.45600000000000306954461843` where the exact value rounds to `123.45600000000000306954461848`,
+checked on 2026-10-28 with rust_decimal 1.36); that rounding is no loss. A `float` becomes the
+`double` that holds it exactly, and then that *(assumed: the answer named the exact binary value,
+which the `double` holds; C# keeps 7 significant digits of a `float`)*. A zero that comes of the
+conversion has no sign, `decimal(-0.0)` included *(assumed: the reading of the answer "None, as
+rust_decimal", under which only `-` gives a zero its sign)*. A `decimal` becomes a `double` as C#
+computes it: its 96-bit integer as a `double`, divided by the `double` nearest to 10 to the power of
+its scale, so `double(1m / 3m)` is `0.33333333333333337` (the owner, 2026-10-28, "As C# computes
+it", against the nearest `double`, `0.3333333333333333`; the cost is a last bit that can differ from
+the nearest `double`), and a `float` as that `double` rounded, as C# computes it *(assumed)*.
+
+Case: [types/conversion-into-decimal.kz](../corpus/types/conversion-into-decimal.kz)
+```kurz
+double Tenth() => 0.1
+decimal Third() => 1m / 3m
+
+print(decimal(Tenth()))
+print(decimal(0.1))
+print(double(Third()))
+print(decimal(-Tenth() * 1e-30))
+```
+
+Case: [types/conversion-into-decimal-raises.kz](../corpus/types/conversion-into-decimal-raises.kz)
+```kurz
+decimal Of(double x) => decimal(x)
+
+print(Of(1e30))
+```
 
 Case: [types/conversion-drops-fraction.kz](../corpus/types/conversion-drops-fraction.kz)
 ```kurz
@@ -408,6 +445,73 @@ Case: [types/conversion-float-test.kz](../corpus/types/conversion-float-test.kz)
 ```kurz
 double big = 100000000000000000000.0
 print(int(big))
+```
+
+### T30 (decided, §4) `decimal` arithmetic
+
+A `decimal` is C#'s System.Decimal: an integer of 96 bits, a scale from 0 to 28 that counts its
+digits after the point, and a sign, in 16 bytes. `+ - * / %` compute, round half to even and choose
+the scale of their result as System.Decimal does, so `1.50m * 2` is `3.00`, `1m / 3m` is
+`0.3333333333333333333333333333` and `5m / 2m` is `2.5`; `%` takes the sign of the dividend; `==`
+and the comparisons compare the values, so `1.5m == 1.50m` *(assumed: T2 names C#'s type; Rust has
+no `decimal`, and its crate rust_decimal chooses other scales, `2.50m * 0` is `0` there where
+System.Decimal keeps `0.00`, so the two do not agree, and Kurz takes C#'s)*. A result beyond
+±79228162514264337593543950335 raises `overflow` (E3) in every build, a release build too, as C#
+throws for it (the owner, 2026-10-28, "Raise in every build", against raising in a test build and
+saturating in a release build; the cost is nothing at run time beyond what the rounding checks
+anyway, and a release program ends with an error line instead of a wrong amount). A zero that `+ - *
+/ %` compute has no sign: `1.50m - 1.5m` shows `0.00` and `0m * -1m` shows `0`; only `-` gives a
+zero its sign, as `-(0.0m)` shows `-0.0` (A8), and the digits and the scale stay System.Decimal's,
+`2.50m * 0` showing `0.00` (the owner, 2026-10-28, "None, as rust_decimal", against System.Decimal's
+sign bit, which it sets on `1.50m - 1.5m`, so that the text of A8 would show `-0.00`, and against no
+sign on any zero, as C# shows none; the cost is a test for zero after each operation, and a sign bit
+that differs from C#'s where no `==` and no text of C# shows it). `%` gives the exact remainder at
+the larger of the two scales, also where System.Decimal throws `OverflowException` for a remainder
+that fits: `4294967295m % 0.9999999999999999999999999999m` is `0.0000000000000000004294967295` (the
+owner, 2026-10-28, "Exact remainder", against raising `overflow` where C# throws, under which the
+runtime would mirror the widths System.Decimal computes in and a remainder that fits would raise;
+the cost is nothing at run time, and the result differs from C#'s only where C# throws; rust_decimal
+1.36 gives `0.9232812099469197934124335104` there).
+
+Case: [types/decimal-arithmetic.kz](../corpus/types/decimal-arithmetic.kz)
+```kurz
+decimal Times(decimal a, decimal b) => a * b
+decimal Over(decimal a, decimal b) => a / b
+decimal Remainder(decimal a, decimal b) => a % b
+
+print(Times(1.50m, 2))
+print(Over(1m, 3m))
+print(Over(2m, 3m))
+print(Over(5m, 2m))
+print(Times(1.5m, 1m) == 1.50m)
+print(Remainder(-7.5m, 2m))
+```
+
+Case: [types/decimal-overflow-release.kz](../corpus/types/decimal-overflow-release.kz)
+```kurz
+decimal Add(decimal a, decimal b) => a + b
+
+print(Add(79228162514264337593543950335m, 1m))
+```
+
+Case: [types/decimal-zero-sign.kz](../corpus/types/decimal-zero-sign.kz)
+```kurz
+decimal Minus(decimal a, decimal b) => a - b
+decimal Times(decimal a, decimal b) => a * b
+decimal Negate(decimal a) => -a
+
+print(Minus(1.50m, 1.5m))
+print(Times(0m, -1m))
+print(Minus(-1m, -1m))
+print(Negate(0.0m))
+```
+
+Case: [types/decimal-remainder-exact.kz](../corpus/types/decimal-remainder-exact.kz)
+```kurz
+decimal Remainder(decimal a, decimal b) => a % b
+
+print(Remainder(4294967295m, 0.9999999999999999999999999999m))
+print(4294967295m % 0.9999999999999999999999999999m)
 ```
 
 ### T11 (decided, §4) Wrapping on purpose
