@@ -246,7 +246,7 @@ public sealed partial class Emitter
         {
             case PrimitiveType { Kind: Primitive.String }:
                 return fn.Value($"call i1 {RuntimeFunction("Same")}(%kz.str {left}, %kz.str {right})");
-            case PrimitiveType p when Types.IsInteger(p) || p.Kind is Primitive.Char or Primitive.Bool:
+            case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || p.Kind is Primitive.Char or Primitive.Bool:
                 return fn.Value($"icmp eq {Ir(type)} {left}, {right}");
             case PrimitiveType p when Types.IsFloating(p):
                 {

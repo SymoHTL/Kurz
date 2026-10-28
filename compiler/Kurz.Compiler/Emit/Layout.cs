@@ -225,10 +225,7 @@ internal sealed class Layout(IrModule module)
                 }
 
             default:
-                {
-                    var size = Lower.Size(type);
-                    return (size, Math.Min(size, 8));
-                }
+                return (Lower.Size(type), Lower.Align(type));
         }
     }
 

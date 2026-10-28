@@ -225,7 +225,7 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
         // T26: beyond the range, an infinity and NaN lose the value, raised at the conversion's line; the release build gives the
         // largest or the smallest value, and 0 for NaN
         var text = Conversions + $"print({call})\n";
-        var name = "conversion-" + new string(call.Where(char.IsLetterOrDigit).ToArray()); // `I(2147483648.0)` and `I(1.0 / Zero())` agree in all else
+        var name = "conversion-" + new string(call.Select(c => c == '-' ? 'M' : c).Where(char.IsLetterOrDigit).ToArray()); // `I(2147483648.0)` and `I(1.0 / Zero())` agree in all else, a sign kept as `M`
         Ran(BuildAndRun(text, name + "-test"), 1, [], $"error: overflow at program.kz:{line}\n");
         Ran(BuildAndRun(text, name + "-release", testBuild: false), 0, [saturated], "");
     }

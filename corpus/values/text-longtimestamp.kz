@@ -1,0 +1,18 @@
+// expect: output
+// | +10000-01-01T00:00:00Z
+// | 0000-01-01T00:00:00Z
+// | -0001-12-31T23:59:59Z
+// allow: raw
+// rules: A16
+
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        longtimestamp epoch = *Ptr<timestamp>(&bits)
+        print(epoch + 2932897days)
+        print(epoch - 719528days)
+        print(epoch - 719528days - 1s)
+    }
+}
+
+Show(0)

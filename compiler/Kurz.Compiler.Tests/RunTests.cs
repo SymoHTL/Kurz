@@ -80,22 +80,15 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before.</summary>
-    private const int RunFloor = 173;
+    private const int RunFloor = 187;
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
     {
         ["memory/asm-explicit-register.kz"] = "inline assembly (R11)",
         ["memory/asm-in-raw.kz"] = "inline assembly (R11)",
-        ["source/unit-literal-fraction.kz"] = "a value of type `duration` (T13)",
-        ["source/unit-literal-micro.kz"] = "a value of type `duration` (T13)",
-        ["types/duration-parameter.kz"] = "a value of type `duration` (T13)",
-        ["types/longduration-parameter.kz"] = "a value of type `duration` (T13)",
-        ["types/longduration-wide.kz"] = "a value of type `longduration` (T13)",
         ["types/string-bytes.kz"] = "`s.Bytes` as a list (T15)",
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
-        ["values/text-duration-sub-millisecond.kz"] = "a value of type `duration` (T13)",
-        ["values/text-duration.kz"] = "a value of type `duration` (T13)",
     };
 
     /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>

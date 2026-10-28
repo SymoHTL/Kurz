@@ -7,7 +7,10 @@ namespace Kurz.Compiler.Emit;
 /// signed and unsigned alike (the operations tell them apart); a <c>bool</c> is <c>i1</c>; a
 /// <c>char</c> is its code point as <c>i32</c>; a <c>float</c> and a <c>double</c> are LLVM's
 /// <c>float</c> and <c>double</c>, IEEE 754's binary32 and binary64 (T2); a <c>decimal</c> is
-/// <c>%kz.dec</c>, C#'s 16 bytes of System.Decimal as two 64-bit words (T2, <see cref="Emitter"/>); a string is
+/// <c>%kz.dec</c>, System.Decimal's 16 bytes as two 64-bit words, the low 64 bits of its integer, then its high 32 bits with its
+/// flags above them (T2, <see cref="Emitter"/>); a <c>duration</c> and a
+/// <c>timestamp</c> are the <c>i64</c> of their nanoseconds, a <c>longduration</c> and a <c>longtimestamp</c> the <c>i128</c>,
+/// 16 bytes aligned to 16 as LLVM lays it out (T24, T29); a string is
 /// <c>%kz.str</c>, a pointer to UTF-8 bytes
 /// and their count, the pointer of an empty string pointing at a constant of no bytes and never
 /// <c>null</c> (R15); a pointer and a C function value are <c>ptr</c> (R10, R17), and so is a list, the
@@ -24,7 +27,8 @@ internal static class Lower
             Primitive.SByte or Primitive.Byte => "i8",
             Primitive.Short or Primitive.UShort => "i16",
             Primitive.Int or Primitive.UInt or Primitive.Char => "i32",
-            Primitive.Long or Primitive.ULong => "i64",
+            Primitive.Long or Primitive.ULong or Primitive.Duration or Primitive.Timestamp => "i64",
+            Primitive.LongDuration or Primitive.LongTimestamp => "i128",
             Primitive.Bool => "i1",
             Primitive.Float => "float",
             Primitive.Double => "double",
@@ -46,15 +50,19 @@ internal static class Lower
         "i16" => 2,
         "i32" or "float" => 4,
         "i64" or "double" or "ptr" => 8,
-        "%kz.str" or "%kz.fn" or "%kz.dec" => 16,
+        "%kz.str" or "%kz.fn" or "%kz.dec" or "i128" => 16,
         var other => throw new InvalidOperationException($"no size for `{other}`"),
     };
 
-    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, pointers to them and C function types over them.</summary>
+    /// <summary>The alignment of a value of the type in memory, as LLVM lays out its IR type: 16 for an <c>i128</c> (T29), else its size up to 8.</summary>
+    public static int Align(KurzType type) => IrType(type) == "i128" ? 16 : Math.Min(Size(type), 8);
+
+    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, the time types, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, pointers to them and C function types over them.</summary>
     public static bool Supported(KurzType type) => type switch
     {
         PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt
-            or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Decimal or Primitive.Bool or Primitive.Char or Primitive.String,
+            or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Decimal or Primitive.Bool or Primitive.Char or Primitive.String
+            or Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp,
         VoidType => true,
         PointerType p => Supported(p.Pointee),
         CFunctionType f => f.Parameters.All(Supported) && Supported(f.Result),
@@ -66,7 +74,6 @@ internal static class Lower
     {
         var rule = type switch
         {
-            PrimitiveType { Kind: Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp } => "T13",
             ListType => "M9",
             DataType => "D1",
             UnionType => "D9",

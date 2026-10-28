@@ -144,7 +144,7 @@ compiler refuses gets its lines on standard error, one per diagnostic in the ord
 and no executable, and the command exits with 1:
 
     hello.kz:3: unknown-name: `y` is not declared
-    hello.kz:1: not supported: a value of type `duration` (T13)
+    hello.kz:2: not supported: `s.Bytes` as a list (T15)
 
 The file is named as the command line gave it. The command grants a program neither `raw` nor
 `native` (R7, R16): a program that needs them is refused with the grant's error. It refuses to
@@ -240,6 +240,7 @@ emitted `main` calls the runtime's `Start`, then the program's top level, then `
 the process with the exit code 0 through the target's `Exit`, the runtime's one exit (section 6).
 `common/` gives what the emitted code calls: `Print`, the text of an integer, of a `char` and of a
 `float` and a `double` (below), the arithmetic, the conversions and the text of a `decimal` (below), the
+text of a duration and of a timestamp (below), the
 joining and the comparison of two strings, the text of a list from the texts of its items,
 `Raise` for an exception of the run-time table and `Throw`, and `Allocate`, which takes its memory
 from the allocator's entry, `std/`'s `Allocate` (record, section 2), and ends the process where the
@@ -291,6 +292,15 @@ what System.Decimal computes, a zero they compute without its sign, and the rema
 for to the exact ones; and 20000 `double`s and as many `float`s of a xorshift sequence converted
 into `decimal` to their exact binary value rounded, which `BigInteger` computes.
 
+A duration and a timestamp of either width (T13, T29) reach `common/` as the two words of their
+128 bits, the low one first, a narrow one extended by its sign. `TextOfDuration` splits the
+nanoseconds into the units of A12 and `TextOfTimestamp` writes the instant as A16 says, the date
+by Howard Hinnant's `civil_from_days`, both dividing the 128 bits by numbers below 2^32 in 64-bit
+words, so that no division of 128 bits needs a function of the C library. `TimeTests` holds the
+text of 3000 durations of a xorshift sequence of 0 to 127 bits and of the edges of both widths to
+the units read off with `BigInteger`, and that of 4000 timestamps and the edges of the calendar to
+.NET's calendar moved by whole cycles of 400 years.
+
 The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
 a `throw`, with the thrown value's text on the line below it. A `print` passes its file and its line
@@ -330,6 +340,12 @@ library a block of C functions names (R16). It emits:
   widened into it (T23), a conversion into an integer type as from a `double`, and the conversions
   between it and `float` and `double`, NaN, an infinity and a value beyond its range raising
   `overflow` in every build (T26);
+- the time types (T13, T24, T29): a `duration` and a `timestamp` as the `i64` of their nanoseconds,
+  a `longduration` and a `longtimestamp` as the `i128`, 16 bytes aligned to 16; their literals, `+`
+  and `-` as the checker types them and the unary `-` of a duration, which raise `overflow` where a
+  result leaves its type's range in every build (T31), the comparisons, `==` also on a field (D3), a
+  narrow value widened beside or into the wide pair (T29), a conversion between the two widths, which
+  raises `overflow` in every build where the value does not fit (T31), and their text (A12, A16);
 - `if`, `while`, `for` over a range, which raises `reversed-range-at-run-time` (C8), `break`,
   `continue` and `return` (chapter 10), and `throw` of a value (O6);
 - `data` types and their values, made with defaults and arguments by name (D1, D2, D8, D11), their
@@ -439,8 +455,7 @@ the calls of `Where`'s test; the release of such an environment before the `Add`
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), the durations and the
-timestamps (T13), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
+`data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` on a list in
 a field (M5), `==` on a value that holds a list (D3), a list's `Pointer` and `List<T>.FromRaw`
 (R15), `s.Bytes` and `s.Chars` as a list, `s.Bytes.Count` aside (T15), and a construct of the other
@@ -452,8 +467,8 @@ values that hold them (above) and for nothing else: memory a string or a value o
 a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
-corpus runner lists every case the checker reads in full and the emitter does not emit, 11 of the
-241 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+corpus runner lists every case the checker reads in full and the emitter does not emit, 4 of the
+248 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a
