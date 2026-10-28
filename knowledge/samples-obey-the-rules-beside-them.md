@@ -35,6 +35,8 @@ the sample as the truth because it is concrete.
   not emit, so its expectation is read against the rules it names in the same way (HAZARD #1).
 - A rule that names an outside behaviour, "what .NET prints", and states numbers of it too is read
   against that behaviour, run, before a case takes the numbers: they can be another version's.
+  Gate: `compiler-tests` for a case the compiler emits, which the corpus runner runs; HAZARD #1 for
+  the rest.
 - In `kurz-design.md` samples are illustrative and unchecked. That is HAZARD #1: nothing executes
   them. The review rule "design record" carries the defect shape, but the reviewer is given one
   batch of the diff, so it can judge a sample only against rules that the same batch shows.
