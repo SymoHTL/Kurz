@@ -276,17 +276,25 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
     [Fact]
     public void A_C_function_takes_and_gives_a_double_and_a_float()
     {
+        // functions both C libraries export: Windows' C runtime on x64 has `fabsf` inline in its headers and in no library, and
+        // the GNU C library has `modf` and `modff` in libc itself
         var text = """
             extern "C" {
                 double fabs(double x)
-                float fabsf(float x)
+                double modf(double x, double* whole)
+                float modff(float x, float* whole)
             }
 
             raw {
                 print(fabs(-2.5))
-                print(fabsf(-1.5f))
+                mut double w = 0
+                print(modf(2.75, &w))
+                print(w)
+                mut float v = 0
+                print(modff(-1.5f, &v))
+                print(v)
             }
             """;
-        Ran(BuildAndRun(text, "c-floating", grants: ["raw", "native"]), 0, ["2.5", "1.5"], "");
+        Ran(BuildAndRun(text, "c-floating", grants: ["raw", "native"]), 0, ["2.5", "0.75", "2", "-0.5", "-1"], "");
     }
 }
