@@ -815,8 +815,8 @@ round can ask about it by the rule's id.
   "Pass, as Rust"). As M7 says, a type parameter can hold one, and so can a
   `data` type when one of its type arguments can, whether a field stores it or not (section 4, the
   owner, 2026-10-28, "Counts, as Rust"), or when a field of it, its type read with the type's
-  arguments in place of its parameters, or of a type derived from it can ("confirmed"), at any
-  depth: a type met again on the way, `Box` in `Box<Box<() => int>>`, answers by its type arguments
+  arguments in place of its parameters as section 4 assumes, or of a type derived from it can
+  ("confirmed"), at any depth: a type met again on the way, `Box` in `Box<Box<() => int>>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
   itself with other arguments, `P<List<T>>` in a `P<T>`. A map, a nullable type and a class, which
   section 4 assumes can hold one, the checker says `not supported` to (M9, N1, chapter 7) before the

@@ -884,7 +884,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(Kept("data Q<T>(int X, List<Q<T>> N)", "Q<() => int>")));
         Clean(Kept("data Q<T>(int X, List<Q<T>> N)", "Q<int>"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(Kept("data Q<T>(int X, List<Q<() => int>> N)", "Q<int>")));
+        Clean(Kept("data Q<T>(int X, List<Q<int>> N)", "Q<int>"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(Kept("data R<T>(T X, List<R<() => int>> N)", "R<int>")));
+        Clean(Kept("data R<T>(T X, List<R<int>> N)", "R<int>"));
         Clean(fs + "mut others = List<int>()\nfs.Add(() => others.Count)\nprint(fs.Count)");
         Names(fs + "fs.Add(() => fs.Count)\nprint(fs.Count)", "a lambda that reads `fs`", "`Add` changes `fs`");
         Names(arm + "        numbers.Add(1)\n        5\n    }\n}))", "`numbers`", "`Add` changes `numbers`");
