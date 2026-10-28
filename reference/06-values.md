@@ -142,17 +142,21 @@ the item it stores before the list grows, so a read of the receiver in its argum
 while `Add` changes it: `rows.Add(rows[0])` for a list of lists `rows` passes, and `xs.Add(F(mut xs))`
 is the error (§4, the owner, 2026-10-24 and 2026-10-25). A lambda that reads the receiver and is that
 argument's value, bare, in brackets or as the value of an arm, holds it while `Add` changes it, so
-`fs.Add(() => fs.Count)` for a list of function values is the error, and so does a lambda given to a
+`fs.Add(() => fs.Count)` for a list of function values is the error, and so is a lambda given to a
 call or a `with` there that the argument's value can keep, a value of a type that can hold a function
 value: `fs.Add(Wrap(() => fs.Count))` is the error (§4, the owner, 2026-10-25). A value inside the
 argument of a type that can hold none ends what it keeps, so `xs.Add(Count(() => xs.Count))` and
 `xs.Add(Count(Wrap(() => xs.Count)))`, whose `Count` gives an `int`, pass (§4, the owner, 2026-10-25
-and 2026-10-28). A type that can hold a function value is a function type, a type parameter, and a
-list, a union or a `data` type, or a type derived from that `data` type, that holds one *(assumed, as
-§4 marks it: the type parameter and the derived type)*. Whether another `mut` method takes `Add`'s
-exception is open (§14), with two options: the exception for a method that changes its receiver after
-its arguments ran, or the read the error for every method but `Add`, as Rust's E0502; while it is
-open, such a read is the error by the rule above, as a read of what the method takes as `mut`. The
+and 2026-10-28). A type that can hold a function value is a function type, a type parameter, a list
+or a union that holds one, and a `data` type when a field of it or of a type derived from it holds
+one, so that a type argument no field of its type uses holds nothing (§4, the owner, 2026-10-28). A
+map, a nullable type and a class can hold one where a type they hold can *(assumed, as §4 marks
+it)*. Whether another `mut` method takes `Add`'s exception is open (§14), with two options: the
+exception for every `mut` method that stores what its argument gave before it changes its receiver,
+as `Add` stores its counted item before the list grows, or for `Add` alone. While it is open, the
+rule above holds for such a method with its conditions: a read of the receiver whose value the
+argument still holds when the method runs is the error, and a copied read or one that makes a new
+value first is not. The
 expression holds the value of a read made as any other argument of that call without `mut` in front
 of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
 value is `mut-at-call`, above); as an argument of a call around it given before
@@ -386,6 +390,15 @@ xs.Add(Count(Wrap(() => xs.Count)))
 print(xs)
 ```
 
+Case: [values/mut-read-lambda-generic-depth.kz](../corpus/values/mut-read-lambda-generic-depth.kz)
+```kurz
+data Box<T>(T V)
+
+mut bs = List<Box<Box<() => int>>>()
+bs.Add(Box<Box<() => int>>(Box<() => int>(() => bs.Count)))
+print(bs.Count)
+```
+
 Case: [values/mut-read-arm-change.kz](../corpus/values/mut-read-arm-change.kz)
 ```kurz
 data NotFound
@@ -533,8 +546,9 @@ type laid out as a block, 8 bytes on a 64-bit target (§4, the owner, 2026-10-23
 growth the system refuses raises it with the bytes the allocator was asked for, the whole request with
 the list's own counts, before the allocator rounds it up (§4); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
 or beyond raises `index-out-of-range` (T14); `Where(test)` is the list of
-items that pass the test, in their order, and calls the test once for each item, in order (§4, the
-owner, 2026-10-28). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
+items that pass the test, in their order, and calls the test once for each item, in order, so that
+a test that ends the program ends it at that item and no item after it is tested (§4, the owner,
+2026-10-28). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the
 record's samples use. The naming of the standard library is open (record, section 14).
 

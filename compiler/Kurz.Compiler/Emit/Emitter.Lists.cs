@@ -314,8 +314,9 @@ public sealed partial class Emitter
     /// M9: <c>list.Add(item)</c> on a <c>mut</c> variable or parameter. The item is read first, then the list the variable holds as
     /// the item left it, as a path assignment reads its value first (M4); a block other values hold is copied before the write (M3),
     /// and a full one grows. What the argument made besides the item is let go of before the list is read, so that the environment
-    /// of a lambda it gave to a call, which counts the values it read (F15), holds no count of the list when the list grows: a
-    /// reading of this directory, which saves the copy of the items, not an order a rule states.
+    /// of a lambda it gave to a call, which counts the values it read (F15), holds no count of the list when the list grows, as
+    /// section 4 states (the owner, 2026-10-28, "Pass, as Rust": "the environment is let go of before the list grows, so `Add`
+    /// copies nothing").
     /// </summary>
     private void EmitListAdd(CallExpression c)
     {
