@@ -853,6 +853,15 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 2)], Errors(fs + "fs.Add((() => fs.Count))\nprint(fs.Count)"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 3)], Errors(fs + "k = 1\nfs.Add(match k {\n    1 => () => fs.Count\n    else => () => 0\n})\nprint(fs.Count)"));
         Clean(fs + "n = fs.Count\nfs.Add(() => n)\nprint(fs.Count)");
+
+        // and one that a value made around it can keep, a value of a type that can hold a function value: a call's result, a field
+        // of one, a `with`; one given to a call whose result is an `int` holds nothing past it (the owner, 2026-10-25, "Refuse if
+        // it can keep it")
+        var wrap = "data Rule(() => int Step, int Limit)\n\n() => int Wrap(() => int g) => g\n\nint Count(() => int g) => g()\n\n" + fs;
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors(wrap + "fs.Add(Wrap(() => fs.Count))\nprint(fs.Count)"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors(wrap + "fs.Add(Rule(() => fs.Count, 1).Step)\nprint(fs.Count)"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(wrap + "r = Rule(() => 0, 1)\nfs.Add((r with { Step = () => fs.Count }).Step)\nprint(fs.Count)"));
+        Clean(wrap + "fs.Add(Wrap(() => 0))\nmut xs = List<int>()\nxs.Add(Count(() => xs.Count))\nprint(fs.Count + xs.Count)");
         Clean(fs + "mut others = List<int>()\nfs.Add(() => others.Count)\nprint(fs.Count)");
         Names(fs + "fs.Add(() => fs.Count)\nprint(fs.Count)", "a lambda that reads `fs`", "`Add` changes `fs`");
         Names(arm + "        numbers.Add(1)\n        5\n    }\n}))", "`numbers`", "`Add` changes `numbers`");

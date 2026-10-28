@@ -343,7 +343,9 @@ block where it has none, as Rust's `Vec` grows, to twice its room, at least 8 it
 up to a kibibyte and 1 of more, and where other values hold the block it copies the items into a
 block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). An argument that
 changes the list through a `mut` parameter is `changed-while-held` (M7), so the order in which an `Add`
-reads its argument and its list is not seen. The count
+reads its argument and its list is not seen. What `Add`'s argument made besides its item, the
+environment of a lambda it gave to a call among them, is let go of before the list is read, so that
+no count it held makes the list copy its items (F15). The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
@@ -380,7 +382,8 @@ of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the s
 the same lists all kept do not; the number of `allocation-failed` past the limit, with the limit
 lowered in the library's text, for items of 1, 8 and 16 bytes, a padded `data` value, a list and a
 value of a block type, and for a growth the system refuses, and for an environment; the order of
-the calls of `Where`'s test; and `index-out-of-range` for an index below 0, at `Count` and beyond.
+the calls of `Where`'s test; the release of such an environment before the `Add` in the IR; and
+`index-out-of-range` for an index below 0, at `Count` and beyond.
 
 ### What the emitter does not emit
 
@@ -401,7 +404,7 @@ a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
 corpus runner lists every case the checker reads in full and the emitter does not emit, 26 of the
-231 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+232 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a
@@ -802,8 +805,11 @@ round can ask about it by the rule's id.
   counts its item before the list grows. Having a `void` success (O10), it stands only as a
   statement, an arm's among them. A lambda in its argument that reads the receiver, as the
   argument's value or an arm's, holds the receiver while `Add` changes it (the owner, 2026-10-25,
-  "Refuse, as Rust's borrow"); a lambda given to a call there is that call's argument, and the call's
-  result a value of its own (M3). A function value is copied (the owner, 2026-10-25, "Copied"), and
+  "Refuse, as Rust's borrow"), and so does one given to a call or a `with` there whose value is of a
+  type that can hold a function value: the checker follows the value through every part whose type
+  can hold one, a type parameter among them, so `fs.Add(Wrap(() => fs.Count))` is the error and
+  `xs.Add(Count(() => xs.Count))`, whose `Count` gives an `int`, is not (the owner, 2026-10-25,
+  "Refuse if it can keep it"). A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter
   counts it once more for the expression (above), the cost the design record names.

@@ -523,6 +523,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void What_Add_s_argument_made_besides_the_item_is_let_go_of_before_the_list_grows()
+    {
+        // the lambda given to `Count` holds a count of the list (F15) until its environment is let go of: before the `Add`, so that
+        // the list is not seen as shared and copied at each `Add`
+        var ir = Compile("int Count(() => int f) => f()\n\nmut xs = List<int>()\nxs.Add(Count(() => xs.Count))\nprint(xs)\n", toolchain.Runtime).Program!.Ir;
+        var main = ir[ir.IndexOf("define internal void @kz.main()", StringComparison.Ordinal)..];
+        main = main[..main.IndexOf("\n}", StringComparison.Ordinal)];
+        var release = main.IndexOf("call void @\"release.fn\"", StringComparison.Ordinal);
+        Assert.True(release >= 0, "the environment is let go of in the top-level code");
+        Assert.True(release < main.IndexOf("call void @\"add.List<int>\"", StringComparison.Ordinal), "the environment is let go of after the `Add`");
+    }
+
+    [Fact]
     public void A_mut_parameter_of_a_lambda_is_not_supported_at_its_line()
     {
         // a function type passes no `mut` (F11), so no caller's variable sees what such a parameter is given (M7)

@@ -142,7 +142,9 @@ the item it stores before the list grows, so a read of the receiver in its argum
 while `Add` changes it: `rows.Add(rows[0])` for a list of lists `rows` passes, and `xs.Add(F(mut xs))`
 is the error (§4, the owner, 2026-10-24 and 2026-10-25). A lambda in that argument that reads the
 receiver holds it while `Add` changes it, so `fs.Add(() => fs.Count)` for a list of function values is
-the error (§4, the owner, 2026-10-25). What another `mut` method does with such an argument is open
+the error, and so does a lambda given to a call or a `with` there whose value is of a type that can
+hold a function value, `fs.Add(Wrap(() => fs.Count))`, while one given to a call that gives an `int`
+holds nothing past that call (§4, the owner, 2026-10-25). What another `mut` method does with such an argument is open
 (§14). The
 expression holds the value of a read made as any other argument of that call without `mut` in front
 of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
@@ -344,6 +346,25 @@ Case: [values/mut-read-lambda-add.kz](../corpus/values/mut-read-lambda-add.kz)
 mut counts = List<() => int>()
 counts.Add(() => counts.Count)
 print(counts.Count)
+```
+
+Case: [values/mut-read-lambda-kept.kz](../corpus/values/mut-read-lambda-kept.kz)
+```kurz
+() => int Wrap(() => int f) => f
+
+mut counts = List<() => int>()
+counts.Add(Wrap(() => counts.Count))
+print(counts.Count)
+```
+
+Case: [values/mut-read-lambda-ends.kz](../corpus/values/mut-read-lambda-ends.kz)
+```kurz
+int Count(() => int f) => f()
+
+mut xs = List<int>()
+xs.Add(Count(() => xs.Count))
+xs.Add(Count(() => xs.Count))
+print(xs)
 ```
 
 Case: [values/mut-read-arm-change.kz](../corpus/values/mut-read-arm-change.kz)

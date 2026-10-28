@@ -1,0 +1,8 @@
+// expect: error changed-while-held at 7
+// rules: M7
+
+() => int Wrap(() => int f) => f
+
+mut counts = List<() => int>()
+counts.Add(Wrap(() => counts.Count))
+print(counts.Count)

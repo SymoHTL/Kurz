@@ -1,0 +1,10 @@
+// expect: output
+// | [0, 1]
+// rules: M7
+
+int Count(() => int f) => f()
+
+mut xs = List<int>()
+xs.Add(Count(() => xs.Count))
+xs.Add(Count(() => xs.Count))
+print(xs)

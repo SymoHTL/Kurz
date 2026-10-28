@@ -313,7 +313,8 @@ public sealed partial class Emitter
     /// <summary>
     /// M9: <c>list.Add(item)</c> on a <c>mut</c> variable or parameter. The item is read first, then the list the variable holds as
     /// the item left it, as a path assignment reads its value first (M4); a block other values hold is copied before the write (M3),
-    /// and a full one grows.
+    /// and a full one grows. What the argument made besides the item is let go of before the list is read, so that a lambda it gave
+    /// to a call holds no count of the list when the list grows (F15).
     /// </summary>
     private void EmitListAdd(CallExpression c)
     {
@@ -325,7 +326,8 @@ public sealed partial class Emitter
         }
 
         var argument = c.Arguments[0].Value;
-        var item = Convert(Owned(argument), TypeOf(argument), list.Element, argument.Line);
+        string item = null!;
+        InRegion(() => item = Convert(Owned(argument), TypeOf(argument), list.Element, argument.Line));
         var place = Place(Model.VariableOf(n), n.Line);
         var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", Ir(list.Element)], () => AddBody(list.Element));
         fn.Emit($"call void {add}(ptr {place}, {Ir(list.Element)} {item})");

@@ -36,8 +36,8 @@ public sealed partial class Checker
     /// expression still holds when that call runs, or when an assignment or a <c>mut</c> method in a statement of an arm changes
     /// it, is <c>changed-while-held</c>, once for each change (E1). A read that makes a new value first, a read after the call,
     /// a read of a type that is copied and a read of <c>Add</c>'s receiver in its own argument, against <c>Add</c>'s change of it,
-    /// hold no such value, unless a lambda in the argument makes the read. The lambdas of the expression are expressions of their
-    /// own, read when they are called, and change nothing they read (F11).
+    /// hold no such value, unless a lambda that the argument's value can keep makes the read. The lambdas of the expression are
+    /// expressions of their own, read when they are called, and change nothing they read (F11).
     /// </summary>
     private void CheckReads(Expression expression) => Reads(expression);
 
@@ -75,8 +75,8 @@ public sealed partial class Checker
         };
 
         // a call's own changes: an argument after `mut` against all it holds; `Add` changes its receiver after its argument ran,
-        // so against nothing of its own (the owner, 2026-10-25, "Allow, as Rust's clone") but a lambda there, which holds what it
-        // reads past the call (the owner, 2026-10-25, "Refuse, as Rust's borrow")
+        // so against nothing of its own (the owner, 2026-10-25, "Allow, as Rust's clone") but a lambda the argument's value can
+        // keep, which holds what it reads past the call (the owner, 2026-10-25, "Refuse, as Rust's borrow", "Refuse if it can keep it")
         if (e is CallExpression call)
         {
             foreach (var a in call.Arguments.Where(a => a.Mut))
@@ -92,9 +92,9 @@ public sealed partial class Checker
 
             if (changes.TryGetValue(call, out var receiver))
             {
-                foreach (var (held, _) in ordered.Skip(1))
+                foreach (var (_, part) in ordered.Skip(1))
                 {
-                    Conflict(held.Where(h => h.Read is null).ToList(), call, receiver);
+                    Conflict(Kept(part), call, receiver);
                 }
             }
         }
@@ -233,11 +233,53 @@ public sealed partial class Checker
                 return ArmValues(m.Arms).SelectMany(HeldBy).ToList();
             case ElseExpression x:
                 return ArmValues(x.Arms).SelectMany(HeldBy).ToList();
-            case LambdaExpression l when model.HasLambda(l):
-                return model.LambdaOf(l).Captures.Select(v => new Held(v, v.Name, v.Type, $"a lambda that reads `{v.Name}`", null)).ToList();
+            case LambdaExpression l:
+                return Captured(l);
             default:
                 return [];
         }
+    }
+
+    /// <summary>The variables a lambda reads, which it holds from the moment it is made (F15).</summary>
+    private List<Held> Captured(LambdaExpression l) =>
+        model.HasLambda(l) ? model.LambdaOf(l).Captures.Select(v => new Held(v, v.Name, v.Type, $"a lambda that reads `{v.Name}`", null)).ToList() : [];
+
+    /// <summary>
+    /// The variables that the lambdas in an expression read and that its value can keep (the owner, 2026-10-25, "Refuse, as Rust's
+    /// borrow" and "Refuse if it can keep it"): a lambda's own, and those of the parts of a value of a type that can hold a function
+    /// value, a call's result, a <c>with</c>, a field and an arm's value among them. A value of another type keeps none, as Rust's
+    /// borrow of a closure ends with a call whose result does not hold it.
+    /// </summary>
+    private IReadOnlyList<Held> Kept(Expression e) =>
+        e is LambdaExpression l ? Captured(l)
+        : model.HasType(e) && HoldsFunction(model.TypeOf(e).Type, []) ? Parts(e).SelectMany(Kept).ToList()
+        : [];
+
+    /// <summary>
+    /// Whether a value of the type can hold a function value: a function type, a type parameter, which may stand for one, and a list,
+    /// a union or a <c>data</c> type, with a type derived from it, that holds one. A type the checker could not tell holds none (E1).
+    /// </summary>
+    private bool HoldsFunction(KurzType type, HashSet<DataSymbol> path) => type switch
+    {
+        FunctionType or TypeParameterType => true,
+        ListType l => HoldsFunction(l.Element, path),
+        UnionType u => u.Cases.Any(c => HoldsFunction(c, path)),
+        DataType d => DataHoldsFunction(d, path),
+        _ => false, // a number, a string, a pointer, a C function
+    };
+
+    // the data types on the way to this one: a type met again on the way holds nothing the first meeting does not
+    private bool DataHoldsFunction(DataType d, HashSet<DataSymbol> path)
+    {
+        if (!path.Add(d.Symbol))
+        {
+            return false;
+        }
+
+        var holds = d.Symbol.Fields.Any(f => HoldsFunction(SubstituteData(d, f.Type), path))
+            || dataTypes.Values.Where(x => x.Base == d.Symbol).Any(x => HoldsFunction(new DataType(x, x.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), path));
+        path.Remove(d.Symbol);
+        return holds;
     }
 
     /// <summary>
