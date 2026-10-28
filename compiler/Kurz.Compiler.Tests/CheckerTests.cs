@@ -841,7 +841,8 @@ public sealed class CheckerTests
         Assert.Equal(["2: a generic data type as a base (T19)"], NotSupported("data Base<T>(T X)\ndata Derived(List<int> Items) : Base<int>\n\nint Reset(mut Base<int> b) {\n    b = Base(2)\n    return 0\n}\n\nint Size(Base<int> b, int n) => n\n\nmut Base<int> p = Base(1)\nprint(Size(p, Reset(mut p)))"));
 
         // `Add` changes its receiver after its argument ran, so a read of it there is held by nothing that the change meets (the
-        // owner, 2026-10-25, "Allow, as Rust's clone"); the receiver is held while a call in its argument changes it
+        // owner, 2026-10-25, "Allow, as Rust's clone"), but by a lambda the argument's value can keep (below); the receiver is
+        // held while a call in its argument changes it
         Clean("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)");
         Clean("mut xs = List<int>()\nxs.Add(1)\nxs.Add(xs[0])\nxs.Add(xs.Count)\nprint(xs)");
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("List<int> Take(mut List<List<int>> all) {\n    all = List<List<int>>()\n    return List<int>()\n}\n\nmut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(Take(mut rows))\nprint(rows.Count)"));
@@ -862,6 +863,17 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors(wrap + "fs.Add(Rule(() => fs.Count, 1).Step)\nprint(fs.Count)"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(wrap + "r = Rule(() => 0, 1)\nfs.Add((r with { Step = () => fs.Count }).Step)\nprint(fs.Count)"));
         Clean(wrap + "fs.Add(Wrap(() => 0))\nmut xs = List<int>()\nxs.Add(Count(() => xs.Count))\nprint(fs.Count + xs.Count)");
+
+        // a value inside the argument that can hold no function value ends what the argument keeps (the owner, 2026-10-28, "Pass,
+        // as Rust"); a generic type holds one where a type argument can, at any depth, and one that holds itself with other
+        // arguments ends the walk
+        Clean(wrap + "mut xs = List<int>()\nxs.Add(Count(Wrap(() => xs.Count)))\nprint(fs.Count + xs.Count)");
+        var box = "data Box<T>(T V)\n\nint Count(() => int g) => g()\n\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(box + "mut bs = List<Box<Box<() => int>>>()\nbs.Add(Box<Box<() => int>>(Box<() => int>(() => bs.Count)))\nprint(bs.Count)"));
+        Clean(box + "mut cs = List<Box<Box<int>>>()\ncs.Add(Box<Box<int>>(Box<int>(Count(() => cs.Count))))\nprint(cs.Count)");
+        var chain = "data P<T>(T V, List<P<List<T>>> Next)\n\nint Count(() => int g) => g()\n\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors(chain + "mut qs = List<P<() => int>>()\nqs.Add(P<() => int>(() => qs.Count, List<P<List<() => int>>>()))\nprint(qs.Count)"));
+        Clean(chain + "mut ps = List<P<int>>()\nps.Add(P<int>(Count(() => ps.Count), List<P<List<int>>>()))\nprint(ps.Count)");
         Clean(fs + "mut others = List<int>()\nfs.Add(() => others.Count)\nprint(fs.Count)");
         Names(fs + "fs.Add(() => fs.Count)\nprint(fs.Count)", "a lambda that reads `fs`", "`Add` changes `fs`");
         Names(arm + "        numbers.Add(1)\n        5\n    }\n}))", "`numbers`", "`Add` changes `numbers`");

@@ -300,7 +300,8 @@ library a block of C functions names (R16). It emits:
   `throw` of an arm of `else`, which throws the case that reached it (O7);
 - lists (M9): `List<T>()`, `Add`, `Count`, `list[i]`, which raises `index-out-of-range` for an
   index below 0 or at `Count` or beyond (T14), `Where`, which calls its test once for each item, in
-  order, and gives a new list of the items it kept, `for` over a list, which walks the list as it was when
+  order (section 4, the owner, 2026-10-28, "Once each, in order"), and gives a new list of the items
+  it kept, `for` over a list, which walks the list as it was when
   the loop started (C6), their text (A4), and lists of every type the emitter lays out, in
   variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
   program with `allocation-failed` and the bytes of its items after the `Add` (M9);
@@ -345,7 +346,8 @@ block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now
 changes the list through a `mut` parameter is `changed-while-held` (M7), so the order in which an `Add`
 reads its argument and its list is not seen. What `Add`'s argument made besides its item, the
 environment of a lambda it gave to a call among them, is let go of before the list is read, so that
-no count it held makes the list copy its items (F15). The count
+no count it held makes the list copy its items: the environment counts what its lambda read (F15),
+and the order is a reading of this directory, which saves that copy, not one a rule states. The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
@@ -364,14 +366,14 @@ union with a case that holds one. The environment of a lambda that reads variabl
 count of the function values that hold it, 8 bytes, and the address of the function that lets go
 of it, then holds each value the lambda read, counted once more where its type is counted; it is
 counted as a list's block is, and at zero the values it holds are let go of and it goes back to
-`Free` (section 4, "Pair + heap env"); a `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
+`Free` (section 4, "Pair + heap env"). A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
 and a raise end the process with their error line, and no count is lowered there.
 A value of a block type is never freed, and the lists it holds are never let go of: the memory of
 such a value, which the answer of 2026-10-23 leaves ungiven back (below), is read to hold the lists
 in its fields, a reading of this directory, not a decision. Pinned by
 `ListTests`: the values the counting keeps apart, the name an arm binds among them, a function value
-and a `data` value that holds one read beside a call that replaces them, a lambda's list that only
-its environment holds and the items `Where` keeps; a system that
+and a `data` value that holds one read beside a call that replaces them, the function value a call
+calls beside such a call, a lambda's list that only its environment holds and the items `Where` keeps; a system that
 refuses every request for memory after sixteen, within which a program that makes and drops lists
 through every way out of a block, the body of a `void` function and a lambda's environment among
 them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
@@ -404,7 +406,7 @@ a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
 corpus runner lists every case the checker reads in full and the emitter does not emit, 26 of the
-232 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+234 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a
@@ -807,9 +809,13 @@ round can ask about it by the rule's id.
   argument's value or an arm's, holds the receiver while `Add` changes it (the owner, 2026-10-25,
   "Refuse, as Rust's borrow"), and so does one given to a call or a `with` there whose value is of a
   type that can hold a function value: the checker follows the value through every part whose type
-  can hold one, a type parameter among them, so `fs.Add(Wrap(() => fs.Count))` is the error and
-  `xs.Add(Count(() => xs.Count))`, whose `Count` gives an `int`, is not (the owner, 2026-10-25,
-  "Refuse if it can keep it"). A function value is copied (the owner, 2026-10-25, "Copied"), and
+  can hold one, so `fs.Add(Wrap(() => fs.Count))` is the error, and a value of a type that can hold
+  none ends it, so `xs.Add(Count(() => xs.Count))` and `xs.Add(Count(Wrap(() => xs.Count)))`, whose
+  `Count` gives an `int`, are not (the owner, 2026-10-25, "Refuse if it can keep it", and 2026-10-28,
+  "Pass, as Rust"). A type parameter can hold one, and so can a type derived from a `data` type, as
+  section 4 assumes, and a generic type holds one where a type argument can, at any depth: a type met
+  again on the way, `Box` in `Box<Box<() => int>>`, answers by its type arguments, which ends the
+  walk for a type that holds itself with other arguments. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter
   counts it once more for the expression (above), the cost the design record names.

@@ -76,7 +76,8 @@ public sealed partial class Checker
 
         // a call's own changes: an argument after `mut` against all it holds; `Add` changes its receiver after its argument ran,
         // so against nothing of its own (the owner, 2026-10-25, "Allow, as Rust's clone") but a lambda the argument's value can
-        // keep, which holds what it reads past the call (the owner, 2026-10-25, "Refuse, as Rust's borrow", "Refuse if it can keep it")
+        // keep, which holds what it reads past the call (the owner, 2026-10-25, "Refuse, as Rust's borrow", "Refuse if it can keep it");
+        // a receiver's change is recorded for `Add` alone, the one `mut` method the checker reads (`MutReceiver`)
         if (e is CallExpression call)
         {
             foreach (var a in call.Arguments.Where(a => a.Mut))
@@ -268,12 +269,14 @@ public sealed partial class Checker
         _ => false, // a number, a string, a pointer, a C function
     };
 
-    // the data types on the way to this one: a type met again on the way holds nothing the first meeting does not
+    // the data types on the way to this one: a type met again on the way has its fields read at the first meeting, so what it
+    // can hold beyond them comes from its type arguments, `Box<() => int>` inside a `Box<Box<() => int>>`; each argument is
+    // smaller than the type, so a type that holds itself with other arguments, `P<List<T>>` in a `P<T>`, ends the walk
     private bool DataHoldsFunction(DataType d, HashSet<DataSymbol> path)
     {
         if (!path.Add(d.Symbol))
         {
-            return false;
+            return d.TypeArguments.Any(a => HoldsFunction(a, path));
         }
 
         var holds = d.Symbol.Fields.Any(f => HoldsFunction(SubstituteData(d, f.Type), path))

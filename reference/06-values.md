@@ -140,12 +140,19 @@ owner, 2026-10-24 and 2026-10-25). A call takes as `mut` what stands after `mut`
 and a `mut` method its receiver (M5). `Add` changes its receiver after its argument ran and counts
 the item it stores before the list grows, so a read of the receiver in its argument holds nothing
 while `Add` changes it: `rows.Add(rows[0])` for a list of lists `rows` passes, and `xs.Add(F(mut xs))`
-is the error (§4, the owner, 2026-10-24 and 2026-10-25). A lambda in that argument that reads the
-receiver holds it while `Add` changes it, so `fs.Add(() => fs.Count)` for a list of function values is
-the error, and so does a lambda given to a call or a `with` there whose value is of a type that can
-hold a function value, `fs.Add(Wrap(() => fs.Count))`, while one given to a call that gives an `int`
-holds nothing past that call (§4, the owner, 2026-10-25). What another `mut` method does with such an argument is open
-(§14). The
+is the error (§4, the owner, 2026-10-24 and 2026-10-25). A lambda that reads the receiver and is that
+argument's value, bare, in brackets or as the value of an arm, holds it while `Add` changes it, so
+`fs.Add(() => fs.Count)` for a list of function values is the error, and so does a lambda given to a
+call or a `with` there that the argument's value can keep, a value of a type that can hold a function
+value: `fs.Add(Wrap(() => fs.Count))` is the error (§4, the owner, 2026-10-25). A value inside the
+argument of a type that can hold none ends what it keeps, so `xs.Add(Count(() => xs.Count))` and
+`xs.Add(Count(Wrap(() => xs.Count)))`, whose `Count` gives an `int`, pass (§4, the owner, 2026-10-25
+and 2026-10-28). A type that can hold a function value is a function type, a type parameter, and a
+list, a union or a `data` type, or a type derived from that `data` type, that holds one *(assumed, as
+§4 marks it: the type parameter and the derived type)*. Whether another `mut` method takes `Add`'s
+exception is open (§14), with two options: the exception for a method that changes its receiver after
+its arguments ran, or the read the error for every method but `Add`, as Rust's E0502; while it is
+open, such a read is the error by the rule above, as a read of what the method takes as `mut`. The
 expression holds the value of a read made as any other argument of that call without `mut` in front
 of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
 value is `mut-at-call`, above); as an argument of a call around it given before
@@ -162,8 +169,8 @@ does not name)* Three reads hold no such
 value. A read that makes a new value first: the result of an operator other than `??`, whose value
 is one of its sides, and of a call or a method (`numbers.Count`, `numbers[0] + 1`, `Same(numbers)` for
 a function that returns its list), where an index is no such operator and its item is held (above)
-*(proposed: the result of a call is a value of its own, M3; `??` and an index, which §4 does not
-name)*. A read that runs after the call has ended. A read of
+*(proposed: the result of a call is a value of its own, M3; the value of `??` is one of its sides and
+the item of an index is held, which §4 does not name)*. A read that runs after the call has ended. A read of
 a copied type, which the expression holds as a copy: a number, a `bool`, a `char`, a pointer, a time,
 the type of a C function, and a `data` value or a union made only of such types that holds no value of
 its own type, so that a lambda that reads an `int` holds the value from before the call (§4, the
@@ -367,6 +374,18 @@ xs.Add(Count(() => xs.Count))
 print(xs)
 ```
 
+Case: [values/mut-read-lambda-nested.kz](../corpus/values/mut-read-lambda-nested.kz)
+```kurz
+() => int Wrap(() => int f) => f
+
+int Count(() => int f) => f()
+
+mut xs = List<int>()
+xs.Add(Count(Wrap(() => xs.Count)))
+xs.Add(Count(Wrap(() => xs.Count)))
+print(xs)
+```
+
 Case: [values/mut-read-arm-change.kz](../corpus/values/mut-read-arm-change.kz)
 ```kurz
 data NotFound
@@ -514,7 +533,8 @@ type laid out as a block, 8 bytes on a 64-bit target (§4, the owner, 2026-10-23
 growth the system refuses raises it with the bytes the allocator was asked for, the whole request with
 the list's own counts, before the allocator rounds it up (§4); `list[i]` is the item at position `i`, counted from 0, and an `i` below 0 or at `Count`
 or beyond raises `index-out-of-range` (T14); `Where(test)` is the list of
-items that pass the test. `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
+items that pass the test, in their order, and calls the test once for each item, in order (§4, the
+owner, 2026-10-28). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the
 record's samples use. The naming of the standard library is open (record, section 14).
 
@@ -533,6 +553,19 @@ mut ages = Map<string, int>()
 ages["Ann"] = 31
 print(ages["Ann"] ?? 0)
 print(ages["Bea"] ?? 0)
+```
+
+Case: [values/list-where-order.kz](../corpus/values/list-where-order.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(3)
+xs.Add(1)
+xs.Add(2)
+big = xs.Where(x => {
+    print(x)
+    return x > 1
+})
+print(big)
 ```
 
 Case: [values/list-index-out-of-range.kz](../corpus/values/list-index-out-of-range.kz)

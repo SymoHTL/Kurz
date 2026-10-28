@@ -112,6 +112,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return 0
         }
 
+        int SwapStep(mut (int) => int f) {
+            f = delta => 0
+            return 0
+        }
+
         int KeepRule(Rule r, int ignored) => r.Step()
 
         int SwapRule(mut Rule r) {
@@ -198,6 +203,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         survivors = nested.Where(inner => inner.Count > 0)
         nested = List<List<int>>()
         print(survivors)
+        mut counted = List<int>()
+        counted.Add(3)
+        counted.Add(4)
+        counted.Add(5)
+        mut step = (int delta) => delta + counted.Count
+        counted = List<int>()
+        print(step(SwapStep(mut step)))
         """;
 
     private static readonly string[] SharingPrint =
@@ -213,6 +225,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "2", // the value a call is given beside a `mut` call that replaces it, a function value whose environment it alone held (M7, "Copied")
         "1", // the same for a data value that holds one ("Copied too"), and a lambda's list that only its environment holds (F15)
         "[[9]]", // an item `Where` keeps, which only the source list held before the source was let go of
+        "3", // the function value a call calls, beside a `mut` call that replaces it, whose environment it alone held (M7, "Copied")
     ];
 
     // every way out of a block a list is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
@@ -508,7 +521,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Where_calls_its_test_once_for_each_item_in_order()
     {
-        // M9 says what `Where` gives, not when it runs its test: once for each item, in order, as Rust's `filter` and `collect` run it
+        // M9: `Where` calls its test once for each item, in order (section 4, the owner, 2026-10-28, "Once each, in order"), as Rust's
+        // `filter` and `collect` run it
         const string text = "mut xs = List<int>()\nxs.Add(3)\nxs.Add(1)\nxs.Add(2)\nkept = xs.Where(x => {\n    print(x)\n    return x > 1\n})\nprint(kept)\n";
         Ran(BuildAndRun(text, toolchain.Runtime, "list-where-order"), 0, ["3", "1", "2", "[3, 2]"], "");
     }

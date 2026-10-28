@@ -1,0 +1,16 @@
+// expect: output
+// | 3
+// | 1
+// | 2
+// | [3, 2]
+// rules: M9
+
+mut xs = List<int>()
+xs.Add(3)
+xs.Add(1)
+xs.Add(2)
+big = xs.Where(x => {
+    print(x)
+    return x > 1
+})
+print(big)
