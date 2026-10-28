@@ -270,13 +270,15 @@ public sealed partial class Checker
     };
 
     // the data types on the way to this one: a type met again on the way has its fields read at the first meeting, so what it
-    // can hold beyond them comes from its type arguments, `Box<() => int>` inside a `Box<Box<() => int>>`; each argument is
-    // smaller than the type, so a type that holds itself with other arguments, `P<List<T>>` in a `P<T>`, ends the walk
+    // can hold beyond them comes from the type arguments its fields use, `Box<() => int>` inside a `Box<Box<() => int>>`, and
+    // none from one no field uses, `Q<() => int>` in a `data Q<T>(int X, List<Q<() => int>> N)`; each argument is smaller than
+    // the type, so a type that holds itself with other arguments, `P<List<T>>` in a `P<T>`, ends the walk
     private bool DataHoldsFunction(DataType d, HashSet<DataSymbol> path)
     {
         if (!path.Add(d.Symbol))
         {
-            return d.TypeArguments.Any(a => HoldsFunction(a, path));
+            return d.Symbol.TypeParameters.Zip(d.TypeArguments)
+                .Any(pair => d.Symbol.Fields.Any(f => Types.Mentions(f.Type, pair.First)) && HoldsFunction(pair.Second, path));
         }
 
         var holds = d.Symbol.Fields.Any(f => HoldsFunction(SubstituteData(d, f.Type), path))
