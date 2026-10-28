@@ -389,24 +389,24 @@ are; nothing of that is a loss *(assumed: the `float` and `double` targets, whic
 2026-10-03 did not name)*. Into `decimal`, which has neither, NaN, an infinity and a value beyond
 its range raise `overflow` (E3) in every build, a release build too, as C# throws for them (the
 owner, 2026-10-28, "Raise in every build", against saturating in a release build and throwing in a
-test build as an integer target does, which this rule assumed before; the cost is a check that a
-release build keeps). A `double` becomes its exact binary value rounded half to even at the largest
-scale up to 28 whose digits fit `decimal`'s 96 bits, its zeros at the end removed down to the scale
-0: `decimal(0.1)` is `0.1000000000000000055511151231` (the owner, 2026-10-28, "Exact binary value",
-against the shortest digits that read back as the same `double`, `0.1`, as the Rust crate
-rust_decimal's `from_f64` gives them, and against the 15 significant digits C# keeps; the cost is
-digits nobody wrote for almost every `double`; rust_decimal's `from_f64_retain` comes near it and
-differs in the last digits, `123.456` giving `123.45600000000000306954461843` where the exact value
-rounds to `123.45600000000000306954461848`, checked on 2026-10-28 with rust_decimal 1.36); that
-rounding is no loss. A `float` becomes the `double` that holds it exactly, and then that *(assumed:
-the answer named the exact binary value, which the `double` holds; C# keeps 7 significant digits of
-a `float`)*. A zero that comes of the conversion has no sign, `decimal(-0.0)` included *(assumed:
-the reading of the answer "None, as rust_decimal", under which only `-` gives a zero its sign)*. A
-`decimal` becomes a `double` as C# computes it: its 96-bit integer as a `double`, divided by the
-`double` nearest to 10 to the power of its scale, so `double(1m / 3m)` is `0.33333333333333337` (the
-owner, 2026-10-28, "As C# computes it", against the nearest `double`, `0.3333333333333333`; the cost
-is a last bit that can differ from the nearest `double`), and a `float` as that `double` rounded, as
-C# computes it *(assumed)*.
+test build as an integer target does, which this rule assumed before; the cost is a release program
+that ends with an error line instead of a clamped amount). A `double` becomes its exact binary value
+rounded half to even at the largest scale up to 28 whose digits fit `decimal`'s 96 bits, its zeros
+at the end removed down to the scale 0: `decimal(0.1)` is `0.1000000000000000055511151231` (the
+owner, 2026-10-28, "Exact binary value", against the shortest digits that read back as the same
+`double`, `0.1`, as the Rust crate rust_decimal's `from_f64` gives them, and against the 15
+significant digits C# keeps; the cost is surprising digits for almost every `double`; rust_decimal's
+`from_f64_retain` comes near it and differs in the last digits, `123.456` giving
+`123.45600000000000306954461843` where the exact value rounds to `123.45600000000000306954461848`,
+checked on 2026-10-28 with rust_decimal 1.36); that rounding is no loss. A `float` becomes the
+`double` that holds it exactly, and then that *(assumed: the answer named the exact binary value,
+which the `double` holds; C# keeps 7 significant digits of a `float`)*. A zero that comes of the
+conversion has no sign, `decimal(-0.0)` included *(assumed: the reading of the answer "None, as
+rust_decimal", under which only `-` gives a zero its sign)*. A `decimal` becomes a `double` as C#
+computes it: its 96-bit integer as a `double`, divided by the `double` nearest to 10 to the power of
+its scale, so `double(1m / 3m)` is `0.33333333333333337` (the owner, 2026-10-28, "As C# computes
+it", against the nearest `double`, `0.3333333333333333`; the cost is a last bit that can differ from
+the nearest `double`), and a `float` as that `double` rounded, as C# computes it *(assumed)*.
 
 Case: [types/conversion-into-decimal.kz](../corpus/types/conversion-into-decimal.kz)
 ```kurz
@@ -458,19 +458,20 @@ no `decimal`, and its crate rust_decimal chooses other scales, `2.50m * 0` is `0
 System.Decimal keeps `0.00`, so the two do not agree, and Kurz takes C#'s)*. A result beyond
 ±79228162514264337593543950335 raises `overflow` (E3) in every build, a release build too, as C#
 throws for it (the owner, 2026-10-28, "Raise in every build", against raising in a test build and
-saturating in a release build; the cost is a check after each operation that a release build keeps).
-A zero that `+ - * / %` compute has no sign: `1.50m - 1.5m` shows `0.00` and `0m * -1m` shows `0`;
-only `-` gives a zero its sign, as `-(0.0m)` shows `-0.0` (A8), and the digits and the scale stay
-System.Decimal's, `2.50m * 0` showing `0.00` (the owner, 2026-10-28, "None, as rust_decimal",
-against System.Decimal's sign bit, which it sets on `1.50m - 1.5m`, so that the text of A8 would
-show `-0.00`, and against no sign on any zero, as C# shows none; the cost is a test for zero after
-each operation, and a sign bit that differs from C#'s where no `==` and no text of C# shows it). `%`
-gives the exact remainder at the larger of the two scales, also where System.Decimal throws
-`OverflowException` for a remainder that fits: `4294967295m % 0.9999999999999999999999999999m` is
-`0.0000000000000000004294967295` (the owner, 2026-10-28, "Exact remainder", against raising
-`overflow` where C# throws, under which the runtime would mirror the widths System.Decimal computes
-in and a remainder that fits would raise; rust_decimal 1.36 gives `0.9232812099469197934124335104`
-there).
+saturating in a release build; the cost is nothing at run time beyond what the rounding checks
+anyway, and a release program ends with an error line instead of a wrong amount). A zero that `+ - *
+/ %` compute has no sign: `1.50m - 1.5m` shows `0.00` and `0m * -1m` shows `0`; only `-` gives a
+zero its sign, as `-(0.0m)` shows `-0.0` (A8), and the digits and the scale stay System.Decimal's,
+`2.50m * 0` showing `0.00` (the owner, 2026-10-28, "None, as rust_decimal", against System.Decimal's
+sign bit, which it sets on `1.50m - 1.5m`, so that the text of A8 would show `-0.00`, and against no
+sign on any zero, as C# shows none; the cost is a test for zero after each operation, and a sign bit
+that differs from C#'s where no `==` and no text of C# shows it). `%` gives the exact remainder at
+the larger of the two scales, also where System.Decimal throws `OverflowException` for a remainder
+that fits: `4294967295m % 0.9999999999999999999999999999m` is `0.0000000000000000004294967295` (the
+owner, 2026-10-28, "Exact remainder", against raising `overflow` where C# throws, under which the
+runtime would mirror the widths System.Decimal computes in and a remainder that fits would raise;
+the cost is nothing at run time, and the result differs from C#'s only where C# throws; rust_decimal
+1.36 gives `0.9232812099469197934124335104` there).
 
 Case: [types/decimal-arithmetic.kz](../corpus/types/decimal-arithmetic.kz)
 ```kurz
