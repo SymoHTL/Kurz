@@ -257,8 +257,9 @@ public sealed partial class Checker
         : [];
 
     /// <summary>
-    /// Whether a value of the type can hold a function value: a function type, a type parameter, which may stand for one, and a list,
-    /// a union or a <c>data</c> type, with a type derived from it, that holds one. A type the checker could not tell holds none (E1).
+    /// Whether a value of the type can hold a function value: a function type, a type parameter, which may stand for one, a list or
+    /// a union that holds one, and a <c>data</c> type when one of its type arguments holds one, or a field of it or of a type derived
+    /// from it does (M7). A type the checker could not tell holds none (E1).
     /// </summary>
     private bool HoldsFunction(KurzType type, HashSet<DataSymbol> path) => type switch
     {
@@ -269,16 +270,21 @@ public sealed partial class Checker
         _ => false, // a number, a string, a pointer, a C function
     };
 
-    // the data types on the way to this one: a type met again on the way has its fields read at the first meeting, so what it
-    // can hold beyond them comes from the type arguments its fields use, `Box<() => int>` inside a `Box<Box<() => int>>`, and
-    // none from one no field uses, `Q<() => int>` in a `data Q<T>(int X, List<Q<() => int>> N)`; each argument is smaller than
-    // the type, so a type that holds itself with other arguments, `P<List<T>>` in a `P<T>`, ends the walk
+    // the data types on the way to this one: a type holds what its type arguments hold, whether a field stores them or not, as
+    // Rust's `PhantomData<T>` keeps the borrow of its argument (the owner, 2026-10-28, "Counts, as Rust"), so `Q<() => int>`
+    // holds one for any `data Q<T>`; a type met again on the way has its fields read at the first meeting, so it answers by its
+    // type arguments alone, `Box<() => int>` inside a `Box<Box<() => int>>`; each argument is smaller than the type, so a type
+    // that holds itself with other arguments, `P<List<T>>` in a `P<T>`, ends the walk
     private bool DataHoldsFunction(DataType d, HashSet<DataSymbol> path)
     {
+        if (d.TypeArguments.Any(a => HoldsFunction(a, path)))
+        {
+            return true;
+        }
+
         if (!path.Add(d.Symbol))
         {
-            return d.Symbol.TypeParameters.Zip(d.TypeArguments)
-                .Any(pair => d.Symbol.Fields.Any(f => Types.Mentions(f.Type, pair.First)) && HoldsFunction(pair.Second, path));
+            return false;
         }
 
         var holds = d.Symbol.Fields.Any(f => HoldsFunction(SubstituteData(d, f.Type), path))
