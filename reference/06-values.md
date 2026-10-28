@@ -148,14 +148,15 @@ value: `fs.Add(Wrap(() => fs.Count))` is the error (§4, the owner, 2026-10-25).
 argument of a type that can hold none ends what it keeps, so `xs.Add(Count(() => xs.Count))` and
 `xs.Add(Count(Wrap(() => xs.Count)))`, whose `Count` gives an `int`, pass (§4, the owner, 2026-10-25
 and 2026-10-28). A type that can hold a function value is a function type, a type parameter, a list
-or a union that holds one, and a `data` type when it or a type derived from it holds one; a type
-argument that no field of its type uses holds nothing (§4, the owner, 2026-10-28). A map, a nullable
-type and a class can hold one where a type they hold can *(assumed, as §4 marks it)*. Whether another `mut` method
-takes `Add`'s exception is open (§14), with two options: the exception for every `mut` method that
-stores what its argument gave before it changes its receiver, as `Add` stores its counted item before
-the list grows, or for `Add` alone. While it is open, the rule above holds for such a method with its
-conditions: a read of the receiver whose value the argument still holds when the method runs is the
-error, and a copied read or one that makes a new value first is not. The
+or a union that holds one, and a `data` type when a field of it or of a type derived from it holds
+one, so that a type argument no field of its type uses holds nothing (§4, the owner, 2026-10-28). A
+map, a nullable type and a class can hold one where a type they hold can *(assumed, as §4 marks
+it)*. Whether another `mut` method takes `Add`'s exception is open (§14), with two options: the
+exception for every `mut` method that stores what its argument gave before it changes its receiver,
+as `Add` stores its counted item before the list grows, or for `Add` alone. While it is open, the
+rule above holds for such a method with its conditions: a read of the receiver whose value the
+argument still holds when the method runs is the error, and a copied read or one that makes a new
+value first is not. The
 expression holds the value of a read made as any other argument of that call without `mut` in front
 of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
 value is `mut-at-call`, above); as an argument of a call around it given before
