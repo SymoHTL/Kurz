@@ -118,7 +118,12 @@ public sealed partial class Emitter
         }
     }
 
-    /// <summary>F11: a call of a function value, its code given its environment and the arguments, which it borrows for the call.</summary>
+    /// <summary>
+    /// F11: a call of a function value, its code given its environment and the arguments, which it borrows for the call. The value
+    /// it calls and each argument are borrowed across the arguments after them: the checker holds them there (M7), refuses a change
+    /// of a list among them, <c>f(xs, Push(mut xs))</c>, and marks a read of a copied type that a change meets, <c>f</c> in
+    /// <c>f(Swap(mut f))</c>, which <see cref="HeldCopy"/> counts.
+    /// </summary>
     private string EmitFunctionValueCall(CallExpression c, FunctionType type)
     {
         var callee = EmitExpression(c.Callee);
