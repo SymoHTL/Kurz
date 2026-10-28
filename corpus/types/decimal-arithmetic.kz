@@ -11,7 +11,7 @@ decimal Times(decimal a, decimal b) => a * b
 decimal Over(decimal a, decimal b) => a / b
 decimal Remainder(decimal a, decimal b) => a % b
 
-print(Times(1.50m, 2))
+print(Times(1.50m, 2m))
 print(Over(1m, 3m))
 print(Over(2m, 3m))
 print(Over(5m, 2m))

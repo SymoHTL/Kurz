@@ -1,0 +1,21 @@
+// expect: output
+// | 1970-01-01T00:00:00Z
+// | 2026-10-28T09:30:00Z
+// | 2026-10-28T09:30:01.500Z
+// | 2026-10-28T09:30:01.000250Z
+// | 1969-12-31T23:59:59.999999999Z
+// allow: raw
+// rules: A16
+
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        print(*Ptr<timestamp>(&bits))
+    }
+}
+
+Show(0)
+Show(1793179800000000000)
+Show(1793179801500000000)
+Show(1793179801000250000)
+Show(-1)

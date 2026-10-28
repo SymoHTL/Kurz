@@ -1,0 +1,11 @@
+// expect: output
+// | 200000days
+// | 200000days 1ns
+// | -200000days
+// rules: T29
+
+longduration Plus(longduration a, longduration b) => a + b
+
+print(200000days)
+print(Plus(200000days, 1ns))
+print(-200000days)

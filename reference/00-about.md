@@ -362,7 +362,7 @@ holds, `1.50m` as `1.50`, with a `-` before a zero whose sign is set, `-(0.0m)` 
 against no sign, as C# shows none; the cost is that an amount can show as `-0.00`; which zeros
 have a sign is T30). A `char` shows its character. A duration shows its value split into units, `1h
 30min`, as A12
-says. A set of flags (D13) shows its names with ` | ` between them, in the order of
+says. A timestamp shows its instant in UTC, as A16 says. A set of flags (D13) shows its names with ` | ` between them, in the order of
 A13. A `double` without a fraction, one that needs an exponent and one that is no number show what
 C# prints for them: `1`, `1E+21`, `NaN`; which C# that is, and what the other special values show,
 is A14.
@@ -454,6 +454,52 @@ print(-90min)
 print(3600s)
 ```
 
+### A16 (decided, §8) The text of a timestamp
+
+A `timestamp` and a `longtimestamp` show their instant in UTC as RFC 3339 writes it,
+`2026-10-28T09:30:00Z`: the fraction of a second in groups of three digits, as many groups as hold it
+and none for a whole second, `09:30:01.500Z`, `09:30:01.000250Z`, `09:30:00.000000001Z`, and a year
+outside 0000 to 9999, which only a `longtimestamp` reaches, with its sign and at least four digits,
+`+10000-01-01T00:00:00Z`, `-0001-12-31T23:59:59Z`, as Rust's `chrono` writes them (§8, the owner,
+2026-10-28, "RFC 3339 UTC, digits as needed", then "Groups of three, as chrono" and "Sign + 4 or
+more digits, as chrono", against leaving the text open, nine digits always and the count of
+nanoseconds since 1970, then against the fewest digits and against six digits of a year as
+JavaScript writes them). The instant counts from 1970-01-01 (T24) *(assumed: the calendar, the
+Gregorian one before its introduction as well, with no leap second and a year 0 before the year 1,
+as chrono and Unix time count, as §8 marks it)*. No construct makes a timestamp of a number but a
+read through a pointer (R10, R14), which the cases below take.
+
+Case: [values/text-timestamp.kz](../corpus/values/text-timestamp.kz)
+```kurz
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        print(*Ptr<timestamp>(&bits))
+    }
+}
+
+Show(0)
+Show(1793179800000000000)
+Show(1793179801500000000)
+Show(1793179801000250000)
+Show(-1)
+```
+
+Case: [values/text-longtimestamp.kz](../corpus/values/text-longtimestamp.kz)
+```kurz
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        longtimestamp epoch = *Ptr<timestamp>(&bits)
+        print(epoch + 2932897days)
+        print(epoch - 719528days)
+        print(epoch - 719528days - 1s)
+    }
+}
+
+Show(0)
+```
+
 ### A13 (assumed, §8) The text of a set of flags
 
 The names show in the order of their declaration, whatever the order in which the set was combined,
@@ -488,8 +534,9 @@ the source of .NET Core 3.0 has it, where the exponent form starts when the part
 would take more places than 17 and than the count of the digits; against keeping `1E+15`, the bound
 of .NET Framework's shorter format, which this rule named before. Where .NET writes a text that does
 not read back as the value, as .NET 10 writes the power of two `2.9802322387695312E-08` as
-`2.980232238769531E-08`, the text is the shortest digits that do, as A4 says. *(assumed: A4's digits
-over such a text of .NET's, which .NET promises to read back)* Of two such texts equally near the
+`2.980232238769531E-08`, the text is the shortest digits that do, as A4 says, the nearest to the
+value among them, as Ryu takes them. *(assumed: A4's digits over such a text of .NET's, which .NET
+promises to read back, and the nearest among them)* Of two such texts equally near the
 value, the text is the one whose last digit is even, as Ryu and Rust's `ryu` crate take it: 2^-25,
 `2.98023223876953125E-08`, shows `2.9802322387695312E-08` and not `2.9802322387695313E-08`.
 *(assumed: the tie, which no answer named)*

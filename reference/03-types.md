@@ -398,15 +398,18 @@ owner, 2026-10-28, "Exact binary value", against the shortest digits that read b
 significant digits C# keeps; the cost is surprising digits for almost every `double`; rust_decimal's
 `from_f64_retain` comes near it and differs in the last digits, `123.456` giving
 `123.45600000000000306954461843` where the exact value rounds to `123.45600000000000306954461848`,
-checked on 2026-10-28 with rust_decimal 1.36); that rounding is no loss. A `float` becomes the
-`double` that holds it exactly, and then that *(assumed: the answer named the exact binary value,
-which the `double` holds; C# keeps 7 significant digits of a `float`)*. A zero that comes of the
-conversion has no sign, `decimal(-0.0)` included *(assumed: the reading of the answer "None, as
-rust_decimal", under which only `-` gives a zero its sign)*. A `decimal` becomes a `double` as C#
-computes it: its 96-bit integer as a `double`, divided by the `double` nearest to 10 to the power of
-its scale, so `double(1m / 3m)` is `0.33333333333333337` (the owner, 2026-10-28, "As C# computes
-it", against the nearest `double`, `0.3333333333333333`; the cost is a last bit that can differ from
-the nearest `double`), and a `float` as that `double` rounded, as C# computes it *(assumed)*.
+checked on 2026-10-28 with rust_decimal 1.36) *(assumed: the rounding half to even, the largest scale
+whose digits fit and the zeros removed at the end, readings of the option's "rounded to 28
+digits")*; that rounding is no loss. A `float` becomes the `double` that holds it exactly, and then
+that *(assumed: the answer named the exact binary value, which the `double` holds; C# keeps 7
+significant digits of a `float`)*. A zero that comes of the conversion has no sign, `decimal(-0.0)`
+included *(assumed: the reading of the answer "None, as rust_decimal", under which only the unary
+`-` gives a zero its sign)*. A `decimal` becomes a `double` as C# computes it: the low 64 bits of its
+96-bit integer as a `double`, plus its high 32 bits times 2^64 as a `double`, divided by the
+`double` nearest to 10 to the power of its scale, as .NET's `VarR8FromDec` computes it, so
+`double(1m / 3m)` is `0.33333333333333337` (the owner, 2026-10-28, "As C# computes it", against the
+nearest `double`, `0.3333333333333333`; the cost is a last bit that can differ from the nearest
+`double`), and a `float` as that `double` rounded, as C# computes it *(assumed)*.
 
 Case: [types/conversion-into-decimal.kz](../corpus/types/conversion-into-decimal.kz)
 ```kurz
@@ -451,17 +454,20 @@ print(int(big))
 
 A `decimal` is C#'s System.Decimal: an integer of 96 bits, a scale from 0 to 28 that counts its
 digits after the point, and a sign, in 16 bytes. `+ - * / %` compute, round half to even and choose
-the scale of their result as System.Decimal does, so `1.50m * 2` is `3.00`, `1m / 3m` is
-`0.3333333333333333333333333333` and `5m / 2m` is `2.5`; `%` takes the sign of the dividend; `==`
+the scale of their result as System.Decimal does, but for the remainders below, so `1.50m * 2` is
+`3.00`, `1m / 3m` is `0.3333333333333333333333333333` and `5m / 2m` is `2.5`; `%` takes the sign of
+the dividend, but for a zero, which has none (below); `/` and `%` by a zero, whatever its scale and
+its sign, raise `divide-by-zero` in every build (T25); `==`
 and the comparisons compare the values, so `1.5m == 1.50m` *(assumed: T2 names C#'s type; Rust has
 no `decimal`, and its crate rust_decimal chooses other scales, `2.50m * 0` is `0` there where
 System.Decimal keeps `0.00`, so the two do not agree, and Kurz takes C#'s)*. A result beyond
 ±79228162514264337593543950335 raises `overflow` (E3) in every build, a release build too, as C#
 throws for it (the owner, 2026-10-28, "Raise in every build", against raising in a test build and
 saturating in a release build; the cost is nothing at run time beyond what the rounding checks
-anyway, and a release program ends with an error line instead of a wrong amount). A zero that `+ - *
-/ %` compute has no sign: `1.50m - 1.5m` shows `0.00` and `0m * -1m` shows `0`; only `-` gives a
-zero its sign, as `-(0.0m)` shows `-0.0` (A8), and the digits and the scale stay System.Decimal's,
+anyway, and a release program ends with an error line instead of a wrong amount). A zero that `+`,
+the binary `-`, `*`, `/` and `%` compute has no sign: `1.50m - 1.5m` shows `0.00` and `0m * -1m`
+shows `0`; only the unary `-`, which turns the sign, gives a zero its sign, as `-(0.0m)` shows
+`-0.0` (A8), and the digits and the scale stay System.Decimal's,
 `2.50m * 0` showing `0.00` (the owner, 2026-10-28, "None, as rust_decimal", against System.Decimal's
 sign bit, which it sets on `1.50m - 1.5m`, so that the text of A8 would show `-0.00`, and against no
 sign on any zero, as C# shows none; the cost is a test for zero after each operation, and a sign bit
@@ -479,7 +485,7 @@ decimal Times(decimal a, decimal b) => a * b
 decimal Over(decimal a, decimal b) => a / b
 decimal Remainder(decimal a, decimal b) => a % b
 
-print(Times(1.50m, 2))
+print(Times(1.50m, 2m))
 print(Over(1m, 3m))
 print(Over(2m, 3m))
 print(Over(5m, 2m))
@@ -583,7 +589,8 @@ Show(90min)
 Beside the 64-bit pair of T24 stand `longduration` and `longtimestamp`: 128 bits with the same step
 of one nanosecond, for a calendar or an archive that reaches before 1677 or after 2262. A `duration`
 widens into a `longduration` and a `timestamp` into a `longtimestamp` without a word (T8), a
-conversion the other way is written out and checked as T20 says, and the texts are A12's. What T13
+conversion the other way is written out and raises `overflow` in every build where the value does
+not fit it (T31), and the texts are A12's and A16's. What T13
 says of the narrow pair holds for the wide one, and an operation between the two pairs widens the
 narrow operand and has the wide type, as `i + l` has `long` (T8), so that `longtimestamp -
 timestamp` is a `longduration`. *(assumed: the mixed operations, proposed on 2026-10-07, when the review found the hole, and
@@ -608,9 +615,24 @@ duration span = 90min
 Show(span)
 ```
 
-A `longduration` is narrowed to a `duration` only by a written conversion, which T20 checks like any
-other: in the case below the sum is two hundred thousand days, beyond the narrow range, so `duration(l)`
-raises `overflow` in a test build.
+A `longduration` and a `longtimestamp` take 16 bytes aligned to 16, as Rust's `i128`, C#'s `Int128`
+and C's `__int128` on x86-64, and `SizeOf` gives 16 for them and 8 for the narrow pair (R14) (§4,
+the owner, 2026-10-28, "16 bytes, 16-aligned", against the 8 of a `decimal`, under which a data
+value that holds one is laid out otherwise than C lays out a structure with an `__int128`; the cost is
+up to 8 bytes of padding in a data value that holds one).
+
+Case: [types/time-size.kz](../corpus/types/time-size.kz)
+```kurz
+print(SizeOf<duration>())
+print(SizeOf<timestamp>())
+print(SizeOf<longduration>())
+print(SizeOf<longtimestamp>())
+```
+
+A `longduration` is narrowed to a `duration` only by a written conversion, which raises `overflow`
+where the value does not fit, in a release build as well (T31): in the cases below the sum is two
+hundred thousand days, beyond the narrow range, so `duration(l)` raises it in a test build and in a
+release build.
 
 Case: [types/longduration-wide.kz](../corpus/types/longduration-wide.kz)
 ```kurz
@@ -619,9 +641,53 @@ longduration l = a + a
 print(duration(l))
 ```
 
+Case: [types/longduration-wide-release.kz](../corpus/types/longduration-wide-release.kz)
+```kurz
+longduration a = 100000days
+longduration l = a + a
+print(duration(l))
+```
+
+A wide value shows as A12 says, its days beyond the narrow range as well.
+
+Case: [values/text-longduration.kz](../corpus/values/text-longduration.kz)
+```kurz
+longduration Plus(longduration a, longduration b) => a + b
+
+print(200000days)
+print(Plus(200000days, 1ns))
+print(-200000days)
+```
+
 Where a union is required, its one time case reaches a duration literal as a written type does (T8).
 
 Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
+
+### T31 (decided, §4) Time arithmetic that leaves the range
+
+`+` and `-` on durations and timestamps, of either pair, and the unary `-` on a duration raise
+`overflow` (E3) where the result leaves the range of its type, in every build, a release build too,
+as Rust's `Duration` and `SystemTime` panic and C#'s `TimeSpan` throws in a build without checks; a
+written conversion from the wide pair into the narrow one raises it where the value does not fit
+(T29), in every build as well (§4, the owner, 2026-10-28, "Raise in every build", asked for the
+operations and for the conversion, against the rule of integer arithmetic, T4 and T5, under which a
+release build wraps, and against T20's wrap in a release build for the conversion; the cost is a
+check and a branch on every such operation in a release build). A constant expression that leaves
+the range is `constant-overflow` (T6).
+
+Case: [types/duration-overflow-release.kz](../corpus/types/duration-overflow-release.kz)
+```kurz
+duration Add(duration a, duration b) => a + b
+
+print(Add(100000days, 10000days))
+```
+
+Case: [types/duration-negate-release.kz](../corpus/types/duration-negate-release.kz)
+```kurz
+duration Negate(duration d) => -d
+
+print(Negate(-9223372036854775808ns))
+```
 
 ### T14 (assumed, §4) Out of range and division by zero
 

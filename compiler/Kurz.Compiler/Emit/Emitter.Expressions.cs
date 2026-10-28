@@ -88,7 +88,7 @@ public sealed partial class Emitter
     {
         switch (constant)
         {
-            case IntegerConstant i when Types.IsInteger(type):
+            case IntegerConstant i when Types.IsInteger(type) || Types.IsTime(type):
                 return IntegerText(i.Value, type);
             case IntegerConstant i when type is PrimitiveType { Kind: Primitive.Char }:
                 return IntegerText(i.Value, Types.Int);
@@ -224,7 +224,7 @@ public sealed partial class Emitter
                         return DecimalNegate(x);
                     }
 
-                    return Arithmetic("sub", IntegerText(BigInteger.Zero, type), x, type, u.Line, checkedBuild: test);
+                    return Arithmetic("sub", IntegerText(BigInteger.Zero, type), x, type, u.Line, checkedBuild: test || Types.IsTime(type)); // T31: a duration in every build
                 }
 
             case TokenKind.Bang:
@@ -285,6 +285,8 @@ public sealed partial class Emitter
 
             case TokenKind.Plus or TokenKind.Minus when leftType is PointerType pointer:
                 return PointerArithmetic(b, pointer, rightType);
+            case TokenKind.Plus or TokenKind.Minus when Types.IsTime(type):
+                return TimeArithmetic(op, EmitExpression(b.Left), leftType, EmitExpression(b.Right), rightType, type, b.Line);
             case TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent:
                 {
                     if (!Types.IsNumber(type))
@@ -380,7 +382,7 @@ public sealed partial class Emitter
         return fn.Value($"getelementptr {Ir(pointer.Pointee)}, ptr {left}, i64 {count}");
     }
 
-    /// <summary>`add`, `sub` or `mul` on an integer type: in a test build the overflow is the exception `overflow` (T5); otherwise it wraps (T4).</summary>
+    /// <summary>`add`, `sub` or `mul` on an integer type: in a test build the overflow is the exception `overflow` (T5); otherwise it wraps (T4). A time type is signed, and checked in every build (T31).</summary>
     private string Arithmetic(string instruction, string l, string r, KurzType type, int line, bool checkedBuild)
     {
         var ir = Ir(type);
@@ -389,7 +391,7 @@ public sealed partial class Emitter
             return fn.Value($"{instruction} {ir} {l}, {r}");
         }
 
-        var intrinsic = $"llvm.{(Types.IsSigned(type) ? "s" : "u")}{instruction}.with.overflow.{ir}";
+        var intrinsic = $"llvm.{(Types.IsUnsigned(type) ? "u" : "s")}{instruction}.with.overflow.{ir}";
         module.Declare($"declare {{ {ir}, i1 }} @{intrinsic}({ir}, {ir})");
         var pair = fn.Value($"call {{ {ir}, i1 }} @{intrinsic}({ir} {l}, {ir} {r})");
         var overflow = fn.Value($"extractvalue {{ {ir}, i1 }} {pair}, 1");
@@ -472,6 +474,11 @@ public sealed partial class Emitter
             return fn.Value($"icmp {Condition(op, signed: false)} i32 {left}, {right}");
         }
 
+        if (Types.IsTime(leftType) && Types.IsTime(rightType))
+        {
+            return TimeComparison(op, left, leftType, right, rightType);
+        }
+
         if (leftType is PointerType or CFunctionType && rightType is PointerType or CFunctionType)
         {
             return fn.Value($"icmp {Condition(op, signed: false)} ptr {left}, {right}"); // R10: the addresses, compared as numbers that are never negative
@@ -512,7 +519,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A value of <paramref name="from"/> where a <paramref name="to"/> is required (T1): the same type; an integer widened (T23); an
-    /// integer or a <c>float</c> into a floating-point type (T23); an integer into a <c>decimal</c> (T23); a
+    /// integer or a <c>float</c> into a floating-point type (T23); an integer into a <c>decimal</c> (T23); a narrow time value into
+    /// the wide pair (T29); a
     /// derived data value as its base (D6), the same block, and no data value as a type it does not derive from; a value into the one
     /// case of a union it goes to (D9, T8 with D9); a union into a union (D9 with O1).
     /// </summary>
@@ -536,6 +544,11 @@ public sealed partial class Emitter
         if (Types.IsInteger(from) && Types.IsDecimal(to))
         {
             return DecimalFromInteger(value, from);
+        }
+
+        if (Types.IsTime(from) && Types.IsTime(to))
+        {
+            return TimeBits(value, from, Types.IsWideTime(to)); // T29: the narrow pair widens
         }
 
         if (from is DataType && to is DataType && Types.Assignable(from, to))
@@ -654,6 +667,9 @@ public sealed partial class Emitter
                     var (low, high) = DecimalWords(value);
                     return fn.Value($"call %kz.str {RuntimeFunction("TextOfDecimal")}(i64 {low}, i64 {high})"); // A8
                 }
+
+            case PrimitiveType p when Types.IsTime(p):
+                return TimeText(value, type); // A12, A16
 
             case DataType or UnionType:
                 return DerivedText(value, type, line);

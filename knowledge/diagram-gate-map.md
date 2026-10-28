@@ -98,7 +98,7 @@ flowchart TD
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
         pinned clang and runs it, red on output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 173 cases run; the build command's lines and refusals; and the refused write and the refused allocation,
+        than 187 cases run; the build command's lines and refusals; and the refused write and the refused allocation,
         each with its error line; DataTests, red on a tag wider or narrower than the largest type number among the
         cases needs, two layouts for one union, a value that does not come back out of a union, a block not copied
         before a write, a path assignment that does not evaluate its value first, a static of a type with a base laid
@@ -121,7 +121,11 @@ flowchart TD
         raises), on a double or a float converted into decimal other than its exact binary value rounded, on a
         result beyond the range, a conversion into decimal that loses the value or a division by zero that does
         not raise in a test and a release build, and on a conversion into an integer type that keeps a value it
-        loses or loses one it keeps.
+        loses or loses one it keeps; and TimeTests, red on the text of a duration other than its units from days
+        down, on the text of a timestamp other than its instant in UTC as RFC 3339 and chrono write it, on time
+        arithmetic or a conversion into the narrow pair beyond the range that does not raise in a test and a
+        release build, on one at the edges that does, on a wide value not aligned to 16, and on a widening, a
+        comparison, a field, a union, a list or a hole of them that shows another value.
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
         no program of them"]

@@ -478,8 +478,8 @@ public sealed class DecimalTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal("123.45600000000000306954461848", run.Output[40013]);
     }
 
-    /// <summary>A file name of a call's letters and digits.</summary>
-    private static string Name(string call) => new(call.Where(char.IsLetterOrDigit).ToArray());
+    /// <summary>A file name of a call's letters and digits, a `-` as `M`.</summary>
+    private static string Name(string call) => new(call.Select(c => c == '-' ? 'M' : c).Where(char.IsLetterOrDigit).ToArray());
 
     private const string Operations = """
         decimal Add(decimal a, decimal b) => a + b

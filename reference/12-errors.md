@@ -127,7 +127,7 @@ assumptions there); the error line of `allocation-failed` names the size asked f
 | id | rules | meaning |
 |---|---|---|
 | `thrown` | O5, O6, O7 | a `throw` statement of the program ran |
-| `overflow` | T5, T20, T26, T29, T30 | arithmetic that left the range of its type, or a conversion that lost its value, in a test build; a `decimal` result beyond its range and a conversion into `decimal` that loses the value, in every build (T30, T26) |
+| `overflow` | T5, T20, T26, T29, T30, T31 | arithmetic that left the range of its type, or a conversion that lost its value, in a test build; a `decimal` result beyond its range and a conversion into `decimal` that loses the value, in every build (T30, T26), and so do `+` and `-` on the time types beyond their range and a conversion into the narrow time pair that loses the value (T31) |
 | `divide-by-zero` | T14, T25 | an integer or `decimal` division or remainder by zero |
 | `index-out-of-range` | T14, M9 | an index outside the collection |
 | `reversed-range-at-run-time` | C8 | a range whose end lay below its start when the loop reached it |

@@ -1025,8 +1025,10 @@ uint InversePow5Offsets(int row) => match row {
 //
 // A `decimal` is C#'s System.Decimal, which the emitted code passes as two 64-bit words: the low 64 bits of its 96-bit
 // integer, then the high 32 bits with System.Decimal's flags above them, the scale in bits 48 to 55 and the sign in bit 63.
-// Its value is the integer divided by ten to the scale, from 0 to 28. The operations compute what System.Decimal computes,
-// digit for digit and scale for scale (section 4); a zero they compute has no sign (the owner, 2026-10-28, "None, as
+// Its value is the integer divided by ten to the scale, from 0 to 28. The arithmetic, the comparison and the conversion into
+// a `double` compute what System.Decimal computes, digit for digit and scale for scale (section 4); the conversion from a
+// `double` takes its exact binary value (the owner, 2026-10-28, "Exact binary value"), and `%` the exact remainder where
+// System.Decimal throws for one that fits ("Exact remainder"); a zero they compute has no sign (the owner, 2026-10-28, "None, as
 // rust_decimal"). A result that leaves the range makes them return false, which the emitted code raises as `overflow` in
 // every build (the owner, 2026-10-28, "Raise in every build"); the emitted code raises `divide-by-zero` before a division
 // or a remainder by zero (T25).
@@ -2014,4 +2016,255 @@ double DoublePower10(int n) => match n {
     26 => 1e26
     27 => 1e27
     else => 1e28
+}
+
+// ---- the time types (T13, T29) -----------------------------------------------------------------------
+//
+// The emitted code passes a duration or a timestamp of either width as the two 64-bit words of its 128 bits, the low one
+// first, a narrow one extended by its sign: a count of nanoseconds, that of a timestamp from 1970-01-01 in UTC (T24). Their
+// arithmetic, its overflow and their conversions are the emitted code's (T31).
+
+// The text of a duration (A12): its value split into `days`, `h`, `min`, `s`, `ms`, `us` and `ns`, from the largest down,
+// each at most once and a zero count left out, `0ms` for zero and `-` before the whole of a negative one; the days of a
+// `longduration` reach 25 digits.
+pub string TextOfDuration(ulong low, ulong high) {
+    mut ulong w0 = low
+    mut ulong w1 = high
+    bool negative = high >> 63 == 1
+    if negative {
+        Negate128(mut w0, mut w1)
+    }
+
+    mut ulong w2 = 0
+    ulong nanos = DivideSmall(mut w0, mut w1, mut w2, 1000)
+    ulong micros = DivideSmall(mut w0, mut w1, mut w2, 1000)
+    ulong millis = DivideSmall(mut w0, mut w1, mut w2, 1000)
+    ulong seconds = DivideSmall(mut w0, mut w1, mut w2, 60)
+    ulong minutes = DivideSmall(mut w0, mut w1, mut w2, 60)
+    ulong hours = DivideSmall(mut w0, mut w1, mut w2, 24)
+    mut string text = ""
+    raw {
+        byte* p = Allocate(72)
+        mut long n = 0
+        if negative {
+            p[0] = 45
+            n = 1
+        }
+
+        long first = n
+        if w0 != 0 || w1 != 0 {
+            n = WideDigits(p, n, w0, w1, 1)
+            n = PutText(p, n, "days")
+        }
+
+        n = TimePart(p, n, first, hours, "h")
+        n = TimePart(p, n, first, minutes, "min")
+        n = TimePart(p, n, first, seconds, "s")
+        n = TimePart(p, n, first, millis, "ms")
+        n = TimePart(p, n, first, micros, "us")
+        n = TimePart(p, n, first, nanos, "ns")
+        if n == first {
+            n = PutText(p, n, "0ms")
+        }
+
+        text = string.FromRaw(p, n)
+    }
+
+    return text
+}
+
+// The text of a timestamp (A16): its instant in UTC as RFC 3339 writes it, `2026-10-28T09:30:00Z`, the fraction of a second in
+// groups of three digits, as many as hold it and none for a whole second, and a year outside 0000 to 9999 with its sign and at
+// least four digits, as Rust's chrono writes them; the date in the Gregorian calendar before its introduction as well, with a
+// year 0 and no leap second, by Howard Hinnant's `civil_from_days`, which counts the days from 0000-03-01 in eras of 400 years.
+pub string TextOfTimestamp(ulong low, ulong high) {
+    mut ulong w0 = low
+    mut ulong w1 = high
+    ulong nanos = FloorDivide(mut w0, mut w1, 1000000000)
+    ulong second = FloorDivide(mut w0, mut w1, 86400)
+    Add128(mut w0, mut w1, 719468)
+    ulong dayOfEra = FloorDivide(mut w0, mut w1, 146097)
+    ulong yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36524 - dayOfEra / 146096) / 365
+    ulong dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+    ulong shifted = (5 * dayOfYear + 2) / 153
+    ulong day = dayOfYear - (153 * shifted + 2) / 5 + 1
+    mut ulong month = shifted + 3
+    mut ulong years = yearOfEra
+    if shifted >= 10 {
+        month = shifted - 9
+        years = years + 1
+    }
+
+    // the year: the era times 400 and the years after its start, as a sign and a magnitude; an era before the year 0 holds
+    // more than 400 years, so its sum is no positive year
+    bool before = w1 >> 63 == 1
+    if before {
+        Negate128(mut w0, mut w1)
+    }
+
+    mut ulong w2 = 0
+    MultiplyBy(mut w0, mut w1, mut w2, 400)
+    if before {
+        Subtract128(mut w0, mut w1, years)
+    } else {
+        Add128(mut w0, mut w1, years)
+    }
+
+    mut string text = ""
+    raw {
+        byte* p = Allocate(64)
+        mut long n = 0
+        if before && (w0 != 0 || w1 != 0) {
+            p[0] = 45
+            n = 1
+        } else if w1 != 0 || w0 > 9999 {
+            p[0] = 43
+            n = 1
+        }
+
+        n = WideDigits(p, n, w0, w1, 4)
+        p[n] = 45
+        WriteDigits(p + n + 1, month, 2)
+        p[n + 3] = 45
+        WriteDigits(p + n + 4, day, 2)
+        p[n + 6] = 84
+        WriteDigits(p + n + 7, second / 3600, 2)
+        p[n + 9] = 58
+        WriteDigits(p + n + 10, second / 60 % 60, 2)
+        p[n + 12] = 58
+        WriteDigits(p + n + 13, second % 60, 2)
+        n = n + 15
+        if nanos != 0 {
+            p[n] = 46
+            if nanos % 1000000 == 0 {
+                WriteDigits(p + n + 1, nanos / 1000000, 3)
+                n = n + 4
+            } else if nanos % 1000 == 0 {
+                WriteDigits(p + n + 1, nanos / 1000, 6)
+                n = n + 7
+            } else {
+                WriteDigits(p + n + 1, nanos, 9)
+                n = n + 10
+            }
+        }
+
+        p[n] = 90
+        text = string.FromRaw(p, n + 1)
+    }
+
+    return text
+}
+
+// ` <count><name>` written at `p + n`, without the space where nothing stands after `first`, and nothing for a zero count; the
+// place after it returned.
+long TimePart(byte* p, long n, long first, ulong count, string name) {
+    if count == 0 {
+        return n
+    }
+
+    mut long at = n
+    if at > first {
+        raw {
+            p[at] = 32
+        }
+
+        at = at + 1
+    }
+
+    long digits = DigitCount(count)
+    WriteDigits(p + at, count, int(digits))
+    return PutText(p, at + digits, name)
+}
+
+// The bytes of `s` written at `p + n`; the place after them returned.
+long PutText(byte* p, long n, string s) {
+    long count = long(s.Bytes.Count)
+    raw {
+        byte* from = s.Pointer
+        mut long i = 0
+        while i < count {
+            p[n + i] = from[i]
+            i = i + 1
+        }
+    }
+
+    return n + count
+}
+
+// The decimal digits of the 128-bit high:low written at `p + n`, at least `least` of them, zeros before the first where it has
+// fewer; the place after the last returned.
+long WideDigits(byte* p, long n, ulong low, ulong high, long least) {
+    mut ulong c0 = low
+    mut ulong c1 = high
+    mut ulong c2 = 0
+    mut long count = 0
+    while count == 0 || c0 != 0 || c1 != 0 {
+        DivideSmall(mut c0, mut c1, mut c2, 10)
+        count = count + 1
+    }
+
+    if count < least {
+        count = least
+    }
+
+    mut ulong w0 = low
+    mut ulong w1 = high
+    mut ulong w2 = 0
+    mut long i = n + count - 1
+    raw {
+        while i >= n {
+            p[i] = byte(DivideSmall(mut w0, mut w1, mut w2, 10) + 48)
+            i = i - 1
+        }
+    }
+
+    return n + count
+}
+
+// The signed 128-bit w1:w0 divided by d, from 1 to 2^32 - 1, rounded toward negative infinity, in place; the remainder
+// returned, from 0 to d - 1.
+ulong FloorDivide(mut ulong w0, mut ulong w1, ulong d) {
+    bool negative = w1 >> 63 == 1
+    if negative {
+        Negate128(mut w0, mut w1)
+    }
+
+    mut ulong w2 = 0
+    mut ulong r = DivideSmall(mut w0, mut w1, mut w2, d)
+    if negative {
+        if r != 0 {
+            Add128(mut w0, mut w1, 1)
+            r = d - r
+        }
+
+        Negate128(mut w0, mut w1)
+    }
+
+    return r
+}
+
+// The 128-bit w1:w0 negated in two's complement, in place.
+void Negate128(mut ulong w0, mut ulong w1) {
+    w0 = ~w0 +% 1
+    w1 = ~w1
+    if w0 == 0 {
+        w1 = w1 +% 1
+    }
+}
+
+// The 128-bit w1:w0 plus k, in place, wrapping as two's complement does.
+void Add128(mut ulong w0, mut ulong w1, ulong k) {
+    w0 = w0 +% k
+    if w0 < k {
+        w1 = w1 +% 1
+    }
+}
+
+// The 128-bit w1:w0 minus k, in place, wrapping as two's complement does.
+void Subtract128(mut ulong w0, mut ulong w1, ulong k) {
+    bool borrow = w0 < k
+    w0 = w0 -% k
+    if borrow {
+        w1 = w1 -% 1
+    }
 }

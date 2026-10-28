@@ -1,0 +1,11 @@
+// expect: output
+// | 8
+// | 8
+// | 16
+// | 16
+// rules: T29
+
+print(SizeOf<duration>())
+print(SizeOf<timestamp>())
+print(SizeOf<longduration>())
+print(SizeOf<longtimestamp>())

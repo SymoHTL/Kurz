@@ -261,6 +261,11 @@ public sealed partial class Emitter
             return FromFloating(value, sourceType, target, c.Line);
         }
 
+        if (Types.IsTime(target))
+        {
+            return TimeConversion(value, sourceType, target, c.Line); // T29, T31
+        }
+
         if (Types.IsDecimal(target))
         {
             return Types.IsDecimal(sourceType) ? value

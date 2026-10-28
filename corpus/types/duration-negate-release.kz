@@ -1,0 +1,7 @@
+// expect: throws overflow at 5
+// build: release
+// rules: T31
+
+duration Negate(duration d) => -d
+
+print(Negate(-9223372036854775808ns))

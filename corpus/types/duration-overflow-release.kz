@@ -1,0 +1,7 @@
+// expect: throws overflow at 5
+// build: release
+// rules: T31
+
+duration Add(duration a, duration b) => a + b
+
+print(Add(100000days, 10000days))
