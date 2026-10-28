@@ -1,0 +1,15 @@
+// expect: output
+// | 0.00
+// | 0
+// | 0
+// | -0.0
+// rules: T30
+
+decimal Minus(decimal a, decimal b) => a - b
+decimal Times(decimal a, decimal b) => a * b
+decimal Negate(decimal a) => -a
+
+print(Minus(1.50m, 1.5m))
+print(Times(0m, -1m))
+print(Minus(-1m, -1m))
+print(Negate(0.0m))

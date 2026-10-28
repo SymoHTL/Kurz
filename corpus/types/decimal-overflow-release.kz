@@ -1,0 +1,7 @@
+// expect: throws overflow at 5
+// build: release
+// rules: T30
+
+decimal Add(decimal a, decimal b) => a + b
+
+print(Add(79228162514264337593543950335m, 1m))

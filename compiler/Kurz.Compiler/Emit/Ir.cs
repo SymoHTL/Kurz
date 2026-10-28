@@ -4,8 +4,8 @@ using System.Text;
 namespace Kurz.Compiler.Emit;
 
 /// <summary>
-/// The text of one LLVM IR module as it is built: the types of a string, <c>%kz.str</c>, and of a
-/// function value, <c>%kz.fn</c>, the string constants, the state outside a function (R13), the
+/// The text of one LLVM IR module as it is built: the types of a string, <c>%kz.str</c>, of a
+/// function value, <c>%kz.fn</c>, and of a <c>decimal</c>, <c>%kz.dec</c>, the string constants, the state outside a function (R13), the
 /// declarations of the C functions the code calls (R16), and the functions emitted, each rendered by
 /// its <see cref="IrFunction"/>.
 /// </summary>
@@ -20,6 +20,7 @@ internal sealed class IrModule
     {
         globals.AppendLine("%kz.str = type { ptr, i64 }");
         globals.AppendLine("%kz.fn = type { ptr, ptr }");
+        globals.AppendLine("%kz.dec = type { i64, i64 }");
     }
 
     /// <summary>The global that holds the UTF-8 bytes of a string literal, as <c>ptr</c>, with their count.</summary>
@@ -134,10 +135,10 @@ internal sealed class IrFunction
         return t;
     }
 
-    /// <summary>Starts the block; the block before it falls through with an unconditional branch where it did not end.</summary>
+    /// <summary>Starts the block; the block before it falls through with an unconditional branch where it did not end, the entry block among them.</summary>
     public void Block(string label)
     {
-        if (!Terminated && body.Length > 0)
+        if (!Terminated)
         {
             body.Append("  br label %").AppendLine(label);
         }

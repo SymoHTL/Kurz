@@ -96,6 +96,8 @@ public sealed partial class Emitter
                 return RealText(r.Value);
             case RealConstant r when type is PrimitiveType { Kind: Primitive.Float }:
                 return RealText((float)r.Value);
+            case DecimalConstant m when Types.IsDecimal(type):
+                return DecimalText(m.Value);
             case BoolConstant b:
                 return b.Value ? "true" : "false";
             case CharConstant c:
@@ -217,6 +219,11 @@ public sealed partial class Emitter
                         return fn.Value($"fneg {Ir(type)} {x}"); // the sign turned, of a zero, an infinity and NaN as well
                     }
 
+                    if (Types.IsDecimal(type))
+                    {
+                        return DecimalNegate(x);
+                    }
+
                     return Arithmetic("sub", IntegerText(BigInteger.Zero, type), x, type, u.Line, checkedBuild: test);
                 }
 
@@ -280,13 +287,18 @@ public sealed partial class Emitter
                 return PointerArithmetic(b, pointer, rightType);
             case TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent:
                 {
-                    if (!Types.IsInteger(type) && !Types.IsFloating(type))
+                    if (!Types.IsNumber(type))
                     {
                         throw Unsupported(b.Line, $"`{op}` on a `{type}`");
                     }
 
                     var l = Convert(EmitExpression(b.Left), leftType, type, b.Line);
                     var r = Convert(EmitExpression(b.Right), rightType, type, b.Line);
+                    if (Types.IsDecimal(type))
+                    {
+                        return DecimalArithmetic(op, l, r, b.Line);
+                    }
+
                     if (Types.IsFloating(type))
                     {
                         // T18, T25: IEEE 754's operations, as C# has them: by zero `/` gives an infinity or NaN and `%` NaN, and `%` is the
@@ -440,6 +452,13 @@ public sealed partial class Emitter
             return fn.Value($"fcmp {FloatingCondition(op)} {Ir(common)} {l}, {r}");
         }
 
+        if (Types.IsDecimal(leftType) || Types.IsDecimal(rightType))
+        {
+            // T18, T23: by their values, an integer side widened into a `decimal`
+            var order = DecimalOrder(Convert(left, leftType, Types.Decimal, b.Line), Convert(right, rightType, Types.Decimal, b.Line));
+            return fn.Value($"icmp {Condition(op, signed: true)} i32 {order}, 0");
+        }
+
         if (Types.IsInteger(leftType) && Types.IsInteger(rightType))
         {
             var common = Types.CommonInteger((PrimitiveType)leftType, (PrimitiveType)rightType) ?? throw Unsupported(b.Line, $"a comparison of a `{leftType}` and a `{rightType}`");
@@ -493,7 +512,7 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A value of <paramref name="from"/> where a <paramref name="to"/> is required (T1): the same type; an integer widened (T23); an
-    /// integer or a <c>float</c> into a floating-point type (T23); a
+    /// integer or a <c>float</c> into a floating-point type (T23); an integer into a <c>decimal</c> (T23); a
     /// derived data value as its base (D6), the same block, and no data value as a type it does not derive from; a value into the one
     /// case of a union it goes to (D9, T8 with D9); a union into a union (D9 with O1).
     /// </summary>
@@ -512,6 +531,11 @@ public sealed partial class Emitter
         if ((Types.IsInteger(from) || Types.IsFloating(from)) && Types.IsFloating(to))
         {
             return ToFloating(value, from, to);
+        }
+
+        if (Types.IsInteger(from) && Types.IsDecimal(to))
+        {
+            return DecimalFromInteger(value, from);
         }
 
         if (from is DataType && to is DataType && Types.Assignable(from, to))
@@ -625,6 +649,12 @@ public sealed partial class Emitter
                 return fn.Value($"call %kz.str {RuntimeFunction("TextOfDouble")}(i64 {fn.Value($"bitcast double {value} to i64")})"); // A4, A14: from its bits
             case PrimitiveType { Kind: Primitive.Float }:
                 return fn.Value($"call %kz.str {RuntimeFunction("TextOfFloat")}(i32 {fn.Value($"bitcast float {value} to i32")})"); // A8, A11
+            case PrimitiveType { Kind: Primitive.Decimal }:
+                {
+                    var (low, high) = DecimalWords(value);
+                    return fn.Value($"call %kz.str {RuntimeFunction("TextOfDecimal")}(i64 {low}, i64 {high})"); // A8
+                }
+
             case DataType or UnionType:
                 return DerivedText(value, type, line);
             case ListType list:

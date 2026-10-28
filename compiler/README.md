@@ -144,7 +144,7 @@ compiler refuses gets its lines on standard error, one per diagnostic in the ord
 and no executable, and the command exits with 1:
 
     hello.kz:3: unknown-name: `y` is not declared
-    hello.kz:1: not supported: a value of type `decimal` (T2)
+    hello.kz:1: not supported: a value of type `duration` (T13)
 
 The file is named as the command line gave it. The command grants a program neither `raw` nor
 `native` (R7, R16): a program that needs them is refused with the grant's error. It refuses to
@@ -239,7 +239,7 @@ under IR names of their own; nothing of it is compiled apart (record, section 2,
 emitted `main` calls the runtime's `Start`, then the program's top level, then `Finish`, which ends
 the process with the exit code 0 through the target's `Exit`, the runtime's one exit (section 6).
 `common/` gives what the emitted code calls: `Print`, the text of an integer, of a `char` and of a
-`float` and a `double` (below), the
+`float` and a `double` (below), the arithmetic, the conversions and the text of a `decimal` (below), the
 joining and the comparison of two strings, the text of a list from the texts of its items,
 `Raise` for an exception of the run-time table and `Throw`, and `Allocate`, which takes its memory
 from the allocator's entry, `std/`'s `Allocate` (record, section 2), and ends the process where the
@@ -262,8 +262,9 @@ The text of a `float` and of a `double` is computed in `common/` from the value'
 emitted code passes as a `uint` and a `ulong`: the fewest digits that read back as the same value,
 of those the nearest, by Ryu's algorithm as Rust's `ryu` crate computes it with its small table (each
 128-bit power of five, and of its inverse, from one of thirteen rows and the power of five below 26
-between, with a correction of two bits per power, and a `float` through the high 64 bits of the same
-powers), laid out as .NET Core 3.0 and later write a `double` and a `float` with the invariant culture
+between, with a correction of two bits per power, the inverse powers' a table of this runtime's own,
+since it multiplies the row's inverse power itself where `ryu` multiplies it less one, and a `float`
+through the high 64 bits of the same powers), laid out as .NET Core 3.0 and later write a `double` and a `float` with the invariant culture
 (A4, A11, A14): the exponent form from `1E+17` for a `double` and from `1E+09` for a `float` (the
 owner, 2026-10-28, "As .NET prints: 1E+17" and "As C# prints a float"), and below `1E-04`, with `E`,
 a sign and two digits or more. Where .NET 10 writes a text that does not read back as the value, as
@@ -271,6 +272,24 @@ for 2^-25 and 2^-958, the text is A4's, the fewest digits that do. `FloatingTest
 20000 values of a xorshift sequence, of the largest value with each exponent, the smallest and the one
 after it, and of the powers of ten and their neighbours, of a `double` and of a `float`, to what .NET
 writes.
+
+A `decimal` (T2, T30) is computed in `common/` from its two words, which the emitted code passes as
+two `ulong`s: the low 64 bits of its 96-bit integer, then its high 32 bits with System.Decimal's
+flags above them, the scale in bits 48 to 55 and the sign in bit 63, as System.Decimal holds them.
+`DecimalAdd`, `DecimalMultiply` and `DecimalDivide` compute the exact result in up to 192 bits and
+round it half to even at the largest scale up to 28 at which it fits 96 bits, as .NET's `DecCalc`
+does, its choices of the scale of a product and of a quotient included, and report a result beyond
+the range, which the emitted code raises as `overflow`; `DecimalRemainder` computes the exact
+remainder (the owner, 2026-10-28, "Exact remainder"), and none of them gives a zero it computes a
+sign. `DecimalCompare` compares the values, `DecimalFromDouble` rounds a `double`'s exact binary
+value, `DecimalToDouble` divides as C# does, `DecimalTruncate` drops the fraction for a conversion
+into an integer type, and `TextOfDecimal` writes the digits with the point at the scale and a `-`
+before a value whose sign is set (A8). `DecimalTests` holds the sum, the difference, the product,
+the quotient, the remainder, the comparisons and the conversions into `double`, `float` and `long`
+of 10000 pairs of a xorshift sequence and of the pairs of 34 values at the edges of the range to
+what System.Decimal computes, a zero they compute without its sign, and the remainders it raises
+for to the exact ones; and 20000 `double`s and as many `float`s of a xorshift sequence converted
+into `decimal` to their exact binary value rounded, which `BigInteger` computes.
 
 The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
@@ -304,6 +323,13 @@ library a block of C functions names (R16). It emits:
   and `%` NaN, NaN equal to nothing (T18, T25), an integer widened into them (T23), and a conversion
   into an integer type that drops the fraction and, where it loses the value, raises `overflow` in a
   test build and saturates in a release build, NaN to 0 (T26);
+- `decimal` (T2) as two 64-bit words, the runtime's (above), 16 bytes: its literals as
+  System.Decimal's bits, `+ - * / %` and the comparisons through the runtime, which raise
+  `overflow` where a result leaves the range and `divide-by-zero` in every build (T30, T25), unary
+  `-` turning the sign, a zero's too (T30), `==` by the value, also on a field (D3), an integer
+  widened into it (T23), a conversion into an integer type as from a `double`, and the conversions
+  between it and `float` and `double`, NaN, an infinity and a value beyond its range raising
+  `overflow` in every build (T26);
 - `if`, `while`, `for` over a range, which raises `reversed-range-at-run-time` (C8), `break`,
   `continue` and `return` (chapter 10), and `throw` of a value (O6);
 - `data` types and their values, made with defaults and arguments by name (D1, D2, D8, D11), their
@@ -413,7 +439,7 @@ the calls of `Where`'s test; the release of such an environment before the `Add`
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), `decimal` (T2), the durations and the
+`data` type or a union (R14), the durations and the
 timestamps (T13), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` on a list in
 a field (M5), `==` on a value that holds a list (D3), a list's `Pointer` and `List<T>.FromRaw`
@@ -426,8 +452,8 @@ values that hold them (above) and for nothing else: memory a string or a value o
 a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
-corpus runner lists every case the checker reads in full and the emitter does not emit, 12 of the
-234 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+corpus runner lists every case the checker reads in full and the emitter does not emit, 11 of the
+241 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
 ends the program with the system's signal and not with its error line, and no exception writes a

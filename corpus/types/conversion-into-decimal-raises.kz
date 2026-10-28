@@ -1,0 +1,7 @@
+// expect: throws overflow at 5
+// build: release
+// rules: T26
+
+decimal Of(double x) => decimal(x)
+
+print(Of(1e30))

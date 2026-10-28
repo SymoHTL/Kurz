@@ -1,0 +1,11 @@
+// expect: output
+// | 1.50
+// | -0.0
+// | 0.0
+// rules: A8
+
+decimal Negate(decimal a) => -a
+
+print(1.50m)
+print(Negate(0.0m))
+print(Negate(Negate(0.0m)))
