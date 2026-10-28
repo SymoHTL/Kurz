@@ -147,21 +147,22 @@ call or a `with` there that the argument's value can keep, a value of a type tha
 value: `fs.Add(Wrap(() => fs.Count))` is the error (§4, the owner, 2026-10-25). A value inside the
 argument of a type that can hold none ends what it keeps, so `xs.Add(Count(() => xs.Count))` and
 `xs.Add(Count(Wrap(() => xs.Count)))`, whose `Count` gives an `int`, pass (§4, the owner, 2026-10-25
-and 2026-10-28). `Add` lets go of what its argument made besides its item, a lambda's environment
-among them, before the list grows, so that no count they hold makes it copy the items (§4, the
-owner, 2026-10-28, "Pass, as Rust"). A type that can hold a function value is a function type, a
+and 2026-10-28). `Add` lets go of a lambda's environment before the list grows, so that no count
+the environment holds makes `Add` copy the items (§4, the owner, 2026-10-28, "Pass, as Rust"), and
+of everything else its argument made besides its item *(assumed, as §4 marks it)*. A type that can hold a function value is a function type, a
 type parameter, a list or a union that holds one, and a `data` type when one of its type arguments
 holds one, whether a field stores it or not, or when a field of it or of a type derived from it
 holds one (§4, the owner, 2026-10-28, "confirmed" and "Counts, as Rust"): `Q<() => int>` holds one
 for any `data Q<T>`, so `qs.Add(Keep(() => qs.Count))`, with a `Keep` that gives a list of them, is
 the error. A field's type is read with the type's arguments in place of its parameters, so a field
 of type `T` holds what the argument for `T` holds, and a map holds one where its key or its value
-type can, a nullable type where the type it makes nullable can, and a class where a field of it or
-of a class derived from it can *(assumed, as §4 marks them)*. Whether another `mut` method takes
+type can, a nullable type where the type it makes nullable can, and a class where one of its type
+arguments or a field of it or of a class derived from it can *(assumed, as §4 marks them)*. Whether another `mut` method takes
 `Add`'s exception is open (§14), with two options: the exception for every `mut` method that stores
 what its argument gave before it changes its receiver, as `Add` stores its counted item before the
-list grows, or for `Add` alone. While it is open, the rule above holds for such a method as for any
-call that takes its receiver as `mut`, with every condition it states. The
+list grows, or for `Add` alone. While it is open, the general rule of §4 (the owner, 2026-10-24),
+which opens this paragraph, holds for such a method as for any call that takes its receiver as
+`mut`, with every condition it states. The
 expression holds the value of a read made as any other argument of that call without `mut` in front
 of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
 value is `mut-at-call`, above); as an argument of a call around it given before

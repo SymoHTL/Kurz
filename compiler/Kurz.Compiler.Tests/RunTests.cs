@@ -80,37 +80,23 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before.</summary>
-    private const int RunFloor = 151;
+    private const int RunFloor = 165;
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
     {
-        ["data/equality-nan.kz"] = "a value of type `double` (T2)",
-        ["data/equality-union-nan.kz"] = "a value of type `double` (T2)",
         ["memory/asm-explicit-register.kz"] = "inline assembly (R11)",
         ["memory/asm-in-raw.kz"] = "inline assembly (R11)",
-        ["source/number-literal-forms.kz"] = "a value of type `double` (T2)",
-        ["source/number-literals.kz"] = "a value of type `double` (T2)",
         ["source/unit-literal-fraction.kz"] = "a value of type `duration` (T13)",
         ["source/unit-literal-micro.kz"] = "a value of type `duration` (T13)",
-        ["types/constant-double-division.kz"] = "a value of type `double` (T2)",
-        ["types/constant-mixed-fold.kz"] = "a value of type `double` (T2)",
-        ["types/conversion-float-infinity.kz"] = "a value of type `float` (T2)",
-        ["types/conversion-float-test.kz"] = "a value of type `double` (T2)",
-        ["types/conversion-saturates.kz"] = "a value of type `double` (T2)",
         ["types/decimal-divide-by-zero.kz"] = "a value of type `decimal` (T2)",
         ["types/duration-parameter.kz"] = "a value of type `duration` (T13)",
-        ["types/float-remainder-by-zero.kz"] = "a value of type `double` (T2)",
-        ["types/fraction-beside-narrow.kz"] = "a value of type `double` (T2)",
         ["types/longduration-parameter.kz"] = "a value of type `duration` (T13)",
         ["types/longduration-wide.kz"] = "a value of type `longduration` (T13)",
         ["types/string-bytes.kz"] = "`s.Bytes` as a list (T15)",
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
-        ["types/widening-across-sign.kz"] = "a value of type `double` (T2)",
-        ["values/text-double-special.kz"] = "a value of type `double` (T2)",
         ["values/text-duration-sub-millisecond.kz"] = "a value of type `duration` (T13)",
         ["values/text-duration.kz"] = "a value of type `duration` (T13)",
-        ["values/text-float.kz"] = "a value of type `float` (T2)",
     };
 
     /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>

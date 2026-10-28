@@ -14,6 +14,13 @@ sample was replaced the same day by the flat-owner pattern (one owner holds the 
 edges are `weak` or indices); the section held that pattern when this entry was checked on
 2026-10-02.
 
+On 2026-10-28 the corpus case `values/text-double-special.kz` expected `1E+15` for `print(1e15)`.
+Its rule, A14, named the text of .NET Core 3.0 and later and gave the bound of that text's exponent
+form as `1E+15`, which is .NET Framework's: .NET 10 writes `1000000000000000`, and its exponent form
+starts at `1E+17`. The case had stood since 2026-10-03, read against its rule and agreeing with it;
+it failed the first time the compiler ran it, in the change that emitted `double`, and the rule took
+the bound the owner chose then.
+
 **Why:** a sample is written to show the idea and is never run. In a design document nothing
 compiles, so a sample that contradicts its rule passes every check there is, and a reader takes
 the sample as the truth because it is concrete.
@@ -24,8 +31,10 @@ the sample as the truth because it is concrete.
   the cycle rule, the null rule, honest signatures, visibility.
 - In the reference, every Kurz sample is a corpus case, shown under a `Case:` line.
   `tools/lint_reference.py` (gate `reference`) refuses a code block that is neither a case sample
-  nor marked `text`, and a sample that differs from its file. Nothing runs a case, so its expectation is read against the rules it
-  names in the same way (HAZARD #1).
+  nor marked `text`, and a sample that differs from its file. Nothing runs a case the compiler does
+  not emit, so its expectation is read against the rules it names in the same way (HAZARD #1).
+- A rule that names an outside behaviour, "what .NET prints", and states numbers of it too is read
+  against that behaviour, run, before a case takes the numbers: they can be another version's.
 - In `kurz-design.md` samples are illustrative and unchecked. That is HAZARD #1: nothing executes
   them. The review rule "design record" carries the defect shape, but the reviewer is given one
   batch of the diff, so it can judge a sample only against rules that the same batch shows.

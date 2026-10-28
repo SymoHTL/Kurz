@@ -235,7 +235,9 @@ public sealed partial class Emitter
 
     /// <summary>
     /// T10, T20: a conversion written as a call of an integer type or of <c>char</c>; a value that does not fit raises
-    /// <c>overflow</c> in a test build and wraps in a release build. R14: <c>long(p)</c> is the address a pointer holds.
+    /// <c>overflow</c> in a test build and wraps in a release build. T23, T26: one written as a call of <c>float</c> or <c>double</c>
+    /// rounds; one from a floating-point value into an integer type drops the fraction, and a value that does not fit raises
+    /// <c>overflow</c> in a test build and saturates in a release build. R14: <c>long(p)</c> is the address a pointer holds.
     /// </summary>
     private string EmitConversion(CallExpression c, KurzType target)
     {
@@ -249,6 +251,16 @@ public sealed partial class Emitter
 
         var from = sourceType is PrimitiveType { Kind: Primitive.Char } ? Types.UInt : sourceType;
         var to = target is PrimitiveType { Kind: Primitive.Char } ? Types.UInt : target;
+        if (Types.IsFloating(to) && (Types.IsInteger(from) || Types.IsFloating(from)))
+        {
+            return ToFloating(value, from, to);
+        }
+
+        if (Types.IsFloating(from) && Types.IsInteger(to))
+        {
+            return FromFloating(value, from, to, c.Line);
+        }
+
         if (!Types.IsInteger(from) || !Types.IsInteger(to))
         {
             throw Unsupported(c.Line, $"a conversion from `{sourceType}` to `{target}`");

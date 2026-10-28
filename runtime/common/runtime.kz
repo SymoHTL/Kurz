@@ -203,6 +203,49 @@ pub string TextOfChar(uint point) {
     return text
 }
 
+// The text of a `double`, given its 64 bits, which the emitted code passes (A4, A14): the fewest digits
+// that read back as the same number, of those the nearest to it, written as .NET Core 3.0 and later
+// write a `double` with the invariant culture; `-0` for a negative zero, `Infinity`, `-Infinity` and
+// `NaN`. The digits are Ryu's, as Rust's `ryu` crate computes them with its small table.
+pub string TextOfDouble(ulong bits) {
+    bool negative = bits >> 63 == 1
+    int exponent = int((bits >> 52) & 2047)
+    ulong mantissa = bits & 4503599627370495
+    if exponent == 2047 {
+        return NoDigits(mantissa != 0, negative)
+    }
+
+    if exponent == 0 && mantissa == 0 {
+        return ZeroText(negative)
+    }
+
+    mut ulong digits = 0
+    mut int power = 0
+    DoubleDigits(mantissa, exponent, mut digits, mut power)
+    return DecimalText(negative, digits, power, 17)
+}
+
+// The text of a `float`, given its 32 bits (A8, A11): the fewest digits that read back as the same
+// `float`, written as .NET Core 3.0 and later write a `float`, and the values without digits as a
+// `double` shows them.
+pub string TextOfFloat(uint bits) {
+    bool negative = bits >> 31 == 1
+    int exponent = int((bits >> 23) & 255)
+    ulong mantissa = ulong(bits & 8388607)
+    if exponent == 255 {
+        return NoDigits(mantissa != 0, negative)
+    }
+
+    if exponent == 0 && mantissa == 0 {
+        return ZeroText(negative)
+    }
+
+    mut ulong digits = 0
+    mut int power = 0
+    FloatDigits(mantissa, exponent, mut digits, mut power)
+    return DecimalText(negative, digits, power, 9)
+}
+
 // Two strings joined (T15): the bytes of the first, then those of the second; more bytes than the
 // largest `int` end the process as a refused allocation does.
 pub string Concat(string first, string second) {
@@ -352,4 +395,624 @@ void WriteNumber(ulong value) {
 
         unit = unit / 10
     }
+}
+
+// The text of an infinity or of NaN (A14).
+string NoDigits(bool nan, bool negative) {
+    if nan {
+        return "NaN"
+    }
+
+    if negative {
+        return "-Infinity"
+    }
+
+    return "Infinity"
+}
+
+// The text of a zero, `-0` for a negative one (A14).
+string ZeroText(bool negative) {
+    if negative {
+        return "-0"
+    }
+
+    return "0"
+}
+
+// The text of `digits` times ten to the `power`, `-` before it when `negative`, as .NET writes a
+// `double` (`precision` 17) or a `float` (9) with the invariant culture: where the part before the
+// point would take more places than both the count of the digits and the precision, or more than
+// three zeros would stand between the point and the first digit, the exponent form `1.5E+09`, with
+// `E`, the sign and two digits or more; otherwise the digits with the point among them, after `0.`
+// and zeros, or before zeros.
+string DecimalText(bool negative, ulong digits, int power, int precision) {
+    mut int count = 1
+    mut ulong rest = digits / 10
+    while rest > 0 {
+        count = count + 1
+        rest = rest / 10
+    }
+
+    int scale = count + power
+    mut long sign = 0
+    if negative {
+        sign = 1
+    }
+
+    mut string text = ""
+    if (scale > count && scale > precision) || scale < -3 {
+        mut int magnitude = scale - 1
+        mut byte mark = 43
+        if magnitude < 0 {
+            magnitude = -magnitude
+            mark = 45
+        }
+
+        mut int width = 2
+        if magnitude >= 100 {
+            width = 3
+        }
+
+        mut long point = 0
+        if count > 1 {
+            point = 1
+        }
+
+        long at = sign + point + long(count)
+        long total = at + 2 + long(width)
+        raw {
+            byte* p = Allocate(total)
+            WriteDigits(p + sign + point, digits, count)
+            if count > 1 {
+                p[sign] = p[sign + 1]
+                p[sign + 1] = 46
+            }
+
+            p[at] = 69
+            p[at + 1] = mark
+            WriteDigits(p + at + 2, ulong(magnitude), width)
+            if negative {
+                p[0] = 45
+            }
+
+            text = string.FromRaw(p, total)
+        }
+    } else if scale <= 0 {
+        long zeros = long(-scale)
+        long total = sign + 2 + zeros + long(count)
+        raw {
+            byte* p = Allocate(total)
+            p[sign] = 48
+            p[sign + 1] = 46
+            mut long i = 0
+            while i < zeros {
+                p[sign + 2 + i] = 48
+                i = i + 1
+            }
+
+            WriteDigits(p + sign + 2 + zeros, digits, count)
+            if negative {
+                p[0] = 45
+            }
+
+            text = string.FromRaw(p, total)
+        }
+    } else if scale >= count {
+        long total = sign + long(scale)
+        raw {
+            byte* p = Allocate(total)
+            WriteDigits(p + sign, digits, count)
+            mut long i = sign + long(count)
+            while i < total {
+                p[i] = 48
+                i = i + 1
+            }
+
+            if negative {
+                p[0] = 45
+            }
+
+            text = string.FromRaw(p, total)
+        }
+    } else {
+        long total = sign + long(count) + 1
+        raw {
+            byte* p = Allocate(total)
+            WriteDigits(p + sign + 1, digits, count)
+            mut long i = 0
+            while i < long(scale) {
+                p[sign + i] = p[sign + 1 + i]
+                i = i + 1
+            }
+
+            p[sign + long(scale)] = 46
+            if negative {
+                p[0] = 45
+            }
+
+            text = string.FromRaw(p, total)
+        }
+    }
+
+    return text
+}
+
+// The `count` decimal digits of `value` at `p`, the last one at `p + count - 1`.
+void WriteDigits(byte* p, ulong value, int count) {
+    mut ulong v = value
+    mut long i = long(count) - 1
+    raw {
+        while i >= 0 {
+            p[i] = byte(v % 10 + 48)
+            v = v / 10
+            i = i - 1
+        }
+    }
+}
+
+// The digits of a finite nonzero `double`, given the fields of its 64 bits, and the power of ten they are
+// multiplied by (Ryu's d2d): the 128-bit products of 5^q and of 2^k / 5^q bracket the value and its two
+// bounds, and the digits are cut from the right while the bounds still differ.
+void DoubleDigits(ulong mantissa, int exponent, mut ulong digits, mut int power) {
+    mut int e2 = 1 - 1077
+    mut ulong m2 = mantissa
+    if exponent != 0 {
+        e2 = exponent - 1077
+        m2 = 4503599627370496 | mantissa
+    }
+
+    bool even = (m2 & 1) == 0
+    ulong mv = 4 * m2
+    mut ulong mmShift = 0
+    if mantissa != 0 || exponent <= 1 {
+        mmShift = 1
+    }
+
+    mut ulong vr = 0
+    mut ulong vp = 0
+    mut ulong vm = 0
+    mut int e10 = 0
+    mut bool vmZeros = false
+    mut bool vrZeros = false
+    mut ulong high = 0
+    if e2 >= 0 {
+        mut int q = Log10Pow2(e2)
+        if e2 > 3 {
+            q = q - 1
+        }
+
+        e10 = q
+        int i = -e2 + q + 125 + Pow5Bits(q) - 1
+        ulong low = InversePow5(q, mut high)
+        vr = MulShift64(mv, low, high, i)
+        vp = MulShift64(mv + 2, low, high, i)
+        vm = MulShift64(mv - 1 - mmShift, low, high, i)
+        if q <= 21 {
+            if mv % 5 == 0 {
+                vrZeros = Fives(mv) >= q
+            } else if even {
+                vmZeros = Fives(mv - 1 - mmShift) >= q
+            } else if Fives(mv + 2) >= q {
+                vp = vp - 1
+            }
+        }
+    } else {
+        mut int q = Log10Pow5(-e2)
+        if -e2 > 1 {
+            q = q - 1
+        }
+
+        e10 = q + e2
+        int i = -e2 - q
+        int j = q - Pow5Bits(i) + 125
+        ulong low = Pow5(i, mut high)
+        vr = MulShift64(mv, low, high, j)
+        vp = MulShift64(mv + 2, low, high, j)
+        vm = MulShift64(mv - 1 - mmShift, low, high, j)
+        if q <= 1 {
+            vrZeros = true
+            if even {
+                vmZeros = mmShift == 1
+            } else {
+                vp = vp - 1
+            }
+        } else if q < 63 {
+            vrZeros = (mv & ((ulong(1) << q) - 1)) == 0
+        }
+    }
+
+    mut int removed = 0
+    digits = Shortest(vr, vp, vm, vmZeros, vrZeros, even, 0, mut removed)
+    power = e10 + removed
+}
+
+// The same for a finite nonzero `float` (Ryu's f2d), through the high 64 bits of the same powers: one
+// removed digit is computed beside them, since the 64-bit products give one digit fewer.
+void FloatDigits(ulong mantissa, int exponent, mut ulong digits, mut int power) {
+    mut int e2 = 1 - 152
+    mut ulong m2 = mantissa
+    if exponent != 0 {
+        e2 = exponent - 152
+        m2 = 8388608 | mantissa
+    }
+
+    bool even = (m2 & 1) == 0
+    ulong mv = 4 * m2
+    ulong mp = mv + 2
+    mut ulong mmShift = 0
+    if mantissa != 0 || exponent <= 1 {
+        mmShift = 1
+    }
+
+    ulong mm = mv - 1 - mmShift
+    mut ulong vr = 0
+    mut ulong vp = 0
+    mut ulong vm = 0
+    mut int e10 = 0
+    mut bool vmZeros = false
+    mut bool vrZeros = false
+    mut ulong last = 0
+    if e2 >= 0 {
+        int q = Log10Pow2(e2)
+        e10 = q
+        int i = -e2 + q + 61 + Pow5Bits(q) - 1
+        ulong factor = InverseTop(q)
+        vr = MulShift32(mv, factor, i)
+        vp = MulShift32(mp, factor, i)
+        vm = MulShift32(mm, factor, i)
+        if q != 0 && (vp - 1) / 10 <= vm / 10 {
+            last = MulShift32(mv, InverseTop(q - 1), -e2 + q - 1 + 61 + Pow5Bits(q - 1) - 1) % 10
+        }
+
+        if q <= 9 {
+            if mv % 5 == 0 {
+                vrZeros = Fives(mv) >= q
+            } else if even {
+                vmZeros = Fives(mm) >= q
+            } else if Fives(mp) >= q {
+                vp = vp - 1
+            }
+        }
+    } else {
+        int q = Log10Pow5(-e2)
+        e10 = q + e2
+        int i = -e2 - q
+        int j = q - Pow5Bits(i) + 61
+        ulong factor = Pow5Top(i)
+        vr = MulShift32(mv, factor, j)
+        vp = MulShift32(mp, factor, j)
+        vm = MulShift32(mm, factor, j)
+        if q != 0 && (vp - 1) / 10 <= vm / 10 {
+            last = MulShift32(mv, Pow5Top(i + 1), q - 1 - Pow5Bits(i + 1) + 61) % 10
+        }
+
+        if q <= 1 {
+            vrZeros = true
+            if even {
+                vmZeros = mmShift == 1
+            } else {
+                vp = vp - 1
+            }
+        } else if q < 31 {
+            vrZeros = (mv & ((ulong(1) << (q - 1)) - 1)) == 0
+        }
+    }
+
+    mut int removed = 0
+    digits = Shortest(vr, vp, vm, vmZeros, vrZeros, even, last, mut removed)
+    power = e10 + removed
+}
+
+// The end of Ryu's algorithm: the fewest digits between the bounds `vm` and `vp` (each one a bound
+// itself where its zeros say the bound is exact and `even` lets it count), cut from the right of `vr`,
+// rounded by the digits cut, half to even where the value ends in a 5 and zeros; `removed` counts the
+// digits cut.
+ulong Shortest(ulong r, ulong p, ulong m, bool mZeros, bool rZeros, bool even, ulong lastDigit, mut int removed) {
+    mut ulong vr = r
+    mut ulong vp = p
+    mut ulong vm = m
+    mut bool vmZeros = mZeros
+    mut bool vrZeros = rZeros
+    mut ulong last = lastDigit
+    if vmZeros || vrZeros {
+        while vp / 10 > vm / 10 {
+            vmZeros = vmZeros && vm % 10 == 0
+            vrZeros = vrZeros && last == 0
+            last = vr % 10
+            vr = vr / 10
+            vp = vp / 10
+            vm = vm / 10
+            removed = removed + 1
+        }
+
+        if vmZeros {
+            while vm % 10 == 0 {
+                vrZeros = vrZeros && last == 0
+                last = vr % 10
+                vr = vr / 10
+                vp = vp / 10
+                vm = vm / 10
+                removed = removed + 1
+            }
+        }
+
+        if vrZeros && last == 5 && vr % 2 == 0 {
+            last = 4
+        }
+
+        if (vr == vm && (!even || !vmZeros)) || last >= 5 {
+            return vr + 1
+        }
+
+        return vr
+    }
+
+    while vp / 10 > vm / 10 {
+        last = vr % 10
+        vr = vr / 10
+        vp = vp / 10
+        vm = vm / 10
+        removed = removed + 1
+    }
+
+    if vr == vm || last >= 5 {
+        return vr + 1
+    }
+
+    return vr
+}
+
+// The top 125 bits of 5^i, i from 0 to 325: the low 64 returned, the high 64 into `high`. Computed from the
+// power of its row and 5^offset, then corrected by the two bits of `Pow5Offsets`.
+ulong Pow5(int i, mut ulong high) {
+    int row = i / 26
+    int offset = i - row * 26
+    ulong low = Pow5Low(row)
+    high = Pow5High(row)
+    if offset == 0 {
+        return low
+    }
+
+    ulong m = PowerOf5(offset)
+    mut ulong high1 = 0
+    ulong low1 = Multiply(m, high, mut high1)
+    mut ulong high0 = 0
+    ulong low0 = Multiply(m, low, mut high0)
+    ulong sum = high0 +% low1
+    if sum < high0 {
+        high1 = high1 + 1
+    }
+
+    int delta = Pow5Bits(i) - Pow5Bits(row * 26)
+    high = ShiftRight(sum, high1, delta)
+    return ShiftRight(low0, sum, delta) + ((ulong(Pow5Offsets(i / 16)) >> ((i % 16) * 2)) & 3)
+}
+
+// 2^(125 + n - 1) / 5^i plus one, n the bits of 5^i, i from 0 to 291: the low 64 returned, the high 64 into
+// `high`. Computed from the power of the row above it divided by 5^offset, then corrected by
+// `InversePow5Offsets`.
+ulong InversePow5(int i, mut ulong high) {
+    int row = (i + 25) / 26
+    int offset = row * 26 - i
+    ulong low = InversePow5Low(row)
+    high = InversePow5High(row)
+    if offset == 0 {
+        return low
+    }
+
+    ulong m = PowerOf5(offset)
+    mut ulong high1 = 0
+    ulong low1 = Multiply(m, high, mut high1)
+    mut ulong high0 = 0
+    ulong low0 = Multiply(m, low, mut high0)
+    ulong sum = high0 +% low1
+    if sum < high0 {
+        high1 = high1 + 1
+    }
+
+    int delta = Pow5Bits(row * 26) - Pow5Bits(i)
+    high = ShiftRight(sum, high1, delta)
+    return ShiftRight(low0, sum, delta) +% ((ulong(InversePow5Offsets(i / 16)) >> ((i % 16) * 2)) & 3) -% 1
+}
+
+// The high 64 bits of 5^i, for a `float` (Ryu's f2s through the table of the `double`).
+ulong Pow5Top(int i) {
+    mut ulong high = 0
+    Pow5(i, mut high)
+    return high
+}
+
+// The high 64 bits of 2^(125 + n - 1) / 5^i plus one, for a `float`.
+ulong InverseTop(int i) {
+    mut ulong high = 0
+    InversePow5(i, mut high)
+    return high + 1
+}
+
+// 5^n, n from 0 to 25.
+ulong PowerOf5(int n) {
+    mut ulong p = 1
+    mut int k = 0
+    while k < n {
+        p = p * 5
+        k = k + 1
+    }
+
+    return p
+}
+
+// The 128-bit product of two 64-bit numbers, from the products of their 32-bit halves: the low 64 bits
+// returned, the high 64 into `high`.
+ulong Multiply(ulong a, ulong b, mut ulong high) {
+    ulong a0 = a & 4294967295
+    ulong a1 = a >> 32
+    ulong b0 = b & 4294967295
+    ulong b1 = b >> 32
+    ulong b00 = a0 * b0
+    ulong mid1 = a1 * b0 + (b00 >> 32)
+    ulong mid2 = a0 * b1 + (mid1 & 4294967295)
+    high = a1 * b1 + (mid1 >> 32) + (mid2 >> 32)
+    return (mid2 << 32) | (b00 & 4294967295)
+}
+
+// The 64 bits of the 128-bit number `high`:`low` from bit `distance` up, 0 < distance < 64.
+ulong ShiftRight(ulong low, ulong high, int distance) => (high << (64 - distance)) | (low >> distance)
+
+// m times the 128-bit number `high`:`low`, shifted right by j bits, j at least 64, as 64 bits (m below 2^55).
+ulong MulShift64(ulong m, ulong low, ulong high, int j) {
+    mut ulong high1 = 0
+    ulong low1 = Multiply(m, high, mut high1)
+    mut ulong high0 = 0
+    Multiply(m, low, mut high0)
+    ulong sum = high0 +% low1
+    if sum < high0 {
+        high1 = high1 + 1
+    }
+
+    return ShiftRight(sum, high1, j - 64)
+}
+
+// m times a 64-bit factor, shifted right by `shift` bits, more than 32 (m below 2^32).
+ulong MulShift32(ulong m, ulong factor, int shift) {
+    ulong low = m * (factor & 4294967295)
+    ulong high = m * (factor >> 32)
+    return ((low >> 32) + high) >> (shift - 32)
+}
+
+// How often 5 divides `value`, which is not zero.
+int Fives(ulong value) {
+    mut ulong v = value
+    mut int count = 0
+    while v % 5 == 0 {
+        v = v / 5
+        count = count + 1
+    }
+
+    return count
+}
+
+// The bits of 5^e, e from 1 to 3528, and 1 for e = 0.
+int Pow5Bits(int e) => int((long(e) * 1217359) >> 19) + 1
+
+// The decimal exponent of 2^e rounded down, e from 0 to 1650.
+int Log10Pow2(int e) => (e * 78913) >> 18
+
+// The decimal exponent of 5^e rounded down, e from 0 to 2620.
+int Log10Pow5(int e) => (e * 732923) >> 20
+
+// The low 64 bits of the top 125 bits of 5^(26 * row), rows 0 to 12 (Ryu's small table, DOUBLE_POW5_SPLIT2).
+ulong Pow5Low(int row) => match row {
+    0 => 0x0
+    1 => 0x0
+    2 => 0xE549208B31ADB10
+    3 => 0x6DC6AD264D8F0866
+    4 => 0xEB1DBD923D8596CA
+    5 => 0xB4C1B80B22AE923C
+    6 => 0x5BB28B4E8F7E4C30
+    7 => 0xF08AED437682D4FB
+    8 => 0xB4EE134AD99BF150
+    9 => 0x16499ECB70C25F03
+    10 => 0x85A56EAD360865B0
+    11 => 0x93DB1D57999890B
+    else => 0xCF38BB735E3F36AC
+}
+
+// Their high 64 bits.
+ulong Pow5High(int row) => match row {
+    0 => 0x1000000000000000
+    1 => 0x14ADF4B7320334B9
+    2 => 0x1ABA4714957D300D
+    3 => 0x1145B7E285BF98F5
+    4 => 0x1652EFDC6018A1FC
+    5 => 0x1CDA62055B2D9D83
+    6 => 0x12A5568B9F52F416
+    7 => 0x1819651531F9E78F
+    8 => 0x1F25C186A6F04C28
+    9 => 0x1420EB449C8842E6
+    10 => 0x1A03FDE214CAF085
+    11 => 0x10CFEB353A97DAD8
+    else => 0x15BAAF44FA52673E
+}
+
+// The low 64 bits of 2^(125 + n - 1) / 5^(26 * row) plus one, n the bits of the power, rows 0 to 12
+// (Ryu's small table, DOUBLE_POW5_INV_SPLIT2).
+ulong InversePow5Low(int row) => match row {
+    0 => 0x1
+    1 => 0x52A6C95FC0655034
+    2 => 0x7CA8D50071DFC806
+    3 => 0x6520247D3556476E
+    4 => 0x6139CDD76802E6E9
+    5 => 0xF951A7FF43DE8C79
+    6 => 0x7BE8BEE8D6E957E8
+    7 => 0x8BD3F9E999A423EA
+    8 => 0x848F973CB3EE3CE
+    9 => 0x153285EBB9EFBFA2
+    10 => 0xADEEE7F86C07B696
+    11 => 0x4D686A4EAF182222
+    else => 0x98C0A106E09EBD9F
+}
+
+// Their high 64 bits.
+ulong InversePow5High(int row) => match row {
+    0 => 0x2000000000000000
+    1 => 0x18C240C4AECB13BB
+    2 => 0x1327FC58DA0F6FF5
+    3 => 0x1DA48CE468E7C702
+    4 => 0x16EF5B40C2FC7779
+    5 => 0x11BEBDF578B2F391
+    6 => 0x1B758D848FAC54B0
+    7 => 0x153EDA614071A3B7
+    8 => 0x10701BD527B4978C
+    9 => 0x196FBB9BB44DB44D
+    10 => 0x13AE3591F5B4D936
+    11 => 0x1E74404F3DAADA91
+    else => 0x17900EA4FDA7C257
+}
+
+// What the low 64 bits of 5^i computed from its row lack, two bits for each i, 16 to a word: words 0 to 20.
+uint Pow5Offsets(int row) => match row {
+    0 => 0x0
+    1 => 0x0
+    2 => 0x0
+    3 => 0x0
+    4 => 0x40000000
+    5 => 0x59695995
+    6 => 0x55545555
+    7 => 0x56555515
+    8 => 0x41150504
+    9 => 0x40555410
+    10 => 0x44555145
+    11 => 0x44504540
+    12 => 0x45555550
+    13 => 0x40004000
+    14 => 0x96440440
+    15 => 0x55565565
+    16 => 0x54454045
+    17 => 0x40154151
+    18 => 0x55559155
+    19 => 0x51405555
+    else => 0x105
+}
+
+// The same for 2^(125 + n - 1) / 5^i plus one, each plus one: words 0 to 18.
+uint InversePow5Offsets(int row) => match row {
+    0 => 0xAAAA9AA9
+    1 => 0x5556AA5A
+    2 => 0x25555555
+    3 => 0x55955959
+    4 => 0x9A666559
+    5 => 0x9A6AAAAA
+    6 => 0x554559A6
+    7 => 0x515A5554
+    8 => 0x55555554
+    9 => 0x69555A96
+    10 => 0x555A99A9
+    11 => 0xAA655699
+    12 => 0xA66965A9
+    13 => 0x96959555
+    14 => 0x56555566
+    15 => 0x55965A55
+    16 => 0xAAA6A955
+    17 => 0x5AAAAAAA
+    else => 0x56
 }

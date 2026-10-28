@@ -144,7 +144,7 @@ compiler refuses gets its lines on standard error, one per diagnostic in the ord
 and no executable, and the command exits with 1:
 
     hello.kz:3: unknown-name: `y` is not declared
-    hello.kz:1: not supported: a value of type `double` (T2)
+    hello.kz:1: not supported: a value of type `decimal` (T2)
 
 The file is named as the command line gave it. The command grants a program neither `raw` nor
 `native` (R7, R16): a program that needs them is refused with the grant's error. It refuses to
@@ -238,7 +238,8 @@ A build checks the runtime for its target and emits it into the program's module
 under IR names of their own; nothing of it is compiled apart (record, section 2, round 17). The
 emitted `main` calls the runtime's `Start`, then the program's top level, then `Finish`, which ends
 the process with the exit code 0 through the target's `Exit`, the runtime's one exit (section 6).
-`common/` gives what the emitted code calls: `Print`, the text of an integer and of a `char`, the
+`common/` gives what the emitted code calls: `Print`, the text of an integer, of a `char` and of a
+`float` and a `double` (below), the
 joining and the comparison of two strings, the text of a list from the texts of its items,
 `Raise` for an exception of the run-time table and `Throw`, and `Allocate`, which takes its memory
 from the allocator's entry, `std/`'s `Allocate` (record, section 2), and ends the process where the
@@ -256,6 +257,20 @@ target's `Release`; the mebibytes a thread carved from stay its own. A target's 
 signal of a closed pipe to ignored and `Write` calling again where a signal interrupted it (section
 6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
+
+The text of a `float` and of a `double` is computed in `common/` from the value's bits, which the
+emitted code passes as a `uint` and a `ulong`: the fewest digits that read back as the same value,
+of those the nearest, by Ryu's algorithm as Rust's `ryu` crate computes it with its small table (each
+128-bit power of five, and of its inverse, from one of thirteen rows and the power of five below 26
+between, with a correction of two bits per power, and a `float` through the high 64 bits of the same
+powers), laid out as .NET Core 3.0 and later write a `double` and a `float` with the invariant culture
+(A4, A11, A14): the exponent form from `1E+17` for a `double` and from `1E+09` for a `float` (the
+owner, 2026-10-28, "As .NET prints: 1E+17" and "As C# prints a float"), and below `1E-04`, with `E`,
+a sign and two digits or more. Where .NET 10 writes a text that does not read back as the value, as
+for 2^-25 and 2^-958, the text is A4's, the fewest digits that do. `FloatingTests` holds the text of
+20000 values of a xorshift sequence, of the largest value with each exponent, the smallest and the one
+after it, and of the powers of ten and their neighbours, of a `double` and of a `float`, to what .NET
+writes.
 
 The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
@@ -275,8 +290,8 @@ module of the three, which the
 pinned clang compiles at `-O2` and links with the C library as the platform links it, and with the
 library a block of C functions names (R16). It emits:
 
-- the integers, `bool`, `char` and `string`, and pointers to them and C function types over them
-  (T2, T21, T15, R10, R17); a string is its bytes and their count, at most the largest `int` of
+- the integers, `float` and `double`, `bool`, `char` and `string`, and pointers to them and C
+  function types over them (T2, T21, T15, R10, R17); a string is its bytes and their count, at most the largest `int` of
   them, a longer one, by a join or by `string.FromRaw`, ending the program with `allocation-failed`
   (T15), and the empty string's bytes are a constant of none, never at the address 0 (R15);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
@@ -284,12 +299,17 @@ library a block of C functions names (R16). It emits:
   called with (T19, T27);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
-  operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20);
+  operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
+  `float` and a `double` IEEE 754's operations, as C# has them, by zero `/` giving an infinity or NaN
+  and `%` NaN, NaN equal to nothing (T18, T25), an integer widened into them (T23), and a conversion
+  into an integer type that drops the fraction and, where it loses the value, raises `overflow` in a
+  test build and saturates in a release build, NaN to 0 (T26);
 - `if`, `while`, `for` over a range, which raises `reversed-range-at-run-time` (C8), `break`,
   `continue` and `return` (chapter 10), and `throw` of a value (O6);
 - `data` types and their values, made with defaults and arguments by name (D1, D2, D8, D11), their
   fields (D14), `with` (D5), an assignment into a path, its value first (M4), a value of a derived type where its
-  base is required (D6, D7), `==` field by field and never equal across types (D3, D15), and their
+  base is required (D6, D7), `==` field by field, a `float` or a `double` field as C#'s `Equals`
+  compares it, NaN equal to NaN (D3), and never equal across types (D3, D15), and their
   text, a generic type's under the name its declaration gives (A3);
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), their text, the text of the case's value
@@ -347,7 +367,8 @@ changes the list through a `mut` parameter is `changed-while-held` (M7), so the 
 reads its argument and its list is not seen. What `Add`'s argument made besides its item, the
 environment of a lambda it gave to a call among them, is let go of before the list is read, so that
 no count it held makes the list copy its items: the environment counts what its lambda read (F15),
-as M7 states (section 4, the owner, 2026-10-28, "Pass, as Rust"). The count
+as M7 states for the environment (section 4, the owner, 2026-10-28, "Pass, as Rust") and assumes for
+the rest. The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
@@ -392,7 +413,7 @@ the calls of `Where`'s test; the release of such an environment before the `Add`
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), `float`, `double` and `decimal` (T2), the durations and the
+`data` type or a union (R14), `decimal` (T2), the durations and the
 timestamps (T13), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` on a list in
 a field (M5), `==` on a value that holds a list (D3), a list's `Pointer` and `List<T>.FromRaw`
@@ -405,7 +426,7 @@ values that hold them (above) and for nothing else: memory a string or a value o
 a value of a block type holds among it (above), so a
 program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
-corpus runner lists every case the checker reads in full and the emitter does not emit, 26 of the
+corpus runner lists every case the checker reads in full and the emitter does not emit, 12 of the
 234 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The crash path is
 not emitted: a stack overflow
@@ -816,7 +837,8 @@ round can ask about it by the rule's id.
   `data` type when one of its type arguments can, whether a field stores it or not (section 4, the
   owner, 2026-10-28, "Counts, as Rust"), or when a field of it, its type read with the type's
   arguments in place of its parameters as section 4 assumes, or of a type derived from it can
-  ("confirmed"), at any depth: a type met again on the way, `Box` in `Box<Box<() => int>>`, answers by its type arguments
+  ("confirmed"), at any depth: a type met again on the way, `Q<() => int>` through the field `N` of a
+  `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
   itself with other arguments, `P<List<T>>` in a `P<T>`. A map, a nullable type and a class, which
   section 4 assumes can hold one, the checker says `not supported` to (M9, N1, chapter 7) before the
