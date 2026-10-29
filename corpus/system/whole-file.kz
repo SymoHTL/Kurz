@@ -1,0 +1,18 @@
+// expect: output
+// | 3
+// | abc
+// rules: S6
+
+void | IoError Whole() {
+    File.WriteAll("whole.txt", "abc".Bytes)
+    bytes = File.ReadAll("whole.txt")
+    print(bytes.Count)
+    print(string.FromUtf8(bytes) else {
+        InvalidUtf8 => "not UTF-8"
+    })
+    File.Delete("whole.txt")
+}
+
+Whole() else {
+    IoError e => print(e)
+}

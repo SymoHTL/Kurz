@@ -234,7 +234,7 @@ directory, the one directory the tree gate's allowlist was widened by for it: th
 project files nowhere else (since pull
 request 29 retired the design-phase rule, after the owner said build on 2026-10-09). It holds the
 library `Kurz.Compiler` (`Text/` reads a source file, `Syntax/` lexes and parses it, `Semantics/`
-checks the tree against the rules of chapters 1 to 3, 5, 6, 8 to 10 and 11's raw forms that
+checks the tree against the rules of chapters 1 to 3, 5, 6, 8 to 10, 11's raw forms and 13's calls on files that
 `compiler/README.md` lists, and says `not supported` to the rest, `Emit/` turns a program the checker read
 in full, the runtime of its target and the standard library into LLVM's IR, `Corpus/` reads a case header,
 `Build/` finds the clang of the pinned LLVM major, carries and checks the runtime and the standard library,

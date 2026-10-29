@@ -199,9 +199,10 @@ public sealed partial class Checker
 
     private void Run(ProgramSyntax program)
     {
-        // T15, D18: the data types of the case `string.FromUtf8` returns besides its string and of the case an enum's `From` returns
-        // besides its value, declared before the file's own types, so that a declaration of their names is `redeclared` (V9; section 4,
-        // the owner, 2026-10-29, "Union, as Rust" and "Built-in, no fields")
+        // T15, D18, S1: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From` returns
+        // besides its value and of the case a call on a file returns where it failed, declared before the file's own types, so that a
+        // declaration of their names is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union, as Rust" and "Built-in, no fields";
+        // section 12, the owner, 2026-10-29, "One union, as Rust")
         foreach (var s in BuiltInTypes.Statements)
         {
             DeclareType((TypeDeclaration)s);
@@ -364,7 +365,7 @@ public sealed partial class Checker
             // a built-in name among them: `data List` could never be named (M9, T17); a built-in data type names the rule that declares it,
             // since no line of the file does
             Report(ErrorIds.Redeclared, d.Line, BuiltInTypeRules.TryGetValue(d.Name, out var rule)
-                ? $"`{d.Name}` is a data type every file sees, declared before the file's own types ({rule}, V9)"
+                ? $"`{d.Name}` is {(enums.ContainsKey(d.Name) ? "an enum" : "a data type")} every file sees, declared before the file's own types ({rule}, V9)"
                 : $"the name `{d.Name}` is declared already (V9)");
         }
 
@@ -818,6 +819,23 @@ public sealed partial class Checker
             return Types.Error;
         }
 
+        if (n.Name is "File" or "TcpListener" or "TcpStream")
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (S5, S9, T17)");
+                return Types.Error;
+            }
+
+            if (n.Name != "File")
+            {
+                NotSupported(n.Line, "a socket (S9)");
+                return Types.Error;
+            }
+
+            return Types.File;
+        }
+
         var parameter = TypeParameter(n.Name);
         if (parameter is not null)
         {
@@ -1234,17 +1252,38 @@ public sealed partial class Checker
     private bool IsDeclaredName(string name) =>
         functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
 
-    /// <summary>The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9).</summary>
-    private static bool IsBuiltInName(string name) => name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes";
+    /// <summary>
+    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9), and the types of
+    /// files and sockets and their functions (S2, S8, S9).
+    /// </summary>
+    private static bool IsBuiltInName(string name) =>
+        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream";
 
-    /// <summary>The rule that declares each data type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18" };
+    /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1" };
 
     /// <summary>
-    /// The data types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
-    /// (T15), and <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18).
+    /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
+    /// (T15), <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18), and <c>IoError</c> with its <c>IoKind</c>, the
+    /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux (S1; section 12, the owner,
+    /// 2026-10-29, "One union, as Rust").
     /// </summary>
-    private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(SourceText.FromString("<built-in>", "data InvalidUtf8(int At)\ndata Invalid\n"), new DiagnosticBag());
+    private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(
+        SourceText.FromString(
+            "<built-in>",
+            """
+            data InvalidUtf8(int At)
+            data Invalid
+            enum IoKind {
+                NotFound, PermissionDenied, AlreadyExists, NotADirectory, IsADirectory, DirectoryNotEmpty, ReadOnlyFilesystem,
+                FilesystemLoop, StaleNetworkFileHandle, InvalidInput, InvalidFilename, ArgumentListTooLong, StorageFull, FilesystemQuotaExceeded,
+                FileTooLarge, NotSeekable, TooManyLinks, CrossesDevices, ResourceBusy, ExecutableFileBusy, Deadlock, Interrupted, WouldBlock,
+                OutOfMemory, Unsupported, TimedOut, BrokenPipe, AddressInUse, AddressNotAvailable, NetworkDown, NetworkUnreachable,
+                HostUnreachable, ConnectionRefused, ConnectionReset, ConnectionAborted, NotConnected, WriteZero, InvalidData, Other
+            }
+            data IoError(IoKind Kind, int Code, string Path)
+            """),
+        new DiagnosticBag());
 
     private void PushScope() => frame.Scope = new Scope { Parent = frame.Scope };
 

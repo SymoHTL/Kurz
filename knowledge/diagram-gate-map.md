@@ -99,7 +99,7 @@ flowchart TD
         pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, red on
         output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 205 cases run on Linux or 204 on Windows, and on Linux on a crash whose trace is empty, holds a line that
+        than 215 cases run on Linux or 205 on Windows, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start
         at the error line's place; TraceTests, red on a trace
         other than the one each Linux program pins: its frames, names and lines, the cut and its count, the
@@ -135,7 +135,12 @@ flowchart TD
         down, on the text of a timestamp other than its instant in UTC as RFC 3339 and chrono write it, on time
         arithmetic or a conversion into the narrow pair beyond the range that does not raise in a test and a
         release build, on one at the edges that does, on a wide value not aligned to 16, and on a widening, a
-        comparison, a field, a union, a list or a hole of them that shows another value.
+        comparison, a field, a union, a list or a hole of them that shows another value; and FileTests, red on a
+        file that stays open after the last value that holds it let go of it, under a limit of 32 descriptors, on a
+        close through one copy that leaves the other open, on a read into a list another value holds that changes
+        that value, on a count and a max past the largest int that read before allocation-failed, on a directory
+        created again that fails, on the text of an error without a path, and on a build for Windows that does not
+        say not supported at a call on a file.
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
         no program of them"]

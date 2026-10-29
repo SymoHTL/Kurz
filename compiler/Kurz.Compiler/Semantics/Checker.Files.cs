@@ -1,0 +1,77 @@
+using Kurz.Compiler.Syntax;
+
+namespace Kurz.Compiler.Semantics;
+
+public sealed partial class Checker
+{
+    // ---- files (chapter 13) ------------------------------------------------------------------------
+
+    /// <summary>The case every call on a file returns where it failed (S1).</summary>
+    private DataType IoError => new(dataTypes["IoError"], []);
+
+    /// <summary>
+    /// S2, S6, S7, S8: a function of <c>File</c> or <c>Directory</c> on a path, a <c>string</c>, whose result is its success or the case
+    /// <c>IoError</c> (S1; section 12, the owner, 2026-10-29, "One union, as Rust" and "Rust's types, Kurz casing").
+    /// </summary>
+    private Typed CheckFileFunction(string type, MemberAccess m, CallExpression c)
+    {
+        var bytes = new ListType(Types.Byte);
+        Slot Path(string name) => new(name, Types.String, false, false, false);
+        (CallKind Kind, List<Slot> Slots, KurzType Success)? function = (type, m.Member) switch
+        {
+            ("File", "Open") => (CallKind.FileOpen, [Path("path")], Types.File),
+            ("File", "Create") => (CallKind.FileCreate, [Path("path")], Types.File),
+            ("File", "ReadAll") => (CallKind.FileReadAll, [Path("path")], bytes),
+            ("File", "WriteAll") => (CallKind.FileWriteAll, [Path("path"), new Slot("bytes", bytes, false, false, false)], Types.Void),
+            ("File", "Delete") => (CallKind.FileDelete, [Path("path")], Types.Void),
+            ("File", "Rename") => (CallKind.FileRename, [Path("from"), Path("to")], Types.Void),
+            ("File", "Size") => (CallKind.FileSize, [Path("path")], Types.Long),
+            ("File", "Exists") => (CallKind.FileExists, [Path("path")], Types.Bool),
+            ("Directory", "Create") => (CallKind.DirectoryCreate, [Path("path")], Types.Void),
+            ("Directory", "List") => (CallKind.DirectoryList, [Path("path")], new ListType(Types.String)),
+            ("Directory", "Delete") => (CallKind.DirectoryDelete, [Path("path")], Types.Void),
+            _ => null,
+        };
+        if (function is not { } f)
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`{type}` has no function `{m.Member}` (S2, S6 to S8, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, $"`{type}.{m.Member}`"))
+        {
+            return Typed.Error;
+        }
+
+        var candidate = new Candidate { Slots = f.Slots, Result = Types.Union([f.Success, IoError]) };
+        return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
+    }
+
+    /// <summary>S3, S4, S5: a file's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>, each with the case <c>IoError</c>.</summary>
+    private Typed CheckFileMethod(MemberAccess m, CallExpression c)
+    {
+        var bytes = new ListType(Types.Byte);
+        (CallKind Kind, List<Slot> Slots, KurzType Success)? method = m.Member switch
+        {
+            "Read" => (CallKind.FileRead, [new Slot("into", bytes, true, false, false), new Slot("max", Types.Int, false, false, false)], Types.Int),
+            "Write" => (CallKind.FileWrite, [new Slot("bytes", bytes, false, false, false)], Types.Void),
+            "Close" => (CallKind.FileClose, [], Types.Void),
+            _ => null,
+        };
+        if (method is not { } f)
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"a `File` has no member `{m.Member}` (S3 to S5, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, $"`{m.Member}`"))
+        {
+            return Typed.Error;
+        }
+
+        var candidate = new Candidate { Slots = f.Slots, Result = Types.Union([f.Success, IoError]) };
+        return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
+    }
+}

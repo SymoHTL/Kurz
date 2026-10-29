@@ -1,0 +1,22 @@
+// expect: output
+// | [one.txt]
+// | DirectoryNotEmpty
+// | false
+// rules: S8
+
+void | IoError Tree() {
+    Directory.Create("tree/inner")
+    File.WriteAll("tree/inner/one.txt", "1".Bytes)
+    print(Directory.List("tree/inner"))
+    Directory.Delete("tree/inner") else {
+        IoError e => print(e.Kind)
+    }
+    File.Delete("tree/inner/one.txt")
+    Directory.Delete("tree/inner")
+    Directory.Delete("tree")
+    print(File.Exists("tree"))
+}
+
+Tree() else {
+    IoError e => print(e)
+}

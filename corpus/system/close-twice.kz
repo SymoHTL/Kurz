@@ -1,0 +1,20 @@
+// expect: output
+// | other: twice.txt
+// | 9
+// rules: S5
+
+void | IoError Twice() {
+    f = File.Create("twice.txt")
+    File.Delete("twice.txt")
+    f.Close()
+    f.Close() else {
+        IoError e => {
+            print(e)
+            print(e.Code)
+        }
+    }
+}
+
+Twice() else {
+    IoError e => print(e)
+}
