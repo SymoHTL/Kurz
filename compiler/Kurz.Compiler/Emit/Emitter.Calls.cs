@@ -26,10 +26,13 @@ public sealed partial class Emitter
             CallKind.SizeOf => SizeOf(Sub(info.Target!), c.Line),
             CallKind.FromRaw when info.Target is PrimitiveType { Kind: Primitive.String } => EmitStringFromRaw(c),
             CallKind.StringAllocate => EmitStringAllocate(c),
+            CallKind.ListAllocate => EmitListAllocate(c, info),
+            CallKind.FromUtf8 => EmitFromUtf8(c, info, lossy: false),
+            CallKind.FromUtf8Lossy => EmitFromUtf8(c, info, lossy: true),
             CallKind.ListNew => "null", // M9: a list without items, which takes no block
             CallKind.ListAdd => EmitListAddCall(c),
             CallKind.ListWhere => EmitListWhere(c, info),
-            CallKind.FromRaw => throw Unsupported(c.Line, "`List<T>.FromRaw` (R15)"),
+            CallKind.FromRaw => EmitListFromRaw(c, info),
             CallKind.DataNew => EmitConstruction(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),
         };
@@ -373,6 +376,7 @@ public sealed partial class Emitter
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {count})");
         fn.Unreachable();
         fn.Block(fits);
+        fn.Emit($"call void {StdFunction("StringTakeOver")}(ptr {pointer}, i64 {count})"); // the count in the block, which `s.Bytes` shares (T15)
         var withPointer = fn.Value($"insertvalue %kz.str undef, ptr {pointer}, 0");
         return fn.Value($"insertvalue %kz.str {withPointer}, i64 {fn.Value($"or i64 {count}, -9223372036854775808")}, 1");
     }
@@ -383,5 +387,82 @@ public sealed partial class Emitter
         var info = Model.CallOf(c);
         var size = Arguments(c, info, _ => Types.Long, _ => false, _ => null, cConvention: false, owned: false).Single();
         return fn.Value($"call ptr {RuntimeFunction("AllocateString")}({size})");
+    }
+
+    /// <summary>
+    /// R15: <c>List&lt;T&gt;.Allocate(n)</c>, the address of room for <c>n</c> items in a list's block, which <c>List&lt;T&gt;.FromRaw</c>
+    /// takes over (the owner, 2026-10-29, "List.Allocate, take over"); more items than the largest <c>int</c> end the process as a longer
+    /// list does, with the bytes of those items, and a block the system refuses with the bytes asked for (M9).
+    /// </summary>
+    private string EmitListAllocate(CallExpression c, CallInfo info)
+    {
+        var list = (ListType)Sub(info.Target!);
+        var count = Arguments(c, info, _ => Types.Long, _ => false, _ => null, cConvention: false, owned: false).Single();
+        var asked = fn.Alloca("i64", "asked");
+        var items = fn.Value($"call ptr {StdFunction("ListAllocate")}({count}, i64 {ItemSize(list.Element)}, ptr {asked})");
+        Refused(fn.Value($"icmp eq ptr {items}, null"), asked);
+        return items;
+    }
+
+    /// <summary>
+    /// R15: <c>List&lt;T&gt;.FromRaw(p, n)</c>, the list of the <c>n</c> items at <c>p</c>, which takes over the block
+    /// <c>List&lt;T&gt;.Allocate</c> gave (the owner, 2026-10-29, "List.Allocate, take over"); an <c>n</c> above the largest <c>int</c> ends
+    /// the process as a longer list does, with the bytes of its items (M9).
+    /// </summary>
+    private string EmitListFromRaw(CallExpression c, CallInfo info)
+    {
+        var list = (ListType)Sub(info.Target!);
+        var arguments = Arguments(c, info, j => j == 0 ? new PointerType(list.Element) : Types.Long, _ => false, _ => null, cConvention: false, owned: false);
+        var pointer = arguments[0]["ptr ".Length..];
+        var count = arguments[1]["i64 ".Length..];
+        var tooLong = fn.Label("too.long");
+        var fits = fn.Label("fits");
+        fn.CondBranch(fn.Value($"icmp sgt i64 {count}, 2147483647"), tooLong, fits);
+        fn.Block(tooLong);
+        fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {fn.Value($"mul i64 {count}, {ItemSize(list.Element)}")})");
+        fn.Unreachable();
+        fn.Block(fits);
+        return fn.Value($"call ptr {StdFunction("ListTakeOver")}(ptr {pointer}, i64 {count})");
+    }
+
+    /// <summary>
+    /// T15: <c>string.FromUtf8(b)</c>, the string of the bytes of <c>b</c>, which shares their block, or the case <c>InvalidUtf8</c> with
+    /// the count of the bytes in front of the first sequence that is not UTF-8; and <c>string.FromUtf8Lossy(b)</c>, that string, or where
+    /// a sequence is not UTF-8 a new one with U+FFFD for each maximal part of one (section 4, the owner, 2026-10-29, "Union, as Rust").
+    /// </summary>
+    private string EmitFromUtf8(CallExpression c, CallInfo info, bool lossy)
+    {
+        var list = Arguments(c, info, _ => new ListType(Types.Byte), _ => false, _ => null, cConvention: false, owned: false).Single()["ptr ".Length..];
+        var count = fn.Value($"zext i32 {ListCount(list)} to i64");
+        var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
+        var invalid = fn.Value($"call i64 {RuntimeFunction("Utf8Invalid")}(ptr {items}, i64 {count})");
+        var result = Sub(info.Result);
+        var slot = fn.Alloca(Ir(result), "text");
+        var valid = fn.Label("utf8");
+        var bad = fn.Label("not.utf8");
+        var done = fn.Label("utf8.done");
+        fn.CondBranch(fn.Value($"icmp slt i64 {invalid}, 0"), valid, bad);
+        fn.Block(valid);
+        var shared = SharedText(list, count);
+        fn.Emit($"store {Ir(result)} {(lossy ? shared : MakeUnion((UnionType)result, Types.String, shared))}, ptr {slot}");
+        fn.Branch(done);
+        fn.Block(bad);
+        string other;
+        if (lossy)
+        {
+            other = fn.Value($"call %kz.str {RuntimeFunction("Utf8Lossy")}(ptr {items}, i64 {count})");
+        }
+        else
+        {
+            var union = (UnionType)result;
+            var data = union.Cases[1];
+            var at = fn.Value($"insertvalue {Ir(data)} undef, i32 {fn.Value($"trunc i64 {invalid} to i32")}, 0");
+            other = MakeUnion(union, data, at);
+        }
+
+        fn.Emit($"store {Ir(result)} {other}, ptr {slot}");
+        fn.Branch(done);
+        fn.Block(done);
+        return fn.Value($"load {Ir(result)}, ptr {slot}");
     }
 }

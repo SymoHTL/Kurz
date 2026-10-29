@@ -191,7 +191,10 @@ public sealed partial class Emitter
         return result ?? StringValue(string.Empty);
     }
 
-    /// <summary>A field of a data value (D1), a string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself, and a list's <c>Count</c> (M9); every other member is not emitted.</summary>
+    /// <summary>
+    /// A field of a data value (D1), a string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself,
+    /// a string's <c>Bytes</c> as a list (T15), and a list's <c>Count</c> (M9) and <c>Pointer</c> (R15); every other member is not emitted.
+    /// </summary>
     private string EmitMember(MemberAccess m)
     {
         var targetType = TypeOf(m.Target);
@@ -208,12 +211,14 @@ public sealed partial class Emitter
                     return fn.Value($"trunc i64 {count} to i32");
                 }
 
-            case PrimitiveType { Kind: Primitive.String } when m.Member is "Bytes" or "Chars":
-                throw Unsupported(m.Line, $"`s.{m.Member}` as a list (T15)");
+            case PrimitiveType { Kind: Primitive.String } when m.Member == "Bytes":
+                return Temp(StringBytes(EmitExpression(m.Target)), new ListType(Types.Byte));
+            case PrimitiveType { Kind: Primitive.String } when m.Member == "Chars":
+                throw Unsupported(m.Line, "`s.Chars` as a list (T15)");
             case ListType when m.Member == "Count":
                 return ListCount(EmitExpression(m.Target));
-            case ListType when m.Member == "Pointer":
-                throw Unsupported(m.Line, "`l.Pointer` (R15)");
+            case ListType list when m.Member == "Pointer":
+                return ListPointer(EmitExpression(m.Target), list.Element);
 
             default:
                 throw Unsupported(m.Line, $"the member `{m.Member}` of {Lower.Refusal(targetType)}");

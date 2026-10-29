@@ -112,6 +112,11 @@ public sealed partial class Checker
                         return CheckListConstruction(c);
                     }
 
+                    if (n.Name == "Bytes")
+                    {
+                        return CheckBytesConstruction(c);
+                    }
+
                     if (n.Name == "Map")
                     {
                         NotSupported(c.Line, "Map (M9)");
@@ -539,6 +544,48 @@ public sealed partial class Checker
     }
 
     /// <summary>M9: <c>List&lt;T&gt;()</c> makes an empty list.</summary>
+    /// <summary>M9: <c>Bytes()</c>, an empty list of bytes, through the second name of <c>List&lt;byte&gt;</c> (section 4, the owner, 2026-10-29).</summary>
+    private Typed CheckBytesConstruction(CallExpression c)
+    {
+        if (RefusesTypeArguments(c, "`Bytes()`"))
+        {
+            return Typed.Error;
+        }
+
+        if (c.Arguments.Count != 0)
+        {
+            Report(ErrorIds.ArgumentMismatch, c.Line, "`Bytes()` takes no arguments (M9)");
+            CheckArgumentsLoosely(c);
+        }
+
+        var list = new ListType(Types.Byte);
+        model.RecordCall(c, new CallInfo(CallKind.ListNew, null, null, null, NoMap, [], 0, list));
+        return new Typed(list);
+    }
+
+    /// <summary>
+    /// T15: <c>string.FromUtf8(b)</c>, a string of the bytes of <c>b</c> or the case <c>InvalidUtf8</c>, and <c>string.FromUtf8Lossy(b)</c>,
+    /// a string with each sequence that is not UTF-8 read as U+FFFD (section 4, the owner, 2026-10-29, "Union, as Rust").
+    /// </summary>
+    private Typed CheckFromUtf8(CallExpression c, bool lossy)
+    {
+        var form = lossy ? "`string.FromUtf8Lossy`" : "`string.FromUtf8`";
+        if (RefusesTypeArguments(c, form))
+        {
+            return Typed.Error;
+        }
+
+        KurzType result = lossy ? Types.String : new UnionType([Types.String, new DataType(dataTypes["InvalidUtf8"], [])]);
+        var candidate = new Candidate { Slots = [new Slot("b", new ListType(Types.Byte), false, false, false)], Result = result };
+        var typed = Call([candidate], c, null, out var picked);
+        if (picked is not null && !typed.IsError)
+        {
+            model.RecordCall(c, new CallInfo(lossy ? CallKind.FromUtf8Lossy : CallKind.FromUtf8, null, null, result, NoMap, picked.Binding, 1, result));
+        }
+
+        return typed;
+    }
+
     private Typed CheckListConstruction(CallExpression c)
     {
         if (c.TypeArguments.Count != 1)
@@ -649,6 +696,21 @@ public sealed partial class Checker
             if (n.Name == "string" && m.Member == "Allocate")
             {
                 return CheckStringAllocate(c); // R15
+            }
+
+            if (n.Name == "string" && m.Member is "FromUtf8" or "FromUtf8Lossy")
+            {
+                return CheckFromUtf8(c, m.Member == "FromUtf8Lossy"); // T15
+            }
+
+            if (n.Name == "Bytes" && m.Member == "FromRaw")
+            {
+                return CheckFromRaw(c, new ListType(Types.Byte), Types.Byte, "Bytes.FromRaw"); // R15, through the second name of `List<byte>` (M9)
+            }
+
+            if (n.Name == "Bytes" && m.Member == "Allocate")
+            {
+                return CheckListAllocate(c, new ListType(Types.Byte), "Bytes.Allocate"); // R15, as above
             }
 
             if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))

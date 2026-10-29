@@ -342,11 +342,96 @@ pub byte* ListPush(byte* block, long item) {
     return slot
 }
 
-// The block of a string (T15, R15): the count of the string values that hold it, 8 bytes, the count
-// of bytes it has room for, 8 bytes, and from its 16th byte the bytes. A string value is the address
-// of its bytes and their count, whose highest bit marks a string that holds such a block; a literal
-// and the empty string hold none and are never freed (design record, section 3). A string never
-// changes, so no write copies a block; the emitted code counts the values that hold one.
+// A new block, held by one list value, with a copy of the `count` items at `items`, each `item` bytes,
+// and room for them: the part of a list (M9) and the bytes of a literal string (T15), whose items' own
+// blocks the caller counts. Null for no items, and null with `asked` set to the bytes asked for where
+// the system refuses.
+pub byte* ListOf(byte* items, long count, long item, mut long asked) {
+    if count == 0 {
+        return null
+    }
+
+    long size = 16 + count * item
+    mut byte* p = null
+    raw {
+        p = Allocate(size)
+        if p == null {
+            asked = size
+        } else {
+            *Ptr<long>(p) = 1
+            *Ptr<int>(p + 8) = int(count)
+            *Ptr<int>(p + 12) = int(count)
+            long n = count * item
+            mut long i = 0
+            while i < n {
+                p[16 + i] = items[i]
+                i = i + 1
+            }
+        }
+    }
+
+    return p
+}
+
+// The room for `count` items of `item` bytes in a new block, held by one list value, with no items,
+// which `List<T>.FromRaw` takes over (R15): the address of its first item. More items than the
+// largest `int` give null with `asked` set to the bytes of those items (M9); a block the system
+// refuses gives null with `asked` set to the bytes asked for.
+pub byte* ListAllocate(long count, long item, mut long asked) {
+    if count > 2147483647 {
+        asked = count * item
+        return null
+    }
+
+    long size = 16 + count * item
+    mut byte* p = null
+    raw {
+        byte* block = Allocate(size)
+        if block == null {
+            asked = size
+        } else {
+            *Ptr<long>(block) = 1
+            *Ptr<int>(block + 8) = 0
+            *Ptr<int>(block + 12) = int(count)
+            p = block + 16
+        }
+    }
+
+    return p
+}
+
+// The block of the items at `items`, which `ListAllocate` gave, holding `count` items: the list
+// `List<T>.FromRaw` makes (R15).
+pub byte* ListTakeOver(byte* items, long count) {
+    mut byte* block = null
+    raw {
+        block = items - 16
+        *Ptr<int>(block + 8) = int(count)
+    }
+
+    return block
+}
+
+// The address of the first item of a list's block, as a string's bytes, held by one more value: the
+// string `string.FromUtf8` makes of a list of bytes, which shares its block (T15). Null for a list
+// without a block.
+pub byte* ListString(byte* block) {
+    if block == null {
+        return null
+    }
+
+    ListRetain(block)
+    return ListItems(block)
+}
+
+// The block of a string (T15, R15), laid out as the block of a list of bytes, so that `s.Bytes` and a
+// string made of a list share it (section 4): the count of the values that hold it, 8 bytes, the count
+// of its bytes and the count of bytes it has room for, 4 bytes each, and from its 16th byte the bytes.
+// A string value is the address of its bytes and their count, whose highest bit marks a string that
+// holds such a block; a literal and the empty string hold none and are never freed (design record,
+// section 3). A string never changes, so no write copies a block; the emitted code counts the values
+// that hold one, and a list value that holds one copies it before it writes, as for any block other
+// values hold (M3).
 
 // A block of room for `size` bytes, held by one string value: the address of its bytes, null where
 // the system refuses.
@@ -356,7 +441,8 @@ pub byte* StringBlock(long size) {
         byte* block = Allocate(16 + size)
         if block != null {
             *Ptr<long>(block) = 1
-            *Ptr<long>(block + 8) = size
+            *Ptr<int>(block + 8) = 0
+            *Ptr<int>(block + 12) = int(size)
             bytes = block + 16
         }
     }
@@ -384,11 +470,31 @@ pub bool StringRelease(byte* bytes) {
     return last
 }
 
+// The count of the `count` bytes at `bytes`, which `string.Allocate` gave, written into their block:
+// what `string.FromRaw` takes over (R15).
+pub void StringTakeOver(byte* bytes, long count) {
+    raw {
+        *Ptr<int>(bytes - 8) = int(count)
+    }
+}
+
+// The block of a string's bytes, held by one more value, as a list of bytes: `s.Bytes` of a string that
+// holds a block (T15).
+pub byte* StringList(byte* bytes) {
+    mut byte* block = null
+    raw {
+        block = bytes - 16
+    }
+
+    ListRetain(block)
+    return block
+}
+
 // The block of the bytes given back to the allocator.
 pub void StringFree(byte* bytes) {
     mut long room = 0
     raw {
-        room = *Ptr<long>(bytes - 8)
+        room = long(*Ptr<int>(bytes - 4))
     }
 
     Free(bytes - 16, 16 + room)

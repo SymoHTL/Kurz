@@ -1,0 +1,12 @@
+// expect: output
+// | 105
+// allow: raw
+// rules: R15
+
+mut xs = Bytes()
+xs.Add(104)
+xs.Add(105)
+raw {
+    p = xs.Pointer
+    print(p[1])
+}

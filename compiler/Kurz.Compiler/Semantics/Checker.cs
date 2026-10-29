@@ -1,4 +1,5 @@
 using Kurz.Compiler.Syntax;
+using Kurz.Compiler.Text;
 
 namespace Kurz.Compiler.Semantics;
 
@@ -196,6 +197,13 @@ public sealed partial class Checker
 
     private void Run(ProgramSyntax program)
     {
+        // T15: the data type of the case `string.FromUtf8` returns besides its string, declared before the file's own types, so
+        // that a declaration of its name is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union, as Rust")
+        foreach (var s in BuiltInTypes.Statements)
+        {
+            DeclareType((TypeDeclaration)s);
+        }
+
         // F6: the functions and data types of the file are visible in the whole file, so their names are declared before
         // anything is checked, in source order, so that a name declared twice is `redeclared` at the later declaration (V9)
         foreach (var s in program.Statements)
@@ -662,6 +670,17 @@ public sealed partial class Checker
             return primitive;
         }
 
+        if (n.Name == "Bytes")
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, "`Bytes` takes no type arguments: it is `List<byte>` (M9, T17)");
+                return Types.Error;
+            }
+
+            return new ListType(Types.Byte); // M9: the second name of a list of bytes (section 4, the owner, 2026-10-29)
+        }
+
         if (n.Name == "List")
         {
             if (n.TypeArguments.Count != 1)
@@ -1086,7 +1105,10 @@ public sealed partial class Checker
         functions.ContainsKey(name) || dataTypes.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
 
     /// <summary>The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9).</summary>
-    private static bool IsBuiltInName(string name) => name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map";
+    private static bool IsBuiltInName(string name) => name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes";
+
+    /// <summary>The data types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string (T15).</summary>
+    private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(SourceText.FromString("<built-in>", "data InvalidUtf8(int At)\n"), new DiagnosticBag());
 
     private void PushScope() => frame.Scope = new Scope { Parent = frame.Scope };
 

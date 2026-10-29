@@ -809,6 +809,15 @@ for, as C#'s `new string('a', int.MaxValue)` throws `OutOfMemoryException` (§4,
 2026-10-23 and 2026-10-24). No case shows that sentence: a case would build a string of 2 GiB, and the error line
 of `allocation-failed` names no line a header could expect.
 
+`s.Bytes` is a `Bytes` (M9), a value of its own (M3): the bytes of a string made while the program
+runs are shared with it, and those of a literal copied *(assumed: as §4 marks it)*.
+`string.FromUtf8(b)` makes a string of the bytes of `b`, and its return type is
+`string | InvalidUtf8` (O1), where `data InvalidUtf8(int At)` holds in `At` the count of the bytes in
+front of the first sequence that is not UTF-8, as Rust's `valid_up_to` counts them;
+`string.FromUtf8Lossy(b)` makes a string in which each such sequence reads U+FFFD; and where the
+bytes have a block, the string shares it (§4, the owner, 2026-10-29). The lossy form writes one
+U+FFFD for each maximal part of a sequence, as Rust counts them *(assumed: as §4 marks it)*.
+
 Case: [types/string-bytes.kz](../corpus/types/string-bytes.kz)
 ```kurz
 s = "aä"
@@ -827,6 +836,37 @@ Case: [types/string-chars.kz](../corpus/types/string-chars.kz)
 s = "aä😀"
 print(s.Chars.Count)
 print(s.Bytes.Count)
+```
+
+Case: [types/string-bytes-value.kz](../corpus/types/string-bytes-value.kz)
+```kurz
+s = "hé"
+print(s.Bytes)
+t = "{s}!"
+mut b = t.Bytes
+print(b)
+b.Add(33)
+print(b.Count)
+print(t)
+```
+
+Case: [types/string-from-utf8.kz](../corpus/types/string-from-utf8.kz)
+```kurz
+mut b = Bytes()
+b.Add(104)
+b.Add(105)
+match string.FromUtf8(b) {
+    string s => print(s)
+    InvalidUtf8 e => print(e.At)
+}
+b.Add(195)
+b.Add(40)
+b.Add(33)
+match string.FromUtf8(b) {
+    string s => print(s)
+    InvalidUtf8 e => print(e.At)
+}
+print(string.FromUtf8Lossy(b))
 ```
 
 ### T16 (decided, §4) What `.Chars` yields

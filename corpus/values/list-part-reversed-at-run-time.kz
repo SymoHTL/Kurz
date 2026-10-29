@@ -1,0 +1,8 @@
+// expect: throws reversed-range-at-run-time at 8
+// rules: M9
+
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+n = 0
+print(xs[1..<n])

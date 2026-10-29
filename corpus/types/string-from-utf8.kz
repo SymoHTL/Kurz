@@ -1,0 +1,21 @@
+// expect: output
+// | hi
+// | 2
+// | hi�(!
+// rules: T15
+
+mut b = Bytes()
+b.Add(104)
+b.Add(105)
+match string.FromUtf8(b) {
+    string s => print(s)
+    InvalidUtf8 e => print(e.At)
+}
+b.Add(195)
+b.Add(40)
+b.Add(33)
+match string.FromUtf8(b) {
+    string s => print(s)
+    InvalidUtf8 e => print(e.At)
+}
+print(string.FromUtf8Lossy(b))

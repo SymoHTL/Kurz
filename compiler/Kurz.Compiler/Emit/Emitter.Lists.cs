@@ -348,9 +348,23 @@ public sealed partial class Emitter
         fn.Block(done);
     }
 
-    /// <summary>T14: <c>list[i]</c>, the item at the position counted from 0; a position below 0 or at the count or beyond raises <c>index-out-of-range</c> at the line.</summary>
+    /// <summary>
+    /// T14: <c>list[i]</c>, the item at the position counted from 0; a position below 0 or at the count or beyond raises
+    /// <c>index-out-of-range</c> at the line. <c>s.Bytes[i]</c> reads the string's byte in place (T15), and <c>list[a..&lt;b]</c> and
+    /// <c>list[a..b]</c> are a part of the list (M9).
+    /// </summary>
     private string EmitListIndex(IndexExpression index, ListType type)
     {
+        if (index.Index is RangeExpression range)
+        {
+            return EmitListPart(index, type, range);
+        }
+
+        if (Unwrap(index.Target) is MemberAccess { Member: "Bytes" } bytes && TypeOf(bytes.Target) is PrimitiveType { Kind: Primitive.String })
+        {
+            return StringByte(index, bytes.Target);
+        }
+
         var list = EmitExpression(index.Target);
         var indexType = TypeOf(index.Index);
         var position = Resize(EmitExpression(index.Index), indexType, Types.IsSigned(indexType) ? Types.Long : Types.ULong);
@@ -363,6 +377,126 @@ public sealed partial class Emitter
         fn.Block(inside);
         var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
         return fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {position}")}");
+    }
+
+    /// <summary>T15: <c>s.Bytes[i]</c>, the byte at the position of the string's bytes, read in place without a list of them; a position outside them raises <c>index-out-of-range</c> at the line.</summary>
+    private string StringByte(IndexExpression index, Expression target)
+    {
+        var text = EmitExpression(target);
+        var indexType = TypeOf(index.Index);
+        var position = Resize(EmitExpression(index.Index), indexType, Types.IsSigned(indexType) ? Types.Long : Types.ULong);
+        var count = fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {text}, 1")}, 9223372036854775807"); // without the mark of a block
+        var inside = fn.Label("byte");
+        var outside = fn.Label("out.of.range");
+        fn.CondBranch(fn.Value($"icmp ult i64 {position}, {count}"), inside, outside); // a negative position reads as a number above every count
+        fn.Block(outside);
+        Raise(ErrorIds.IndexOutOfRange, index.Line);
+        fn.Block(inside);
+        var bytes = fn.Value($"extractvalue %kz.str {text}, 0");
+        return fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {bytes}, i64 {position}")}");
+    }
+
+    /// <summary>
+    /// M9: <c>list[a..&lt;b]</c> and <c>list[a..b]</c>, a new list of the items from position <c>a</c> to <c>b</c>, the second with
+    /// <c>b</c>, copied into a block of its own, which holds each item's own blocks once more (section 4, the owner, 2026-10-29, "A
+    /// List&lt;T&gt;, a value"). A range whose end lies below its start raises <c>reversed-range-at-run-time</c>, as C8's range does, and
+    /// then a start below 0 or an end past the count <c>index-out-of-range</c>, at the line.
+    /// </summary>
+    private string EmitListPart(IndexExpression index, ListType type, RangeExpression range)
+    {
+        var list = EmitExpression(index.Target);
+        var numbers = TypeOf(range); // the type of the range's numbers (C8)
+        var signed = Types.IsSigned(numbers);
+        var wide = signed ? Types.Long : Types.ULong;
+        var start = Resize(Convert(EmitExpression(range.Start), TypeOf(range.Start), numbers, range.Line), numbers, wide);
+        var end = Resize(Convert(EmitExpression(range.End), TypeOf(range.End), numbers, range.Line), numbers, wide);
+        var reversed = fn.Label("reversed");
+        var ordered = fn.Label("ordered");
+        fn.CondBranch(fn.Value($"icmp {(signed ? "slt" : "ult")} i64 {end}, {start}"), reversed, ordered);
+        fn.Block(reversed);
+        Raise(ErrorIds.ReversedRangeAtRunTime, index.Line);
+        fn.Block(ordered);
+        var count = fn.Value($"zext i32 {ListCount(list)} to i64");
+
+        // a negative end reads as a number above every count, and the end of `a..b` is checked before one is added to it
+        var endInside = fn.Value($"icmp {(range.Inclusive ? "ult" : "ule")} i64 {end}, {count}");
+        var startInside = fn.Value($"icmp ule i64 {start}, {count}");
+        var inside = fn.Label("part");
+        var outside = fn.Label("out.of.range");
+        fn.CondBranch(fn.Value($"and i1 {startInside}, {endInside}"), inside, outside);
+        fn.Block(outside);
+        Raise(ErrorIds.IndexOutOfRange, index.Line);
+        fn.Block(inside);
+        var last = range.Inclusive ? fn.Value($"add i64 {end}, 1") : end;
+        var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
+        var from = fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {start}");
+        var asked = fn.Alloca("i64", "asked");
+        fn.Emit($"store i64 0, ptr {asked}");
+        var part = fn.Value($"call ptr {StdFunction("ListOf")}(ptr {from}, i64 {fn.Value($"sub i64 {last}, {start}")}, i64 {ItemSize(type.Element)}, ptr {asked})");
+        Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
+        if (Counted(type.Element))
+        {
+            EachItem(part, type.Element, held => Retain(held, type.Element)); // the part holds the items' blocks too
+        }
+
+        return Temp(part, type);
+    }
+
+    /// <summary>The end of the process at an allocation the system refused, where <paramref name="refused"/> holds, with the bytes <paramref name="asked"/> holds (O11, M9).</summary>
+    private void Refused(string refused, string asked)
+    {
+        var failed = fn.Label("failed");
+        var done = fn.Label("allocated");
+        fn.CondBranch(refused, failed, done);
+        fn.Block(failed);
+        fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {fn.Value($"load i64, ptr {asked}")})");
+        fn.Unreachable();
+        fn.Block(done);
+    }
+
+    /// <summary>
+    /// T15: <c>s.Bytes</c> as a value, a list of bytes held once more: the block of a string made while the program runs, which it shares,
+    /// or a new block with the bytes of a literal, which holds none (section 4, assumed there).
+    /// </summary>
+    private string StringBytes(string text)
+    {
+        var name = Helper("bytes.string", "ptr", ["%kz.str"], () =>
+        {
+            var bytes = fn.Value("extractvalue %kz.str %a0, 0");
+            var marked = fn.Value("extractvalue %kz.str %a0, 1");
+            var made = fn.Label("made");
+            var literal = fn.Label("literal");
+            fn.CondBranch(fn.Value($"icmp slt i64 {marked}, 0"), made, literal); // the mark: a block
+            fn.Block(made);
+            fn.Return($"ptr {fn.Value($"call ptr {StdFunction("StringList")}(ptr {bytes})")}");
+            fn.Block(literal);
+            var asked = fn.Alloca("i64", "asked");
+            fn.Emit($"store i64 0, ptr {asked}");
+            var copy = fn.Value($"call ptr {StdFunction("ListOf")}(ptr {bytes}, i64 {marked}, i64 1, ptr {asked})");
+            Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
+            fn.Return($"ptr {copy}");
+        });
+        return fn.Value($"call ptr {name}(%kz.str {text})");
+    }
+
+    /// <summary>T15: the string of a list of bytes that shares its block, held once more, or the empty string for a list without a block.</summary>
+    private string SharedText(string list, string count)
+    {
+        var bytes = fn.Value($"call ptr {StdFunction("ListString")}(ptr {list})");
+        var none = fn.Value($"icmp eq ptr {list}, null");
+        var (empty, _) = module.String(string.Empty);
+        var pointer = fn.Value($"select i1 {none}, ptr {empty}, ptr {bytes}");
+        var marked = fn.Value($"select i1 {none}, i64 0, i64 {fn.Value($"or i64 {count}, -9223372036854775808")}");
+        var withPointer = fn.Value($"insertvalue %kz.str undef, ptr {pointer}, 0");
+        return fn.Value($"insertvalue %kz.str {withPointer}, i64 {marked}, 1");
+    }
+
+    /// <summary>R15: <c>l.Pointer</c>, the address of the list's first item, and for a list without a block an address that is not null, aligned for its items, through which nothing is read or written, as Rust's <c>NonNull::dangling</c>.</summary>
+    private string ListPointer(string list, KurzType element)
+    {
+        var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
+        var dangling = fn.Value($"inttoptr i64 {Number(layout.Measure(element).Align)} to ptr");
+        return fn.Value($"select i1 {fn.Value($"icmp eq ptr {list}, null")}, ptr {dangling}, ptr {items}");
     }
 
     /// <summary>

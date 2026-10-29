@@ -1,0 +1,14 @@
+// expect: output
+// | [104, 105]
+// | hi
+// allow: raw
+// rules: R15
+
+raw {
+    p = List<byte>.Allocate(4)
+    p[0] = 104
+    p[1] = 105
+    b = List<byte>.FromRaw(p, 2)
+    print(b)
+    print(string.FromUtf8Lossy(b))
+}
