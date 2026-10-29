@@ -525,10 +525,10 @@ field and a union with a case that holds one. A string made while the program ru
 of `std/` in front of its bytes: the count of the string values that hold it, 8 bytes, and the room
 `string.Allocate` gave, 8 bytes; the highest bit of the string's count of bytes marks such a string,
 and a literal, which holds no block, is neither counted nor freed, a copy and the end of a holder
-testing that bit and touching no memory for a literal (section 4, the owner, 2026-10-29, "Bit in the
-count"). A string is counted where a list is, with no copy at a write, since a string never
-changes, and at zero its block goes back to `Free` with the room it was given. The runtime makes
-every string it makes in such a block, through `string.Allocate` and `string.FromRaw`, which takes
+testing that bit and touching no memory for a literal (section 4: the bit the owner's, 2026-10-29, "Bit
+in the count", the block and its room assumed). A string is counted where a list is, with no copy
+at a write, since a string never changes, and at zero its block goes back to `Free` with the room
+it was given. The runtime makes every string it makes in such a block, through `string.Allocate` and `string.FromRaw`, which takes
 the block over (R15, the owner, 2026-10-29, "string.Allocate, take over"); the text the emitted code
 makes of a value, for a `print` or a hole of a string, is a temporary of its statement, and the
 helper that makes the text of a list or of a `data` value lets go of each text it joined. The environment of a lambda that reads variables starts with the
