@@ -574,8 +574,8 @@ own file, `/proc/self/exe`, through two pages it maps from the system, and takes
 inlined at it from `.debug_info`; it leaves out the frames whose symbols start with neither `f.` nor
 `std.`, the runtime's and the compiler's own functions, and ends at `kz.main`, `main`. A hundred
 frames are written, then `  ... N more frames`, `  ... 1 more frame` for one, and `KURZ_TRACE=0`
-switches it off. Windows writes no trace: its `Trace` writes nothing, and the error line stands
-alone. `TraceTests` pins the forms, the names, the cut, the variable, the release build with and
+switches it off. Windows writes no trace: the reader of the PDB through `dbghelp.dll` that section 6
+gives is not built, its `Trace` writes nothing, and the error line stands alone. `TraceTests` pins the forms, the names, the cut, the variable, the release build with and
 without `--lines` and an executable stripped of its symbols or of its line tables, on Linux; the
 corpus runner holds the trace of every crash it runs to its error line's place and to `main` (E3),
 and every other test that compares a crash's standard error sets `KURZ_TRACE=0` for the program it runs.
