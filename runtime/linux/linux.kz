@@ -10,6 +10,17 @@ extern "C" {
     int munmap(void* address, long length)
     void* signal(int number, void* handler)
     int* __errno_location()
+    int open(byte* path, int mode, ...)
+    long pread(int fd, byte* bytes, long count, long offset)
+    byte* getenv(byte* name)
+    ulong getauxval(ulong type)
+}
+
+// The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
+// linked as Rust's standard library links it on Linux with the GNU C library.
+extern "C" in "gcc_s" {
+    int _Unwind_Backtrace(extern "C" (void*, void*) => int trace, void* argument)
+    ulong _Unwind_GetIPInfo(void* context, int* before)
 }
 
 // The start of the process: the signal of a closed pipe, `SIGPIPE` (13), set to ignored, so that a
@@ -64,5 +75,1186 @@ pub void Release(byte* p, long bytes) {
 pub void Exit(int code) {
     raw {
         _exit(code)
+    }
+}
+
+// ---- the trace of the calls (design record, section 6) ---------------------------------------------
+
+// The trace's state on its thread: two pages from the system, the first a window on the executable's
+// file at `windowAt`, `windowHeld` bytes of it, the second the calls inlined at one frame; the file;
+// whether a read of the file failed, and whether the debug information holds a form this reader does
+// not know; the frames counted, and whether the trace reached `main`, the actor's entry, or a write
+// failed; and whether the trace runs, so that a raise inside it writes no second one.
+thread static mut byte* page = null
+thread static mut long windowAt = 0
+thread static mut long windowHeld = 0
+thread static mut int image = -1
+thread static mut bool readable = false
+thread static mut bool broken = false
+thread static mut bool lost = false
+thread static mut long frames = 0
+thread static mut bool ended = false
+thread static mut bool failed = false
+thread static mut bool tracing = false
+
+// Where the sections the trace reads lie in the file, 0 for one the file lacks: the symbols and their
+// names, the line tables and their names, the debug information and the tables it refers to; and what
+// the system added to every address of the file where it loaded the program.
+thread static mut long symbols = 0
+thread static mut long symbolsEnd = 0
+thread static mut long symbolNames = 0
+thread static mut long lines = 0
+thread static mut long linesEnd = 0
+thread static mut long lineNames = 0
+thread static mut long info = 0
+thread static mut long infoEnd = 0
+thread static mut long abbreviations = 0
+thread static mut long strings = 0
+thread static mut long stringOffsets = 0
+thread static mut long addresses = 0
+thread static mut long rangeLists = 0
+thread static mut long bias = 0
+
+// What the reads found: the row of the line tables at an address, its unit, its file and its line; the
+// bases of the unit of the debug information last read, its first address and its line tables' unit;
+// and the attributes of its entry last read, each -1 where the entry has none.
+thread static mut long foundUnit = 0
+thread static mut long foundFile = 0
+thread static mut long foundLine = 0
+thread static mut long stringBase = 0
+thread static mut long addressBase = 0
+thread static mut long rangeBase = 0
+thread static mut long unitLow = 0
+thread static mut long unitLines = 0
+thread static mut long lowForm = -1
+thread static mut long low = 0
+thread static mut long highForm = -1
+thread static mut long high = 0
+thread static mut long rangesForm = -1
+thread static mut long ranges = 0
+thread static mut long origin = -1
+thread static mut long originForm = -1
+thread static mut long callFile = -1
+thread static mut long callLine = -1
+thread static mut long nameForm = -1
+thread static mut long name = 0
+thread static mut long stringsAttribute = -1
+thread static mut long addressesAttribute = -1
+thread static mut long rangesAttribute = -1
+thread static mut long linesAttribute = -1
+
+// The trace of the calls below the error line of an exception that ends the process (design record,
+// section 6), on standard error, from the frame that raised to `main`, innermost first, the runtime's
+// frames left out: `  at <function> in <file>:<n>`, `  at <function>` where the line tables hold no
+// line there, and `  at <unknown> (0x55d2a8c5b2e4)` where the executable's file cannot be read or names
+// no function there; a hundred frames, and a line that counts the rest, `  ... 12 more frames`. The
+// walk, by the platform's unwinder, and the reads of the file run on the stack that raised (the owner,
+// 2026-10-29, "Where it raised, as Rust"), through the two pages, from the system and not from the
+// allocator. `KURZ_TRACE=0` switches it off, and a line whose write fails ends it.
+pub void Trace() {
+    raw {
+        if tracing || Off() {
+            return
+        }
+
+        tracing = true
+        readable = Open()
+        _Unwind_Backtrace(OnFrame, null)
+
+        if frames > 100 {
+            long more = frames - 100
+            Out("  ... ")
+            Number(more)
+            if more == 1 {
+                Out(" more frame\n")
+            } else {
+                Out(" more frames\n")
+            }
+        }
+    }
+}
+
+// Whether `KURZ_TRACE` is `0`, read from the environment when the trace is written and never before
+// (design record, section 6): every other value, the empty one among them, and its absence leave the
+// trace on.
+bool Off() {
+    raw {
+        string variable = "KURZ_TRACE\0"
+        mut bool off = false
+        byte* value = getenv(variable.Pointer)
+        if value != null {
+            off = value[0] == 48 && value[1] == 0
+        }
+
+        return off
+    }
+}
+
+// Takes the two pages from the system, opens the executable's file, `/proc/self/exe`, where Rust's
+// backtrace finds it too, and reads where its sections lie and where the system loaded it: false where
+// the pages, the file or its headers cannot be had, or the file is no 64-bit little-endian ELF file.
+bool Open() {
+    raw {
+        void* got = mmap(null, 8192, 3, 34, -1, 0)
+        if long(got) != -1 {
+            page = Ptr<byte>(got)
+        }
+
+        if page == null {
+            return false
+        }
+
+        string path = "/proc/self/exe\0"
+        // O_RDONLY | O_CLOEXEC
+        image = open(path.Pointer, 524288)
+
+        if image < 0 || Read(0, 4) != 1179403647 || ByteAt(4) != 2 || ByteAt(5) != 1 {
+            return false
+        }
+
+        long sections = Read(40, 8)
+        long size = Read(58, 2)
+        long count = Read(60, 2)
+        long sectionNames = Read(sections + Read(62, 2) * size + 24, 8)
+        mut long i = 0
+        while i < count && !broken {
+            long at = sections + i * size
+            long kind = Read(at + 4, 4)
+            long title = sectionNames + Read(at, 4)
+            long offset = Read(at + 24, 8)
+            long end = offset + Read(at + 32, 8)
+            if kind == 2 {
+                symbols = offset
+                symbolsEnd = end
+                symbolNames = Read(sections + Read(at + 40, 4) * size + 24, 8)
+            } else if Starts(title, ".debug_line\0") {
+                lines = offset
+                linesEnd = end
+            } else if Starts(title, ".debug_line_str\0") {
+                lineNames = offset
+            } else if Starts(title, ".debug_info\0") {
+                info = offset
+                infoEnd = end
+            } else if Starts(title, ".debug_abbrev\0") {
+                abbreviations = offset
+            } else if Starts(title, ".debug_str\0") {
+                strings = offset
+            } else if Starts(title, ".debug_str_offsets\0") {
+                stringOffsets = offset
+            } else if Starts(title, ".debug_addr\0") {
+                addresses = offset
+            } else if Starts(title, ".debug_rnglists\0") {
+                rangeLists = offset
+            }
+
+            i = i + 1
+        }
+
+        // where the system put the program's headers (`AT_PHDR`, 3) less where the file places them: the
+        // header of the headers (`PT_PHDR`, 6), or the loaded part of the file that holds them (`PT_LOAD`, 1)
+        long headers = Read(32, 8)
+        long headerSize = Read(54, 2)
+        long headerCount = Read(56, 2)
+        mut long placed = -1
+        mut long j = 0
+        while j < headerCount && !broken {
+            long at = headers + j * headerSize
+            long kind = Read(at, 4)
+            long offset = Read(at + 8, 8)
+            if kind == 6 {
+                placed = Read(at + 16, 8)
+            } else if kind == 1 && placed < 0 && offset <= headers && headers < offset + Read(at + 32, 8) {
+                placed = Read(at + 16, 8) + headers - offset
+            }
+
+            j = j + 1
+        }
+
+        if placed < 0 || broken {
+            return false
+        }
+
+        bias = long(getauxval(3)) - placed
+
+        return true
+    }
+}
+
+// One frame of the walk, as the unwinder hands it over: its address, which is the return address, or
+// the address of the instruction itself where the unwinder says so, and whose line is looked up at
+// the call, the return address less one, as unwinders look a return address up (design record,
+// section 6); the walk ends at `main`, at a write that failed, and where the unwinder has no frame.
+extern "C" int OnFrame(void* context, void* argument) {
+    raw {
+        mut int before = 0
+        mut long ip = 0
+        ip = long(_Unwind_GetIPInfo(context, &before))
+
+        if ip == 0 {
+            return 1
+        }
+
+        mut long at = ip
+        if before == 0 {
+            at = at - 1
+        }
+
+        Frame(ip, at - bias)
+        if ended || failed {
+            return 1
+        }
+
+        return 0
+    }
+}
+
+// The lines of one frame: none for a frame of the runtime, of the emitted code's helpers or of the C
+// library's start; one for a frame of the program or of the standard library, named by its symbol,
+// and before it one for each call inlined there, named by the debug information, innermost first (the
+// owner, 2026-10-29, "As Rust: a frame each"), each with the line of its call in the frame outside it;
+// `  at <unknown> (0x...)` with the return address where the file cannot be read or names no function
+// there (the owner, 2026-10-29). The frame of `main`, the actor's entry, is the last.
+void Frame(long ip, long at) {
+    raw {
+        mut long symbol = -1
+        if readable {
+            symbol = FunctionAt(at)
+        }
+
+        if symbol < 0 {
+            if Counted() {
+                Out("  at <unknown> (")
+                Hex(ip)
+                Out(")\n")
+            }
+
+            return
+        }
+
+        long kind = KindOf(symbol)
+        if kind == 0 {
+            return
+        }
+
+        if kind == 2 {
+            ended = true
+        }
+
+        long depth = Inlined(at)
+        mut bool known = LineAt(at)
+        mut long unit = foundUnit
+        mut long file = foundFile
+        mut long line = foundLine
+        mut long k = depth - 1
+        while k >= 0 {
+            long label = NameOf(Chained(k, 0), Chained(k, 1))
+            if label >= 0 && !Starts(label, "rt.") && Counted() {
+                Out("  at ")
+                FileBytes(label, End(label))
+                Place(known, unit, file, line)
+            }
+
+            unit = unitLines
+            file = Chained(k, 2)
+            line = Chained(k, 3)
+            known = file >= 0 && line > 0
+            k = k - 1
+        }
+
+        if Counted() {
+            Out("  at ")
+            Shown(symbol)
+            Place(known, unit, file, line)
+        }
+    }
+}
+
+// Counts a line of the trace: whether it is one of the first hundred, which are written.
+bool Counted() {
+    raw {
+        frames = frames + 1
+        return frames <= 100 && !failed
+    }
+}
+
+// The end of a frame's line: ` in <file>:<n>` where the line is known, and the line feed.
+void Place(bool known, long unit, long file, long line) {
+    raw {
+        if known {
+            long title = FileAt(unit, file)
+            if title >= 0 {
+                Out(" in ")
+                FileBytes(title, End(title))
+                Out(":")
+                Number(line)
+            }
+        }
+
+        Out("\n")
+    }
+}
+
+// What the symbol whose name is at `symbol` names: 1 a function of the program or of the standard
+// library, whose symbol starts with `f.` or `std.`, 2 the top-level code, `kz.main`, and 0 the
+// runtime's (`rt.`), the emitted code's helpers and the C library's start, which the trace leaves out.
+long KindOf(long symbol) {
+    raw {
+        if Starts(symbol, "kz.main\0") {
+            return 2
+        }
+
+        if Starts(symbol, "f.") || Starts(symbol, "std.") {
+            return 1
+        }
+
+        return 0
+    }
+}
+
+// The name a trace shows for a function of the program or of the standard library: its symbol without
+// the part up to its first `.` and without the numbers that make it unique, `f.Max<int>.8` as
+// `Max<int>` and `f.Twice.lambda.3.1` as `Twice.lambda`, and `main` for `kz.main` (design record,
+// section 6).
+void Shown(long symbol) {
+    raw {
+        if Starts(symbol, "kz.main\0") {
+            Out("main")
+            return
+        }
+
+        mut long from = symbol
+        while ByteAt(from) > 0 && ByteAt(from) != 46 {
+            from = from + 1
+        }
+
+        from = from + 1
+        mut long to = End(from)
+        mut bool cut = true
+        while cut {
+            cut = false
+            mut long i = to - 1
+            while i > from && ByteAt(i) >= 48 && ByteAt(i) <= 57 {
+                i = i - 1
+            }
+
+            if i < to - 1 && i > from && ByteAt(i) == 46 {
+                to = i
+                cut = true
+            }
+        }
+
+        FileBytes(from, to)
+    }
+}
+
+// The name's place of the function whose code holds `at`, by the symbols of the file, a function's
+// symbol being of the type `STT_FUNC` (2): -1 where none holds it.
+long FunctionAt(long at) {
+    raw {
+        mut long p = symbols
+        while p > 0 && p + 24 <= symbolsEnd && !broken {
+            if (ByteAt(p + 4) & 15) == 2 {
+                long start = Read(p + 8, 8)
+                if at >= start && at < start + Read(p + 16, 8) {
+                    return symbolNames + Read(p, 4)
+                }
+            }
+
+            p = p + 24
+        }
+
+        return -1
+    }
+}
+
+// ---- the line tables (DWARF 5, as the compiler writes them) ----------------------------------------
+
+// The row of the line tables whose addresses hold `at`: true, with `foundUnit`, `foundFile` and
+// `foundLine`, where a row of a line above 0 holds it.
+bool LineAt(long at) {
+    raw {
+        mut long unit = lines
+        while unit > 0 && unit + 4 <= linesEnd && !broken {
+            long length = Read(unit, 4)
+            if length >= 4294967280 {
+                return false
+            }
+
+            long end = unit + 4 + length
+            long minimum = ByteAt(unit + 12)
+            mut long lineBase = ByteAt(unit + 15)
+            if lineBase > 127 {
+                lineBase = lineBase - 256
+            }
+
+            long lineRange = ByteAt(unit + 16)
+            long opcodeBase = ByteAt(unit + 17)
+            if Read(unit + 4, 2) == 5 && lineRange > 0 {
+                mut long p = unit + 12 + Read(unit + 8, 4)
+                mut long address = 0
+                mut long file = 1
+                mut long line = 1
+                mut bool have = false
+                mut long lastAddress = 0
+                mut long lastFile = 0
+                mut long lastLine = 0
+                while p < end && !broken {
+                    long op = Take(mut p, 1)
+                    mut bool row = false
+                    mut bool last = false
+                    if op >= opcodeBase {
+                        long step = op - opcodeBase
+                        address = address + step / lineRange * minimum
+                        line = line + lineBase + step % lineRange
+                        row = true
+                    } else if op == 0 {
+                        long size = Uleb(mut p)
+                        long next = p + size
+                        long sub = ByteAt(p)
+                        if sub == 1 {
+                            row = true
+                            last = true
+                        } else if sub == 2 {
+                            address = Read(p + 1, 8)
+                        }
+
+                        p = next
+                    } else if op == 1 {
+                        row = true
+                    } else if op == 2 {
+                        address = address + Uleb(mut p) * minimum
+                    } else if op == 3 {
+                        line = line + Sleb(mut p)
+                    } else if op == 4 {
+                        file = Uleb(mut p)
+                    } else if op == 8 {
+                        address = address + (255 - opcodeBase) / lineRange * minimum
+                    } else if op == 9 {
+                        address = address + Take(mut p, 2)
+                    } else {
+                        // the operands of a standard opcode this reader does not use, as its header counts them
+                        mut long operands = ByteAt(unit + 17 + op)
+                        while operands > 0 {
+                            Uleb(mut p)
+                            operands = operands - 1
+                        }
+                    }
+
+                    if row {
+                        if have && lastAddress <= at && at < address {
+                            foundUnit = unit
+                            foundFile = lastFile
+                            foundLine = lastLine
+                            return lastLine > 0
+                        }
+
+                        if last {
+                            have = false
+                            address = 0
+                            file = 1
+                            line = 1
+                        } else {
+                            have = true
+                            lastAddress = address
+                            lastFile = file
+                            lastLine = line
+                        }
+                    }
+                }
+            }
+
+            unit = end
+        }
+
+        return false
+    }
+}
+
+// The place of the name of file `index` of the line tables' unit at `unit`, its `DW_LNCT_path` (1), as a
+// compile error names the file: -1 where the unit names no such file.
+long FileAt(long unit, long index) {
+    raw {
+        mut long p = unit + 17 + ByteAt(unit + 17)
+        Entries(mut p, -1)
+        return Entries(mut p, index)
+    }
+}
+
+// The directories or the files of a unit's header at `p`, their format and then their entries, and `p`
+// moved past them: the place of the name of entry `index`, or -1.
+long Entries(mut long p, long index) {
+    raw {
+        long formatCount = Take(mut p, 1)
+        long formats = p
+        mut long k = 0
+        while k < formatCount {
+            Uleb(mut p)
+            Uleb(mut p)
+            k = k + 1
+        }
+
+        long count = Uleb(mut p)
+        mut long found = -1
+        mut long entry = 0
+        while entry < count && !broken && !lost {
+            mut long format = formats
+            mut long j = 0
+            while j < formatCount {
+                long content = Uleb(mut format)
+                long form = Uleb(mut format)
+                long value = Value(mut p, form)
+                if entry == index && content == 1 {
+                    found = StringOf(form, value)
+                }
+
+                j = j + 1
+            }
+
+            entry = entry + 1
+        }
+
+        return found
+    }
+}
+
+// ---- the debug information of the inlined calls (DWARF 5) ------------------------------------------
+
+// The calls inlined at `at` (the owner, 2026-10-29, "As Rust: a frame each"): the entries of the debug
+// information, `DW_TAG_inlined_subroutine` (29), whose code holds `at`, outermost first, in the second
+// page, four numbers each, the entry, its unit, and the file and the line of its call; their count, 0
+// where the information holds none, which is so in a build that inlines nothing.
+long Inlined(long at) {
+    raw {
+        lost = false
+        mut long depth = 0
+        mut long unit = info
+        while unit > 0 && unit + 12 <= infoEnd && abbreviations > 0 && !broken && !lost {
+            long length = Read(unit, 4)
+            if length >= 4294967280 {
+                return 0
+            }
+
+            long end = unit + 4 + length
+            if Read(unit + 4, 2) == 5 && ByteAt(unit + 6) == 1 {
+                long table = abbreviations + Read(unit + 8, 4)
+                mut long p = unit + 12
+                mut bool first = true
+                while p < end && !broken && !lost {
+                    long entry = p
+                    long code = Uleb(mut p)
+                    if code != 0 {
+                        mut long spec = Abbreviation(table, code)
+                        if spec < 0 {
+                            return 0
+                        }
+
+                        long tag = Uleb(mut spec)
+                        spec = spec + 1
+                        Attributes(mut p, mut spec)
+                        if first {
+                            first = false
+                            stringBase = stringsAttribute
+                            addressBase = addressesAttribute
+                            rangeBase = rangesAttribute
+                            unitLow = 0
+                            if lowForm >= 0 {
+                                unitLow = Address(lowForm, low)
+                            }
+
+                            unitLines = lines + linesAttribute
+                        } else if tag == 29 && depth < 128 && Holds(at) {
+                            long* chain = Ptr<long>(page + 4096)
+                            chain[depth * 4] = entry
+                            chain[depth * 4 + 1] = unit
+                            chain[depth * 4 + 2] = callFile
+                            chain[depth * 4 + 3] = callLine
+
+                            depth = depth + 1
+                        }
+                    }
+                }
+
+                if depth > 0 {
+                    return depth
+                }
+            }
+
+            unit = end
+        }
+
+        if lost {
+            return 0
+        }
+
+        return depth
+    }
+}
+
+// Number `part` of entry `k` of the inlined calls.
+long Chained(long k, long part) {
+    raw {
+        mut long value = 0
+        long* chain = Ptr<long>(page + 4096)
+        value = chain[k * 4 + part]
+
+        return value
+    }
+}
+
+// The place of the name of the function inlined by the entry at `entry` of the unit at `unit`: the name
+// of the entry its `DW_AT_abstract_origin` names, followed as far as an entry with a name; -1 where none.
+long NameOf(long entry, long unit) {
+    raw {
+        mut long at = entry
+        mut long hops = 0
+        while hops < 4 && !broken {
+            mut long p = at
+            long code = Uleb(mut p)
+            mut long spec = Abbreviation(abbreviations + Read(unit + 8, 4), code)
+            if code == 0 || spec < 0 {
+                return -1
+            }
+
+            Uleb(mut spec)
+            spec = spec + 1
+            Attributes(mut p, mut spec)
+            if lost {
+                return -1
+            }
+
+            if nameForm >= 0 {
+                return StringOf(nameForm, name)
+            }
+
+            if origin < 0 {
+                return -1
+            }
+
+            // a reference into the unit, or with `DW_FORM_ref_addr` (16) into the section
+            if originForm == 16 {
+                at = info + origin
+            } else {
+                at = unit + origin
+            }
+
+            hops = hops + 1
+        }
+
+        return -1
+    }
+}
+
+// The entry's specification of `code` in the table of abbreviations at `table`: the place of its tag,
+// or -1.
+long Abbreviation(long table, long code) {
+    raw {
+        mut long p = table
+        while !broken {
+            long found = Uleb(mut p)
+            if found == 0 {
+                return -1
+            }
+
+            if found == code {
+                return p
+            }
+
+            Uleb(mut p)
+            p = p + 1
+            mut bool more = true
+            while more && !broken {
+                long attribute = Uleb(mut p)
+                long form = Uleb(mut p)
+                if form == 33 {
+                    Sleb(mut p)
+                }
+
+                more = attribute != 0 || form != 0
+            }
+        }
+
+        return -1
+    }
+}
+
+// The attributes of an entry at `p` as its specification at `spec` lists them, `p` and `spec` moved
+// past them: those the trace reads kept, each -1 where the entry has none.
+void Attributes(mut long p, mut long spec) {
+    raw {
+        lowForm = -1
+        highForm = -1
+        rangesForm = -1
+        origin = -1
+        originForm = -1
+        callFile = -1
+        callLine = -1
+        nameForm = -1
+        stringsAttribute = -1
+        addressesAttribute = -1
+        rangesAttribute = -1
+        linesAttribute = -1
+        mut bool more = true
+        while more && !broken && !lost {
+            long attribute = Uleb(mut spec)
+            long form = Uleb(mut spec)
+            mut long constant = 0
+            if form == 33 {
+                constant = Sleb(mut spec)
+            }
+
+            if attribute == 0 && form == 0 {
+                more = false
+            } else {
+                mut long value = Value(mut p, form)
+                if form == 33 {
+                    value = constant
+                }
+
+                if attribute == 3 {
+                    nameForm = form
+                    name = value
+                } else if attribute == 16 {
+                    linesAttribute = value
+                } else if attribute == 17 {
+                    lowForm = form
+                    low = value
+                } else if attribute == 18 {
+                    highForm = form
+                    high = value
+                } else if attribute == 49 {
+                    origin = value
+                    originForm = form
+                } else if attribute == 85 {
+                    rangesForm = form
+                    ranges = value
+                } else if attribute == 88 {
+                    callFile = value
+                } else if attribute == 89 {
+                    callLine = value
+                } else if attribute == 114 {
+                    stringsAttribute = value
+                } else if attribute == 115 {
+                    addressesAttribute = value
+                } else if attribute == 116 {
+                    rangesAttribute = value
+                }
+            }
+        }
+    }
+}
+
+// Whether the code of the entry last read holds `at`: by its `DW_AT_low_pc` and `DW_AT_high_pc`, the
+// latter an address or, as a constant, the length, or by its range list.
+bool Holds(long at) {
+    raw {
+        if lowForm >= 0 && highForm >= 0 {
+            long start = Address(lowForm, low)
+            mut long end = high
+            if highForm != 1 && !Indexed(highForm) {
+                end = start + high
+            } else {
+                end = Address(highForm, high)
+            }
+
+            return start <= at && at < end
+        }
+
+        if rangesForm < 0 {
+            return false
+        }
+
+        // `DW_FORM_rnglistx` (35) indexes the unit's table of offsets; `DW_FORM_sec_offset` gives the place
+        mut long p = rangeLists + ranges
+        if rangesForm == 35 {
+            p = rangeLists + rangeBase + Read(rangeLists + rangeBase + ranges * 4, 4)
+        }
+
+        mut long base = unitLow
+        while rangeLists > 0 && !broken {
+            long kind = Take(mut p, 1)
+            mut long start = 0
+            mut long end = 0
+            if kind == 0 {
+                return false
+            } else if kind == 1 {
+                base = Address(27, Uleb(mut p))
+            } else if kind == 2 {
+                start = Address(27, Uleb(mut p))
+                end = Address(27, Uleb(mut p))
+            } else if kind == 3 {
+                start = Address(27, Uleb(mut p))
+                end = start + Uleb(mut p)
+            } else if kind == 4 {
+                start = base + Uleb(mut p)
+                end = base + Uleb(mut p)
+            } else if kind == 5 {
+                base = Take(mut p, 8)
+            } else if kind == 6 {
+                start = Take(mut p, 8)
+                end = Take(mut p, 8)
+            } else if kind == 7 {
+                start = Take(mut p, 8)
+                end = start + Uleb(mut p)
+            } else {
+                return false
+            }
+
+            if start <= at && at < end {
+                return true
+            }
+        }
+
+        return false
+    }
+}
+
+// Whether a form is an index into the unit's addresses, `DW_FORM_addrx` and its fixed sizes.
+bool Indexed(long form) {
+    raw {
+        return form == 27 || form == 41 || form == 42 || form == 43 || form == 44
+    }
+}
+
+// The address an attribute of form `form` gives: the value of `DW_FORM_addr` (1), or the address at the
+// index into the unit's table of addresses.
+long Address(long form, long value) {
+    raw {
+        if Indexed(form) {
+            return Read(addresses + addressBase + value * 8, 8)
+        }
+
+        return value
+    }
+}
+
+// The place of the string an attribute of form `form` gives: in place (`DW_FORM_string`, 8), by an
+// offset into the strings (14) or the line tables' strings (31), or by an index into the unit's offsets
+// of the strings (`DW_FORM_strx` and its fixed sizes); -1 for another form.
+long StringOf(long form, long value) {
+    raw {
+        if form == 8 {
+            return value
+        }
+
+        if form == 14 {
+            return strings + value
+        }
+
+        if form == 31 {
+            return lineNames + value
+        }
+
+        if form == 26 || form == 37 || form == 38 || form == 39 || form == 40 {
+            return strings + Read(stringOffsets + stringBase + value * 4, 4)
+        }
+
+        return -1
+    }
+}
+
+// The value of an attribute of form `form` at `p`, as DWARF 5 writes it, and `p` moved past it: the
+// number of a constant, an index or an offset, and for a string or a block written in place its place
+// in the file; a form this reader does not know marks the information lost.
+long Value(mut long p, long form) {
+    raw {
+        // DW_FORM_addr, data8, ref8, ref_sig8, ref_sup8
+        if form == 1 || form == 7 || form == 20 || form == 32 || form == 36 {
+            return Take(mut p, 8)
+        }
+
+        // DW_FORM_data4, strp, ref_addr, ref4, sec_offset, ref_sup4, strp_sup, line_strp, strx4, addrx4
+        if form == 6 || form == 14 || form == 16 || form == 19 || form == 23 || form == 28 || form == 29 || form == 31 || form == 40 || form == 44 {
+            return Take(mut p, 4)
+        }
+
+        // DW_FORM_data2, ref2, strx2, addrx2
+        if form == 5 || form == 18 || form == 38 || form == 42 {
+            return Take(mut p, 2)
+        }
+
+        // DW_FORM_data1, flag, ref1, strx1, addrx1
+        if form == 11 || form == 12 || form == 17 || form == 37 || form == 41 {
+            return Take(mut p, 1)
+        }
+
+        // DW_FORM_strx3, addrx3
+        if form == 39 || form == 43 {
+            return Take(mut p, 3)
+        }
+
+        // DW_FORM_udata, ref_udata, strx, addrx, loclistx, rnglistx
+        if form == 15 || form == 21 || form == 26 || form == 27 || form == 34 || form == 35 {
+            return Uleb(mut p)
+        }
+
+        // DW_FORM_sdata
+        if form == 13 {
+            return Sleb(mut p)
+        }
+
+        // DW_FORM_flag_present, and implicit_const, whose value stands in the specification
+        if form == 25 || form == 33 {
+            return 0
+        }
+
+        long at = p
+        if form == 8 {
+            p = End(p) + 1
+        } else if form == 30 {
+            p = p + 16
+        } else if form == 10 {
+            long count = Take(mut p, 1)
+            p = p + count
+        } else if form == 3 {
+            long count = Take(mut p, 2)
+            p = p + count
+        } else if form == 4 {
+            long count = Take(mut p, 4)
+            p = p + count
+        } else if form == 9 || form == 24 {
+            long count = Uleb(mut p)
+            p = p + count
+        } else {
+            lost = true
+        }
+
+        return at
+    }
+}
+
+// ---- reading the file ------------------------------------------------------------------------------
+
+// The byte of the file at `at`, read through the window, or -1 where it cannot be read.
+long ByteAt(long at) {
+    raw {
+        if at < windowAt || at >= windowAt + windowHeld {
+            if !Window(at) {
+                return -1
+            }
+        }
+
+        mut long b = 0
+        b = long(page[at - windowAt])
+
+        return b
+    }
+}
+
+// The window moved to `at`: a page of the file from there, read by `pread`, called again where a signal
+// interrupted it (`EINTR`, 4); false, and the file marked broken, where nothing can be read there.
+bool Window(long at) {
+    raw {
+        mut long got = -1
+        if at >= 0 {
+            int* error = __errno_location()
+            got = pread(image, page, 4096, at)
+            while got < 0 && *error == 4 {
+                got = pread(image, page, 4096, at)
+            }
+        }
+
+        if got <= 0 {
+            broken = true
+            windowHeld = 0
+            return false
+        }
+
+        windowAt = at
+        windowHeld = got
+        return true
+    }
+}
+
+// The little-endian number of `size` bytes at `at`; 0 where they cannot be read.
+long Read(long at, long size) {
+    raw {
+        mut long value = 0
+        mut long i = size - 1
+        while i >= 0 {
+            long b = ByteAt(at + i)
+            if b < 0 {
+                return 0
+            }
+
+            value = (value << 8) | b
+            i = i - 1
+        }
+
+        return value
+    }
+}
+
+// The number of `size` bytes at `at`, and `at` moved past them.
+long Take(mut long at, long size) {
+    raw {
+        long value = Read(at, size)
+        at = at + size
+        return value
+    }
+}
+
+// An unsigned LEB128 number at `at`, as DWARF writes one, and `at` moved past it.
+long Uleb(mut long at) {
+    raw {
+        mut long value = 0
+        mut int shift = 0
+        mut long b = 128
+        while b >= 128 {
+            b = ByteAt(at)
+            if b < 0 {
+                return 0
+            }
+
+            at = at + 1
+            if shift < 64 {
+                value = value | ((b & 127) << shift)
+            }
+
+            shift = shift + 7
+        }
+
+        return value
+    }
+}
+
+// A signed LEB128 number at `at`, and `at` moved past it.
+long Sleb(mut long at) {
+    raw {
+        mut long value = 0
+        mut int shift = 0
+        mut long b = 128
+        while b >= 128 {
+            b = ByteAt(at)
+            if b < 0 {
+                return 0
+            }
+
+            at = at + 1
+            if shift < 64 {
+                value = value | ((b & 127) << shift)
+            }
+
+            shift = shift + 7
+        }
+
+        if shift < 64 && (b & 64) != 0 {
+            value = value | (long(-1) << shift)
+        }
+
+        return value
+    }
+}
+
+// Whether the bytes of the file at `at` start with those of `text`, a zero at its end among them where
+// the whole name is meant.
+bool Starts(long at, string text) {
+    raw {
+        long count = long(text.Bytes.Count)
+        mut long i = 0
+        while i < count {
+            mut long b = 0
+            b = long(text.Pointer[i])
+
+            if ByteAt(at + i) != b {
+                return false
+            }
+
+            i = i + 1
+        }
+
+        return true
+    }
+}
+
+// The place of the zero that ends the string at `at`.
+long End(long at) {
+    raw {
+        mut long p = at
+        while ByteAt(p) > 0 {
+            p = p + 1
+        }
+
+        return p
+    }
+}
+
+// ---- writing the trace -----------------------------------------------------------------------------
+
+// A text written on standard error.
+void Out(string text) {
+    raw {
+        Bytes(text.Pointer, long(text.Bytes.Count))
+    }
+}
+
+// The file's bytes from `from` to `to` written on standard error, a window at a time.
+void FileBytes(long from, long to) {
+    raw {
+        mut long at = from
+        while at < to && !failed && Window(at) {
+            mut long count = to - at
+            if count > windowHeld {
+                count = windowHeld
+            }
+
+            Bytes(page, count)
+            at = at + count
+        }
+    }
+}
+
+// `count` bytes written on standard error in as many calls as it takes; a write the system refuses, or
+// one that takes nothing, ends the trace there (design record, section 6).
+void Bytes(byte* bytes, long count) {
+    raw {
+        mut long done = 0
+        while done < count && !failed {
+            long written = Write(2, bytes + done, count - done)
+            if written <= 0 {
+                failed = true
+            } else {
+                done = done + written
+            }
+        }
+    }
+}
+
+// The decimal digits of a number, written one at a time.
+void Number(long value) {
+    raw {
+        mut long unit = 1
+        while value / unit >= 10 {
+            unit = unit * 10
+        }
+
+        while unit > 0 {
+            mut byte digit = byte(value / unit % 10 + 48)
+            Bytes(&digit, 1)
+
+            unit = unit / 10
+        }
+    }
+}
+
+// An address in hexadecimal after `0x`, as a frame without a name gives it (design record, section 6).
+void Hex(long value) {
+    raw {
+        Out("0x")
+        mut int shift = 60
+        while shift > 0 && ((value >> shift) & 15) == 0 {
+            shift = shift - 4
+        }
+
+        while shift >= 0 {
+            long d = (value >> shift) & 15
+            mut byte digit = byte(d + 48)
+            if d >= 10 {
+                digit = byte(d + 87)
+            }
+
+            Bytes(&digit, 1)
+
+            shift = shift - 4
+        }
     }
 }

@@ -56,10 +56,17 @@ public sealed class Toolchain : IDisposable
         }).ToList();
     }
 
-    /// <summary>Runs a built program with nothing on its input; its exit code, what it wrote on standard output as lines, and what it wrote on standard error.</summary>
-    public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable)
+    /// <summary>
+    /// Runs a built program with nothing on its input and the trace of the calls switched off, <c>KURZ_TRACE=0</c> (design record,
+    /// section 6), so that an error stream holds the error line alone; its exit code, what it wrote on standard output as lines, and what
+    /// it wrote on standard error.
+    /// </summary>
+    public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable) => Run(executable, "0");
+
+    /// <summary>Runs a built program as <see cref="Run(string)"/> does, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where it is null.</summary>
+    public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable, string? trace)
     {
-        var (code, output, error) = Processes.Capture(executable, [], null, TimeSpan.FromSeconds(30));
+        var (code, output, error) = Processes.Capture(executable, [], null, TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace });
         return (code, Lines(output), error);
     }
 
@@ -182,14 +189,16 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return;
         }
 
-        var (code, output, error) = Toolchain.Run(executable);
+        // the trace on, as a program runs where nobody set KURZ_TRACE
+        var (code, output, all) = Toolchain.Run(executable, null);
         Assert.Equal(header.OutputLines, output);
         if (header.Expectation == Expectation.Output)
         {
-            Assert.Equal((0, ""), (code, error));
+            Assert.Equal((0, ""), (code, all));
             return;
         }
 
+        var (error, trace) = TraceTests.Split(all);
         var line = $"error: {header.ErrorId} at {relativePath}:{header.ErrorLine}";
         if (header.ErrorId == ErrorIds.Thrown)
         {
@@ -201,6 +210,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(line + "\n", error);
         }
 
+        TraceTests.AssertTrace(trace, $"{relativePath}:{header.ErrorLine}", header.Build != BuildKind.Release);
         Assert.Equal(1, code);
     }
 

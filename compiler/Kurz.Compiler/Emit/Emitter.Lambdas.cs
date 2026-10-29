@@ -33,7 +33,7 @@ public sealed partial class Emitter
             throw Unsupported(l.Line, "a `mut` parameter of a lambda (M7)");
         }
 
-        var key = $"{unit.Prefix}.lambda.{Number(l.Line)}.{Number(++lambdaCount)}";
+        var key = $"{unit.Prefix}.{display.Replace('"', '\'')}.lambda.{Number(l.Line)}.{Number(++lambdaCount)}";
         var name = $"@\"{key}\"";
         var captures = Model.LambdaOf(l).Captures;
         if (captures.Count == 0)

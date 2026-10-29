@@ -317,7 +317,7 @@ public sealed partial class Emitter
     {
         var owner = owners.TryGetValue(f, out var u) ? u : throw new InvalidOperationException($"`{f.Name}` belongs to no file of the module");
         var arguments = f.TypeParameters.Count == 0 ? string.Empty : "<" + string.Join(", ", f.TypeParameters.Select(p => Lower.Mangle(instanceMap[p]))) + ">";
-        var key = $"{owner.Prefix}.{f.Name}.{f.Line.ToString(CultureInfo.InvariantCulture)}{arguments}";
+        var key = $"{owner.Prefix}.{f.Name}{arguments}.{f.Line.ToString(CultureInfo.InvariantCulture)}";
         if (!instances.TryGetValue(key, out var name))
         {
             name = $"@\"{key}\"";
@@ -376,7 +376,7 @@ public sealed partial class Emitter
         }
 
         Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})"), instanceMap, result);
-        Trace(TraceName(f, instanceMap), Symbol(name), d.Line);
+        Trace(unit.Prefix.StartsWith("rt.", StringComparison.Ordinal) ? Symbol(name) : TraceName(f, instanceMap), Symbol(name), d.Line);
         for (var i = 0; i < f.Parameters.Count; i++)
         {
             var p = f.Parameters[i];

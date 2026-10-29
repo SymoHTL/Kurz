@@ -173,10 +173,12 @@ conversion that loses its value (T20) or an index out of range (T14) passes only
 exception from that line, and a `throw` of the program is `thrown` at the line of the `throw`
 that raised; the bare `throw` of an `else` arm (O5) is such a `throw`, and nothing is raised a
 second time, because nothing catches. The trace of the calls that the runtime writes after the error
-line (§6, where its reading for a case is an assumption) is words to a case: no case pins it, and a
-case passes with or without it *(assumed: the reading of this rule for the trace, since the header
-names an id and a line and nothing of a trace, so that the runner reads the error line and nothing
-after it, proposed with the record of round 16 and not put to the owner)*.
+line (§6, where its reading for a case is an assumption) is words to a case: no case pins it, and
+the corpus runner holds the trace of a case it runs on Linux to §6 alone, its first frame at the
+error line's place in a test build and its last `main`, and never to the case *(assumed: the reading of this rule
+for the trace, since the header names an id and a line and nothing of a trace, proposed with the
+record of round 16 and not put to the owner, and the runner's check of the trace, an assumption of
+§6)*.
 The program's exit code is pinned with it (O6). The owner chose this on 2026-10-03, against a
 header that says only that something is thrown; the cost is a word the runtime carries in every
 exception.

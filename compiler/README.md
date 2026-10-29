@@ -389,7 +389,8 @@ pinned clang compiles unoptimised, at `-O0`, in a test build, as Cargo's `dev` p
 library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
 library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
 which links `m` beside `c` on Linux), whose `fmod` an unoptimised `%` of a `double` calls, and with the
-library a block of C functions names (R16). It emits:
+library a block of C functions names (R16), the Linux runtime's own block among them, which names
+`gcc_s` for the unwinder of the trace (below). It emits:
 
 - the integers, `float` and `double`, `bool`, `char` and `string`, and pointers to them and C
   function types over them (T2, T21, T15, R10, R17); a string is its bytes and their count, at most the largest `int` of
@@ -465,9 +466,11 @@ Max<int>, std path"): `main` for the top-level code, `Max<int>` for an instance,
 lambda, and the line of each statement and each expression on the instructions emitted for it. On
 Linux they are DWARF in the executable, on Windows CodeView in the PDB the linker writes beside it,
 for which clang gets `-g`. On Linux LLVM writes the subprogram of a line-only unit into DWARF only
-where a call was inlined into the function, which an unoptimised build never does, so a probe of a
-test build found the compile unit alone in `.debug_info`, and there the executable's symbols, the
-IR's names (`f.Down.1`, `f.Max.8<int>`, `kz.main`), name a function; CodeView keeps the subprograms'
+where a call was inlined into the function, which an unoptimised build never does
+([a line-only unit writes no subprogram on Linux](../knowledge/a-line-only-unit-writes-no-subprogram-on-linux.md)),
+so there the executable's symbols name a function, each carrying the name a trace shows between
+the prefix of its code and the numbers that keep it unique (`f.Down.1`, `f.Max<int>.8`,
+`f.Twice.lambda.3.1`, `kz.main`; section 6, an assumption there); CodeView keeps the subprograms'
 names.
 `EmitterTests.A_test_build_and_a_release_build_with_lines_carry_line_tables_under_the_names_a_trace_shows_and_a_release_build_does_not`
 and `CommandTests.Build_writes_the_line_tables_into_a_test_build_and_into_a_release_build_where_lines_says_so`
@@ -558,11 +561,24 @@ program that makes them without end runs out of memory and ends with `allocation
 value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
 corpus runner lists every case the checker reads in full and the emitter does not emit, 4 of the
 248 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
-checker says `not supported` to are held by the checker's theory and not built. The crash path is
-not emitted: a stack overflow
-ends the program with the system's signal and not with its error line, and no exception writes a
-trace (section 6), so `outcomes/stack-overflow.kz` is built and not run, the one case the runner
-lists so.
+checker says `not supported` to are held by the checker's theory and not built. The handler of a
+stack overflow is not emitted: a stack overflow
+ends the program with the system's signal and not with its error line (section 6), so
+`outcomes/stack-overflow.kz` is built and not run, the one case the runner lists so.
+
+On Linux an exception that ends the process writes the trace of the calls below its error line
+(section 6): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
+`_Unwind_Backtrace` of `libgcc_s`, the shared library a program links for it, reads the executable's
+own file, `/proc/self/exe`, through two pages it maps from the system, and takes a frame's name from
+`.symtab`, its line from `.debug_line` and, in a release build built with `--lines`, the calls
+inlined at it from `.debug_info`; it leaves out the frames whose symbols start with neither `f.` nor
+`std.`, the runtime's and the compiler's own functions, and ends at `kz.main`, `main`. A hundred
+frames are written, then `  ... N more frames`, `  ... 1 more frame` for one, and `KURZ_TRACE=0`
+switches it off. Windows writes no trace: its `Trace` writes nothing, and the error line stands
+alone. `TraceTests` pins the forms, the names, the cut, the variable, the release build with and
+without `--lines` and an executable stripped of its symbols or of its line tables, on Linux; the
+corpus runner holds the trace of every crash it runs to its error line's place and to `main` (E3),
+and every other test that compares a crash's standard error sets `KURZ_TRACE=0` for the program it runs.
 
 ### Readings the record leaves open to the emitter
 

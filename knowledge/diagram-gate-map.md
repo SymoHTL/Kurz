@@ -98,7 +98,11 @@ flowchart TD
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
         pinned clang and runs it, red on output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 187 cases run; the build command's lines and refusals; and the refused write and the refused allocation,
+        than 187 cases run, and on Linux on a crash whose trace is empty, holds a line that is not a frame, does
+        not end at main or, in a test build, does not start at the error line's place; TraceTests, red on a trace
+        other than the one each Linux program pins: its frames, names and lines, the cut and its count, the
+        switch KURZ_TRACE=0, the release build with and without --lines, an executable stripped of its symbols
+        or of its line tables; the build command's lines and refusals; and the refused write and the refused allocation,
         each with its error line; DataTests, red on a tag wider or narrower than the largest type number among the
         cases needs, two layouts for one union, a value that does not come back out of a union, a block not copied
         before a write, a path assignment that does not evaluate its value first, a static of a type with a base laid

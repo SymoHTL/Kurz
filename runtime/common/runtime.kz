@@ -90,7 +90,8 @@ pub void Print(string text, string file, int line) {
 }
 
 // The error line of an exception of the run-time table (chapter 12), `error: <id> at <file>:<n>`, on
-// standard error, and the end of the process with the exit code 1 (design record, section 6).
+// standard error, the trace of the calls below it, which the target's `Trace` writes, and the end of
+// the process with the exit code 1 (design record, section 6).
 pub void Raise(string id, string file, int line) {
     WriteError("error: ")
     WriteError(id)
@@ -99,11 +100,12 @@ pub void Raise(string id, string file, int line) {
     WriteError(":")
     WriteNumber(ulong(line))
     WriteError("\n")
+    sys.Trace()
     sys.Exit(1)
 }
 
 // A `throw` (O6): the error line ends with a colon, and the text of the thrown value stands on the
-// line below it, written as it is (design record, section 6).
+// line below it, written as it is, with the trace below the text (design record, section 6).
 pub void Throw(string text, string file, int line) {
     WriteError("error: thrown at ")
     WriteError(file)
@@ -112,6 +114,7 @@ pub void Throw(string text, string file, int line) {
     WriteError(":\n")
     WriteError(text)
     WriteError("\n")
+    sys.Trace()
     sys.Exit(1)
 }
 
