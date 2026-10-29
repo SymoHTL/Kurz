@@ -84,7 +84,8 @@ public sealed record ErrorType : KurzType
 /// <summary><c>List&lt;T&gt;</c> (M9, T17).</summary>
 public sealed record ListType(KurzType Element) : KurzType
 {
-    public override string Text => $"List<{Element.Text}>";
+    /// <summary>M9: a list of bytes is named <c>Bytes</c>, its second name (section 4, the owner, 2026-10-29, "Bytes = List&lt;byte&gt;").</summary>
+    public override string Text => Element is PrimitiveType { Kind: Primitive.Byte } ? "Bytes" : $"List<{Element.Text}>";
 
     public bool Equals(ListType? other) => other is not null && Types.Same(Element, other.Element);
 

@@ -1464,7 +1464,7 @@ long End(long at) {
 // A text written on standard error.
 void Out(string text) {
     raw {
-        Bytes(text.Pointer, long(text.Bytes.Count))
+        TraceBytes(text.Pointer, long(text.Bytes.Count))
     }
 }
 
@@ -1478,7 +1478,7 @@ void FileBytes(long from, long to) {
                 count = windowHeld
             }
 
-            Bytes(page, count)
+            TraceBytes(page, count)
             at = at + count
         }
     }
@@ -1486,7 +1486,7 @@ void FileBytes(long from, long to) {
 
 // `count` bytes written on standard error in as many calls as it takes; a write the system refuses, or
 // one that takes nothing, ends the trace there (design record, section 6).
-void Bytes(byte* bytes, long count) {
+void TraceBytes(byte* bytes, long count) {
     raw {
         mut long done = 0
         while done < count && !failed {
@@ -1510,7 +1510,7 @@ void Number(long value) {
 
         while unit > 0 {
             mut byte digit = byte(value / unit % 10 + 48)
-            Bytes(&digit, 1)
+            TraceBytes(&digit, 1)
 
             unit = unit / 10
         }
@@ -1533,7 +1533,7 @@ void Hex(long value) {
                 digit = byte(d + 87)
             }
 
-            Bytes(&digit, 1)
+            TraceBytes(&digit, 1)
 
             shift = shift - 4
         }

@@ -725,13 +725,54 @@ public sealed partial class Checker
         return typed;
     }
 
-    /// <summary>R15: <c>List&lt;T&gt;.FromRaw(p, n)</c>; a member of another type with type arguments is one no rule gives it (V10).</summary>
+    /// <summary>
+    /// R15: <c>List&lt;T&gt;.Allocate(n)</c>, the address of room for <c>n</c> items in a list's block that <c>List&lt;T&gt;.FromRaw</c> takes
+    /// over, a <c>T*</c> of a <c>T</c> a pointer can point to (section 3, the owner, 2026-10-29, "List.Allocate, take over").
+    /// </summary>
+    private Typed CheckListAllocate(CallExpression c, ListType list, string form)
+    {
+        if (RefusesTypeArguments(c, $"`{form}`"))
+        {
+            return Typed.Error;
+        }
+
+        if (Types.IsVoid(list.Element))
+        {
+            Report(ErrorIds.TypeMismatch, c.Line, "`void` has no size: `List<void>.Allocate` makes room for no items (R14, R15)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        var pointer = PointerTo(list.Element, c.Line, $"`{form}`");
+        if (Types.IsError(pointer))
+        {
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        RequireRaw(c.Line, $"`{form}`", "R15");
+        var candidate = new Candidate { Slots = [new Slot("n", Types.Long, false, false, false)], Result = pointer };
+        var typed = Call([candidate], c, null, out var picked);
+        if (picked is not null && !typed.IsError)
+        {
+            model.RecordCall(c, new CallInfo(CallKind.ListAllocate, null, null, list, NoMap, picked.Binding, 1, pointer));
+        }
+
+        return typed;
+    }
+
+    /// <summary>R15: <c>List&lt;T&gt;.FromRaw(p, n)</c> and <c>List&lt;T&gt;.Allocate(n)</c>; a member of another type with type arguments is one no rule gives it (V10).</summary>
     private Typed CheckTypeMemberCall(TypeMemberAccess t, CallExpression c)
     {
         var type = Resolve(t.Type);
         if (type is ListType list && t.Member == "FromRaw")
         {
             return CheckFromRaw(c, list, list.Element, "List<T>.FromRaw");
+        }
+
+        if (type is ListType allocated && t.Member == "Allocate")
+        {
+            return CheckListAllocate(c, allocated, "List<T>.Allocate");
         }
 
         if (!Types.IsError(type))

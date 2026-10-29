@@ -1,0 +1,14 @@
+// expect: output
+// | [104, 105]
+// | 105
+// | 2
+// rules: M9
+
+Bytes b = "hi".Bytes
+print(b)
+List<byte> same = b
+print(same[1])
+mut c = Bytes()
+c.Add(7)
+c.Add(8)
+print(c.Count)

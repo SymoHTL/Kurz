@@ -107,14 +107,13 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 189 : 190;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 198 : 199;
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
     {
         ["memory/asm-explicit-register.kz"] = "inline assembly (R11)",
         ["memory/asm-in-raw.kz"] = "inline assembly (R11)",
-        ["types/string-bytes.kz"] = "`s.Bytes` as a list (T15)",
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
     };
 

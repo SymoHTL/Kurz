@@ -400,11 +400,53 @@ public sealed class CheckerTests
     {
         // T15, T16, T21
         Assert.Equal([(ErrorIds.StringIndex, 2)], Errors("s = \"abc\"\nprint(s[0])"));
-        Assert.Equal("List<byte>", TypeOf("s = \"abc\"\nb = s.Bytes\nprint(b.Count)", "b"));
+        Assert.Equal("Bytes", TypeOf("s = \"abc\"\nb = s.Bytes\nprint(b.Count)", "b")); // M9: the second name of a list of bytes
         Assert.Equal("List<char>", TypeOf("s = \"abc\"\nc = s.Chars\nprint(c.Count)", "c"));
         Assert.Equal("char", TypeOf("c = \"abc\".Chars[0]\nprint(c)", "c"));
         Assert.Equal("byte", TypeOf("b = \"abc\".Bytes[0]\nprint(b)", "b"));
         Clean("c = 'a'\nprint(c == 'a')\nd = 'b'\nprint(d == c)");
+    }
+
+    [Fact]
+    public void Bytes_is_the_second_name_of_a_list_of_bytes()
+    {
+        // M9 (section 4, the owner, 2026-10-29, "Bytes = List<byte>"): one type under two names, which a message names `Bytes`
+        Assert.Equal("Bytes", TypeOf("List<byte> b = Bytes()\nprint(b)", "b"));
+        Assert.Equal("Bytes", TypeOf("Bytes b = List<byte>()\nprint(b)", "b"));
+        Assert.Equal("List<int>", TypeOf("xs = List<int>()\nprint(xs)", "xs"));
+        Clean("void Show(List<byte> b) => print(b)\n\nShow(\"ab\".Bytes)\nShow(Bytes())");
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("Bytes<byte> b = Bytes()\nprint(b)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("b = Bytes(1)\nprint(b)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("data Bytes(int Count)"));
+        var (diagnostics, _) = Check("int x = Bytes()\nprint(x)");
+        Assert.Contains("`Bytes`", Assert.Single(diagnostics.Items).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Bytes_become_a_string_through_FromUtf8_whose_other_case_is_InvalidUtf8()
+    {
+        // T15 (section 4, the owner, 2026-10-29, "Union, as Rust"): a union whose case leaves as every case does (O1, O3, O9)
+        Clean("b = Bytes()\nmatch string.FromUtf8(b) {\n    string s => print(s)\n    InvalidUtf8 e => print(e.At)\n}");
+        Clean("b = Bytes()\nprint(string.FromUtf8Lossy(b))");
+        Clean("string | InvalidUtf8 Text(Bytes b) {\n    s = string.FromUtf8(b)\n    return \"<{s}>\"\n}\n\nmatch Text(\"ab\".Bytes) {\n    string s => print(s)\n    InvalidUtf8 e => print(e.At)\n}");
+        Assert.Equal([(ErrorIds.UnlistedCase, 2)], Errors("string Text(Bytes b) {\n    return string.FromUtf8(b)\n}\n\nprint(Text(Bytes()))"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 1)], Errors("print(string.FromUtf8(Bytes()))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = List<int>()\nprint(string.FromUtf8Lossy(xs))"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("data InvalidUtf8(int At)"));
+    }
+
+    [Fact]
+    public void A_part_of_a_list_is_a_list_and_its_ends_are_a_range_s()
+    {
+        // M9 (section 4, the owner, 2026-10-29, "A List<T>, a value"), with C8's ends: integers of one sign, in order where both are literals
+        Assert.Equal("List<int>", TypeOf("xs = List<int>()\nys = xs[0..<0]\nprint(ys)", "ys"));
+        Assert.Equal("Bytes", TypeOf("ys = \"abc\".Bytes[1..2]\nprint(ys)", "ys"));
+        Clean("xs = List<int>()\nlong a = 0\nprint(xs[a..<a])");
+        Assert.Equal([(ErrorIds.ReversedRange, 2)], Errors("xs = List<int>()\nprint(xs[2..<1])"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = List<int>()\nprint(xs[0..<1.5])"));
+        Assert.Equal([(ErrorIds.SignMix, 4)], Errors("xs = List<int>()\nint a = 0\nuint u = 1\nprint(xs[a..<u])"));
+        Assert.Equal([(ErrorIds.StringIndex, 1)], Errors("print(\"abc\"[0..<1])"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("x = 5\nprint(x[0..<1])"));
     }
 
     [Fact]
@@ -1624,6 +1666,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CountedPointee, 2)], Errors("raw {\n    xs = List<string>.FromRaw(Ptr<long>(64), 1)\n    print(xs.Count)\n}", grants: "raw"));
         // the reading on R14 with R15 (README): `void` has no size, so a list of its elements counts none, `type-mismatch` as `SizeOf<void>()`
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("raw {\n    xs = List<void>.FromRaw(Ptr<void>(64), 2)\n    print(xs.Count)\n}", grants: "raw"));
+
+        // `List<T>.Allocate`, the room `List<T>.FromRaw` takes over, and both through `Bytes` (section 3, the owner, 2026-10-29)
+        Clean("raw {\n    long* p = List<long>.Allocate(4)\n    ys = List<long>.FromRaw(p, 0)\n    print(ys.Count)\n}", grants: "raw");
+        Clean("raw {\n    byte* p = Bytes.Allocate(2)\n    p[0] = 104\n    b = Bytes.FromRaw(p, 1)\n    print(b)\n}", grants: "raw");
+        Assert.Equal([(ErrorIds.RawRequired, 1)], Errors("print(List<long>.Allocate(4) == null)"));
+        Assert.Equal([(ErrorIds.RawRequired, 1)], Errors("print(Bytes.Allocate(4) == null)"));
+        Assert.Equal([(ErrorIds.CountedPointee, 2)], Errors("raw {\n    print(List<string>.Allocate(1) == null)\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("raw {\n    print(List<void>.Allocate(1) == null)\n}", grants: "raw"));
     }
 
     [Fact]

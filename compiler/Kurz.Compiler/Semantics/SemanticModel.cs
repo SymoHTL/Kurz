@@ -43,6 +43,15 @@ public enum CallKind
 
     /// <summary><c>string.Allocate(n)</c> (R15), the address of room for the bytes of a string that <c>string.FromRaw</c> takes over.</summary>
     StringAllocate,
+
+    /// <summary><c>List&lt;T&gt;.Allocate(n)</c> (R15), the address of room for the items of a list that <c>List&lt;T&gt;.FromRaw</c> takes over; <see cref="CallInfo.Target"/> is the list type.</summary>
+    ListAllocate,
+
+    /// <summary><c>string.FromUtf8(b)</c> (T15), a string of the bytes or the case <c>InvalidUtf8</c>.</summary>
+    FromUtf8,
+
+    /// <summary><c>string.FromUtf8Lossy(b)</c> (T15), a string of the bytes with U+FFFD for each sequence that is not UTF-8.</summary>
+    FromUtf8Lossy,
 }
 
 /// <summary>

@@ -326,6 +326,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         string First(string a, string b) => a
 
+        string | InvalidUtf8 Wrapped(Bytes b) {
+            inner = string.FromUtf8(b)
+            return "<{inner}>"
+        }
+
         mut first = Made(1)
         second = first
         first = Made(2)
@@ -395,6 +400,31 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         mut named = Made(23)
         print(First("{named}", Rename(mut named)))
         print(named)
+        mut bytes = Made(24).Bytes
+        print(bytes)
+        text = string.FromUtf8Lossy(bytes)
+        bytes.Add(33)
+        print(text)
+        print(bytes)
+        mut parts = List<string>()
+        parts.Add(Made(25))
+        parts.Add(Made(26))
+        part = parts[1..<2]
+        parts = List<string>()
+        print(part)
+        print("{Made(27)}".Bytes[1])
+        match Wrapped(Made(28).Bytes) {
+            string inner => print(inner)
+            InvalidUtf8 bad => print(bad.At)
+        }
+        raw {
+            room = Bytes.Allocate(4)
+            room[0] = 104
+            room[1] = 105
+            made = Bytes.FromRaw(room, 2)
+            print(string.FromUtf8Lossy(made))
+            print(made.Pointer[1])
+        }
         """;
 
     private static readonly string[] StringsPrint =
@@ -421,12 +451,20 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "2",
         "n23", // one hole of a string is a new value, which the call that changes the place it read leaves whole
         "n21",
+        "[110, 50, 52]", // the bytes of a string a call made, which share its block past the statement
+        "n24", // a string of the bytes, which shares their block, and an `Add` that copies it
+        "[110, 50, 52, 33]",
+        "[n26]", // a part holds its items' blocks
+        "50", // a byte read in place
+        "<n28>", // a string of bytes in a function, through the success of its union
+        "hi", // a list that took over the room `Bytes.Allocate` gave
+        "105",
     ];
 
     // every way out of a block a string is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, an assignment over a variable, a lambda's environment in a
-    // variable and in a list, a list of strings, and an interpolation of one hole of 4096 bytes; each other string of 1024 bytes,
-    // joined from halves the join lets go of
+    // variable and in a list, a list of strings, an interpolation of one hole of 4096 bytes, the bytes of such a string, a string of
+    // them, which shares their block, and a part of them; each other string of 1024 bytes, joined from halves the join lets go of
     private const string StringRounds = """
         data Pair(string A, int B)
 
@@ -480,7 +518,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             ss.Add(Make(10))
             ss.Add(a)
             lone = "{Make(12)}"
-            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096
+            bb = Make(12).Bytes
+            tt = string.FromUtf8Lossy(bb)
+            pp = bb[0..<4000]
+            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096 + bb.Count - 4096 + tt.Bytes.Count - 4096 + pp.Count - 4000
         }
         print(round)
         print(total)
@@ -723,6 +764,104 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, toolchain.Runtime, "list-index-" + name), 1, ["5"], "error: index-out-of-range at program.kz:5\n");
     }
 
+    [Theory]
+    [InlineData("-1", "1", false, "index-out-of-range", "minus")]
+    [InlineData("0", "4", false, "index-out-of-range", "past")]
+    [InlineData("0", "3", true, "index-out-of-range", "past-last")]
+    [InlineData("4", "4", false, "index-out-of-range", "start-past")]
+    [InlineData("2", "1", false, "reversed-range-at-run-time", "reversed")]
+    [InlineData("5", "1", false, "reversed-range-at-run-time", "reversed-past")] // the order before the count, as C8 checks it first
+    public void A_part_outside_the_list_or_with_its_ends_reversed_raises_at_its_line(string start, string end, bool inclusive, string id, string name)
+    {
+        // M9 (section 4, the owner, 2026-10-29, "A List<T>, a value"): the part before it is the positive control
+        var text = $"mut xs = List<int>()\nxs.Add(1)\nxs.Add(2)\nxs.Add(3)\na = {start}\nb = {end}\nprint(xs[1..<3])\nprint(xs[a..{(inclusive ? "" : "<")}b])\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-part-" + name), 1, ["[2, 3]"], $"error: {id} at program.kz:8\n");
+    }
+
+    [Fact]
+    public void A_part_reaches_both_ends_of_the_list_with_ends_of_any_integer_type()
+    {
+        // M9: a part that ends at the count, an empty one there, one item of `a..b`, and ends of `uint` and of `long`
+        const string text = "mut xs = List<int>()\nxs.Add(1)\nxs.Add(2)\nxs.Add(3)\nprint(xs[0..<3])\nprint(xs[3..<3])\nprint(xs[2..2])\nuint a = 1\nuint b = 3\nprint(xs[a..<b])\nlong c = 0\nprint(xs[c..c])\nprint(List<int>()[0..<0])\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-part-ends"), 0, ["[1, 2, 3]", "[]", "[3]", "[2, 3]", "[1]", "[]"], "");
+    }
+
+    [Fact]
+    public void FromUtf8_reads_bytes_as_Rust_s_from_utf8_and_from_utf8_lossy_do()
+    {
+        // T15 (section 4, the owner, 2026-10-29, "Union, as Rust"): for each sequence, what Rust 1.82's `str::from_utf8` gave on
+        // 2026-10-29, `ok` or the error's `valid_up_to`, and the bytes of its `String::from_utf8_lossy`: overlong forms, surrogates, code
+        // points past U+10FFFF, bytes that begin no sequence, and sequences cut short inside the bytes and at their end
+        (byte[] Bytes, string Valid, string Lossy)[] cases =
+        [
+            ([], "ok", "[]"),
+            ([0x41], "ok", "[65]"),
+            ([0x80], "0", "[239, 191, 189]"),
+            ([0xC2, 0x80], "ok", "[194, 128]"),
+            ([0xC1, 0xBF], "0", "[239, 191, 189, 239, 191, 189]"),
+            ([0xE0, 0x80, 0x80], "0", "[239, 191, 189, 239, 191, 189, 239, 191, 189]"),
+            ([0xE0, 0xA0, 0x80], "ok", "[224, 160, 128]"),
+            ([0xED, 0xA0, 0x80], "0", "[239, 191, 189, 239, 191, 189, 239, 191, 189]"),
+            ([0xED, 0x9F, 0xBF], "ok", "[237, 159, 191]"),
+            ([0xEF, 0xBF, 0xBF], "ok", "[239, 191, 191]"),
+            ([0xF0, 0x8F, 0xBF, 0xBF], "0", "[239, 191, 189, 239, 191, 189, 239, 191, 189, 239, 191, 189]"),
+            ([0xF0, 0x90, 0x80, 0x80], "ok", "[240, 144, 128, 128]"),
+            ([0xF4, 0x8F, 0xBF, 0xBF], "ok", "[244, 143, 191, 191]"),
+            ([0xF4, 0x90, 0x80, 0x80], "0", "[239, 191, 189, 239, 191, 189, 239, 191, 189, 239, 191, 189]"),
+            ([0xF5, 0x80, 0x80, 0x80], "0", "[239, 191, 189, 239, 191, 189, 239, 191, 189, 239, 191, 189]"),
+            ([0xFF], "0", "[239, 191, 189]"),
+            ([0xC2], "0", "[239, 191, 189]"),
+            ([0xE2, 0x82], "0", "[239, 191, 189]"),
+            ([0xF0, 0x90, 0x80], "0", "[239, 191, 189]"),
+            ([0x61, 0xE2, 0x82, 0x61], "1", "[97, 239, 191, 189, 97]"),
+            ([0xF0, 0x90, 0x80, 0x41], "0", "[239, 191, 189, 65]"),
+            ([0x68, 0x69, 0xC3, 0x28, 0x21], "2", "[104, 105, 239, 191, 189, 40, 33]"),
+            ([0xE2, 0x82, 0xAC, 0xC3, 0xA4, 0x80, 0xBF, 0x7A], "5", "[226, 130, 172, 195, 164, 239, 191, 189, 239, 191, 189, 122]"),
+        ];
+        var program = new StringBuilder("void Show(Bytes b) {\n    match string.FromUtf8(b) {\n        InvalidUtf8 e => print(e.At)\n        else => print(\"ok\")\n    }\n    print(string.FromUtf8Lossy(b).Bytes)\n}\n\n");
+        for (var i = 0; i < cases.Length; i++)
+        {
+            program.Append(cases[i].Bytes.Length == 0 ? $"c{i} = Bytes()\n" : $"mut c{i} = Bytes()\n");
+            foreach (var b in cases[i].Bytes)
+            {
+                program.Append($"c{i}.Add({b})\n");
+            }
+
+            program.Append($"Show(c{i})\n");
+        }
+
+        string[] lines = [.. cases.SelectMany(c => new[] { c.Valid, c.Lossy })];
+        Ran(BuildAndRun(program.ToString(), toolchain.Runtime, "utf8-table"), 0, lines, "");
+        Ran(BuildAndRun(program.ToString(), Fenced, "utf8-table-fenced"), 0, lines, "");
+    }
+
+    [Fact]
+    public void A_list_takes_over_the_room_Allocate_gave_and_shows_its_memory_in_raw()
+    {
+        // R15 (section 3, the owner, 2026-10-29, "List.Allocate, take over"): the list holds the room `Allocate` gave and grows from it;
+        // the pointer of a list without a block is not null
+        const string text = "raw {\n    p = List<long>.Allocate(4)\n    p[0] = 7\n    p[1] = 8\n    mut xs = List<long>.FromRaw(p, 2)\n    xs.Add(9)\n    print(xs)\n    print(xs.Pointer == p)\n    xs.Add(10)\n    xs.Add(11)\n    print(xs)\n    empty = List<int>()\n    print(empty.Pointer != null)\n}\n";
+        string[] lines = ["[7, 8, 9]", "true", "[7, 8, 9, 10, 11]", "true"];
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-from-raw", "raw"), 0, lines, "");
+        Ran(BuildAndRun(text, Fenced, "list-from-raw-fenced", "raw"), 0, lines, "");
+    }
+
+    [Fact]
+    public void A_list_asked_of_more_items_than_the_limit_ends_with_their_bytes_and_a_refused_one_with_its_block()
+    {
+        // M9, R15: the limit of the largest `int` lowered to 3 in the library's text, so that `List<long>.Allocate(4)` asks past it with
+        // the bytes of 4 items of 8; a refused block reports the bytes the allocator was asked for, the 16 of its counts among them
+        const string text = "raw {\n    p = List<long>.Allocate(3)\n    print(p != null)\n    q = List<long>.Allocate(4)\n    print(q != null)\n}\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "if count > 2147483647 {\n        asked = count * item", "if count > 3 {\n        asked = count * item")), "list-allocate-limit", "raw"), 1, ["true"], "error: allocation-failed (32 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-allocate-below-limit", "raw"), 0, ["true", "true"], ""); // the positive control
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "list-allocate-refused", "raw"), 1, [], "error: allocation-failed (40 bytes)\n");
+
+        // a count past the largest `int` handed to `FromRaw`, the bytes of its items, and the bytes of a literal the system refuses
+        Ran(BuildAndRun("raw {\n    p = List<long>.Allocate(1)\n    xs = List<long>.FromRaw(p, 2147483648)\n    print(xs.Count)\n}\n", toolchain.Runtime, "list-from-raw-limit", "raw"), 1, [], "error: allocation-failed (17179869184 bytes)\n");
+        Ran(BuildAndRun("b = \"abc\".Bytes\nprint(b)\n", EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "bytes-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        Ran(BuildAndRun("b = \"abc\".Bytes\nprint(b)\n", toolchain.Runtime, "bytes-granted"), 0, ["[97, 98, 99]"], ""); // the positive control
+    }
+
     [Fact]
     public void A_growth_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
@@ -733,12 +872,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
-    [InlineData("mut xs = List<int>()\nraw {\n    print(xs.Pointer != null)\n}\n", 3, "`l.Pointer` (R15)", "raw")]
-    [InlineData("raw {\n    xs = List<int>.FromRaw(Ptr<int>(16), 0)\n    print(xs.Count)\n}\n", 2, "`List<T>.FromRaw` (R15)", "raw")]
     [InlineData("mut xs = List<int>()\nxs.Add(1)\nxs[0] = 2\n", 3, "an assignment into an index (M9)", null)]
     [InlineData("data Box(List<int> Items)\n\nmut b = Box(List<int>())\nb.Items.Add(1)\n", 4, "an `Add` on a list in a field (M5)", null)]
     [InlineData("data Box(List<int> Items)\n\na = Box(List<int>())\nb = Box(List<int>())\nprint(a == b)\n", 5, "`==` on a `List<int>`", null)] // D3 compares the fields
-    [InlineData("s = \"ab\"\nprint(s.Bytes[0])\n", 2, "`s.Bytes` as a list (T15)", null)]
+    [InlineData("s = \"ab\"\nprint(s.Chars[0])\n", 2, "`s.Chars` as a list (T15)", null)]
     [InlineData("data Box(List<int> Items)\n\nvoid Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nmut b = Box(List<int>())\nFill(mut b.Items)\n", 8, "a `mut` parameter given anything but a variable (M7)", null)]
     public void What_the_emitter_does_not_lay_out_of_a_list_is_not_supported_at_its_line(string text, int line, string message, string? grant)
     {

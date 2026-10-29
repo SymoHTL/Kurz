@@ -454,7 +454,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (Types.ByName.ContainsKey(n.Name) || n.Name is "List" or "Map")
+        if (Types.ByName.ContainsKey(n.Name) || n.Name is "List" or "Map" or "Bytes")
         {
             Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here (T10)");
             return Typed.Error;
@@ -601,6 +601,11 @@ public sealed partial class Checker
     private Typed CheckIndex(IndexExpression i)
     {
         var target = CheckExpression(i.Target, null);
+        if (i.Index is RangeExpression range)
+        {
+            return CheckPart(i, target, range);
+        }
+
         var index = CheckExpression(i.Index, target.Type is PointerType ? null : Types.Int); // R10: an offset is an `int` or a `long`, so a literal takes the type L10 gives it
         if (target.Type is PointerType)
         {
@@ -623,6 +628,29 @@ public sealed partial class Checker
                 return new Typed(l.Element);
             default:
                 Report(ErrorIds.TypeMismatch, i.Line, $"a `{target.Type}` is not indexed (M9)");
+                return Typed.Error;
+        }
+    }
+
+    /// <summary>
+    /// M9: <c>xs[a..&lt;b]</c> and <c>xs[a..b]</c>, a new list of the items from position <c>a</c> to <c>b</c>, whose ends are read as
+    /// C8 reads a range's, <c>reversed-range</c> among them (section 4, the owner, 2026-10-29, "A List&lt;T&gt;, a value"); a part of a
+    /// string is <c>string-index</c>, as its index is (T15).
+    /// </summary>
+    private Typed CheckPart(IndexExpression i, Typed target, RangeExpression range)
+    {
+        RecordThrough(i.Index, new Typed(CheckRange(range))); // a range has the type of its numbers (C8)
+        switch (target.Type)
+        {
+            case ErrorType:
+                return Typed.Error;
+            case PrimitiveType { Kind: Primitive.String }:
+                Report(ErrorIds.StringIndex, i.Line, "a string is indexed through `.Bytes` or `.Chars` (T15)");
+                return Typed.Error;
+            case ListType l:
+                return new Typed(l); // an end that is no integer was reported by the range, and the part is still a list (E1)
+            default:
+                Report(ErrorIds.TypeMismatch, i.Line, $"a part is taken of a list, not of a `{target.Type}` (M9)");
                 return Typed.Error;
         }
     }

@@ -1,0 +1,15 @@
+// expect: output
+// | [104, 195, 169]
+// | [104, 195, 169, 33]
+// | 5
+// | hé!
+// rules: T15
+
+s = "hé"
+print(s.Bytes)
+t = "{s}!"
+mut b = t.Bytes
+print(b)
+b.Add(33)
+print(b.Count)
+print(t)

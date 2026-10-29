@@ -595,7 +595,11 @@ the list's own counts, before the allocator rounds it up (§4); `list[i]` is the
 or beyond raises `index-out-of-range` (T14); `Where(test)` is the list of
 items that pass the test, in their order, and calls the test once for each item, in order, so that
 a test that ends the program ends it at that item and no item after it is tested (§4, the owner,
-2026-10-28). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
+2026-10-28). `Bytes` is a second name of `List<byte>`, and a message names that type `Bytes`; `xs[a..<b]`
+and `xs[a..b]` are a new list of the items from position `a` to `b`, the second with `b` included, their
+items copied (M3); a start below 0 or an end past the count raises `index-out-of-range`, and a range
+whose end lies below its start is `reversed-range` or `reversed-range-at-run-time`, as C8 says of a
+range (§4, the owner, 2026-10-29). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the
 record's samples use. The naming of the standard library is open (record, section 14).
 
@@ -634,6 +638,57 @@ Case: [values/list-index-out-of-range.kz](../corpus/values/list-index-out-of-ran
 mut xs = List<int>()
 xs.Add(1)
 print(xs[1])
+```
+
+Case: [types/bytes-name.kz](../corpus/types/bytes-name.kz)
+```kurz
+Bytes b = "hi".Bytes
+print(b)
+List<byte> same = b
+print(same[1])
+mut c = Bytes()
+c.Add(7)
+c.Add(8)
+print(c.Count)
+```
+
+Case: [values/list-part.kz](../corpus/values/list-part.kz)
+```kurz
+mut xs = List<int>()
+for i in 1..5 {
+    xs.Add(i)
+}
+print(xs[1..<3])
+print(xs[1..3])
+print(xs[2..<2])
+print(xs)
+```
+
+Case: [values/list-part-out-of-range.kz](../corpus/values/list-part-out-of-range.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+n = 3
+print(xs[1..n])
+```
+
+Case: [values/list-part-reversed.kz](../corpus/values/list-part-reversed.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+print(xs[2..<1])
+```
+
+Case: [values/list-part-reversed-at-run-time.kz](../corpus/values/list-part-reversed-at-run-time.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+n = 0
+print(xs[1..<n])
 ```
 
 ### M10 (decided, §4) The order of a map's entries

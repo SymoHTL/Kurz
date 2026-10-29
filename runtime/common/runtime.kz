@@ -385,6 +385,139 @@ pub bool Same(string first, string second) {
     return same
 }
 
+// The byte at position `at` of the `count` bytes at `bytes`, and -1 past them.
+long ByteAt(byte* bytes, long count, long at) {
+    mut long b = -1
+    if at < count {
+        raw {
+            b = long(bytes[at])
+        }
+    }
+
+    return b
+}
+
+// The UTF-8 sequence that starts at position `at` of the `count` bytes at `bytes`, read as Rust's
+// `str::from_utf8` reads it, which takes no overlong form, no surrogate and nothing above U+10FFFF:
+// its length where it is valid, and else the negative of the count of its bytes that begin a valid
+// sequence, at least 1, the maximal part of a sequence that Rust's `String::from_utf8_lossy` and the
+// Unicode Standard's recommended practice read as one U+FFFD (T15).
+long Utf8Sequence(byte* bytes, long count, long at) {
+    long first = ByteAt(bytes, count, at)
+    if first < 128 {
+        return 1
+    }
+
+    mut long width = 0
+    mut long low = 128
+    mut long high = 191
+    if first >= 194 && first <= 223 {
+        width = 2
+    } else if first >= 224 && first <= 239 {
+        width = 3
+        if first == 224 {
+            low = 160
+        } else if first == 237 {
+            high = 159
+        }
+    } else if first >= 240 && first <= 244 {
+        width = 4
+        if first == 240 {
+            low = 144
+        } else if first == 244 {
+            high = 143
+        }
+    } else {
+        return -1
+    }
+
+    long second = ByteAt(bytes, count, at + 1)
+    if second < low || second > high {
+        return -1
+    }
+
+    mut long i = 2
+    while i < width {
+        long b = ByteAt(bytes, count, at + i)
+        if b < 128 || b > 191 {
+            return -i
+        }
+
+        i = i + 1
+    }
+
+    return width
+}
+
+// The count of the bytes in front of the first sequence of the `count` bytes at `bytes` that is not
+// UTF-8, as Rust's `Utf8Error::valid_up_to` counts them, and -1 where every sequence is UTF-8: what
+// `string.FromUtf8` puts into `InvalidUtf8` (T15; the owner, 2026-10-29, "Union, as Rust").
+pub long Utf8Invalid(byte* bytes, long count) {
+    mut long at = 0
+    while at < count {
+        long n = Utf8Sequence(bytes, count, at)
+        if n < 0 {
+            return at
+        }
+
+        at = at + n
+    }
+
+    return -1
+}
+
+// The text of the `count` bytes at `bytes` with each maximal part of a sequence that is not UTF-8 read
+// as U+FFFD, the bytes 239, 191 and 189: `string.FromUtf8Lossy` of bytes that hold such a part (T15).
+// A text of more bytes than the largest `int` ends the process as a longer string does.
+pub string Utf8Lossy(byte* bytes, long count) {
+    mut long size = 0
+    mut long at = 0
+    while at < count {
+        long n = Utf8Sequence(bytes, count, at)
+        if n < 0 {
+            size = size + 3
+            at = at - n
+        } else {
+            size = size + n
+            at = at + n
+        }
+    }
+
+    if size > 2147483647 {
+        AllocationFailed(size)
+    }
+
+    mut string text = ""
+    raw {
+        byte* p = string.Allocate(size)
+        mut long to = 0
+        at = 0
+        while at < count {
+            long n = Utf8Sequence(bytes, count, at)
+            if n < 0 {
+                p[to] = 239
+                p[to + 1] = 191
+                p[to + 2] = 189
+                to = to + 3
+                at = at - n
+            } else {
+                mut long i = 0
+                while i < n {
+                    p[to + i] = bytes[at + i]
+                    i = i + 1
+                }
+
+                to = to + n
+                at = at + n
+            }
+        }
+
+        text = string.FromRaw(p, size)
+    }
+
+    return text
+}
+
 // The bytes of a text written to standard error, each piece in as many write calls as it takes; a
 // write the system refuses ends the writing there, since nothing more can be said.
 void WriteError(string text) {

@@ -166,7 +166,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Theory]
     [InlineData("print(string.FromRaw(string.Allocate(1), 2147483647).Bytes.Count)", 0, "2147483647", "")] // the largest that fits, the positive control: a count past the block's room, which nothing reads beyond, freed as the block's room says
     [InlineData("print(string.FromRaw(Ptr<byte>(16), 2147483648).Bytes.Count)", 1, null, "error: allocation-failed (2147483648 bytes)\n")]
-    [InlineData("print(\"{string.FromRaw(Ptr<byte>(16), 2147483647)}a\")", 1, null, "error: allocation-failed (2147483648 bytes)\n")] // a join
+    [InlineData("print(\"{string.FromRaw(string.Allocate(1), 2147483647)}a\")", 1, null, "error: allocation-failed (2147483648 bytes)\n")] // a join
     [InlineData("print(string.Allocate(2147483648) != null)", 1, null, "error: allocation-failed (2147483648 bytes)\n")]
     public void A_string_holds_at_most_the_largest_int_of_bytes_and_a_longer_one_ends_as_a_refused_allocation(string statement, int code, string? line, string error)
     {
@@ -208,7 +208,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var target = Builder.HostTarget!.Value;
         var path = $"runtime/{Runtime.Directory(target)}/";
         var files = Runtime.Files.Select(f => f.Path.StartsWith(path, StringComparison.Ordinal)
-            ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub void Start() {", "pub void Start() {\n    print(\"ab\".Bytes[0])", StringComparison.Ordinal)))
+            ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub void Start() {", "pub void Start() {\n    print(\"ab\".Chars[0])", StringComparison.Ordinal)))
             : f).ToList();
         var errors = new List<string>();
         var runtime = Runtime.Check(files, target, errors);

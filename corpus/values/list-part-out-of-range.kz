@@ -1,0 +1,9 @@
+// expect: throws index-out-of-range at 9
+// rules: M9
+
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+n = 3
+print(xs[1..n])

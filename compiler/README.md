@@ -149,7 +149,7 @@ compiler refuses gets its lines on standard error, one per diagnostic in the ord
 and no executable, and the command exits with 1:
 
     hello.kz:3: unknown-name: `y` is not declared
-    hello.kz:2: not supported: `s.Bytes` as a list (T15)
+    hello.kz:2: not supported: `s.Chars` as a list (T15)
 
 The file is named as the command line gave it. The command grants a program neither `raw` nor
 `native` (R7, R16): a program that needs them is refused with the grant's error. It refuses to
@@ -400,6 +400,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   largest `int` of them, a longer one, by a join, by `string.Allocate` or by `string.FromRaw`, ending the program with
   `allocation-failed` (T15), the count's highest bit marking a string that holds a block in front of its bytes, which
   a literal does not (below), and the empty string's bytes are a constant of none, never at the address 0 (R15);
+  `s.Bytes` as a `Bytes`, which takes a count of the block of a string made while the program runs and copies the
+  bytes of a literal, `s.Bytes[i]`, read from the string in place, and `string.FromUtf8(b)` and
+  `string.FromUtf8Lossy(b)`, whose string takes a count of the block of the bytes where every sequence is UTF-8,
+  their case `InvalidUtf8` a data type every file sees, declared before the file's own, and the lossy text, where a
+  sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
+  owner, 2026-10-29, "Union, as Rust");
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
@@ -437,8 +443,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (O1, O2), a success case without a value (O10), `match` with arms of a type, of a value and
   `else` (C4, C9, O8), postfix `else` after a call (O5), and `throw` of a data value and the bare
   `throw` of an arm of `else`, which throws the case that reached it (O7);
-- lists (M9): `List<T>()`, `Add`, `Count`, `list[i]`, which raises `index-out-of-range` for an
-  index below 0 or at `Count` or beyond (T14), `Where`, which calls its test once for each item, in
+- lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
+  message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
+  which raises `index-out-of-range` for an index below 0 or at `Count` or beyond (T14), `list[a..<b]` and
+  `list[a..b]`, a new list of a copy of those items, which raises `reversed-range-at-run-time` for ends in the
+  wrong order and then `index-out-of-range` for a start below 0 or an end past the count (section 4, the owner,
+  2026-10-29, "A List<T>, a value"), `Where`, which calls its test once for each item, in
   order (section 4, the owner, 2026-10-28, "Once each, in order"), and gives a new list of the items
   it kept, `for` over a list, which walks the list as it was when
   the loop started (C6), their text (A4), and lists of every type the emitter lays out, in
@@ -452,7 +462,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   their bytes (T18);
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
-  `string.Allocate(n)` and `string.FromRaw(p, n)` (R15), state outside a function, `thread static` among it, laid out
+  `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
+  its items as an address, not null, as Rust's `NonNull::dangling`, and `List<T>.Allocate(n)` and
+  `List<T>.FromRaw(p, n)`, also through `Bytes` (R15; section 3, the owner, 2026-10-29, "List.Allocate, take
+  over"), state outside a function, `thread static` among it, laid out
   after the layout knows the program's data types, a `data` value without fields as its initial
   value (R13),
   calls of C functions with `...` (R16) and of a C function value (R17).
@@ -522,8 +535,11 @@ string its caller lent it through its parameters alone. The name an arm of a `ma
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
 Counted are a list, a string, a function value, a plain `data` value that holds one of them in a
 field and a union with a case that holds one. A string made while the program runs holds a block
-of `std/` in front of its bytes: the count of the string values that hold it, 8 bytes, and the room
-`string.Allocate` gave, 8 bytes; the highest bit of the string's count of bytes marks such a string,
+of `std/` in front of its bytes, laid out as the block of a list of bytes: the count of the values that
+hold it, 8 bytes, then the count of its bytes, which `string.FromRaw` writes, and the room
+`string.Allocate` gave, 4 bytes each, so that `s.Bytes` and a string of a list of bytes share the
+block, and a list that holds it copies it before it writes, as for any shared block (M3); the
+highest bit of the string's count of bytes marks such a string,
 and a literal, which holds no block, is neither counted nor freed, a copy and the end of a holder
 testing that bit and touching no memory for a literal (section 4: the bit the owner's, 2026-10-29, "Bit
 in the count", the block and its room assumed). A string is counted where a list is, with no copy
@@ -560,8 +576,15 @@ for 3000 rounds within the sixteen pieces, and five of them kept each round not;
 block the system refuses; the number of `allocation-failed` past the limit, with the limit
 lowered in the library's text, for items of 1, 8 and 16 bytes, a padded `data` value, a list and a
 value of a block type, and for a growth the system refuses, and for an environment; the order of
-the calls of `Where`'s test; the release of such an environment before the `Add` in the IR; and
-`index-out-of-range` for an index below 0, at `Count` and beyond.
+the calls of `Where`'s test; the release of such an environment before the `Add` in the IR;
+`index-out-of-range` for an index below 0, at `Count` and beyond; a part of a list outside it or with
+its ends reversed, and parts at both ends with ends of `uint` and of `long`; `string.FromUtf8` and
+`string.FromUtf8Lossy` over 23 sequences, which give what Rust 1.82's `str::from_utf8` and
+`String::from_utf8_lossy` gave for them on 2026-10-29, under both allocators; a list that takes over
+the room `List<T>.Allocate` gave and grows from it, and the pointer of a list without a block; and the
+bytes of `allocation-failed` for `List<T>.Allocate` past the limit and refused, for `List<T>.FromRaw`
+past the limit and for the bytes of a literal refused. The strings' program and its rounds hold the
+bytes of a string, a string of bytes, a part of a list of strings and a list made in a `raw` block.
 
 ### What the emitter does not emit
 
@@ -570,8 +593,7 @@ checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` on a list in
-a field (M5), `==` on a value that holds a list (D3), a list's `Pointer` and `List<T>.FromRaw`
-(R15), `s.Bytes` and `s.Chars` as a list, `s.Bytes.Count` aside (T15), and a construct of the other
+a field (M5), `==` on a value that holds a list (D3), `s.Chars` as a list (T15), and a construct of the other
 chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
@@ -581,7 +603,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 4 of the 250 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+full and the emitter does not emit, 3 of the 258 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -715,8 +737,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   actor bodies write `mut users = Map<int, User>()`.
 - T17 with T19: how a call's type arguments are told from comparisons. The front end keeps the list
   when `(` follows the `>`, so `a < b, c > (d)` is the call `a<b, c>(d)` and `a < b, c > d` two
-  comparisons, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`,
-  the one form the reference gives a generic name that is not called; C# also keeps the list
+  comparisons, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`
+  and `List<T>.Allocate(n)`, the forms the reference gives a generic name that is not called; C# also keeps the list
   before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
   `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
@@ -1099,8 +1121,8 @@ round can ask about it by the rule's id.
   that error is the value's one, with no `raw-required` beside it (E1). State whose name is
   `redeclared` is read with its diagnostics dropped, and its name then stands for state of the
   error type, where no other state has it (E1).
-- R14 with R15 and T1: `void` has no size, so `SizeOf<void>()` and `List<void>.FromRaw(p, n)`,
-  which counts elements of that size, are `type-mismatch`, as R14 says of `p + n`, `p - n` and
+- R14 with R15 and T1: `void` has no size, so `SizeOf<void>()`, `List<void>.FromRaw(p, n)` and
+  `List<void>.Allocate(n)`, which count elements of that size, are `type-mismatch`, as R14 says of `p + n`, `p - n` and
   `p - q` of a `void*`. `Ptr<T>(x)` takes a pointer, a `long` or an integer that widens into one (T8, T23),
   as a `long` parameter takes it, and a `ulong` is `type-mismatch`.
 - R16: each argument in the place of `...` that C would widen is a `native-type` of its own. A
