@@ -406,7 +406,6 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         :
         [
             ("std/std.kz", "if size > 262144 {", "if size >= 0 {"),
-            (TargetFile, "    int munmap(void* address, long length)\n", "    int munmap(void* address, long length)\n    int mprotect(void* address, long length, int protection)\n"),
             (TargetFile, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p), bytes, 0)"), // PROT_NONE: the pages stay mapped
         ];
 

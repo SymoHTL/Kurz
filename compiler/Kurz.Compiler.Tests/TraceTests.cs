@@ -13,7 +13,8 @@ namespace Kurz.Compiler.Tests;
 /// <c>main</c>, innermost first, under the names a trace shows and with the lines of the line tables, the frames of the runtime and of
 /// the emitted code's helpers left out, a call inlined in a release build with the tables as a frame of its own (the owner,
 /// 2026-10-29, "As Rust: a frame each"), the cut after a hundred frames (the owner, 2026-10-29), <c>KURZ_TRACE</c>, and the forms of a
-/// frame without a line and without a name. Windows writes no trace: there each test holds the error line alone.
+/// frame without a line and without a name; and the handler of a stack overflow, which writes the error line and the trace from the fault
+/// on Linux. Windows writes no trace and has no such handler: there each test holds the error line alone, or the system's end.
 /// </summary>
 public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -40,9 +41,9 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     }
 
     /// <summary>
-    /// The trace of a raise of the program's code: none on Windows; on Linux at least one frame and no cut, every frame with a line
-    /// where the build has the line tables and none without, the first at <paramref name="place"/>, the error line's, where it has
-    /// them, and the last <c>main</c>, the actor's entry.
+    /// The trace of a raise of the program's code: none on Windows; on Linux at least one frame, every frame with a line where the
+    /// build has the line tables and none without, the first at <paramref name="place"/>, the error line's, where it has them, and the
+    /// last <c>main</c>, the actor's entry, or, where the trace is cut, a hundred frames and the cut line below them.
     /// </summary>
     internal static void AssertTrace(IReadOnlyList<string> trace, string place, bool lines)
     {
@@ -53,9 +54,18 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
         }
 
         Assert.NotEmpty(trace);
-        var frames = trace.Select(l => Frame().Match(l)).ToList();
+        var cut = Cut().IsMatch(trace[^1]);
+        var frames = trace.Take(cut ? trace.Count - 1 : trace.Count).Select(l => Frame().Match(l)).ToList();
         Assert.All(frames, m => Assert.True(m.Success && m.Groups["place"].Success == lines, $"not a frame {(lines ? "with" : "without")} a line: {m.Value}"));
-        Assert.Equal("main", frames[^1].Groups["name"].Value);
+        if (cut)
+        {
+            Assert.Equal(100, frames.Count);
+        }
+        else
+        {
+            Assert.Equal("main", frames[^1].Groups["name"].Value);
+        }
+
         if (lines)
         {
             Assert.Equal(place, frames[0].Groups["place"].Value);
@@ -66,9 +76,9 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     private static string Expected(string error, params string[] trace) =>
         error + (OperatingSystem.IsLinux() ? string.Concat(trace.Select(l => l + "\n")) : string.Empty);
 
-    private string Build(string text, string name, bool testBuild = true, bool lines = false)
+    private string Build(string text, string name, bool testBuild = true, bool lines = false, params string[] grants)
     {
-        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild, lines);
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), grants, toolchain.Runtime, testBuild, lines);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         return toolchain.Build(compilation.Program, name);
     }
@@ -188,6 +198,105 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
         Assert.Equal(
             (1, Expected("error: divide-by-zero at program.kz:3\n", "  at Half in program.kz:3", "  at Twice in program.kz:7", "  at main in program.kz:10")),
             (lines.Code, lines.Error));
+    }
+
+    /// <summary>
+    /// The trace of a stack overflow on Linux: a hundred frames named <paramref name="frame"/>, the frame of the call that did not fit
+    /// first, and the cut line, whose count is past a thousand (the recursion fills the stack of the system's limit, megabytes).
+    /// </summary>
+    private static void AssertOverflowTrace(IReadOnlyList<string> trace, string frame)
+    {
+        Assert.Equal(101, trace.Count);
+        Assert.All(trace.Take(100), l => Assert.Equal(frame, l));
+        var cut = Regex.Match(trace[100], @"^  \.\.\. ([0-9]+) more frames$");
+        Assert.True(cut.Success && long.Parse(cut.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) > 1000, trace[100]);
+    }
+
+    /// <summary>The exit code of a process Windows ends for an overflow of its stack, <c>STATUS_STACK_OVERFLOW</c>.</summary>
+    private const int StackOverflowOnWindows = unchecked((int)0xC00000FD);
+
+    [Fact]
+    public void A_stack_overflow_writes_the_line_of_the_call_that_did_not_fit_and_the_trace_from_its_frame()
+    {
+        // design record, section 6: the root actor's overflow ends the process with the exit code 1, its error line names the call that did
+        // not fit, and the trace starts at the frame that made it; Windows installs no handler, and the system ends the process there
+        const string text = "int Down(int n) {\n    return Down(n + 1) + 1\n}\n\nprint(Down(0))\n";
+        var built = Build(text, "overflow");
+        var run = Toolchain.Run(built, null);
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Equal((StackOverflowOnWindows, ""), (run.Code, run.Error));
+            return;
+        }
+
+        var (error, trace) = Split(run.Error);
+        Assert.Equal((1, "error: stack-overflow at program.kz:2\n"), (run.Code, error));
+        AssertOverflowTrace(trace, "  at Down in program.kz:2");
+
+        // KURZ_TRACE=0: the error line alone
+        var off = Toolchain.Run(built, "0");
+        Assert.Equal((1, "error: stack-overflow at program.kz:2\n"), (off.Code, off.Error));
+    }
+
+    [Fact]
+    public void A_stack_overflow_in_a_release_build_has_the_note_in_place_of_its_line_and_with_the_tables_its_line()
+    {
+        // the call's result is printed after it, so that the optimizer keeps the recursion a call and does not turn it into a loop; the
+        // run with the tables is the bound of the count past the cut: where every frame reads the file, its half a million frames take
+        // minutes, past the 30 seconds of a run (seen 2026-10-29: 288 seconds with the table of counted addresses bypassed)
+        const string text = "int Down(int n) {\n    int r = Down(n + 1)\n    print(r)\n    return r\n}\n\nprint(Down(0))\n";
+        var release = Toolchain.Run(Build(text, "overflow-release", testBuild: false), null);
+        var lines = Toolchain.Run(Build(text, "overflow-release-lines", testBuild: false, lines: true), null);
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Equal((StackOverflowOnWindows, "", StackOverflowOnWindows, ""), (release.Code, release.Error, lines.Code, lines.Error));
+            return;
+        }
+
+        var (error, trace) = Split(release.Error);
+        Assert.Equal((1, "error: stack-overflow (no line tables: build with --lines)\n"), (release.Code, error));
+        AssertOverflowTrace(trace, "  at Down");
+
+        (error, trace) = Split(lines.Error);
+        Assert.Equal((1, "error: stack-overflow at program.kz:2\n"), (lines.Code, error));
+        AssertOverflowTrace(trace, "  at Down in program.kz:2");
+    }
+
+    [Fact]
+    public void A_stack_overflow_inside_the_runtime_takes_the_line_of_the_innermost_frame_outside_it()
+    {
+        // `print` of an `int` runs the runtime's text of the value and the standard library's allocator below the program's frame, deeper
+        // than a frame of `Down`: the fault comes inside them, the runtime's frames are passed and the standard library's are not (design
+        // record, section 6, "Caller outside runtime")
+        const string text = "void Down(int n) {\n    print(n)\n    Down(n + 1)\n}\n\nDown(0)\n";
+        var run = Toolchain.Run(Build(text, "overflow-runtime"), null);
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Equal((StackOverflowOnWindows, ""), (run.Code, run.Error));
+            return;
+        }
+
+        var (error, trace) = Split(run.Error);
+        Assert.Equal(1, run.Code);
+        var down = trace.ToList().IndexOf("  at Down in program.kz:2");
+        Assert.True(down >= 0 && trace[down + 1] == "  at Down in program.kz:3", string.Join("\n", trace.Take(5)));
+        var first = Frame().Match(trace[0]);
+        Assert.Equal($"error: stack-overflow at {first.Groups["place"].Value}\n", error);
+        Assert.All(trace.Take(down), l => Assert.Matches(@"^  at [A-Za-z.<>]+ in std[^ ]*\.kz:[0-9]+$", l));
+    }
+
+    [Fact]
+    public void A_fault_outside_the_guard_page_ends_the_process_as_the_system_ends_it()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the handler of a fault on Linux: Windows installs none
+        }
+
+        // a read of the address 8: no stack overflow, so the handler sets the default back, and the fault ends the process with `SIGSEGV`
+        // (11), which .NET reports as 128 plus the signal; the positive control is the overflow above, which the same handler writes
+        var run = Toolchain.Run(Build("raw {\n    int* p = Ptr<int>(8)\n    print(*p)\n}\n", "fault-elsewhere", grants: "raw"), null);
+        Assert.Equal((139, ""), (run.Code, run.Error));
     }
 
     [Fact]

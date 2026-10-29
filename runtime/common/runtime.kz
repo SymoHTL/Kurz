@@ -40,6 +40,7 @@ pub byte* Allocate(long size) {
 // largest `int` (T15; the owner, "C#'s limit" on 2026-10-23 and "allocation-failed" on 2026-10-24): `error:
 // allocation-failed (<n> bytes)` and the exit code 1, with no place and no trace (O11).
 pub void AllocationFailed(long size) {
+    sys.Crashing()
     WriteError("error: allocation-failed (")
     WriteNumber(ulong(size))
     WriteError(" bytes)\n")
@@ -91,8 +92,10 @@ pub void Print(string text, string file, int line) {
 
 // The error line of an exception of the run-time table (chapter 12), `error: <id> at <file>:<n>`, on
 // standard error, the trace of the calls below it, which the target's `Trace` writes, and the end of
-// the process with the exit code 1 (design record, section 6).
+// the process with the exit code 1 (design record, section 6). The target's `Crashing` marks the crash
+// path as running first, so that a stack overflow in it ends the process with no second error line.
 pub void Raise(string id, string file, int line) {
+    sys.Crashing()
     WriteError("error: ")
     WriteError(id)
     WriteError(" at ")
@@ -107,6 +110,7 @@ pub void Raise(string id, string file, int line) {
 // A `throw` (O6): the error line ends with a colon, and the text of the thrown value stands on the
 // line below it, written as it is, with the trace below the text (design record, section 6).
 pub void Throw(string text, string file, int line) {
+    sys.Crashing()
     WriteError("error: thrown at ")
     WriteError(file)
     WriteError(":")
