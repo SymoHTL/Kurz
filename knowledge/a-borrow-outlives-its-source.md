@@ -1,6 +1,6 @@
 ---
 name: a-borrow-outlives-its-source
-description: The counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran; three shapes reached main, one inside an expression (2026-10-24), which the checker refuses since the owner's answers (M7), the name an arm binds, which holds a count of its own since, and an assignment in an else arm's block inside an expression (2026-10-25), which the checker's walk of M7 missed and refuses since; a borrow names what keeps its source unchanged while it is used, and a walk that checks it names every statement that changes a place
+description: The counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran; three shapes reached main, one inside an expression (2026-10-24), which the checker refuses since the owner's answers (M7), the name an arm binds, which holds a count of its own since, and an assignment in an else arm's block inside an expression (2026-10-25), which the checker's walk of M7 missed and refuses since; the counting of strings (pull request 78) reached main with a string's hole the walk held nothing of, refused since, and an interpolation of one hole that was the string itself, a new value since; a borrow names what keeps its source unchanged while it is used, and a walk that checks it names every statement that changes a place
 metadata:
   type: feedback
 ---
@@ -33,6 +33,17 @@ change the place it came from. Three shapes in which something could reached `ma
   at the cap; the owner answered on 2026-10-25 that it is a compile error, `changed-while-held`, as
   Rust's E0506, and since pull request 65 the walk counts an assignment, a `mut` method and a `mut`
   argument in a statement of the arm's block, nested statements among them.
+- **Inside an interpolation.** Pull request 78 counted strings and freed them at zero, and a hole of a
+  string was the string itself, read without a count: the walk of M7 gave an interpolation's holes
+  nothing it held, on the reading that each hole is made text where it stands, which no type but a
+  string breaks. `"{s}{F(mut s)}"`, with a string of 524288 bytes made while the program runs and an
+  `F` that assigns its `mut` parameter, ended with the exit code 139 on `main` on 2026-10-29: the
+  join read the block `F`'s assignment had given back to the system. `G("{s}", F(mut s))` did the
+  same where `G` read the bytes, since an interpolation of one hole was the string itself. The review
+  of pull request 78 found the first, at the cap; the second was found while the first was built. The
+  owner answered on 2026-10-29: a hole of a string holds what it read until the interpolation is made,
+  so the first is `changed-while-held` ("Refuse, as Rust", as Rust's `format!` borrows its arguments),
+  and an interpolation of one hole is a new value with a count of its own ("New value, as format!").
 
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the
@@ -40,7 +51,8 @@ defect; one whose freed blocks are given out again shows it as wrong output, not
 
 **How to apply:** every construct of the emitter that reads a place and keeps what it read past a
 call or a statement names what keeps the place unchanged: the checker's refusal within one
-expression (M7, `Semantics/Checker.Reads.cs`), no state outside a function that holds a list (R13),
+expression (M7, `Semantics/Checker.Reads.cs`), an interpolation's holes among them, no state outside a function that holds a
+list or a string (R13),
 the count a loop holds of its collection (C6), the count the name an arm binds holds, the count
 `Add` takes of its item before its list grows (`rows.Add(rows[0])`, which the owner allowed on
 2026-10-25), the count a lambda's environment takes of each value the lambda reads (F15), and the

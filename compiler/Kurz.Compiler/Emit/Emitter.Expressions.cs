@@ -179,6 +179,15 @@ public sealed partial class Emitter
             result = result is null ? piece : Temp(fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {result}, %kz.str {piece})"), Types.String);
         }
 
+        // one hole of a string is the string itself, and the interpolation a new value with a count of its own, as Rust's `format!`
+        // makes a new `String`, so that a call around it holds nothing of the place the hole read (M7, the owner, 2026-10-29, "New
+        // value, as format!")
+        if (s.Segments is [HoleSegment { Expression: var only }] && TypeOf(only) is PrimitiveType { Kind: Primitive.String })
+        {
+            Retain(result!, Types.String);
+            return Temp(result!, Types.String);
+        }
+
         return result ?? StringValue(string.Empty);
     }
 

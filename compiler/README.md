@@ -517,8 +517,8 @@ what a call takes as `mut` that the expression still holds when the call runs, o
 or a `mut` method in an arm's statement inside the expression changes it (M7), and such a read of a
 type that is copied, a function value among them, is counted once more, as a value the expression
 made (the owner, 2026-10-25, "Copied"), and no state
-outside a function holds a list, which R13 refuses, so a callee reaches a list its caller lent it
-through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
+outside a function holds a list or a string, which R13 refuses, so a callee reaches a list or a
+string its caller lent it through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
 Counted are a list, a string, a function value, a plain `data` value that holds one of them in a
 field and a union with a case that holds one. A string made while the program runs holds a block
@@ -530,8 +530,10 @@ in the count", the block and its room assumed). A string is counted where a list
 at a write, since a string never changes, and at zero its block goes back to `Free` with the room
 it was given. The runtime makes every string it makes in such a block, through `string.Allocate` and `string.FromRaw`, which takes
 the block over (R15, the owner, 2026-10-29, "string.Allocate, take over"); the text the emitted code
-makes of a value, for a `print` or a hole of a string, is a temporary of its statement, and the
-helper that makes the text of a list or of a `data` value lets go of each text it joined. The environment of a lambda that reads variables starts with the
+makes of a value, for a `print` or a hole of a string, is a temporary of its statement, an
+interpolation of one hole of a string takes a count of the string, a new value as Rust's `format!`
+makes one (the owner, 2026-10-29, "New value, as format!"), and the helper that makes the text of a
+list or of a `data` value lets go of each text it joined. The environment of a lambda that reads variables starts with the
 count of the function values that hold it, 8 bytes, and the address of the function that lets go
 of it, then holds each value the lambda read, counted once more where its type is counted; it is
 counted as a list's block is, and at zero the values it holds are let go of and it goes back to
@@ -579,7 +581,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 4 of the 249 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+full and the emitter does not emit, 4 of the 250 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -1008,7 +1010,10 @@ round can ask about it by the rule's id.
 - M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
   the checker reads each expression of a statement whole, in the order it runs: a call's receiver or
   the value it calls, then its arguments as written (D11), an operator's left operand, an index's
-  target and a `with`'s target before what follows them. Either side of `??` is its value, a reading
+  target and a `with`'s target before what follows them, and an interpolation's holes as written, a
+  hole of a `string` holding what it read until the interpolation is made and a hole of another type
+  made text where it stands (the owner, 2026-10-29, "Refuse, as Rust"); a hole closes on its line, so
+  what changes a place inside one is a `mut` argument. Either side of `??` is its value, a reading
   no program shows, since the checker says `not supported` to `??` (chapter 4). A statement inside an arm is read on its own, while
   what it changes, a `mut` argument, an assignment or a `mut` method, changes it within the
   expression around the arm; and one `changed-while-held` is reported for each change, at its line,

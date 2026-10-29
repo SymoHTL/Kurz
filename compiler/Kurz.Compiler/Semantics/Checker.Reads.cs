@@ -64,13 +64,16 @@ public sealed partial class Checker
         }
 
         // the parts the expression holds while the next ones run, in the order they run: a call's receiver or the value it calls
-        // first, then its arguments as written (D11); a string's holes are made text where they stand, and a `match` or an `else`
-        // gives its arms nothing of its subject or its call but the names they bind, which are variables of their own (M3)
+        // first, then its arguments as written (D11); a string's holes as written, a hole of a `string` holding what it read until
+        // the interpolation is made, as Rust's `format!` borrows its arguments (the owner, 2026-10-29, "Refuse, as Rust"), and a
+        // hole of any other type made text where it stands; and a `match` or an `else` gives its arms nothing of its subject or its
+        // call but the names they bind, which are variables of their own (M3)
         List<(IReadOnlyList<Held> Held, Expression Part)> ordered = e switch
         {
             CallExpression c => [(Callee(c), c.Callee), .. c.Arguments.Where(a => !a.Mut).Select(a => (HeldBy(a.Value), a.Value))],
             IndexExpression or RangeExpression or WithExpression or BinaryExpression { Operator: not TokenKind.QuestionQuestion } =>
                 Parts(e).Select(p => (HeldBy(p), p)).ToList(),
+            StringLiteral => Parts(e).Select(p => (IsString(p) ? HeldBy(p) : [], p)).ToList(),
             _ => [],
         };
 
@@ -201,6 +204,9 @@ public sealed partial class Checker
 
     private IEnumerable<(object Node, Change Change)> ChangeOf(object node) =>
         changes.TryGetValue(node, out var change) ? [(node, change)] : [];
+
+    /// <summary>Whether the checker found the expression a <c>string</c>, which a hole holds as it is (M7).</summary>
+    private bool IsString(Expression e) => model.HasType(e) && model.TypeOf(e).Type is PrimitiveType { Kind: Primitive.String };
 
     /// <summary>What a call holds while its arguments run: the receiver of a method, or the value of a variable or a field it calls (F11).</summary>
     private IReadOnlyList<Held> Callee(CallExpression c) =>
