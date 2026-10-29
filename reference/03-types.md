@@ -584,6 +584,37 @@ void Show(duration d) {
 Show(90min)
 ```
 
+Case: [values/text-timestamp.kz](../corpus/values/text-timestamp.kz)
+```kurz
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        print(*Ptr<timestamp>(&bits))
+    }
+}
+
+Show(0)
+Show(1793179800000000000)
+Show(1793179801500000000)
+Show(1793179801000250000)
+Show(-1)
+```
+
+Case: [values/text-longtimestamp.kz](../corpus/values/text-longtimestamp.kz)
+```kurz
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        longtimestamp epoch = *Ptr<timestamp>(&bits)
+        print(epoch + 2932897days)
+        print(epoch - 719528days)
+        print(epoch - 719528days - 1s)
+    }
+}
+
+Show(0)
+```
+
 ### T29 (decided, §4) The wider pair: `longduration` and `longtimestamp`
 
 Beside the 64-bit pair of T24 stand `longduration` and `longtimestamp`: 128 bits with the same step
@@ -615,11 +646,12 @@ duration span = 90min
 Show(span)
 ```
 
-A `longduration` and a `longtimestamp` take 16 bytes aligned to 16, as Rust's `i128`, C#'s `Int128`
-and C's `__int128` on x86-64, and `SizeOf` gives 16 for them and 8 for the narrow pair (R14) (§4,
-the owner, 2026-10-28, "16 bytes, 16-aligned", against the 8 of a `decimal`, under which a data
-value that holds one is laid out otherwise than C lays out a structure with an `__int128`; the cost is
-up to 8 bytes of padding in a data value that holds one).
+A `longduration` and a `longtimestamp` take 16 bytes aligned to 16, as Rust's `i128` from rustc 1.77
+on, C's `__int128` on x86-64 and .NET's `Int128` on Linux, which keeps the 8 of a `long` on Windows,
+and `SizeOf` gives 16 for them and 8 for the narrow pair (R14) (§4, the owner, 2026-10-28, "16
+bytes, 16-aligned", against the 8 of a `decimal`, under which a data value that holds one is laid
+out otherwise than C lays out a structure with an `__int128`; the cost is up to 8 bytes of padding
+in a data value that holds one).
 
 Case: [types/time-size.kz](../corpus/types/time-size.kz)
 ```kurz
@@ -663,17 +695,21 @@ Where a union is required, its one time case reaches a duration literal as a wri
 
 Case: [types/literal-one-time-case.kz](../corpus/types/literal-one-time-case.kz)
 
+Case: [values/text-timestamp.kz](../corpus/values/text-timestamp.kz)
+
+Case: [values/text-longtimestamp.kz](../corpus/values/text-longtimestamp.kz)
+
 ### T31 (decided, §4) Time arithmetic that leaves the range
 
-`+` and `-` on durations and timestamps, of either pair, and the unary `-` on a duration raise
-`overflow` (E3) where the result leaves the range of its type, in every build, a release build too,
-as Rust's `Duration` and `SystemTime` panic and C#'s `TimeSpan` throws in a build without checks; a
-written conversion from the wide pair into the narrow one raises it where the value does not fit
-(T29), in every build as well (§4, the owner, 2026-10-28, "Raise in every build", asked for the
-operations and for the conversion, against the rule of integer arithmetic, T4 and T5, under which a
-release build wraps, and against T20's wrap in a release build for the conversion; the cost is a
-check and a branch on every such operation in a release build). A constant expression that leaves
-the range is `constant-overflow` (T6).
+`+` and `-` on durations and timestamps, of either pair, and the unary `-` on a duration of either
+pair raise `overflow` (E3) where the result leaves the range of its type, in every build, a release
+build too, as Rust's `Duration` and `SystemTime` panic and C#'s `TimeSpan` throws in a build without
+checks; a written conversion from the wide pair into the narrow one raises it where the value does
+not fit (T29), in every build as well (§4, the owner, 2026-10-28, "Raise in every build", asked for
+the operations and for the conversion, against the rule of integer arithmetic, T4 and T5, under
+which a release build wraps, and against T20's wrap in a release build for the conversion; the cost
+is a check and a branch on every such operation in a release build). A constant expression that
+leaves the range of the type its literals take (T29) is `constant-overflow` (T6).
 
 Case: [types/duration-overflow-release.kz](../corpus/types/duration-overflow-release.kz)
 ```kurz
@@ -686,7 +722,7 @@ Case: [types/duration-negate-release.kz](../corpus/types/duration-negate-release
 ```kurz
 duration Negate(duration d) => -d
 
-print(Negate(-9223372036854775808ns))
+print(Negate(-9223372036854775808ns)) // one constant: the parameter's type takes the literal with its sign (L17)
 ```
 
 ### T14 (assumed, §4) Out of range and division by zero

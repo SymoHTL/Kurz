@@ -3,7 +3,7 @@
 // | 0000-01-01T00:00:00Z
 // | -0001-12-31T23:59:59Z
 // allow: raw
-// rules: A16
+// rules: A16, R10, R14, T24, T29
 
 void Show(long nanoseconds) {
     long bits = nanoseconds

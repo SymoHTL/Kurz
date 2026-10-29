@@ -4,4 +4,4 @@
 
 duration Negate(duration d) => -d
 
-print(Negate(-9223372036854775808ns))
+print(Negate(-9223372036854775808ns)) // one constant: the parameter's type takes the literal with its sign (L17)

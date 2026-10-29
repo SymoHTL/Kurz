@@ -16,8 +16,9 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   checker read in full, with the runtime of its target, into LLVM's IR (the section "What the
   emitter emits" below), `Corpus/` reads the header of a corpus case in the shape `reference/00-about.md`
   states, its grant line among it (R7), and `Build/` finds the clang of the release of LLVM the
-  compiler pins, carries and checks the runtime, builds a program from its source to an executable
-  and is the command (the section "The command" below).
+  compiler pins, carries and checks the runtime, builds a program from its source to an executable,
+  makes the places `run` and `exec` build and run a program in, and is the command (the section
+  "The command" below).
 - `Kurz/`: the command `kurz`, one line over `Build/Command.cs`.
 - `Kurz.Compiler.Tests/`: xunit tests. Every program the lexer, parser and checker tests read
   stands inline in the test, and the corpus suite reads the cases where they lie, under `corpus/`:
@@ -38,7 +39,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   prints, its exit code and its error line against the case's header (`RunTests`); a seventh
   builds the programs that pin what no case can, a refused write and a refused allocation among
   them (`EmitterTests`), and an eighth those of data values and unions, with the width of a tag and
-  the copy of a block before a write (`DataTests`).
+  the copy of a block before a write (`DataTests`); a ninth makes and removes the places of `run`
+  and `exec` under a directory of its own (`PlaceTests`).
 
 ## Building and testing
 
@@ -181,10 +183,58 @@ The search for clang runs after the program was accepted, and its failures are t
 build writes the IR into a directory of its own under the system's temporary directory, which it
 removes after clang's run.
 
+`kurz run [--release] file.kz` builds the file as `build` does and runs it, and
+`kurz exec [--release] "program text"` builds its argument and runs it, the argument's lines named
+`exec` in a refusal and in a failure the program reports (`exec:2: unknown-name: ...`,
+`error: overflow at exec:2`) (design record, section 2). Each builds into a place of its own,
+`place-` and 32 hexadecimal digits, under the directory `kurz` in the user's cache directory as
+Rust's `dirs` crate names it: on Linux the directory `XDG_CACHE_HOME` names where it is an absolute
+path, else `.cache` under the home directory, which is `HOME` or the user database's entry, and on
+Windows the known folder LocalAppData (the owner, 2026-10-29, "As Rust's dirs"). On Linux the
+directory `kurz` the command makes and every place are the user's alone, 0700 (the owner,
+2026-10-29, "Owner only, 0700"). A place holds the lock file `lock`, which the command opens so that
+no child inherits it, takes the lock of, `flock`'s on Linux and `LockFileEx`'s on Windows, waiting
+for it, and writes the mark `kurz place 1` into before anything else is written to the place; the
+executable is `program`, `program.exe` on Windows, beside the build's other files. The program runs
+in the caller's directory with no argument and with the command's standard input, output and error
+(the owner, 2026-10-29, "Inherit all three"); while it runs, the command ignores Ctrl-C, and on Linux
+SIGQUIT, so that the program alone ends by them (the owner, 2026-10-29, "Command waits it out"). The
+command then removes the place, its other files first and the lock file last, and ends with the
+program's exit code, on Linux 128 and the signal's number where a signal ended the program, 130 for
+Ctrl-C. At its start, before the build, it removes every place whose lock it can take and whose lock
+file holds the mark and nothing else, a place a run cut short left, and leaves a place whose lock
+file is missing or holds anything else alone. A removal that fails is passed over without a word
+(the owner, 2026-10-29, "Silent"). A program refused, or a source not read, makes no place and ends
+the command with 1, as do the failures of `build` above that a run shares and these, in the owner's
+words (the owner, 2026-10-29, "Keep these words"), the first on Linux and the second on Windows:
+
+    error: no directory for the command's places
+      note: XDG_CACHE_HOME is not set to an absolute path, and no home directory is found in HOME or the user database
+      help: set HOME, or XDG_CACHE_HOME to an absolute path
+
+    error: no directory for the command's places
+      note: Windows names no LocalAppData folder for this user
+      help: run the command as a user with a profile
+
+    error: the place for the run cannot be made
+      note: <what the system said>
+      help: check that <the directory of the places> can be written
+
+    error: the built program cannot be started
+      note: <what the system said>
+      help: check that programs may run from <the directory of the places>
+
+`CommandTests` and `PlaceTests` pin these. That the command outlives Ctrl-C and SIGQUIT, and that
+no child inherits the lock file, they check on Linux alone, reading `/proc`: on Windows nothing
+checks either.
+
 Any other command line gets the usage on standard error and the exit code 1:
 
     usage: kurz --version [--verbose]
            kurz build [--release] <file.kz> [-o <output>]
+           kurz run [--release] <file.kz>
+           kurz exec [--release] "<program text>"
+           run and exec pass no arguments to the program
 
 ### Readings the record leaves open to the command
 
@@ -201,6 +251,18 @@ ask about it.
 - `build` builds for a 64-bit machine alone: the emitter lays a pointer out in 8 bytes, and the
   runtime declares C's `size_t` as a `long`. Pinned by
   `CommandTests.The_target_is_a_64_bit_Linux_or_Windows_machine`.
+- `run` takes `--release` and the file, each once, in either order, and nothing else, `-o` among
+  it; `exec` takes `--release` before its text alone, and one text, which may be empty: an empty
+  text is an empty program and ends with 0. A missing file or text gets the usage. Pinned by
+  `CommandTests`.
+- The name of a place, of its lock file and of the executable, and the text of the mark, are this
+  directory's. On Linux the lock file is opened through `open` with `O_CLOEXEC` and locked through
+  `flock`, called directly: .NET's own open of a file takes a `flock` of its own that does not
+  wait, under which the maker the record lets wait would fail. Pinned by `PlaceTests`.
+- The program runs in the caller's directory, and the command waits for it however long it runs.
+  Pinned by `CommandTests.The_program_takes_the_commands_input_output_and_error_no_argument_and_the_callers_directory`
+  and, on Linux, by the endless program of
+  `CommandTests.On_linux_an_interrupt_or_a_quit_ends_the_program_alone_and_the_command_ends_with_its_code`.
 
 ## The runtime
 

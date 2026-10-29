@@ -243,6 +243,188 @@ public sealed class CommandTests : IDisposable
     [InlineData("--Version")]
     [InlineData("--verbose")]
     [InlineData("--version", "--verbose", "--verbose")]
+    [InlineData("run")]
+    [InlineData("run", "a.kz", "b.kz")]
+    [InlineData("run", "--release", "--release", "a.kz")]
+    [InlineData("run", "a.kz", "-o", "out")]
+    [InlineData("exec")]
+    [InlineData("exec", "--release")]
+    [InlineData("exec", "print(1)", "print(2)")]
+    [InlineData("exec", "print(1)", "--release")]
     public void A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1(params string[] arguments) =>
-        Assert.Equal((1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] <file.kz> [-o <output>]\n"), Kurz(arguments));
+        Assert.Equal(
+            (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] <file.kz> [-o <output>]\n       kurz run [--release] <file.kz>\n"
+                + "       kurz exec [--release] \"<program text>\"\n       run and exec pass no arguments to the program\n"),
+            Kurz(arguments));
+
+    /// <summary>
+    /// Runs <c>kurz</c> with the places under the test's directory on Linux; on Windows the known folder is the system's answer and
+    /// no variable of the child's moves it (knowledge/a-windows-child-gets-its-own-program-files.md), so the places are the user's.
+    /// </summary>
+    private (int Code, string Output, string Error) KurzWithPlaces(params string[] arguments) =>
+        Processes.Capture(Host, [Dll, .. arguments], null, TimeSpan.FromMinutes(2), new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = Path.Combine(root, "cache") });
+
+    /// <summary>
+    /// No place left once the runs ended: on Linux the directory of the places under the test's directory is the user's alone and
+    /// empty, or not there where no run <paramref name="made"/> a place; on Windows the user's holds no place, which another
+    /// <c>kurz run</c> of the user's at the same moment would hold.
+    /// </summary>
+    private void NoPlaceLeft(bool made)
+    {
+        var places = OperatingSystem.IsWindows() ? Place.Root()! : Path.Combine(root, "cache", "kurz");
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Empty(Directory.Exists(places) ? Directory.EnumerateFileSystemEntries(places, Place.Prefix + "*") : []);
+            return;
+        }
+
+        Assert.Equal(made, Directory.Exists(places));
+        if (!made)
+        {
+            return;
+        }
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(places));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(places));
+    }
+
+    [Fact]
+    public void Run_and_exec_build_the_program_run_it_with_the_commands_streams_and_end_with_its_exit_code()
+    {
+        var source = Path.Combine(root, "add.kz");
+        File.WriteAllText(source, "int Next(int n) => n + 1\n\nprint(\"next\")\nprint(Next(2147483647))\n");
+        Assert.Equal((1, "next\n", $"error: overflow at {source}:1\n"), KurzWithPlaces("run", source));
+        Assert.Equal((0, "next\n-2147483648\n", ""), KurzWithPlaces("run", "--release", source));
+        Assert.Equal((0, "1\n", ""), KurzWithPlaces("exec", "print(1)"));
+        Assert.Equal((1, "2\n", "error: overflow at exec:2\n"), KurzWithPlaces("exec", "print(2)\nint Next(int n) => n + 1\nprint(Next(2147483647))"));
+        Assert.Equal((0, "-2147483648\n", ""), KurzWithPlaces("exec", "--release", "int Next(int n) => n + 1\nprint(Next(2147483647))"));
+        Assert.Equal((0, "", ""), KurzWithPlaces("exec", "")); // an empty text is an empty program, as an empty file is
+        NoPlaceLeft(made: true);
+    }
+
+    [Fact]
+    public void A_program_run_or_exec_refuses_gets_its_lines_named_by_the_file_or_exec_and_exit_1()
+    {
+        var source = Path.Combine(root, "hello.kz");
+        File.WriteAllText(source, "print(y)\n");
+        Assert.Equal((1, "", $"{source}:1: unknown-name: no `y` is visible here (V10)\n"), KurzWithPlaces("run", source));
+        Assert.Equal((1, "", "exec:2: unknown-name: no `x` is visible here (V10)\n"), KurzWithPlaces("exec", "print(1)\nprint(x)"));
+        var (code, output, error) = KurzWithPlaces("run", Path.Combine(root, "missing.kz"));
+        Assert.Equal((1, ""), (code, output));
+        Assert.Matches(@"^error: the source cannot be read\n  note: .+\n  help: name a Kurz source file that can be read\n$", error);
+        NoPlaceLeft(made: false); // a program refused, or not read, makes no place
+    }
+
+    [Fact]
+    public void Run_and_exec_without_a_directory_for_the_places_fail_with_the_owners_words()
+    {
+        var expected = OperatingSystem.IsWindows()
+            ? "error: no directory for the command's places\n  note: Windows names no LocalAppData folder for this user\n  help: run the command as a user with a profile\n"
+            : "error: no directory for the command's places\n  note: XDG_CACHE_HOME is not set to an absolute path, and no home directory is found in HOME or the user database\n  help: set HOME, or XDG_CACHE_HOME to an absolute path\n";
+        Assert.Equal((1, "", expected), RunWithPlaces(() => null, Found().Find, "exec", "print(1)"));
+    }
+
+    [Fact]
+    public void A_place_that_cannot_be_made_and_a_program_that_does_not_start_fail_with_the_owners_words()
+    {
+        var file = Path.Combine(root, "a-file");
+        File.WriteAllText(file, "");
+        var places = Path.Combine(file, "kurz"); // a directory under a file, which no system makes
+        var (code, output, error) = RunWithPlaces(() => places, Found().Find, "exec", "print(1)");
+        Assert.Equal((1, ""), (code, output));
+        Assert.Matches($@"^error: the place for the run cannot be made\n  note: .+\n  help: check that {Regex.Escape(places)} can be written\n$", error);
+
+        using var writer = new StringWriter();
+        Assert.Equal(1, Command.RunProgram(file, root, writer)); // an empty file, which no system starts
+        Assert.Matches($@"^error: the built program cannot be started\n  note: .+\n  help: check that programs may run from {Regex.Escape(root)}\n$", writer.ToString());
+    }
+
+    /// <summary>Runs the command line in this process with the places and the search given.</summary>
+    private static (int Code, string Output, string Error) RunWithPlaces(Func<string?> places, Func<ClangSearch> find, params string[] arguments)
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var code = Command.Run(arguments, output, error, find, Builder.HostTarget, places);
+        return (code, output.ToString(), error.ToString());
+    }
+
+    [Fact]
+    public void The_program_takes_the_commands_input_output_and_error_no_argument_and_the_callers_directory()
+    {
+        // the owner, 2026-10-29, "Inherit all three": nothing redirected
+        var info = Processes.Inheriting("program");
+        Assert.Equal(
+            (false, false, false, false, 0, ""),
+            (info.UseShellExecute, info.RedirectStandardInput, info.RedirectStandardOutput, info.RedirectStandardError, info.ArgumentList.Count, info.WorkingDirectory));
+    }
+
+    [Fact]
+    public void On_linux_an_interrupt_or_a_quit_ends_the_program_alone_and_the_command_ends_with_its_code()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // Windows sends Ctrl-C to every process of a console, the test's own among them: nothing checks it there
+        }
+
+        // the owner, 2026-10-29, "Command waits it out": the command outlives an interrupt and a quit, and ends with 128 + 2
+        var info = new System.Diagnostics.ProcessStartInfo(Host) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in new[] { Dll, "exec", "while true {\n}" })
+        {
+            info.ArgumentList.Add(a);
+        }
+
+        info.Environment["XDG_CACHE_HOME"] = Path.Combine(root, "cache");
+        using var command = System.Diagnostics.Process.Start(info)!;
+        try
+        {
+            var program = ProgramOf(command.Id, TimeSpan.FromMinutes(2));
+            Assert.Equal(0, Kill(command.Id, 2));
+            Assert.Equal(0, Kill(command.Id, 3));
+            Assert.False(command.WaitForExit(1000), "the command ended by the interrupt or the quit sent to it");
+            Assert.Equal(0, Kill(program, 2));
+            Assert.True(command.WaitForExit(30000), "the command did not end when its program did");
+            Assert.Equal((130, "", ""), (command.ExitCode, command.StandardOutput.ReadToEnd(), command.StandardError.ReadToEnd()));
+            NoPlaceLeft(made: true);
+        }
+        finally
+        {
+            if (!command.HasExited)
+            {
+                command.Kill(entireProcessTree: true);
+            }
+        }
+    }
+
+    /// <summary>The process number of the built program the command started, a child named <c>program</c> and not the clang of the build, read from <c>/proc</c>.</summary>
+    private static int ProgramOf(int command, TimeSpan limit)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (watch.Elapsed < limit)
+        {
+            foreach (var task in Directory.EnumerateDirectories($"/proc/{command}/task"))
+            {
+                foreach (var child in File.ReadAllText(Path.Combine(task, "children")).Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    try
+                    {
+                        if (File.ReadAllText($"/proc/{child}/cmdline").Split('\0')[0].EndsWith("/program", StringComparison.Ordinal))
+                        {
+                            return int.Parse(child, System.Globalization.CultureInfo.InvariantCulture);
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        // a clang that ended between the two reads
+                    }
+                }
+            }
+
+            Thread.Sleep(100);
+        }
+
+        throw new TimeoutException($"the command {command} started no program within {limit}");
+    }
+
+    [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
+    private static extern int Kill(int process, int signal);
 }

@@ -2,7 +2,7 @@
 // | 200000days
 // | 200000days 1ns
 // | -200000days
-// rules: T29
+// rules: T29, A12
 
 longduration Plus(longduration a, longduration b) => a + b
 

@@ -454,17 +454,27 @@ print(-90min)
 print(3600s)
 ```
 
+Case: [values/text-longduration.kz](../corpus/values/text-longduration.kz)
+```kurz
+longduration Plus(longduration a, longduration b) => a + b
+
+print(200000days)
+print(Plus(200000days, 1ns))
+print(-200000days)
+```
+
 ### A16 (decided, §8) The text of a timestamp
 
 A `timestamp` and a `longtimestamp` show their instant in UTC as RFC 3339 writes it,
 `2026-10-28T09:30:00Z`: the fraction of a second in groups of three digits, as many groups as hold it
 and none for a whole second, `09:30:01.500Z`, `09:30:01.000250Z`, `09:30:00.000000001Z`, and a year
 outside 0000 to 9999, which only a `longtimestamp` reaches, with its sign and at least four digits,
-`+10000-01-01T00:00:00Z`, `-0001-12-31T23:59:59Z`, as Rust's `chrono` writes them (§8, the owner,
-2026-10-28, "RFC 3339 UTC, digits as needed", then "Groups of three, as chrono" and "Sign + 4 or
-more digits, as chrono", against leaving the text open, nine digits always and the count of
-nanoseconds since 1970, then against the fewest digits and against six digits of a year as
-JavaScript writes them). The instant counts from 1970-01-01 (T24) *(assumed: the calendar, the
+`+10000-01-01T00:00:00Z`, `-0001-12-31T23:59:59Z`, as Rust's `chrono` writes them, the expanded
+years of ISO 8601, which RFC 3339 does not have (§8, the owner, 2026-10-28, "RFC 3339 UTC, digits
+as needed", then "Groups of three, as chrono" and "Sign + 4 or more digits, as chrono", against
+leaving the text open, nine digits always and the count of nanoseconds since 1970, then against
+the fewest digits and against six digits of a year as JavaScript writes them). The instant counts
+from 1970-01-01 (T24) *(assumed: the calendar, the
 Gregorian one before its introduction as well, with no leap second and a year 0 before the year 1,
 as chrono and Unix time count, as §8 marks it)*. No construct makes a timestamp of a number but a
 read through a pointer (R10, R14), which the cases below take.
