@@ -13,22 +13,23 @@ namespace Kurz.Compiler.Build;
 /// search refused the clang it found, or found none, they write what they know before the clang, the
 /// failure on standard error in the form of the record's failures of the command (<c>error:</c>, then
 /// indented <c>note:</c> and <c>help:</c> lines), and exit with 1.
-/// <c>kurz build [--release] file.kz [-o output]</c> builds the program for the machine that builds, the test build unless
-/// <c>--release</c> says otherwise, into the executable beside the source, named after it, <c>hello.exe</c> on Windows, or where
+/// <c>kurz build [--release] [--lines] file.kz [-o output]</c> builds the program for the machine that builds, the test build unless
+/// <c>--release</c> says otherwise, a release build with the line tables a test build has where <c>--lines</c> says so (the owner,
+/// 2026-10-29, "build, run and exec"), into the executable beside the source, named after it, <c>hello.exe</c> on Windows, or where
 /// <c>-o</c> says, written over an executable that is there; it refuses to write over the source or a directory. A program the
 /// compiler refuses gets its lines on standard error, <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> or
 /// <c>hello.kz:3: not supported: &lt;text&gt;</c>, and no executable; that, and every failure of the command's own, exits with 1. The
-/// command grants a program neither <c>raw</c> nor <c>native</c> (R7, R16). <c>kurz run [--release] file.kz</c> builds the file and
-/// runs it, and <c>kurz exec [--release] "program text"</c> builds its argument, whose lines are named <c>exec</c>, and runs it, each in
-/// a place of its own (<see cref="Place"/>), which it removes after the run, with the places a run cut short left removed at its
+/// command grants a program neither <c>raw</c> nor <c>native</c> (R7, R16). <c>kurz run [--release] [--lines] file.kz</c> builds the file
+/// and runs it, and <c>kurz exec [--release] [--lines] "program text"</c> builds its argument, whose lines are named <c>exec</c>, and runs
+/// it, each in a place of its own (<see cref="Place"/>), which it removes after the run, with the places a run cut short left removed at its
 /// start; the program takes no argument and the command's streams (<see cref="Processes.Run"/>), and the command ends with the
 /// program's exit code. A command line it cannot read gets the usage on standard error and the exit code 1.
 /// </summary>
 public static class Command
 {
     /// <summary>What the command prints for a command line it cannot read.</summary>
-    public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] <file.kz> [-o <output>]\n"
-        + "       kurz run [--release] <file.kz>\n       kurz exec [--release] \"<program text>\"\n       run and exec pass no arguments to the program\n";
+    public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] <file.kz> [-o <output>]\n"
+        + "       kurz run [--release] [--lines] <file.kz>\n       kurz exec [--release] [--lines] \"<program text>\"\n       run and exec pass no arguments to the program\n";
 
     private const string OnThePath = " on the path";
 
@@ -62,12 +63,8 @@ public static class Command
                 return Build(arguments.Skip(1).ToList(), error, find, host);
             case ["run", ..]:
                 return RunFile(arguments.Skip(1).ToList(), error, find, host, places);
-            case ["exec", var text] when text != "--release":
-                return BuildAndRun(() => SourceText.FromString("exec", text), release: false, error, find, host, places);
-            case ["exec", "--release", var text]:
-                return BuildAndRun(() => SourceText.FromString("exec", text), release: true, error, find, host, places);
             case ["exec", ..]:
-                return Usage1(error);
+                return Exec(arguments.Skip(1).ToList(), error, find, host, places);
         }
 
         bool verbose;
@@ -101,6 +98,7 @@ public static class Command
     private static int Build(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host)
     {
         var release = false;
+        var lines = false;
         string? sourcePath = null;
         string? outputPath = null;
         for (var i = 0; i < arguments.Count; i++)
@@ -109,6 +107,9 @@ public static class Command
             {
                 case "--release" when !release:
                     release = true;
+                    break;
+                case "--lines" when !lines:
+                    lines = true;
                     break;
                 case "-o" when outputPath is null && i + 1 < arguments.Count:
                     outputPath = arguments[++i];
@@ -154,7 +155,7 @@ public static class Command
             return 1;
         }
 
-        if (Read(sourcePath, error) is not { } source || Compile(source, target, release, error) is not { } program)
+        if (Read(sourcePath, error) is not { } source || Compile(source, target, release, lines, error) is not { } program)
         {
             return 1;
         }
@@ -186,6 +187,7 @@ public static class Command
     private static int RunFile(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
         var release = false;
+        var lines = false;
         string? sourcePath = null;
         foreach (var a in arguments)
         {
@@ -193,6 +195,9 @@ public static class Command
             {
                 case "--release" when !release:
                     release = true;
+                    break;
+                case "--lines" when !lines:
+                    lines = true;
                     break;
                 case var p when sourcePath is null && !p.StartsWith('-'):
                     sourcePath = p;
@@ -202,14 +207,39 @@ public static class Command
             }
         }
 
-        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), release, error, find, host, places);
+        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), release, lines, error, find, host, places);
+    }
+
+    /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument and no option.</summary>
+    private static int Exec(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    {
+        var release = false;
+        var lines = false;
+        for (var i = 0; i < arguments.Count; i++)
+        {
+            switch (arguments[i])
+            {
+                case "--release" when !release:
+                    release = true;
+                    break;
+                case "--lines" when !lines:
+                    lines = true;
+                    break;
+                case var text when i == arguments.Count - 1 && text is not ("--release" or "--lines"):
+                    return BuildAndRun(() => SourceText.FromString("exec", text), release, lines, error, find, host, places);
+                default:
+                    return Usage1(error);
+            }
+        }
+
+        return Usage1(error);
     }
 
     /// <summary>
     /// Builds the program <paramref name="read"/> reads, a file or <c>exec</c>'s text, into a place of its own and runs it; the program's exit code, or 1
     /// where it was refused or the command failed. The places a run cut short left are removed at the start, before the build.
     /// </summary>
-    private static int BuildAndRun(Func<SourceText?> read, bool release, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    private static int BuildAndRun(Func<SourceText?> read, bool release, bool lines, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
         if (host is not { } target)
         {
@@ -226,7 +256,7 @@ public static class Command
         }
 
         Place.RemoveLeft(root);
-        if (read() is not { } source || Compile(source, target, release, error) is not { } emitted)
+        if (read() is not { } source || Compile(source, target, release, lines, error) is not { } emitted)
         {
             return 1;
         }
@@ -304,9 +334,9 @@ public static class Command
     }
 
     /// <summary>The program the compiler emits for the source, or null where it refused it, with its lines written, named by the source's name.</summary>
-    private static EmittedProgram? Compile(SourceText source, Target target, bool release, TextWriter error)
+    private static EmittedProgram? Compile(SourceText source, Target target, bool release, bool lines, TextWriter error)
     {
-        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release);
+        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release, lines);
         foreach (var d in compilation.Diagnostics.Sorted)
         {
             error.Write(d.At(source.Name) + "\n");

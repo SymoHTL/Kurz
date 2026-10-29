@@ -584,15 +584,15 @@ first line names (§6), so a case pins a line of the
 program only where that frame was the program's, and every case of the corpus that pins a stack
 overflow pins a call of the program's own, with a recursion that calls nothing of the standard
 library and nothing that reaches the runtime's primitives or the allocator's entry, over values that
-allocate nothing, as the case below does over an `int`, which the test build keeps as calls (§2, an
-assumption there), so that the frame that does not fit is the program's in that build, its number is
+allocate nothing, as the case below does over an `int`, which the test build keeps as calls (§2, the
+owner, 2026-10-29), so that the frame that does not fit is the program's in that build, its number is
 the program's line and the runner compares it as E3 says; the corpus holds no case whose overflow
 lands in the standard library's source *(assumed: the name of a library file, which the naming of the
 standard library gives (§14), and the condition on the cases, as §6 marks it; the line's reading
 from the tables is decided, as below)*; in a release build built without its line tables
 (§2, the answer decided there, its reading an assumption) the error
 line names no line and is `error: stack-overflow (no line tables: build with --lines)`, unless a note below comes first, and the
-`Crashed` value's place holds the line 0 (§6, an assumption there as to both), since the line of a
+`Crashed` value's place holds the line 0 (§6, the note's words decided there, the owner, 2026-10-29, the line 0 an assumption there), since the line of a
 stack overflow comes from those tables (§6, decided there,
 with the assumptions its markers name; the owner, 2026-10-20), and no case pins that, since a case's
 header names a line (E3). In either build, where the stack could not be walked, the file that

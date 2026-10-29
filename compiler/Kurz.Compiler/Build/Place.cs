@@ -45,13 +45,15 @@ public sealed class Place : IDisposable
     /// <summary>
     /// The directory of the places, <c>kurz</c> under the user's cache directory: on Linux the one <c>XDG_CACHE_HOME</c> names where
     /// it is an absolute path, else <c>.cache</c> under the home directory, <c>HOME</c> or the user database's entry, which .NET's
-    /// folder of the user's profile reads in that order; on Windows the known folder LocalAppData. Null where there is none.
+    /// folder of the user's profile reads in that order; on Windows the known folder LocalAppData. Each is taken as the system names
+    /// it, whether or not it is there, as <c>dirs</c> takes it: .NET's folders, asked without <c>DoNotVerify</c>, give an empty path
+    /// for one that is not there. Null where there is none.
     /// </summary>
     public static string? Root() => Root(
         OperatingSystem.IsWindows(),
         Environment.GetEnvironmentVariable("XDG_CACHE_HOME"),
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify));
 
     /// <summary>As above, from what the system gave: the variable, the home directory and the known folder, the last two empty where there is none.</summary>
     internal static string? Root(bool windows, string? cacheHome, string home, string localAppData)
@@ -191,7 +193,7 @@ public sealed class Place : IDisposable
 
     /// <summary>
     /// Opens a lock file for reading and writing so that no child inherits it: on Linux through <c>open</c> with <c>O_CLOEXEC</c>, since
-    /// .NET's own open takes a lock of its own that does not wait; on Windows with delete sharing, so that another command's handle
+    /// .NET's own open takes a lock of its own that does not wait (knowledge/a-dotnet-open-takes-a-lock-that-does-not-wait.md); on Windows with delete sharing, so that another command's handle
     /// does not hold up a removal.
     /// </summary>
     private static SafeFileHandle Open(string path, bool create)

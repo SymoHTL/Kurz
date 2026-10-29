@@ -50,11 +50,11 @@ public static class Builder
     }
 
     /// <summary>
-    /// Reads, checks and emits the program, with the grants of <paramref name="grants"/> (R7, R16) and the runtime given. A program the
-    /// front end or the checker refuses, and one that uses what the checker or the emitter does not read, gets no IR, and the diagnostics
-    /// say why.
+    /// Reads, checks and emits the program, with the grants of <paramref name="grants"/> (R7, R16) and the runtime given, and with the
+    /// line tables in a release build where <paramref name="lines"/> asks for them (<c>--lines</c>). A program the front end or the
+    /// checker refuses, and one that uses what the checker or the emitter does not read, gets no IR, and the diagnostics say why.
     /// </summary>
-    public static Compilation Compile(SourceText source, IReadOnlyCollection<string> grants, CheckedRuntime runtime, bool testBuild)
+    public static Compilation Compile(SourceText source, IReadOnlyCollection<string> grants, CheckedRuntime runtime, bool testBuild, bool lines = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         var diagnostics = new DiagnosticBag();
@@ -70,7 +70,7 @@ public static class Builder
             return new Compilation(diagnostics, null);
         }
 
-        return new Compilation(diagnostics, Emitter.Emit(tree, checker, runtime, source.Name, testBuild, diagnostics));
+        return new Compilation(diagnostics, Emitter.Emit(tree, checker, runtime, source.Name, testBuild, diagnostics, lines));
     }
 
     /// <summary>Writes the IR into the working directory and has clang build the executable at <paramref name="outputPath"/>.</summary>
@@ -81,7 +81,7 @@ public static class Builder
         Directory.CreateDirectory(workingDirectory);
         var irPath = Path.Combine(workingDirectory, IrFile);
         File.WriteAllText(irPath, program.Ir);
-        clang.Build(irPath, outputPath, program.Libraries);
+        clang.Build(irPath, outputPath, program.Libraries, program.Release, program.Lines);
     }
 
     /// <summary>The name of the executable a build of this source writes beside it: the source's name without its extension, with <c>.exe</c> on Windows.</summary>

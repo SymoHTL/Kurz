@@ -404,7 +404,7 @@ public sealed partial class Emitter
 
         var saved = fn;
         var (savedRegions, savedScopes) = (regions, scopes);
-        fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})", Attributes());
+        fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})");
         (regions, scopes) = ([], []); // a helper makes no temporary and has no variable
         try
         {

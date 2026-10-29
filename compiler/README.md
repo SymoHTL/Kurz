@@ -138,8 +138,10 @@ so a test cannot move that directory through a child's environment
 `--verbose` stands before or after `--version`, as rustc takes `-v` and `-V` in either order (the
 owner, 2026-10-23).
 
-`kurz build [--release] file.kz [-o output]` builds the program for the machine that builds,
-the test build unless `--release` says otherwise, into the executable beside the source, named
+`kurz build [--release] [--lines] file.kz [-o output]` builds the program for the machine that
+builds, the test build unless `--release` says otherwise, a release build with the line tables a
+test build has where `--lines` says so (the owner, 2026-10-29, "build, run and exec"), into the
+executable beside the source, named
 after it, `hello.exe` on Windows, or where `-o` says (design record, section 2). It writes over an
 executable that is there, writes nothing on standard output, and exits with 0. A program the
 compiler refuses gets its lines on standard error, one per diagnostic in the order of their lines,
@@ -183,14 +185,15 @@ The search for clang runs after the program was accepted, and its failures are t
 build writes the IR into a directory of its own under the system's temporary directory, which it
 removes after clang's run.
 
-`kurz run [--release] file.kz` builds the file as `build` does and runs it, and
-`kurz exec [--release] "program text"` builds its argument and runs it, the argument's lines named
+`kurz run [--release] [--lines] file.kz` builds the file as `build` does and runs it, and
+`kurz exec [--release] [--lines] "program text"` builds its argument and runs it, the argument's lines named
 `exec` in a refusal and in a failure the program reports (`exec:2: unknown-name: ...`,
 `error: overflow at exec:2`) (design record, section 2). Each builds into a place of its own,
 `place-` and 32 hexadecimal digits, under the directory `kurz` in the user's cache directory as
 Rust's `dirs` crate names it: on Linux the directory `XDG_CACHE_HOME` names where it is an absolute
 path, else `.cache` under the home directory, which is `HOME` or the user database's entry, and on
-Windows the known folder LocalAppData (the owner, 2026-10-29, "As Rust's dirs"). On Linux the
+Windows the known folder LocalAppData, each taken as the system names it, whether or not it is
+there, as `dirs` takes it (the owner, 2026-10-29, "As Rust's dirs"). On Linux the
 directory `kurz` the command makes and every place are the user's alone, 0700 (the owner,
 2026-10-29, "Owner only, 0700"). A place holds the lock file `lock`, which the command opens so that
 no child inherits it, takes the lock of, `flock`'s on Linux and `LockFileEx`'s on Windows, waiting
@@ -231,9 +234,9 @@ checks either.
 Any other command line gets the usage on standard error and the exit code 1:
 
     usage: kurz --version [--verbose]
-           kurz build [--release] <file.kz> [-o <output>]
-           kurz run [--release] <file.kz>
-           kurz exec [--release] "<program text>"
+           kurz build [--release] [--lines] <file.kz> [-o <output>]
+           kurz run [--release] [--lines] <file.kz>
+           kurz exec [--release] [--lines] "<program text>"
            run and exec pass no arguments to the program
 
 ### Readings the record leaves open to the command
@@ -251,14 +254,17 @@ ask about it.
 - `build` builds for a 64-bit machine alone: the emitter lays a pointer out in 8 bytes, and the
   runtime declares C's `size_t` as a `long`. Pinned by
   `CommandTests.The_target_is_a_64_bit_Linux_or_Windows_machine`.
-- `run` takes `--release` and the file, each once, in either order, and nothing else, `-o` among
-  it; `exec` takes `--release` before its text alone, and one text, which may be empty: an empty
+- `run` takes `--release`, `--lines` and the file, each once, in any order, and nothing else, `-o`
+  among it; `exec` takes `--release` and `--lines` before its text alone, each once, and one
+  text, which may be empty: an empty
   text is an empty program and ends with 0. A missing file or text gets the usage. Pinned by
   `CommandTests`.
 - The name of a place, of its lock file and of the executable, and the text of the mark, are this
   directory's. On Linux the lock file is opened through `open` with `O_CLOEXEC` and locked through
   `flock`, called directly: .NET's own open of a file takes a `flock` of its own that does not
-  wait, under which the maker the record lets wait would fail. Pinned by `PlaceTests`.
+  wait, under which the maker the record lets wait would fail
+  ([a .NET open takes a lock that does not wait](../knowledge/a-dotnet-open-takes-a-lock-that-does-not-wait.md)).
+  Pinned by `PlaceTests`.
 - The program runs in the caller's directory, and the command waits for it however long it runs.
   Pinned by `CommandTests.The_program_takes_the_commands_input_output_and_error_no_argument_and_the_callers_directory`
   and, on Linux, by the endless program of
@@ -378,7 +384,11 @@ build, the second with a runtime whose `Memory` refuses every request.
 The emitter (`Emit/`) takes a program the checker read without an error and without `not
 supported`, with the runtime checked for its target and the standard library, and writes one LLVM
 module of the three, which the
-pinned clang compiles at `-O2` and links with the C library as the platform links it, and with the
+pinned clang compiles unoptimised, at `-O0`, in a test build, as Cargo's `dev` profile builds, and at
+`-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), and links with the C
+library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
+library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
+which links `m` beside `c` on Linux), whose `fmod` an unoptimised `%` of a `double` calls, and with the
 library a block of C functions names (R16). It emits:
 
 - the integers, `float` and `double`, `bool`, `char` and `string`, and pointers to them and C
@@ -442,9 +452,26 @@ library a block of C functions names (R16). It emits:
   value (R13),
   calls of C functions with `...` (R16) and of a C function value (R17).
 
-In a test build every function carries LLVM's attribute that turns no call into a jump, so that a
-recursion runs as deep as the program wrote it (record, section 2). A raise by code passes its file
-and its line to the runtime as constants (section 6).
+A test build, unoptimised, keeps every call a call, so that a recursion runs as deep as the program
+wrote it (record, section 2), which
+`EmitterTests.The_test_build_keeps_every_call_and_the_release_build_turns_a_tail_call_into_a_loop`
+pins. A test build, and a release build built with `--lines`, carry the line tables, LLVM's debug
+information of the lines alone, as clang's `-gline-tables-only` writes it: one compile unit, each file
+named as a compile error names it, in the directory the build ran in (the owner, 2026-10-29, "As
+Rust: the build's directory"), the runtime's and the standard library's by their path in the
+repository, `std/list.kz`, a subprogram per function of the program, the runtime and the
+standard library define, under the name a trace shows (section 6; the owner, 2026-10-29, "Type.Method,
+Max<int>, std path"): `main` for the top-level code, `Max<int>` for an instance, `Twice.lambda` for a
+lambda, and the line of each statement and each expression on the instructions emitted for it. On
+Linux they are DWARF in the executable, on Windows CodeView in the PDB the linker writes beside it,
+for which clang gets `-g`. On Linux LLVM writes the subprogram of a line-only unit into DWARF only
+where a call was inlined into the function, which an unoptimised build never does, so a probe of a
+test build found the compile unit alone in `.debug_info`, and there the executable's symbols, the
+IR's names (`f.Down.1`, `f.Max.8<int>`, `kz.main`), name a function; CodeView keeps the subprograms'
+names.
+`EmitterTests.A_test_build_and_a_release_build_with_lines_carry_line_tables_under_the_names_a_trace_shows_and_a_release_build_does_not`
+and `CommandTests.Build_writes_the_line_tables_into_a_test_build_and_into_a_release_build_where_lines_says_so`
+pin them. A raise by code passes its file and its line to the runtime as constants (section 6).
 
 The layout of a data value and of a union is the compiler's own, which no form of the language
 outside `raw` shows (section 5, round 19; D10), and the owner kept it as described here on
