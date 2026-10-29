@@ -125,20 +125,33 @@ public sealed partial class Clang
 
     /// <summary>
     /// Compiles the IR at <paramref name="irPath"/> and links it into the executable at <paramref name="outputPath"/>, with the
-    /// C library as the platform links it and the libraries the program's C functions come from (R16); on Windows with the
-    /// linker of the same release where the installer put one beside this clang. The failure, with what clang wrote, where it
+    /// C library as the platform links it, on Linux its math library <c>libm</c> with it, as Rust's standard library links it through
+    /// its <c>libc</c> crate, which the calls of an unoptimised build reach (<c>fmod</c> for a <c>%</c> of a <c>double</c>), and the
+    /// libraries the program's C functions come from (R16); on Windows with the linker of the same release where the installer put
+    /// one beside this clang. A release build is optimised and a test build is not, as Rust's release and dev profiles (the owner,
+    /// 2026-10-29, "As Rust's dev profile, -O0"); IR with line tables is built with <c>-g</c>, which on Windows has the linker write
+    /// them into the PDB. The failure, with what clang wrote, where it
     /// does not exit with 0.
     /// </summary>
-    public void Build(string irPath, string outputPath, IReadOnlyList<string> libraries)
+    public void Build(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines)
     {
         ArgumentNullException.ThrowIfNull(libraries);
-        var arguments = new List<string> { "-O2", irPath, "-o", outputPath };
+        var arguments = new List<string> { release ? "-O2" : "-O0", irPath, "-o", outputPath };
+        if (lines)
+        {
+            arguments.Add("-g");
+        }
+
         if (OperatingSystem.IsWindows() && File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Path) ?? string.Empty, "lld-link.exe")))
         {
             arguments.Add("-fuse-ld=lld");
         }
 
         arguments.AddRange(libraries.Select(l => "-l" + l));
+        if (OperatingSystem.IsLinux())
+        {
+            arguments.Add("-lm");
+        }
         var (code, _, error) = Processes.Capture(Path, arguments, null, TimeSpan.FromMinutes(2));
         if (code != 0)
         {

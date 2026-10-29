@@ -91,7 +91,8 @@ could not be walked, the tables could not be read or the raising frame has no en
 its note in place of the line, the first the crash path meets where more than one holds: the walk's,
 the file's, the tables', then the entry's, so that a Windows release build built without `--lines`,
 whose PDB holds names and no lines, writes the note that names `--lines`, and a program whose PDB is
-missing writes the note that the tables could not be read (§6, an assumption there). A raise by code
+missing writes the note that the tables could not be read (§6, the words of the four notes decided there, the owner, 2026-10-29,
+where each is written and their order an assumption there). A raise by code
 keeps its file and its line in each of these builds. In a test build, which keeps the program's
 checks in the runtime's own code, its primitives (§2, decided there), a check of that code, on Linux
 and on Windows, ends the process as a stack fault inside the allocator or the scheduler does (O11),

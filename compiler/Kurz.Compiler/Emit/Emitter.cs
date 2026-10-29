@@ -8,8 +8,11 @@ using VoidType = Kurz.Compiler.Semantics.VoidType;
 
 namespace Kurz.Compiler.Emit;
 
-/// <summary>The IR of a program with its runtime, and the libraries its C functions come from (R16), which the link names.</summary>
-public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries);
+/// <summary>
+/// The IR of a program with its runtime, the libraries its C functions come from (R16), which the link names, whether it is a release
+/// build, which the backend optimises, and whether it carries line tables, as a test build and a release build with <c>--lines</c> do.
+/// </summary>
+public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, bool Release, bool Lines);
 
 /// <summary>
 /// The code generator: LLVM IR, as text, for a program the checker read without an error and without <c>not supported</c>, from
@@ -21,16 +24,18 @@ public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries);
 /// <c>bool</c>, <c>char</c> and <c>string</c>, functions and their generic instances, the statements of chapter 10, <c>throw</c>,
 /// and the raw forms of chapter 11 the runtime is written in (<see cref="Lower.Supported"/>); a program that uses another type, or a
 /// construct the emitter does not lay out, gets one <c>not supported</c> diagnostic and no IR. In a test build the arithmetic of T4
-/// raises <c>overflow</c> (T5) and every function carries LLVM's attribute that turns no call into a jump; in a release build it
-/// wraps and the optimiser may. A raise by code passes its file and its line to the runtime as constants (design record,
-/// section 6), and so does a <c>print</c>, for <c>print-failed</c> (the owner, 2026-10-23, "Caller passes it").
+/// raises <c>overflow</c> (T5) and the backend does not optimise, as Rust's dev profile, so that every call is a frame; in a release build
+/// it wraps and the optimiser runs. A test build, and a release build with <c>--lines</c>, carry line tables (<see cref="DebugInfo"/>). A
+/// raise by code passes its file and its line to the runtime as constants (design record, section 6), and so does a <c>print</c>, for
+/// <c>print-failed</c> (the owner, 2026-10-23, "Caller passes it").
 /// </summary>
 public sealed partial class Emitter
 {
     private static readonly IReadOnlyDictionary<TypeParameterSymbol, KurzType> NoMap = new Dictionary<TypeParameterSymbol, KurzType>();
 
     private readonly bool test;
-    private readonly IrModule module = new();
+    private readonly bool lines;
+    private readonly IrModule module;
     private readonly Unit program;
     private readonly Unit common;
     private readonly Unit std;
@@ -50,6 +55,7 @@ public sealed partial class Emitter
     // the function being emitted, and the file it is in
     private Unit unit;
     private IrFunction fn = null!;
+    private string display = "main"; // the function being emitted as a trace names it, which names a lambda in it
     private Dictionary<VariableSymbol, string> slots = new(ReferenceEqualityComparer.Instance);
     private IReadOnlyDictionary<TypeParameterSymbol, KurzType> map = NoMap;
     private KurzType returnType = Types.Void;
@@ -61,7 +67,7 @@ public sealed partial class Emitter
     /// </summary>
     private sealed record Unit(string Prefix, string File, ProgramSyntax Tree, SemanticModel Model, bool Runtime);
 
-    private Emitter(Unit program, Unit common, Unit sys, Unit std, bool test)
+    private Emitter(Unit program, Unit common, Unit sys, Unit std, bool test, bool lines, Target target)
     {
         this.program = program;
         this.common = common;
@@ -69,6 +75,11 @@ public sealed partial class Emitter
         units = [program, common, sys, std];
         unit = program;
         this.test = test;
+        this.lines = test || lines;
+        module = new IrModule
+        {
+            Debug = this.lines ? new DebugInfo(System.Environment.CurrentDirectory, program.File, $"kurz {Command.CompilerVersion}", !test, target == Target.Windows) : null,
+        };
         layout = new Layout(module);
     }
 
@@ -78,9 +89,10 @@ public sealed partial class Emitter
     /// The IR of the program and of the runtime checked for its target, or null with one <c>not supported</c> diagnostic added
     /// when the program uses what the emitter does not lay out. <paramref name="checker"/> is the checker that read the program,
     /// with no error and no <c>not supported</c> among its diagnostics; <paramref name="file"/> is the name of the program's
-    /// file as a compile error names it (design record, section 2), which the error line of an exception names (section 6).
+    /// file as a compile error names it (design record, section 2), which the error line of an exception names (section 6);
+    /// <paramref name="lines"/> keeps the line tables in a release build (<c>--lines</c>), which a test build carries in any case.
     /// </summary>
-    public static EmittedProgram? Emit(ProgramSyntax tree, Checker checker, CheckedRuntime runtime, string file, bool testBuild, DiagnosticBag diagnostics)
+    public static EmittedProgram? Emit(ProgramSyntax tree, Checker checker, CheckedRuntime runtime, string file, bool testBuild, DiagnosticBag diagnostics, bool lines = false)
     {
         ArgumentNullException.ThrowIfNull(tree);
         ArgumentNullException.ThrowIfNull(checker);
@@ -96,7 +108,9 @@ public sealed partial class Emitter
             new Unit("rt.common", runtime.CommonPath, runtime.Common, runtime.CommonChecker.Model, true),
             new Unit("rt.sys", runtime.SysPath, runtime.Sys, runtime.SysChecker.Model, true),
             new Unit("std", runtime.StdPath, runtime.Std, runtime.StdChecker.Model, true),
-            testBuild);
+            testBuild,
+            lines,
+            runtime.Target);
         try
         {
             return emitter.Run();
@@ -133,7 +147,8 @@ public sealed partial class Emitter
         }
 
         unit = program;
-        Begin(new IrFunction("internal void @kz.main()", Attributes()), NoMap, Types.Void);
+        Begin(new IrFunction("internal void @kz.main()"), NoMap, Types.Void);
+        Trace("main", "kz.main", 1);
         InScope(() =>
         {
             foreach (var s in program.Tree.Statements)
@@ -163,7 +178,7 @@ public sealed partial class Emitter
             }
         }
 
-        var main = new IrFunction("i32 @main()", Attributes());
+        var main = new IrFunction("i32 @main()");
         main.Emit($"call void {start}()");
         main.Emit("call void @kz.main()");
         main.Emit($"call void {finish}()");
@@ -174,11 +189,8 @@ public sealed partial class Emitter
             module.Add(f);
         }
 
-        return new EmittedProgram(module.Render(), libraries.ToList());
+        return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines);
     }
-
-    /// <summary>The attributes of every function the module defines: in a test build, no call turned into a jump (design record, section 2).</summary>
-    private string[] Attributes() => test ? ["\"disable-tail-calls\"=\"true\""] : [];
 
     /// <summary>The functions, the C declarations, the data types and the state outside a function of a file (R13, R16), each by its symbol.</summary>
     private void Register(Unit u)
@@ -250,6 +262,36 @@ public sealed partial class Emitter
     }
 
     private void End() => emitted.Add(fn);
+
+    /// <summary>
+    /// Gives the function being emitted its subprogram in the line tables, under the name a trace shows (design record, section 6:
+    /// <c>main</c> for the top-level code, the owner's "Type.Method, Max&lt;int&gt;, std path" of 2026-10-29 for the rest), at its line.
+    /// </summary>
+    private void Trace(string name, string symbol, int line)
+    {
+        display = name;
+        if (module.Debug is { } debug)
+        {
+            fn.Subprogram = debug.Subprogram(name, symbol, unit.File, line);
+            At(line);
+        }
+    }
+
+    /// <summary>The line of the instructions emitted from here on, in a function with a subprogram.</summary>
+    private void At(int line)
+    {
+        if (fn.Subprogram is { } scope)
+        {
+            fn.Location = module.Debug!.Location(line, scope);
+        }
+    }
+
+    /// <summary>The name a trace shows for a function with these type arguments: <c>Max&lt;int&gt;</c>.</summary>
+    private static string TraceName(FunctionSymbol f, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap) =>
+        f.TypeParameters.Count == 0 ? f.Name : $"{f.Name}<{string.Join(", ", f.TypeParameters.Select(p => instanceMap[p].Text))}>";
+
+    /// <summary>The symbol of an IR name, without its <c>@</c> and its quotes.</summary>
+    private static string Symbol(string name) => name.TrimStart('@').Trim('"');
 
     // ---- types -----------------------------------------------------------------------------------
 
@@ -333,7 +375,8 @@ public sealed partial class Emitter
             parameters.Add(p.Mut ? $"ptr %p{i}" : $"{ParameterType(f, type)} %p{i}");
         }
 
-        Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", Attributes()), instanceMap, result);
+        Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})"), instanceMap, result);
+        Trace(TraceName(f, instanceMap), Symbol(name), d.Line);
         for (var i = 0; i < f.Parameters.Count; i++)
         {
             var p = f.Parameters[i];
@@ -435,6 +478,7 @@ public sealed partial class Emitter
     /// <summary>A type the emitter does not lay out, met anywhere inside the statement, is the one diagnostic, at the statement's line.</summary>
     private void EmitStatement(Statement statement)
     {
+        At(statement.Line);
         try
         {
             InRegion(() => EmitStatementCore(statement));

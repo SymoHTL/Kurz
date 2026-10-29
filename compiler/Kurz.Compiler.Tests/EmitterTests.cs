@@ -9,8 +9,8 @@ namespace Kurz.Compiler.Tests;
 
 /// <summary>
 /// The emitter's decisions that no corpus case pins: where a refused write and a refused allocation end the program and what they
-/// say (design record, section 6; the owner, 2026-10-23, "Caller passes it" and "Id + size"), the test build's attribute
-/// (section 2), the texts of the integers at their edges (A2), a conversion from an unsigned type to a signed one (T20), the empty
+/// say (design record, section 6; the owner, 2026-10-23, "Caller passes it" and "Id + size"), the test build left unoptimised and
+/// the line tables (section 2; the owner, 2026-10-29), the texts of the integers at their edges (A2), a conversion from an unsigned type to a signed one (T20), the empty
 /// string's pointer (R15), the largest string (T15; the owner, 2026-10-23, "C#'s limit"), the runtime of every target emitted, and a
 /// construct of the runtime the emitter does not lay out, which is the compiler's defect.
 /// </summary>
@@ -85,11 +85,38 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void The_test_build_asks_the_backend_to_keep_every_call_and_the_release_build_does_not()
+    public void The_test_build_keeps_every_call_and_the_release_build_turns_a_tail_call_into_a_loop()
     {
-        const string text = "int Next(int n) => n + 1\n\nprint(Next(1))\n";
-        Assert.Contains("\"disable-tail-calls\"=\"true\"", Compile(text, toolchain.Runtime, testBuild: true).Program!.Ir, StringComparison.Ordinal);
-        Assert.DoesNotContain("disable-tail-calls", Compile(text, toolchain.Runtime, testBuild: false).Program!.Ir, StringComparison.Ordinal);
+        // the owner, 2026-10-29, "As Rust's dev profile, -O0": a recursion of a test build runs as deep as the program wrote it
+        const string text = "long Count(long n) {\n    if n == 0 {\n        return 0\n    }\n\n    return Count(n - 1)\n}\n\nprint(Count(10000000))\n";
+        Ran(Toolchain.Run(toolchain.Build(Compile(text, toolchain.Runtime, testBuild: false).Program!, "tail-release")), 0, ["0"], "");
+        Assert.NotEqual(0, BuildAndRun(text, "tail-test").Code); // ten million frames do not fit the stack
+    }
+
+    [Fact]
+    public void A_test_build_and_a_release_build_with_lines_carry_line_tables_under_the_names_a_trace_shows_and_a_release_build_does_not()
+    {
+        const string text = "T Max<T>(T a, T b) => a\n\nint Apply((int) => int f, int n) => f(n)\n\nint Twice(int n) => Apply(x => x * 2, n)\n\n"
+            + "print(Max(1, 2))\nprint(Apply(x => x + 1, Twice(3)))\n";
+        var test = Emit(text);
+        var release = Compile(text, toolchain.Runtime, testBuild: false).Program!;
+        var lines = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false, lines: true).Program!;
+        Assert.Equal((false, true, true, false, true, true), (test.Release, test.Lines, release.Release, release.Lines, lines.Release, lines.Lines));
+
+        // design record, section 6, and the owner's "Type.Method, Max<int>, std path" of 2026-10-29
+        foreach (var name in new[] { "main", "Max<int>", "Apply", "Twice", "Twice.lambda", "main.lambda" })
+        {
+            Assert.Contains($"!DISubprogram(name: \"{name}\",", test.Ir, StringComparison.Ordinal);
+            Assert.Contains($"!DISubprogram(name: \"{name}\",", lines.Ir, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("!dbg", release.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("DISPFlagOptimized", test.Ir, StringComparison.Ordinal);
+        Assert.Contains("DISPFlagOptimized", lines.Ir, StringComparison.Ordinal);
+
+        // in the executable on Linux, in the PDB beside it on Windows
+        var built = new[] { (test, "lines-test"), (release, "lines-release"), (lines, "lines-lines") }.Select(b => Toolchain.HasLineTables(toolchain.Build(b.Item1, b.Item2)));
+        Assert.Equal([true, false, true], built);
     }
 
     [Fact]

@@ -38,6 +38,24 @@ public sealed class Toolchain : IDisposable
         return executable;
     }
 
+    /// <summary>Whether a built executable carries line tables: on Linux the DWARF section <c>.debug_line</c> in it, on Windows a PDB beside it.</summary>
+    public static bool HasLineTables(string executable) =>
+        OperatingSystem.IsWindows() ? File.Exists(Path.ChangeExtension(executable, ".pdb")) : Sections(executable).Contains(".debug_line");
+
+    /// <summary>The names of the sections of an ELF file, little-endian and of 64 bits, read from its table of section headers.</summary>
+    private static List<string> Sections(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var table = (int)BitConverter.ToInt64(bytes, 0x28);
+        var size = BitConverter.ToUInt16(bytes, 0x3A);
+        var names = (int)BitConverter.ToInt64(bytes, table + (BitConverter.ToUInt16(bytes, 0x3E) * size) + 0x18);
+        return Enumerable.Range(0, BitConverter.ToUInt16(bytes, 0x3C)).Select(i =>
+        {
+            var start = names + BitConverter.ToInt32(bytes, table + (i * size));
+            return System.Text.Encoding.ASCII.GetString(bytes, start, Array.IndexOf(bytes, (byte)0, start) - start);
+        }).ToList();
+    }
+
     /// <summary>Runs a built program with nothing on its input; its exit code, what it wrote on standard output as lines, and what it wrote on standard error.</summary>
     public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable)
     {

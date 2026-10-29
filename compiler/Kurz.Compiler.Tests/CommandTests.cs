@@ -137,6 +137,23 @@ public sealed class CommandTests : IDisposable
         Assert.Equal((0, "-2147483648\n", ""), Processes.Capture(output, [], null, TimeSpan.FromSeconds(30)));
     }
 
+    [Fact]
+    public void Build_writes_the_line_tables_into_a_test_build_and_into_a_release_build_where_lines_says_so()
+    {
+        // the owner, 2026-10-29, "build, run and exec": `--lines` keeps them in a release build and changes nothing in a test build
+        var source = Path.Combine(root, "lines.kz");
+        File.WriteAllText(source, "print(1)\n");
+        var output = Path.Combine(root, OperatingSystem.IsWindows() ? "lines.exe" : "lines");
+        (string[] Options, bool Tables)[] builds = [([], true), (["--lines"], true), (["--release"], false), (["--release", "--lines"], true), (["--lines", "--release"], true)];
+        foreach (var (options, tables) in builds)
+        {
+            File.Delete(Path.ChangeExtension(output, ".pdb")); // the PDB of the build before
+            Assert.Equal((0, "", ""), Kurz(["build", .. options, source, "-o", output]));
+            Assert.Equal((string.Join(' ', options), tables), (string.Join(' ', options), Toolchain.HasLineTables(output)));
+            Assert.Equal((0, "1\n", ""), Processes.Capture(output, [], null, TimeSpan.FromSeconds(30)));
+        }
+    }
+
     [Theory]
     [InlineData("print(1)\nprint(y)\n", ":2: unknown-name: ")] // a compile error, in the record's form
     [InlineData("s = \"ab\"\nprint(s.Bytes[0])\n", ":2: not supported: `s.Bytes` as a list (T15)\n")] // the emitter's not supported
@@ -237,6 +254,7 @@ public sealed class CommandTests : IDisposable
     [InlineData("build")]
     [InlineData("build", "a.kz", "b.kz")]
     [InlineData("build", "--release", "--release", "a.kz")]
+    [InlineData("build", "--lines", "--lines", "a.kz")]
     [InlineData("build", "a.kz", "-o")]
     [InlineData("build", "--fast", "a.kz")]
     [InlineData("--version", "--release")]
@@ -246,15 +264,21 @@ public sealed class CommandTests : IDisposable
     [InlineData("run")]
     [InlineData("run", "a.kz", "b.kz")]
     [InlineData("run", "--release", "--release", "a.kz")]
+    [InlineData("run", "--lines", "--lines", "a.kz")]
     [InlineData("run", "a.kz", "-o", "out")]
     [InlineData("exec")]
     [InlineData("exec", "--release")]
     [InlineData("exec", "print(1)", "print(2)")]
     [InlineData("exec", "print(1)", "--release")]
+    [InlineData("exec", "--lines")]
+    [InlineData("exec", "--release", "--lines")]
+    [InlineData("exec", "--lines", "--lines", "print(1)")]
+    [InlineData("exec", "print(1)", "--lines")]
     public void A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1(params string[] arguments) =>
         Assert.Equal(
-            (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] <file.kz> [-o <output>]\n       kurz run [--release] <file.kz>\n"
-                + "       kurz exec [--release] \"<program text>\"\n       run and exec pass no arguments to the program\n"),
+            (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] <file.kz> [-o <output>]\n"
+                + "       kurz run [--release] [--lines] <file.kz>\n       kurz exec [--release] [--lines] \"<program text>\"\n"
+                + "       run and exec pass no arguments to the program\n"),
             Kurz(arguments));
 
     /// <summary>
@@ -307,8 +331,11 @@ public sealed class CommandTests : IDisposable
     {
         var source = Path.Combine(root, "hello.kz");
         File.WriteAllText(source, "print(y)\n");
-        Assert.Equal((1, "", $"{source}:1: unknown-name: no `y` is visible here (V10)\n"), KurzWithPlaces("run", source));
-        Assert.Equal((1, "", "exec:2: unknown-name: no `x` is visible here (V10)\n"), KurzWithPlaces("exec", "print(1)\nprint(x)"));
+        foreach (var (refused, line) in new[] { (KurzWithPlaces("run", source), $"{source}:1: unknown-name: "), (KurzWithPlaces("exec", "print(1)\nprint(x)"), "exec:2: unknown-name: ") })
+        {
+            Assert.Equal((1, "", 1), (refused.Code, refused.Output, refused.Error.Count(c => c == '\n'))); // one line, whose words are the checker's
+            Assert.StartsWith(line, refused.Error, StringComparison.Ordinal);
+        }
         var (code, output, error) = KurzWithPlaces("run", Path.Combine(root, "missing.kz"));
         Assert.Equal((1, ""), (code, output));
         Assert.Matches(@"^error: the source cannot be read\n  note: .+\n  help: name a Kurz source file that can be read\n$", error);
@@ -322,6 +349,21 @@ public sealed class CommandTests : IDisposable
             ? "error: no directory for the command's places\n  note: Windows names no LocalAppData folder for this user\n  help: run the command as a user with a profile\n"
             : "error: no directory for the command's places\n  note: XDG_CACHE_HOME is not set to an absolute path, and no home directory is found in HOME or the user database\n  help: set HOME, or XDG_CACHE_HOME to an absolute path\n";
         Assert.Equal((1, "", expected), RunWithPlaces(Builder.HostTarget, () => null, Found().Find, "exec", "print(1)"));
+    }
+
+    [Fact]
+    public void On_linux_a_home_directory_that_is_not_there_holds_the_places_as_dirs_takes_it()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // Windows' known folder is the system's answer, which no variable of a child moves
+        }
+
+        // .NET's folder of the user's profile, asked without DoNotVerify, is empty for a home that is not there; `dirs` takes HOME as it is
+        var home = Path.Combine(root, "home-not-there");
+        var environment = new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = "", ["HOME"] = home };
+        Assert.Equal((0, "1\n", ""), Processes.Capture(Host, [Dll, "exec", "print(1)"], null, TimeSpan.FromMinutes(2), environment));
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(home, ".cache", "kurz"))); // the place was made there, and removed
     }
 
     [Fact]

@@ -20,10 +20,10 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A lambda made in the function being emitted, emitted after it: the file it is in, the type arguments of that function, its IR
-    /// name, the IR type of its environment, none where it reads no variable, and the variables it reads, in the order of the
-    /// environment's fields.
+    /// name, the IR type of its environment, none where it reads no variable, the variables it reads, in the order of the
+    /// environment's fields, and the name a trace shows for that function.
     /// </summary>
-    private sealed record PendingLambda(Unit Unit, LambdaExpression Lambda, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name, string? Environment, IReadOnlyList<VariableSymbol> Captures);
+    private sealed record PendingLambda(Unit Unit, LambdaExpression Lambda, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name, string? Environment, IReadOnlyList<VariableSymbol> Captures, string Display);
 
     /// <summary>The function value of a lambda where it is made: its code, and an environment of the values it reads (F15), a temporary of the region.</summary>
     private string EmitLambda(LambdaExpression l, FunctionType type)
@@ -38,14 +38,14 @@ public sealed partial class Emitter
         var captures = Model.LambdaOf(l).Captures;
         if (captures.Count == 0)
         {
-            lambdas.Enqueue(new PendingLambda(unit, l, map, name, null, captures));
+            lambdas.Enqueue(new PendingLambda(unit, l, map, name, null, captures, display));
             return $"{{ ptr {name}, ptr null }}";
         }
 
         var types = captures.Select(v => Sub(v.Type)).ToList();
         var environment = $"%\"env.{key}\"";
         module.Global($"{environment} = type {{ i64, ptr{string.Concat(types.Select(t => ", " + Ir(t)))} }}");
-        lambdas.Enqueue(new PendingLambda(unit, l, map, name, environment, captures));
+        lambdas.Enqueue(new PendingLambda(unit, l, map, name, environment, captures, display));
         var drop = Helper($"drop.{key}", "void", ["ptr"], () =>
         {
             for (var i = 0; i < types.Count; i++)
@@ -95,7 +95,8 @@ public sealed partial class Emitter
             var info = Model.LambdaOf(l);
             var type = (FunctionType)Types.Substitute(info.Type, pending.Map);
             var parameters = type.Parameters.Select((t, i) => $"{Ir(t)} %p{Number(i)}").Prepend("ptr %env");
-            Begin(new IrFunction($"internal {Ir(type.Result)} {pending.Name}({string.Join(", ", parameters)})", Attributes()), pending.Map, type.Result);
+            Begin(new IrFunction($"internal {Ir(type.Result)} {pending.Name}({string.Join(", ", parameters)})"), pending.Map, type.Result);
+            Trace($"{pending.Display}.lambda", Symbol(pending.Name), l.Line); // design record, section 6
             for (var i = 0; i < pending.Captures.Count; i++)
             {
                 slots[pending.Captures[i]] = Capture(pending.Environment!, "%env", i);

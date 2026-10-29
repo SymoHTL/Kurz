@@ -134,6 +134,7 @@ public sealed class PlaceTests : IDisposable
         else
         {
             // a file whose name is no UTF-8: .NET reads its name otherwise and cannot remove it, which no permission makes for a root user
+            // (knowledge/dotnet-cannot-remove-a-name-that-is-not-utf-8.md)
             Assert.Equal(0, Processes.Capture("/bin/sh", ["-c", "touch \"$0/$(printf '\\377')\"", work], null, TimeSpan.FromMinutes(1)).Code);
             place.Dispose();
             Assert.True(Directory.Exists(work), "the removal did not fail");

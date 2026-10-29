@@ -10,8 +10,21 @@ namespace Kurz.Compiler.Emit;
 
 public sealed partial class Emitter
 {
-    /// <summary>The IR value of an expression, of the layout of its own type (<see cref="TypeOf"/>); the site converts it to where it goes.</summary>
+    /// <summary>
+    /// The IR value of an expression, of the layout of its own type (<see cref="TypeOf"/>); the site converts it to where it goes. Its
+    /// instructions carry its line in the line tables, and what the expression around it emits after it carries that one's again.
+    /// </summary>
     private string EmitExpression(Expression e)
+    {
+        var f = fn;
+        var around = f.Location;
+        At(e.Line);
+        var value = EmitExpressionAt(e);
+        f.Location = around;
+        return value;
+    }
+
+    private string EmitExpressionAt(Expression e)
     {
         var typed = Model.TypeOf(e);
         var type = Sub(typed.Type);
