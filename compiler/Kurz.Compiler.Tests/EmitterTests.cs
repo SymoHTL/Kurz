@@ -110,6 +110,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Contains($"!DISubprogram(name: \"{name}\",", lines.Ir, StringComparison.Ordinal);
         }
 
+        // the owner, 2026-10-29, "As Rust: the build's directory"
+        Assert.Contains($"directory: {IrModule.Quote(Environment.CurrentDirectory)})", test.Ir, StringComparison.Ordinal);
         Assert.DoesNotContain("!dbg", release.Ir, StringComparison.Ordinal);
         Assert.DoesNotContain("DISPFlagOptimized", test.Ir, StringComparison.Ordinal);
         Assert.Contains("DISPFlagOptimized", lines.Ir, StringComparison.Ordinal);
