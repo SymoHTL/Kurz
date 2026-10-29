@@ -646,6 +646,11 @@ public sealed partial class Checker
                 return CheckFromRaw(c, Types.String, Types.Byte, "string.FromRaw"); // R15
             }
 
+            if (n.Name == "string" && m.Member == "Allocate")
+            {
+                return CheckStringAllocate(c); // R15
+            }
+
             if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");

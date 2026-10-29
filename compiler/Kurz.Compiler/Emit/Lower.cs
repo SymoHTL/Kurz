@@ -12,8 +12,9 @@ namespace Kurz.Compiler.Emit;
 /// <c>timestamp</c> are the <c>i64</c> of their nanoseconds, a <c>longduration</c> and a <c>longtimestamp</c> the <c>i128</c>,
 /// 16 bytes aligned to 16 as LLVM lays it out (T24, T29); a string is
 /// <c>%kz.str</c>, a pointer to UTF-8 bytes
-/// and their count, the pointer of an empty string pointing at a constant of no bytes and never
-/// <c>null</c> (R15); a pointer and a C function value are <c>ptr</c> (R10, R17), and so is a list, the
+/// and their count, whose highest bit marks a string that holds a block of the standard library in front of the bytes, which a
+/// literal does not, the pointer of an empty string pointing at a constant of no bytes and never
+/// <c>null</c> (R15; design record, section 3); a pointer and a C function value are <c>ptr</c> (R10, R17), and so is a list, the
 /// address of its block (M9); a function value is <c>%kz.fn</c>, the address of its code and of its
 /// environment, null for a lambda that reads no variable (F11, F15). Every other type is not emitted:
 /// <see cref="Supported"/> says so.

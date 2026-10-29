@@ -338,7 +338,7 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A3, A4: the text of a data value, the name its declaration gives and its fields, or that name alone without fields; of a
-    /// block, of the type the block holds; of a union, the text of its case's value.
+    /// block, of the type the block holds; of a union, the text of its case's value. The caller holds a count of the text.
     /// </summary>
     private string DerivedText(string value, KurzType type, int line)
     {
@@ -361,14 +361,23 @@ public sealed partial class Emitter
                 case UnionType u when u.Cases.Any(c => c is VoidType):
                     throw new InvalidOperationException($"the text of a `{u}` at line {line}: a success without a value has none, `no-text`, which the checker reports (A7)");
                 case UnionType u:
-                    ByCase(Tag("%a0", u), u, u.Cases, c => fn.Return($"%kz.str {TextOf(Payload("%a0", u, c), c, line)}"));
+                    ByCase(Tag("%a0", u), u, u.Cases, c =>
+                    {
+                        var text = TextOf(Payload("%a0", u, c), c, line);
+                        if (c is PrimitiveType { Kind: Primitive.String })
+                        {
+                            Retain(text, c); // the case's string is its own text, of which the result holds a count
+                        }
+
+                        fn.Return($"%kz.str {text}");
+                    });
                     break;
             }
         });
         return fn.Value($"call %kz.str {name}({Ir(type)} {value})");
     }
 
-    /// <summary>A3: `Name { Field = text, ... }`, or the name alone for a type without fields.</summary>
+    /// <summary>A3: `Name { Field = text, ... }`, or the name alone for a type without fields; the texts it joined on the way are let go of.</summary>
     private string RecordText(DataType type, List<string> values, int line)
     {
         var fields = type.Symbol.Fields;
@@ -381,14 +390,25 @@ public sealed partial class Emitter
         var types = Layout.Fields(type);
         for (var i = 0; i < fields.Count; i++)
         {
-            text = Concat(text, StringValue($"{(i == 0 ? string.Empty : ", ")}{fields[i].Name} = "));
-            text = Concat(text, TextOf(values[i], types[i], line));
+            text = Joined(text, StringValue($"{(i == 0 ? string.Empty : ", ")}{fields[i].Name} = "));
+            var piece = TextOf(values[i], types[i], line);
+            text = Joined(text, piece);
+            if (MakesText(types[i]))
+            {
+                Release(piece, Types.String);
+            }
         }
 
-        return Concat(text, StringValue(" }"));
+        return Joined(text, StringValue(" }"));
     }
 
-    private string Concat(string first, string second) => fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {first}, %kz.str {second})");
+    /// <summary>The runtime's <c>Concat</c> of the two texts, after which the first, a text the caller held, is let go of.</summary>
+    private string Joined(string first, string second)
+    {
+        var joined = fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {first}, %kz.str {second})");
+        Release(first, Types.String);
+        return joined;
+    }
 
     /// <summary>
     /// A function of the module the emitted code calls for a type, emitted once: <paramref name="body"/> fills it with its arguments

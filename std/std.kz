@@ -1,10 +1,10 @@
 // The standard library's Kurz code (design record, section 2; the owner, 2026-10-24, "A std/ directory
 // now"), which the compiler compiles with every program, as it compiles the runtime: the allocator of
-// section 3 and the block of a list. It takes its memory from the system through the runtime's
-// boundary call, reached as the folder `sys`, the directory of the target the program is built for,
-// and the runtime reaches it as the folder `std`, through its allocation entry, `Allocate` (the owner,
-// 2026-10-24, "As built"; compiler/README.md, "The runtime"). The emitted code calls the functions of
-// a list's block.
+// section 3 and the blocks of a list and of a string. It takes its memory from the system through the
+// runtime's boundary call, reached as the folder `sys`, the directory of the target the program is
+// built for, and the runtime reaches it as the folder `std`, through its allocation entry, `Allocate`
+// (the owner, 2026-10-24, "As built"; compiler/README.md, "The runtime"). The emitted code calls the
+// functions of a list's block and of a string's.
 use sys
 
 // The memory the allocator carves blocks from, and the bytes left behind it, of each thread (R13).
@@ -340,4 +340,56 @@ pub byte* ListPush(byte* block, long item) {
     }
 
     return slot
+}
+
+// The block of a string (T15, R15): the count of the string values that hold it, 8 bytes, the count
+// of bytes it has room for, 8 bytes, and from its 16th byte the bytes. A string value is the address
+// of its bytes and their count, whose highest bit marks a string that holds such a block; a literal
+// and the empty string hold none and are never freed (design record, section 3). A string never
+// changes, so no write copies a block; the emitted code counts the values that hold one.
+
+// A block of room for `size` bytes, held by one string value: the address of its bytes, null where
+// the system refuses.
+pub byte* StringBlock(long size) {
+    mut byte* bytes = null
+    raw {
+        byte* block = Allocate(16 + size)
+        if block != null {
+            *Ptr<long>(block) = 1
+            *Ptr<long>(block + 8) = size
+            bytes = block + 16
+        }
+    }
+
+    return bytes
+}
+
+// One more string value holds the block of the bytes.
+pub void StringRetain(byte* bytes) {
+    raw {
+        *Ptr<long>(bytes - 16) = *Ptr<long>(bytes - 16) + 1
+    }
+}
+
+// One string value less holds the block of the bytes: whether it was the last, after which the caller
+// frees it with `StringFree`.
+pub bool StringRelease(byte* bytes) {
+    mut bool last = false
+    raw {
+        long count = *Ptr<long>(bytes - 16) - 1
+        *Ptr<long>(bytes - 16) = count
+        last = count == 0
+    }
+
+    return last
+}
+
+// The block of the bytes given back to the allocator.
+pub void StringFree(byte* bytes) {
+    mut long room = 0
+    raw {
+        room = *Ptr<long>(bytes - 8)
+    }
+
+    Free(bytes - 16, 16 + room)
 }

@@ -705,6 +705,26 @@ public sealed partial class Checker
         return typed;
     }
 
+    /// <summary>R15: <c>string.Allocate(n)</c>, the address of room for <c>n</c> bytes, in a block that <c>string.FromRaw</c> takes over, inside a <c>raw</c> block.</summary>
+    private Typed CheckStringAllocate(CallExpression c)
+    {
+        if (RefusesTypeArguments(c, "`string.Allocate`"))
+        {
+            return Typed.Error;
+        }
+
+        RequireRaw(c.Line, "`string.Allocate`", "R15");
+        var result = new PointerType(Types.Byte);
+        var candidate = new Candidate { Slots = [new Slot("n", Types.Long, false, false, false)], Result = result };
+        var typed = Call([candidate], c, null, out var picked);
+        if (picked is not null && !typed.IsError)
+        {
+            model.RecordCall(c, new CallInfo(CallKind.StringAllocate, null, null, result, NoMap, picked.Binding, 1, result));
+        }
+
+        return typed;
+    }
+
     /// <summary>R15: <c>List&lt;T&gt;.FromRaw(p, n)</c>; a member of another type with type arguments is one no rule gives it (V10).</summary>
     private Typed CheckTypeMemberCall(TypeMemberAccess t, CallExpression c)
     {

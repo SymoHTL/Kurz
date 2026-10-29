@@ -96,9 +96,10 @@ flowchart TD
         for any target, or on a function common/ or std/ calls that a target's directory gives with other parameters
         or another result;
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
-        pinned clang and runs it, red on output, an exit code or an error line other than the header's, on a case
+        pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, red on
+        output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 188 cases run on Linux or 187 on Windows, and on Linux on a crash whose trace is empty, holds a line that
+        than 189 cases run on Linux or 188 on Windows, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start
         at the error line's place; TraceTests, red on a trace
         other than the one each Linux program pins: its frames, names and lines, the cut and its count, the
@@ -117,10 +118,10 @@ flowchart TD
         conversion from an unsigned type to a signed one, red on a value above the signed maximum that raises no
         overflow in a test build, and on a function whose first instruction starts a block, which clang refuses
         without the entry block's branch, and on a function without uwtable, or without the inline stack probe on Linux
-        or with it on Windows; and ListTests, red on a list's block read or written after it was freed, under an
-        allocator that makes every freed block inaccessible (a borrow that outlived its source, the name an arm
-        binds among the programs), on lists made and dropped that outgrow a system giving sixteen pieces, and on
-        the number allocation-failed reports; and FloatingTests, red on the text of a double or a float that
+        or with it on Windows; and ListTests, red on a list's or a string's block read or written after it was
+        freed, under an allocator that makes every freed block inaccessible (a borrow that outlived its source, the
+        name an arm binds among the programs), on lists or strings made and dropped that outgrow a system giving
+        sixteen pieces, and on the number allocation-failed reports; and FloatingTests, red on the text of a double or a float that
         differs from what .NET writes, or where .NET's does not read back, from the fewest digits that do, on a
         conversion into an integer type at either end of its range that keeps a value it loses or loses one it
         keeps, in a test and a release build, and on a comparison, a field's equality, a widening, a remainder,
