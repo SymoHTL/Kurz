@@ -185,14 +185,19 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void Every_function_carries_its_unwind_tables_and_the_probe_of_a_frame_larger_than_a_page()
+    public void Every_function_carries_its_unwind_tables_and_on_linux_the_inline_probe_of_a_frame_larger_than_a_page()
     {
-        // design record, sections 2 and 6: the unwinder walks from a fault in a prologue, and no frame steps past the guard page
-        var program = Compile("int Twice(int n) => n * 2\n\nprint(Twice(2))\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
-        Assert.True(program is not null);
-        var defines = program.Ir.Split('\n').Where(l => l.StartsWith("define ", StringComparison.Ordinal)).ToList();
-        Assert.True(defines.Count >= 10, $"{defines.Count} functions: the program's, the runtime's and the standard library's are more"); // a floor
-        Assert.All(defines, d => Assert.Contains(" uwtable \"probe-stack\"=\"inline-asm\"", d, StringComparison.Ordinal));
+        // design record, sections 2 and 6: the unwinder walks from a fault in a prologue, and no frame steps past the guard page; on
+        // Windows the backend's `__chkstk` probes, and the attribute there names the function the backend calls
+        foreach (var target in new[] { Target.Linux, Target.Windows })
+        {
+            var program = Compile("int Twice(int n) => n * 2\n\nprint(Twice(2))\n", Builder.CheckRuntime(target)).Program;
+            Assert.True(program is not null, $"no program for {target}");
+            var defines = program.Ir.Split('\n').Where(l => l.StartsWith("define ", StringComparison.Ordinal)).ToList();
+            Assert.True(defines.Count >= 10, $"{target}: {defines.Count} functions, and the program's, the runtime's and the standard library's are more"); // a floor
+            Assert.All(defines, d => Assert.Contains(" uwtable", d, StringComparison.Ordinal));
+            Assert.All(defines, d => Assert.Equal(target == Target.Linux, d.Contains(" \"probe-stack\"=\"inline-asm\"", StringComparison.Ordinal)));
+        }
     }
 
     [Fact]

@@ -574,8 +574,8 @@ own file, `/proc/self/exe`, through three pages it maps from the system, and tak
 inlined at it from `.debug_info`; it writes the frames whose symbols start with `f.` or `std.`, and
 `kz.main`, `main`, where it ends, and leaves out every other, the runtime's and the compiler's own
 functions. A hundred frames are written, then `  ... N more frames`, `  ... 1 more frame` for one,
-the frames past the hundredth only counted, with what the reads found for each of the last 256
-return addresses kept in the third page, and `KURZ_TRACE=0` switches it off. Windows writes no trace: the reader of the PDB through `dbghelp.dll` that section 6
+the frames past the hundredth only counted, with what the reads found for a return address kept in
+the third page, in a table of 251 slots chosen by the address, and `KURZ_TRACE=0` switches it off. Windows writes no trace: the reader of the PDB through `dbghelp.dll` that section 6
 gives is not built, its `Trace` writes nothing, and the error line stands alone. `TraceTests` pins the forms, the names, the cut, the variable, the release build with and
 without `--lines` and an executable stripped of its symbols or of its line tables, on Linux; the
 corpus runner holds the trace of every crash it runs to its error line's place and to `main`, or, where it
@@ -595,13 +595,16 @@ the fault interrupted holds it where the instruction there is a call, and otherw
 it, at its return address less one; where that frame is the runtime's or the C library's, the
 innermost frame outside them. The note of section 6 stands in place of the place where the line is
 not known, then the trace follows from that frame, and the process ends with 1. The emitter gives
-every function `uwtable` and `"probe-stack"="inline-asm"`, so that the unwinder walks from a fault
-in a prologue and a frame larger than a page probes each page; Windows probes with `__chkstk`. A
+every function `uwtable`, so that the unwinder walks from a fault in a prologue, and on Linux
+`"probe-stack"="inline-asm"`, so that a frame larger than a page probes each page; on Windows the
+backend calls `__chkstk` for such a frame, and the attribute would name the function it calls. A
 stack overflow while a thrown value's `Text()` runs comes before `Throw` marks the crash path and is
 written as a stack overflow, where section 6 ends the process with the throw's error line alone: that
 window is not built. `TraceTests` pins the error line and the cut trace in a test build and in a
 release build with and without `--lines`, `KURZ_TRACE=0`, an overflow inside the runtime, and a fault
-outside the guard page; `EmitterTests` pins the two attributes on every function.
+outside the guard page, where the overflow of a release build with `--lines` runs past the 30 seconds
+of a test's run when every frame past the cut reads the file; `EmitterTests` pins the attributes of
+every function for both targets.
 
 ### Readings the record leaves open to the emitter
 

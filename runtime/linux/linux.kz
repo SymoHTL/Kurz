@@ -599,12 +599,13 @@ void Frame(long ip, long at) {
 
 // A frame past the hundredth line of the trace, counted and not written: the lines it takes, one for
 // each call inlined at it that the trace shows and one of its own, none for a frame the trace leaves
-// out, kept for the 256 addresses counted last in the third page, so that a recursion, whose frames
+// out, kept in the third page in a table of 251 slots chosen by the address's remainder by 251, where
+// two addresses whose difference is a multiple of 251 take turns, so that a recursion, whose frames
 // repeat a few return addresses, reads the file one time per address on the walk that counts the rest.
 void Count(long at) {
     raw {
         long* table = Ptr<long>(page + 8192)
-        long slot = at / 16 % 256 * 2
+        long slot = at % 251 * 2
         // the lines times 4, plus the kind of `KindOf`, plus 1; 0 for an address not counted
         mut long known = 0
         if table[slot] == at {

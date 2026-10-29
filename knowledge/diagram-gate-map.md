@@ -105,7 +105,8 @@ flowchart TD
         switch KURZ_TRACE=0, the release build with and without --lines, an executable stripped of its symbols
         or of its line tables, and a stack overflow's error line, cut trace and exit code in a test build and a
         release build with and without --lines, with KURZ_TRACE=0, inside the runtime, and a fault outside the
-        guard page that the system ends; the build command's lines and refusals; and the refused write and the refused allocation,
+        guard page that the system ends, and on a count past the cut that reads the file at every frame, whose
+        release run with --lines outlasts the 30 seconds of a run; the build command's lines and refusals; and the refused write and the refused allocation,
         each with its error line; DataTests, red on a tag wider or narrower than the largest type number among the
         cases needs, two layouts for one union, a value that does not come back out of a union, a block not copied
         before a write, a path assignment that does not evaluate its value first, a static of a type with a base laid
@@ -115,7 +116,8 @@ flowchart TD
         more bytes than the largest int that ends otherwise than in allocation-failed with that count, and on a
         conversion from an unsigned type to a signed one, red on a value above the signed maximum that raises no
         overflow in a test build, and on a function whose first instruction starts a block, which clang refuses
-        without the entry block's branch, and on a function without uwtable and the inline stack probe; and ListTests, red on a list's block read or written after it was freed, under an
+        without the entry block's branch, and on a function without uwtable, or without the inline stack probe on Linux
+        or with it on Windows; and ListTests, red on a list's block read or written after it was freed, under an
         allocator that makes every freed block inaccessible (a borrow that outlived its source, the name an arm
         binds among the programs), on lists made and dropped that outgrow a system giving sixteen pieces, and on
         the number allocation-failed reports; and FloatingTests, red on the text of a double or a float that

@@ -51,7 +51,16 @@ internal sealed class IrModule
     /// <summary>A global constant or variable, written as it is.</summary>
     public void Global(string text) => globals.AppendLine(text);
 
-    public void Add(IrFunction function) => functions.Add(function.Render());
+    public void Add(IrFunction function) => functions.Add(function.Render(InlineProbe ? ["uwtable", "\"probe-stack\"=\"inline-asm\""] : ["uwtable"]));
+
+    /// <summary>
+    /// Whether every function carries the inline probe of each page of a frame larger than a page, so that no frame steps past the
+    /// guard page of its stack, as Rust's x86 targets probe inline, beside the unwind tables at every instruction every function
+    /// carries, so that the platform's unwinder walks from a fault in a prologue too (design record, sections 2 and 6): on Linux.
+    /// On Windows the backend calls <c>__chkstk</c> for such a frame, and the attribute there would name the function it calls in
+    /// its place.
+    /// </summary>
+    public bool InlineProbe { get; init; }
 
     /// <summary>The line tables of the module, null where the build carries none.</summary>
     public DebugInfo? Debug { get; init; }
@@ -289,20 +298,15 @@ internal sealed class IrFunction
         Terminated = true;
     }
 
-    public string Render()
+    /// <param name="every">The attributes every function of the module carries (<see cref="IrModule.InlineProbe"/>).</param>
+    public string Render(IEnumerable<string> every)
     {
         var sb = new StringBuilder();
         sb.Append("define ").Append(signature);
-        foreach (var a in attributes)
+        foreach (var a in attributes.Concat(every))
         {
             sb.Append(' ').Append(a);
         }
-
-        // every function carries its unwind tables, at every instruction, so that the platform's unwinder walks from a fault
-        // in its prologue too, and a probe of each page of a frame larger than a page, so that no frame steps past the guard
-        // page of its stack (design record, sections 2 and 6), as Rust's x86 targets probe inline; Windows probes with
-        // `__chkstk` whatever the attribute says
-        sb.Append(" uwtable \"probe-stack\"=\"inline-asm\"");
 
         if (Subprogram is not null)
         {

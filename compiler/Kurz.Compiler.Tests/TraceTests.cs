@@ -241,7 +241,9 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     [Fact]
     public void A_stack_overflow_in_a_release_build_has_the_note_in_place_of_its_line_and_with_the_tables_its_line()
     {
-        // the call's result is printed after it, so that the optimizer keeps the recursion a call and does not turn it into a loop
+        // the call's result is printed after it, so that the optimizer keeps the recursion a call and does not turn it into a loop; the
+        // run with the tables is the bound of the count past the cut: where every frame reads the file, its half a million frames take
+        // minutes, past the 30 seconds of a run (seen 2026-10-29: 288 seconds with the table of counted addresses bypassed)
         const string text = "int Down(int n) {\n    int r = Down(n + 1)\n    print(r)\n    return r\n}\n\nprint(Down(0))\n";
         var release = Toolchain.Run(Build(text, "overflow-release", testBuild: false), null);
         var lines = Toolchain.Run(Build(text, "overflow-release-lines", testBuild: false, lines: true), null);

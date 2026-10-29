@@ -79,6 +79,7 @@ public sealed partial class Emitter
         module = new IrModule
         {
             Debug = this.lines ? new DebugInfo(System.Environment.CurrentDirectory, program.File, $"kurz {Command.CompilerVersion}", !test, target == Target.Windows) : null,
+            InlineProbe = target != Target.Windows,
         };
         layout = new Layout(module);
     }
