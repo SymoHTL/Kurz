@@ -75,3 +75,8 @@ pub void Release(byte* p, long bytes) {
         VirtualFree(Ptr<void>(p), 0, 32768)
     }
 }
+
+// The trace of the calls below an error line (design record, section 6), which Windows reads through
+// `dbghelp.dll` and the PDB: not written on Windows by this runtime, so the error line stands alone.
+pub void Trace() {
+}

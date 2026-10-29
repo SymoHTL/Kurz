@@ -57,6 +57,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var compilation = Compile("mut i = 0\nwhile i < 100000000 {\n    print(\"line\")\n    i = i + 1\n}\n", toolchain.Runtime, testBuild);
         var executable = toolchain.Build(compilation.Program!, testBuild ? "print-failed-test" : "print-failed-release");
         var info = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        info.Environment["KURZ_TRACE"] = "0"; // the error line alone: the trace below it is TraceTests'
         using var process = Process.Start(info)!;
         try
         {

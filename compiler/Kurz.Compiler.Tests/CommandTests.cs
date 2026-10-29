@@ -132,7 +132,7 @@ public sealed class CommandTests : IDisposable
         var output = Path.Combine(root, OperatingSystem.IsWindows() ? "out.exe" : "out"); // the Windows linker names an executable without an extension with one
         File.WriteAllText(output, "a file the build writes over");
         Assert.Equal((0, "", ""), Kurz("build", source, "-o", output));
-        Assert.Equal((1, "", $"error: overflow at {source}:1\n"), Processes.Capture(output, [], null, TimeSpan.FromSeconds(30)));
+        Assert.Equal((1, "", $"error: overflow at {source}:1\n"), Processes.Capture(output, [], null, TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         Assert.Equal((0, "", ""), Kurz("build", "--release", "-o", output, source));
         Assert.Equal((0, "-2147483648\n", ""), Processes.Capture(output, [], null, TimeSpan.FromSeconds(30)));
     }
@@ -286,7 +286,7 @@ public sealed class CommandTests : IDisposable
     /// no variable of the child's moves it (knowledge/a-windows-child-gets-its-own-program-files.md), so the places are the user's.
     /// </summary>
     private (int Code, string Output, string Error) KurzWithPlaces(params string[] arguments) =>
-        Processes.Capture(Host, [Dll, .. arguments], null, TimeSpan.FromMinutes(2), new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = Path.Combine(root, "cache") });
+        Processes.Capture(Host, [Dll, .. arguments], null, TimeSpan.FromMinutes(2), new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = Path.Combine(root, "cache"), ["KURZ_TRACE"] = "0" }); // the program run inherits the switch: these tests hold the error line, TraceTests the trace
 
     /// <summary>
     /// No place left once the runs ended: on Linux the directory of the places under the test's directory is the user's alone and
