@@ -1767,6 +1767,15 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_declaration_of_a_built_in_data_type_names_the_rule_that_declares_it()
+    {
+        // V9 with D18 and T15: no line of the file declares the type, so the text says who does; a name the file declares twice keeps its text
+        Assert.Equal("`Invalid` is a data type every file sees, declared before the file's own types (D18, V9)", Assert.Single(Check("data Invalid").Diagnostics.Items).Message);
+        Assert.Equal("`InvalidUtf8` is a data type every file sees, declared before the file's own types (T15, V9)", Assert.Single(Check("data InvalidUtf8(int At)").Diagnostics.Items).Message);
+        Assert.Equal("the name `Rejected` is declared already (V9)", Assert.Single(Check("data Rejected\ndata Rejected").Diagnostics.Items).Message);
+    }
+
+    [Fact]
     public void An_enum_value_is_a_constant_and_a_copied_value()
     {
         // F12 with D12: a default can be a value of an enum (section 4, an assumption there)

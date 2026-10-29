@@ -361,7 +361,11 @@ public sealed partial class Checker
         var clash = IsDeclaredName(d.Name);
         if (clash)
         {
-            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a built-in name among them: `data List` could never be named (M9, T17)
+            // a built-in name among them: `data List` could never be named (M9, T17); a built-in data type names the rule that declares it,
+            // since no line of the file does
+            Report(ErrorIds.Redeclared, d.Line, BuiltInTypeRules.TryGetValue(d.Name, out var rule)
+                ? $"`{d.Name}` is a data type every file sees, declared before the file's own types ({rule}, V9)"
+                : $"the name `{d.Name}` is declared already (V9)");
         }
 
         if (d.Kind == TypeDeclarationKind.Enum)
@@ -1232,6 +1236,9 @@ public sealed partial class Checker
 
     /// <summary>The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9).</summary>
     private static bool IsBuiltInName(string name) => name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes";
+
+    /// <summary>The rule that declares each data type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18" };
 
     /// <summary>
     /// The data types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
