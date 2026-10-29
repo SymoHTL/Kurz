@@ -368,6 +368,37 @@ print(c)
 // a `char` holds no counted reference, so a pointer points to it as to a number (R10)
 ```
 
+Case: [values/text-timestamp.kz](../corpus/values/text-timestamp.kz)
+```kurz
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        print(*Ptr<timestamp>(&bits))
+    }
+}
+
+Show(0)
+Show(1793179800000000000)
+Show(1793179801500000000)
+Show(1793179801000250000)
+Show(-1)
+```
+
+Case: [values/text-longtimestamp.kz](../corpus/values/text-longtimestamp.kz)
+```kurz
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        longtimestamp epoch = *Ptr<timestamp>(&bits)
+        print(epoch + 2932897days)
+        print(epoch - 719528days)
+        print(epoch - 719528days - 1s)
+    }
+}
+
+Show(0)
+```
+
 ### R11 (decided, §3) Inline assembly
 
 Inline assembly is a statement inside a `raw` block, written as Rust writes `asm!`:
@@ -616,6 +647,10 @@ Case: [source/core-word-sizeof.kz](../corpus/source/core-word-sizeof.kz)
 SizeOf = 1
 print(SizeOf)
 ```
+
+Case: [values/text-timestamp.kz](../corpus/values/text-timestamp.kz)
+
+Case: [values/text-longtimestamp.kz](../corpus/values/text-longtimestamp.kz)
 
 ### R15 (decided, §3) The memory of a string and a list
 

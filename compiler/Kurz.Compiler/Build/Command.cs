@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Reflection;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 
 namespace Kurz.Compiler.Build;
@@ -16,13 +18,17 @@ namespace Kurz.Compiler.Build;
 /// <c>-o</c> says, written over an executable that is there; it refuses to write over the source or a directory. A program the
 /// compiler refuses gets its lines on standard error, <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> or
 /// <c>hello.kz:3: not supported: &lt;text&gt;</c>, and no executable; that, and every failure of the command's own, exits with 1. The
-/// command grants a program neither <c>raw</c> nor <c>native</c> (R7, R16). A command line it cannot read gets the usage on standard
-/// error and the exit code 1.
+/// command grants a program neither <c>raw</c> nor <c>native</c> (R7, R16). <c>kurz run [--release] file.kz</c> builds the file and
+/// runs it, and <c>kurz exec [--release] "program text"</c> builds its argument, whose lines are named <c>exec</c>, and runs it, each in
+/// a place of its own (<see cref="Place"/>), which it removes after the run, with the places a run cut short left removed at its
+/// start; the program takes no argument and the command's streams (<see cref="Processes.Run"/>), and the command ends with the
+/// program's exit code. A command line it cannot read gets the usage on standard error and the exit code 1.
 /// </summary>
 public static class Command
 {
     /// <summary>What the command prints for a command line it cannot read.</summary>
-    public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] <file.kz> [-o <output>]\n";
+    public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] <file.kz> [-o <output>]\n"
+        + "       kurz run [--release] <file.kz>\n       kurz exec [--release] \"<program text>\"\n       run and exec pass no arguments to the program\n";
 
     private const string OnThePath = " on the path";
 
@@ -39,15 +45,29 @@ public static class Command
         Run(arguments, output, error, find, Builder.HostTarget);
 
     /// <summary>As above, building for <paramref name="host"/>, the target of the machine, null where the runtime has none for it.</summary>
-    internal static int Run(IReadOnlyList<string> arguments, TextWriter output, TextWriter error, Func<ClangSearch> find, Target? host)
+    internal static int Run(IReadOnlyList<string> arguments, TextWriter output, TextWriter error, Func<ClangSearch> find, Target? host) =>
+        Run(arguments, output, error, find, host, Place.Root);
+
+    /// <summary>As above, with the directory of the places <paramref name="places"/> gives, null where there is none.</summary>
+    internal static int Run(IReadOnlyList<string> arguments, TextWriter output, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
         ArgumentNullException.ThrowIfNull(find);
-        if (arguments is ["build", ..])
+        ArgumentNullException.ThrowIfNull(places);
+        switch (arguments)
         {
-            return Build(arguments.Skip(1).ToList(), error, find, host);
+            case ["build", ..]:
+                return Build(arguments.Skip(1).ToList(), error, find, host);
+            case ["run", ..]:
+                return RunFile(arguments.Skip(1).ToList(), error, find, host, places);
+            case ["exec", var text] when text != "--release":
+                return BuildAndRun(() => SourceText.FromString("exec", text), release: false, error, find, host, places);
+            case ["exec", "--release", var text]:
+                return BuildAndRun(() => SourceText.FromString("exec", text), release: true, error, find, host, places);
+            case ["exec", ..]:
+                return Usage1(error);
         }
 
         bool verbose;
@@ -130,35 +150,11 @@ public static class Command
 
         if (host is not { } target)
         {
-            error.Write("error: no runtime for this system\n  note: the runtime has a directory for 64-bit Linux and one for 64-bit Windows\n  help: build on 64-bit Linux or Windows\n");
+            error.Write(NoRuntime);
             return 1;
         }
 
-        byte[] bytes;
-        try
-        {
-            bytes = File.ReadAllBytes(sourcePath);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            error.Write($"error: the source cannot be read\n  note: {e.Message}\n  help: name a Kurz source file that can be read\n");
-            return 1;
-        }
-
-        var source = SourceText.FromBytes(sourcePath, bytes, out var invalid);
-        if (source is null)
-        {
-            error.Write(invalid!.At(sourcePath) + "\n");
-            return 1;
-        }
-
-        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release);
-        foreach (var d in compilation.Diagnostics.Sorted)
-        {
-            error.Write(d.At(sourcePath) + "\n");
-        }
-
-        if (compilation.Program is not { } program)
+        if (Read(sourcePath, error) is not { } source || Compile(source, target, release, error) is not { } program)
         {
             return 1;
         }
@@ -178,7 +174,7 @@ public static class Command
         }
         catch (ToolchainException e)
         {
-            error.Write($"error: clang did not build the program\n  note: {e.Message.Replace("\n", "\n    ", StringComparison.Ordinal)}\n  help: check that the clang found runs; the compiler accepted the program, so a clang that runs and fails on it is the compiler's defect\n");
+            error.Write(ClangFailed(e));
             return 1;
         }
         finally
@@ -186,6 +182,149 @@ public static class Command
             work.Delete(recursive: true);
         }
     }
+
+    private static int RunFile(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    {
+        var release = false;
+        string? sourcePath = null;
+        foreach (var a in arguments)
+        {
+            switch (a)
+            {
+                case "--release" when !release:
+                    release = true;
+                    break;
+                case var p when sourcePath is null && !p.StartsWith('-'):
+                    sourcePath = p;
+                    break;
+                default:
+                    return Usage1(error);
+            }
+        }
+
+        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), release, error, find, host, places);
+    }
+
+    /// <summary>
+    /// Builds the program <paramref name="read"/> reads, a file or <c>exec</c>'s text, into a place of its own and runs it; the program's exit code, or 1
+    /// where it was refused or the command failed. The places a run cut short left are removed at the start, before the build.
+    /// </summary>
+    private static int BuildAndRun(Func<SourceText?> read, bool release, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    {
+        if (host is not { } target)
+        {
+            error.Write(NoRuntime);
+            return 1;
+        }
+
+        if (places() is not { } root)
+        {
+            error.Write(OperatingSystem.IsWindows()
+                ? "error: no directory for the command's places\n  note: Windows names no LocalAppData folder for this user\n  help: run the command as a user with a profile\n"
+                : "error: no directory for the command's places\n  note: XDG_CACHE_HOME is not set to an absolute path, and no home directory is found in HOME or the user database\n  help: set HOME, or XDG_CACHE_HOME to an absolute path\n");
+            return 1;
+        }
+
+        Place.RemoveLeft(root);
+        if (read() is not { } source || Compile(source, target, release, error) is not { } emitted)
+        {
+            return 1;
+        }
+
+        var search = find();
+        if (search.Found is not { } clang)
+        {
+            error.Write(Failure(search));
+            return 1;
+        }
+
+        Place place;
+        try
+        {
+            place = Place.Make(root);
+        }
+        catch (PlaceException e)
+        {
+            error.Write($"error: the place for the run cannot be made\n  note: {e.Message}\n  help: check that {root} can be written\n");
+            return 1;
+        }
+
+        using (place)
+        {
+            var executable = Path.Combine(place.Directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
+            try
+            {
+                Builder.Build(emitted, clang, place.Directory, executable);
+            }
+            catch (ToolchainException e)
+            {
+                error.Write(ClangFailed(e));
+                return 1;
+            }
+
+            return RunProgram(executable, root, error);
+        }
+    }
+
+    /// <summary>Runs a built program as <see cref="Processes.Run"/> does; its exit code, or 1 where it does not start.</summary>
+    internal static int RunProgram(string executable, string root, TextWriter error)
+    {
+        try
+        {
+            return Processes.Run(executable);
+        }
+        catch (Win32Exception e)
+        {
+            error.Write($"error: the built program cannot be started\n  note: {e.Message}\n  help: check that programs may run from {root}\n");
+            return 1;
+        }
+    }
+
+    /// <summary>The source at the path, or null where it cannot be read or is no text, with the failure written.</summary>
+    private static SourceText? Read(string sourcePath, TextWriter error)
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(sourcePath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            error.Write($"error: the source cannot be read\n  note: {e.Message}\n  help: name a Kurz source file that can be read\n");
+            return null;
+        }
+
+        var source = SourceText.FromBytes(sourcePath, bytes, out var invalid);
+        if (source is null)
+        {
+            error.Write(invalid!.At(sourcePath) + "\n");
+        }
+
+        return source;
+    }
+
+    /// <summary>The program the compiler emits for the source, or null where it refused it, with its lines written, named by the source's name.</summary>
+    private static EmittedProgram? Compile(SourceText source, Target target, bool release, TextWriter error)
+    {
+        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release);
+        foreach (var d in compilation.Diagnostics.Sorted)
+        {
+            error.Write(d.At(source.Name) + "\n");
+        }
+
+        return compilation.Program;
+    }
+
+    private static int Usage1(TextWriter error)
+    {
+        error.Write(Usage);
+        return 1;
+    }
+
+    private const string NoRuntime = "error: no runtime for this system\n  note: the runtime has a directory for 64-bit Linux and one for 64-bit Windows\n  help: build on 64-bit Linux or Windows\n";
+
+    private static string ClangFailed(ToolchainException e) =>
+        $"error: clang did not build the program\n  note: {e.Message.Replace("\n", "\n    ", StringComparison.Ordinal)}\n  help: check that the clang found runs; the compiler accepted the program, so a clang that runs and fails on it is the compiler's defect\n";
 
     /// <summary>Whether the two paths name one file, as the file system compares names: without regard to case on Windows.</summary>
     private static bool SamePath(string a, string b) =>
