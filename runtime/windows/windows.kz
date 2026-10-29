@@ -80,3 +80,8 @@ pub void Release(byte* p, long bytes) {
 // `dbghelp.dll` and the PDB: not written on Windows by this runtime, so the error line stands alone.
 pub void Trace() {
 }
+
+// Marks the crash path as running, for the handler of a stack overflow (design record, section 6): no
+// handler is installed on Windows by this runtime, so there is nothing to mark.
+pub void Crashing() {
+}

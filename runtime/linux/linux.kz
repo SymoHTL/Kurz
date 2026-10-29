@@ -14,6 +14,13 @@ extern "C" {
     long pread(int fd, byte* bytes, long count, long offset)
     byte* getenv(byte* name)
     ulong getauxval(ulong type)
+    int mprotect(void* address, long length, int protection)
+    int sigaction(int number, void* action, void* old)
+    int sigaltstack(void* stack, void* old)
+    ulong pthread_self()
+    int pthread_getattr_np(ulong thread, void* attributes)
+    int pthread_attr_getstack(void* attributes, long* address, long* size)
+    int pthread_attr_destroy(void* attributes)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -25,10 +32,11 @@ extern "C" in "gcc_s" {
 
 // The start of the process: the signal of a closed pipe, `SIGPIPE` (13), set to ignored, so that a
 // write to a closed pipe returns an error, which `print` raises as `print-failed` (design record,
-// section 6); `SIG_IGN` is the handler 1.
+// section 6); `SIG_IGN` is the handler 1. Then the handler of a fault, `Faults`.
 pub void Start() {
     raw {
         signal(13, Ptr<void>(1))
+        Faults()
     }
 }
 
@@ -97,6 +105,16 @@ thread static mut bool ended = false
 thread static mut bool failed = false
 thread static mut bool tracing = false
 
+// The handler's state on its thread: the guard page of the thread's stack, from `guardLow` up to
+// `guardHigh`; whether the thread's crash path runs; where the walk of a stack overflow stands, 1 while
+// it passes the handler's frames and the signal's, 2 while it looks for the frame that holds the line,
+// and 0 from that frame on; and whether `KURZ_TRACE=0` switched the trace off.
+thread static mut long guardLow = 0
+thread static mut long guardHigh = 0
+thread static mut bool crashing = false
+thread static mut int seeking = 0
+thread static mut bool quiet = false
+
 // Where the sections the trace reads lie in the file, 0 for one the file lacks: the symbols and their
 // names, the line tables and their names, the debug information and the tables it refers to; and what
 // the system added to every address of the file where it loaded the program.
@@ -160,7 +178,14 @@ pub void Trace() {
         tracing = true
         readable = Open()
         _Unwind_Backtrace(OnFrame, null)
+        Cut()
+    }
+}
 
+// The line that counts the frames past the hundredth (the owner, 2026-10-29), `  ... 12 more frames`,
+// and `  ... 1 more frame` for one.
+void Cut() {
+    raw {
         if frames > 100 {
             long more = frames - 100
             Out("  ... ")
@@ -171,6 +196,180 @@ pub void Trace() {
                 Out(" more frames\n")
             }
         }
+    }
+}
+
+// Marks the thread's crash path as running, at the start of a raise (design record, section 6), so
+// that a fault in the guard page while it runs ends the process with no second error line.
+pub void Crashing() {
+    raw {
+        crashing = true
+    }
+}
+
+// The handler of a fault and the stack it runs on, for the main thread, as Rust's standard library
+// installs its own (checked 2026-10-29: `handler_signal.rs` under
+// `library/std/src/sys/pal/unix/stack_overflow/`). The guard page is the page below the lowest address
+// the main thread's stack may grow to, which `pthread_getattr_np` gives, where the system refuses to
+// grow it further. The handler's stack is 64 KiB from the system, with a page below it that faults, so
+// that an overflow of the handler's own stack ends the process. The handler takes `SIGSEGV` (11) and
+// `SIGBUS` (7) on that stack (`SA_ONSTACK`), with the fault's details (`SA_SIGINFO`), and with the
+// signal not blocked while it runs (`SA_NODEFER`), since it never returns through the signal's frame
+// (design record, section 6). Where any of it cannot be had, no handler is installed, and a stack
+// overflow ends the process as the system ends it.
+void Faults() {
+    raw {
+        // `AT_PAGESZ`
+        long size = long(getauxval(6))
+        void* got = mmap(null, size + 65536 + size, 3, 34, -1, 0)
+        if long(got) == -1 || size <= 0 {
+            return
+        }
+
+        // the handler's stack after its guard page, then a page for the structures handed to the system
+        byte* block = Ptr<byte>(got)
+        byte* scratch = block + size + 65536
+        if pthread_getattr_np(pthread_self(), Ptr<void>(scratch)) != 0 {
+            return
+        }
+
+        long* lowest = Ptr<long>(scratch + 512)
+        long* extent = Ptr<long>(scratch + 520)
+        int found = pthread_attr_getstack(Ptr<void>(scratch), lowest, extent)
+        pthread_attr_destroy(Ptr<void>(scratch))
+        // `PROT_NONE`
+        if found != 0 || mprotect(got, size, 0) != 0 {
+            return
+        }
+
+        // the lowest address rounded up to a page, as Rust's standard library rounds it
+        mut long top = *lowest
+        if top % size != 0 {
+            top = top + size - top % size
+        }
+
+        guardLow = top - size
+        guardHigh = top
+
+        // `stack_t`: the stack's address, its flags and its size
+        *Ptr<long>(scratch + 64) = long(block + size)
+        *Ptr<int>(scratch + 72) = 0
+        *Ptr<long>(scratch + 80) = 65536
+        // `struct sigaction`: the handler, the mask of the signals blocked while it runs, empty, and the
+        // flags, `SA_SIGINFO` (4) | `SA_ONSTACK` (0x08000000) | `SA_NODEFER` (0x40000000)
+        *Ptr<extern "C" (int, void*, void*) => void>(scratch + 128) = OnFault
+        *Ptr<int>(scratch + 264) = 1207959556
+        if sigaltstack(Ptr<void>(scratch + 64), null) == 0 {
+            sigaction(11, Ptr<void>(scratch + 128), null)
+            sigaction(7, Ptr<void>(scratch + 128), null)
+        }
+    }
+}
+
+// The handler of a fault (design record, section 6), on its own stack. A fault whose address is
+// outside the guard page is not the handler's: it sets the signal's default action back and returns,
+// so that the instruction faults again and the system ends the process, as Rust's handler does (the
+// owner, 2026-10-29, "Guard page first, as Rust"). A fault in the guard page while the thread's crash
+// path runs, a walk of a raise that overflowed among it, ends the process with the exit code 1 of the
+// error line and no second trace; any other is a stack overflow of the top-level code, the root actor,
+// whose error line and trace `Overflow` writes before the process ends with the exit code 1.
+extern "C" void OnFault(int number, void* details, void* context) {
+    raw {
+        // `si_addr` of `siginfo_t`
+        long address = *Ptr<long>(Ptr<byte>(details) + 16)
+        if address < guardLow || address >= guardHigh {
+            signal(number, null)
+            return
+        }
+
+        if !crashing {
+            crashing = true
+            Overflow()
+        }
+
+        _exit(1)
+    }
+}
+
+// The error line and the trace of a stack overflow (design record, section 6), from the fault, on the
+// handler's stack. The walk passes the handler's frames and the signal's to the frame the fault
+// interrupted. Where the instruction that faulted is a call, whose push of its return address met the
+// guard page, that frame holds the line, the call's own; otherwise the fault came in the prologue of the
+// frame that did not fit, and the frame below it holds the line, at its return address less one. Where
+// that frame is the runtime's, a helper's or the C library's, the innermost frame outside them holds it
+// ("Caller outside runtime"). The trace starts at the frame that holds the line.
+void Overflow() {
+    raw {
+        tracing = true
+        quiet = Off()
+        readable = Open()
+        seeking = 1
+        _Unwind_Backtrace(OnFrame, null)
+        if seeking != 0 {
+            Out("error: stack-overflow (no line: the stack could not be walked)\n")
+            return
+        }
+
+        Cut()
+    }
+}
+
+// Whether the instruction at `ip`, in the program's code, is a call: `E8` with a 32-bit offset, or `FF`
+// with 2 in the register field of the byte after it, after an optional REX prefix (`40` to `4F`), the
+// forms of a call on x86-64.
+bool IsCall(long ip) {
+    raw {
+        byte* code = Ptr<byte>(ip)
+        mut long i = 0
+        if long(code[0]) >= 64 && long(code[0]) <= 79 {
+            i = 1
+        }
+
+        mut bool call = long(code[i]) == 232
+        if long(code[i]) == 255 {
+            call = long(code[i + 1]) / 8 % 8 == 2
+        }
+
+        return call
+    }
+}
+
+// Whether the frame at `at` holds the line of a stack overflow: a frame of the program or of the
+// standard library does, one of the runtime, of the emitted code's helpers or of the C library is
+// passed, and where the file cannot be read or names no function the first frame does. For that frame
+// it writes the error line, `error: stack-overflow at <file>:<n>`, or with the note that stands in
+// place of the place, the first that holds of the file's, the tables' and the frame's entry's (design
+// record, section 6).
+bool Located(long at) {
+    raw {
+        if readable && symbols > 0 {
+            long symbol = FunctionAt(at)
+            if symbol < 0 || KindOf(symbol) == 0 {
+                return false
+            }
+        }
+
+        Out("error: stack-overflow")
+        mut long title = -1
+        if readable && lines > 0 && LineAt(at) {
+            title = FileAt(foundUnit, foundFile)
+        }
+
+        if !readable {
+            Out(" (no line: the tables could not be read)\n")
+        } else if lines == 0 {
+            Out(" (no line tables: build with --lines)\n")
+        } else if title < 0 {
+            Out(" (no line: the frame has no entry in the tables)\n")
+        } else {
+            Out(" at ")
+            FileBytes(title, End(title))
+            Out(":")
+            Number(foundLine)
+            Out("\n")
+        }
+
+        return true
     }
 }
 
@@ -190,12 +389,12 @@ bool Off() {
     }
 }
 
-// Takes the two pages from the system, opens the executable's file, `/proc/self/exe`, where Rust's
+// Takes three pages from the system, opens the executable's file, `/proc/self/exe`, where Rust's
 // backtrace finds it too, and reads where its sections lie and where the system loaded it: false where
 // the pages, the file or its headers cannot be had, or the file is no 64-bit little-endian ELF file.
 bool Open() {
     raw {
-        void* got = mmap(null, 8192, 3, 34, -1, 0)
+        void* got = mmap(null, 12288, 3, 34, -1, 0)
         if long(got) != -1 {
             page = Ptr<byte>(got)
         }
@@ -299,6 +498,30 @@ extern "C" int OnFrame(void* context, void* argument) {
             at = at - 1
         }
 
+        // a stack overflow's walk: the frame the fault interrupted is the first whose address is the
+        // instruction's own, and where that instruction is no call, the frame did not fit and is passed
+        if seeking == 1 {
+            if before == 0 {
+                return 0
+            }
+
+            seeking = 2
+            if !IsCall(ip) {
+                return 0
+            }
+        }
+
+        if seeking == 2 {
+            if !Located(at - bias) {
+                return 0
+            }
+
+            seeking = 0
+            if quiet || failed {
+                return 1
+            }
+        }
+
         Frame(ip, at - bias)
         if ended || failed {
             return 1
@@ -316,6 +539,11 @@ extern "C" int OnFrame(void* context, void* argument) {
 // there (the owner, 2026-10-29). The frame of `main`, the actor's entry, is the last.
 void Frame(long ip, long at) {
     raw {
+        if frames >= 100 {
+            Count(at)
+            return
+        }
+
         mut long symbol = -1
         if readable {
             symbol = FunctionAt(at)
@@ -365,6 +593,58 @@ void Frame(long ip, long at) {
             Out("  at ")
             Shown(symbol)
             Place(known, unit, file, line)
+        }
+    }
+}
+
+// A frame past the hundredth line of the trace, counted and not written: the lines it takes, one for
+// each call inlined at it that the trace shows and one of its own, none for a frame the trace leaves
+// out, kept for the 256 addresses counted last in the third page, so that a recursion, whose frames
+// repeat a few return addresses, reads the file one time per address on the walk that counts the rest.
+void Count(long at) {
+    raw {
+        long* table = Ptr<long>(page + 8192)
+        long slot = at / 16 % 256 * 2
+        // the lines times 4, plus the kind of `KindOf`, plus 1; 0 for an address not counted
+        mut long known = 0
+        if table[slot] == at {
+            known = table[slot + 1]
+        }
+
+        if known == 0 {
+            mut long symbol = -1
+            if readable {
+                symbol = FunctionAt(at)
+            }
+
+            mut long kind = 1
+            mut long count = 1
+            if symbol >= 0 {
+                kind = KindOf(symbol)
+                if kind == 0 {
+                    count = 0
+                } else {
+                    long depth = Inlined(at)
+                    mut long k = 0
+                    while k < depth {
+                        long label = NameOf(Chained(k, 0), Chained(k, 1))
+                        if label >= 0 && !Starts(label, "rt.") {
+                            count = count + 1
+                        }
+
+                        k = k + 1
+                    }
+                }
+            }
+
+            known = count * 4 + kind + 1
+            table[slot] = at
+            table[slot + 1] = known
+        }
+
+        frames = frames + (known - 1) / 4
+        if (known - 1) % 4 == 2 {
+            ended = true
         }
     }
 }

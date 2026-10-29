@@ -322,9 +322,9 @@ memory, which it takes from the system's `Memory` a mebibyte at a time; an alloc
 the layout a block was allocated with: a block of a size class to the front of its class's free
 blocks, where the next request of the class takes it, and a larger one to the system through the
 target's `Release`; the mebibytes a thread carved from stay its own. A target's directory gives
-`Start`, `Write`, `Exit`, `Memory` and `Release`: on Linux over the C library, `Start` setting the
-signal of a closed pipe to ignored and `Write` calling again where a signal interrupted it (section
-6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
+`Start`, `Write`, `Exit`, `Memory`, `Release`, `Trace` and `Crashing`: on Linux over the C library,
+`Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
+`Write` calling again where a signal interrupted it (section 6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The text of a `float` and of a `double` is computed in `common/` from the value's bits, which the
@@ -562,23 +562,46 @@ value and a union take none of their own (the owner, 2026-10-23, "Accept, docume
 corpus runner lists every case the checker reads in full and the emitter does not emit, 4 of the
 248 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
-stack overflow is not emitted: a stack overflow
-ends the program with the system's signal and not with its error line (section 6), so
+stack overflow is built on Linux and not on Windows, where a stack overflow
+ends the program as the system ends it and not with its error line (section 6), so there
 `outcomes/stack-overflow.kz` is built and not run, the one case the runner lists so.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
-(section 6): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
+(section 6), but `allocation-failed`, which writes no place and no trace (O11): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
 `_Unwind_Backtrace` of `libgcc_s`, the shared library a program links for it, reads the executable's
-own file, `/proc/self/exe`, through two pages it maps from the system, and takes a frame's name from
+own file, `/proc/self/exe`, through three pages it maps from the system, and takes a frame's name from
 `.symtab`, its line from `.debug_line` and, in a release build built with `--lines`, the calls
-inlined at it from `.debug_info`; it leaves out the frames whose symbols start with neither `f.` nor
-`std.`, the runtime's and the compiler's own functions, and ends at `kz.main`, `main`. A hundred
-frames are written, then `  ... N more frames`, `  ... 1 more frame` for one, and `KURZ_TRACE=0`
-switches it off. Windows writes no trace: the reader of the PDB through `dbghelp.dll` that section 6
+inlined at it from `.debug_info`; it writes the frames whose symbols start with `f.` or `std.`, and
+`kz.main`, `main`, where it ends, and leaves out every other, the runtime's and the compiler's own
+functions. A hundred frames are written, then `  ... N more frames`, `  ... 1 more frame` for one,
+the frames past the hundredth only counted, with what the reads found for each of the last 256
+return addresses kept in the third page, and `KURZ_TRACE=0` switches it off. Windows writes no trace: the reader of the PDB through `dbghelp.dll` that section 6
 gives is not built, its `Trace` writes nothing, and the error line stands alone. `TraceTests` pins the forms, the names, the cut, the variable, the release build with and
 without `--lines` and an executable stripped of its symbols or of its line tables, on Linux; the
-corpus runner holds the trace of every crash it runs to its error line's place and to `main` (E3),
-and every other test that compares a crash's standard error sets `KURZ_TRACE=0` for the program it runs.
+corpus runner holds the trace of every crash it runs to its error line's place and to `main`, or, where it
+is cut, to a hundred frames above the cut line (E3), and every other test that compares a crash's standard
+error sets `KURZ_TRACE=0` for the program it runs.
+
+On Linux the runtime's `Start` installs the handler of a fault (section 6) for the process's one
+thread, as Rust's standard library installs its own: `Faults` maps a stack of 64 KiB with a page
+below it that faults, takes the page below the lowest address `pthread_getattr_np` gives for the
+thread's stack as its guard page, and installs `OnFault` for `SIGSEGV` and `SIGBUS` on that stack
+with `SA_SIGINFO`, `SA_ONSTACK` and `SA_NODEFER`. A fault outside the guard page sets the signal's
+default back and returns, so that the system ends the process, the exit code 139 in a shell for
+`SIGSEGV`. A fault in it while a crash path runs, which `Raise`, `Throw` and the end of a refused
+allocation mark first through `Crashing`, ends the process with 1 and nothing more written; any other
+writes `error: stack-overflow at <file>:<n>` with the line of the call that did not fit: the frame
+the fault interrupted holds it where the instruction there is a call, and otherwise the frame below
+it, at its return address less one; where that frame is the runtime's or the C library's, the
+innermost frame outside them. The note of section 6 stands in place of the place where the line is
+not known, then the trace follows from that frame, and the process ends with 1. The emitter gives
+every function `uwtable` and `"probe-stack"="inline-asm"`, so that the unwinder walks from a fault
+in a prologue and a frame larger than a page probes each page; Windows probes with `__chkstk`. A
+stack overflow while a thrown value's `Text()` runs comes before `Throw` marks the crash path and is
+written as a stack overflow, where section 6 ends the process with the throw's error line alone: that
+window is not built. `TraceTests` pins the error line and the cut trace in a test build and in a
+release build with and without `--lines`, `KURZ_TRACE=0`, an overflow inside the runtime, and a fault
+outside the guard page; `EmitterTests` pins the two attributes on every function.
 
 ### Readings the record leaves open to the emitter
 

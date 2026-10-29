@@ -104,8 +104,8 @@ public sealed class Toolchain : IDisposable
 /// </summary>
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    /// <summary>The cases built and run: fewer means the emitter refuses what it built before.</summary>
-    private const int RunFloor = 187;
+    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's.</summary>
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 187 : 188;
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
@@ -117,10 +117,12 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
     };
 
     /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>
-    private static readonly Dictionary<string, string> NotRun = new(StringComparer.Ordinal)
-    {
-        ["outcomes/stack-overflow.kz"] = "the raise of `stack-overflow` is the crash path's (design record, section 6), which is not emitted",
-    };
+    private static readonly Dictionary<string, string> NotRun = OperatingSystem.IsWindows()
+        ? new(StringComparer.Ordinal)
+        {
+            ["outcomes/stack-overflow.kz"] = "the raise of `stack-overflow` is the handler's of a fault (design record, section 6), which the runtime installs on Linux alone",
+        }
+        : new(StringComparer.Ordinal);
 
     public static TheoryData<string> RunnableCases()
     {

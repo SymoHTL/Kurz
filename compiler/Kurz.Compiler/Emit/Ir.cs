@@ -298,6 +298,12 @@ internal sealed class IrFunction
             sb.Append(' ').Append(a);
         }
 
+        // every function carries its unwind tables, at every instruction, so that the platform's unwinder walks from a fault
+        // in its prologue too, and a probe of each page of a frame larger than a page, so that no frame steps past the guard
+        // page of its stack (design record, sections 2 and 6), as Rust's x86 targets probe inline; Windows probes with
+        // `__chkstk` whatever the attribute says
+        sb.Append(" uwtable \"probe-stack\"=\"inline-asm\"");
+
         if (Subprogram is not null)
         {
             sb.Append(" !dbg ").Append(Subprogram);
