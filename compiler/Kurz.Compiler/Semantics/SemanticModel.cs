@@ -40,6 +40,9 @@ public enum CallKind
 
     /// <summary><c>string.FromRaw(p, n)</c> or <c>List&lt;T&gt;.FromRaw(p, n)</c> (R15); <see cref="CallInfo.Target"/> is the string or list type it makes.</summary>
     FromRaw,
+
+    /// <summary><c>string.Allocate(n)</c> (R15), the address of room for the bytes of a string that <c>string.FromRaw</c> takes over.</summary>
+    StringAllocate,
 }
 
 /// <summary>

@@ -667,11 +667,30 @@ misuse of `raw` code, a string being immutable; the pointer of an empty string o
 and nothing is read or written through it; the member's pointer holds while the string or the list
 lives and, for a list, while its count does not change, a use after either being a misuse of `raw`
 code; and such a member outside a `raw` block is the compile
-error `raw-required` (R10). `FromRaw` takes over memory the allocator's entry gave (§2), which the
-string or the list frees as its own; a list made so holds room for its `n` elements and takes more as
-it grows; bytes handed to `string.FromRaw` that are not UTF-8 are a misuse of `raw` code; and `n` of 0
+error `raw-required` (R10). `List<T>.FromRaw` takes over memory the allocator's entry gave (§2), which
+the list frees as its own; a list made so holds room for its `n` elements and takes more as it
+grows; bytes handed to `string.FromRaw` that are not UTF-8 are a misuse of `raw` code; and `n` of 0
 makes an empty string or list; and `FromRaw` takes no capacity, which Rust's two functions take as a
 third argument, the room of a list made so being its `n` elements *(assumed: as §3 marks them)*.
+
+`string.Allocate(n)` gives the address of room for `n` bytes in a block that holds the count of a
+string in front of them (§4), which `raw` code writes, and `string.FromRaw(p, n)` takes over such a
+block, `n` no more than its room, which the string frees as its own; memory from anywhere else, or a
+count past the room, handed to `string.FromRaw` is a misuse of `raw` code, and a block never handed
+to it is never given back, as Rust's `String::from_raw_parts` takes only memory the allocator of
+Rust's standard library gave (§3, the owner, 2026-10-29). `string.Allocate` outside a `raw` block
+is `raw-required` (R10), and more than the largest `int` of bytes asked of it raises
+`allocation-failed` with the count it asked for (T15) *(assumed: as §3 marks them)*.
+
+Case: [memory/string-from-raw.kz](../corpus/memory/string-from-raw.kz)
+```kurz
+raw {
+    p = string.Allocate(2)
+    p[0] = 104
+    p[1] = 105
+    print(string.FromRaw(p, 2))
+}
+```
 
 Case: [memory/string-pointer.kz](../corpus/memory/string-pointer.kz)
 ```kurz

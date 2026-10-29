@@ -164,7 +164,7 @@ public sealed partial class Emitter
 
     // ---- strings and members ---------------------------------------------------------------------
 
-    /// <summary>L6: the texts of the segments, joined by the runtime's <c>Concat</c>.</summary>
+    /// <summary>L6: the texts of the segments, joined by the runtime's <c>Concat</c>; each text a hole or a join made is a temporary of the region.</summary>
     private string EmitInterpolation(StringLiteral s)
     {
         string? result = null;
@@ -173,10 +173,10 @@ public sealed partial class Emitter
             var piece = segment switch
             {
                 TextSegment t => StringValue(t.Text),
-                HoleSegment h => TextOf(EmitExpression(h.Expression), TypeOf(h.Expression), h.Expression.Line),
+                HoleSegment h => Text(EmitExpression(h.Expression), TypeOf(h.Expression), h.Expression.Line),
                 _ => throw new InvalidOperationException(segment.GetType().Name),
             };
-            result = result is null ? piece : fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {result}, %kz.str {piece})");
+            result = result is null ? piece : Temp(fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {result}, %kz.str {piece})"), Types.String);
         }
 
         return result ?? StringValue(string.Empty);
@@ -653,7 +653,16 @@ public sealed partial class Emitter
 
     // ---- the text of a value (A2, A3, A8) --------------------------------------------------------
 
-    /// <summary>The text of a value as `print` and an interpolation show it (A1, L6), as a <c>%kz.str</c>, made by the runtime.</summary>
+    /// <summary>The text of a value as <see cref="TextOf"/> makes it, a temporary of the region where it made one.</summary>
+    private string Text(string value, KurzType type, int line) => MakesText(type) ? Temp(TextOf(value, type, line), Types.String) : TextOf(value, type, line);
+
+    /// <summary>Whether <see cref="TextOf"/> makes a text for a value of the type, which holds a count its caller lets go of: for every type but a string, which is its own text, and a <c>bool</c>, whose texts are literals.</summary>
+    private static bool MakesText(KurzType type) => type is not PrimitiveType { Kind: Primitive.String or Primitive.Bool };
+
+    /// <summary>
+    /// The text of a value as `print` and an interpolation show it (A1, L6), as a <c>%kz.str</c>, made by the runtime: a string as it
+    /// is, a <c>bool</c> as a literal, and for every other type a text whose count the caller holds (<see cref="MakesText"/>).
+    /// </summary>
     private string TextOf(string value, KurzType type, int line)
     {
         switch (type)

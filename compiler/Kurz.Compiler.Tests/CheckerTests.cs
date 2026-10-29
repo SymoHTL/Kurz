@@ -1598,12 +1598,14 @@ public sealed class CheckerTests
     [Fact]
     public void The_memory_of_a_string_and_a_list_shows_in_raw()
     {
-        // R15: `s.Pointer`, `l.Pointer`, `string.FromRaw` and `List<T>.FromRaw` inside a `raw` block, `raw-required` outside it, and a
-        // list of a type that holds a counted reference is `counted-pointee`
+        // R15: `s.Pointer`, `l.Pointer`, `string.Allocate`, `string.FromRaw` and `List<T>.FromRaw` inside a `raw` block, `raw-required`
+        // outside it, and a list of a type that holds a counted reference is `counted-pointee`
         Clean("s = \"ab\"\nraw {\n    p = s.Pointer\n    print(string.FromRaw(p, 2))\n}", grants: "raw");
+        Clean("raw {\n    byte* p = string.Allocate(2)\n    p[0] = 104\n    p[1] = 105\n    print(string.FromRaw(p, 2))\n}", grants: "raw");
         Clean("xs = List<long>()\nraw {\n    p = xs.Pointer\n    ys = List<long>.FromRaw(p, 0)\n    print(ys.Count)\n}", grants: "raw");
         Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("s = \"ab\"\nprint(s.Pointer == null)"));
         Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("byte* p = null\nprint(string.FromRaw(p, 0))"));
+        Assert.Equal([(ErrorIds.RawRequired, 1)], Errors("print(string.Allocate(2) == null)"));
         Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("xs = List<long>()\nprint(xs.Pointer == null)"));
         Assert.Equal([(ErrorIds.RawRequired, 2)], Errors("long* p = null\nys = List<long>.FromRaw(p, 0)\nprint(ys.Count)"));
         Assert.Equal([(ErrorIds.CountedPointee, 3)], Errors("xs = List<string>()\nraw {\n    print(xs.Pointer == null)\n}", grants: "raw"));

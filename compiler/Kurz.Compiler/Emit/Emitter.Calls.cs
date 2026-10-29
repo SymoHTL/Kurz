@@ -25,6 +25,7 @@ public sealed partial class Emitter
             CallKind.PointerConversion => EmitPointerConversion(c),
             CallKind.SizeOf => SizeOf(Sub(info.Target!), c.Line),
             CallKind.FromRaw when info.Target is PrimitiveType { Kind: Primitive.String } => EmitStringFromRaw(c),
+            CallKind.StringAllocate => EmitStringAllocate(c),
             CallKind.ListNew => "null", // M9: a list without items, which takes no block
             CallKind.ListAdd => EmitListAddCall(c),
             CallKind.ListWhere => EmitListWhere(c, info),
@@ -50,7 +51,7 @@ public sealed partial class Emitter
     private string? EmitPrint(CallExpression c)
     {
         var argument = c.Arguments[0].Value;
-        var text = TextOf(EmitExpression(argument), TypeOf(argument), argument.Line);
+        var text = Text(EmitExpression(argument), TypeOf(argument), argument.Line);
         fn.Emit($"call void {RuntimeFunction("Print")}(%kz.str {text}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         return null;
     }
@@ -354,8 +355,10 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// R15: <c>string.FromRaw(p, n)</c>, the string of the <c>n</c> bytes at <c>p</c>, which it takes over; an <c>n</c> above the largest
-    /// <c>int</c> ends the process as a refused allocation does (T15; the owner, 2026-10-23 and 2026-10-24).
+    /// R15: <c>string.FromRaw(p, n)</c>, the string of the <c>n</c> bytes at <c>p</c>, which it takes over with the block
+    /// <c>string.Allocate</c> gave, its count of bytes marked in its highest bit as a string that holds a block (the owner, 2026-10-29,
+    /// "string.Allocate, take over" and "Bit in the count"); an <c>n</c> above the largest <c>int</c> ends the process as a refused
+    /// allocation does (T15; the owner, 2026-10-23 and 2026-10-24).
     /// </summary>
     private string EmitStringFromRaw(CallExpression c)
     {
@@ -371,6 +374,14 @@ public sealed partial class Emitter
         fn.Unreachable();
         fn.Block(fits);
         var withPointer = fn.Value($"insertvalue %kz.str undef, ptr {pointer}, 0");
-        return fn.Value($"insertvalue %kz.str {withPointer}, i64 {count}, 1");
+        return fn.Value($"insertvalue %kz.str {withPointer}, i64 {fn.Value($"or i64 {count}, -9223372036854775808")}, 1");
+    }
+
+    /// <summary>R15: <c>string.Allocate(n)</c>, the runtime's room for <c>n</c> bytes in a block that holds a string's count (the owner, 2026-10-29, "string.Allocate, take over").</summary>
+    private string EmitStringAllocate(CallExpression c)
+    {
+        var info = Model.CallOf(c);
+        var size = Arguments(c, info, _ => Types.Long, _ => false, _ => null, cConvention: false, owned: false).Single();
+        return fn.Value($"call ptr {RuntimeFunction("AllocateString")}({size})");
     }
 }

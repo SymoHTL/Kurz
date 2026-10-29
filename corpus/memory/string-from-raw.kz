@@ -1,0 +1,11 @@
+// expect: output
+// | hi
+// allow: raw
+// rules: R15
+
+raw {
+    p = string.Allocate(2)
+    p[0] = 104
+    p[1] = 105
+    print(string.FromRaw(p, 2))
+}

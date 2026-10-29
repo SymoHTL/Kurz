@@ -6,10 +6,11 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The emitter's decisions on lists that no corpus case pins (M9; design record, section 3; the owner, 2026-10-24, "Full counting
-/// now" and "Items after the Add"): a list is a value whose storage is shared until one side writes (M3), the counting frees a
-/// block nothing holds, which the allocator gives out again, and a lambda's environment as it frees a list's block (the owner,
-/// 2026-10-25, "Pair + heap env"), no block is read after it is freed, the number `allocation-failed`
+/// The emitter's decisions on lists and strings that no corpus case pins (M9; design record, section 3; the owner, 2026-10-24, "Full
+/// counting now" and "Items after the Add"): a list is a value whose storage is shared until one side writes (M3), the counting frees
+/// a block nothing holds, which the allocator gives out again, and a lambda's environment as it frees a list's block (the owner,
+/// 2026-10-25, "Pair + heap env"), and a string's block, which a literal does not have (the owner, 2026-10-29, "Bit in the count"
+/// and "string.Allocate, take over"), no block is read after it is freed, the number `allocation-failed`
 /// reports past the limit and for a refused growth, and what the emitter says `not supported` to; what the checker refuses of a
 /// read beside a `mut` call (M7) the corpus pins.
 /// </summary>
@@ -288,6 +289,188 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(total)
         """;
 
+    // strings in variables, fields, a `with`, a path assignment, an arm's name while the arm changes the subject's variable, a
+    // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
+    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, and a string made in a `raw` block
+    private const string Strings = """
+        data Person(string Name, int Age)
+        data Tag(string Label)
+        data Leaf
+        data Node(string Label, Node | Leaf Next)
+
+        string Same(string s) => s
+
+        string Made(int n) => "n{n}"
+
+        string Raw(int n) {
+            mut string s = ""
+            raw {
+                byte* p = string.Allocate(3)
+                p[0] = byte(48 + n)
+                p[1] = byte(33)
+                s = string.FromRaw(p, 2)
+            }
+            return s
+        }
+
+        void Show(string a, string b) {
+            print(a)
+            print(b)
+        }
+
+        mut first = Made(1)
+        second = first
+        first = Made(2)
+        print(second)
+        print(first)
+        person = Person(Made(3), 30)
+        older = person with { Age = 31 }
+        mut renamed = older
+        renamed.Name = Made(4)
+        print(person)
+        print(older)
+        print(renamed)
+        mut Tag | Leaf u = Tag(Made(5))
+        match u {
+            Tag g => {
+                u = Leaf
+                w = Made(6)
+                print(g.Label)
+                print(w)
+            }
+            Leaf => print(0)
+        }
+        mut string | Leaf v = Made(7)
+        match v {
+            string x => {
+                v = Leaf
+                y = Made(8)
+                print(x)
+                print(y)
+            }
+            Leaf => print(0)
+        }
+        mut held = Made(9)
+        f = () => held
+        held = Made(10)
+        print(f())
+        mut names = List<string>()
+        names.Add(Made(11))
+        mut k = 0
+        while k < 8 {
+            names.Add(names[0])
+            k = k + 1
+        }
+        mut copy = names
+        copy.Add(Made(100))
+        copy.Add("lit")
+        names = List<string>()
+        print(copy)
+        kept = copy.Where(x => x.Bytes.Count == 4)
+        copy = List<string>()
+        print(kept)
+        mut words = List<string>()
+        words.Add(Made(12))
+        words.Add(Made(13))
+        for word in words {
+            words = List<string>()
+            z = Made(14)
+            print("{word} {z}")
+        }
+        Show(Made(15), Same(Made(16)))
+        e = ""
+        print("{Made(17)}{e}{Made(18)}")
+        node = Node(Made(19), Node(Made(20), Leaf))
+        print(node)
+        print(Raw(1))
+        print(Raw(2).Bytes.Count)
+        """;
+
+    private static readonly string[] StringsPrint =
+    [
+        "n1", // the variable keeps the string it was given
+        "n2",
+        "Person { Name = n3, Age = 30 }",
+        "Person { Name = n3, Age = 31 }",
+        "Person { Name = n4, Age = 31 }",
+        "n5", // the name keeps the string it was bound to, and the freed block the next string takes is not its own
+        "n6",
+        "n7", // the same for a case that is a string
+        "n8",
+        "n9", // the environment keeps the string its lambda read
+        "[n11, n11, n11, n11, n11, n11, n11, n11, n11, n100, lit]", // an item read for its own list's `Add` across growths
+        "[n100]", // an item `Where` keeps, which only the source list held before the source was let go of
+        "n12 n14", // the loop walks the list as it was when it started (C6)
+        "n13 n14",
+        "n15",
+        "n16",
+        "n17n18",
+        "Node { Label = n19, Next = Node { Label = n20, Next = Leaf } }", // strings a value laid out as a block holds
+        "1!",
+        "2",
+    ];
+
+    // every way out of a block a string is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
+    // result nothing holds, the body of a `void` function, a `with`, an assignment over a variable, a lambda's environment in a
+    // variable and in a list, and a list of strings; each string of 1024 bytes, joined from halves the join lets go of
+    private const string StringRounds = """
+        data Pair(string A, int B)
+
+        string Make(int n) {
+            mut s = "x"
+            mut i = 0
+            while i < n {
+                s = "{s}{s}"
+                i = i + 1
+            }
+            return s
+        }
+
+        int Early(int n) {
+            s = Make(n)
+            if n > 0 {
+                return s.Bytes.Count
+            }
+            return 0
+        }
+
+        void Drop(int n) => Make(n)
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(10)
+            mut b = a
+            b = "{b}!"
+            p = Pair(Make(10), 1)
+            q = p with { B = 2 }
+            for x in 0..<3 {
+                c = Make(10)
+                if x == 1 {
+                    continue
+                }
+                total = total + c.Bytes.Count
+                if x == 2 {
+                    break
+                }
+            }
+            Make(10)
+            Drop(10)
+            l = Make(10)
+            h = () => l.Bytes.Count
+            mut hs = List<() => int>()
+            hs.Add(h)
+            hs.Add(() => Make(10).Bytes.Count)
+            mut ss = List<string>()
+            ss.Add(Make(10))
+            ss.Add(a)
+            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096
+        }
+        print(round)
+        print(total)
+        """;
+
     private static Compilation Compile(string text, CheckedRuntime runtime, params string[] grants) =>
         Builder.Compile(SourceText.FromString("program.kz", text), grants, runtime, testBuild: true);
 
@@ -409,21 +592,29 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             (TargetFile, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p), bytes, 0)"), // PROT_NONE: the pages stay mapped
         ];
 
+    private static readonly Lazy<CheckedRuntime> FencedRuntime = new(() => Edited(Fence));
+
+    /// <summary>The runtime of this machine's target with the allocator <see cref="Fence"/> makes, which the corpus runner builds every case with too.</summary>
+    internal static CheckedRuntime Fenced => FencedRuntime.Value;
+
     [Fact]
     public void Lists_are_values_whose_storage_is_shared_until_one_side_writes()
     {
         Ran(BuildAndRun(Values, toolchain.Runtime, "list-values"), 0, ValuesPrint, "");
         Ran(BuildAndRun(Sharing, toolchain.Runtime, "list-sharing"), 0, SharingPrint, "");
+        Ran(BuildAndRun(Strings, toolchain.Runtime, "string-values", "raw"), 0, StringsPrint, "");
     }
 
     [Fact]
     public void No_block_is_read_or_written_after_it_is_freed()
     {
-        var fenced = Edited(Fence);
+        var fenced = Fenced;
         Ran(BuildAndRun(Values, fenced, "list-values-fenced"), 0, ValuesPrint, "");
         Ran(BuildAndRun(Sharing, fenced, "list-sharing-fenced"), 0, SharingPrint, "");
+        Ran(BuildAndRun(Strings, fenced, "string-values-fenced", "raw"), 0, StringsPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
+        Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process
         var writer = Edited([.. Fence, ("runtime/common/runtime.kz", "pub void Start() {\n    sys.Start()\n", "pub void Start() {\n    sys.Start()\n    byte* p = Allocate(16)\n    raw {\n        std.Free(p, 16)\n        p[0] = 1\n    }\n")]);
@@ -434,12 +625,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void What_no_value_holds_is_freed_and_given_out_again()
     {
         Ran(BuildAndRun(Rounds, Budget(), "list-rounds"), 0, ["3000", "12003000"], "");
+        Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
         var run = BuildAndRun(held, Budget(), "list-rounds-held");
         Assert.Equal(1, run.Code);
         Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
+
+        // and five of the rounds' strings of 1024 bytes held each round, a block of 1040 bytes in the size class of 2048: 30 megabytes
+        const string strings = "string Make(int n) {\n    mut s = \"x\"\n    mut i = 0\n    while i < n {\n        s = \"{s}{s}\"\n        i = i + 1\n    }\n    return s\n}\n\nmut all = List<string>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    all.Add(Make(10))\n    all.Add(Make(10))\n    all.Add(Make(10))\n    all.Add(Make(10))\n    all.Add(Make(10))\n}\nprint(all.Count)\n";
+        var kept = BuildAndRun(strings, Budget(), "string-rounds-held");
+        Assert.Equal(1, kept.Code);
+        Assert.StartsWith("error: allocation-failed (", kept.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -459,6 +657,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var run = BuildAndRun(held, Bytes(), "list-large-held"); // the positive control: the same lists, all of them held
         Assert.Equal(1, run.Code);
         Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
+
+        // strings of 524288 bytes joined from halves of 262144, blocks of 524304 and 262160 bytes with their counts: 150 mebibytes in
+        // 200 rounds were none of them given back
+        const string fill = "string Fill(int n) {\n    mut s = \"x\"\n    mut i = 0\n    while i < n {\n        s = \"{s}{s}\"\n        i = i + 1\n    }\n    return s\n}\n\n";
+        Ran(BuildAndRun(fill + "mut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + long(Fill(19).Bytes.Count)\n}\nprint(total)\n", Bytes(), "string-large-rounds"), 0, ["104857600"], "");
+        var strings = BuildAndRun(fill + "mut all = List<string>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    all.Add(Fill(19))\n}\nprint(all.Count)\n", Bytes(), "string-large-held");
+        Assert.Equal(1, strings.Code); // the positive control: the same strings, all of them held
+        Assert.StartsWith("error: allocation-failed (", strings.Error, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -477,6 +683,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var name = new string(type.Where(char.IsLetter).ToArray());
         Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-limit-" + name), 1, [], $"error: allocation-failed ({bytes} bytes)\n");
         Ran(BuildAndRun(text, toolchain.Runtime, "list-below-limit-" + name), 0, ["4"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_string_asked_of_more_bytes_than_the_limit_ends_with_the_count_it_asked_for_and_a_refused_one_with_its_block()
+    {
+        // T15: the limit of the largest `int` lowered to 3 in the runtime's text, so that `string.Allocate(4)` asks past it; the
+        // bytes of a refused block are those the allocator was asked for, the 16 of its counts among them, as for a list's growth
+        const string text = "raw {\n    p = string.Allocate(3)\n    print(p != null)\n    q = string.Allocate(4)\n    print(q != null)\n}\n";
+        Ran(BuildAndRun(text, Edited(("runtime/common/runtime.kz", "    if size > 2147483647 {\n        AllocationFailed(size)", "    if size > 3 {\n        AllocationFailed(size)")), "string-limit", "raw"), 1, ["true"], "error: allocation-failed (4 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-below-limit", "raw"), 0, ["true", "true"], ""); // the positive control
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "string-refused", "raw"), 1, [], "error: allocation-failed (19 bytes)\n");
     }
 
     [Theory]

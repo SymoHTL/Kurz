@@ -36,6 +36,24 @@ pub byte* Allocate(long size) {
     return p
 }
 
+// The bytes of a new string, `string.Allocate(size)` (R15): room for `size` bytes in a block that
+// holds the count of the string values in front of them, which `string.FromRaw` takes over. More
+// bytes than the largest `int` end the process as a refused allocation does, with the count asked
+// for (T15); a block the system refuses ends it with the bytes the allocator was asked for, the
+// block's counts among them, as a list's growth does (section 4).
+pub byte* AllocateString(long size) {
+    if size > 2147483647 {
+        AllocationFailed(size)
+    }
+
+    byte* p = std.StringBlock(size)
+    if p == null {
+        AllocationFailed(16 + size)
+    }
+
+    return p
+}
+
 // The end of the process for an allocation refused, and for a string asked of more bytes than the
 // largest `int` (T15; the owner, "C#'s limit" on 2026-10-23 and "allocation-failed" on 2026-10-24): `error:
 // allocation-failed (<n> bytes)` and the exit code 1, with no place and no trace (O11).
@@ -133,7 +151,7 @@ pub string TextOfLong(long value) {
     long count = long(digits.Bytes.Count)
     mut string text = ""
     raw {
-        byte* p = Allocate(count + 1)
+        byte* p = string.Allocate(count + 1)
         byte* from = digits.Pointer
         p[0] = 45
         mut long i = 0
@@ -159,7 +177,7 @@ pub string TextOfULong(ulong value) {
 
     mut string text = ""
     raw {
-        byte* p = Allocate(count)
+        byte* p = string.Allocate(count)
         mut ulong v = value
         mut long i = count - 1
         while i >= 0 {
@@ -187,7 +205,7 @@ pub string TextOfChar(uint point) {
 
     mut string text = ""
     raw {
-        byte* p = Allocate(count)
+        byte* p = string.Allocate(count)
         if count == 1 {
             p[0] = byte(point)
         } else if count == 2 {
@@ -272,7 +290,7 @@ pub string Concat(string first, string second) {
 
     mut string text = ""
     raw {
-        byte* p = Allocate(a + b)
+        byte* p = string.Allocate(a + b)
         byte* x = first.Pointer
         byte* y = second.Pointer
         mut long i = 0
@@ -294,15 +312,15 @@ pub string Concat(string first, string second) {
 }
 
 // The text of a list (A4): the texts of its `count` items, one or more, which `texts` holds as a
-// string is laid out, the address of its bytes and their count, 8 bytes each, between `[` and `]`
-// and with `, ` between them; more bytes than the largest `int` end the process as a refused
-// allocation does.
+// string is laid out, the address of its bytes and their count, 8 bytes each, the count's highest bit
+// the mark of a string that holds a block (`std/std.kz`), between `[` and `]` and with `, ` between
+// them; more bytes than the largest `int` end the process as a refused allocation does.
 pub string ListText(byte* texts, long count) {
     mut long total = 2 * count
     raw {
         mut long i = 0
         while i < count {
-            total = total + *Ptr<long>(texts + i * 16 + 8)
+            total = total + (*Ptr<long>(texts + i * 16 + 8) & 9223372036854775807)
             i = i + 1
         }
     }
@@ -313,7 +331,7 @@ pub string ListText(byte* texts, long count) {
 
     mut string text = ""
     raw {
-        byte* p = Allocate(total)
+        byte* p = string.Allocate(total)
         p[0] = 91
         mut long at = 1
         mut long i = 0
@@ -325,7 +343,7 @@ pub string ListText(byte* texts, long count) {
             }
 
             byte* from = Ptr<byte>(*Ptr<long>(texts + i * 16))
-            long n = *Ptr<long>(texts + i * 16 + 8)
+            long n = *Ptr<long>(texts + i * 16 + 8) & 9223372036854775807
             mut long j = 0
             while j < n {
                 p[at + j] = from[j]
@@ -468,7 +486,7 @@ string DecimalText(bool negative, ulong digits, int power, int precision) {
         long at = sign + point + long(count)
         long total = at + 2 + long(width)
         raw {
-            byte* p = Allocate(total)
+            byte* p = string.Allocate(total)
             WriteDigits(p + sign + point, digits, count)
             if count > 1 {
                 p[sign] = p[sign + 1]
@@ -488,7 +506,7 @@ string DecimalText(bool negative, ulong digits, int power, int precision) {
         long zeros = long(-scale)
         long total = sign + 2 + zeros + long(count)
         raw {
-            byte* p = Allocate(total)
+            byte* p = string.Allocate(total)
             p[sign] = 48
             p[sign + 1] = 46
             mut long i = 0
@@ -507,7 +525,7 @@ string DecimalText(bool negative, ulong digits, int power, int precision) {
     } else if scale >= count {
         long total = sign + long(scale)
         raw {
-            byte* p = Allocate(total)
+            byte* p = string.Allocate(total)
             WriteDigits(p + sign, digits, count)
             mut long i = sign + long(count)
             while i < total {
@@ -524,7 +542,7 @@ string DecimalText(bool negative, ulong digits, int power, int precision) {
     } else {
         long total = sign + long(count) + 1
         raw {
-            byte* p = Allocate(total)
+            byte* p = string.Allocate(total)
             WriteDigits(p + sign + 1, digits, count)
             mut long i = 0
             while i < long(scale) {
@@ -1448,7 +1466,7 @@ pub string TextOfDecimal(ulong low, ulong high) {
 
     mut string text = ""
     raw {
-        byte* p = Allocate(length)
+        byte* p = string.Allocate(length)
         mut long i = length - 1
         mut long j = 0
         while j < count {
@@ -2051,7 +2069,7 @@ pub string TextOfDuration(ulong low, ulong high) {
     ulong hours = DivideSmall(mut w0, mut w1, mut w2, 24)
     mut string text = ""
     raw {
-        byte* p = Allocate(72)
+        byte* p = string.Allocate(72)
         mut long n = 0
         if negative {
             p[0] = 45
@@ -2119,7 +2137,7 @@ pub string TextOfTimestamp(ulong low, ulong high) {
 
     mut string text = ""
     raw {
-        byte* p = Allocate(64)
+        byte* p = string.Allocate(64)
         mut long n = 0
         if before && (w0 != 0 || w1 != 0) {
             p[0] = 45

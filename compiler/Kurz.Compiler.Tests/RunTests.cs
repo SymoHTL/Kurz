@@ -100,12 +100,14 @@ public sealed class Toolchain : IDisposable
 /// case the checker reads and the emitter does not lay out is in <see cref="NotEmitted"/>, with the construct the emitter names; and a
 /// case it lays out whose expectation needs what the build does not hold is in <see cref="NotRun"/>, with why, and is built and not run.
 /// Neither list holds a stale entry. A case is built with the grants of its <c>allow:</c> line, and as its <c>build:</c> line says, else
-/// as the test build, the default. A floor holds the count of cases run.
+/// as the test build, the default. A floor holds the count of cases run. Every case runs a second time under an allocator that makes
+/// every block it frees inaccessible (<see cref="ListTests.Fenced"/>), so that a block the counting frees while a value still holds
+/// it ends that run with the system's signal.
 /// </summary>
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 187 : 188;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 188 : 189;
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
@@ -141,11 +143,11 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static CaseHeader Header(string relativePath) => CorpusTests.ReadCase(relativePath).Header;
 
     /// <summary>The program of a case the checker reads in full and the emitter lays out; else null, with what the emitter said, or null where the checker said <c>not supported</c>.</summary>
-    private (EmittedProgram? Program, string? NotSupported) Emit(string relativePath, CaseHeader header)
+    private (EmittedProgram? Program, string? NotSupported) Emit(string relativePath, CaseHeader header, CheckedRuntime? runtime = null)
     {
         var bytes = File.ReadAllBytes(Path.Combine(CorpusTests.Root, "corpus", relativePath));
         var source = SourceText.FromBytes(relativePath, bytes, out _)!;
-        var compilation = Builder.Compile(source, header.Grants, toolchain.Runtime, testBuild: header.Build != BuildKind.Release);
+        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release);
         Assert.False(compilation.Diagnostics.HasErrors, $"{relativePath}: the compiler refuses a case that expects a run: {string.Join("; ", compilation.Diagnostics.Sorted)}");
         if (compilation.Program is { } program)
         {
@@ -171,10 +173,16 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     [Theory]
     [MemberData(nameof(RunnableCases))]
-    public void A_built_case_runs_as_its_header_says(string relativePath)
+    public void A_built_case_runs_as_its_header_says(string relativePath) => RunCase(relativePath, toolchain.Runtime, string.Empty);
+
+    [Theory]
+    [MemberData(nameof(RunnableCases))]
+    public void A_built_case_runs_as_its_header_says_where_no_freed_block_can_be_read(string relativePath) => RunCase(relativePath, ListTests.Fenced, "-fenced");
+
+    private void RunCase(string relativePath, CheckedRuntime runtime, string suffix)
     {
         var header = Header(relativePath);
-        var (program, notSupported) = Emit(relativePath, header);
+        var (program, notSupported) = Emit(relativePath, header, runtime);
         if (program is null)
         {
             if (notSupported is not null)
@@ -185,7 +193,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return;
         }
 
-        var executable = toolchain.Build(program, relativePath.Replace('/', '_').Replace(".kz", "", StringComparison.Ordinal));
+        var executable = toolchain.Build(program, relativePath.Replace('/', '_').Replace(".kz", "", StringComparison.Ordinal) + suffix);
         if (NotRun.ContainsKey(relativePath))
         {
             return;

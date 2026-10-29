@@ -7,10 +7,13 @@ using VoidType = Kurz.Compiler.Semantics.VoidType;
 namespace Kurz.Compiler.Emit;
 
 /// <summary>
-/// Lists (M9) and the counting of their blocks (design record, section 3: compiler-inserted reference counting; the owner,
-/// 2026-10-24, "Full counting now"). A list value is the address of its block in the standard library, null for a list without
-/// items; the block counts the list values that hold it, and <c>std/std.kz</c> alone reads its layout. A value of a type that holds
-/// a list, a list itself, a plain data value with such a field or a union with such a case, is counted: every place that holds one,
+/// Lists (M9) and the counting of their blocks and of the blocks of strings (design record, section 3: compiler-inserted reference
+/// counting; the owner, 2026-10-24, "Full counting now", and 2026-10-29, "Bit in the count"). A list value is the address of its
+/// block in the standard library, null for a list without items; the block counts the list values that hold it, and
+/// <c>std/std.kz</c> alone reads its layout. A string made at run time holds a block of the standard library in front of its bytes,
+/// which counts the string values that hold it, and the highest bit of the string's count of bytes marks it; a literal holds none.
+/// A value of a type that holds a list or a string, a list or a string itself, a plain data value with such a field or a union with
+/// such a case, is counted: every place that holds one,
 /// a variable, a field, an item, a result, holds one count of each block in it. A value an expression makes, a call's result, a
 /// list, a <c>with</c>, a <c>match</c> or an <c>else</c> as a value, is a temporary of the statement, or of the arm or the operand
 /// it is made in, and the end of that region lets go of what no place took over. A value read from a variable, a field, an item
@@ -26,10 +29,10 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    /// <summary>Whether a value of the type holds the block of a list or the environment of a lambda: a list, a function value, a plain data value with a field that does, a union with a case that does.</summary>
+    /// <summary>Whether a value of the type holds the block of a list or of a string or the environment of a lambda: a list, a string, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or FunctionType => true,
+        ListType or FunctionType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
@@ -185,6 +188,16 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is PrimitiveType { Kind: Primitive.String })
+        {
+            if (!IsLiteral(value))
+            {
+                fn.Emit($"call void {StringCount("retain", "StringRetain")}(%kz.str {value})");
+            }
+
+            return;
+        }
+
         var name = Helper($"retain.{Lower.Mangle(type)}", "void", [Ir(type)], () => EachHeld("%a0", type, Retain));
         fn.Emit($"call void {name}({Ir(type)} {value})");
     }
@@ -195,6 +208,16 @@ public sealed partial class Emitter
         if (type is FunctionType)
         {
             fn.Emit($"call void {ReleaseEnvironment()}(%kz.fn {value})");
+            return;
+        }
+
+        if (type is PrimitiveType { Kind: Primitive.String })
+        {
+            if (!IsLiteral(value))
+            {
+                fn.Emit($"call void {StringCount("release", "StringRelease")}(%kz.str {value})");
+            }
+
             return;
         }
 
@@ -223,6 +246,38 @@ public sealed partial class Emitter
         });
         fn.Emit($"call void {name}({Ir(type)} {value})");
     }
+
+    /// <summary>Whether the value is a string the module holds as a constant, a literal, which holds no block (<see cref="StringValue"/>).</summary>
+    private static bool IsLiteral(string value) => value.StartsWith("{ ptr ", StringComparison.Ordinal) || value == "zeroinitializer";
+
+    /// <summary>
+    /// The helper that raises or lowers the count of a string's block, <paramref name="name"/> of the standard library: of a string
+    /// whose count of bytes carries the mark in its highest bit, and nothing for a literal; a block that loses its last holder is
+    /// freed.
+    /// </summary>
+    private string StringCount(string kind, string name) => Helper($"{kind}.string", "void", ["%kz.str"], () =>
+    {
+        var counted = fn.Label("counted");
+        var done = fn.Label("done");
+        fn.CondBranch(fn.Value($"icmp slt i64 {fn.Value("extractvalue %kz.str %a0, 1")}, 0"), counted, done); // the mark: a block
+        fn.Block(counted);
+        var bytes = fn.Value("extractvalue %kz.str %a0, 0");
+        if (kind == "retain")
+        {
+            fn.Emit($"call void {StdFunction(name)}(ptr {bytes})");
+        }
+        else
+        {
+            var free = fn.Label("free");
+            fn.CondBranch(fn.Value($"call i1 {StdFunction(name)}(ptr {bytes})"), free, done);
+            fn.Block(free);
+            fn.Emit($"call void {StdFunction("StringFree")}(ptr {bytes})");
+        }
+
+        fn.Return(null);
+        fn.Block(done);
+        fn.Return(null);
+    });
 
     /// <summary>In a helper over a plain data value or a union: <paramref name="each"/> for each counted field, or for the case value when its case is counted; then the return.</summary>
     private void EachHeld(string value, KurzType type, Action<string, KurzType> each)
@@ -477,6 +532,23 @@ public sealed partial class Emitter
                 fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {at}");
             });
             var text = fn.Value($"call %kz.str {RuntimeFunction("ListText")}(ptr {buffer}, i64 {wide})");
+            if (MakesText(type.Element))
+            {
+                // the items' texts, which the joined text holds no count of
+                fn.Emit($"store i64 0, ptr {at}");
+                var check = fn.Label("made");
+                var each = fn.Label("made.text");
+                var done = fn.Label("made.done");
+                fn.Block(check);
+                var i = fn.Value($"load i64, ptr {at}");
+                fn.CondBranch(fn.Value($"icmp slt i64 {i}, {wide}"), each, done);
+                fn.Block(each);
+                Release(fn.Value($"load %kz.str, ptr {fn.Value($"getelementptr %kz.str, ptr {buffer}, i64 {i}")}"), Types.String);
+                fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {at}");
+                fn.Branch(check);
+                fn.Block(done);
+            }
+
             fn.Emit($"call void {StdFunction("Free")}(ptr {buffer}, i64 {bytes})");
             fn.Return($"%kz.str {text}");
         });

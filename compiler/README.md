@@ -36,7 +36,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   fifth checks the runtime under `runtime/` and the standard library under `std/` (the section "The
   runtime" below). A sixth builds
   every corpus case that expects a run with the pinned clang and runs it, and checks what it
-  prints, its exit code and its error line against the case's header (`RunTests`); a seventh
+  prints, its exit code and its error line against the case's header, then builds and runs it again
+  under an allocator that makes every block it frees inaccessible (`RunTests`); a seventh
   builds the programs that pin what no case can, a refused write and a refused allocation among
   them (`EmitterTests`), and an eighth those of data values and unions, with the width of a tag and
   the copy of a block before a write (`DataTests`); a ninth makes and removes the places of `run`
@@ -275,7 +276,7 @@ ask about it.
 The runtime a built program links is written in Kurz, in `runtime/` at the top of the repository
 (design record, section 2): `runtime/common/` holds the code every target shares, and
 `runtime/linux/` and `runtime/windows/` the code of one target each. The standard library's Kurz
-code is in `std/`: the allocator of section 3 and the block of a list (the owner, 2026-10-24, "A std/ directory now"), at
+code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
@@ -310,7 +311,8 @@ the process with the exit code 0 through the target's `Exit`, the runtime's one 
 `float` and a `double` (below), the arithmetic, the conversions and the text of a `decimal` (below), the
 text of a duration and of a timestamp (below), the
 joining and the comparison of two strings, the text of a list from the texts of its items,
-`Raise` for an exception of the run-time table and `Throw`, and `Allocate`, which takes its memory
+`Raise` for an exception of the run-time table and `Throw`, `AllocateString`, the room of a new string in
+a block of `std/` (R15, below), and `Allocate`, which takes its memory
 from the allocator's entry, `std/`'s `Allocate` (record, section 2), and ends the process where the
 entry gives null (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
 returns null and leaves the end of the process to a caller, which its documentation encourages to
@@ -376,7 +378,8 @@ to `Print`, which raises `print-failed` there where the system refuses the write
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
-size"). Both end with the exit code 1. `EmitterTests` pins both, the first in a test and in a release
+size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). Both
+end with the exit code 1. `EmitterTests` pins both, the first in a test and in a release
 build, the second with a runtime whose `Memory` refuses every request.
 
 ## What the emitter emits
@@ -393,9 +396,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 `gcc_s` for the unwinder of the trace (below). It emits:
 
 - the integers, `float` and `double`, `bool`, `char` and `string`, and pointers to them and C
-  function types over them (T2, T21, T15, R10, R17); a string is its bytes and their count, at most the largest `int` of
-  them, a longer one, by a join or by `string.FromRaw`, ending the program with `allocation-failed`
-  (T15), and the empty string's bytes are a constant of none, never at the address 0 (R15);
+  function types over them (T2, T21, T15, R10, R17); a string is the address of its bytes and their count, at most the
+  largest `int` of them, a longer one, by a join, by `string.Allocate` or by `string.FromRaw`, ending the program with
+  `allocation-failed` (T15), the count's highest bit marking a string that holds a block in front of its bytes, which
+  a literal does not (below), and the empty string's bytes are a constant of none, never at the address 0 (R15);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
@@ -447,8 +451,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), and `==` on strings by
   their bytes (T18);
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
-  and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`
-  and `string.FromRaw(p, n)` (R15), state outside a function, `thread static` among it, laid out
+  and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
+  `string.Allocate(n)` and `string.FromRaw(p, n)` (R15), state outside a function, `thread static` among it, laid out
   after the layout knows the program's data types, a `data` value without fields as its initial
   value (R13),
   calls of C functions with `...` (R16) and of a C function value (R17).
@@ -516,27 +520,42 @@ made (the owner, 2026-10-25, "Copied"), and no state
 outside a function holds a list, which R13 refuses, so a callee reaches a list its caller lent it
 through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
-Counted are a list, a function value, a plain `data` value that holds one of them in a field and a
-union with a case that holds one. The environment of a lambda that reads variables starts with the
+Counted are a list, a string, a function value, a plain `data` value that holds one of them in a
+field and a union with a case that holds one. A string made while the program runs holds a block
+of `std/` in front of its bytes: the count of the string values that hold it, 8 bytes, and the room
+`string.Allocate` gave, 8 bytes; the highest bit of the string's count of bytes marks such a string,
+and a literal, which holds no block, is neither counted nor freed, a copy and the end of a holder
+testing that bit and touching no memory for a literal (section 4: the bit the owner's, 2026-10-29, "Bit
+in the count", the block and its room assumed). A string is counted where a list is, with no copy
+at a write, since a string never changes, and at zero its block goes back to `Free` with the room
+it was given. The runtime makes every string it makes in such a block, through `string.Allocate` and `string.FromRaw`, which takes
+the block over (R15, the owner, 2026-10-29, "string.Allocate, take over"); the text the emitted code
+makes of a value, for a `print` or a hole of a string, is a temporary of its statement, and the
+helper that makes the text of a list or of a `data` value lets go of each text it joined. The environment of a lambda that reads variables starts with the
 count of the function values that hold it, 8 bytes, and the address of the function that lets go
 of it, then holds each value the lambda read, counted once more where its type is counted; it is
 counted as a list's block is, and at zero the values it holds are let go of and it goes back to
 `Free` (section 4, "Pair + heap env"). A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
 and a raise end the process with their error line, and no count is lowered there.
-A value of a block type is never freed, and the lists it holds are never let go of: the memory of
-such a value, which the answer of 2026-10-23 leaves ungiven back (below), is read to hold the lists
-in its fields, a reading of this directory, not a decision. Pinned by
-`ListTests`: the values the counting keeps apart, the name an arm binds among them, a function value
+A value of a block type is never freed, and the lists and strings it holds are never let go of: the
+memory of such a value, which the answer of 2026-10-23 leaves ungiven back (below), is read to hold
+the lists and strings in its fields, a reading of this directory, not a decision. Pinned by
+`ListTests`: the values the counting keeps apart, the name an arm binds among them, strings in every
+place the lists' programs hold a list, one made in a `raw` block among them, a function value
 and a `data` value that holds one read beside a call that replaces them, the function value a call
 calls beside such a call, a lambda's list that only its environment holds and the items `Where` keeps; a system that
 refuses every request for memory after sixteen, within which a program that makes and drops lists
 through every way out of a block, the body of a `void` function and a lambda's environment among
 them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
 inaccessible, under which the values' programs and twenty rounds of the same program print the
-same lines; the target's own `Release`, after
+same lines, and so do the strings' program and twenty rounds of strings through every way out of a block;
+the target's own `Release`, after
 which a write into a freed block of more than 262144 bytes ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
-the same lists all kept do not; the number of `allocation-failed` past the limit, with the limit
+the same lists all kept do not, and so for strings of 524288 bytes; strings of 1024 bytes made and dropped
+for 3000 rounds within the sixteen pieces, and five of them kept each round not; the count
+`string.Allocate` asks past its limit, lowered in the runtime's text, and the bytes of a string's
+block the system refuses; the number of `allocation-failed` past the limit, with the limit
 lowered in the library's text, for items of 1, 8 and 16 bytes, a padded `data` value, a list and a
 value of a block type, and for a growth the system refuses, and for an environment; the order of
 the calls of `Where`'s test; the release of such an environment before the `Add` in the IR; and
@@ -554,13 +573,13 @@ a field (M5), `==` on a value that holds a list (D3), a list's `Pointer` and `Li
 chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
-The reference counting of section 3 is emitted for lists, the environments of lambdas and the
-values that hold them (above) and for nothing else: memory a string or a value of a block type takes is never given back, the lists
-a value of a block type holds among it (above), so a
-program that makes them without end runs out of memory and ends with `allocation-failed`; a plain
-value and a union take none of their own (the owner, 2026-10-23, "Accept, documented"). The
-corpus runner lists every case the checker reads in full and the emitter does not emit, 4 of the
-248 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+The reference counting of section 3 is emitted for lists, strings, the environments of lambdas and
+the values that hold them (above) and for nothing else: memory a value of a block type takes is never
+given back, the lists and strings it holds among it (above), so a program that makes such values
+without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
+none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
+before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
+full and the emitter does not emit, 4 of the 249 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there

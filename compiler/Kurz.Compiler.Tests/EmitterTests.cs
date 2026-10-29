@@ -78,8 +78,9 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_allocation_the_system_refuses_ends_the_program_with_the_id_and_the_size_and_no_line()
     {
+        // the text's 5 bytes and the 16 of the counts of its block (design record, section 3)
         var compilation = Compile("print(12345)\n", RuntimeWithoutMemory(Builder.HostTarget!.Value));
-        Ran(Toolchain.Run(toolchain.Build(compilation.Program!, "allocation-failed")), 1, [], "error: allocation-failed (5 bytes)\n");
+        Ran(Toolchain.Run(toolchain.Build(compilation.Program!, "allocation-failed")), 1, [], "error: allocation-failed (21 bytes)\n");
 
         // the positive control: the same program with the runtime as it is
         Ran(BuildAndRun("print(12345)\n", "allocation-granted"), 0, ["12345"], "");
@@ -163,9 +164,10 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
-    [InlineData("print(string.FromRaw(Ptr<byte>(16), 2147483647).Bytes.Count)", 0, "2147483647", "")] // the largest that fits, the positive control
+    [InlineData("print(string.FromRaw(string.Allocate(1), 2147483647).Bytes.Count)", 0, "2147483647", "")] // the largest that fits, the positive control: a count past the block's room, which nothing reads beyond, freed as the block's room says
     [InlineData("print(string.FromRaw(Ptr<byte>(16), 2147483648).Bytes.Count)", 1, null, "error: allocation-failed (2147483648 bytes)\n")]
     [InlineData("print(\"{string.FromRaw(Ptr<byte>(16), 2147483647)}a\")", 1, null, "error: allocation-failed (2147483648 bytes)\n")] // a join
+    [InlineData("print(string.Allocate(2147483648) != null)", 1, null, "error: allocation-failed (2147483648 bytes)\n")]
     public void A_string_holds_at_most_the_largest_int_of_bytes_and_a_longer_one_ends_as_a_refused_allocation(string statement, int code, string? line, string error)
     {
         // the owner, "C#'s limit" on 2026-10-23 and "allocation-failed" on 2026-10-24; no byte at the pointer is read
