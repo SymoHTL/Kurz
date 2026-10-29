@@ -1,0 +1,49 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0yOVQyMTo1Njo0M1rOscUQzw=="
+          },
+          "nodes": [
+            {
+              "id": "PRRT_kwDOU3tPGc6xxRDP",
+              "isResolved": true,
+              "path": "compiler/Kurz.Compiler.Tests/FileTests.cs",
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "github-actions"
+                    },
+                    "authorAssociation": "NONE",
+                    "body": "**Automated review**\n\n- **medium** `compiler/Kurz.Compiler.Tests/FileTests.cs` line 65: Windows refusal is checked against the emitter's own constant, and not at its line\n\n  `RefusedOnWindows` compares the message with `Emitter.NotOnWindows`, so the expected value comes from the code under test. If that text changed or lost its rule (S11), the test would still pass. The check also ignores the diagnostic's line, though the description says the build says `not supported` \"at the call\". Write the expected words out (\"a call on a file, which the runtime of Windows does not give (S11)\") and check the line of the call.\n\n- **medium** `compiler/Kurz.Compiler.Tests/FileTests.cs` line 183: The positive control does not test the limit its comment describes\n\n  The comment says the control reads with \"one byte less\", room the list can hold. The code instead swaps in an empty list and a `max` of 3, far from the largest `int`. So nothing shows that a count plus `max` of exactly 2147483647 still reads. An off-by-one in the limit (refusing at the largest `int` itself) would pass both halves. Keep the read at the limit (for example an empty list with `max` 2147483647, or `\"a\".Bytes` with 2147483646), or fix the comment to say what the control does.\n\nFix the file, then resolve this thread. A finding that looks wrong is answered by an edit that makes the misreading impossible; on tool and workflow code a written reply also counts.\n\n<!-- kurz-review:findings [{\"file\": \"compiler/Kurz.Compiler.Tests/FileTests.cs\", \"line\": 65, \"severity\": \"medium\", \"title\": \"Windows refusal is checked against the emitter's own constant, and not at its line\", \"sha\": \"fb82fbcd5dcbdc39dd0b0fb1acceed0f18d7a139\"}, {\"file\": \"compiler/Kurz.Compiler.Tests/FileTests.cs\", \"line\": 183, \"severity\": \"medium\", \"title\": \"The positive control does not test the limit its comment describes\", \"sha\": \"fb82fbcd5dcbdc39dd0b0fb1acceed0f18d7a139\"}] -->",
+                    "createdAt": "2026-10-29T21:56:43Z",
+                    "url": "https://github.com/SymoHTL/Kurz/pull/82#discussion_r4418327083",
+                    "originalCommit": {
+                      "oid": "fb82fbcd5dcbdc39dd0b0fb1acceed0f18d7a139"
+                    }
+                  },
+                  {
+                    "author": {
+                      "login": "SymoHTL"
+                    },
+                    "authorAssociation": "OWNER",
+                    "body": "Moved to the collection ticket at the review cap: #39, section \"Pull request #82 at `fb82fbc`\", with what the code at that head shows.",
+                    "createdAt": "2026-10-29T22:00:02Z",
+                    "url": "https://github.com/SymoHTL/Kurz/pull/82#discussion_r4418352354",
+                    "originalCommit": {
+                      "oid": "fb82fbcd5dcbdc39dd0b0fb1acceed0f18d7a139"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

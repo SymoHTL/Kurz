@@ -201,6 +201,9 @@ flowchart TD
         At the review cap (R7) a finding on any file is also answered by a reply from someone who may write here
         that links an open issue labelled review-leftovers, the collection ticket; the gate reads that list only
         at the cap, and the resolve command resolves a thread whose replies all move it (self-tests).
+        The cap command of tools/pr_gates.py takes that walk: the section as a comment on the ticket, the replies,
+        the resolutions, and a refusal below the cap, of an open finding of another head and of a thread a person
+        wrote in (self-tests).
         The gates job reads that list with issues: read, the one grant of its token beyond the tree and the
         pull request (ci-config pins the grant); a refused read fails the gate closed.
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]

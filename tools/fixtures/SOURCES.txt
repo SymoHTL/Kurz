@@ -33,7 +33,19 @@ tools/fixtures/ (GitHub, repository SymoHTL/Kurz; captured 2026-10-01 unless a l
                         and real statuses of another, and says so where it loads them.
   review-threads.json   gh api graphql with the query THREADS of tools/pr_gates.py, asked for the
                         first two threads only (reviewThreads(first: 2)), for pull request 8 on
-                        2026-10-02, after the first review that posted threads
+                        2026-10-02, after the first review that posted threads; the query did not
+                        ask for createdAt and url then
+  cap-thread.json       the same query, with createdAt and url, asked for the first thread only
+                        (reviewThreads(first: 1)), for pull request 82 on 2026-10-29, after the walk at
+                        its review cap: the reviewer's post with two findings, and the reply that
+                        moved them to the collection ticket, resolved. The self-test of the cap walk
+                        edits it back to open, with the reviewer's post alone, and says so
+  cap-notes.json        gh api "repos/SymoHTL/Kurz/issues/82/comments?per_page=1&page=4" (2026-10-29):
+                        the reviewer's second note of low findings on that pull request, five lows on
+                        its head, collected in issue 19
+  cap-lows.json         gh api "repos/SymoHTL/Kurz/issues/19/comments?since=2026-10-29T21:57:15Z&per_page=1"
+                        (2026-10-29): the comment on the lows issue that holds the five lows of that
+                        note, opened by the header kit.lows_header writes
   resolve-thread.json   gh api graphql with the mutation RESOLVE of tools/pr_gates.py, for a thread of
                         pull request 23 that was already resolved (2026-10-08, after its merge): the
                         answer for a thread already resolved. The tool read the same field as true in

@@ -646,7 +646,7 @@ def render(thread, head=None, as_thread=True):
     # The model's words are shown, never trusted: a marker opened inside a title or body must not read back as state.
     shown = lambda text: harmless(text if len(text) <= BODY_CHARS else text[:BODY_CHARS] + " [cut here: the text was longer]")
     lows = thread.get("lows")
-    lines = [f"**Automated review: low findings of pull request #{lows[0]} at `{lows[1][:8]}`**" if lows else "**Automated review**", ""]
+    lines = [kit.lows_header(*lows) if lows else "**Automated review**", ""]
     for f in thread["findings"]:
         lines += [f"- **{f['severity']}** `{shown(f['file'])}` line {f['line']}: {shown(f['title'])}", "", indent(shown(f["body"]), "  "), ""]
     if lows:

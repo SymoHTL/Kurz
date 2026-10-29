@@ -76,10 +76,10 @@ flowchart TD
     or with a push that is needed anyway. After the round at the cap no push: node Q. Gate: pr-findings"]
     I -- "the round at the cap is done" --> Q["the cap, one review round counted by the labels review-round-n:
     no fix push and no run started: judgment step. What is open goes on the collection ticket, the open issue labelled
-    review-leftovers; every open thread gets a reply that links it; read what pr_gates.py resolve --pr N --head SHA lists,
-    with the head the round at the cap reviewed, then resolve with --go the threads whose replies all move them.
+    review-leftovers, as a comment, and every open thread gets a reply that links it and is resolved: write the reading
+    of what is open in a file, read the plan of pr_gates.py cap --pr N --analysis FILE, then take it with --go.
     A round at the cap that did not complete: the owner decides (node N). Gate: pr-findings and the merge
-    tool read the move (self-tests); the section on the ticket: judgment step; the labels a person can change:
+    tool read the move, the cap command writes it (self-tests); the reading in the section: judgment step; the labels a person can change:
     HAZARD issue 41"]
     Q --> J
     I --> J{"gates green and review green on the head,
