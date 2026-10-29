@@ -552,7 +552,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>The runtime and the standard library of this machine's target with each file's text edited where <paramref name="edits"/> names its path; each text it replaces is there.</summary>
-    private static CheckedRuntime Edited(params (string Path, string Old, string New)[] edits)
+    internal static CheckedRuntime Edited(params (string Path, string Old, string New)[] edits)
     {
         var target = Builder.HostTarget!.Value;
         var files = Runtime.Files.Select(f =>

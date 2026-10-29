@@ -348,8 +348,10 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S6: the helper that reads the whole file at the C path in <c>%a0</c> into the list of bytes at <c>%a1</c>, as Rust's
-    /// <c>fs::read</c> reads to the end: the room left in the list, or 8192 bytes more where none is left, read again until a read gives
-    /// 0, the file closed after, its error ignored. 0, or the failure of the open or of a read.
+    /// <c>fs::read</c> reads to the end: the piece <c>BytesPiece</c> gives, read again while a read gives bytes, the file closed after,
+    /// its error ignored. A list that holds the largest <c>int</c> of items reads one byte more, as Rust's <c>read_to_end</c> probes a
+    /// full <c>Vec</c> before it grows it: none is the end of the file, and one raises <c>allocation-failed</c> as an <c>Add</c> past
+    /// the limit does (M9). 0, or the failure of the open or of a read.
     /// </summary>
     private string ReadAll() => Helper("file.read.all", "i64", ["ptr", "ptr"], () =>
     {
@@ -361,14 +363,28 @@ public sealed partial class Emitter
         fn.Return($"i64 {opened}");
         fn.Block(open);
         var fd = fn.Value($"trunc i64 {opened} to i32");
+        var result = fn.Alloca("i64", "result");
+        var probe = fn.Alloca("i8", "probe");
         var loop = fn.Label("read");
+        var end = fn.Label("end");
         fn.Branch(loop);
         fn.Block(loop);
-        var left = fn.Value($"call i64 {StdFunction("BytesRoom")}(ptr {fn.Value("load ptr, ptr %a1")})");
-        var more = fn.Value($"select i1 {fn.Value($"icmp eq i64 {left}, 0")}, i64 {ReadAllChunk}, i64 {left}");
+        var more = fn.Value($"call i64 {StdFunction("BytesPiece")}(ptr {fn.Value("load ptr, ptr %a1")}, i64 {ReadAllChunk})");
+        var full = fn.Label("full");
+        var room = fn.Label("room");
+        fn.CondBranch(fn.Value($"icmp eq i64 {more}, 0"), full, room);
+        fn.Block(full);
+        var probed = SysCall("ReadFile", $"i32 {fd}, ptr {probe}, i64 1");
+        fn.Emit($"store i64 {probed}, ptr {result}");
+        var past = fn.Label("past");
+        fn.CondBranch(fn.Value($"icmp sle i64 {probed}, 0"), end, past);
+        fn.Block(past);
+        Reserve("%a1", "1");
+        fn.Branch(loop);
+        fn.Block(room);
         var block = Reserve("%a1", more);
         var r = SysCall("ReadFile", $"i32 {fd}, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {more}");
-        var end = fn.Label("end");
+        fn.Emit($"store i64 {r}, ptr {result}");
         var read = fn.Label("added");
         fn.CondBranch(fn.Value($"icmp sle i64 {r}, 0"), end, read);
         fn.Block(read);
@@ -376,7 +392,7 @@ public sealed partial class Emitter
         fn.Branch(loop);
         fn.Block(end);
         SysCall("CloseFile", $"i32 {fd}");
-        fn.Return($"i64 {r}");
+        fn.Return($"i64 {fn.Value($"load i64, ptr {result}")}");
     });
 
     // ---- the handle --------------------------------------------------------------------------------
@@ -441,7 +457,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S1: in the helper of the text of an <c>IoError</c> in <c>%a0</c>: the words of its kind, its name's words in lower case, a colon and
-    /// its path, <c>not found: data/x.bin</c>, or the words alone where the path is empty.
+    /// its path, <c>not found: data/x.bin</c>, or the words alone where the path is empty; the words of <c>Other</c> with the system's
+    /// number after them, <c>other (os error 24)</c>.
     /// </summary>
     private void IoErrorText(DataType error)
     {
@@ -456,14 +473,29 @@ public sealed partial class Emitter
         for (var i = 0; i < values.Count; i++)
         {
             fn.Block(labels[i]);
-            var words = Words(values[i]);
             var alone = fn.Label("alone");
             var joined = fn.Label("joined");
+            if (values[i] == "Other")
+            {
+                // the system's number after the words, as Rust's text writes it (the owner, 2026-10-29, "Number for Other")
+                var code = fn.Value($"sext i32 {fn.Value($"extractvalue {Ir(error)} %a0, 1")} to i64");
+                var number = fn.Value($"call %kz.str {RuntimeFunction("TextOfLong")}(i64 {code})");
+                var numbered = fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue("other (os error ")}, %kz.str {number})");
+                Release(number, Types.String);
+                var words = Joined(numbered, StringValue(")"));
+                fn.CondBranch(empty, alone, joined);
+                fn.Block(alone);
+                fn.Return($"%kz.str {words}");
+                fn.Block(joined);
+                fn.Return($"%kz.str {Joined(Joined(words, StringValue(": ")), path)}");
+                continue;
+            }
+
             fn.CondBranch(empty, alone, joined);
             fn.Block(alone);
-            fn.Return($"%kz.str {StringValue(words)}");
+            fn.Return($"%kz.str {StringValue(Words(values[i]))}");
             fn.Block(joined);
-            fn.Return($"%kz.str {fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue(words + ": ")}, %kz.str {path})")}");
+            fn.Return($"%kz.str {fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue(Words(values[i]) + ": ")}, %kz.str {path})")}");
         }
 
         fn.Block(other);

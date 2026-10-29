@@ -138,7 +138,10 @@ flowchart TD
         comparison, a field, a union, a list or a hole of them that shows another value; and FileTests, red on a
         file that stays open after the last value that holds it let go of it, under a limit of 32 descriptors, on a
         close through one copy that leaves the other open, on a read into a list another value holds that changes
-        that value, on a count and a max past the largest int that read before allocation-failed, on a directory
+        that value, on a count and a max past the largest int that read before allocation-failed, on a whole file of
+        the largest int of bytes (lowered to 20) that is not read whole or one byte more that is, on a read or a
+        write in the wrong direction that is not error 9, on a file or a directory whose mode is not 0666 or 0777
+        less the umask, on a descriptor opened without close-on-exec, on a directory
         created again that fails, on the text of an error without a path, and on a build for Windows that does not
         say not supported at a call on a file.
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run

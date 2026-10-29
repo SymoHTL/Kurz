@@ -343,7 +343,7 @@ before a call that took none (S4); `CloseFile` takes an interrupt for no failure
 `struct stat`; `CreateDirectories` creates the directories above that are missing, as Rust's
 `fs::create_dir_all` does, and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
 library's `struct dirent` (S8). `std/` gives the room a read makes in a list of bytes before it,
-`BytesReserve`, `BytesRoom`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, M9).
+`BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9).
 
 The text of a `float` and of a `double` is computed in `common/` from the value's bits, which the
 emitted code passes as a `uint` and a `ulong`: the fewest digits that read back as the same value,
@@ -480,18 +480,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - files (chapter 13), in a build for Linux: each call of `File` and `Directory` and each of a file's
   `Read`, `Write` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` and `ErrorCode` and its path the call's first,
-  whose text is the words of its kind and its path (S1); a `File` is the address of a block of 32 bytes,
+  whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File` is the address of a block of 32 bytes,
   the count of the values that hold it, the descriptor and the path, counted as a list's block is and
   closed at zero, the error of that close ignored, and `Close` writes -1 as the descriptor before it
   closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
   holds, before it reads (S3), and `File.ReadAll` reads into the room the list has, else 8192
-  bytes more, while a read gives bytes, so that a file within 8192 bytes below the largest `int` raises
-  `allocation-failed` as one past it does (S6). `FileTests` pins what no case can: 200 opens of a
+  bytes more, no more than the largest `int` of items leaves, while a read gives bytes, and a list that
+  holds that many reads one byte more, which raises `allocation-failed` where the file has it (S6). `FileTests` pins what no case can: 200 opens of a
   file, and the files and directories the calls on a path open for themselves, under a limit of 32
   descriptors, and the same files all held, which reach the limit; a close through a copy; a read
-  into a list another value holds; a count and a `max` past the largest `int`; a directory created
-  again and one under a file; the text of an error without a path; and the refusal for Windows;
+  into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
+  largest `int` of bytes, lowered to 20 in the library's text, and one byte more; a read and a write in
+  the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
+  created again and one under a file; the text of an error without a path; and the refusal for Windows;
 - lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code

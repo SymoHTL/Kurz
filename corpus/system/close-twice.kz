@@ -1,5 +1,5 @@
 // expect: output
-// | other: twice.txt
+// | other (os error 9): twice.txt
 // | 9
 // rules: S5
 

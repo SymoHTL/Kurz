@@ -7,7 +7,8 @@ raises nothing: `File.Open(path)` is a `File | IoError`. Every file sees `data I
 Code, string Path)`, as it sees `Invalid` (D18): `Kind` is the kind of the failure, `Code` the
 system's number for it, and `Path` the path or the address the call was about. The text of an
 `IoError` (A3) is the words of its kind, its name's words in lower case, a colon and its path,
-`not found: data/x.bin`, and the words alone where the path is empty. `IoKind` is an `enum` (D12)
+`not found: data/x.bin`, and the words alone where the path is empty; the kind `Other` adds the
+system's number after its words, `other (os error 24): probe.txt`. `IoKind` is an `enum` (D12)
 whose values are the kinds Rust's `ErrorKind` gives the error numbers of Linux, with each
 abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotADirectory`,
 `IsADirectory`, `DirectoryNotEmpty`, `ReadOnlyFilesystem`, `FilesystemLoop`,

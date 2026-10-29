@@ -410,16 +410,29 @@ pub byte* BytesReserve(byte* block, long more, mut long asked) {
     return p
 }
 
-// The bytes a list of bytes has room for after its own, 0 for a list without a block.
-pub long BytesRoom(byte* block) {
-    mut long spare = 0
+// The bytes the next read of a whole file asks for (S6): the room a list of bytes has after its own,
+// else `piece` more, as Rust's `read_to_end` reads into the room its `Vec` has before it grows it, and
+// no more than the largest `int` of items leaves, so that a file a list holds is read whole; 0 for a
+// list that holds that many.
+pub long BytesPiece(byte* block, long piece) {
+    mut long count = 0
+    mut long room = 0
     raw {
         if block != null {
-            spare = long(*Ptr<int>(block + 12)) - long(*Ptr<int>(block + 8))
+            count = long(*Ptr<int>(block + 8))
+            room = long(*Ptr<int>(block + 12))
         }
     }
 
-    return spare
+    if room > count {
+        return room - count
+    }
+
+    if piece > 2147483647 - count {
+        return 2147483647 - count
+    }
+
+    return piece
 }
 
 // The address after the last byte of a list of bytes, where a read puts the bytes it adds; null for a
