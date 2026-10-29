@@ -395,10 +395,13 @@ Gate: review rule "rules for sessions".
   request, with the head the findings were made on, the links of its threads and the link of its
   lows on the `review-lows` issue; every open thread gets a reply that links the ticket and is
   resolved, and the pull request merges as it is, on the approval the cap gives (above). The skill
-  `change-walk` has the walk (section 3, item 8). Gate: `self-tests` (the count, the label before
+  `change-walk` has the walk (section 3, item 8), and `py -3 tools/pr_gates.py cap --pr N --analysis <file>`
+  takes it: the section as a comment on the ticket, the replies and the resolutions
+  ([knowledge/the-walk-at-the-cap-is-a-command.md](knowledge/the-walk-at-the-cap-is-a-command.md)).
+  Gate: `self-tests` (the count, the label before
   the first pass, the end at the cap and its status; the move to the collection ticket in
-  `pr-findings`, in the resolve command and in the merge tool, whose wiring of it is
-  `merge_pr.held_by`); writing the section and starting no run at the cap are a `judgment step`; a
+  `pr-findings`, in the resolve command, in the cap command and in the merge tool, whose wiring of it is
+  `merge_pr.held_by`); the reading the section carries and starting no run at the cap are a `judgment step`; a
   label taken off or put on by hand, a second open issue that carries the label, two runs of one
   pull request that start at the same moment, and a dry run, which puts on no label: HAZARD (#41).
   The gates job lists the ticket with `issues: read`, which `ci-config` pins.

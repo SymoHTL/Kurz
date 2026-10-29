@@ -83,6 +83,13 @@ def review_rounds(labels):
     return max((int(m.group(1)) for m in numbers if m), default=0)
 
 
+def lows_header(number, head):
+    """The first line of a comment on the issue that collects low findings: the pull request and the head
+    the findings were made on. The reviewer writes it (tools/review/review.py); the cap walk finds the
+    comments of a head by it (tools/pr_gates.py)."""
+    return f"**Automated review: low findings of pull request #{number} at `{head[:8]}`**"
+
+
 class Refused(Exception):
     """A command the tool depends on failed. The caller treats it as a refusal, never as a pass."""
 

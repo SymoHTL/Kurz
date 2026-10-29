@@ -172,18 +172,20 @@ the head that will be reviewed is a `judgment step`.
    its `error` takes the place of the `review` status on its head, the head the round at the cap
    reviewed too. After that round no fix push follows, and no run is started (no Draft and
    Ready, no dispatch):
-   1. Write what is still open on the collection ticket, the open issue labelled
-      `review-leftovers`: a section for the pull request with the head the findings were made
-      on, each open finding with its severity, file, line and thread link, and the link of the
-      round's lows on the `review-lows` issue.
-   2. Reply on every open thread with the link of that section or of the ticket (`#<ticket>`, or
-      its address).
-   3. `py -3 tools/pr_gates.py resolve --pr <N> --head <the head the round at the cap reviewed>` lists
-      the threads whose replies all move them, and `--go` resolves them; a thread in which a
-      person wrote anything else is read, answered, and resolved by hand.
+   1. Read every open thread and write what the code at the reviewed head shows, grouped, in a
+      file.
+   2. `py -3 tools/pr_gates.py cap --pr <N> --analysis <file>` prints the section of the
+      collection ticket, the open issue labelled `review-leftovers` (the head the findings were
+      made on, each open finding with its severity, file, line and thread link, the reading, and
+      the link of the round's lows on the `review-lows` issue), and the reply each open thread
+      gets. `--go` posts the section as a comment on the ticket, replies, resolves and reads the
+      threads back; a walk that stopped is run again. It refuses below the cap, an open finding
+      of another head, and a thread in which a person wrote anything but a move: that thread is
+      read and answered first (`knowledge/the-walk-at-the-cap-is-a-command.md`).
+   3. Run the failed jobs of the gates again when `pr-findings` read the threads open.
    4. Merge at the head the round at the cap reviewed, over red where it is red (section 4, item 4).
-   Gate: `pr-findings` and the merge tool read the move at the cap (`self-tests`); writing the
-   section and starting no run are a `judgment step`; the labels a person can change, a second
+   Gate: `pr-findings` and the merge tool read the move at the cap, and the cap command writes
+   it (`self-tests`); the reading and starting no run are a `judgment step`; the labels a person can change, a second
    issue with the collection label, two runs that start at the same moment and a dry run:
    HAZARD (#41).
 

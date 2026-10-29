@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Gates that read a pull request rather than the tree. Usage: pr_gates.py title|breadth|findings|resolve [--pr N] [--head SHA] [--go]
+"""Gates that read a pull request rather than the tree. Usage: pr_gates.py title|breadth|findings|resolve|cap [--pr N]
+[--head SHA] [--analysis FILE] [--go]
 (the number comes from PR_NUMBER in CI).
 
 title     a workflow-skip literal, a credential-shaped or machine-bound string or a conflict marker
@@ -37,11 +38,24 @@ resolve   not a gate: the session's step after its fix push. Every unresolved th
           the pull request shows another head: the forge names the old one for a moment after a
           push. Two pull requests
           had this as a hand-written script before the third need made it the tool (2026-10-07).
+cap       not a gate: the session's walk of a pull request at the review cap, which sessions took by
+          hand for every pull request at the cap from 2026-10-21 until it became this command
+          (2026-10-29). It refuses below the cap, with no or several open collection tickets, with
+          an open finding made on another commit than the head, and with a thread in which a person
+          wrote; it prints the section of the collection ticket (the head, the day of the round,
+          every open finding with the address of its thread, the session's reading from
+          --analysis FILE, the low findings with the addresses of their comments, whose count must be
+          the one the reviewer's notes name), and with --go posts it as a comment on the ticket,
+          replies in every open finding thread with the ticket and the section's address, resolves
+          as `resolve` does, and reads the threads back: one still open is exit 1. Writes are a
+          second apart. A section or a reply that is there is not written again, so a walk that
+          stopped is run again.
 A failed API call is a refusal (exit 1), never a pass. Known limit, printed by `findings` and by
 `resolve`: neither a resolved thread nor the review that posts its findings starts a pipeline, so
 the verdict is the one of the moment the job ran. Re-run the gates after resolving; the merge tool reads the threads
 again at the merge."""
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -74,7 +88,7 @@ THREADS = """query($owner: String!, $name: String!, $pr: Int!, $after: String) {
   repository(owner: $owner, name: $name) { pullRequest(number: $pr) {
     reviewThreads(first: 50, after: $after) { pageInfo { hasNextPage endCursor } nodes {
       id isResolved path
-      comments(first: 30) { nodes { author { login } authorAssociation body originalCommit { oid } } } } } } } }"""
+      comments(first: 30) { nodes { author { login } authorAssociation body createdAt url originalCommit { oid } } } } } } } }"""
 
 
 def lf(text):
@@ -172,6 +186,12 @@ def moved_to(repo, tickets):
     return moved
 
 
+def tickets(repo, pages=None):
+    """The open collection tickets: the open issues labelled kit.LEFTOVERS_LABEL, as the forge lists them."""
+    issues = (pages or kit.gh_pages)(f"repos/{repo}/issues?state=open&labels={kit.LEFTOVERS_LABEL}&per_page=100")
+    return [i for i in issues if "pull_request" not in i]  # the endpoint lists pull requests too
+
+
 def leftovers(repo, pr, pages=None):
     """(review rounds, moved) for a pull request as the forge sent it: the rounds from its labels, and
     `moved_to` over the open collection tickets, which are asked for only at the cap: below it no
@@ -181,8 +201,7 @@ def leftovers(repo, pr, pages=None):
     rounds = kit.review_rounds([label["name"] for label in pr["labels"]])
     if rounds < kit.ROUND_CAP:
         return rounds, moved_to(repo, ())
-    issues = (pages or kit.gh_pages)(f"repos/{repo}/issues?state=open&labels={kit.LEFTOVERS_LABEL}&per_page=100")
-    return rounds, moved_to(repo, [i["number"] for i in issues if "pull_request" not in i])  # the endpoint lists pull requests too
+    return rounds, moved_to(repo, [i["number"] for i in tickets(repo, pages)])
 
 
 # What a finding still open at the cap asks for: no edit follows the round at the cap, so the error names the move.
@@ -331,6 +350,165 @@ def resolve_command(repo, number, go, get=None, expect=None, pages=None):
     return 0
 
 
+REPLY = ("mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply("
+         "input: {pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }")
+
+
+def words_and(words):
+    """'a', 'a and b', 'a, b and c'."""
+    return " and ".join(w for w in (", ".join(words[:-1]), words[-1]) if w) if words else ""
+
+
+def section_header(number, head):
+    """The heading of a pull request's section on the collection ticket."""
+    return f"## Pull request #{number} at `{head[:7]}`"
+
+
+def first_line(comment):
+    """The first line of a comment as the REST endpoints send it."""
+    return lf(comment.get("body")).split("\n", 1)[0]
+
+
+def by_writer(comment):
+    """`trusted` for a comment as the REST endpoints send it."""
+    return trusted((comment.get("user") or {}).get("login", ""), comment.get("author_association"))
+
+
+def low_links(repo, number, head, pages):
+    """(count, addresses) of the low findings the review of `head` reported. The reviewer's notes on the
+    pull request name each low with the head it was made on and the issue that collects it
+    (tools/review/review.py), and the comments on that issue that open with kit.lows_header for this
+    pull request and head are where the lows stand. The counts must agree: lows the notes name and no
+    comment shows are a link nobody can write, a refusal, never a section that names fewer."""
+    lows, issues, since = 0, set(), None
+    for note in pages(f"repos/{repo}/issues/{number}/comments?per_page=100"):
+        m = MARK.search(note.get("body") or "")
+        mine = [f for f in json.loads(m.group(1)) if f.get("severity") == "low" and f.get("sha") == head] if m and by_writer(note) else []
+        if not mine:
+            continue
+        named = re.search(r"collected in #(\d+)", note["body"])
+        if not named:
+            raise kit.Refused(f"the note {note.get('html_url')} names {len(mine)} low findings and no issue that collects them")
+        lows, since = lows + len(mine), min(since or note["created_at"], note["created_at"])
+        issues.add(int(named.group(1)))
+    if not lows:
+        return 0, []
+    # the issue's comment follows its note; a minute earlier, so that a comment of the same second is listed too
+    since = (datetime.datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ") - datetime.timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    parts = [c for n in sorted(issues) for c in pages(f"repos/{repo}/issues/{n}/comments?per_page=100&since={since}")
+             if by_writer(c) and first_line(c) == kit.lows_header(number, head)]
+    shown = sum(len(re.findall(r"^- \*\*low\*\* ", lf(c["body"]), re.M)) for c in parts)
+    if shown != lows:
+        raise kit.Refused(f"the reviewer's notes name {lows} low findings on {head[:8]}, and the comments of "
+                          f"{', '.join(f'#{n}' for n in sorted(issues))} that name this pull request and head show {shown}")
+    return lows, [c["html_url"] for c in parts]
+
+
+def cap_section(number, head, rounds, found, analysis, lows):
+    """The section of the collection ticket for a pull request at the cap: the head, the day of the
+    round, each open finding with the address of its thread (the later findings of a thread point
+    up to it), the session's reading, and the low findings with the addresses of their comments."""
+    date = found[0][0]["comments"]["nodes"][0]["createdAt"][:10]
+    lines = [section_header(number, head), "",
+             f"{'One review round' if rounds == 1 else f'{rounds} review rounds, the last'} on {date}, the cap, at {head}; "
+             "it merges with what it has. Open threads of that review, resolved on the pull request with a pointer here:", ""]
+    for t, findings in found:
+        url = t["comments"]["nodes"][0]["url"]
+        if not findings:
+            lines.append(f"- a post of the reviewer that names no file {url}")
+        for n, f in enumerate(findings):
+            lines.append(f"- **{f['severity']}** `{f['file']}` line {f['line']}: {f['title']} {url if n == 0 else '(in the thread above)'}")
+    if analysis.strip():
+        lines += ["", analysis.strip()]
+    count, links = lows
+    lines += ["", f"The {count} low finding{'s' if count != 1 else ''} of the same review: {words_and(links)}." if count
+              else "The same review reported no low findings."]
+    return "\n".join(lines) + "\n"
+
+
+def cap_walk(repo, number, go, analysis="", get=None, pages=None, send=None):
+    """The walk at the review cap; True when every finding thread is resolved, or without `go` when the
+    plan was printed. Refused before any write: a pull request below the cap, none or several open
+    collection tickets, an open finding made on another commit than the head the pull request shows
+    (a finding of an earlier round, or a head that moved after the round at the cap, the owner's to
+    decide), and a thread in which a person wrote other than a move (read first). A section that is on
+    the ticket, as a comment or in its body as the walks by hand wrote it, is not posted again, and a
+    thread that a reply already moved gets no second one, so a walk that stopped is run again."""
+    get, send = get or kit.gh_json, send or kit.gh_send
+    pages = once(pages or kit.gh_pages)  # the rounds and the walk read the same list of tickets
+    pr = get(f"repos/{repo}/pulls/{number}")
+    head = pr["head"]["sha"]
+    rounds, moved = leftovers(repo, pr, pages)
+    if rounds < kit.ROUND_CAP:
+        raise kit.Refused(f"{rounds} review rounds, below the cap of {kit.ROUND_CAP}: a finding is answered by its edit, not moved")
+    open_tickets = tickets(repo, pages)
+    if len(open_tickets) != 1:
+        raise kit.Refused(f"{len(open_tickets)} open issues carry the label {kit.LEFTOVERS_LABEL}: the section goes on one")
+    ticket = open_tickets[0]
+    found = [(t, f) for t, f in finding_threads(fetch_threads(repo, number, get)) if not t["isResolved"]]
+    if not found:
+        print("cap: no finding thread is open, so nothing moves to the collection ticket")
+        return True
+    for t, _ in found:
+        sha = (t["comments"]["nodes"][0].get("originalCommit") or {}).get("oid")
+        if sha != head:
+            raise kit.Refused(f"the open finding on {t.get('path')} ({t.get('id')}) was made on {sha}, not on the head {head}: "
+                              "the walk covers the head the round at the cap reviewed")
+        if any(spoke(c) and not moved(c) for c in t["comments"]["nodes"][1:]):
+            raise kit.Refused(f"a person wrote in the thread on {t.get('path')} ({t.get('id')}): read and answer it first")
+    posted = next((c["html_url"] for c in pages(f"repos/{repo}/issues/{ticket['number']}/comments?per_page=100")
+                   if by_writer(c) and first_line(c) == section_header(number, head)), None)
+    if not posted and section_header(number, head) in lf(ticket.get("body")).split("\n"):
+        posted = ticket["html_url"]
+    if posted:
+        print(f"cap: the section is on #{ticket['number']} already: {posted}")
+    else:
+        section = cap_section(number, head, rounds, found, analysis, low_links(repo, number, head, pages))
+        print(section)  # in the log before the write that can be refused
+        if go:
+            posted = send("POST", f"repos/{repo}/issues/{ticket['number']}/comments", {"body": section}).get("html_url")
+            if not posted:
+                raise kit.Refused(f"the forge's answer to the section names no comment: read #{ticket['number']}, then run the walk again")
+            print(f"cap: posted the section: {posted}")
+            time.sleep(1)
+    reply = (f"Moved to the collection ticket at the review cap: #{ticket['number']}, section "
+             f"\"Pull request #{number} at `{head[:7]}`\": {posted or '(the address of the section once posted)'}")
+    for t, _ in found:
+        if any(moved(c) for c in t["comments"]["nodes"][1:]):
+            continue
+        if not go:
+            print(f"would reply in {t.get('path')} ({t['id']}): {reply}")
+            continue
+        get("graphql", "-f", f"query={REPLY}", "-f", f"thread={t['id']}", "-f", f"body={reply}")
+        print(f"replied in {t.get('path')} ({t['id']})")
+        time.sleep(1)
+    if not go:
+        print(f"cap: {len(found)} finding threads to move and resolve (plan only: add --go)")
+        return True
+    resolve_threads(repo, number, True, get, head, pages)  # it reads the threads again, with the replies
+    still = [t for t, _ in finding_threads(fetch_threads(repo, number, get)) if not t["isResolved"]]
+    for t in still:
+        print(f"still open: {t.get('path')} ({t.get('id')})")
+    print(f"cap: {len(found) - len(still)} of {len(found)} finding threads moved to #{ticket['number']} and resolved")
+    return not still
+
+
+def cap_command(repo, number, go, reading=None, get=None, pages=None, send=None):
+    """The exit code of the cap command: 0 when the walk ended with every finding thread resolved, or
+    printed its plan; 1 when it was refused, the reading (a file) or a read of the forge or a write
+    failed, a thread is still open, or the run was interrupted. What was written before a failure
+    stands, and the walk skips it when run again."""
+    try:
+        done = cap_walk(repo, number, go, kit.read(reading) if reading else "", get, pages, send)
+    except BaseException as e:  # whatever failed, an interrupt too: the lines printed above are what was written
+        print(f"ERROR: cap stopped: {type(e).__name__}: {e}. What is printed above as posted, replied or resolved "
+              "stands; run the walk again, it skips what is there")
+        print(LIMIT)
+        return 1
+    print(LIMIT)
+    return 0 if done else 1
+
+
 def fetch_threads(repo, number, get=None):
     owner, name = repo.split("/")
     threads, after = [], None
@@ -444,6 +622,16 @@ def fixture_issues(path=None):
     return issues if isinstance(issues, list) and all(isinstance(i, dict) for i in issues) else []
 
 
+def fixture_json(name):
+    """A payload the forge really sent, from tools/fixtures/ (see tools/fixtures/SOURCES.txt). None when the
+    file is missing or unreadable, which fails the cases that need it instead of crashing the suite."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", name), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 def fixture_answer():
     """The forge's real answer to RESOLVE (see tools/fixtures/SOURCES.txt). {} when the file is missing
     or unreadable, which fails the cases that need it instead of crashing the suite."""
@@ -474,6 +662,12 @@ def self_test():
             return fn()
         except BaseException as e:
             return e
+
+    def quietly(fn):
+        """(what fn returned or raised, what it printed)."""
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            out = got(fn)
+        return out, printed.getvalue()
 
     check("clean title and messages", title_errors("Add the knowledge store", ["Add the lint\n\nbody"]), None)
     for literal in ("[skip ci]", "[ci skip]", "[no ci]", "[skip actions]", "[actions skip]"):
@@ -802,12 +996,6 @@ def self_test():
             get.asked = asked
             return get, written
 
-        def quietly(fn):
-            """(what fn returned or raised, what it printed)."""
-            with contextlib.redirect_stdout(io.StringIO()) as printed:
-                out = got(fn)
-            return out, printed.getvalue()
-
         resolved_lines = lambda printed: sum(line.startswith("resolved ") for line in printed.splitlines())  # the error text says "resolved" too
         slept = []
         saved_sleep, time.sleep = time.sleep, slept.append
@@ -940,6 +1128,206 @@ def self_test():
     joined = (got(lambda: option(["resolve", "--head=abc", "--go"], "--head")), got(lambda: option(["resolve", "--head="], "--head")))
     cases.append(("option: --head=SHA is read too, and --head= without a value is refused",
                   joined[0] == "abc" and type(joined[1]) is kit.Refused, repr(joined)))
+
+    # the walk at the cap, over the thread, the note and the comment on the lows issue of pull request 82 as captured
+    def captured_list(name, *keys):
+        """A list in a captured payload, under its keys; [] for a file that is missing or of another shape,
+        which fails the fixture cases below instead of crashing the suite."""
+        value = fixture_json(name)
+        for key in keys:
+            value = value.get(key) if isinstance(value, dict) else None
+        return value if isinstance(value, list) else []
+
+    walked = captured_list("cap-thread.json", "data", "repository", "pullRequest", "reviewThreads", "nodes")
+    notes82, lows82 = captured_list("cap-notes.json"), captured_list("cap-lows.json")
+    cap_found = finding_threads(walked)
+    opening = cap_found[0][0]["comments"]["nodes"][0] if cap_found else {}
+    reviewed = (opening.get("originalCommit") or {}).get("oid") or ""
+    cases.append(("fixture: the captured thread of pull request 82 holds two findings made on its head, with the address and the time of its first post",
+                  len(cap_found) == 1 and len(cap_found[0][1]) == 2 and len(reviewed) == 40 and all(f.get("sha") == reviewed for f in cap_found[0][1])
+                  and bool(opening.get("url")) and bool(opening.get("createdAt")), repr(walked)[:300]))
+    note_mark = MARK.search((notes82[0].get("body") or "") if notes82 else "")
+    noted = [f for f in json.loads(note_mark.group(1)) if f.get("severity") == "low" and f.get("sha") == reviewed] if note_mark else []
+    cases.append(("fixture: the captured note names five lows on that head, collected in #19, and the captured comment on #19 opens with the lows header of pull request 82 at that head and lists five",
+                  len(noted) == 5 and "collected in #19" in notes82[0]["body"] and len(lows82) == 1 and bool(reviewed)
+                  and first_line(lows82[0]) == kit.lows_header(82, reviewed) and len(re.findall(r"^- \*\*low\*\* ", lf(lows82[0]["body"]), re.M)) == 5,
+                  repr((notes82, lows82))[:300]))
+    cases.append(("words: one word, two with and, three with a comma and and",
+                  [words_and([]), words_and(["a"]), words_and(["a", "b"]), words_and(["a", "b", "c"])] == ["", "a", "a and b", "a, b and c"], ""))
+    if cap_found and len(noted) == 5 and lows82 and listed_issues:
+        captured_ticket = listed_issues[0]  # the collection ticket #39 as captured, its body with the section of pull request 33
+        posted_at = "https://github.com/o/n/issues/39#issuecomment-1"
+
+        def walking(rounds=kit.ROUND_CAP, thread=None, notes=None, lows=None, open_tickets=None, ticket_comments=(), flips=True):
+            """A forge for cap_walk. The pull request is the recorded one, edited to carry `rounds` rounds and the captured
+            thread's commit as its head. Its one thread is `thread`, or the captured one edited to be unresolved with its
+            first post alone (the walk's reply and resolution are what a case writes). `notes` on it and `lows` on #19 are
+            the captured ones unless given; the tickets are `open_tickets`, else the captured #39 with `ticket_comments`.
+            A reply adds itself to the thread (an edit: the captured first post with the reply's text under a writer's
+            login), the resolution marks it resolved unless `flips` is false, and a post on #39 is answered with the
+            captured comment on #19, edited to carry the posted text and an address on #39. `log` lists the writes,
+            `reads` the lists asked for."""
+            state = json.loads(json.dumps(thread or dict(walked[0], isResolved=False, comments={"nodes": walked[0]["comments"]["nodes"][:1]})))
+            log, reads, comments = [], [], [json.loads(json.dumps(c)) for c in ticket_comments]
+            pr = labelled(f"{kit.ROUND_LABEL}{rounds}")
+            pr["head"] = dict(pr.get("head") or {}, sha=reviewed)
+
+            def get(*args):
+                if args[0] == "graphql" and "addPullRequestReviewThreadReply" in args[2]:
+                    body = next(a for a in args if a.startswith("body="))[len("body="):]
+                    log.append(("reply", next(a for a in args if a.startswith("thread=")), body))
+                    state["comments"]["nodes"].append(dict(state["comments"]["nodes"][0], body=body, author={"login": "a-maintainer"},
+                                                           authorAssociation="OWNER"))
+                    return {}  # the walk reads nothing of the answer: the threads it reads back are its proof
+                if args[0] == "graphql" and args[2].startswith("query=mutation"):
+                    log.append(("resolve", args[-1]))
+                    state["isResolved"] = state["isResolved"] or flips
+                    return json.loads(json.dumps(captured))
+                if args[0] == "graphql":
+                    page = {"nodes": [json.loads(json.dumps(state))], "pageInfo": {"hasNextPage": False}}
+                    return {"data": {"repository": {"pullRequest": {"reviewThreads": page}}}}
+                if "/contents/" in args[0]:
+                    return {"sha": "blob"}
+                return json.loads(json.dumps(pr))
+
+            def pages(path):
+                reads.append(path)
+                answers_ = {"labels=": [captured_ticket] if open_tickets is None else open_tickets, "/issues/82/comments": notes82 if notes is None else notes,
+                            "/issues/19/comments": lows82 if lows is None else lows, "/issues/39/comments": comments}
+                return json.loads(json.dumps(next(v for k, v in answers_.items() if k in path)))
+
+            def send(method, path, payload):
+                log.append(("post", path, payload["body"]))
+                comments.append(dict(lows82[0], body=payload["body"], html_url=posted_at))
+                return comments[-1]
+            return get, pages, send, log, reads
+
+        def walk(go, **forge):
+            """(what cap_walk returned or raised, what it printed, the writes, the reads)."""
+            get, pages, send, log, reads = walking(**forge)
+            out, printed = quietly(lambda: cap_walk("o/n", 82, go, "What the code at that head shows.", get, pages, send))
+            return out, printed, log, reads
+
+        section82 = (
+            "## Pull request #82 at `fb82fbc`\n\n"
+            "One review round on 2026-10-29, the cap, at fb82fbcd5dcbdc39dd0b0fb1acceed0f18d7a139; it merges with what it has. "
+            "Open threads of that review, resolved on the pull request with a pointer here:\n\n"
+            "- **medium** `compiler/Kurz.Compiler.Tests/FileTests.cs` line 65: Windows refusal is checked against the emitter's own constant, "
+            "and not at its line https://github.com/SymoHTL/Kurz/pull/82#discussion_r4418327083\n"
+            "- **medium** `compiler/Kurz.Compiler.Tests/FileTests.cs` line 183: The positive control does not test the limit its comment "
+            "describes (in the thread above)\n\n"
+            "What the code at that head shows.\n\n"
+            "The 5 low findings of the same review: https://github.com/SymoHTL/Kurz/issues/19#issuecomment-6509258622.\n")
+        slept = []
+        saved_sleep, time.sleep = time.sleep, slept.append
+        try:
+            out, printed, log, reads = walk(False)
+            cases.append(("cap: the section holds the head, the day, each finding with its thread's address once, the reading and the lows with their address, as the walk by hand wrote it for this thread",
+                          section82 in printed, printed))
+            cases.append(("cap: without --go the section and the replies are printed and nothing is written",
+                          out is True and log == [] and "would reply in" in printed, repr((out, log))))
+            slept.clear()
+            out, printed, log, reads = walk(True)
+            reply = next((w[2] for w in log if w[0] == "reply"), "")
+            cases.append(("cap: with --go the section is posted on the ticket, the thread gets the reply that links the ticket and the section, then it is resolved, a second apart",
+                          out is True and [w[0] for w in log] == ["post", "reply", "resolve"] and log[0][1] == "repos/o/n/issues/39/comments"
+                          and log[0][2] == section82 and reply.startswith("Moved to the collection ticket at the review cap: #39, ")
+                          and reply.endswith(posted_at) and moved_to("o/n", [39])({"body": reply, "authorAssociation": "OWNER"})
+                          and slept == [1, 1, 1] and sum("labels=" in r for r in reads) == 1, repr((out, log, slept, reads))))
+            out, printed, log, reads = walk(True, rounds=kit.ROUND_CAP - 1)
+            cases.append(("cap: a pull request below the cap is refused before any list is read and anything is written",
+                          type(out) is kit.Refused and "below the cap" in str(out) and reads == [] and log == [], repr((out, reads, log))))
+            refusals = [walk(True, open_tickets=t)[::2] for t in ([], [captured_ticket, dict(captured_ticket, number=40)])]
+            cases.append(("cap: no open collection ticket, and two, are refused before anything is written",
+                          all(type(out) is kit.Refused and "the section goes on one" in str(out) and log == [] for out, log in refusals), repr(refusals)))
+            elsewhere = json.loads(json.dumps(walked[0]))
+            elsewhere["isResolved"], elsewhere["comments"]["nodes"] = False, elsewhere["comments"]["nodes"][:1]
+            elsewhere["comments"]["nodes"][0]["originalCommit"] = {"oid": "0" * 40}  # edited: a finding of another head
+            out, printed, log, reads = walk(True, thread=elsewhere)
+            cases.append(("cap: an open finding made on another commit than the head is refused before anything is written",
+                          type(out) is kit.Refused and f"not on the head {reviewed}" in str(out) and log == [], repr((out, log))))
+            asking = json.loads(json.dumps(walked[0]))  # edited: unresolved, a person's question after the reviewer's post
+            asking["isResolved"] = False
+            asking["comments"]["nodes"] = asking["comments"]["nodes"][:1] + [dict(asking["comments"]["nodes"][0], body="Why not fix it here?",
+                                                                                   author={"login": "someone"}, authorAssociation="NONE")]
+            out, printed, log, reads = walk(True, thread=asking)
+            cases.append(("cap: a thread a person wrote in is refused before anything is written",
+                          type(out) is kit.Refused and "a person wrote" in str(out) and log == [], repr((out, log))))
+            again = json.loads(json.dumps(walked[0]))  # as captured: the reply of the walk by hand, resolved; edited: unresolved
+            again["isResolved"] = False
+            on_ticket = dict(lows82[0], body=section82, html_url=posted_at)  # edited: the section posted on #39
+            out, printed, log, reads = walk(True, thread=again, ticket_comments=[on_ticket])
+            cases.append(("cap: a section that is on the ticket is not posted again, and a thread a reply moved gets no second one: the walk resolves it",
+                          out is True and [w[0] for w in log] == ["resolve"] and "already" in printed, repr((out, log))))
+            by_hand = dict(captured_ticket, body=lf(captured_ticket.get("body")) + "\n\n## Pull request #82 at `fb82fbc`\n\nx\n")  # edited: the section in the body
+            out, printed, log, reads = walk(True, open_tickets=[by_hand])
+            cases.append(("cap: a section in the ticket's body, as the walks by hand wrote it, is not posted again, and the reply links the ticket",
+                          out is True and [w[0] for w in log] == ["reply", "resolve"] and log[0][2].endswith(captured_ticket.get("html_url") or "?"),
+                          repr((out, log))))
+            out, printed, log, reads = walk(True, thread=dict(walked[0], isResolved=True))
+            cases.append(("cap: with no finding thread open nothing is written and no low is read",
+                          out is True and log == [] and not any("/issues/82/" in r for r in reads), repr((out, log, reads))))
+            out, printed, log, reads = walk(True, lows=[])
+            cases.append(("lows: notes that name lows no comment on their issue shows are refused before anything is written",
+                          type(out) is kit.Refused and "name 5 low findings" in str(out) and "show 0" in str(out) and log == [], repr((out, log))))
+            other = [dict(notes82[0], body=notes82[0]["body"].replace(reviewed, "1" * 40))]  # edited: the lows of another head
+            out, printed, log, reads = walk(False, notes=other)
+            cases.append(("lows: no note on the head is a review without lows, said so, and the issue is not read",
+                          out is True and "The same review reported no low findings." in printed and not any("/issues/19/" in r for r in reads),
+                          repr((out, reads))))
+            twice = [notes82[0], dict(notes82[0], id=2)]  # edited: a second part of five
+            parts = [lows82[0], dict(lows82[0], html_url="https://github.com/SymoHTL/Kurz/issues/19#issuecomment-2")]
+            out, printed, log, reads = walk(False, notes=twice, lows=parts)
+            cases.append(("lows: two parts are counted together and both addresses are named",
+                          out is True and "The 10 low findings of the same review: https://github.com/SymoHTL/Kurz/issues/19#issuecomment-6509258622 and "
+                          "https://github.com/SymoHTL/Kurz/issues/19#issuecomment-2." in printed, printed[-300:]))
+            outsider = {"user": {"login": "someone"}, "author_association": "NONE"}  # edited: the author
+            stranger_note = walk(False, notes=[dict(notes82[0], **outsider)])
+            stranger_part = walk(False, lows=[lows82[0], dict(lows82[0], **outsider)])  # a copy from an outsider
+            cases.append(("lows: a note from someone who may not write here names no low, and a comment from one shows none",
+                          "The same review reported no low findings." in stranger_note[1]
+                          and "The 5 low findings of the same review: https://github.com/SymoHTL/Kurz/issues/19#issuecomment-6509258622." in stranger_part[1],
+                          repr((stranger_note[0], stranger_part[0]))))
+            out, printed, log, reads = walk(True, ticket_comments=[dict(on_ticket, **outsider)])
+            cases.append(("cap: a section on the ticket from someone who may not write here is none: the section is posted",
+                          out is True and [w[0] for w in log] == ["post", "reply", "resolve"], repr((out, log))))
+            out, printed, log, reads = walk(False)
+            cases.append(("lows: the issue is read from a minute before the first note, so a comment of the note's second is listed too",
+                          "repos/o/n/issues/19/comments?per_page=100&since=2026-10-29T21:56:14Z" in reads, repr(reads)))
+            nameless = [dict(notes82[0], body=notes82[0]["body"].replace("collected in #19", "collected"))]  # edited: no issue named
+            out, printed, log, reads = walk(True, notes=nameless)
+            cases.append(("lows: a note that names lows and no issue is refused before anything is written",
+                          type(out) is kit.Refused and "no issue that collects them" in str(out) and log == [], repr((out, log))))
+            get, pages, send, log, reads = walking()
+            out, printed = quietly(lambda: cap_walk("o/n", 82, True, "What the code at that head shows.", get, pages, lambda *a: {}))
+            cases.append(("cap: the section is printed before its post, and an answer to the post that names no comment is refused before any reply",
+                          type(out) is kit.Refused and "names no comment" in str(out) and section82 in printed and log == [], repr((out, log))))
+            out, printed, log, reads = walk(False, rounds=kit.ROUND_CAP + 1)
+            cases.append(("cap: a pull request past the cap names its rounds",
+                          out is True and f"{kit.ROUND_CAP + 1} review rounds, the last on 2026-10-29, the cap, at {reviewed}" in printed, printed[:400]))
+            one = cap_section(82, reviewed, kit.ROUND_CAP, cap_found, "", (1, ["u"]))
+            cases.append(("cap: one low finding is named in the singular", one.endswith("\nThe 1 low finding of the same review: u.\n"), one[-200:]))
+            out, printed, log, reads = walk(True, flips=False)
+            cases.append(("cap: a finding thread still open when the threads are read back after the resolution is a failed walk, named",
+                          out is False and "still open: compiler/Kurz.Compiler.Tests/FileTests.cs" in printed, repr((out, printed[-300:]))))
+            silent = json.loads(json.dumps(walked[0]))  # edited: unresolved, a post of the reviewer whose findings name no file
+            silent["isResolved"], silent["comments"]["nodes"] = False, silent["comments"]["nodes"][:1]
+            silent["comments"]["nodes"][0]["body"] = MARK.sub(lambda m: "<!-- kurz-review:findings [] -->", silent["comments"]["nodes"][0]["body"])
+            out, printed, log, reads = walk(False, thread=silent)
+            cases.append(("cap: a post of the reviewer that names no file is listed with its address",
+                          out is True and f"- a post of the reviewer that names no file {opening.get('url')}\n" in printed, printed[:600]))
+            get, pages, send, log, reads = walking(rounds=kit.ROUND_CAP - 1)
+            refused_code = quietly(lambda: cap_command("o/n", 82, True, None, get, pages, send))
+            get, pages, send, log, reads = walking(flips=False)
+            open_code = quietly(lambda: cap_command("o/n", 82, True, None, get, pages, send))
+            get, pages, send, log, reads = walking()
+            done_code = quietly(lambda: cap_command("o/n", 82, True, None, get, pages, send))
+            cases.append(("cap: the command ends 1 on a refusal and on a thread still open, 0 when every finding thread is resolved, and prints the known limit",
+                          [refused_code[0], open_code[0], done_code[0]] == [1, 1, 0] and "cap stopped" in refused_code[1]
+                          and all("re-run the gates after resolving" in printed for _, printed in (refused_code, done_code)),
+                          repr((refused_code, open_code[0], done_code[0]))))
+        finally:
+            time.sleep = saved_sleep
     return kit.report(cases)
 
 
@@ -951,6 +1339,8 @@ if __name__ == "__main__":
         number = pr_number(sys.argv)
         if gate == "resolve":
             sys.exit(resolve_command(kit.repo(), number, "--go" in sys.argv, expect=option(sys.argv, "--head")))
+        if gate == "cap":
+            sys.exit(cap_command(kit.repo(), number, "--go" in sys.argv, option(sys.argv, "--analysis")))
         errors, scanned = run_gate(gate, kit.repo(), number)
     except (kit.Refused, KeyError, IndexError, ValueError, TypeError, AttributeError) as e:
         print(f"ERROR: pr gate {gate or '?'} could not run: {type(e).__name__}: {e}")
