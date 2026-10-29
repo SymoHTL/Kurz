@@ -1,3 +1,4 @@
+using System.Numerics;
 using Kurz.Compiler.Syntax;
 
 namespace Kurz.Compiler.Semantics;
@@ -103,4 +104,29 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     public bool IsGeneric => TypeParameters.Count > 0;
 
     public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
+}
+
+/// <summary>
+/// An <c>enum</c> (D12) with its values in the order written, each name once, and their numbers where the declaration writes them
+/// (D18); a declaration that breaks D20's shape keeps its values and has its uses of the numbers read without a second error (E1).
+/// </summary>
+public sealed class EnumSymbol(string name, TypeDeclaration declaration)
+{
+    public string Name { get; } = name;
+
+    public TypeDeclaration Declaration { get; } = declaration;
+
+    public List<string> Values { get; } = [];
+
+    /// <summary>The number of each value, in the order of <see cref="Values"/>; empty where the declaration writes none.</summary>
+    public List<BigInteger> Numbers { get; } = [];
+
+    /// <summary>Set where the declaration breaks D20's shape, which was reported at the declaration.</summary>
+    public bool Refused { get; set; }
+
+    public bool Numbered => Numbers.Count > 0;
+
+    public int Line => Declaration.Line;
+
+    public int IndexOf(string value) => Values.IndexOf(value);
 }

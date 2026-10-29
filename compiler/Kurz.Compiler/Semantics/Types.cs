@@ -102,6 +102,16 @@ public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArg
     public override int GetHashCode() => HashCode.Combine(Symbol.Name, TypeArguments.Count);
 }
 
+/// <summary>An <c>enum</c> (D12), one type per declaration.</summary>
+public sealed record EnumType(EnumSymbol Symbol) : KurzType
+{
+    public override string Text => Symbol.Name;
+
+    public bool Equals(EnumType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol);
+
+    public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
+}
+
 /// <summary>
 /// A union (D9). The cases are flat and distinct, in the order written; the first is the success
 /// case of a result (O1). Two unions are one type when they have the same first case and the same
@@ -286,6 +296,7 @@ public static class Types
             (ErrorType, ErrorType) => true,
             (ListType x, ListType y) => Same(x.Element, y.Element),
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
+            (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
             (FunctionType x, FunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (PointerType x, PointerType y) => Same(x.Pointee, y.Pointee),

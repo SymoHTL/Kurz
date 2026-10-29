@@ -1095,9 +1095,9 @@ public sealed class CheckerTests
     public void A_written_union_type_keeps_every_case_and_names_them_all()
     {
         // O4: the success case alone unwraps; a type the success converts to counts as the success
-        var find = "data NotFound\ndata Invalid\n\nint | NotFound | Invalid Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    if id == 2 {\n        return Invalid\n    }\n    return NotFound\n}\n\n";
+        var find = "data NotFound\ndata Rejected\n\nint | NotFound | Rejected Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    if id == 2 {\n        return Rejected\n    }\n    return NotFound\n}\n\n";
         Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(find + "int | NotFound result = Find(1)\nmatch result {\n    int n => print(n)\n    NotFound => print(\"none\")\n}"));
-        Clean(find + "int | NotFound | Invalid result = Find(1)\nmatch result {\n    int n => print(n)\n    NotFound => print(\"none\")\n    Invalid => print(\"invalid\")\n}");
+        Clean(find + "int | NotFound | Rejected result = Find(1)\nmatch result {\n    int n => print(n)\n    NotFound => print(\"none\")\n    Rejected => print(\"invalid\")\n}");
         Assert.Equal([(ErrorIds.UnlistedCase, 14)], Errors(find + "long result = Find(1)\nprint(result)"));
     }
 
@@ -1112,8 +1112,8 @@ public sealed class CheckerTests
         Clean(find + "value = Find(2) else {\n    NotFound => {\n        print(\"none\")\n        0\n    }\n}\nprint(value)");
         Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors(find + "int OrZero(int id) {\n    value = Find(id) else {\n        NotFound => \"none\"\n    }\n    return value\n}\n\nprint(OrZero(1))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors(find + "int OrZero(int id) {\n    value = Find(id) else {\n        string s => 0\n    }\n    return value\n}\n\nprint(OrZero(1))"));
-        Assert.Equal([(ErrorIds.UnlistedCase, 11)], Errors("data NotFound\ndata Invalid\n\nint | NotFound | Invalid Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\nvalue = Find(2) else {\n    NotFound => 0\n}\nprint(value)"));
-        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors("data NotFound\ndata Invalid\ndata Other\n\nint | NotFound | Invalid Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\nvalue = Find(2) else {\n    Other => 0\n    NotFound => 0\n}\nprint(value)")); // E1: which case the wrong arm meant is unknown, so `Invalid` is not reported beside it
+        Assert.Equal([(ErrorIds.UnlistedCase, 11)], Errors("data NotFound\ndata Rejected\n\nint | NotFound | Rejected Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\nvalue = Find(2) else {\n    NotFound => 0\n}\nprint(value)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors("data NotFound\ndata Rejected\ndata Other\n\nint | NotFound | Rejected Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\nvalue = Find(2) else {\n    Other => 0\n    NotFound => 0\n}\nprint(value)")); // E1: which case the wrong arm meant is unknown, so `Rejected` is not reported beside it
         Assert.Equal([(ErrorIds.UnreachableArm, 4)], Errors("int One() => 1\n\nx = One() else {\n    else => 0\n}\nprint(x)")); // a call with no case beside its success
         Assert.Equal([(ErrorIds.Syntax, 13)], Errors(find + "int OrZero(int id) {\n    value = Find(id) else {\n        NotFound => {\n            if id > 0 {\n                print(1)\n            }\n        }\n    }\n    return value\n}\n\nprint(OrZero(1))")); // O5: the arm neither recovers, returns nor throws
         Assert.Equal([(ErrorIds.Redeclared, 12)], Errors(find + "int OrZero(int id) {\n    value = Nope(id) else {\n        NotFound id => 0\n    }\n    return value\n}\n\nprint(OrZero(1))").Where(e => e.Item1 == ErrorIds.Redeclared).ToList()); // after a call that did not type, a binding is still checked
@@ -1733,12 +1733,56 @@ public sealed class CheckerTests
         Assert.Equal(["1: a data type in C's layout, `extern \"C\" data` (R17)"], NotSupported("extern \"C\" data Point(int X, int Y)\nprint(Point(1, 2).X)", grants: "native"));
     }
 
+    // ---- enums (D12, D18, D20) ------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("enum Plan { Free = 1.5, Pro = 2 }\n\nprint(Plan.Pro)", "type-mismatch", 1)] // a constant of another type: T1's id (section 4, an assumption there)
+    [InlineData("enum Plan { Free = 1u, Pro = 2 }\n\nprint(Plan.Pro)", "sign-mix", 1)]
+    [InlineData("int One() {\n    return 1\n}\n\nenum Plan { Free = One(), Pro = 2 }\n\nprint(Plan.Pro)", "enum-number", 5)] // no constant
+    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan.From(1))", "enum-number", 3)]
+    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan.Free >= Plan.Pro)", "enum-number", 3)]
+    [InlineData("enum Plan { Free = 1, Pro = 2 }\n\nprint(Plan(2))", "syntax", 3)]
+    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan)", "syntax", 3)]
+    [InlineData("enum Plan { Free = 1, Pro = 2 }\n\nf = Plan.From\nprint(1)", "syntax", 3)]
+    [InlineData("extern \"C\" enum Plan { Free, Pro }\n\nprint(Plan.Free)", "syntax", 1)]
+    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan.Gold)", "unknown-name", 3)]
+    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan.Free == 0)", "type-mismatch", 3)] // a value is not an integer (D12)
+    [InlineData("enum Plan { Free, Pro }\nenum Tier { Free, Pro }\n\nprint(Plan.Free == Tier.Free)", "type-mismatch", 4)]
+    [InlineData("enum Plan { Free, Pro }\n\nmatch Plan.Pro {\n    Plan.Free => print(1)\n    Plan.Free => print(2)\n    Plan.Pro => print(3)\n}", "unreachable-arm", 5)]
+    [InlineData("enum Plan { Free, Pro }\n\nmatch Plan.Pro {\n    Plan p => print(p)\n    Plan.Free => print(2)\n}", "unreachable-arm", 5)]
+    [InlineData("enum Plan { Free, Pro }\n\nmatch Plan.Pro {\n    Plan.Free => print(1)\n    Plan.Pro => print(2)\n    else => print(3)\n}", "unreachable-arm", 6)]
+    [InlineData("enum Plan { Free = 1, Pro = 2 }\n\nvoid Show(int n) {\n    match Plan.From(n) {\n        Plan.Free => print(1)\n        Invalid => print(0)\n    }\n}\n\nShow(1)", "match-not-exhaustive", 4)]
+    [InlineData("enum Plan { Free, Pro }\n\nextern \"C\" {\n    int abs(Plan p)\n}\n\nprint(1)", "native-type", 4)] // its layout is the compiler's (R16)
+    public void An_enum_shape_the_rules_do_not_give_is_its_one_error(string program, string id, int line)
+    {
+        Assert.Equal([(id, line)], Errors(program, grants: "native"));
+    }
+
+    [Fact]
+    public void An_enum_whose_declaration_was_reported_carries_no_second_error()
+    {
+        // E1 with D20: the numbers, `From` and an order of a declaration that broke D20 carry nothing more
+        Assert.Equal([(ErrorIds.EnumNumber, 1)], Errors("enum Plan { Free = 1, Pro = 1 }\nprint(Plan.Pro.Number)\nprint(Plan.From(1))\nprint(Plan.Free < Plan.Pro)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("enum Plan { Free, Pro, Free }\nprint(Plan.Free)\nprint(Plan.Pro)"));
+    }
+
+    [Fact]
+    public void An_enum_value_is_a_constant_and_a_copied_value()
+    {
+        // F12 with D12: a default can be a value of an enum (section 4, an assumption there)
+        Clean("enum Plan { Free, Pro }\n\nvoid Show(Plan p = Plan.Pro) {\n    print(p)\n}\n\nShow()");
+
+        // M7: a read of an enum value that a `mut` argument changes in the same expression is a copy, as a number's is; a string's is the error
+        const string Program = "data Two(T A, int B)\n\nint Change(mut T p) {\n    p = V\n    return 1\n}\n\nmut q = W\nprint(Two(q, Change(mut q)))";
+        Clean("enum Plan { Free, Pro }\n" + Program.Replace("T ", "Plan ", StringComparison.Ordinal).Replace("V", "Plan.Pro", StringComparison.Ordinal).Replace("W", "Plan.Free", StringComparison.Ordinal));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(Program.Replace("T ", "string ", StringComparison.Ordinal).Replace("V", "\"b\"", StringComparison.Ordinal).Replace("W", "\"a\"", StringComparison.Ordinal)));
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
     [InlineData("class Counter(mut int Count)\n\nc = Counter(0)\nprint(c)", "1: a class (chapter 7)")]
     [InlineData("interface Shape {\n    int Area()\n}", "1: an interface (K6, K10)")]
-    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan.Free)", "1: an enum (D12)")]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read)", "1: a flags type (D13)")]
     [InlineData("string? Email(int id) => null\n\nprint(1)", "1: a nullable type (N1)")]
     [InlineData("x = null\nprint(1)", "1: null (N1)")]

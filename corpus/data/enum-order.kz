@@ -1,0 +1,15 @@
+// expect: output
+// | true
+// | false
+// | true
+// rules: D18
+
+enum Plan { Free = 2, Pro = 1 }
+
+bool Below(Plan a, Plan b) {
+    return a < b
+}
+
+print(Plan.Free > Plan.Pro)
+print(Below(Plan.Free, Plan.Pro))
+print(Below(Plan.Pro, Plan.Free))

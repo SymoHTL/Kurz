@@ -361,7 +361,7 @@ public sealed partial class Checker
     /// </summary>
     private static bool HasText(KurzType type, List<DataSymbol> seen) => type switch
     {
-        PrimitiveType => true,
+        PrimitiveType or EnumType => true,
         ErrorType => true,
         ListType l => HasText(l.Element, seen),
         UnionType u => u.Cases.All(c => HasText(c, seen)),
@@ -425,6 +425,12 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (enums.ContainsKey(n.Name))
+        {
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here: a value of it is written `{n.Name}.Name` (D12)");
+            return Typed.Error;
+        }
+
         if (IsUnreadName(n.Name))
         {
             return Typed.Error;
@@ -480,6 +486,11 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
+            if (enums.TryGetValue(n.Name, out var enumSymbol))
+            {
+                return EnumValue(enumSymbol, m.Member, m.Line);
+            }
+
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
             {
                 if (HasBody(data))
@@ -501,6 +512,30 @@ public sealed partial class Checker
 
         var target = CheckExpression(m.Target, null);
         return MemberOf(target.Type, m.Member, m.Line);
+    }
+
+    /// <summary>D12: <c>Plan.Free</c>, a value of the enum, a constant (section 4); <c>From</c> is called (D18), and any other name is no value of it (V10).</summary>
+    private Typed EnumValue(EnumSymbol symbol, string member, int line)
+    {
+        var index = symbol.IndexOf(member);
+        if (index >= 0)
+        {
+            return new Typed(new EnumType(symbol), new EnumConstant(index));
+        }
+
+        if (member == "From")
+        {
+            Report(ErrorIds.Syntax, line, $"`{symbol.Name}.From` is a function, and no value stands here: it is called, `{symbol.Name}.From(n)` (D18, F11)");
+            return Typed.Error;
+        }
+
+        if (symbol.Refused && symbol.Declaration.Values.Any(v => v.Name == member))
+        {
+            return Typed.Error; // a value its declaration wrote and that was reported there (E1)
+        }
+
+        Report(ErrorIds.UnknownName, line, $"`{symbol.Name}` has no value `{member}` (D12, V10)");
+        return Typed.Error;
     }
 
     /// <summary>
@@ -570,6 +605,19 @@ public sealed partial class Checker
                     break;
                 }
 
+            case EnumType e when member == "Number":
+                if (e.Symbol.Refused)
+                {
+                    return new Typed(Types.Int); // the declaration's error was reported there (E1)
+                }
+
+                if (!e.Symbol.Numbered)
+                {
+                    Report(ErrorIds.EnumNumber, line, $"`{e}` numbers none of its values, so a value of it has no `Number` (D20)");
+                    return Typed.Error;
+                }
+
+                return new Typed(Types.Int); // D18
             case UnionType:
                 Report(ErrorIds.TypeMismatch, line, $"a `{type}` is one of its cases only after a `match` (D9)");
                 return Typed.Error;
@@ -1181,6 +1229,18 @@ public sealed partial class Checker
         {
             ok = true;
         }
+        else if (left.Type is EnumType e && Types.Same(left.Type, right.Type))
+        {
+            // D12: equal when the same value; D18: in order by their numbers, as C# orders them (section 4, the owner, 2026-10-29), and an
+            // enum that numbers none has no order (D20, section 4, an assumption there)
+            if (!equality && !e.Symbol.Numbered && !e.Symbol.Refused)
+            {
+                Report(ErrorIds.EnumNumber, b.Line, $"`{op}` orders values by their numbers, and `{e}` numbers none of its values (D18, D20)");
+                return new Typed(Types.Bool);
+            }
+
+            ok = true;
+        }
         else if (equality)
         {
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
@@ -1201,6 +1261,9 @@ public sealed partial class Checker
             (CharConstant l, CharConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
             (StringConstant l, StringConstant r) => Compare(b.Operator, string.CompareOrdinal(l.Value, r.Value), true),
             (BoolConstant l, BoolConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
+            (EnumConstant l, EnumConstant r) when left.Type is EnumType { Symbol: { Numbered: true } numbered } =>
+                Compare(b.Operator, numbered.Numbers[l.Index].CompareTo(numbered.Numbers[r.Index]), true),
+            (EnumConstant l, EnumConstant r) when equality => Compare(b.Operator, l.Index.CompareTo(r.Index), true),
             _ => (bool?)null,
         };
         return new Typed(Types.Bool, result is null ? null : new BoolConstant(result.Value));

@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: D20
+
+enum Plan { Free, Pro, Free }
+
+print(Plan.Pro)

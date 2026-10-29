@@ -406,6 +406,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   their case `InvalidUtf8` a data type every file sees, declared before the file's own, and the lossy text, where a
   sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
   owner, 2026-10-29, "Union, as Rust");
+- `enum` (D12, D18, D20): a value is its number, or its place among the values where the declaration
+  writes none, in the smallest of `i8`, `i16` and `i32` that holds every one, signed where a number is
+  negative, as Rust stores the value of an enum without fields (section 4, an assumption there); `==`
+  and `!=` compare the values, `<`, `<=`, `>` and `>=` their numbers, `.Number` widens the value to
+  an `int`, `Plan.From(n)` picks the value by a switch on the numbers or makes the case `Invalid`, a
+  data type every file sees, and the text of a value is a literal of its name (A4);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
@@ -603,7 +609,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 258 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 56 the
+full and the emitter does not emit, 3 of the 262 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 54 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -822,7 +828,7 @@ brace. Each is pinned as it is, so that a fix shows.
 The checker (`Semantics/`) takes a tree the parser read without an error and checks it against
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
-generic data type as a base), 5 (data types: D1 to D11, D14 and D15), 6 (values: M1 to M5, M7, and
+generic data type as a base), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
 M9 for lists), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow) and 11's raw forms (R7, R10 to R17), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A8, A10 for a type parameter, A11, A12 and A14. A program's
@@ -857,7 +863,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `constant-overflow`, `constant-divide-by-zero`, `inexact-literal`, `redeclared`, `unknown-name`,
 `unused-variable`, `assign-immutable`, `capture-assign`, `mut-required`, `mut-at-call`, `changed-while-held`,
 `argument-mismatch`, `ambiguous-call`, `cannot-infer`, `duplicate-function`,
-`default-not-constant`, `base-cycle`, `missing-return`, `throw-needs-value`, `unlisted-case`,
+`default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
 `naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, and
@@ -871,8 +877,8 @@ comes from the construct (E1), but where the construct holds an error of its own
 dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
-which is the complete one: a `class`, an `interface`, an `enum`
-or a `flags` type and a value of one (chapter 7, D12, D13, and the A-rules of their text); `null`,
+which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
+(chapter 7, D13, and the A-rules of their text); `null`,
 a nullable type, `?.` and `??` (chapter 4), `null` where no pointer stands among them; `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
@@ -900,8 +906,8 @@ a second file of a program and what F9 makes visible across files, since the che
 file; `Map` (M8, M9, M10), an assignment into an index or into a path through one, a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's
-name (D16 to D20), and `equal by` (K8); among the bases of a `data` type a class, an interface, an
-enum or a flags type (chapter 7, K10, D12, D13), the explicit form of inheritance (K17) and a
+name (D16), and `equal by` (K8); among the bases of a `data` type a class, an interface or a
+flags type (chapter 7, K10, D13), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
@@ -935,8 +941,10 @@ round can ask about it by the rule's id.
   does not have (T17, T19), in a type as in a call, one on a callee without type parameters
   included (`print<int>(1)`, a conversion, a function value, a list's `Add` and `Where`), where a
   generic type written with none is `cannot-infer` (the reading on T27 with M9 and T19 below); a
-  path as an arm (`p.X`, which the parser reads as a pattern for a value of an enum, D12), where C9
-  has a literal; a `match` used as a value whose every arm throws, or whose arm is a statement or a
+  path as an arm that names no value of an enum (`p.X`, which the parser reads as a pattern for one,
+  D12), where C9 has a literal; an enum's name where a value stands (`print(Plan)`), a call of it
+  (`Plan(2)`, the C# form section 4 rejects for `Plan.From(2)`), `Plan.From` without its call, and
+  `extern "C"` before an `enum`, which no rule gives a layout of C; a `match` used as a value whose every arm throws, or whose arm is a statement or a
   block, where C9 has an arm with a value; an arm of a postfix `else` whose last statement neither
   recovers, returns nor throws, the three things O5 lets it do, or that names a literal where O5
   has a case type; an `else` that follows no call, which the parser reports, since it reads the
@@ -981,6 +989,13 @@ round can ask about it by the rule's id.
   classes; the checker reads it for data types.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
+- E1 with D20: an enum whose declaration was reported, a name written twice, a member's name or a
+  number that breaks D20, gives `.Number`, `From` and an order of its values without a second
+  error, and keeps every value but the one the defect named.
+- M7 with D12: a value of an enum is copied, as a number is, being a number in memory (above), as
+  Rust copies an enum without fields that derives `Copy`.
+- R16 with D12: an enum cannot cross to C, `native-type`, since its layout is the compiler's
+  (above) and no rule gives it C's, as Rust asks `#[repr(C)]` of an enum it passes to C.
 - V9 with M9 and T17: a data type named as a built-in (`data List`, `data int`, `data print`) is
   `redeclared`, since no type could name it.
 - V9 with A1 and F6: a variable named `print`, or named as a function or a type of the file, is

@@ -1,0 +1,19 @@
+// expect: output
+// | pro
+// | invalid
+// | free
+// rules: D12
+
+enum Plan { Free = 1, Pro = 2 }
+
+void Show(int n) {
+    match Plan.From(n) {
+        Plan.Free => print("free")
+        Plan.Pro => print("pro")
+        Invalid => print("invalid")
+    }
+}
+
+Show(2)
+Show(7)
+Show(1)

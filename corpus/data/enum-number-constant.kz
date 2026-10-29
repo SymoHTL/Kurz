@@ -1,0 +1,16 @@
+// expect: output
+// | -1
+// | 5
+// | true
+// rules: D20
+
+enum Level { Low = -1, High = 2 + 3 }
+enum Never {}
+
+bool Below(Level a, Level b) {
+    return a < b
+}
+
+print(Level.Low.Number)
+print(Level.High.Number)
+print(Below(Level.Low, Level.High))

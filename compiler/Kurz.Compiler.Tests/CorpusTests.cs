@@ -40,8 +40,8 @@ public sealed class CorpusTests
 
     /// <summary>
     /// The rules the checker does not read: those of the null chapter, the class chapter and the
-    /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9), <c>enum</c> and <c>flags</c>
-    /// (D12, D13, D17 to D20), the body of a data type (D16),
+    /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9), <c>flags</c>
+    /// (D13, D17, D19), the body of a data type (D16),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
     /// and maps (M6, M8, M10), and the texts of class instances, maps and sets of flags (A5 to A7, A9,
     /// A10, A13, A15). A case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header.
@@ -49,7 +49,7 @@ public sealed class CorpusTests
     private static bool OutsideTheChecker(string rule) =>
         rule[0] is 'N' or 'K'
         || rule is "R1" or "R2" or "R3" or "R4" or "R5" or "R6" or "R8" or "R9"
-        || rule is "D12" or "D13" or "D16" or "D17" or "D18" or "D19" or "D20" or "F9" or "F10" or "T19" or "M6" or "M8" or "M10"
+        || rule is "D13" or "D16" or "D17" or "D19" or "F9" or "F10" or "T19" or "M6" or "M8" or "M10"
         || rule is "A5" or "A6" or "A7" or "A9" or "A10" or "A13" or "A15";
 
     /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct; an entry whose case cites a rule outside the checker is redundant and refused.</summary>
@@ -59,7 +59,7 @@ public sealed class CorpusTests
         ["types/generic-cannot-infer-classes.kz"] = "classes (chapter 7)",
         ["values/map.kz"] = "a Map and `??` (M9, N4)",
         ["values/mut-method-through-field.kz"] = "a class (chapter 7)",
-        ["values/text.kz"] = "an enum, a nullable type and null (D12, N1)",
+        ["values/text.kz"] = "a nullable type and null (N1)",
         ["values/text-more.kz"] = "a flags type (D13)",
     };
 

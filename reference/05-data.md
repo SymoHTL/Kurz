@@ -599,7 +599,13 @@ print(Item(7, ProductId: 8).Count)
 It is the short form of a union of cases without fields (D8, D9): a `match` on it has to list
 every value (O8), and two values are equal when they are the same value. A value is not an
 integer. It has a number only where the declaration writes one; how that is written and read is
-D18.
+D18. An arm names a value as an expression names it, `Plan.Free =>`, and an arm of the type,
+`Plan p =>`, takes every value. A `match` on a union that holds an enum lists the enum's values
+beside the union's other cases: `Plan.Free`, `Plan.Pro` and `Invalid` are the arms of a `match` on
+`Plan | Invalid`, and the union's case `Plan` is covered when every value has its arm (§4, the
+owner, 2026-10-29). An arm of a value that an earlier arm names, or that follows the arm of its
+type, and an arm of the type or `else` after arms that name every value, are `unreachable-arm`
+(C4).
 
 Case: [data/enum.kz](../corpus/data/enum.kz)
 ```kurz
@@ -628,6 +634,38 @@ void Show(Plan p) {
 }
 
 Show(Plan.Pro)
+```
+
+Case: [data/enum-arm-after-every-value.kz](../corpus/data/enum-arm-after-every-value.kz)
+```kurz
+enum Plan { Free, Pro }
+
+void Show(Plan p) {
+    match p {
+        Plan.Free => print("free")
+        Plan.Pro => print("pro")
+        Plan other => print(other)
+    }
+}
+
+Show(Plan.Pro)
+```
+
+Case: [data/enum-union-arms.kz](../corpus/data/enum-union-arms.kz)
+```kurz
+enum Plan { Free = 1, Pro = 2 }
+
+void Show(int n) {
+    match Plan.From(n) {
+        Plan.Free => print("free")
+        Plan.Pro => print("pro")
+        Invalid => print("invalid")
+    }
+}
+
+Show(2)
+Show(7)
+Show(1)
 ```
 
 ### D13 (decided, §4) Flags
@@ -747,11 +785,13 @@ print(r.Has(Access.Read))
 A declaration writes the number of a value after `=`: `enum Plan { Free = 1, Pro = 2 }`. The two
 directions are members of the type. `Plan.Pro.Number` is the number of a value. `Plan.From(2)`
 is the value of a number, and its result is `Plan | Invalid`: a number that no value has is an
-outcome (O1), not an exception. The record marks as *(assumed)* that a declaration writes a
-number for every value or for none, that the number is an `int`, and that `Invalid` is the type
-that input from outside yields (record, section 13); an arm names it as it names any case type
-(C4), and the reference does not declare it because the standard library will. The
-case declares no `Invalid` for that reason. What a declaration that breaks the shape gets is D20.
+outcome (O1), not an exception. `Invalid` is a `data` type without fields that every file sees,
+declared before the file's own types, so that a file's own `data Invalid` is `redeclared` (V9);
+an arm names it as it names any case type (C4) (§4, the owner, 2026-10-29). Two values of an enum
+compare with `<`, `<=`, `>` and `>=` by their numbers, as C# compares them: with `Free = 2` and
+`Pro = 1`, `Plan.Free > Plan.Pro` is `true` (§4, the owner, 2026-10-29). A value of an enum is a
+constant, which a default can be (F12) *(assumed: as §4 marks it)*. What a declaration that
+breaks the shape gets, and an order of values without numbers, is D20.
 
 Case: [data/enum-number.kz](../corpus/data/enum-number.kz)
 ```kurz
@@ -768,18 +808,100 @@ match Plan.From(7) {
 }
 ```
 
-### D20 (assumed, §4) Numbers that do not fit the shape of D18
+Case: [data/invalid-redeclared.kz](../corpus/data/invalid-redeclared.kz)
+```kurz
+data Invalid
+
+print(Invalid)
+```
+
+Case: [data/enum-order.kz](../corpus/data/enum-order.kz)
+```kurz
+enum Plan { Free = 2, Pro = 1 }
+
+bool Below(Plan a, Plan b) {
+    return a < b
+}
+
+print(Plan.Free > Plan.Pro)
+print(Below(Plan.Free, Plan.Pro))
+print(Below(Plan.Pro, Plan.Free))
+```
+
+### D20 (decided, §4) Numbers that do not fit the shape of D18
 
 A declaration that writes the same number for two values, one that writes a number for some values
 and not for all, and a use of `.Number` or `From` on an `enum` whose declaration writes no number
 are the compile error `enum-number`. The alternative, C#'s, lets two values share a number and makes
 them equal, which gives `From` a value nobody can predict; the error keeps D12's "a value has a
-number only where one is written" simple. The owner accepted this reading by its id on 2026-10-09,
-in round 13, without its text shown, so it is assumed and not decided.
+number only where one is written" simple. As Rust reads a declaration, a value's name written twice
+is `redeclared`, and so is a value named `Number` or `From`, which the member would hide; a number
+is a constant expression of type `int`, a negative one and one folded from literals (T18) among
+them, and one past the range of an `int` is `constant-overflow`; an enum without values is a type
+(§4, the owner, 2026-10-29). A comparison with `<`, `<=`, `>` or `>=` of values of an enum whose
+declaration writes no number is `enum-number`, and so is a number that is not a constant
+expression, while one of another type gets the error its type gets where an `int` is required (T1)
+*(assumed: as §4 marks them)*.
 
 Case: [data/enum-number-twice.kz](../corpus/data/enum-number-twice.kz)
 ```kurz
 enum Plan { Free = 1, Pro = 1 }
+
+print(Plan.Pro.Number)
+```
+
+Case: [data/enum-number-some.kz](../corpus/data/enum-number-some.kz)
+```kurz
+enum Plan { Free = 1, Pro }
+
+print(Plan.Free.Number)
+```
+
+Case: [data/enum-number-none.kz](../corpus/data/enum-number-none.kz)
+```kurz
+enum Plan { Free, Pro }
+
+print(Plan.Pro.Number)
+```
+
+Case: [data/enum-order-no-number.kz](../corpus/data/enum-order-no-number.kz)
+```kurz
+enum Plan { Free, Pro }
+
+print(Plan.Free < Plan.Pro)
+```
+
+Case: [data/enum-value-twice.kz](../corpus/data/enum-value-twice.kz)
+```kurz
+enum Plan { Free, Pro, Free }
+
+print(Plan.Pro)
+```
+
+Case: [data/enum-value-member-name.kz](../corpus/data/enum-value-member-name.kz)
+```kurz
+enum Plan { Free, From }
+
+print(Plan.Free)
+```
+
+Case: [data/enum-number-constant.kz](../corpus/data/enum-number-constant.kz)
+```kurz
+enum Level { Low = -1, High = 2 + 3 }
+enum Never {}
+
+bool Below(Level a, Level b) {
+    return a < b
+}
+
+print(Level.Low.Number)
+print(Level.High.Number)
+print(Below(Level.Low, Level.High))
+```
+
+Case: [data/enum-number-past-int.kz](../corpus/data/enum-number-past-int.kz)
+```kurz
+enum Plan { Free = 1, Pro = 2147483648 }
 
 print(Plan.Pro.Number)
 ```

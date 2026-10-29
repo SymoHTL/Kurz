@@ -1,0 +1,21 @@
+// expect: output
+// | Free
+// | [Free, Pro]
+// | Box { P = Pro }
+// | plan Pro
+// | Invalid
+// rules: A4
+
+enum Plan { Free = 1, Pro = 2 }
+data Box(Plan P)
+
+mut xs = List<Plan>()
+xs.Add(Plan.Free)
+xs.Add(Plan.Pro)
+p = Plan.Free
+print(p)
+print(xs)
+print(Box(Plan.Pro))
+print("plan {xs[1]}")
+Plan | Invalid none = Plan.From(9)
+print(none)

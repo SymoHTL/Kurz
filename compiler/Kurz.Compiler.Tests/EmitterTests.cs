@@ -11,7 +11,8 @@ namespace Kurz.Compiler.Tests;
 /// The emitter's decisions that no corpus case pins: where a refused write and a refused allocation end the program and what they
 /// say (design record, section 6; the owner, 2026-10-23, "Caller passes it" and "Id + size"), the test build left unoptimised and
 /// the line tables (section 2; the owner, 2026-10-29), the texts of the integers at their edges (A2), a conversion from an unsigned type to a signed one (T20), the empty
-/// string's pointer (R15), the largest string (T15; the owner, 2026-10-23, "C#'s limit"), the runtime of every target emitted, and a
+/// string's pointer (R15), the largest string (T15; the owner, 2026-10-23, "C#'s limit"), the integer an enum's value is stored in (D12;
+/// section 4, an assumption there), the runtime of every target emitted, and a
 /// construct of the runtime the emitter does not lay out, which is the compiler's defect.
 /// </summary>
 public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -216,5 +217,22 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var e = Assert.Throws<InvalidOperationException>(() => Compile("print(1)\n", runtime));
         Assert.StartsWith($"{path}{Runtime.Directory(target)}.kz:", e.Message, StringComparison.Ordinal);
         Assert.Contains("(T15)", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_enum_value_is_stored_in_the_smallest_integer_that_holds_it_and_read_by_its_sign()
+    {
+        // section 4, an assumption there: as Rust stores an enum without fields, signed where a number is negative
+        const string Program = "enum Few { A, B }\nenum Signed { Low = -1, High = 5 }\nenum Unsigned { High = 200, Low = 1 }\nenum Middle { A = 300 }\nenum Wide { A = 70000 }\n\n"
+            + "bool Above(Unsigned x, Unsigned y) {\n    return x > y\n}\n\nbool Below(Signed x, Signed y) {\n    return x < y\n}\n\n"
+            + "print(Few.B)\nprint(Signed.High)\nprint(Signed.Low.Number)\nprint(Unsigned.Low)\nprint(Unsigned.High.Number)\nprint(Above(Unsigned.High, Unsigned.Low))\n"
+            + "print(Below(Signed.Low, Signed.High))\nprint(Middle.A)\nprint(Wide.A)\nprint(Wide.A.Number)";
+        var program = Emit(Program);
+        foreach (var (name, ir) in (List<(string, string)>)[("Few", "i8"), ("Signed", "i8"), ("Unsigned", "i8"), ("Middle", "i16"), ("Wide", "i32")])
+        {
+            Assert.Contains($"@\"text.{name}\"({ir} %a0)", program.Ir, StringComparison.Ordinal);
+        }
+
+        Ran(Toolchain.Run(toolchain.Build(program, "enum-layout")), 0, ["B", "High", "-1", "Low", "200", "true", "true", "A", "A", "70000"], string.Empty);
     }
 }

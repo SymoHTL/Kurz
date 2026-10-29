@@ -52,6 +52,9 @@ public enum CallKind
 
     /// <summary><c>string.FromUtf8Lossy(b)</c> (T15), a string of the bytes with U+FFFD for each sequence that is not UTF-8.</summary>
     FromUtf8Lossy,
+
+    /// <summary><c>Plan.From(n)</c> (D18), the value of the <c>enum</c> whose number is <c>n</c> or the case <c>Invalid</c>; <see cref="CallInfo.Target"/> is the enum.</summary>
+    EnumFrom,
 }
 
 /// <summary>

@@ -133,6 +133,8 @@ public sealed partial class Emitter
 
             case UnitConstant when type is DataType:
                 return "zeroinitializer"; // D8: a structure of no fields
+            case EnumConstant e when type is EnumType enumType:
+                return IntegerText(Lower.EnumStored(enumType.Symbol, e.Index), type); // D12, D18: its number, or its place
             default:
                 throw Unsupported(line, $"a constant of type `{type}`");
         }
@@ -219,6 +221,8 @@ public sealed partial class Emitter
                 return ListCount(EmitExpression(m.Target));
             case ListType list when m.Member == "Pointer":
                 return ListPointer(EmitExpression(m.Target), list.Element);
+            case EnumType e when m.Member == "Number":
+                return EnumNumber(EmitExpression(m.Target), e); // D18
 
             default:
                 throw Unsupported(m.Line, $"the member `{m.Member}` of {Lower.Refusal(targetType)}");
@@ -506,6 +510,11 @@ public sealed partial class Emitter
             return TimeComparison(op, left, leftType, right, rightType);
         }
 
+        if (leftType is EnumType e)
+        {
+            return fn.Value($"icmp {Condition(op, Lower.EnumSigned(e.Symbol))} {Ir(leftType)} {left}, {right}"); // D12, D18: by their numbers
+        }
+
         if (leftType is PointerType or CFunctionType && rightType is PointerType or CFunctionType)
         {
             return fn.Value($"icmp {Condition(op, signed: false)} ptr {left}, {right}"); // R10: the addresses, compared as numbers that are never negative
@@ -670,8 +679,8 @@ public sealed partial class Emitter
     /// <summary>The text of a value as <see cref="TextOf"/> makes it, a temporary of the region where it made one.</summary>
     private string Text(string value, KurzType type, int line) => MakesText(type) ? Temp(TextOf(value, type, line), Types.String) : TextOf(value, type, line);
 
-    /// <summary>Whether <see cref="TextOf"/> makes a text for a value of the type, which holds a count its caller lets go of: for every type but a string, which is its own text, and a <c>bool</c>, whose texts are literals.</summary>
-    private static bool MakesText(KurzType type) => type is not PrimitiveType { Kind: Primitive.String or Primitive.Bool };
+    /// <summary>Whether <see cref="TextOf"/> makes a text for a value of the type, which holds a count its caller lets go of: for every type but a string, which is its own text, and a <c>bool</c> and an enum, whose texts are literals.</summary>
+    private static bool MakesText(KurzType type) => type is not (PrimitiveType { Kind: Primitive.String or Primitive.Bool } or EnumType);
 
     /// <summary>
     /// The text of a value as `print` and an interpolation show it (A1, L6), as a <c>%kz.str</c>, made by the runtime: a string as it
@@ -709,6 +718,8 @@ public sealed partial class Emitter
 
             case DataType or UnionType:
                 return DerivedText(value, type, line);
+            case EnumType e:
+                return EnumText(value, e); // A4
             case ListType list:
                 return ListText(value, list, line);
             default:

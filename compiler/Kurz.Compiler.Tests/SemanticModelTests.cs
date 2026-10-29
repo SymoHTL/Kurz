@@ -576,6 +576,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     }
 
                     break;
+                case TypeDeclaration { Kind: TypeDeclarationKind.Enum }:
+                    break; // D12: its values are constants, which the expressions that name them carry
                 case TypeDeclaration t:
                     Need(Try(() => model.DataTypeOf(t)), t.Line, $"type `{t.Name}`");
                     Defaults(t.PrimaryConstructor ?? []);
@@ -667,6 +669,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case NameExpression n:
                     Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant), n.Line, $"what `{n.Name}` means");
                     break;
+                case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is EnumConstant:
+                    break; // D12: a value of an enum, a constant a code generator reads whole
                 case MemberAccess m:
                     Expression(m.Target);
                     break;
