@@ -38,7 +38,7 @@ public sealed partial class Emitter
             CallKind.ListClear => EmitListClear(c),
             CallKind.FileOpen or CallKind.FileCreate or CallKind.FileReadAll or CallKind.FileWriteAll or CallKind.FileDelete or CallKind.FileRename
                 or CallKind.FileSize or CallKind.FileExists or CallKind.DirectoryCreate or CallKind.DirectoryList or CallKind.DirectoryDelete
-                or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose => EmitFileCall(c, info),
+                or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept => EmitFileCall(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),
         };
         if (result is UnionType union && !Types.Same(TypeOf(c), union))

@@ -1,0 +1,21 @@
+// expect: output
+// | ConnectionRefused
+// | 111
+// rules: S9
+
+void | IoError Refused() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    port = listener.Port
+    listener.Close()
+    match TcpStream.Connect("127.0.0.1:{port}") {
+        TcpStream => print("connected")
+        IoError e => {
+            print(e.Kind)
+            print(e.Code)
+        }
+    }
+}
+
+Refused() else {
+    IoError e => print(e)
+}

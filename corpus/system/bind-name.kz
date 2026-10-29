@@ -1,0 +1,18 @@
+// expect: output
+// | true
+// | connected
+// rules: S9
+
+void | IoError Named() {
+    listener = TcpListener.Bind("localhost:0")
+    print(listener.Port > 0)
+    client = TcpStream.Connect("localhost:{listener.Port}")
+    server = listener.Accept()
+    client.Close()
+    server.Close()
+    print("connected")
+}
+
+Named() else {
+    IoError e => print(e)
+}

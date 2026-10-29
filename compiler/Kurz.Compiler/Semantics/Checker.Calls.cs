@@ -752,16 +752,9 @@ public sealed partial class Checker
                 return CheckListAllocate(c, new ListType(Types.Byte), "Bytes.Allocate"); // R15, as above
             }
 
-            if (n.Name is "File" or "Directory")
+            if (n.Name is "File" or "Directory" or "TcpListener" or "TcpStream")
             {
-                return CheckFileFunction(n.Name, m, c); // S2, S6 to S8
-            }
-
-            if (n.Name is "TcpListener" or "TcpStream")
-            {
-                NotSupported(m.Line, "a socket (S9)");
-                CheckArgumentsLoosely(c);
-                return Typed.Error;
+                return CheckFileFunction(n.Name, m, c); // S2, S6 to S9
             }
 
             if (enums.TryGetValue(n.Name, out var enumSymbol))
@@ -846,9 +839,9 @@ public sealed partial class Checker
             }
         }
 
-        if (target.Type is HandleType)
+        if (target.Type is HandleType handle && !(handle.Kind == Handle.TcpListener && m.Member == "Port"))
         {
-            return CheckFileMethod(m, c); // S3 to S5
+            return CheckFileMethod(handle, m, c); // S3 to S5, S9
         }
 
         var member = MemberOf(target.Type, m.Member, m.Line);

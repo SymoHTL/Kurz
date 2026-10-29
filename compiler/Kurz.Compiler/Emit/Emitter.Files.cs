@@ -7,9 +7,10 @@ using UnionType = Kurz.Compiler.Semantics.UnionType;
 namespace Kurz.Compiler.Emit;
 
 /// <summary>
-/// Files (chapter 13; design record, section 12). A file is the address of its handle's block: the count of the values that hold it,
-/// 8 bytes, its descriptor, 4 bytes, -1 once it is closed, and from its 16th byte the path it was opened with, a string of which the
-/// block holds a count; 32 bytes. The last value that lets go of it closes the descriptor, ignoring an error of the close, as Rust's
+/// Files and sockets (chapter 13; design record, section 12). A file, a listener and a stream are the address of their handle's block:
+/// the count of the values that hold it, 8 bytes, its descriptor, 4 bytes, -1 once it is closed, a listener's port, 4 bytes, and from its
+/// 16th byte the path or the address it was opened with, a string of which the block holds a count; 32 bytes. A stream a listener's
+/// <c>Accept</c> gives holds the listener's address (S9). The last value that lets go of it closes the descriptor, ignoring an error of the close, as Rust's
 /// <c>Drop</c> of a <c>File</c> ignores it, lets go of the path and frees the block (S5; the owner, 2026-10-29, "At the last count, as Rust
 /// Drop"). A call on a file calls the runtime of Linux, whose result is a number of 0 or more or a failure below 0, which the runtime's
 /// <c>ErrorKind</c> and <c>ErrorCode</c> read into an <c>IoError</c> with the path the call was about (S1); the runtime of Windows gives none of
@@ -17,8 +18,8 @@ namespace Kurz.Compiler.Emit;
 /// </summary>
 public sealed partial class Emitter
 {
-    /// <summary>What a build for Windows says <c>not supported</c> with at a call on a file (S11).</summary>
-    internal const string NotOnWindows = "a call on a file, which the runtime of Windows does not give (S11)";
+    /// <summary>What a build for Windows says <c>not supported</c> with at a call on a file or a socket (S11).</summary>
+    internal const string NotOnWindows = "a call on a file or a socket, which the runtime of Windows does not give (S11)";
 
     /// <summary>The bytes of a handle's block.</summary>
     private const string HandleSize = "32";
@@ -29,18 +30,18 @@ public sealed partial class Emitter
     /// <summary>The result of a call on a file being emitted: its union, the case <c>IoError</c>, the slot that takes the value and the block after it.</summary>
     private sealed record FileOutcome(UnionType Union, DataType Error, string Slot, string Done);
 
-    /// <summary>The IR name of a <c>pub</c> function of the runtime of the target, which only a program's calls on files call.</summary>
+    /// <summary>The IR name of a <c>pub</c> function of the runtime of the target, which only a program's calls on files and sockets call.</summary>
     private string SysFunction(string name) => Instance(
         sys.Tree.Statements.OfType<FunctionDeclaration>()
             .Where(d => d.Name == name && (d.Modifiers & Modifiers.Pub) != 0)
             .Select(d => sys.Model.FunctionOf(d))
-            .SingleOrDefault() ?? throw new InvalidOperationException($"{sys.File} has no `pub` function `{name}`, which a call on a file calls"),
+            .SingleOrDefault() ?? throw new InvalidOperationException($"{sys.File} has no `pub` function `{name}`, which a call on a file or a socket calls"),
         NoMap);
 
     /// <summary>Whether the data type is <c>IoError</c>, which no file can declare beside the one every file sees (S1, V9).</summary>
     private static bool IsIoError(KurzType type) => type is DataType { Symbol.Name: "IoError" };
 
-    /// <summary>S2 to S8: a call on a path or on a file, whose result is its success or the case <c>IoError</c>.</summary>
+    /// <summary>S2 to S9: a call on a path, an address, a file or a socket, whose result is its success or the case <c>IoError</c>.</summary>
     private string EmitFileCall(CallExpression c, CallInfo info)
     {
         if (target != Target.Linux)
@@ -50,7 +51,7 @@ public sealed partial class Emitter
 
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
-        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose)
+        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept)
         {
             var handle = EmitExpression(((MemberAccess)Unwrap(c.Callee)).Target);
             switch (info.Kind)
@@ -60,6 +61,9 @@ public sealed partial class Emitter
                     break;
                 case CallKind.FileWrite:
                     EmitFileWrite(c, info, outcome, handle);
+                    break;
+                case CallKind.TcpAccept:
+                    EmitAccept(outcome, handle);
                     break;
                 default:
                     EmitFileClose(outcome, handle);
@@ -79,7 +83,7 @@ public sealed partial class Emitter
         return fn.Value($"load {Ir(union)}, ptr {outcome.Slot}");
     }
 
-    /// <summary>S2, S6, S7, S8: a function of <c>File</c> or <c>Directory</c> on a path, the error naming the first path.</summary>
+    /// <summary>S2, S6, S7, S8: a function of <c>File</c> or <c>Directory</c> on a path, the error naming the first path; S9: a listener or a stream on an address, the error naming it.</summary>
     private void EmitPathCall(CallKind kind, FileOutcome o, List<string> arguments)
     {
         var path = arguments[0];
@@ -89,6 +93,27 @@ public sealed partial class Emitter
             case CallKind.FileOpen or CallKind.FileCreate:
                 {
                     var r = SysCall("OpenFile", $"ptr {c}, i1 {(kind == CallKind.FileCreate ? "true" : "false")}");
+                    FreePath(c, path);
+                    FailBelowZero(o, r, path);
+                    Succeed(o, NewHandle(fn.Value($"trunc i64 {r} to i32"), path));
+                    break;
+                }
+
+            case CallKind.TcpBind:
+                {
+                    var port = fn.Alloca("i32", "port");
+                    var r = SysCall("Listen", $"ptr {c}, ptr {port}");
+                    FreePath(c, path);
+                    FailBelowZero(o, r, path);
+                    var listener = NewHandle(fn.Value($"trunc i64 {r} to i32"), path);
+                    fn.Emit($"store i32 {fn.Value($"load i32, ptr {port}")}, ptr {HandleField(listener, 12)}");
+                    Succeed(o, listener);
+                    break;
+                }
+
+            case CallKind.TcpConnect:
+                {
+                    var r = SysCall("Connect", $"ptr {c}");
                     FreePath(c, path);
                     FailBelowZero(o, r, path);
                     Succeed(o, NewHandle(fn.Value($"trunc i64 {r} to i32"), path));
@@ -218,6 +243,15 @@ public sealed partial class Emitter
         var r = SysCall("CloseFile", $"i32 {fd}");
         FailBelowZero(o, r, HandlePath(handle));
         Succeed(o, null);
+    }
+
+    /// <summary>S9: a listener's <c>Accept()</c>, a stream that holds the listener's address.</summary>
+    private void EmitAccept(FileOutcome o, string handle)
+    {
+        var r = SysCall("Accept", $"i32 {HandleDescriptor(handle)}");
+        var address = HandlePath(handle);
+        FailBelowZero(o, r, address);
+        Succeed(o, NewHandle(fn.Value($"trunc i64 {r} to i32"), address));
     }
 
     /// <summary>M9: <c>list.Clear()</c>, through the place of the list's variable.</summary>

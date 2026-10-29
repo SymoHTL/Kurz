@@ -1,0 +1,18 @@
+// expect: output
+// | invalid input: 127.0.0.1
+// | invalid input: 127.0.0.1:65536
+// | 0
+// rules: S9
+
+match TcpListener.Bind("127.0.0.1") {
+    TcpListener => print("bound")
+    IoError e => print(e)
+}
+
+match TcpStream.Connect("127.0.0.1:65536") {
+    TcpStream => print("connected")
+    IoError e => {
+        print(e)
+        print(e.Code)
+    }
+}

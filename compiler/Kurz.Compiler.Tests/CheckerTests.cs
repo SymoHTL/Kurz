@@ -1795,6 +1795,19 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_listener_accepts_and_has_a_port_and_a_stream_reads_writes_and_closes_as_a_file()
+    {
+        // S9 with V10: the functions and the members of a listener and a stream, every other one `unknown-name`
+        const string Program = "void | IoError Serve() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    int port = l.Port\n    s = l.Accept()\n    mut buffer = Bytes()\n    s.Read(mut buffer, port)\n    s.Write(buffer)\n    s.Close()\n    l.Close()\n    c = TcpStream.Connect(\"localhost:{port}\")\n    c.Close()\n}\n\nServe() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors(Program.Replace("TcpListener.Bind", "TcpListener.Listen", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("l.Accept()", "l.Read()", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("s.Close()", "s.Accept()", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(Program.Replace("c.Close()", "print(c.Port)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors(Program.Replace("TcpStream.Connect(\"localhost:{port}\")", "TcpStream.Connect(port)", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void A_read_takes_its_list_as_mut_and_clear_changes_a_mut_list()
     {
         // S3 with M7: the list a read adds to is a `mut` argument, written so at the call
@@ -1848,8 +1861,6 @@ public sealed class CheckerTests
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\ndata Sub(int X) : Counter\n\nmut s = Sub(1, 2)\ns.Increment()", "2: the body of a data type (D16)")]
     [InlineData("static int Twice(int n) {\n    return \"x\"\n}\n\nprint(Twice(\"a\"))", "1: the modifier `static` of a method (K7, M6)")]
     [InlineData("data User(string Name)\n\nmut u = User(\"a\")\nu?.Name = \"b\"", "4: `?.` (N5)")]
-    [InlineData("void | IoError Serve() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n}\n\nServe() else {\n    IoError e => print(e)\n}", "2: a socket (S9)")]
-    [InlineData("void Serve(TcpStream s) {\n    print(1)\n}\n\nprint(2)", "1: a socket (S9)")]
     public void A_construct_of_a_chapter_the_checker_does_not_read_is_not_supported_and_carries_no_error(string program, string first)
     {
         // the helper asserts that no diagnostic is an error: what stands inside the construct is read with its diagnostics dropped, so that
