@@ -291,7 +291,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // strings in variables, fields, a `with`, a path assignment, an arm's name while the arm changes the subject's variable, a
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
-    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, and a string made in a `raw` block
+    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block, and
+    // an interpolation of one hole beside a call that changes the place the hole read
     private const string Strings = """
         data Person(string Name, int Age)
         data Tag(string Label)
@@ -317,6 +318,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(a)
             print(b)
         }
+
+        string Rename(mut string t) {
+            t = Made(21)
+            return Made(22)
+        }
+
+        string First(string a, string b) => a
 
         mut first = Made(1)
         second = first
@@ -384,6 +392,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(node)
         print(Raw(1))
         print(Raw(2).Bytes.Count)
+        mut named = Made(23)
+        print(First("{named}", Rename(mut named)))
+        print(named)
         """;
 
     private static readonly string[] StringsPrint =
@@ -408,11 +419,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "Node { Label = n19, Next = Node { Label = n20, Next = Leaf } }", // strings a value laid out as a block holds
         "1!",
         "2",
+        "n23", // one hole of a string is a new value, which the call that changes the place it read leaves whole
+        "n21",
     ];
 
     // every way out of a block a string is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, an assignment over a variable, a lambda's environment in a
-    // variable and in a list, and a list of strings; each string of 1024 bytes, joined from halves the join lets go of
+    // variable and in a list, a list of strings, and an interpolation of one hole of 4096 bytes; each other string of 1024 bytes,
+    // joined from halves the join lets go of
     private const string StringRounds = """
         data Pair(string A, int B)
 
@@ -465,7 +479,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             mut ss = List<string>()
             ss.Add(Make(10))
             ss.Add(a)
-            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096
+            lone = "{Make(12)}"
+            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096
         }
         print(round)
         print(total)

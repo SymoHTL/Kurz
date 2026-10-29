@@ -1,0 +1,10 @@
+// expect: error changed-while-held at 10
+// rules: M7
+
+string Rename(mut string t) {
+    t = "{t}!"
+    return "b"
+}
+
+mut name = "a{1}"
+print("{name}{Rename(mut name)}")

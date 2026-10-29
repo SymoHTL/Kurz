@@ -190,7 +190,11 @@ of function values and copied types (§4, the owner, 2026-10-25). Two fields of 
 variable stay two values. The error stands at the line of what changes the value, an argument after
 `mut`, the call of a `mut` method or an assignment, once for each of them however many reads it meets.
 *(assumed, as §4 marks it: one error per change, E1; a `data` type is copied where every type derived
-from it is; a hole of an interpolation makes a new value)* The reads of an expression run left to
+from it is; a hole of a type other than `string` is made text where it stands, a new value)* A hole of a `string` holds
+the string it read until the interpolation is made, so a hole after it that changes what it read is the error, as
+Rust's `format!` borrows its arguments; an interpolation is a new value, one of a single hole of a `string` among them,
+as Rust's `format!` makes a new `String`, so a call around it holds nothing of what the hole read (§4, the owner,
+2026-10-29, "Refuse, as Rust" and "New value, as format!"). The reads of an expression run left to
 right as written: a call's receiver before its arguments, an operand before the one after it, and the
 target of `with` or of an index before what follows it, as F12 has a call's arguments and as Rust
 evaluates operands, so a copied read before a `mut` call holds the value from before the call. The
@@ -545,6 +549,32 @@ numbers.Add(1)
 print(Look(numbers) else {
     NotFound => Grow(mut numbers) + 4
 })
+```
+
+Case: [values/mut-read-hole.kz](../corpus/values/mut-read-hole.kz)
+```kurz
+string Rename(mut string t) {
+    t = "{t}!"
+    return "b"
+}
+
+mut name = "a{1}"
+print("{name}{Rename(mut name)}")
+```
+
+Case: [values/mut-read-hole-new-value.kz](../corpus/values/mut-read-hole-new-value.kz)
+```kurz
+string Rename(mut string t) {
+    t = "{t}!"
+    return "b"
+}
+
+string First(string a, string b) => a
+
+mut name = "a{1}"
+print(First("{name}", Rename(mut name)))
+print(name)
+print("{Rename(mut name)}{name}")
 ```
 
 ### M8 (decided, §4) One family of collections

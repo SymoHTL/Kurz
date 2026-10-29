@@ -1,0 +1,17 @@
+// expect: output
+// | a1
+// | a1!
+// | ba1!!
+// rules: M7
+
+string Rename(mut string t) {
+    t = "{t}!"
+    return "b"
+}
+
+string First(string a, string b) => a
+
+mut name = "a{1}"
+print(First("{name}", Rename(mut name)))
+print(name)
+print("{Rename(mut name)}{name}")

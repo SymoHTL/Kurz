@@ -799,7 +799,19 @@ public sealed class CheckerTests
 
         var name = "string Name(mut string t) {\n    t = \"b\"\n    return \"c\"\n}\n\nmut s = \"a\"\n";
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors(name + "print(s == Name(mut s))")); // a `string` is not copied
-        Clean(name + "print(\"{s}{Name(mut s)}\")"); // a hole is made text where it stands
+        // a hole of a string holds it until the interpolation is made, as Rust's `format!` borrows its arguments (the owner,
+        // 2026-10-29, "Refuse, as Rust"); a hole closes on its line, so what changes a place inside one is a `mut` argument
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors(name + "print(\"{s}{Name(mut s)}\")"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors(name + "print(\"{s}, {Name(mut s)}\")")); // text between them
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors(name + "print(\"{s}{\"{Name(mut s)}!\"}\")")); // a hole inside a hole
+        Clean(name + "print(\"{Name(mut s)}{s}\")"); // the read after the change
+        var card = "data Card(string Title, int Size)\n\nint Retitle(mut Card c) {\n    c = Card(\"b\", 1)\n    return 1\n}\n\nmut card = Card(\"a\", 2)\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(card + "print(\"{card.Title}{Retitle(mut card)}\")")); // a path into the variable
+        Clean(card + "n = 1\nprint(\"{card.Size}{Retitle(mut card)}{n}\")"); // a hole of another type is made text where it stands
+        var lone = "string Name(mut string t) {\n    t = \"b\"\n    return \"c\"\n}\n\nstring First(string a, string b) => a\n\nstring Three(string a, string b, string c) => a\n\nmut s = \"a\"\n";
+        Clean(lone + "print(First(\"{s}\", Name(mut s)))"); // one hole of a string is a new value (the owner, 2026-10-29, "New value, as format!")
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11)], Errors(lone + "print(Three(\"{s}\", s, Name(mut s)))")); // beside the read of the variable itself
+        Clean(grow + "mut numbers = List<int>()\nprint(\"{numbers}{Grow(mut numbers)}\")"); // the text of a list is made where it stands
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors("data End\ndata Node(int V, Node | End Next)\n\nint Cut(mut Node node) {\n    node = Node(0, End)\n    return 1\n}\n\nint Value(Node node, int n) => node.V + n\n\nmut first = Node(1, End)\nprint(Value(first, Cut(mut first)))")); // a data type that holds itself is not copied, as a Rust `Box`
         Clean("data Inner(int A)\ndata Outer(Inner X, Inner Y)\n\nint Cut(mut Outer o) {\n    o = Outer(Inner(0), Inner(0))\n    return 1\n}\n\nint Value(Outer o, int n) => o.Y.A + n\n\nmut first = Outer(Inner(1), Inner(2))\nprint(Value(first, Cut(mut first)))"); // a type met twice is no type that holds itself
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 13)], Errors("data Person(int Id)\ndata Member(List<int> Items) : Person\n\nint Reset(mut Person q) {\n    q = Person(2)\n    return 0\n}\n\nint Size(Person q, int n) => q.Id + n\n\nmut Person p = Member(1, List<int>())\nprint(p.Id)\nprint(Size(p, Reset(mut p)))")); // a type derived from it holds a list
