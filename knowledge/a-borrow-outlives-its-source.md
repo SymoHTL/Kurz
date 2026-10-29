@@ -8,7 +8,7 @@ metadata:
 The emitter of pull request 63 counts the holders of a list's block, and a value read from a
 variable, a field or an item is borrowed: no count is raised for the read, since the place still
 holds one (`compiler/README.md`, the counting paragraph). A borrow is sound only while nothing can
-change the place it came from. Three shapes in which something could reached `main`:
+change the place it came from. Four shapes in which something could reached `main`:
 
 - **Inside one expression.** `G(xs, F(mut xs))`: `G`'s first argument is read as a borrowed
   pointer, then `F` runs and gives `xs` a new block, and `G` receives a freed one. The emitter held
