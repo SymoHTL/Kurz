@@ -1,0 +1,14 @@
+// expect: error unreachable-arm at 10
+// rules: D12
+
+enum Plan { Free, Pro }
+
+void Show(Plan p) {
+    match p {
+        Plan.Free => print("free")
+        Plan.Pro => print("pro")
+        Plan other => print(other)
+    }
+}
+
+Show(Plan.Pro)

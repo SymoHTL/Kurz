@@ -62,6 +62,10 @@ public sealed partial class Checker
                             {
                                 Report(ErrorIds.UnreachableArm, arm.Line, $"an earlier arm covers `{type}` (C4)");
                             }
+                            else if (type is EnumType e && EveryValueNamed(e, literals))
+                            {
+                                Report(ErrorIds.UnreachableArm, arm.Line, $"the arms above name every value of `{type}` (C4, D12)");
+                            }
                             else
                             {
                                 covered.Add(type);
@@ -80,14 +84,14 @@ public sealed partial class Checker
                     {
                         if (!known)
                         {
-                            CheckLoosely(vp.Value); // the arms name values of a type the checker does not know (a value of an enum, say): nothing is judged
+                            CheckLoosely(vp.Value); // the arms name values of a type the checker does not know: nothing is judged
                             break;
                         }
 
-                        // C9: an arm names a literal; a folded expression or a name is not one, text no rule gives a meaning (E4)
-                        if (!IsLiteralPattern(vp.Value))
+                        // C9: an arm names a literal, D12 a value of an enum; a folded expression or a name is neither, text no rule gives a meaning (E4)
+                        if (!IsLiteralPattern(vp.Value) && !IsEnumValuePattern(vp.Value))
                         {
-                            Report(ErrorIds.Syntax, arm.Line, "an arm names a case type, a literal or `else` (C4, C9)");
+                            Report(ErrorIds.Syntax, arm.Line, "an arm names a case type, a literal, a value of an enum or `else` (C4, C9, D12)");
                             CheckLoosely(vp.Value);
                             break;
                         }
@@ -109,7 +113,7 @@ public sealed partial class Checker
                         }
                         else if (literals.Any(l => Types.Same(l.Type, value.Type) && l.Value == value.Constant))
                         {
-                            Report(ErrorIds.UnreachableArm, arm.Line, "an earlier arm names the same literal (C4)");
+                            Report(ErrorIds.UnreachableArm, arm.Line, value.Type is EnumType ? "an earlier arm names the same value (C4, D12)" : "an earlier arm names the same literal (C4)");
                         }
                         else
                         {
@@ -195,9 +199,17 @@ public sealed partial class Checker
         _ => false,
     };
 
-    /// <summary>O8, C9: every case is covered by an arm of its type or a base's, or, for <c>bool</c>, by the arms of both its literals.</summary>
+    /// <summary>D12: an arm's value of an enum, <c>Plan.Free</c>, the type's name and one of its members.</summary>
+    private bool IsEnumValuePattern(Expression e) =>
+        Unwrap(e) is MemberAccess { Conditional: false, Target: NameExpression n } && enums.ContainsKey(n.Name) && Lookup(n.Name).Variable is null;
+
+    /// <summary>D12: whether the arms name every value of the enum, inside a union too (section 4, the owner, 2026-10-29).</summary>
+    private static bool EveryValueNamed(EnumType e, List<(KurzType Type, Constant Value)> literals) =>
+        Enumerable.Range(0, e.Symbol.Values.Count).All(i => literals.Any(l => Types.Same(l.Type, e) && l.Value is EnumConstant { Index: var named } && named == i));
+
+    /// <summary>O8, C9: every case is covered by an arm of its type or a base's, for <c>bool</c> by the arms of both its literals, and for an enum by the arms of all its values (D12).</summary>
     private static bool Covers(List<KurzType> cases, List<KurzType> covered, List<(KurzType Type, Constant Value)> literals) =>
-        cases.Count > 0 && cases.All(c => covered.Any(t => IsCaseOf(c, t)) || (c is PrimitiveType { Kind: Primitive.Bool } && literals.Count(l => l.Value is BoolConstant) == 2));
+        cases.Count > 0 && cases.All(c => covered.Any(t => IsCaseOf(c, t)) || (c is PrimitiveType { Kind: Primitive.Bool } && literals.Count(l => l.Value is BoolConstant) == 2) || (c is EnumType e && EveryValueNamed(e, literals)));
 
     /// <summary>C9: the type the arms of a <c>match</c> expression share, or the one written or expected around it; an arm of another type is reported at that arm (E1).</summary>
     private KurzType ArmsType(List<(KurzType Type, int Line)> armTypes, KurzType? expected)

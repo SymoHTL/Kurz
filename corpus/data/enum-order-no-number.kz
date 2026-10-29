@@ -1,0 +1,6 @@
+// expect: error enum-number at 6
+// rules: D20
+
+enum Plan { Free, Pro }
+
+print(Plan.Free < Plan.Pro)

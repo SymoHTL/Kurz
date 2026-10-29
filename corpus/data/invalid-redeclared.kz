@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: D18
+
+data Invalid
+
+print(Invalid)

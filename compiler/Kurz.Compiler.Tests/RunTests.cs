@@ -107,7 +107,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 198 : 199;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 204 : 205;
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)

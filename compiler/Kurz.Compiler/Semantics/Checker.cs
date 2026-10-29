@@ -1,3 +1,4 @@
+using System.Numerics;
 using Kurz.Compiler.Syntax;
 using Kurz.Compiler.Text;
 
@@ -27,6 +28,7 @@ public sealed partial class Checker
     private readonly Dictionary<string, DataSymbol> dataTypes = new(StringComparer.Ordinal);
     private readonly List<DataSymbol> dataDeclared = [];
     private readonly List<DataSymbol> refusedTypes = [];
+    private readonly Dictionary<string, EnumSymbol> enums = new(StringComparer.Ordinal); // D12: the enums of the file, by name
     private readonly HashSet<string> unsupportedTypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> unsupportedBases = new(StringComparer.Ordinal);
     private readonly HashSet<string> unreadData = new(StringComparer.Ordinal);
@@ -197,8 +199,9 @@ public sealed partial class Checker
 
     private void Run(ProgramSyntax program)
     {
-        // T15: the data type of the case `string.FromUtf8` returns besides its string, declared before the file's own types, so
-        // that a declaration of its name is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union, as Rust")
+        // T15, D18: the data types of the case `string.FromUtf8` returns besides its string and of the case an enum's `From` returns
+        // besides its value, declared before the file's own types, so that a declaration of their names is `redeclared` (V9; section 4,
+        // the owner, 2026-10-29, "Union, as Rust" and "Built-in, no fields")
         foreach (var s in BuiltInTypes.Statements)
         {
             DeclareType((TypeDeclaration)s);
@@ -249,6 +252,7 @@ public sealed partial class Checker
         RefuseModifiedFunctions();
         CheckDuplicateFunctions();
         CheckStates();
+        CheckEnumNumbers();
         CheckDefaults();
         CollectReserved(program.Statements);
 
@@ -301,7 +305,7 @@ public sealed partial class Checker
 
     private void PopNested() => nestedNames.RemoveAt(nestedNames.Count - 1);
 
-    /// <summary>A type's name the checker does not read: a type of chapter 7, an enum, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
+    /// <summary>A type's name the checker does not read: a type of chapter 7, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
 
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
@@ -357,7 +361,26 @@ public sealed partial class Checker
         var clash = IsDeclaredName(d.Name);
         if (clash)
         {
-            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a built-in name among them: `data List` could never be named (M9, T17)
+            // a built-in name among them: `data List` could never be named (M9, T17); a built-in data type names the rule that declares it,
+            // since no line of the file does
+            Report(ErrorIds.Redeclared, d.Line, BuiltInTypeRules.TryGetValue(d.Name, out var rule)
+                ? $"`{d.Name}` is a data type every file sees, declared before the file's own types ({rule}, V9)"
+                : $"the name `{d.Name}` is declared already (V9)");
+        }
+
+        if (d.Kind == TypeDeclarationKind.Enum)
+        {
+            if ((d.Modifiers & Modifiers.Extern) != 0)
+            {
+                Report(ErrorIds.Syntax, d.Line, "`extern \"C\"` before an `enum` is text no rule gives a meaning (D12, E4)");
+            }
+
+            if (!clash)
+            {
+                DeclareEnum(d);
+            }
+
+            return;
         }
 
         if (d.Kind != TypeDeclarationKind.Data)
@@ -371,7 +394,6 @@ public sealed partial class Checker
             {
                 TypeDeclarationKind.Class => "a class (chapter 7)",
                 TypeDeclarationKind.Interface => "an interface (K6, K10)",
-                TypeDeclarationKind.Enum => "an enum (D12)",
                 _ => "a flags type (D13)",
             };
             NotSupported(d.Line, what);
@@ -380,7 +402,6 @@ public sealed partial class Checker
             {
                 TypeDeclarationKind.Class => "a class a data type names (chapter 7)",
                 TypeDeclarationKind.Interface => "an interface a data type names (K10)",
-                TypeDeclarationKind.Enum => "an enum a data type names (D12)",
                 _ => "a flags type a data type names (D13)",
             };
             return;
@@ -418,8 +439,106 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// D12, D20: an enum and its values, each name once: a name an earlier value has, and the names of the members <c>Number</c> and
+    /// <c>From</c>, which the value would hide, are <c>redeclared</c>, as Rust refuses a name given twice (E0428). The numbers are read
+    /// once every function is declared (<see cref="CheckEnumNumbers"/>).
+    /// </summary>
+    private void DeclareEnum(TypeDeclaration d)
+    {
+        var symbol = new EnumSymbol(d.Name, d);
+        foreach (var value in d.Values)
+        {
+            if (symbol.Values.Contains(value.Name))
+            {
+                Report(ErrorIds.Redeclared, value.Line, $"`{d.Name}` has a value `{value.Name}` already (D20, V9)");
+                symbol.Refused = true;
+            }
+            else if (value.Name is "Number" or "From")
+            {
+                Report(ErrorIds.Redeclared, value.Line, $"`{d.Name}.{value.Name}` is a member of every enum, which a value of that name would hide (D18, D20)");
+                symbol.Refused = true;
+            }
+            else
+            {
+                symbol.Values.Add(value.Name);
+            }
+        }
+
+        enums[d.Name] = symbol;
+    }
+
+    /// <summary>
+    /// D18, D20: the numbers of the enums, each a constant expression of type <c>int</c>, written for every value or for none, no two
+    /// alike, as Rust refuses a number given twice (E0081); a number that is not a constant is <c>enum-number</c> (section 4, an
+    /// assumption there), and one past the range of an <c>int</c> <c>constant-overflow</c>, which its folding reports (T6, L10).
+    /// </summary>
+    private void CheckEnumNumbers()
+    {
+        foreach (var symbol in enums.Values)
+        {
+            var values = symbol.Declaration.Values.Where(v => symbol.Values.Contains(v.Name)).DistinctBy(v => v.Name).ToList();
+            var numbered = values.Where(v => v.Number is not null).ToList();
+            if (numbered.Count == 0)
+            {
+                continue;
+            }
+
+            frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = symbol.Line };
+            var numbers = new List<(string Name, BigInteger Number)>();
+            foreach (var value in values)
+            {
+                if (value.Number is null)
+                {
+                    var other = numbered[0].Name;
+                    Report(ErrorIds.EnumNumber, value.Line, $"`{value.Name}` has no number, and `{other}` has one: number every value or none (D20)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                var reading = readingConstant;
+                readingConstant = true;
+                var typed = CheckExpression(value.Number, Types.Int);
+                readingConstant = reading;
+                if (typed.IsError)
+                {
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                if (typed.Constant is null)
+                {
+                    Report(ErrorIds.EnumNumber, value.Number.Line, $"the number of `{value.Name}` is a constant expression of type `int`: a literal, or literals that T6 folds (D20)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                if (!Types.Assignable(typed.Type, Types.Int) || typed.Constant is not IntegerConstant number)
+                {
+                    Report(Types.MismatchId(typed.Type, Types.Int), value.Number.Line, $"the number of `{value.Name}` is a `{typed.Type}` where an `int` is required (D20, T1)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                var first = numbers.FindIndex(n => n.Number == number.Value);
+                if (first >= 0)
+                {
+                    Report(ErrorIds.EnumNumber, value.Number.Line, $"`{value.Name}` has the number {number.Value} that `{numbers[first].Name}` has (D20)");
+                    symbol.Refused = true;
+                }
+
+                numbers.Add((value.Name, number.Value));
+            }
+
+            if (!symbol.Refused)
+            {
+                symbol.Numbers.AddRange(numbers.Select(n => n.Number));
+            }
+        }
+    }
+
+    /// <summary>
     /// Chapter 7, K10, K17, T19: a data type whose bases hold the explicit form of inheritance, a generic data type, or a class,
-    /// an interface, an enum or a flags type is not read: that base is <c>not supported</c> at its line, and the type,
+    /// an interface or a flags type is not read: that base is <c>not supported</c> at its line, and the type,
     /// with every data type whose base it is, joins the types the checker does not read, so that a use of any of them
     /// has the error type and carries nothing more (E1); the type's own fields would lack the base's (D7).
     /// </summary>
@@ -723,6 +842,17 @@ public sealed partial class Checker
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
+        if (enums.TryGetValue(n.Name, out var enumSymbol))
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (D12, T19)");
+                return Types.Error;
+            }
+
+            return new EnumType(enumSymbol);
+        }
+
         if (IsUnreadType(n.Name))
         {
             return Types.Error;
@@ -763,7 +893,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1102,13 +1232,19 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
 
     /// <summary>The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9).</summary>
     private static bool IsBuiltInName(string name) => name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes";
 
-    /// <summary>The data types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string (T15).</summary>
-    private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(SourceText.FromString("<built-in>", "data InvalidUtf8(int At)\n"), new DiagnosticBag());
+    /// <summary>The rule that declares each data type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18" };
+
+    /// <summary>
+    /// The data types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
+    /// (T15), and <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18).
+    /// </summary>
+    private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(SourceText.FromString("<built-in>", "data InvalidUtf8(int At)\ndata Invalid\n"), new DiagnosticBag());
 
     private void PushScope() => frame.Scope = new Scope { Parent = frame.Scope };
 

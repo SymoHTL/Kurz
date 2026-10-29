@@ -248,6 +248,8 @@ public sealed partial class Emitter
                 return fn.Value($"call i1 {RuntimeFunction("Same")}(%kz.str {left}, %kz.str {right})");
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || p.Kind is Primitive.Char or Primitive.Bool:
                 return fn.Value($"icmp eq {Ir(type)} {left}, {right}");
+            case EnumType:
+                return fn.Value($"icmp eq {Ir(type)} {left}, {right}"); // D12: the same value
             case PrimitiveType p when Types.IsFloating(p):
                 {
                     var same = fn.Value($"fcmp oeq {Ir(type)} {left}, {right}");
@@ -375,6 +377,60 @@ public sealed partial class Emitter
             }
         });
         return fn.Value($"call %kz.str {name}({Ir(type)} {value})");
+    }
+
+    /// <summary>A4: the name of an enum's value without the name of its type, a literal, chosen by the value's number or place.</summary>
+    private string EnumText(string value, EnumType type)
+    {
+        var name = Helper($"text.{Lower.Mangle(type)}", "%kz.str", [Ir(type)], () =>
+        {
+            var values = type.Symbol.Values;
+            var labels = values.Select(_ => fn.Label("value")).ToList();
+            var other = fn.Label("other");
+            fn.Terminate($"switch {Ir(type)} %a0, label %{other} [ {string.Join(" ", values.Select((_, i) => $"{Ir(type)} {IntegerText(Lower.EnumStored(type.Symbol, i), type)}, label %{labels[i]}"))} ]");
+            for (var i = 0; i < values.Count; i++)
+            {
+                fn.Block(labels[i]);
+                fn.Return($"%kz.str {StringValue(values[i])}");
+            }
+
+            fn.Block(other);
+            fn.Unreachable(); // a value of the enum is one of its values: `From` makes no other (D18)
+        });
+        return fn.Value($"call %kz.str {name}({Ir(type)} {value})");
+    }
+
+    /// <summary>D18: the number of an enum's value, the value itself widened to an <c>int</c>, by its sign where a number is negative.</summary>
+    private string EnumNumber(string value, EnumType type) =>
+        Ir(type) == "i32" ? value : fn.Value($"{(Lower.EnumSigned(type.Symbol) ? "sext" : "zext")} {Ir(type)} {value} to i32");
+
+    /// <summary>
+    /// D18: <c>Plan.From(n)</c>, the value whose number is <c>n</c>, chosen by a switch on the numbers the declaration writes, or the
+    /// case <c>Invalid</c> for a number no value has.
+    /// </summary>
+    private string EmitEnumFrom(CallExpression c, CallInfo info)
+    {
+        var type = (EnumType)info.Target!;
+        var number = Arguments(c, info, _ => Types.Int, _ => false, _ => null, cConvention: false, owned: false).Single()["i32 ".Length..];
+        var union = (UnionType)Sub(info.Result);
+        var slot = fn.Alloca(Ir(union), "from");
+        var done = fn.Label("from.done");
+        var values = type.Symbol.Values;
+        var labels = values.Select(_ => fn.Label("value")).ToList();
+        var invalid = fn.Label("invalid");
+        fn.Terminate($"switch i32 {number}, label %{invalid} [ {string.Join(" ", values.Select((_, i) => $"i32 {IntegerText(type.Symbol.Numbers[i], Types.Int)}, label %{labels[i]}"))} ]");
+        for (var i = 0; i < values.Count; i++)
+        {
+            fn.Block(labels[i]);
+            fn.Emit($"store {Ir(union)} {MakeUnion(union, type, IntegerText(Lower.EnumStored(type.Symbol, i), type))}, ptr {slot}");
+            fn.Branch(done);
+        }
+
+        fn.Block(invalid);
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, union.Cases[1], "zeroinitializer")}, ptr {slot}");
+        fn.Branch(done);
+        fn.Block(done);
+        return fn.Value($"load {Ir(union)}, ptr {slot}");
     }
 
     /// <summary>A3: `Name { Field = text, ... }`, or the name alone for a type without fields; the texts it joined on the way are let go of.</summary>

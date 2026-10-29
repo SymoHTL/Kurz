@@ -4,7 +4,6 @@
 // rules: O5
 
 data NotFound
-data Invalid
 
 int | NotFound | Invalid Find(int id) {
     if id < 0 {

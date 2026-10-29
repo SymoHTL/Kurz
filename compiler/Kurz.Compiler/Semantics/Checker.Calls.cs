@@ -139,6 +139,14 @@ public sealed partial class Checker
                         return CheckConstruction(data, c, expected);
                     }
 
+                    if (enums.ContainsKey(n.Name))
+                    {
+                        // D18: the value of a number is `Plan.From(n)`, against the C# form `Plan(2)` (section 4, the owner, 2026-10-02)
+                        Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is an enum, and the value of a number is `{n.Name}.From(n)` (D18)");
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
                     if (IsUnreadName(n.Name))
                     {
                         CheckArgumentsLoosely(c);
@@ -586,6 +594,37 @@ public sealed partial class Checker
         return typed;
     }
 
+    /// <summary>
+    /// D18: <c>Plan.From(n)</c>, the value whose number is <c>n</c>, an <c>int</c>, or the case <c>Invalid</c>, an outcome (O1); on an enum that
+    /// numbers none it is <c>enum-number</c> (D20).
+    /// </summary>
+    private Typed CheckEnumFrom(EnumSymbol symbol, CallExpression c)
+    {
+        var form = $"`{symbol.Name}.From`";
+        if (RefusesTypeArguments(c, form))
+        {
+            return Typed.Error;
+        }
+
+        if (!symbol.Numbered && !symbol.Refused)
+        {
+            Report(ErrorIds.EnumNumber, c.Line, $"`{symbol.Name}` numbers none of its values, so no number gives one (D20)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        var type = new EnumType(symbol);
+        var result = new UnionType([type, new DataType(dataTypes["Invalid"], [])]);
+        var candidate = new Candidate { Slots = [new Slot("number", Types.Int, false, false, false)], Result = result };
+        var typed = Call([candidate], c, null, out var picked);
+        if (picked is not null && !typed.IsError)
+        {
+            model.RecordCall(c, new CallInfo(CallKind.EnumFrom, null, null, type, NoMap, picked.Binding, 1, result));
+        }
+
+        return symbol.Refused ? Typed.Error : typed;
+    }
+
     private Typed CheckListConstruction(CallExpression c)
     {
         if (c.TypeArguments.Count != 1)
@@ -711,6 +750,18 @@ public sealed partial class Checker
             if (n.Name == "Bytes" && m.Member == "Allocate")
             {
                 return CheckListAllocate(c, new ListType(Types.Byte), "Bytes.Allocate"); // R15, as above
+            }
+
+            if (enums.TryGetValue(n.Name, out var enumSymbol))
+            {
+                if (m.Member == "From")
+                {
+                    return CheckEnumFrom(enumSymbol, c); // D18
+                }
+
+                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no function `{m.Member}`: an enum's one is `From` (D18, V10)");
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
             }
 
             if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))

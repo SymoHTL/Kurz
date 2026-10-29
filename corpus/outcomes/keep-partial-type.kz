@@ -1,8 +1,7 @@
-// expect: error type-mismatch at 17
+// expect: error type-mismatch at 16
 // rules: O4
 
 data NotFound
-data Invalid
 
 int | NotFound | Invalid Find(int id) {
     if id == 1 {

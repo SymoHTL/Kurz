@@ -303,7 +303,7 @@ public sealed partial class Checker
     /// <summary>
     /// M7, the owner's "Rust's Copy line" (2026-10-24), "Rust's Copy set", "Copied" and "Copied too" (2026-10-25): whether the
     /// expression holds a copy of a value of the type: a number, a <c>bool</c>, a <c>char</c>, a pointer, a time, the type of a C
-    /// function, a function value, and a <c>data</c> value or a union made only of such types that holds no value of its own type,
+    /// function, a function value, a value of an enum, and a <c>data</c> value or a union made only of such types that holds no value of its own type,
     /// as Rust's <c>Copy</c> types; a <c>data</c> type only where every type derived from it is too (the record's assumption,
     /// section 4). A type the checker could not tell is copied, so that its error stays the one reported (E1).
     /// </summary>
@@ -312,7 +312,7 @@ public sealed partial class Checker
     private bool Copied(KurzType type, HashSet<DataSymbol> path) => type switch
     {
         PrimitiveType p => p.Kind != Primitive.String,
-        PointerType or CFunctionType or FunctionType or VoidType or ErrorType => true,
+        PointerType or CFunctionType or FunctionType or VoidType or ErrorType or EnumType => true,
         UnionType u => u.Cases.All(c => Copied(c, path)),
         DataType d => CopiedData(d, path),
         _ => false, // a list, a string, a type parameter

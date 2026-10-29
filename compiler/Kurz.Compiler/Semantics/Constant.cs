@@ -6,7 +6,7 @@ namespace Kurz.Compiler.Semantics;
 /// The value of a constant expression, which F12 names as what a default may be: a literal of any
 /// kind (an integer, a floating-point number, a <c>decimal</c>, a <c>bool</c>, a string without
 /// holes, a <c>char</c>, a unit literal); the one value of a <c>data</c> type without fields (D8),
-/// which F12 counts among them; literals under the operators of T18 (with T9's sign rule), T22 and
+/// which F12 counts among them, and a value of an <c>enum</c> (D12); literals under the operators of T18 (with T9's sign rule), T22 and
 /// T12, folded one operation at a time in the type the literals take (L17, T6); and a written
 /// conversion of one of these (T10). The type stands beside it, in the <see cref="Typed"/> that
 /// carries it.
@@ -31,6 +31,9 @@ public sealed record CharConstant(int Value) : Constant;
 
 /// <summary>The one value of a <c>data</c> type without fields (D8), which F12 counts as a constant.</summary>
 public sealed record UnitConstant : Constant;
+
+/// <summary>A value of an <c>enum</c> (D12), by its place among the values its declaration writes, which F12 counts as a constant as it counts the value of a <c>data</c> type without fields (section 4).</summary>
+public sealed record EnumConstant(int Index) : Constant;
 
 /// <summary><c>null</c>, which F12 counts as a constant; the checker types it as a pointer alone (R10).</summary>
 public sealed record NullConstant : Constant;

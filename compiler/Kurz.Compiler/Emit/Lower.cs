@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Numerics;
 using Kurz.Compiler.Semantics;
 
 namespace Kurz.Compiler.Emit;
@@ -16,7 +18,9 @@ namespace Kurz.Compiler.Emit;
 /// literal does not, the pointer of an empty string pointing at a constant of no bytes and never
 /// <c>null</c> (R15; design record, section 3); a pointer and a C function value are <c>ptr</c> (R10, R17), and so is a list, the
 /// address of its block (M9); a function value is <c>%kz.fn</c>, the address of its code and of its
-/// environment, null for a lambda that reads no variable (F11, F15). Every other type is not emitted:
+/// environment, null for a lambda that reads no variable (F11, F15); a value of an enum is its number, or its place among the values
+/// where the declaration writes none, in the smallest of <c>i8</c>, <c>i16</c> and <c>i32</c> that holds every one, signed where a number
+/// is negative, as Rust stores the value of an enum without fields (D12, D18; section 4, an assumption there). Every other type is not emitted:
 /// <see cref="Supported"/> says so.
 /// </summary>
 internal static class Lower
@@ -38,6 +42,7 @@ internal static class Lower
             _ => throw new NotSupportedException(Refusal(p)),
         },
         VoidType => "void",
+        EnumType e => $"i{EnumBits(e.Symbol).ToString(CultureInfo.InvariantCulture)}",
         PointerType or CFunctionType or ListType => "ptr",
         FunctionType => "%kz.fn",
         TypeParameterType t => throw new InvalidOperationException($"the type parameter `{t}` was not substituted"),
@@ -64,7 +69,7 @@ internal static class Lower
         PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt
             or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Decimal or Primitive.Bool or Primitive.Char or Primitive.String
             or Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp,
-        VoidType => true,
+        VoidType or EnumType => true,
         PointerType p => Supported(p.Pointee),
         CFunctionType f => f.Parameters.All(Supported) && Supported(f.Result),
         _ => false,
@@ -82,6 +87,35 @@ internal static class Lower
             _ => null,
         };
         return $"a value of type `{type}`" + (rule is null ? string.Empty : $" ({rule})");
+    }
+
+    /// <summary>The value an enum's value is stored as: its number, or its place where the declaration writes no number.</summary>
+    public static BigInteger EnumStored(EnumSymbol symbol, int index) => symbol.Numbered ? symbol.Numbers[index] : index;
+
+    /// <summary>Whether the stored values of an enum are read as signed: one of its numbers is negative.</summary>
+    public static bool EnumSigned(EnumSymbol symbol) => symbol.Numbers.Any(n => n.Sign < 0);
+
+    /// <summary>The width of the smallest integer that holds every stored value of the enum, eight bits for one without values.</summary>
+    private static int EnumBits(EnumSymbol symbol)
+    {
+        var stored = Enumerable.Range(0, symbol.Values.Count).Select(i => EnumStored(symbol, i)).ToList();
+        if (stored.Count == 0)
+        {
+            return 8;
+        }
+
+        var signed = EnumSigned(symbol);
+        foreach (var bits in (int[])[8, 16])
+        {
+            var low = signed ? -(BigInteger.One << (bits - 1)) : BigInteger.Zero;
+            var high = (BigInteger.One << (signed ? bits - 1 : bits)) - 1;
+            if (stored.All(v => v >= low && v <= high))
+            {
+                return bits;
+            }
+        }
+
+        return 32;
     }
 
     /// <summary>The type of a parameter or a result in a declaration of the C calling convention: a <c>bool</c> is C's <c>_Bool</c>, one byte with its high bits zero, as clang declares it.</summary>

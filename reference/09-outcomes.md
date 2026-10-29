@@ -303,7 +303,6 @@ match result {
 Case: [outcomes/keep-partial-type.kz](../corpus/outcomes/keep-partial-type.kz)
 ```kurz
 data NotFound
-data Invalid
 
 int | NotFound | Invalid Find(int id) {
     if id == 1 {
@@ -383,7 +382,6 @@ match Need(2) {
 Case: [outcomes/else-partial.kz](../corpus/outcomes/else-partial.kz)
 ```kurz
 data NotFound
-data Invalid
 
 int | NotFound | Invalid Find(int id) {
     if id < 0 {

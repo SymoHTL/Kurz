@@ -166,6 +166,23 @@ print(0.5)
 print(0.1 + 0.2)
 ```
 
+Case: [values/enum-text.kz](../corpus/values/enum-text.kz)
+```kurz
+enum Plan { Free = 1, Pro = 2 }
+data Box(Plan P)
+
+mut xs = List<Plan>()
+xs.Add(Plan.Free)
+xs.Add(Plan.Pro)
+p = Plan.Free
+print(p)
+print(xs)
+print(Box(Plan.Pro))
+print("plan {xs[1]}")
+Plan | Invalid none = Plan.From(9)
+print(none)
+```
+
 Case: [classes/print-without-text.kz](../corpus/classes/print-without-text.kz)
 ```kurz
 class Counter(mut int Count)

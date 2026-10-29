@@ -216,8 +216,8 @@ public sealed partial class Emitter
                 case VariableDeclaration v when (v.Modifiers & Modifiers.Static) != 0:
                     state.Add((u, v));
                     break;
-                case TypeDeclaration t:
-                    dataOwners[u.Model.DataTypeOf(t)] = u; // the checker reads a data type alone, and says `not supported` to the others
+                case TypeDeclaration { Kind: TypeDeclarationKind.Data } t:
+                    dataOwners[u.Model.DataTypeOf(t)] = u; // the checker reads a data type and an enum, whose values are constants, and says `not supported` to the others
                     break;
             }
         }
