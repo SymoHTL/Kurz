@@ -122,22 +122,26 @@ public sealed class PlaceTests : IDisposable
         var place = Place.Make(Places);
         var program = Path.Combine(place.Directory, "program");
         File.WriteAllText(program, "");
+        var work = Path.Combine(place.Directory, "work");
+        Directory.CreateDirectory(work);
         if (OperatingSystem.IsWindows())
         {
             using (new FileStream(program, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
                 place.Dispose(); // the program's file is open without delete sharing, as a program that outlives its command holds it
             }
-
-            Assert.Equal("kurz place 1\n", File.ReadAllText(Path.Combine(place.Directory, Place.LockName))); // the removal failed, the lock file last
-            Place.RemoveLeft(Places);
         }
         else
         {
-            Directory.Delete(place.Directory, recursive: true); // gone behind the command's back, which no permission stops for a root user
+            // a file whose name is no UTF-8: .NET reads its name otherwise and cannot remove it, which no permission makes for a root user
+            Assert.Equal(0, Processes.Capture("/bin/sh", ["-c", "touch \"$0/$(printf '\\377')\"", work], null, TimeSpan.FromMinutes(1)).Code);
             place.Dispose();
+            Assert.True(Directory.Exists(work), "the removal did not fail");
+            Assert.Equal(0, Processes.Capture("/bin/sh", ["-c", "rm \"$0\"/*", work], null, TimeSpan.FromMinutes(1)).Code);
         }
 
+        Assert.Equal("kurz place 1\n", File.ReadAllText(Path.Combine(place.Directory, Place.LockName))); // the removal failed, the lock file last
+        Place.RemoveLeft(Places);
         Assert.False(Directory.Exists(place.Directory));
     }
 

@@ -321,7 +321,42 @@ public sealed class CommandTests : IDisposable
         var expected = OperatingSystem.IsWindows()
             ? "error: no directory for the command's places\n  note: Windows names no LocalAppData folder for this user\n  help: run the command as a user with a profile\n"
             : "error: no directory for the command's places\n  note: XDG_CACHE_HOME is not set to an absolute path, and no home directory is found in HOME or the user database\n  help: set HOME, or XDG_CACHE_HOME to an absolute path\n";
-        Assert.Equal((1, "", expected), RunWithPlaces(() => null, Found().Find, "exec", "print(1)"));
+        Assert.Equal((1, "", expected), RunWithPlaces(Builder.HostTarget, () => null, Found().Find, "exec", "print(1)"));
+    }
+
+    [Fact]
+    public void Run_and_exec_without_a_runtime_or_a_clang_fail_as_build_does_and_leave_no_place()
+    {
+        var places = Path.Combine(root, "places", "kurz");
+        var source = Path.Combine(root, "hello.kz");
+        File.WriteAllText(source, "print(1)\n");
+        var empty = Path.Combine(root, "empty");
+        Directory.CreateDirectory(empty);
+        var note = OperatingSystem.IsWindows()
+            ? $"looked for clang-23.exe and clang.exe on the path and in the LLVM installer directory, {Path.Combine(empty, "LLVM", "bin")}"
+            : "looked for clang-23 and clang on the path";
+        var refused = new ClangSearch(null, Path.Combine(root, "clang"), "20.1.2", ["clang-23 on the path", "clang on the path"]);
+        var (find, path) = Found(); // an empty file named clang-23, which does not start
+        foreach (var arguments in new[] { new[] { "run", source }, ["exec", "print(1)"] })
+        {
+            Assert.Equal(
+                (1, "", "error: no runtime for this system\n  note: the runtime has a directory for 64-bit Linux and one for 64-bit Windows\n  help: build on 64-bit Linux or Windows\n"),
+                RunWithPlaces(null, () => places, () => throw new InvalidOperationException("the search ran"), arguments));
+            Assert.Equal(
+                (1, "", $"error: no clang found\n  note: {note}\n  help: install LLVM 23\n"),
+                RunWithPlaces(Builder.HostTarget, () => places, () => Clang.Find(empty, empty, OperatingSystem.IsWindows(), file => throw new InvalidOperationException($"asked {file}")), arguments));
+            Assert.Equal(
+                (1, "", $"error: clang 20.1.2 is not LLVM 23\n  note: found at {Path.Combine(root, "clang")}\n  help: install LLVM 23, ahead of this clang on the path\n"),
+                RunWithPlaces(Builder.HostTarget, () => places, () => refused, arguments));
+            Assert.False(Directory.Exists(places), "a place was made before the clang was found");
+
+            var (code, output, error) = RunWithPlaces(Builder.HostTarget, () => places, find, arguments); // the clang runs in the place
+            Assert.Equal((1, ""), (code, output));
+            Assert.StartsWith($"error: clang did not build the program\n  note: {path} exited with -1 and wrote:\n    ", error, StringComparison.Ordinal);
+            Assert.EndsWith("\n  help: check that the clang found runs; the compiler accepted the program, so a clang that runs and fails on it is the compiler's defect\n", error, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(places));
+            Directory.Delete(places);
+        }
     }
 
     [Fact]
@@ -330,7 +365,7 @@ public sealed class CommandTests : IDisposable
         var file = Path.Combine(root, "a-file");
         File.WriteAllText(file, "");
         var places = Path.Combine(file, "kurz"); // a directory under a file, which no system makes
-        var (code, output, error) = RunWithPlaces(() => places, Found().Find, "exec", "print(1)");
+        var (code, output, error) = RunWithPlaces(Builder.HostTarget, () => places, Found().Find, "exec", "print(1)");
         Assert.Equal((1, ""), (code, output));
         Assert.Matches($@"^error: the place for the run cannot be made\n  note: .+\n  help: check that {Regex.Escape(places)} can be written\n$", error);
 
@@ -339,12 +374,12 @@ public sealed class CommandTests : IDisposable
         Assert.Matches($@"^error: the built program cannot be started\n  note: .+\n  help: check that programs may run from {Regex.Escape(root)}\n$", writer.ToString());
     }
 
-    /// <summary>Runs the command line in this process with the places and the search given.</summary>
-    private static (int Code, string Output, string Error) RunWithPlaces(Func<string?> places, Func<ClangSearch> find, params string[] arguments)
+    /// <summary>Runs the command line in this process for the machine, with the places and the search given.</summary>
+    private static (int Code, string Output, string Error) RunWithPlaces(Target? host, Func<string?> places, Func<ClangSearch> find, params string[] arguments)
     {
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var code = Command.Run(arguments, output, error, find, Builder.HostTarget, places);
+        var code = Command.Run(arguments, output, error, find, host, places);
         return (code, output.ToString(), error.ToString());
     }
 
