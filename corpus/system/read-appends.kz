@@ -1,0 +1,23 @@
+// expect: output
+// | 3
+// | 6
+// | 0
+// rules: S3
+
+void | IoError Chunks() {
+    File.WriteAll("chunks.txt", "abcdef".Bytes)
+    f = File.Open("chunks.txt")
+    mut buffer = Bytes()
+    f.Read(mut buffer, 3)
+    print(buffer.Count)
+    f.Read(mut buffer, 3)
+    print(buffer.Count)
+    buffer.Clear()
+    print(buffer.Count)
+    f.Close()
+    File.Delete("chunks.txt")
+}
+
+Chunks() else {
+    IoError e => print(e)
+}

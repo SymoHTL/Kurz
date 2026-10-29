@@ -1,7 +1,8 @@
 // The runtime's code for Linux (design record, section 2): the functions `runtime/common/` calls as
-// `sys`, over the C library, which a program built for Linux links as the platform links it. It is the
-// code of 64-bit Linux, where C's `size_t` and `ssize_t` are 64 bits as `long` is: the compiler builds
-// for a 64-bit machine alone (compiler/README.md, "The runtime").
+// `sys`, and the calls on files a program makes (section 12), over the C library, which a program
+// built for Linux links as the platform links it. It is the code of 64-bit Linux, where C's `size_t`
+// and `ssize_t` are 64 bits as `long` is: the compiler builds for a 64-bit machine alone
+// (compiler/README.md, "The runtime").
 
 extern "C" {
     long write(int fd, byte* bytes, long count)
@@ -21,6 +22,17 @@ extern "C" {
     int pthread_getattr_np(ulong thread, void* attributes)
     int pthread_attr_getstack(void* attributes, long* address, long* size)
     int pthread_attr_destroy(void* attributes)
+    long read(int fd, byte* bytes, long count)
+    int close(int fd)
+    int unlink(byte* path)
+    int rename(byte* from, byte* to)
+    int mkdir(byte* path, int mode)
+    int rmdir(byte* path)
+    int stat(byte* path, void* status)
+    void* opendir(byte* path)
+    void* readdir(void* directory)
+    int closedir(void* directory)
+    long strlen(byte* text)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -1538,4 +1550,357 @@ void Hex(long value) {
             shift = shift - 4
         }
     }
+}
+
+// ---- files (design record, section 12) --------------------------------------------------------------
+
+// The calls on files of a program built for Linux (chapter 13 of the reference): the emitted code of
+// the program calls them, and nothing of `runtime/common/` or `std/` does, so that the runtime of
+// Windows gives none of them and a build for Windows says `not supported` at such a call (the owner,
+// 2026-10-29, "Not supported on Windows"). Each takes a path as the address of its bytes ended by a
+// NUL byte, read from the working directory where it does not start with `/`, and returns what it
+// gives, a number of 0 or more, or a failure below 0: the system's error number negated, or -4096 for
+// the name of a directory's entry that is not UTF-8, which no error number is, Linux's being below
+// 4096. `ErrorKind` and `ErrorCode` read a failure. A call a signal interrupts (`EINTR`, 4) where it waits
+// on a file is made again, as Rust's standard library makes it again.
+
+// The page of each thread that `stat` fills, mapped at its first use.
+thread static mut byte* status = null
+
+// A system call's result: `result` where it is 0 or more, else the error number negated.
+long Checked(long result) {
+    mut long checked = result
+    raw {
+        if result < 0 {
+            checked = -long(*__errno_location())
+        }
+    }
+
+    return checked
+}
+
+// The descriptor of the file at `path`, opened to read, or with `create` created or emptied to write,
+// with the permissions 0666 less the process's `umask`, as Rust's `File::open` and `File::create` open
+// it: `O_RDONLY` is 0 and `O_WRONLY | O_CREAT | O_TRUNC` 577, each with `O_CLOEXEC`, 524288, since
+// Rust's standard library opens every descriptor close-on-exec.
+pub long OpenFile(byte* path, bool create) {
+    mut int options = 524288
+    if create {
+        options = 524288 + 577
+    }
+
+    mut long result = -1
+    raw {
+        int* error = __errno_location()
+        result = long(open(path, options, 438))
+        while result < 0 && *error == 4 {
+            result = long(open(path, options, 438))
+        }
+    }
+
+    return Checked(result)
+}
+
+// Up to `count` bytes of the file `fd` read to `bytes`: their count, 0 at the end of the file.
+pub long ReadFile(int fd, byte* bytes, long count) {
+    mut long result = -1
+    raw {
+        int* error = __errno_location()
+        result = read(fd, bytes, count)
+        while result < 0 && *error == 4 {
+            result = read(fd, bytes, count)
+        }
+    }
+
+    return Checked(result)
+}
+
+// The `count` bytes at `bytes` written to the file `fd`, `write` called again with the rest where it
+// took a part, as `print` writes and Rust's `write_all` does: `count`, or the bytes written before a
+// call that took none, which is `WriteZero` to the caller, or the failure of the call that failed.
+pub long WriteFile(int fd, byte* bytes, long count) {
+    mut long done = 0
+    while done < count {
+        mut long written = -1
+        raw {
+            written = Write(fd, bytes + done, count - done)
+        }
+
+        if written < 0 {
+            return Checked(written)
+        }
+
+        if written == 0 {
+            return done
+        }
+
+        done = done + written
+    }
+
+    return done
+}
+
+// The file `fd` closed: 0, or the failure of `close`, of which an interrupt is none: Linux lets go of
+// the descriptor before the signal, so that it is not closed again, as Rust's standard library does
+// not close it again.
+pub long CloseFile(int fd) {
+    mut long result = 0
+    raw {
+        int* error = __errno_location()
+        if close(fd) != 0 && *error != 4 {
+            result = -long(*error)
+        }
+    }
+
+    return result
+}
+
+// The file at `path` deleted, by `unlink`: 0, or the failure.
+pub long DeleteFile(byte* path) {
+    mut long result = 0
+    raw {
+        result = Checked(long(unlink(path)))
+    }
+
+    return result
+}
+
+// The file at `from` moved to `to`, over a file that `to` names, by `rename`: 0, or the failure.
+pub long RenameFile(byte* from, byte* to) {
+    mut long result = 0
+    raw {
+        result = Checked(long(rename(from, to)))
+    }
+
+    return result
+}
+
+// The empty directory at `path` deleted, by `rmdir`: 0, or the failure.
+pub long DeleteDirectory(byte* path) {
+    mut long result = 0
+    raw {
+        result = Checked(long(rmdir(path)))
+    }
+
+    return result
+}
+
+// The status of what has the path, by `stat`, which follows a link, as Rust's `fs::metadata` does,
+// into the thread's page: 0, or the failure, `ENOMEM` (12) where the page cannot be mapped. The page
+// holds x86-64's `struct stat` (the trace above reads x86-64's forms of a call): `st_mode` at its
+// byte 24 and `st_size` at its byte 48.
+long Status(byte* path) {
+    mut long result = -12
+    raw {
+        if status == null {
+            status = Memory(4096)
+        }
+
+        if status != null {
+            result = Checked(long(stat(path, Ptr<void>(status))))
+        }
+    }
+
+    return result
+}
+
+// The size in bytes of the file at `path`, or the failure.
+pub long FileSize(byte* path) {
+    long result = Status(path)
+    if result < 0 {
+        return result
+    }
+
+    mut long size = 0
+    raw {
+        size = *Ptr<long>(status + 48)
+    }
+
+    return size
+}
+
+// Whether anything has the path: 1, 0 where `stat` finds nothing (`ENOENT`, 2), as Rust's
+// `fs::exists` answers `false` for `NotFound` alone, or the failure.
+pub long FileExists(byte* path) {
+    long result = Status(path)
+    if result == -2 {
+        return 0
+    }
+
+    if result < 0 {
+        return result
+    }
+
+    return 1
+}
+
+// Whether a directory has the path: its type in `st_mode` (`S_IFMT`, 0o170000) is `S_IFDIR` (0o40000).
+bool IsDirectory(byte* path) {
+    if Status(path) < 0 {
+        return false
+    }
+
+    mut bool directory = false
+    raw {
+        directory = (*Ptr<int>(status + 24) & 61440) == 16384
+    }
+
+    return directory
+}
+
+// `mkdir` of the path with the permissions 0777 (511) less the `umask`: 0 where it made the directory,
+// or where a directory has the path and the failure is not `ENOENT` (2), as Rust's `create_dir_all`
+// takes a directory that is there; else the failure.
+long MakeDirectory(byte* path) {
+    mut long result = 0
+    raw {
+        result = Checked(long(mkdir(path, 511)))
+    }
+
+    if result < 0 && result != -2 && IsDirectory(path) {
+        return 0
+    }
+
+    return result
+}
+
+// The directory at the first `count` bytes of `path` created, with every directory above it that is
+// missing, as Rust's `fs::create_dir_all` creates them: where `mkdir` finds no directory above, the
+// one above is created first and `mkdir` made again. An empty path is created already. The byte after
+// the `count` is written NUL while the call runs and given back after it, so that a path ends where the
+// directory above ends: at its last `/` with bytes in front of it, without the `/`s at its end.
+pub long CreateDirectories(byte* path, long count) {
+    if count == 0 {
+        return 0
+    }
+
+    mut long result = 0
+    raw {
+        byte kept = path[count]
+        path[count] = 0
+        result = MakeDirectory(path)
+        if result == -2 {
+            mut long end = count
+            while end > 1 && path[end - 1] == 47 {
+                end = end - 1
+            }
+
+            while end > 0 && path[end - 1] != 47 {
+                end = end - 1
+            }
+
+            while end > 1 && path[end - 1] == 47 {
+                end = end - 1
+            }
+
+            result = CreateDirectories(path, end)
+            if result == 0 {
+                result = MakeDirectory(path)
+            }
+        }
+
+        path[count] = kept
+    }
+
+    return result
+}
+
+// The names of the entries of the directory at `path` added to `names` in the order `readdir` gives
+// them, without `.` and `..`, as Rust's `fs::read_dir` leaves them out: 0, the failure of `opendir` or
+// of `readdir`, or -4096 for a name that is not UTF-8, which a `string` does not hold. A name stands at
+// byte 19 of the GNU C library's `struct dirent` of a 64-bit target.
+pub long ListDirectory(byte* path, mut List<string> names) {
+    mut long result = 0
+    raw {
+        int* error = __errno_location()
+        void* directory = opendir(path)
+        if directory == null {
+            return -long(*error)
+        }
+
+        while result == 0 {
+            *error = 0
+            void* entry = readdir(directory)
+            if entry == null {
+                result = -long(*error)
+                break
+            }
+
+            byte* entryName = Ptr<byte>(entry) + 19
+            long count = strlen(entryName)
+            bool dots = (count == 1 && entryName[0] == 46) || (count == 2 && entryName[0] == 46 && entryName[1] == 46)
+            if !dots {
+                byte* items = Bytes.Allocate(count)
+                mut long i = 0
+                while i < count {
+                    items[i] = entryName[i]
+                    i = i + 1
+                }
+
+                match string.FromUtf8(Bytes.FromRaw(items, count)) {
+                    string text => names.Add(text)
+                    InvalidUtf8 => result = -4096
+                }
+            }
+        }
+
+        closedir(directory)
+    }
+
+    return result
+}
+
+// The kind of a failure of the calls above: the kind Rust 1.82's `decode_error_kind` gives the error
+// number on Linux, each abbreviation written out, `AddrInUse` as `AddressInUse`, `Other` for a number
+// it gives no kind, and `InvalidData` for a name that is not UTF-8 (S1).
+pub IoKind ErrorKind(long failure) => match -failure {
+    1 => IoKind.PermissionDenied
+    2 => IoKind.NotFound
+    4 => IoKind.Interrupted
+    7 => IoKind.ArgumentListTooLong
+    11 => IoKind.WouldBlock
+    12 => IoKind.OutOfMemory
+    13 => IoKind.PermissionDenied
+    16 => IoKind.ResourceBusy
+    17 => IoKind.AlreadyExists
+    18 => IoKind.CrossesDevices
+    20 => IoKind.NotADirectory
+    21 => IoKind.IsADirectory
+    22 => IoKind.InvalidInput
+    26 => IoKind.ExecutableFileBusy
+    27 => IoKind.FileTooLarge
+    28 => IoKind.StorageFull
+    29 => IoKind.NotSeekable
+    30 => IoKind.ReadOnlyFilesystem
+    31 => IoKind.TooManyLinks
+    32 => IoKind.BrokenPipe
+    35 => IoKind.Deadlock
+    36 => IoKind.InvalidFilename
+    38 => IoKind.Unsupported
+    39 => IoKind.DirectoryNotEmpty
+    40 => IoKind.FilesystemLoop
+    98 => IoKind.AddressInUse
+    99 => IoKind.AddressNotAvailable
+    100 => IoKind.NetworkDown
+    101 => IoKind.NetworkUnreachable
+    103 => IoKind.ConnectionAborted
+    104 => IoKind.ConnectionReset
+    107 => IoKind.NotConnected
+    110 => IoKind.TimedOut
+    111 => IoKind.ConnectionRefused
+    113 => IoKind.HostUnreachable
+    116 => IoKind.StaleNetworkFileHandle
+    122 => IoKind.FilesystemQuotaExceeded
+    4096 => IoKind.InvalidData
+    else => IoKind.Other
+}
+
+// The number of a failure of the calls above (S1): the system's error number, or 0 for a name that is
+// not UTF-8, which is no error of the system's.
+pub int ErrorCode(long failure) {
+    if failure == -4096 {
+        return 0
+    }
+
+    return int(-failure)
 }

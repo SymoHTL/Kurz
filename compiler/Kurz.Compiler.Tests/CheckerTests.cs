@@ -1772,7 +1772,39 @@ public sealed class CheckerTests
         // V9 with D18 and T15: no line of the file declares the type, so the text says who does; a name the file declares twice keeps its text
         Assert.Equal("`Invalid` is a data type every file sees, declared before the file's own types (D18, V9)", Assert.Single(Check("data Invalid").Diagnostics.Items).Message);
         Assert.Equal("`InvalidUtf8` is a data type every file sees, declared before the file's own types (T15, V9)", Assert.Single(Check("data InvalidUtf8(int At)").Diagnostics.Items).Message);
+        Assert.Equal("`IoError` is a data type every file sees, declared before the file's own types (S1, V9)", Assert.Single(Check("data IoError(int Code)").Diagnostics.Items).Message);
+        Assert.Equal("`IoKind` is an enum every file sees, declared before the file's own types (S1, V9)", Assert.Single(Check("enum IoKind { Lost }").Diagnostics.Items).Message);
         Assert.Equal("the name `Rejected` is declared already (V9)", Assert.Single(Check("data Rejected\ndata Rejected").Diagnostics.Items).Message);
+    }
+
+    // ---- files (chapter 13) --------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_names_of_files_and_sockets_are_names_every_file_sees_with_the_functions_and_members_their_rules_give()
+    {
+        // S2, S8, S9 with V9: a file's own declaration of one is `redeclared`
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("data File"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("data Directory"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("data TcpStream"));
+
+        // V10: a function of `File` and a member of a file that no rule gives
+        const string Program = "void | IoError Use() {\n    f = File.Open(\"a\")\n    f.Close()\n    File.Delete(\"a\")\n}\n\nUse() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("File.Delete", "File.Remove", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors(Program.Replace("f.Close()", "f.Flush()", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_read_takes_its_list_as_mut_and_clear_changes_a_mut_list()
+    {
+        // S3 with M7: the list a read adds to is a `mut` argument, written so at the call
+        const string Program = "void | IoError Use() {\n    f = File.Open(\"a\")\n    mut buffer = Bytes()\n    print(f.Read(mut buffer, 4))\n}\n\nUse() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.MutAtCall, 4)], Errors(Program.Replace("mut buffer, 4", "buffer, 4", StringComparison.Ordinal)));
+
+        // M9 with M5: `Clear` changes the list it is called on
+        Clean("mut xs = List<int>()\nxs.Clear()\nprint(xs.Count)");
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("xs = List<int>()\nxs.Clear()\nprint(xs.Count)"));
     }
 
     [Fact]
@@ -1816,6 +1848,8 @@ public sealed class CheckerTests
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\ndata Sub(int X) : Counter\n\nmut s = Sub(1, 2)\ns.Increment()", "2: the body of a data type (D16)")]
     [InlineData("static int Twice(int n) {\n    return \"x\"\n}\n\nprint(Twice(\"a\"))", "1: the modifier `static` of a method (K7, M6)")]
     [InlineData("data User(string Name)\n\nmut u = User(\"a\")\nu?.Name = \"b\"", "4: `?.` (N5)")]
+    [InlineData("void | IoError Serve() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n}\n\nServe() else {\n    IoError e => print(e)\n}", "2: a socket (S9)")]
+    [InlineData("void Serve(TcpStream s) {\n    print(1)\n}\n\nprint(2)", "1: a socket (S9)")]
     public void A_construct_of_a_chapter_the_checker_does_not_read_is_not_supported_and_carries_no_error(string program, string first)
     {
         // the helper asserts that no diagnostic is an error: what stands inside the construct is read with its diagnostics dropped, so that

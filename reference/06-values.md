@@ -583,9 +583,11 @@ There is one family of collections, and every value can cross between actors.
 
 No case: actors are outside this reference; that collections are values is shown under M3.
 
-### M9 (assumed, §4, §5) The collections the corpus uses
+### M9 (assumed, §4, §5, §12) The collections the corpus uses
 
-`List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method; `Count` is the number
+`List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method; `Clear()` empties a list and
+keeps its room, a `mut` method too, and a list that shares its block with another value lets go of it
+(M3; §12, the owner, 2026-10-29); `Count` is the number
 of items, an `int`, and a list holds at most as many items as the largest `int`, an `Add` that
 would make it longer raising `allocation-failed` with the bytes of its items, a 64-bit number: the count
 after the `Add` times the item's size in its layout, padding included, the size of a pointer for a
@@ -601,7 +603,8 @@ items copied (M3); a start below 0 or an end past the count raises `index-out-of
 whose end lies below its start is `reversed-range` or `reversed-range-at-run-time`, as C8 says of a
 range (§4, the owner, 2026-10-29). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the
-record's samples use. The naming of the standard library is open (record, section 14).
+record's samples use, and `Clear` is the one section 12 gives. The naming of the standard library is open
+beyond the calls on files and sockets (record, sections 12 and 14).
 
 Case: [values/list.kz](../corpus/values/list.kz)
 ```kurz
@@ -689,6 +692,18 @@ xs.Add(1)
 xs.Add(2)
 n = 0
 print(xs[1..<n])
+```
+
+Case: [values/list-clear.kz](../corpus/values/list-clear.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+ys = xs
+xs.Clear()
+print(xs.Count)
+print(ys.Count)
 ```
 
 ### M10 (decided, §4) The order of a map's entries

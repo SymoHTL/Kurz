@@ -1,0 +1,13 @@
+// expect: output
+// | 0
+// | 3
+// rules: M9
+
+mut xs = List<int>()
+xs.Add(1)
+xs.Add(2)
+xs.Add(3)
+ys = xs
+xs.Clear()
+print(xs.Count)
+print(ys.Count)

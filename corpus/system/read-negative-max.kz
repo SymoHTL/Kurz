@@ -1,0 +1,15 @@
+// expect: throws index-out-of-range at 10
+// rules: S3
+
+void | IoError Negative() {
+    File.WriteAll("negative.txt", "abc".Bytes)
+    f = File.Open("negative.txt")
+    File.Delete("negative.txt")
+    mut buffer = Bytes()
+    int max = -1
+    f.Read(mut buffer, max)
+}
+
+Negative() else {
+    IoError e => print(e)
+}

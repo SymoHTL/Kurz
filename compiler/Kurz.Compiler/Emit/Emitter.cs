@@ -38,7 +38,9 @@ public sealed partial class Emitter
     private readonly IrModule module;
     private readonly Unit program;
     private readonly Unit common;
+    private readonly Unit sys;
     private readonly Unit std;
+    private readonly Target target;
     private readonly IReadOnlyList<Unit> units;
     private readonly Dictionary<FunctionSymbol, Unit> owners = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionSymbol, string?> cLibraries = new(ReferenceEqualityComparer.Instance);
@@ -71,7 +73,9 @@ public sealed partial class Emitter
     {
         this.program = program;
         this.common = common;
+        this.sys = sys;
         this.std = std;
+        this.target = target;
         units = [program, common, sys, std];
         unit = program;
         this.test = test;

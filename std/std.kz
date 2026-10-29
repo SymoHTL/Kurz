@@ -342,6 +342,132 @@ pub byte* ListPush(byte* block, long item) {
     return slot
 }
 
+// For a read into a list of bytes (S3): a block with room for `more` bytes after its own that no other
+// list value holds, as Rust's `Vec::reserve` makes room before a read: the block itself where it has the
+// room and no other value holds it, else a new block with its bytes, the old block freed, or held by one
+// value less where other values hold it (M3). A new block has the room of the old one where that holds
+// `more` bytes after them, else the larger of the room a full block grows to and the count and `more`.
+// Null for a list without a block and `more` 0, which needs none. A count and `more` past the largest
+// `int` give null with `asked` set to their sum, the bytes of the items, as an `Add` past it does (M9);
+// a block the system refuses gives null with `asked` set to the bytes asked for.
+pub byte* BytesReserve(byte* block, long more, mut long asked) {
+    mut long count = 0
+    mut long room = 0
+    mut bool shared = false
+    raw {
+        if block != null {
+            count = long(*Ptr<int>(block + 8))
+            room = long(*Ptr<int>(block + 12))
+            shared = *Ptr<long>(block) > 1
+        }
+    }
+
+    if count + more > 2147483647 {
+        asked = count + more
+        return null
+    }
+
+    if !shared && room - count >= more {
+        return block
+    }
+
+    mut long grown = room
+    if room - count < more {
+        grown = Grown(room, 1)
+        if grown < count + more {
+            grown = count + more
+        }
+    }
+
+    long size = 16 + grown
+    mut byte* p = null
+    raw {
+        p = Allocate(size)
+        if p == null {
+            asked = size
+        } else {
+            *Ptr<long>(p) = 1
+            *Ptr<int>(p + 8) = int(count)
+            *Ptr<int>(p + 12) = int(grown)
+            mut long i = 0
+            while i < count {
+                p[16 + i] = block[16 + i]
+                i = i + 1
+            }
+        }
+    }
+
+    if p != null && block != null {
+        if shared {
+            raw {
+                *Ptr<long>(block) = *Ptr<long>(block) - 1
+            }
+        } else {
+            Free(block, 16 + room)
+        }
+    }
+
+    return p
+}
+
+// The bytes the next read of a whole file asks for (S6): the room a list of bytes has after its own,
+// else `piece` more, as Rust's `read_to_end` reads into the room its `Vec` has before it grows it, and
+// no more than the largest `int` of items leaves, so that a file a list holds is read whole; 0 for a
+// list that holds that many.
+pub long BytesPiece(byte* block, long piece) {
+    mut long count = 0
+    mut long room = 0
+    raw {
+        if block != null {
+            count = long(*Ptr<int>(block + 8))
+            room = long(*Ptr<int>(block + 12))
+        }
+    }
+
+    if room > count {
+        return room - count
+    }
+
+    if piece > 2147483647 - count {
+        return 2147483647 - count
+    }
+
+    return piece
+}
+
+// The address after the last byte of a list of bytes, where a read puts the bytes it adds; null for a
+// list without a block.
+pub byte* BytesEnd(byte* block) {
+    mut byte* end = null
+    raw {
+        if block != null {
+            end = block + 16 + long(*Ptr<int>(block + 8))
+        }
+    }
+
+    return end
+}
+
+// The count of a list of bytes raised by the `count` bytes a read put after its own, in its room; a
+// list without a block takes no byte.
+pub void BytesAdded(byte* block, long count) {
+    raw {
+        if block != null {
+            *Ptr<int>(block + 8) = *Ptr<int>(block + 8) + int(count)
+        }
+    }
+}
+
+// The count of the list's items set to 0 and its room kept, for `Clear` (M9) on a list no other value
+// holds, whose items' own blocks the caller let go of; nothing for a list without a block.
+pub void ListClear(byte* block) {
+    raw {
+        if block != null {
+            *Ptr<int>(block + 8) = 0
+        }
+    }
+}
+
 // A new block, held by one list value, with a copy of the `count` items at `items`, each `item` bytes,
 // and room for them: the part of a list (M9) and the bytes of a literal string (T15), whose items' own
 // blocks the caller counts. Null for no items, and null with `asked` set to the bytes asked for where

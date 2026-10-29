@@ -58,15 +58,15 @@ public sealed class Toolchain : IDisposable
 
     /// <summary>
     /// Runs a built program with nothing on its input and the trace of the calls switched off, <c>KURZ_TRACE=0</c> (design record,
-    /// section 6), so that an error stream holds the error line alone; its exit code, what it wrote on standard output as lines, and what
-    /// it wrote on standard error.
+    /// section 6), so that an error stream holds the error line alone, in the directory of its build, so that a file it makes with a
+    /// relative path (S2) lands there; its exit code, what it wrote on standard output as lines, and what it wrote on standard error.
     /// </summary>
     public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable) => Run(executable, "0");
 
     /// <summary>Runs a built program as <see cref="Run(string)"/> does, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where it is null.</summary>
     public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable, string? trace)
     {
-        var (code, output, error) = Processes.Capture(executable, [], null, TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace });
+        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace });
         return (code, Lines(output), error);
     }
 
@@ -106,16 +106,23 @@ public sealed class Toolchain : IDisposable
 /// </summary>
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 204 : 205;
+    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files.</summary>
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 205 : 215;
+
+    /// <summary>The cases of the calls on files that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
+    private static readonly string[] FileCases =
+    [
+        "system/close-twice.kz", "system/delete-rename-size.kz", "system/directories.kz", "system/open-missing.kz", "system/path-with-nul.kz",
+        "system/read-appends.kz", "system/read-negative-max.kz", "system/whole-file.kz", "system/write-read.kz",
+    ];
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
-    private static readonly Dictionary<string, string> NotEmitted = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, string> NotEmitted = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["memory/asm-explicit-register.kz"] = "inline assembly (R11)",
         ["memory/asm-in-raw.kz"] = "inline assembly (R11)",
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
-    };
+    }.Concat(OperatingSystem.IsWindows() ? FileCases.Select(c => KeyValuePair.Create(c, Emitter.NotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
 
     /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>
     private static readonly Dictionary<string, string> NotRun = OperatingSystem.IsWindows()

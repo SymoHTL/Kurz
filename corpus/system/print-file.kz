@@ -1,0 +1,12 @@
+// expect: error no-text at 7
+// rules: S5
+
+void | IoError Show() {
+    f = File.Create("shown.txt")
+    File.Delete("shown.txt")
+    print(f)
+}
+
+Show() else {
+    IoError e => print(e)
+}

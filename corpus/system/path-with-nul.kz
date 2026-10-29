@@ -1,0 +1,12 @@
+// expect: output
+// | InvalidInput
+// | 0
+// rules: S1
+
+match File.Create("a\0b") {
+    File => print("created")
+    IoError e => {
+        print(e.Kind)
+        print(e.Code)
+    }
+}

@@ -1,0 +1,14 @@
+// expect: output
+// | not found: no-such-file.txt
+// | NotFound
+// | 2
+// rules: S1, S2
+
+match File.Open("no-such-file.txt") {
+    File => print("opened")
+    IoError e => {
+        print(e)
+        print(e.Kind)
+        print(e.Code)
+    }
+}

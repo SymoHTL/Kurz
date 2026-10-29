@@ -21,7 +21,8 @@ namespace Kurz.Compiler.Emit;
 /// and at a <c>return</c>, a <c>break</c> and a <c>continue</c> that leave the block; a <c>throw</c> ends the process. A parameter
 /// is borrowed from the caller for the call. The blocks of data types in a relation of inheritance or that hold themselves are
 /// never freed, so what they hold keeps the count it was stored with. A function value is counted as a list is, by the
-/// environment of its lambda (<see cref="EmitLambda"/>), and values of every other type are not counted.
+/// environment of its lambda (<see cref="EmitLambda"/>), and so is a file, by the block of its handle, which closes it at its last count
+/// (S5), and values of every other type are not counted.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -29,10 +30,10 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    /// <summary>Whether a value of the type holds the block of a list or of a string or the environment of a lambda: a list, a string, a function value, a plain data value with a field that does, a union with a case that does.</summary>
+    /// <summary>Whether a value of the type holds the block of a list, of a string or of a file's handle or the environment of a lambda: a list, a string, a file, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or FunctionType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or FunctionType or HandleType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
@@ -188,6 +189,12 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is HandleType)
+        {
+            fn.Emit($"call void {RetainHandle()}(ptr {value})");
+            return;
+        }
+
         if (type is PrimitiveType { Kind: Primitive.String })
         {
             if (!IsLiteral(value))
@@ -208,6 +215,12 @@ public sealed partial class Emitter
         if (type is FunctionType)
         {
             fn.Emit($"call void {ReleaseEnvironment()}(%kz.fn {value})");
+            return;
+        }
+
+        if (type is HandleType)
+        {
+            fn.Emit($"call void {ReleaseHandle()}(ptr {value})");
             return;
         }
 

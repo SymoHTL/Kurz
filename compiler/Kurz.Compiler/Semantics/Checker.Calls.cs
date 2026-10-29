@@ -701,7 +701,7 @@ public sealed partial class Checker
         return new Typed(made);
     }
 
-    /// <summary>M5, M9, T15: a call of a member: a list's <c>Add</c> and <c>Where</c>; a data value's field of function type.</summary>
+    /// <summary>M5, M9, T15, S2 to S8: a call of a member: a list's <c>Add</c>, <c>Where</c> and <c>Clear</c>; a function of <c>File</c> and <c>Directory</c>, and a file's methods; a data value's field of function type.</summary>
     private Typed CheckMethodCall(MemberAccess m, CallExpression c)
     {
         if (m.Conditional)
@@ -750,6 +750,18 @@ public sealed partial class Checker
             if (n.Name == "Bytes" && m.Member == "Allocate")
             {
                 return CheckListAllocate(c, new ListType(Types.Byte), "Bytes.Allocate"); // R15, as above
+            }
+
+            if (n.Name is "File" or "Directory")
+            {
+                return CheckFileFunction(n.Name, m, c); // S2, S6 to S8
+            }
+
+            if (n.Name is "TcpListener" or "TcpStream")
+            {
+                NotSupported(m.Line, "a socket (S9)");
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
             }
 
             if (enums.TryGetValue(n.Name, out var enumSymbol))
@@ -812,9 +824,31 @@ public sealed partial class Checker
                         return Record(c, CallKind.ListWhere, Call([candidate], c, null, out var picked), picked);
                     }
 
+                case "Clear":
+                    {
+                        if (RefusesTypeArguments(c, "`Clear`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var candidate = new Candidate { Slots = [], Result = Types.Void };
+                        var result = Record(c, CallKind.ListClear, Call([candidate], c, null, out var picked), picked);
+                        if (!result.IsError)
+                        {
+                            MutReceiver(c, m.Target, c.Line, "`Clear` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
+                        return result;
+                    }
+
                 default:
                     break;
             }
+        }
+
+        if (target.Type is HandleType)
+        {
+            return CheckFileMethod(m, c); // S3 to S5
         }
 
         var member = MemberOf(target.Type, m.Member, m.Line);

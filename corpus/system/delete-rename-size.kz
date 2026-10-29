@@ -1,0 +1,22 @@
+// expect: output
+// | 4
+// | false
+// | true
+// | not found: gone.txt
+// rules: S7
+
+void | IoError Move() {
+    File.WriteAll("first.txt", "four".Bytes)
+    File.Rename("first.txt", "second.txt")
+    print(File.Size("second.txt"))
+    print(File.Exists("first.txt"))
+    print(File.Exists("second.txt"))
+    File.Delete("second.txt")
+    File.Delete("gone.txt") else {
+        IoError e => print(e)
+    }
+}
+
+Move() else {
+    IoError e => print(e)
+}

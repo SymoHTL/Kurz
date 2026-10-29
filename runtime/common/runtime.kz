@@ -3,8 +3,8 @@
 // 2026-10-23, "Rust's sys"), and the standard library's allocator as the folder `std` (the owner,
 // 2026-10-24, "A std/ directory now" and "As built"). The emitted code calls its `pub` functions: `Start` before the
 // program's first statement and `Finish` after its last, and the others where the program allocates,
-// prints, makes the text of a value, joins or compares strings, computes with a `decimal`, or raises an
-// exception (compiler/README.md, "The runtime").
+// prints, makes the text of a value, joins or compares strings, computes with a `decimal`, raises an
+// exception, or hands a path to a call on a file (compiler/README.md, "The runtime").
 use std
 use sys
 
@@ -63,6 +63,37 @@ pub void AllocationFailed(long size) {
     WriteNumber(ulong(size))
     WriteError(" bytes)\n")
     sys.Exit(1)
+}
+
+// The bytes of a path as C reads them, for a call on a file (S1, S2): a copy of the string's bytes
+// ended by a NUL byte, which `FreePath` gives back, or null where the string holds a NUL byte, which
+// no path of the system holds and which is `InvalidInput` to the caller, as Rust's `run_path_with_cstr`
+// refuses it.
+pub byte* CPath(string path) {
+    long count = long(path.Bytes.Count)
+    byte* p = Allocate(count + 1)
+    raw {
+        byte* from = path.Pointer
+        mut long i = 0
+        while i < count {
+            if from[i] == 0 {
+                std.Free(p, count + 1)
+                return null
+            }
+
+            p[i] = from[i]
+            i = i + 1
+        }
+
+        p[count] = 0
+    }
+
+    return p
+}
+
+// The copy `CPath` made of the path, given back to the allocator.
+pub void FreePath(byte* p, string path) {
+    std.Free(p, long(path.Bytes.Count) + 1)
 }
 
 // `print` (A1): the text and a line feed, handed to the system's write call in one piece, which is

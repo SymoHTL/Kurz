@@ -112,6 +112,23 @@ public sealed record EnumType(EnumSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>The handles of chapter 13, each a name every file sees.</summary>
+public enum Handle
+{
+    File,
+    TcpListener,
+    TcpStream,
+}
+
+/// <summary>
+/// A handle (S5, S9): a file or a socket of the system, held by every copy of the value and closed when the last lets go of it, as a
+/// list's block is freed (section 12, the owner, 2026-10-29, "At the last count, as Rust Drop").
+/// </summary>
+public sealed record HandleType(Handle Kind) : KurzType
+{
+    public override string Text => Kind.ToString();
+}
+
 /// <summary>
 /// A union (D9). The cases are flat and distinct, in the order written; the first is the success
 /// case of a result (O1). Two unions are one type when they have the same first case and the same
@@ -196,6 +213,7 @@ public static class Types
     public static readonly PrimitiveType LongTimestamp = new(Primitive.LongTimestamp);
     public static readonly VoidType Void = new();
     public static readonly ErrorType Error = new();
+    public static readonly HandleType File = new(Handle.File);
 
     /// <summary>The built-in types by the names L19 reserves.</summary>
     public static readonly IReadOnlyDictionary<string, PrimitiveType> ByName = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal)
@@ -297,6 +315,7 @@ public static class Types
             (ListType x, ListType y) => Same(x.Element, y.Element),
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (HandleType x, HandleType y) => x.Kind == y.Kind,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
             (FunctionType x, FunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (PointerType x, PointerType y) => Same(x.Pointee, y.Pointee),

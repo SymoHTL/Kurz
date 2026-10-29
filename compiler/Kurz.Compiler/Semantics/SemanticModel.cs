@@ -55,6 +55,51 @@ public enum CallKind
 
     /// <summary><c>Plan.From(n)</c> (D18), the value of the <c>enum</c> whose number is <c>n</c> or the case <c>Invalid</c>; <see cref="CallInfo.Target"/> is the enum.</summary>
     EnumFrom,
+
+    /// <summary>A list's <c>Clear</c> (M9).</summary>
+    ListClear,
+
+    /// <summary><c>File.Open(path)</c> (S2), a file opened to read or the case <c>IoError</c> (S1).</summary>
+    FileOpen,
+
+    /// <summary><c>File.Create(path)</c> (S2), a file created or emptied to write or the case <c>IoError</c>.</summary>
+    FileCreate,
+
+    /// <summary><c>File.ReadAll(path)</c> (S6).</summary>
+    FileReadAll,
+
+    /// <summary><c>File.WriteAll(path, bytes)</c> (S6).</summary>
+    FileWriteAll,
+
+    /// <summary><c>File.Delete(path)</c> (S7).</summary>
+    FileDelete,
+
+    /// <summary><c>File.Rename(from, to)</c> (S7).</summary>
+    FileRename,
+
+    /// <summary><c>File.Size(path)</c> (S7).</summary>
+    FileSize,
+
+    /// <summary><c>File.Exists(path)</c> (S7).</summary>
+    FileExists,
+
+    /// <summary><c>Directory.Create(path)</c> (S8).</summary>
+    DirectoryCreate,
+
+    /// <summary><c>Directory.List(path)</c> (S8).</summary>
+    DirectoryList,
+
+    /// <summary><c>Directory.Delete(path)</c> (S8).</summary>
+    DirectoryDelete,
+
+    /// <summary>A file's <c>Read(mut into, max)</c> (S3).</summary>
+    FileRead,
+
+    /// <summary>A file's <c>Write(bytes)</c> (S4).</summary>
+    FileWrite,
+
+    /// <summary>A file's <c>Close()</c> (S5).</summary>
+    FileClose,
 }
 
 /// <summary>

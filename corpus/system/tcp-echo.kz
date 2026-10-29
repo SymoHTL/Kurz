@@ -1,0 +1,19 @@
+// expect: output
+// | hello
+// rules: S9
+
+void | IoError Echo() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("hello".Bytes)
+    mut buffer = Bytes()
+    server.Read(mut buffer, 5)
+    print(string.FromUtf8(buffer) else {
+        InvalidUtf8 => "not UTF-8"
+    })
+}
+
+Echo() else {
+    IoError e => print(e)
+}

@@ -7,8 +7,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   skipped, the two-byte line break of Windows editors read as one, in a `"""` block too), `Syntax/`
   turns it into tokens and a syntax tree (the syntax of chapters 1 to 11: every declaration,
   statement and expression form the reference shows), `Semantics/` checks a tree the parser read
-  without an error against the rules of chapters 1 to 3, 5, 6, 8 to 10 and the raw forms of 11
-  (the section "What the checker reads" below) and says `not supported` to a construct of the
+  without an error against the rules of chapters 1 to 3, 5, 6, 8 to 10, the raw forms of 11 and
+  the calls on files of 13 (the section "What the checker reads" below) and says `not supported` to a construct of the
   other chapters, and keeps what it found out, node by node, for a code generator
   (`Semantics/SemanticModel.cs`: the type and constant of every expression, the variable or
   function every name means, the variable every declaration makes, the function every call picks
@@ -329,6 +329,22 @@ target's `Release`; the mebibytes a thread carved from stay its own. A target's 
 `Write` calling again where a signal interrupted it (section 6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
+The Linux file also gives the calls on files of chapter 13 (section 12), which the emitted code calls
+and nothing of `common/` or `std/` does, so that the Windows file gives none of them (S11). Each takes
+a path as the address of its bytes ended by a NUL byte, which `common/`'s `CPath` copies from a string,
+null where the string holds a NUL, and `FreePath` gives back; each returns a number of 0 or more, or a
+failure below 0, the system's error number negated, or -4096 for the name of a directory's entry that
+is not UTF-8. `ErrorKind` gives a failure's `IoKind`, the kind Rust 1.82's `decode_error_kind` gives the
+number on Linux, and `ErrorCode` its number, 0 for -4096 (S1). `OpenFile` opens close-on-exec, a file it
+creates with the permissions 0666 less the `umask` (S2); `OpenFile` and `ReadFile` call again where a
+signal interrupted them; `WriteFile` calls `Write` again with the rest and returns the bytes written
+before a call that took none (S4); `CloseFile` takes an interrupt for no failure; `FileSize` and
+`FileExists` read `stat` into a page each thread maps at its first use, at the offsets of x86-64's
+`struct stat`; `CreateDirectories` creates the directories above that are missing, as Rust's
+`fs::create_dir_all` does, and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
+library's `struct dirent` (S8). `std/` gives the room a read makes in a list of bytes before it,
+`BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9).
+
 The text of a `float` and of a `double` is computed in `common/` from the value's bits, which the
 emitted code passes as a `uint` and a `ulong`: the fewest digits that read back as the same value,
 of those the nearest, by Ryu's algorithm as Rust's `ryu` crate computes it with its small table (each
@@ -459,7 +475,25 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   it kept, `for` over a list, which walks the list as it was when
   the loop started (C6), their text (A4), and lists of every type the emitter lays out, in
   variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
-  program with `allocation-failed` and the bytes of its items after the `Add` (M9);
+  program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
+  lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
+- files (chapter 13), in a build for Linux: each call of `File` and `Directory` and each of a file's
+  `Read`, `Write` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
+  case `IoError`, its kind and number from `ErrorKind` and `ErrorCode` and its path the call's first,
+  whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File` is the address of a block of 32 bytes,
+  the count of the values that hold it, the descriptor and the path, counted as a list's block is and
+  closed at zero, the error of that close ignored, and `Close` writes -1 as the descriptor before it
+  closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
+  `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
+  holds, before it reads (S3), and `File.ReadAll` reads into the room the list has, else 8192
+  bytes more, no more than the largest `int` of items leaves, while a read gives bytes, and a list that
+  holds that many reads one byte more, which raises `allocation-failed` where the file has it (S6). `FileTests` pins what no case can: 200 opens of a
+  file, and the files and directories the calls on a path open for themselves, under a limit of 32
+  descriptors, and the same files all held, which reach the limit; a close through a copy; a read
+  into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
+  largest `int` of bytes, lowered to 20 in the library's text, and one byte more; a read and a write in
+  the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
+  created again and one under a file; the text of an error without a path; and the refusal for Windows;
 - lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code
@@ -598,9 +632,9 @@ A program that uses one of these gets one `not supported` at the construct's lin
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
-(M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` on a list in
-a field (M5), `==` on a value that holds a list (D3), `s.Chars` as a list (T15), and a construct of the other
-chapters the checker does not read. The line
+(M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` or a `Clear` on a list in
+a field (M5), `==` on a value that holds a list (D3), `s.Chars` as a list (T15), a call on a file in a build for
+Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
 The reference counting of section 3 is emitted for lists, strings, the environments of lambdas and
@@ -609,7 +643,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 262 cases that expect a run, with the words the emitter says, and refuses a stale entry; the 54 the
+full and the emitter does not emit, 3 of the 273 cases that expect a run, and on Windows the 9 of files besides, with the words the emitter says, and refuses a stale entry; the 55 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -830,7 +864,8 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
 M9 for lists), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow) and 11's raw forms (R7, R10 to R17), and the rules of `print` and of a value's text that
+flow), 11's raw forms (R7, R10 to R17) and 13 (files: S1 to S8, S10 and S11; S12's grants are a
+package's, and the checker reads a program), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
@@ -899,7 +934,7 @@ another function of its name, with a `mut` parameter or with a type that cannot 
 which no rule names an id, which leaves its body read with its diagnostics dropped and its calls
 unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the type of a C
 function does not write, the type of a C function with a type that cannot cross to C, and a data
-type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
+type in C's layout (R16, R17); a socket, `TcpListener` and `TcpStream` (S9); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one

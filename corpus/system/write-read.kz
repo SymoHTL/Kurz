@@ -1,0 +1,25 @@
+// expect: output
+// | 5
+// | hello
+// | 0
+// rules: S2, S3, S4
+
+int | IoError Roundtrip() {
+    file = File.Create("roundtrip.txt")
+    file.Write("hello".Bytes)
+    file.Close()
+    f = File.Open("roundtrip.txt")
+    mut buffer = Bytes()
+    print(f.Read(mut buffer, 100))
+    print(string.FromUtf8(buffer) else {
+        InvalidUtf8 => "not UTF-8"
+    })
+    end = f.Read(mut buffer, 100)
+    File.Delete("roundtrip.txt")
+    return end
+}
+
+match Roundtrip() {
+    int end => print(end)
+    IoError e => print(e)
+}
