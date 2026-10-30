@@ -14,7 +14,7 @@ Sources are the Rust project's own surveys and records where they exist. A sourc
 resort" is a widely cited article, tutorial or forum thread outside the project's record. Section
 numbers name sections of `kurz-design.md`; rule ids (M7, O3, T4 ...) name rules of `reference/`.
 
-Summary: 25 findings: 5 avoided, 1 not applicable; 19 answered and recorded.
+Summary: 25 findings: 3 avoided, 1 repeated, 1 repeated in part, 1 not applicable; 19 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.

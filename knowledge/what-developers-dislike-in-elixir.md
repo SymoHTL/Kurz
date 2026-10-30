@@ -17,7 +17,7 @@ other source is the project's own record (elixir-lang.org, hexdocs, erlang.org),
 paper, marked so. Verdicts on actors, distribution and keywords rest on the design record alone: the reference
 leaves them out, and the compiler builds no actor.
 
-Summary: 24 findings: 5 avoided, 1 not applicable; 18 answered and recorded.
+Summary: 24 findings: 5 avoided, 1 not applicable, 2 open, 1 repeated for some sends and answered for the rest; 15 answered and recorded, of which 1 is repeated in part for a call whose caller crashed.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -73,7 +73,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: GenServer (https://elixir.hexdocs.pm/GenServer.html), on `call/3`: "The default value is 5000. If no reply is received within the specified time, the function call fails and the caller exits." The same paragraph describes the server in that case as "just late with the reply".
 - Since: the gen_server documentation of Erlang/OTP (https://www.erlang.org/doc/apps/stdlib/gen_server.html) says that since OTP 24 `gen_server:call` uses process aliases, so a late reply no longer reaches the caller; the server still does the work.
-- Kurz: answered: "Deadline on chain ID", section 6 of the record, for a caller that waits: an inbox drops a message whose deadline passed. A call whose caller crashed runs to its end and its reply is dropped ("Run it, drop the reply", section 6), the work nobody waits for that this finding names, which the owner took at that cost. Before the answers: REPEATED.
+- Kurz: answered for a caller that waits: "Deadline on chain ID", section 6 of the record: an inbox drops a message whose deadline passed. REPEATED in part for a call whose caller crashed: it runs to its end and its reply is dropped ("Run it, drop the reply", section 6), the work nobody waits for that this finding names, which the owner took at that cost, except where the crash ends the callee, an actor the caller spawned by hand, which stops after the message it runs ("After current message", section 6). Before the answers: REPEATED.
 
 ## 10. Let it crash: a lasting fault restarts in a loop, and the limit takes the tree down
 

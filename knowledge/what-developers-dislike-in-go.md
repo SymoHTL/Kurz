@@ -19,7 +19,7 @@ survey, nor a study, nor the Go project's own record. The language reference
 covers only the sequential core, and the compiler builds no actor. So the verdicts on concurrency
 (findings 9, 13, 15 and 18) rest on section 6 of the design record alone.
 
-Summary: 25 findings: 16 avoided; 9 answered and recorded.
+Summary: 25 findings: 15 avoided, 1 repeated in part; 9 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
