@@ -66,7 +66,11 @@ flowchart TD
         LIVING entry without diagram or update triggers, fewer living entries than their floor;
         expired or future-dated numbers, a TTL over 90 days; a generated block that is empty, or a page
         whose digest is stale: a number, the generated date or the TTL edited by hand
-        (a recomputed digest passes: HAZARD issue 18); fewer entries than the floor"]
+        (a recomputed digest passes: HAZARD issue 18); fewer entries than the floor;
+        in the research entries, a finding with no verdict, two, or one in no word of its entry,
+        a section of the design record a verdict cites that the record does not have, a repeated,
+        open or answered finding that cites none (not what the section says: review rule design record),
+        an entry with no finding, fewer research entries than their floor"]
         G9["reference: a rule without id, status or the record section it cites;
         a decided, assumed or proposed rule with neither a case nor a reason;
         a case on an open rule; a sample that differs from its corpus file;
@@ -87,7 +91,7 @@ flowchart TD
         dotnet missing or out of time; kurz --version, which it prints, exited with another code than 0 (the command
         refused the clang it found or found none, did not start or ran out of time), or exited with 0 and wrote no line
         that names a clang release in the command's one-line form. Read: the output of dotnet test, one summary per
-        test project, summed;
+        test project, summed, and printed on a red run into a log that takes every character;
         the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
         Inside the suite: the walk of every corpus case the checker reads clean, red on a node a code generator reads
         that the checker's record (SemanticModel) holds no entry for, or on fewer than 160 cases or 2,900 entries
@@ -248,7 +252,9 @@ flowchart TD
         Nothing asserts the policy: HAZARD issue 10"]
         R5["review rules, .review/review-rules.yaml of the default branch: one section per surface, the
         section compiler for compiler/, runtime/ and std/, which reads a borrow of the emitter that names no count and
-        no refusal of the checker, and a change inside an expression that the checker's walk of M7 does not count.
+        no refusal of the checker, and a change inside an expression that the checker's walk of M7 does not count,
+        the section design record, which reads a change to the record whose description neither names the research
+        finding it meets nor says it meets none (node B4 of the design playbook; the citations are G3's).
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).
         The reviewer is a model that is given one batch of the diff: it can miss a defect, it cannot
         see a file outside its batch, and a breach it rates low opens no thread and holds no merge.
