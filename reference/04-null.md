@@ -648,7 +648,8 @@ the type that fills the parameter is not nullable, `T?` is that type's nullable 
 on a `List<int>` gives an `int?` and its `return null` gives `null`. C# from version 9 on differs
 there: it reads `T?` of such a parameter as `T` where a value type fills it, so that `First<int>`
 gives an `int`, and it refuses the `return null` of the generic function itself, whatever fills `T`
-(CS0403).
+(CS0403, "Cannot convert null to type parameter 'T' because it could be a non-nullable value type";
+checked 2026-10-30 by a build of `static T? First<T>(List<T> xs)` with the .NET SDK 10.0.402).
 
 Case: [null/nullable-type-parameter.kz](../corpus/null/nullable-type-parameter.kz)
 ```kurz
