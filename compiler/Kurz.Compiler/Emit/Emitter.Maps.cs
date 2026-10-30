@@ -6,9 +6,9 @@ namespace Kurz.Compiler.Emit;
 
 /// <summary>
 /// M9: a map is the address of its block, null for a map without entries, which takes no block; the block's functions are the
-/// standard library's (<c>std/std.kz</c>), and a slot of it holds an entry as <c>{ i64, K, V }</c>, the hash of its key, the
-/// key and the value, the hash 0 in a slot without an entry. A key's hash is SipHash-1-3 under the keys of the map's block, of a
-/// string's UTF-8 bytes and of any other key's value widened to 64 bits, with its highest bit set.
+/// standard library's (<c>std/std.kz</c>), a control byte of it says whether a slot holds an entry, 255 where it holds none, and a
+/// slot holds an entry as <c>{ i64, K, V }</c>, the hash of its key, the key and the value. A key's hash is SipHash-1-3 under the
+/// keys of the map's block, of a string's UTF-8 bytes and of any other key's value widened to 64 bits.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -52,36 +52,64 @@ public sealed partial class Emitter
         return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
     }
 
-    /// <summary>The helper that finds the slot of a key's entry in a map's block, <c>%a0</c>, by the key, <c>%a1</c>, and its hash, <c>%a2</c>: the slot's address, or null where the map has no entry of the key.</summary>
+    /// <summary>
+    /// The helper that finds the slot of a key's entry in a map's block, <c>%a0</c>, by the key, <c>%a1</c>, and its hash, <c>%a2</c>:
+    /// the slot's address, or null where the map has no entry of the key. It reads a group's 8 control bytes as one word and marks
+    /// the bytes equal to the hash's control byte as hashbrown's generic group does (a byte after a match can be marked too, which
+    /// the comparison of the hash and the key settles); a group with a slot without an entry ends the probe.
+    /// </summary>
     private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () =>
     {
+        const string ones = "72340172838076673"; // 0x0101010101010101
+        const string highs = "-9187201950435737472"; // 0x8080808080808080
+        module.Declare("declare i64 @llvm.cttz.i64(i64, i1)");
         var entry = EntryType(type);
         var mask = fn.Value($"sub i64 {fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr %a0)")} to i64")}, 1");
+        var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr %a0)");
         var slots = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr %a0)");
-        var at = fn.Alloca("i64", "slot");
-        fn.Emit($"store i64 {fn.Value($"and i64 %a2, {mask}")}, ptr {at}");
-        var probe = fn.Label("probe");
-        var filled = fn.Label("filled");
+        var pattern = fn.Value($"mul i64 {fn.Value($"and i64 {fn.Value("lshr i64 %a2, 56")}, 127")}, {ones}");
+        var at = fn.Alloca("i64", "group");
+        var step = fn.Alloca("i64", "step");
+        var marks = fn.Alloca("i64", "marks");
+        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"and i64 %a2, {mask}")}, -8")}, ptr {at}");
+        fn.Emit($"store i64 0, ptr {step}");
+        var group = fn.Label("group");
+        var check = fn.Label("marks");
+        var mark = fn.Label("mark");
         var same = fn.Label("same.hash");
+        var after = fn.Label("marks.done");
         var next = fn.Label("next");
-        var found = fn.Label("found");
         var none = fn.Label("none");
-        fn.Branch(probe);
-        fn.Block(probe);
-        var i = fn.Value($"load i64, ptr {at}");
+        fn.Branch(group);
+        fn.Block(group);
+        var position = fn.Value($"load i64, ptr {at}");
+        var word = fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {position}")}");
+        var differ = fn.Value($"xor i64 {word}, {pattern}");
+        var zeros = fn.Value($"and i64 {fn.Value($"and i64 {fn.Value($"sub i64 {differ}, {ones}")}, {fn.Value($"xor i64 {differ}, -1")}")}, {highs}");
+        fn.Emit($"store i64 {zeros}, ptr {marks}");
+        fn.Branch(check);
+        fn.Block(check);
+        var left = fn.Value($"load i64, ptr {marks}");
+        fn.CondBranch(fn.Value($"icmp eq i64 {left}, 0"), after, mark);
+        fn.Block(mark);
+        var i = fn.Value($"add i64 {position}, {fn.Value($"lshr i64 {fn.Value($"call i64 @llvm.cttz.i64(i64 {left}, i1 true)")}, 3")}");
+        fn.Emit($"store i64 {fn.Value($"and i64 {left}, {fn.Value($"sub i64 {left}, 1")}")}, ptr {marks}");
         var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
-        var hash = fn.Value($"load i64, ptr {slot}");
-        fn.CondBranch(fn.Value($"icmp eq i64 {hash}, 0"), none, filled); // a slot without an entry ends the probe
-        fn.Block(filled);
-        fn.CondBranch(fn.Value($"icmp eq i64 {hash}, %a2"), same, next);
+        fn.CondBranch(fn.Value($"icmp eq i64 {fn.Value($"load i64, ptr {slot}")}, %a2"), same, check);
         fn.Block(same);
         var key = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
-        fn.CondBranch(Equal(key, "%a1", type.Key, 0), found, next);
-        fn.Block(next);
-        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"add i64 {i}, 1")}, {mask}")}, ptr {at}"); // the last slot followed by the first
-        fn.Branch(probe);
-        fn.Block(found);
+        var equal = Equal(key, "%a1", type.Key, 0);
+        var hit = fn.Label("hit");
+        fn.CondBranch(equal, hit, check);
+        fn.Block(hit);
         fn.Return($"ptr {slot}");
+        fn.Block(after);
+        fn.CondBranch(fn.Value($"icmp ne i64 {fn.Value($"and i64 {word}, {highs}")}, 0"), none, next); // a slot without an entry ends the probe
+        fn.Block(next);
+        var stepped = fn.Value($"add i64 {fn.Value($"load i64, ptr {step}")}, 8");
+        fn.Emit($"store i64 {stepped}, ptr {step}");
+        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"add i64 {position}, {stepped}")}, {mask}")}, ptr {at}"); // the last group followed by the first
+        fn.Branch(group);
         fn.Block(none);
         fn.Return("ptr null");
     });
@@ -91,6 +119,7 @@ public sealed partial class Emitter
     {
         var entry = EntryType(type);
         var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr {block})")} to i64");
+        var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr {block})");
         var slots = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr {block})");
         var counter = fn.Alloca("i64", "slot");
         fn.Emit($"store i64 0, ptr {counter}");
@@ -103,9 +132,10 @@ public sealed partial class Emitter
         var i = fn.Value($"load i64, ptr {counter}");
         fn.CondBranch(fn.Value($"icmp slt i64 {i}, {room}"), body, done);
         fn.Block(body);
-        var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
-        fn.CondBranch(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {slot}")}, 0"), held, next);
+        var mark = fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {i}")}");
+        fn.CondBranch(fn.Value($"icmp ne i8 {mark}, -1"), held, next);
         fn.Block(held);
+        var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
         var key = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
         var value = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
         each(key, value);

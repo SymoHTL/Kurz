@@ -1300,10 +1300,34 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_map_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
-        // the first block of a `Map<long, long>`: 32 bytes of counts and keys and 8 entries of a hash, a key and a value
+        // the first block of a `Map<long, long>`: 32 bytes of counts and keys, 16 of the control bytes of its 8 slots, padded, and 8
+        // entries of a hash, a key and a value
         const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
-        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-refused"), 1, [], "error: allocation-failed (224 bytes)\n");
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-refused"), 1, [], "error: allocation-failed (240 bytes)\n");
         Ran(BuildAndRun(text, toolchain.Runtime, "map-granted"), 0, ["1"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_map_finds_each_key_it_holds_and_no_other_through_its_growth()
+    {
+        // 20000 entries grow the block from 8 slots to 32768, through groups of 8 control bytes and probes past full groups; half the
+        // keys asked for are missing, and each probe for one ends at a group with a slot without an entry
+        const string text = "mut m = Map<int, int>()\nfor i in 0..<20000 {\n    m[i * 2] = i\n}\nmut long found = 0\nmut missing = 0\nfor i in 0..<40000 {\n    v = m[i] ?? -1\n    if v < 0 {\n        missing = missing + 1\n    } else {\n        found = found + long(v)\n    }\n}\nprint(found)\nprint(missing)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "map-many"), 0, ["199990000", "20000"], "");
+        Ran(BuildAndRun(text, Fenced, "map-many-fenced"), 0, ["199990000", "20000"], "");
+    }
+
+    [Fact]
+    public void A_slot_holds_an_entry_by_its_control_byte_not_by_the_bytes_a_block_held_before()
+    {
+        // a new block's slots are as the allocator gave them, as hashbrown leaves its buckets: the second map takes the block the
+        // first gave back, whose slots still hold its five entries, and holds the one entry written into it
+        const string text = "void Fill() {\n    mut m = Map<int, int>()\n    for i in 0..<5 {\n        m[i] = i + 10\n    }\n}\n\nFill()\nmut n = Map<int, int>()\nn[7] = 1\nprint(n)\nprint(n[3] ?? -1)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "map-used-block"), 0, ["[7: 1]", "-1"], "");
+
+        // the positive control: a new block that keeps the control bytes the first map left in it holds the first map's entries too
+        var stale = BuildAndRun(text, Edited(("std/std.kz", "                p[32 + i] = 255\n", "")), "map-used-block-stale");
+        Assert.False(stale.Output.SequenceEqual(["[7: 1]", "-1"]), string.Join(" | ", stale.Output));
     }
 
     [Fact]

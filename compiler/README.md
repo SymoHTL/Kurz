@@ -505,13 +505,16 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   every key the checker takes and every value the emitter lays out, in variables, parameters, fields,
   unions, lists and maps. A map is the address of a block, null for a map without entries: the count
   of the values that hold it, 8 bytes, the count of its entries and the number of its slots, a power
-  of two, 4 bytes each, and the two keys of its hash, 8 bytes each, then the slots, each the hash of
-  its key, 8 bytes, 0 for an empty slot, the key and the value, laid out as a `data` value of the
-  three. A key's hash is SipHash-1-3 of its bytes, a string's UTF-8 bytes and any other key widened to
-  64 bits, with the highest bit set, the hash Rust's `HashMap` takes by default; the slot of a key is
-  the first, from the hash's low bits on, that is empty or holds the key, the next slot after a full
-  one (linear probing, this directory's reading, where Rust's `hashbrown` probes groups of control
-  bytes). A map grows to twice its slots where an entry would fill more than seven eighths of them,
+  of two from 8, 4 bytes each, and the two keys of its hash, 8 bytes each, then a control byte for
+  each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
+  key and the value, laid out as a `data` value of the three. A key's hash is SipHash-1-3 of its
+  bytes, a string's UTF-8 bytes and any other key widened to 64 bits, the hash Rust's `HashMap` takes
+  by default. The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a
+  slot without an entry, else 7 bits of its entry's hash, bits 56 to 62; a lookup reads the control
+  bytes of a group of 8 slots as one word and compares the key only where a byte matches, as
+  `hashbrown`'s generic groups do, from the group the hash's low bits give, then each group one group
+  further on than the step before, and ends at a group with a slot without an entry, which a key added
+  takes, the first in its probe; only the control bytes of a new block are written. A map grows to twice its slots where an entry would fill more than seven eighths of them,
   `hashbrown`'s load factor, and a write to a map another value holds copies the block first (M3), as
   a list's `Add` does. The keys of the hash come from the system's `Random` once per thread, at its
   first map, and each new map takes the first key plus one, as Rust's `RandomState` takes them, so

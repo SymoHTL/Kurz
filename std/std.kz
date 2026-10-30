@@ -628,13 +628,19 @@ pub void StringFree(byte* bytes) {
 
 // The block of a map (M9). A map value is the address of its block, null for a map without entries,
 // which takes no block. A block holds the count of the map values that hold it, 8 bytes, the count of
-// its entries and the count of slots it has room for, a power of two, 4 bytes each, the two keys of
-// its hash, 8 bytes each, and from its 32nd byte the slots, each `entry` bytes, as the emitted code
-// lays out an entry: the hash of its key, 8 bytes, 0 in a slot without an entry, then the key and the
-// value. An entry stands in the slot its hash gives, or in the first slot after it without one, the
-// last slot followed by the first. A map value is copied without its entries, and a write into a block
-// that other values hold first copies the block (M3), as a list's. The emitted code holds the counts of
-// the entries' own blocks.
+// its entries and the count of slots it has room for, a power of two from 8, 4 bytes each, the two keys
+// of its hash, 8 bytes each, from its 32nd byte a control byte for each slot, padded to a multiple of 16
+// bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an entry: the hash
+// of its key, 8 bytes, then the key and the value; a slot without an entry holds what its bytes held
+// before. A slot's control byte is 255 where the slot has no entry, else bits 56 to 62 of its entry's
+// hash, as Rust's `HashMap`
+// (hashbrown's SwissTable) keeps a control byte per slot. The slots are probed in groups of 8, whose 8
+// control bytes the emitted code reads as one word, as hashbrown's generic groups: first the group the
+// hash's low bits give, then each group one group further on than the step before, the last group
+// followed by the first, and an entry stands in the first group of its hash's probe that had a slot
+// without an entry when it was added, so that a probe for a key ends at a group with such a slot. A map
+// value is copied without its entries, and a write into a block that other values hold first copies the
+// block (M3), as a list's. The emitted code holds the counts of the entries' own blocks.
 
 // The keys of the hash of the thread's next map: random bytes of the system at its first map, the
 // first key raised by one for each map after it, as Rust's `RandomState::new` takes and raises them;
@@ -665,14 +671,36 @@ pub int MapRoom(byte* block) {
     return room
 }
 
+// The bytes of the control bytes of a map's block of `room` slots: a multiple of 16, so that the slots
+// after them stay at a multiple of 16.
+long MapControlBytes(long room) {
+    return (room + 15) / 16 * 16
+}
+
+// The address of the first control byte of a map's block.
+pub byte* MapControl(byte* block) {
+    mut byte* control = null
+    raw {
+        control = block + 32
+    }
+
+    return control
+}
+
 // The address of the first slot of a map's block.
 pub byte* MapSlots(byte* block) {
     mut byte* slots = null
+    long control = MapControlBytes(long(MapRoom(block)))
     raw {
-        slots = block + 32
+        slots = block + 32 + control
     }
 
     return slots
+}
+
+// The bytes of a map's block of `room` slots of `entry` bytes.
+long MapBytes(long room, long entry) {
+    return 32 + MapControlBytes(room) + room * entry
 }
 
 // One more map value holds the block.
@@ -693,13 +721,15 @@ pub bool MapShared(byte* block) {
 
 // The block given back to the allocator, its slots each `entry` bytes.
 pub void MapFree(byte* block, long entry) {
-    Free(block, 32 + long(MapRoom(block)) * entry)
+    Free(block, MapBytes(long(MapRoom(block)), entry))
 }
 
 // A block of `room` slots of `entry` bytes, held by one map value, with no entry and the keys `key0`
-// and `key1`; null with `asked` set to the bytes asked for where the system refuses.
+// and `key1`, every control byte 255 and the slots as the allocator gave them, as hashbrown writes the
+// control bytes of a new table alone; null with `asked` set to the bytes asked for where the system
+// refuses.
 byte* MapBlock(long room, long entry, ulong key0, ulong key1, mut long asked) {
-    long size = 32 + room * entry
+    long size = MapBytes(room, entry)
     mut byte* p = null
     raw {
         p = Allocate(size)
@@ -713,7 +743,7 @@ byte* MapBlock(long room, long entry, ulong key0, ulong key1, mut long asked) {
             *Ptr<ulong>(p + 24) = key1
             mut long i = 0
             while i < room {
-                *Ptr<ulong>(p + 32 + i * entry) = 0
+                p[32 + i] = 255
                 i = i + 1
             }
         }
@@ -748,7 +778,7 @@ pub byte* MapNew(long entry, mut long asked) {
 // value, the old block held by one value less, which never frees it. The caller counts the copied
 // entries' own blocks. Null with `asked` set to the bytes asked for where the system refuses.
 pub byte* MapCopy(byte* block, long entry, mut long asked) {
-    long size = 32 + long(MapRoom(block)) * entry
+    long size = MapBytes(long(MapRoom(block)), entry)
     mut byte* p = null
     raw {
         p = Allocate(size)
@@ -775,18 +805,33 @@ pub bool MapFull(byte* block) {
     return (long(MapCount(block)) + 1) * 8 > long(MapRoom(block)) * 7
 }
 
-// The first slot without an entry at or after the slot the hash gives, in a block that has one: where
-// an entry of that hash goes.
+// The first slot without an entry in the hash's probe, in a block that has one, its control byte set to
+// the hash's: where an entry of that hash goes.
 pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     long mask = long(MapRoom(block)) - 1
-    mut long i = long(hash & ulong(mask))
+    byte* control = MapControl(block)
+    byte* slots = MapSlots(block)
+    mut long at = long(hash & ulong(mask)) / 8 * 8
+    mut long step = 0
+    mut long i = -1
     mut byte* slot = null
     raw {
-        slot = block + 32 + i * entry
-        while *Ptr<ulong>(slot) != 0 {
-            i = (i + 1) & mask
-            slot = block + 32 + i * entry
+        while i < 0 {
+            mut long b = 0
+            while b < 8 && i < 0 {
+                if control[at + b] == 255 {
+                    i = at + b
+                }
+
+                b = b + 1
+            }
+
+            step = step + 8
+            at = (at + step) & mask
         }
+
+        control[i] = byte((hash >> 56) & 127UL)
+        slot = slots + i * entry
     }
 
     return slot
@@ -799,7 +844,7 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
 pub byte* MapGrow(byte* block, long entry, mut long asked) {
     long room = long(MapRoom(block))
     if room * 2 > 2147483647 {
-        asked = 32 + room * 2 * entry
+        asked = MapBytes(room * 2, entry)
         return null
     }
 
@@ -815,14 +860,15 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
         return null
     }
 
+    byte* control = MapControl(block)
+    byte* slots = MapSlots(block)
     raw {
         *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
         mut long i = 0
         while i < room {
-            byte* from = block + 32 + i * entry
-            ulong hash = *Ptr<ulong>(from)
-            if hash != 0 {
-                byte* to = MapEmpty(p, hash, entry)
+            if control[i] != 255 {
+                byte* from = slots + i * entry
+                byte* to = MapEmpty(p, *Ptr<ulong>(from), entry)
                 mut long j = 0
                 while j < entry {
                     to[j] = from[j]
@@ -834,7 +880,7 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
         }
     }
 
-    Free(block, 32 + room * entry)
+    Free(block, MapBytes(room, entry))
     return p
 }
 
@@ -845,8 +891,7 @@ pub void MapAdded(byte* block) {
     }
 }
 
-// The hash of the `count` bytes at `bytes` under the keys of the map's block, with its highest bit set,
-// so that no entry's hash is the 0 of a slot without one.
+// The hash of the `count` bytes at `bytes` under the keys of the map's block.
 pub ulong MapHash(byte* block, byte* bytes, long count) {
     mut ulong key0 = 0
     mut ulong key1 = 0
@@ -855,7 +900,7 @@ pub ulong MapHash(byte* block, byte* bytes, long count) {
         key1 = *Ptr<ulong>(block + 24)
     }
 
-    return SipHash13(key0, key1, bytes, count) | 9223372036854775808UL
+    return SipHash13(key0, key1, bytes, count)
 }
 
 // SipHash-1-3 of the `count` bytes at `bytes` under the keys `key0` and `key1`, the hash Rust's
