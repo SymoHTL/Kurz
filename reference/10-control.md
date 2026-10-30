@@ -235,17 +235,21 @@ print(sum)
 (C8) *(assumed, §8: the loop means what it means in C#)*, and in the order of the map's storage for a
 map (M10), where an item is an entry, a value of the built-in `data` type `Entry<K, V>`, whose fields
 `Key` and `Value` are the entry's key and value: it has a `data` value's text (A3), it is passed, kept
-and read in a lambda, and a program writes its type, `Entry<string, int>` (§4, the owner, 2026-10-30).
+and read in a lambda, and a program writes its type, `Entry<string, int>` (§4, the owner, 2026-10-30,
+"A value, as C#"; the name `Entry<K, V>` is the one the chosen option "Both, as a data type" gives it).
 The type is built in (§4), so a file's own declaration of the name `Entry` is `redeclared` (V9)
 *(assumed: as §4 marks it)*. A program makes an entry by `Entry(key, value)` and copies one by
-`with` (D5), as every `data` type (§4, the owner, 2026-10-30). Over a map,
+`with` (D5), as every `data` type (§4, the owner, 2026-10-30, "Both, as a data type") *(proposed: that
+`Entry(key, value)` infers `K` and `V` from its arguments as the construction of any generic `data` type
+does (T27), and that `Entry<string, long>("Ann", 31)` takes the types it names; §4 names the form alone)*.
+Over a map,
 `for key, value in map { }` names the key and the value together, under any two names (§4, the owner,
 2026-10-30); two names over a list or a range are `type-mismatch` *(proposed: the error; §4 gives the
 form over a map alone)*. The loop runs over the collection as it was when
 the loop started: the collection is a value (M1), and a change to the variable inside the block is a
-change to the variable, not to what the loop walks; for a map §4 records it as the owner's answer
-(the owner, 2026-10-30, "Key and Value, as C#"), and for a list and a range it is *(proposed: a
-reading of M3)*. The record's stream sample uses this form.
+change to the variable, not to what the loop walks. For a map §4 states it, as the owner's answer
+(the owner, 2026-10-30, "Key and Value, as C#"); for a list and a range §4 states nothing, and it is
+*(proposed: a reading of M3)*. The record's stream sample uses this form.
 
 Case: [control/for-in.kz](../corpus/control/for-in.kz)
 ```kurz

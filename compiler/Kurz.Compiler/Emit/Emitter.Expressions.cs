@@ -588,7 +588,9 @@ public sealed partial class Emitter
 
         // the two sides as the type the other stands in: a derived value beside its base compares as the base, and is never equal to one (D15)
         var shared = Types.Assignable(leftType, rightType) ? rightType : leftType;
-        var equal = Equal(Convert(left, leftType, shared, line), Convert(right, rightType, shared, line), shared, line, ieee: shared is ListType); // M9: two lists by IEEE's `==`
+        // M9: two lists by IEEE's `==`, and two values of a union, whose `double` or `float` case compares as such values alone do (section
+        // 4, the owner, 2026-10-30, "Case and value, as Rust")
+        var equal = Equal(Convert(left, leftType, shared, line), Convert(right, rightType, shared, line), shared, line, ieee: shared is ListType or UnionType);
         return op == TokenKind.EqualEqual ? equal : fn.Value($"xor i1 {equal}, true");
     }
 

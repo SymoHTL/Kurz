@@ -308,6 +308,32 @@ if other != null {
 }
 ```
 
+Case: [memory/c-function-type-nullable.kz](../corpus/memory/c-function-type-nullable.kz)
+```kurz
+// the nullable form of a C function type holds `null` where C may give none (R17), a map's value is
+// read as one (M9), and a call through it is read where a test knows it not null, as any nullable
+// value is (N3)
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+(extern "C" (long) => long)? none = null
+print(none == null)
+(extern "C" (long) => long)? f = Twice
+mut table = Map<string, extern "C" (long) => long>()
+table["twice"] = Twice
+g = table["twice"]
+raw {
+    if f != null {
+        print(f(4))
+    }
+
+    if g != null {
+        print(g(5))
+    }
+}
+```
+
 ### N4 (decided, §4) `??`
 
 `a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#. `??` on a value whose type is

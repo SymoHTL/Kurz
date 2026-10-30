@@ -761,8 +761,10 @@ pub void StringFree(byte* bytes) {
 // block grows, 4 bytes, and 12 bytes unused, from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
 // entry: the hash of its key, 8 bytes, then the key and the value; a slot without an entry holds what its
-// bytes held before. A slot's control byte is 255 where the slot has never held an entry since the block
-// was made or cleared, 128 where its entry was removed, and else bits 56 to 62 of its entry's hash, as
+// bytes held before. A slot's control byte is 255 where the slot holds no entry and a probe ends at its
+// group: never filled since the block was made or cleared, or emptied by `MapErase` in a group that
+// holds a 255 still; 128 where its entry was removed in a group with no 255, which a probe passes; and
+// else bits 56 to 62 of its entry's hash, as
 // Rust's `HashMap` (hashbrown's SwissTable) keeps a control byte per slot, EMPTY, DELETED or the hash's
 // seven bits. The slots are probed in groups of 8, whose 8 control bytes the emitted code reads as one
 // word, as hashbrown's generic groups: first the group the hash's low bits give, then each group one
@@ -952,7 +954,7 @@ pub byte* MapCopy(byte* block, long entry, mut long asked) {
 
 // The slot an entry of the hash goes to, the first in the hash's probe whose control byte is 255 or 128,
 // its control byte set to the hash's, as hashbrown's `find_insert_slot` takes it; null, with nothing
-// written, where that slot has never held an entry and the block can take no more such slots, which
+// written, where that slot is of 255 and the block can take no more such slots, which
 // `MapGrow` then makes room for, as hashbrown's `insert` calls `reserve` where `growth_left` is 0.
 pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     long mask = long(MapRoom(block)) - 1
@@ -1048,7 +1050,7 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
 
 // The entry in `slot` taken out of a block no other value holds, whose caller let go of its key and
 // took its value: its control byte 255 where its group of 8 has a slot of 255 still, which ends every
-// probe that reaches the group, so that the slot is taken as one that never held an entry, else 128, which
+// probe that reaches the group, so that the slot is one of 255 again, else 128, which
 // a probe passes, as hashbrown's `erase` marks a slot EMPTY or DELETED.
 pub void MapErase(byte* block, byte* slot, long entry) {
     byte* control = MapControl(block)

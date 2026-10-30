@@ -2,7 +2,7 @@
 // | false
 // | true
 // | true
-// rules: M9
+// rules: M9, D3
 
 data Samples(List<double?> Xs)
 

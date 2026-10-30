@@ -1,0 +1,28 @@
+// expect: output
+// | false
+// | true
+// | true
+// | true
+// | false
+// | true
+// rules: D3, M9
+
+// `==` on a union compares its case, then the value of that case (D3), alone and as the items of two
+// lists (M9); a `double` case of a union that stands alone compares by IEEE's `==`, NaN unequal to itself
+double z = 0.0
+int | string a = 1
+int | string b = "1"
+int | string c = 1
+print(a == b)
+print(a == c)
+print(a == 1)
+print(a != "1")
+int | double n = z / z
+print(n == n)
+mut xs = List<int | string>()
+xs.Add(1)
+xs.Add("a")
+mut ys = List<int | string>()
+ys.Add(1)
+ys.Add("a")
+print(xs == ys)

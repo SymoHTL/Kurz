@@ -241,8 +241,10 @@ public sealed partial class Emitter
     /// 1.5 equal to 1.50, as C#'s <c>Equals</c> compares it. <paramref name="ieee"/> is set for the two sides of a list's <c>==</c>,
     /// whose <c>double</c> and <c>float</c> items, the values of its <c>double?</c> and <c>float?</c> items, and those of the lists among
     /// its items, compare by IEEE's <c>==</c>, <c>null</c> equal to <c>null</c>, as Rust's <c>Vec&lt;Option&lt;f64&gt;&gt;</c> compares
-    /// (section 4, the owner, 2026-10-30, "As plain double"); a list held in a <c>data</c> value or a key compares them as C#'s
-    /// <c>Equals</c> does (section 4, the owner, 2026-10-30, "Equals inside data/keys", "As plain double").
+    /// (section 4, the owner, 2026-10-30, "As plain double"), and for the two sides of a union's <c>==</c>, whose <c>double</c> or
+    /// <c>float</c> case compares so too (section 4, the owner, 2026-10-30, "Case and value, as Rust"); a list or a union held in a
+    /// <c>data</c> value or a key compares them as C#'s <c>Equals</c> does (section 4, the owner, 2026-10-30, "Equals inside data/keys",
+    /// "As plain double").
     /// </summary>
     private string Equal(string left, string right, KurzType type, int line, bool ieee = false)
     {
@@ -269,8 +271,9 @@ public sealed partial class Emitter
             case UnionType union:
                 {
                     // a nullable item of a list under `==`: `null` equal to `null` alone (N10), a `double?` or a `float?` one's value by
-                    // IEEE's `==` (section 4, the owner, 2026-10-30, "As plain double")
-                    ieee = ieee && Types.NonNull(union) is { } inner && IeeeItem(inner);
+                    // IEEE's `==` (section 4, the owner, 2026-10-30, "As plain double"); a union alone or a list's item under `==`: its
+                    // `double` or `float` case by IEEE's `==` (section 4, the owner, 2026-10-30, "Case and value, as Rust")
+                    ieee = ieee && IeeeItem(union);
                     var name = Helper($"equal.{(ieee ? "ieee." : "")}{Lower.Mangle(type)}", "i1", [Ir(type), Ir(type)], () =>
                     {
                         var tag = Tag("%a0", union);
@@ -284,7 +287,7 @@ public sealed partial class Emitter
                         ByCase(tag, union, union.Cases, c =>
                         {
                             var (a, b) = c is VoidType or NullType ? ("", "") : (Payload("%a0", union, c), Payload("%a1", union, c));
-                            fn.Return($"i1 {(c is VoidType or NullType ? "true" : ieee && c is PrimitiveType p ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, c, line, ieee))}");
+                            fn.Return($"i1 {(c is VoidType or NullType ? "true" : ieee && c is PrimitiveType p && Types.IsFloating(p) ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, c, line, ieee))}");
                         });
                     });
                     return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
@@ -344,15 +347,15 @@ public sealed partial class Emitter
         }
     }
 
-    /// <summary>Whether the list's items, or the items of the lists among them, are of a <c>double</c> or a <c>float</c>, or of a nullable type of one.</summary>
+    /// <summary>Whether the list's items, or the items of the lists among them, are of a <c>double</c> or a <c>float</c>, or of a union one of whose cases is one, a nullable type of one among them.</summary>
     private static bool FloatingItems(ListType list) => IeeeItem(list.Element);
 
-    /// <summary>Whether an item of the type compares by IEEE's <c>==</c> in a list under <c>==</c>: a <c>double</c>, a <c>float</c>, a list of them and a nullable type of each.</summary>
+    /// <summary>Whether an item of the type compares by IEEE's <c>==</c> in a list under <c>==</c>: a <c>double</c>, a <c>float</c>, a list of them and a union one of whose cases is one of them, a nullable type of each among them.</summary>
     private static bool IeeeItem(KurzType item) => item switch
     {
         PrimitiveType p => Types.IsFloating(p),
         ListType inner => FloatingItems(inner),
-        UnionType u when Types.NonNull(u) is { } inner => IeeeItem(inner),
+        UnionType u => u.Cases.Any(IeeeItem),
         _ => false,
     };
 

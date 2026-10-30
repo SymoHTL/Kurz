@@ -1775,6 +1775,7 @@ public sealed partial class Checker
         PrimitiveType { Kind: Primitive.Decimal } => Crossing.Unknown,
         PrimitiveType p when Types.IsNumber(p) || p.Kind == Primitive.Bool => Crossing.Yes,
         PointerType or CFunctionType or ErrorType => Crossing.Yes,
+        UnionType u when Types.NonNull(u) is CFunctionType => Crossing.Yes, // R17: its `null` is the address 0, as Rust's `Option<extern "C" fn()>`
         TypeParameterType => Crossing.Unknown,
         _ => Crossing.No,
     };
