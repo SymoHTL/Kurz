@@ -223,7 +223,7 @@ public sealed partial class Checker
     /// <summary>C4: whether an arm's type names a case: the case itself, or a data type derived from it (D6); no widening (T8) makes a case.</summary>
     private static bool IsCaseOf(KurzType type, KurzType c) => Types.Same(type, c) || (type is DataType && c is DataType && Types.Assignable(type, c));
 
-    /// <summary>C9: what an arm may name beside a type and <c>else</c>: a literal, with its sign where it is a number (L17), and <c>null</c>, the case of a nullable value (N1; the reading in <c>compiler/README.md</c>).</summary>
+    /// <summary>C9: what an arm may name beside a type and <c>else</c>: a literal, with its sign where it is a number (L17), and <c>null</c>, the case of a nullable value (N1, C9; section 4, the owner, 2026-10-30, "Allow, as C#").</summary>
     private static bool IsLiteralPattern(Expression e) => Unwrap(e) switch
     {
         IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral => true,

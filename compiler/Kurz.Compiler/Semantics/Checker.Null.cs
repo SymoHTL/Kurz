@@ -228,11 +228,12 @@ public sealed partial class Checker
         if (PathOf(e) is { } path && Unwrap(e) is NameExpression or MemberAccess { Conditional: false })
         {
             frame.Known = frame.Known.Remove(path); // a variable or a path of fields, which runs nothing that could change what is known
+            var read =CheckExpression(e, null, keepCases);
+            frame.Known = known;
+            return read;
         }
 
-        var typed = CheckExpression(e, null, keepCases);
-        frame.Known = known;
-        return typed;
+        return CheckExpression(e, null, keepCases); // anything else keeps what it changed: a `mut` argument in it ends a narrowing (N7)
     }
 
     /// <summary>N3: <c>x == null</c> and <c>x != null</c> on a nullable value test its case (<see cref="CheckNullable"/>). On any other type <c>null</c> is <c>type-mismatch</c> (N6).</summary>
@@ -271,7 +272,8 @@ public sealed partial class Checker
     /// what a round leaves nullable at the end of its body or at a <c>continue</c>, the join C# makes where the paths around a loop meet
     /// (section 4, an assumption there). Where a reading ends with less known than it began with, it is read again from that, its
     /// diagnostics dropped, until a reading keeps what it began with; that reading's diagnostics are the loop's. After the loop holds
-    /// what the head and a false condition show, joined with what held at each <c>break</c>.
+    /// what the head and a false condition show, joined with what held at each <c>break</c>; a <c>for</c> (C8), which has no condition and
+    /// can run no round, leaves with what the head holds as well.
     /// </summary>
     private void CheckLoop(Expression? condition, Block body)
     {
@@ -281,17 +283,18 @@ public sealed partial class Checker
             var variables = declared.Count;
             frame.Known = head;
             Push();
+            var tested = head;
             var (whenTrue, whenFalse) = (ImmutableHashSet<NullPath>.Empty, ImmutableHashSet<NullPath>.Empty);
             if (condition is not null)
             {
                 CheckCondition(condition);
-                head = frame.Known; // what the condition's `mut` arguments changed is changed at every round
+                tested = frame.Known; // what the condition's `mut` arguments changed, while the head stays what a round comes back to
                 (whenTrue, whenFalse) = Tests(condition);
             }
 
             var exits = new LoopExits();
             frame.Loops.Add(exits);
-            frame.Known = head.Union(whenTrue);
+            frame.Known = tested.Union(whenTrue);
             frame.LoopDepth++;
             var flow = CheckBlock(body);
             frame.LoopDepth--;
@@ -306,8 +309,8 @@ public sealed partial class Checker
             if (next.Count == head.Count)
             {
                 Pop(commit: true);
-                var leaves = condition is null || Unwrap(condition) is BoolLiteral { Value: true } ? exits.Breaks : exits.Breaks.Prepend(head.Union(whenFalse));
-                frame.Known = Join(leaves, head);
+                var leaves = condition is not null && Unwrap(condition) is BoolLiteral { Value: true } ? exits.Breaks : exits.Breaks.Prepend(tested.Union(whenFalse));
+                frame.Known = Join(leaves, tested);
                 return;
             }
 
@@ -457,9 +460,20 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (Unchecked(index, i.Line, "used as an index"))
+        {
+            return Typed.Error;
+        }
+
         if (!index.IsError && !Types.IsInteger(index.Type))
         {
             Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not a `{index.Type}` (M9, T2)");
+            return Typed.Error;
+        }
+
+        if (Types.NonNull(list.Element) is null && list.Element is UnionType or FunctionType or PointerType or CFunctionType or VoidType)
+        {
+            NotSupported(i.Line, $"`?[` to a `{list.Element}`, which no `?` makes nullable (N1, N5)");
             return Typed.Error;
         }
 

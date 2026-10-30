@@ -1,0 +1,21 @@
+// expect: output
+// | 13
+// | none
+// rules: N1
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+void Show(int id) {
+    match Email(id) {
+        null => print("none")
+        string s => print(s.Bytes.Count)
+    }
+}
+
+Show(1)
+Show(2)
