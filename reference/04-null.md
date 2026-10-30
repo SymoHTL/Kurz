@@ -8,7 +8,11 @@ An arm of a `match` may name `null`, which matches the `null` of a `T?` value, a
 and Rust's `None =>` do, and a `match` over a `T?` covers `null` by that arm or by `else` (O8,
 C9; §4, the owner, 2026-10-30, "Allow, as C#"). An arm that no `null` reaches, one of a type, one
 of a literal, or an `else` after the `null` arm, knows the variable or the path of fields the
-`match` tests not null, as C#'s analysis reads a pattern (N3).
+`match` tests not null, as C#'s analysis reads a pattern (N3). *(assumed, §4: the coverage of
+`null` by the arm or by `else`, and the arm no `null` reaches knowing the subject not null)* An arm
+after `else`, a `null` arm among them, is `syntax` (C9). *(proposed: that a `null` arm over a subject that is not nullable is
+`type-mismatch`, as `null` is where a type that takes none is required (N6), and that a second
+`null` arm is `unreachable-arm`, as a second arm of one literal is (C4); the answer named neither)*
 
 Case: [null/coalesce.kz](../corpus/null/coalesce.kz)
 ```kurz
@@ -437,6 +441,26 @@ Show(2)
 Show(1)
 ```
 
+Case: [null/assignment-join-around.kz](../corpus/null/assignment-join-around.kz)
+```kurz
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+void Show(int id, bool c) {
+    mut f = Email(id)
+    if c {
+        f = "x"
+    }
+    print(f.Bytes.Count)
+}
+
+Show(2, false)
+```
+
 Case: [null/assignment-ends-narrowing.kz](../corpus/null/assignment-ends-narrowing.kz)
 ```kurz
 string? Email(int id) {
@@ -623,8 +647,10 @@ already, since `T??` is `T?`, as C# reads `T?` of a type parameter without a con
 filled with a nullable type, `int?`: a missing value and a value that is `null` read alike. Where
 the type that fills the parameter is not nullable, `T?` is that type's nullable type, so `First`
 on a `List<int>` gives an `int?` and its `return null` gives `null`. C# from version 9 on differs
-there for a value type: it reads `T?` of such a parameter as `T` for `T` = `int` and refuses its
-`return null`.
+there: it reads `T?` of such a parameter as `T` where a value type fills it, so that `First<int>`
+gives an `int`, and it refuses the `return null` of the generic function itself, whatever fills `T`
+(CS0403, "Cannot convert null to type parameter 'T' because it could be a non-nullable value type";
+checked 2026-10-30 by a build of `static T? First<T>(List<T> xs)` with the .NET SDK 10.0.402).
 
 Case: [null/nullable-type-parameter.kz](../corpus/null/nullable-type-parameter.kz)
 ```kurz

@@ -1,0 +1,10 @@
+// expect: error type-mismatch at 7
+// rules: D3
+
+data Log(File Out)
+
+void Same(Log a, Log b) {
+    print(a == b)
+}
+
+print(1)

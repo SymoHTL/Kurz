@@ -206,10 +206,10 @@ public sealed partial class Checker
 
     private void Run(ProgramSyntax program)
     {
-        // T15, D18, S1: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From` returns
-        // besides its value and of the case a call on a file returns where it failed, declared before the file's own types, so that a
-        // declaration of their names is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union, as Rust" and "Built-in, no fields";
-        // section 12, the owner, 2026-10-29, "One union, as Rust")
+        // T15, D18, S1, C6: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From`
+        // returns besides its value, of the case a call on a file returns where it failed and of the entry of a loop over a map, declared
+        // before the file's own types, so that a declaration of their names is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union,
+        // as Rust" and "Built-in, no fields", and 2026-10-30, "A value, as C#"; section 12, the owner, 2026-10-29, "One union, as Rust")
         foreach (var s in BuiltInTypes.Statements)
         {
             DeclareType((TypeDeclaration)s);
@@ -825,8 +825,15 @@ public sealed partial class Checker
 
         if (n.Name == "Map")
         {
-            NotSupported(n.Line, "Map (M9)");
-            return Types.Error;
+            if (n.TypeArguments.Count != 2)
+            {
+                Report(n.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, n.Line, "`Map` takes two type arguments (M9, T17)");
+                return Types.Error;
+            }
+
+            var key = Resolve(n.TypeArguments[0]);
+            var value = Resolve(n.TypeArguments[1]);
+            return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
         if (n.Name is "File" or "TcpListener" or "TcpStream")
@@ -1269,13 +1276,15 @@ public sealed partial class Checker
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream";
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["Entry"] = "C6" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
     /// (T15), <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18), and <c>IoError</c> with its <c>IoKind</c>, the
     /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux (S1; section 12, the owner,
-    /// 2026-10-29, "One union, as Rust").
+    /// 2026-10-29, "One union, as Rust"), and <c>Entry</c>, the entry of a loop over a map, a value as C#'s <c>KeyValuePair</c> is one (C6;
+    /// section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies by <c>with</c> as every data type
+    /// (section 4, the owner, 2026-10-30, "Both, as a data type").
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(
         SourceText.FromString(
@@ -1291,6 +1300,7 @@ public sealed partial class Checker
                 HostUnreachable, ConnectionRefused, ConnectionReset, ConnectionAborted, NotConnected, WriteZero, InvalidData, Other
             }
             data IoError(IoKind Kind, int Code, string Path)
+            data Entry<K, V>(K Key, V Value)
             """),
         new DiagnosticBag());
 
@@ -1941,9 +1951,15 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
+    /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
+    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is.
+    /// </summary>
     private void CheckForIn(ForInStatement f)
     {
         KurzType element;
+        KurzType? value = null;
         if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
@@ -1961,19 +1977,33 @@ public sealed partial class Checker
             {
                 ListType l => l.Element,
                 ErrorType or VoidType => Types.Error,
+                MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
+                MapType m => m.Key,
                 _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
                 _ => Report(f.Collection.Line, t.Type),
             };
+            value = t.Type is MapType map ? map.Value : null;
+        }
+
+        if (f.Second is not null && value is null && !Types.IsError(element))
+        {
+            this.Report(ErrorIds.TypeMismatch, f.Collection.Line, $"two names walk the entries of a map, not a `{model.TypeOf(f.Collection).Type}` (C6)");
+            element = Types.Error;
         }
 
         PushScope();
         DeclareChecked(f.Variable, element, false, VariableKind.Loop, f.VariableLine, f);
+        if (f.Second is not null)
+        {
+            DeclareChecked(f.Second.Name, value ?? Types.Error, false, VariableKind.Loop, f.Second.Line, f.Second);
+        }
+
         CheckLoop(null, f.Body);
         PopScope();
 
         KurzType Report(int line, KurzType type)
         {
-            this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list or a range, not a `{type}` (C6, C8)");
+            this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not a `{type}` (C6, C8)");
             return Types.Error;
         }
     }

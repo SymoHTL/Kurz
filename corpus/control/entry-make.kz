@@ -1,0 +1,11 @@
+// expect: output
+// | Entry { Key = Ann, Value = 31 }
+// | Entry { Key = Ann, Value = 32 }
+// | true
+// rules: C6
+
+a = Entry("Ann", 31)
+print(a)
+b = a with { Value = 32 }
+print(b)
+print(b == Entry("Ann", 32))

@@ -229,14 +229,23 @@ while i <= 3 {
 print(sum)
 ```
 
-### C6 (assumed, §8, §13) `for ... in`
+### C6 (decided, §4, §8, §13) `for ... in`
 
 `for name in collection { }` runs its block once for each item: in order for a list and a range
-(C8), and in the order of the map's storage for a map (M10), where an item is an entry with a
-`Key` and a `Value` *(proposed: the names)*. The loop runs over the collection as it was when the
-loop started: the collection is a value (M1), and a change to the variable inside the block is a
-change to the variable, not to what the loop walks *(proposed reading of M3)*. The record's stream
-sample uses this form.
+(C8) *(assumed, §8: the loop means what it means in C#)*, and in the order of the map's storage for a
+map (M10), where an item is an entry, a value of the built-in `data` type `Entry<K, V>`, whose fields
+`Key` and `Value` are the entry's key and value: it has a `data` value's text (A3), it is passed, kept
+and read in a lambda, and a program writes its type, `Entry<string, int>` (§4, the owner, 2026-10-30).
+The type is built in (§4), so a file's own declaration of the name `Entry` is `redeclared` (V9)
+*(assumed: as §4 marks it)*. A program makes an entry by `Entry(key, value)` and copies one by
+`with` (D5), as every `data` type (§4, the owner, 2026-10-30). Over a map,
+`for key, value in map { }` names the key and the value together, under any two names (§4, the owner,
+2026-10-30); two names over a list or a range are `type-mismatch` *(proposed: the error; §4 gives the
+form over a map alone)*. The loop runs over the collection as it was when
+the loop started: the collection is a value (M1), and a change to the variable inside the block is a
+change to the variable, not to what the loop walks; for a map §4 records it as the owner's answer
+(the owner, 2026-10-30, "Key and Value, as C#"), and for a list and a range it is *(proposed: a
+reading of M3)*. The record's stream sample uses this form.
 
 Case: [control/for-in.kz](../corpus/control/for-in.kz)
 ```kurz
@@ -244,6 +253,55 @@ mut xs = List<int>()
 xs.Add(4)
 xs.Add(5)
 for x in xs {
+    print(x)
+}
+```
+
+Case: [control/for-in-map.kz](../corpus/control/for-in-map.kz)
+```kurz
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+for e in ages {
+    print("{e.Key} {e.Value}")
+}
+for name, age in ages {
+    print("{name} is {age}")
+}
+```
+
+Case: [control/for-in-map-entry.kz](../corpus/control/for-in-map-entry.kz)
+```kurz
+string Name(Entry<string, int> entry) => entry.Key
+
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+for e in ages {
+    print(e)
+    print(Name(e))
+}
+```
+
+Case: [control/entry-make.kz](../corpus/control/entry-make.kz)
+```kurz
+a = Entry("Ann", 31)
+print(a)
+b = a with { Value = 32 }
+print(b)
+print(b == Entry("Ann", 32))
+```
+
+Case: [control/entry-redeclared.kz](../corpus/control/entry-redeclared.kz)
+```kurz
+data Entry(string Name)
+
+print(1)
+```
+
+Case: [control/for-two-names-list.kz](../corpus/control/for-two-names-list.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(4)
+for i, x in xs {
     print(x)
 }
 ```

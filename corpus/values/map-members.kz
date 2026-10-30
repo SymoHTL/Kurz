@@ -1,0 +1,24 @@
+// expect: output
+// | 2
+// | true
+// | 31
+// | 0
+// | 1
+// | false
+// | 0
+// | 2
+// rules: M9
+
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+ages["Bea"] = 27
+print(ages.Count)
+print(ages.ContainsKey("Ann"))
+print(ages.Remove("Ann") ?? 0)
+print(ages.Remove("Ann") ?? 0)
+print(ages.Count)
+print(ages.ContainsKey("Ann"))
+copy = ages
+ages.Clear()
+print(ages.Count)
+print(copy.Count + 1)

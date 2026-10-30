@@ -44,7 +44,7 @@ internal static class Lower
         VoidType => "void",
         NullType => "{}", // N1: one value, of no size
         EnumType e => $"i{EnumBits(e.Symbol).ToString(CultureInfo.InvariantCulture)}",
-        PointerType or CFunctionType or ListType or HandleType => "ptr",
+        PointerType or CFunctionType or ListType or MapType or HandleType => "ptr",
         FunctionType => "%kz.fn",
         TypeParameterType t => throw new InvalidOperationException($"the type parameter `{t}` was not substituted"),
         _ => throw new NotSupportedException(Refusal(type)),
@@ -82,7 +82,7 @@ internal static class Lower
     {
         var rule = type switch
         {
-            ListType => "M9",
+            ListType or MapType => "M9",
             DataType => "D1",
             UnionType => "D9",
             FunctionType => "F11",

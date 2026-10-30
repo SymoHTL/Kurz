@@ -44,6 +44,7 @@ extern "C" {
     int inet_pton(int family, byte* text, void* address)
     int getaddrinfo(byte* host, byte* service, void* hints, void* list)
     void freeaddrinfo(void* list)
+    long getrandom(byte* bytes, long count, uint options)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -99,6 +100,111 @@ pub void Release(byte* p, long bytes) {
     raw {
         munmap(Ptr<void>(p), bytes)
     }
+}
+
+// What `Random` keeps for the process, as Rust's standard library keeps it in two `static` `AtomicBool`s
+// read and written with `Relaxed` order and a `OnceLock<File>`: whether `getrandom` takes the flag
+// `GRND_INSECURE`, whether the system refused `getrandom` itself, and the descriptor of `/dev/urandom`,
+// -1 where it is not open. Kurz has no atomic form, so they are plain `static mut`s, which the one
+// thread the runtime runs reads and writes.
+static mut bool insecureTaken = true
+static mut bool getrandomRefused = false
+static mut int urandom = -1
+
+// `count` bytes of the system's randomness at `bytes`, taken as Rust's standard library takes the keys of
+// a map's hash on Linux (`library/std/src/sys/pal/unix/rand.rs`, checked at the tag 1.82.0): true where
+// they were filled, and false where Rust panics with "failed to retrieve random hash map seed", the
+// bytes then left as they are, which the caller ends the program for with `random-failed` (M9). First
+// `getrandom` (`GetRandom`), called again for the bytes left where it gave fewer and where a signal
+// interrupted it (`EINTR` is 4); where the system refuses the call, `ENOSYS` (38) or `EPERM` (1), as a
+// filter of system calls in a container does, the process reads `/dev/urandom` from then on, and where
+// the system's pool is not ready, `EAGAIN` (11), this call reads it; any other error is false.
+pub bool Random(byte* bytes, long count) {
+    mut long at = 0
+    mut bool file = false
+    raw {
+        file = getrandomRefused
+        while !file && at < count {
+            long got = GetRandom(bytes + at, count - at)
+            if got != -1 {
+                at = at + got
+            } else {
+                int error = *__errno_location()
+                if error == 38 || error == 1 {
+                    getrandomRefused = true
+                    file = true
+                } else if error == 11 {
+                    file = true
+                } else if error != 4 {
+                    return false
+                }
+            }
+        }
+    }
+
+    if file {
+        return Urandom(bytes, count)
+    }
+
+    return true
+}
+
+// One call of `getrandom` for `count` bytes at `bytes`, with the flag `GRND_INSECURE` (4), the best
+// randomness the system has at the moment and no wait for it, and with `GRND_NONBLOCK` (1) for the rest
+// of the process where the kernel refuses that flag with `EINVAL` (22), as kernels before 5.6 do, as
+// Rust's standard library calls it: its result, -1 with the error in `errno` where it failed.
+long GetRandom(byte* bytes, long count) {
+    mut long got = -1
+    raw {
+        if insecureTaken {
+            got = getrandom(bytes, count, 4)
+            if got != -1 || *__errno_location() != 22 {
+                return got
+            }
+
+            insecureTaken = false
+        }
+
+        got = getrandom(bytes, count, 1)
+    }
+
+    return got
+}
+
+// `count` bytes of `/dev/urandom` at `bytes`, as Rust's standard library reads them where `getrandom`
+// gives none: the file opened at the first such read (`O_RDONLY | O_CLOEXEC` is 524288) and kept open
+// for the process, an open and a read a signal interrupted made again, as Rust's `File::open` and
+// `read_exact` make them; false where the open fails, a read fails or the file ends first, the places
+// where Rust panics.
+bool Urandom(byte* bytes, long count) {
+    mut long at = 0
+    mut int fd = -1
+    raw {
+        if urandom < 0 {
+            string path = "/dev/urandom\0"
+            fd = open(path.Pointer, 524288)
+            while fd < 0 && *__errno_location() == 4 {
+                fd = open(path.Pointer, 524288)
+            }
+
+            if fd < 0 {
+                return false
+            }
+
+            urandom = fd
+        }
+
+        while at < count {
+            long got = read(urandom, bytes + at, count - at)
+            if got > 0 {
+                at = at + got
+            } else if got == 0 || *__errno_location() != 4 {
+                return false
+            }
+        }
+    }
+
+    return true
 }
 
 // Memory `Memory` gave, `bytes` bytes of it from its start, grown to `grown` bytes with what it holds

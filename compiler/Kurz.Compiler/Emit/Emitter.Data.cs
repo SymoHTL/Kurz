@@ -238,9 +238,13 @@ public sealed partial class Emitter
     /// data by their type and their fields (D3, D15), and the values of a field of a union by their case and that case's values
     /// (D3, the owner, 2026-10-23); a <c>float</c> or a <c>double</c> here is a field's or a case's, which compares as C#'s
     /// <c>Equals</c> does, NaN equal to NaN and 0 to -0 (D3, the owner, 2026-10-09 and 2026-10-24); a <c>decimal</c> by its value,
-    /// 1.5 equal to 1.50, as C#'s <c>Equals</c> compares it.
+    /// 1.5 equal to 1.50, as C#'s <c>Equals</c> compares it. <paramref name="ieee"/> is set for the two sides of a list's <c>==</c>,
+    /// whose <c>double</c> and <c>float</c> items, the values of its <c>double?</c> and <c>float?</c> items, and those of the lists among
+    /// its items, compare by IEEE's <c>==</c>, <c>null</c> equal to <c>null</c>, as Rust's <c>Vec&lt;Option&lt;f64&gt;&gt;</c> compares
+    /// (section 4, the owner, 2026-10-30, "As plain double"); a list held in a <c>data</c> value or a key compares them as C#'s
+    /// <c>Equals</c> does (section 4, the owner, 2026-10-30, "Equals inside data/keys", "As plain double").
     /// </summary>
-    private string Equal(string left, string right, KurzType type, int line)
+    private string Equal(string left, string right, KurzType type, int line, bool ieee = false)
     {
         switch (type)
         {
@@ -264,7 +268,10 @@ public sealed partial class Emitter
 
             case UnionType union:
                 {
-                    var name = Helper($"equal.{Lower.Mangle(type)}", "i1", [Ir(type), Ir(type)], () =>
+                    // a nullable item of a list under `==`: `null` equal to `null` alone (N10), a `double?` or a `float?` one's value by
+                    // IEEE's `==` (section 4, the owner, 2026-10-30, "As plain double")
+                    ieee = ieee && Types.NonNull(union) is { } inner && IeeeItem(inner);
+                    var name = Helper($"equal.{(ieee ? "ieee." : "")}{Lower.Mangle(type)}", "i1", [Ir(type), Ir(type)], () =>
                     {
                         var tag = Tag("%a0", union);
                         var same = fn.Value($"icmp eq i{Number(layout.TagBits(union))} {tag}, {Tag("%a1", union)}");
@@ -274,7 +281,11 @@ public sealed partial class Emitter
                         fn.Block(differ);
                         fn.Return("i1 false");
                         fn.Block(cases);
-                        ByCase(tag, union, union.Cases, c => fn.Return($"i1 {(c is VoidType or NullType ? "true" : Equal(Payload("%a0", union, c), Payload("%a1", union, c), c, line))}"));
+                        ByCase(tag, union, union.Cases, c =>
+                        {
+                            var (a, b) = c is VoidType or NullType ? ("", "") : (Payload("%a0", union, c), Payload("%a1", union, c));
+                            fn.Return($"i1 {(c is VoidType or NullType ? "true" : ieee && c is PrimitiveType p ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, c, line, ieee))}");
+                        });
                     });
                     return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
                 }
@@ -285,10 +296,65 @@ public sealed partial class Emitter
                     return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
                 }
 
+            case ListType list:
+                {
+                    // M9: `==` compares two lists by their counts and their items in order, each pair by `==`, as Rust's `Vec` does,
+                    // a `double` item by IEEE's `==`, NaN unequal to NaN (section 4, the owner, 2026-10-30, "By items, as Rust"); a key
+                    // of a map, which hashes a list over its items (section 4, "Any type with =="), and a field of a `data` value that
+                    // holds one (D3) compare its `double` items as C#'s `Equals`, NaN equal to NaN (section 4, the owner, 2026-10-30,
+                    // "Equals inside data/keys"), so that a value equals itself and a key is found again
+                    ieee = ieee && FloatingItems(list);
+                    var name = Helper($"equal.{(ieee ? "ieee." : "")}{Lower.Mangle(type)}", "i1", ["ptr", "ptr"], () =>
+                    {
+                        var count = ListCount("%a0");
+                        var items = fn.Label("items");
+                        var differ = fn.Label("differ");
+                        fn.CondBranch(fn.Value($"icmp eq i32 {count}, {ListCount("%a1")}"), items, differ);
+                        fn.Block(items);
+                        var first = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a0)");
+                        var second = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a1)");
+                        var counter = fn.Alloca("i32", "item");
+                        fn.Emit($"store i32 0, ptr {counter}");
+                        var check = fn.Label("check");
+                        var item = fn.Label("item");
+                        var same = fn.Label("same");
+                        fn.Block(check);
+                        var i = fn.Value($"load i32, ptr {counter}");
+                        fn.CondBranch(fn.Value($"icmp slt i32 {i}, {count}"), item, same);
+                        fn.Block(item);
+                        var wide = fn.Value($"sext i32 {i} to i64");
+                        var a = fn.Value($"load {Ir(list.Element)}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {first}, i64 {wide}")}");
+                        var b = fn.Value($"load {Ir(list.Element)}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {second}, i64 {wide}")}");
+                        var more = fn.Label("more");
+                        var equal = ieee && list.Element is PrimitiveType p ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, list.Element, line, ieee);
+                        fn.CondBranch(equal, more, differ);
+                        fn.Block(more);
+                        fn.Emit($"store i32 {fn.Value($"add i32 {i}, 1")}, ptr {counter}");
+                        fn.Branch(check);
+                        fn.Block(same);
+                        fn.Return("i1 true");
+                        fn.Block(differ);
+                        fn.Return("i1 false");
+                    });
+                    return fn.Value($"call i1 {name}(ptr {left}, ptr {right})");
+                }
+
             default:
                 throw Unsupported(line, $"`==` on a `{type}`");
         }
     }
+
+    /// <summary>Whether the list's items, or the items of the lists among them, are of a <c>double</c> or a <c>float</c>, or of a nullable type of one.</summary>
+    private static bool FloatingItems(ListType list) => IeeeItem(list.Element);
+
+    /// <summary>Whether an item of the type compares by IEEE's <c>==</c> in a list under <c>==</c>: a <c>double</c>, a <c>float</c>, a list of them and a nullable type of each.</summary>
+    private static bool IeeeItem(KurzType item) => item switch
+    {
+        PrimitiveType p => Types.IsFloating(p),
+        ListType inner => FloatingItems(inner),
+        UnionType u when Types.NonNull(u) is { } inner => IeeeItem(inner),
+        _ => false,
+    };
 
     private void EqualBody(DataType type, int line)
     {
