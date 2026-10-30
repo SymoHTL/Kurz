@@ -1,0 +1,7 @@
+// expect: output
+// | true
+// rules: S15
+
+first = timestamp.Now
+second = timestamp.Now
+print(second >= first)

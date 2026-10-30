@@ -1,0 +1,21 @@
+// expect: output
+// | true
+// | true
+// | not found: no-such-file.txt
+// rules: S15
+
+void | IoError Times() {
+    File.WriteAll("stamped.txt", "x".Bytes)
+    written = File.Modified("stamped.txt")
+    print(written <= timestamp.Now)
+    print(timestamp.Now - written < 1min)
+    File.Delete("stamped.txt")
+    match File.Modified("no-such-file.txt") {
+        timestamp t => print(t)
+        IoError e => print(e)
+    }
+}
+
+Times() else {
+    IoError e => print(e)
+}

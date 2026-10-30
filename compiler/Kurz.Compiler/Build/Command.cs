@@ -22,14 +22,15 @@ namespace Kurz.Compiler.Build;
 /// command grants a program neither <c>raw</c> nor <c>native</c> (R7, R16). <c>kurz run [--release] [--lines] file.kz</c> builds the file
 /// and runs it, and <c>kurz exec [--release] [--lines] "program text"</c> builds its argument, whose lines are named <c>exec</c>, and runs
 /// it, each in a place of its own (<see cref="Place"/>), which it removes after the run, with the places a run cut short left removed at its
-/// start; the program takes no argument and the command's streams (<see cref="Processes.Run"/>), and the command ends with the
+/// start; the program takes the words after <c>--</c> and the command's streams (<see cref="Processes.Run"/>), and the command ends with the
 /// program's exit code. A command line it cannot read gets the usage on standard error and the exit code 1.
 /// </summary>
 public static class Command
 {
     /// <summary>What the command prints for a command line it cannot read.</summary>
     public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] <file.kz> [-o <output>]\n"
-        + "       kurz run [--release] [--lines] <file.kz>\n       kurz exec [--release] [--lines] \"<program text>\"\n       run and exec pass no arguments to the program\n";
+        + "       kurz run [--release] [--lines] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] \"<program text>\" [-- <argument>...]\n"
+        + "       run and exec pass the words after -- to the program\n";
 
     private const string OnThePath = " on the path";
 
@@ -189,7 +190,8 @@ public static class Command
         var release = false;
         var lines = false;
         string? sourcePath = null;
-        foreach (var a in arguments)
+        var (own, program) = AtDashes(arguments);
+        foreach (var a in own)
         {
             switch (a)
             {
@@ -207,17 +209,18 @@ public static class Command
             }
         }
 
-        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), release, lines, error, find, host, places);
+        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), program, release, lines, error, find, host, places);
     }
 
-    /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument and no option.</summary>
+    /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument before <c>--</c> and no option.</summary>
     private static int Exec(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
         var release = false;
         var lines = false;
-        for (var i = 0; i < arguments.Count; i++)
+        var (own, program) = AtDashes(arguments);
+        for (var i = 0; i < own.Count; i++)
         {
-            switch (arguments[i])
+            switch (own[i])
             {
                 case "--release" when !release:
                     release = true;
@@ -225,8 +228,8 @@ public static class Command
                 case "--lines" when !lines:
                     lines = true;
                     break;
-                case var text when i == arguments.Count - 1 && text is not ("--release" or "--lines"):
-                    return BuildAndRun(() => SourceText.FromString("exec", text), release, lines, error, find, host, places);
+                case var text when i == own.Count - 1 && text is not ("--release" or "--lines"):
+                    return BuildAndRun(() => SourceText.FromString("exec", text), program, release, lines, error, find, host, places);
                 default:
                     return Usage1(error);
             }
@@ -236,10 +239,18 @@ public static class Command
     }
 
     /// <summary>
-    /// Builds the program <paramref name="read"/> reads, a file or <c>exec</c>'s text, into a place of its own and runs it; the program's exit code, or 1
-    /// where it was refused or the command failed. The places a run cut short left are removed at the start, before the build.
+    /// The command's own words of <c>run</c> or <c>exec</c>, those before the first <c>--</c>, and the program's, every word after it as
+    /// it was given, a further <c>--</c> among them, as <c>cargo run</c> splits them (the owner, 2026-10-30, "After <c>--</c>, as cargo").
     /// </summary>
-    private static int BuildAndRun(Func<SourceText?> read, bool release, bool lines, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    private static (List<string> Own, List<string> Program) AtDashes(List<string> arguments) =>
+        arguments.IndexOf("--") is var at and >= 0 ? (arguments[..at], arguments[(at + 1)..]) : (arguments, []);
+
+    /// <summary>
+    /// Builds the program <paramref name="read"/> reads, a file or <c>exec</c>'s text, into a place of its own and runs it with
+    /// <paramref name="program"/> as its arguments; the program's exit code, or 1 where it was refused or the command failed. The
+    /// places a run cut short left are removed at the start, before the build.
+    /// </summary>
+    private static int BuildAndRun(Func<SourceText?> read, IReadOnlyList<string> program, bool release, bool lines, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
         if (host is not { } target)
         {
@@ -292,16 +303,16 @@ public static class Command
                 return 1;
             }
 
-            return RunProgram(executable, root, error);
+            return RunProgram(executable, program, root, error);
         }
     }
 
     /// <summary>Runs a built program as <see cref="Processes.Run"/> does; its exit code, or 1 where it does not start.</summary>
-    internal static int RunProgram(string executable, string root, TextWriter error)
+    internal static int RunProgram(string executable, IReadOnlyList<string> arguments, string root, TextWriter error)
     {
         try
         {
-            return Processes.Run(executable);
+            return Processes.Run(executable, arguments);
         }
         catch (Win32Exception e)
         {

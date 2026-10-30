@@ -671,6 +671,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is EnumConstant:
                     break; // D12: a value of an enum, a constant a code generator reads whole
+                case MemberAccess m when model.IsClockRead(m):
+                    break; // S15: `timestamp.Now`, a read of the clock a code generator reads whole
                 case MemberAccess m:
                     Expression(m.Target);
                     break;

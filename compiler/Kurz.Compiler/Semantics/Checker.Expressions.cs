@@ -410,6 +410,11 @@ public sealed partial class Checker
         {
             variable.Read = true;
             model.RecordName(n, variable);
+            if (ReferenceEquals(variable, model.Arguments))
+            {
+                model.RecordArgumentsRead(n.Line); // S13
+            }
+
             stateRead |= readingConstant && variable.Kind == VariableKind.Static;
             RequireRawForState(variable, n.Line);
             return Narrowed(n, new Typed(variable.Type)); // N3
@@ -473,6 +478,12 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (n.Name == "args")
+        {
+            Report(ErrorIds.UnknownName, n.Line, "`args` is seen by the top-level code alone: a function reads `Environment.Args()` or takes the list as a parameter (S13, V10)");
+            return Typed.Error;
+        }
+
         Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
         return Typed.Error;
     }
@@ -506,6 +517,12 @@ public sealed partial class Checker
 
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a type and has no member `{m.Member}` (D1, V10)");
                 return Typed.Error;
+            }
+
+            if (n.Name == "timestamp" && m.Member == "Now")
+            {
+                model.RecordClockRead(m); // S15: the wall clock (section 12, the owner, 2026-10-30, "`timestamp.Now`")
+                return new Typed(Types.Timestamp);
             }
 
             if (IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
