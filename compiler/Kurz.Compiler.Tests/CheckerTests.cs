@@ -2393,6 +2393,7 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("class Counter(mut int Count)\n\nc = Counter(0)\nprint(c)", "1: a class (chapter 7)")]
+    [InlineData("class Account(mut string? Email)\n\nAccount? Load(int id) => null\n\nvoid Touch() {\n}\n\na = Load(1)\nif a?.Email != null {\n    Touch()\n    print(a?.Email.Bytes.Count)\n}", "1: a class (chapter 7)")] // N9: the checker narrows no path through a class instance, and a `weak` path runs through one (R5)
     [InlineData("interface Shape {\n    int Area()\n}", "1: an interface (K6, K10)")]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read)", "1: a flags type (D13)")]
     [InlineData("data R(int | string V)\n\nR? G() => null\n\nprint(G()?.V)", "5: `?.` to a `int | string`, which no `?` makes nullable (N1, N5)")]
