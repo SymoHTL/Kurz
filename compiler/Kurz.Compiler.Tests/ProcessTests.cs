@@ -16,8 +16,8 @@ namespace Kurz.Compiler.Tests;
 /// Rust"); a variable gives its value, and one that is not set, whose value is not UTF-8, or whose name is empty or holds <c>=</c>
 /// or a NUL byte the <c>EnvError</c> of its kind (S14, "An outcome, as Rust"); <c>timestamp.Now</c> is the time of the wall clock
 /// and <c>File.Modified</c> a file's or a directory's time to the nanosecond, with the edges of the 64 bits of a <c>timestamp</c>
-/// (S15); and a build for Windows says <c>not supported</c> at each of the five. Each program runs under the runtime of this
-/// machine; on Windows the tests hold the build's refusal instead.
+/// (S15); and a build for Windows says <c>not supported</c> at each of the five, <c>File.Modified</c> as at every call on a file. Each
+/// program runs under the runtime of this machine; on Windows the tests hold the build's refusal instead.
 /// </summary>
 public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -189,6 +189,17 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((line, Emitter.ProcessNotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
+    }
+
+    [Fact]
+    public void A_build_for_windows_says_not_supported_at_the_time_of_a_file_as_at_every_call_on_a_file()
+    {
+        const string text = "print(1)\nmatch File.Modified(\"a.txt\") {\n    timestamp t => print(t)\n    IoError e => print(e)\n}\n";
+        var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
+        Assert.Null(refused.Program);
+        var diagnostic = Assert.Single(refused.Diagnostics.Items);
+        Assert.Equal((2, Emitter.NotOnWindows), (diagnostic.Line, diagnostic.Message));
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 }
