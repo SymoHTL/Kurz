@@ -1534,6 +1534,156 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "false", // NaN unequal to NaN in the lists among the items too
     ];
 
+    // a list and a map in a field, written through a path from a `mut` variable (M4, M5, M9) by each `mut` member, an item and an entry
+    // written, `Add`, `Clear` and `Remove`: beside a copy taken before (M3), in a `mut` parameter, after a value that replaced the variable
+    // (M4), nested, in a data type that holds itself, whose block another variable holds, grown past its first block, and in a nullable
+    // field known not null (N3), of a plain value and of a block
+    private const string Fields = """
+        data Store(List<string> Names, Map<string, string> Etags, int Hits)
+        data Shelf(Store Main, string Label)
+        data Node(string Name, List<string> Tags, Map<string, int> Counts, Node? Next)
+        data Pocket(List<string>? Items, Map<string, int>? Counts)
+        data Bag(List<int>? Xs, Bag? Next)
+
+        void Tag(mut Store store, string name) {
+            store.Names.Add(name)
+            store.Etags[name] = "e-{name}"
+        }
+
+        string Reset(mut Store store) {
+            store = Store(List<string>(), Map<string, string>(), 0)
+            return "after"
+        }
+
+        mut s = Store(List<string>(), Map<string, string>(), 0)
+        copy = s
+        s.Names.Add("a")
+        s.Etags["a"] = "e1"
+        print(copy)
+        print(s)
+        Tag(mut s, "b")
+        print(s.Names)
+        print(s.Etags["b"] ?? "none")
+        before = s
+        s.Names.Clear()
+        print(s.Names)
+        print(before.Names)
+        s.Names.Add("c")
+        s.Etags["k"] = Reset(mut s)
+        print(s.Etags)
+        print(s.Names)
+        mut shelf = Shelf(Store(List<string>(), Map<string, string>(), 0), "top")
+        kept = shelf
+        shelf.Main.Names.Add("x")
+        shelf.Main.Etags["x"] = "y"
+        print(shelf)
+        print(kept)
+        top = shelf
+        shelf.Main.Names[0] = "z"
+        shelf.Main.Etags.Clear()
+        print(shelf)
+        print(top)
+        mut n = Node("a", List<string>(), Map<string, int>(), null)
+        held = n
+        n.Tags.Add("t")
+        n.Counts["c"] = 1
+        print(n.Tags)
+        print(held.Tags)
+        print(n.Counts)
+        print(held.Counts)
+        again = n
+        n.Tags.Clear()
+        print(n.Tags)
+        print(again.Tags)
+        old = n
+        print(n.Counts.Remove("c") ?? 0)
+        print(n.Counts)
+        print(old.Counts)
+        mut i = 0
+        while i < 40 {
+            s.Names.Add("n{i}")
+            s.Etags["n{i}"] = "v{i}"
+            i = i + 1
+        }
+        print(s.Names.Count)
+        print(s.Etags["n39"] ?? "none")
+        print(s.Etags["k"] ?? "none")
+        written = s
+        s.Names[0] = "w"
+        print(s.Names[0])
+        print(written.Names[0])
+        mut p = Pocket(List<string>(), Map<string, int>())
+        pc = p
+        if p.Items != null {
+            p.Items.Add("i")
+            p.Items.Add("j")
+        }
+        if p.Counts != null {
+            p.Counts["c"] = 2
+        }
+        print(p)
+        print(pc)
+        if p.Items != null {
+            p.Items.Clear()
+        }
+        print(p.Items)
+        if p.Counts != null {
+            p.Counts.Clear()
+        }
+        print(p.Counts)
+        mut bag = Bag(List<int>(), null)
+        stash = bag
+        if bag.Xs != null {
+            bag.Xs.Add(3)
+        }
+        print(bag.Xs)
+        print(stash.Xs)
+        prior = bag
+        if bag.Xs != null {
+            bag.Xs[0] = 4
+        }
+        print(bag.Xs)
+        print(prior.Xs)
+        """;
+
+    private static readonly string[] FieldsPrint =
+    [
+        "Store { Names = [], Etags = [], Hits = 0 }", // the copy keeps what it had (M3)
+        "Store { Names = [a], Etags = [a: e1], Hits = 0 }",
+        "[a, b]", // through a `mut` parameter
+        "e-b",
+        "[]",
+        "[a, b]", // a `Clear` beside a copy
+        "[k: after]", // the value first, then the map of the variable it replaced (M4)
+        "[]",
+        "Shelf { Main = Store { Names = [x], Etags = [x: y], Hits = 0 }, Label = top }", // nested
+        "Shelf { Main = Store { Names = [], Etags = [], Hits = 0 }, Label = top }",
+        "Shelf { Main = Store { Names = [z], Etags = [], Hits = 0 }, Label = top }", // an item written and a map's `Clear`, nested
+        "Shelf { Main = Store { Names = [x], Etags = [x: y], Hits = 0 }, Label = top }",
+        "[t]", // a data type that holds itself, whose block another variable holds
+        "[]",
+        "[c: 1]",
+        "[]",
+        "[]",
+        "[t]",
+        "1", // a `Remove`
+        "[]",
+        "[c: 1]",
+        "40", // grown past the first block
+        "v39",
+        "after",
+        "w", // an item written beside a copy
+        "n0",
+        "Pocket { Items = [i, j], Counts = [c: 2] }", // a nullable field known not null
+        "Pocket { Items = [], Counts = [] }",
+        "[]",
+        "[]",
+        "[3]", // the same in a block another variable holds
+        "[]",
+        "[4]",
+        "[3]",
+    ];
+
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
     // of maps whose entry is written over, a map of strings whose value and key a write over a key lets go of, and entries kept, made
@@ -1790,6 +1940,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, toolchain.Runtime, "map-members"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
+        Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
     }
 
     [Fact]
@@ -1802,6 +1953,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, fenced, "map-members-fenced"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
+        Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
@@ -2208,9 +2360,6 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
-    [InlineData("data Box(List<int> Items)\n\nmut b = Box(List<int>())\nb.Items.Add(1)\n", 4, "an `Add` on a list in a field (M5)", null)]
-    [InlineData("data Box(Map<int, int> Items)\n\nmut b = Box(Map<int, int>())\nb.Items.Clear()\n", 4, "a `Clear` on a map in a field (M5)", null)]
-    [InlineData("data Box(Map<int, int> Items)\n\nmut b = Box(Map<int, int>())\nprint(b.Items.Remove(1) ?? 0)\n", 4, "a `Remove` on a map in a field (M5)", null)]
     [InlineData("s = \"ab\"\nprint(s.Chars[0])\n", 2, "`s.Chars` as a list (T15)", null)]
     [InlineData("data Box(List<int> Items)\n\nvoid Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nmut b = Box(List<int>())\nFill(mut b.Items)\n", 8, "a `mut` parameter given anything but a variable (M7)", null)]
     public void What_the_emitter_does_not_lay_out_of_a_list_is_not_supported_at_its_line(string text, int line, string message, string? grant)

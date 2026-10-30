@@ -196,9 +196,26 @@ public sealed partial class Emitter
             target = Unwrap(m.Target);
         }
 
-        var root = (NameExpression)target;
-        var variable = Model.VariableOf(root);
         var value = Convert(Owned(a.Value), TypeOf(a.Value), TypeOf(a.Target), a.Value.Line);
+        var (place, type, copied) = WritablePath((NameExpression)target, members);
+        if (copied)
+        {
+            fn.Emit($"store {Ir(type)} {value}, ptr {place}");
+        }
+        else
+        {
+            Store(value, type, place);
+        }
+    }
+
+    /// <summary>
+    /// M4: the place at the end of a path of fields from the <c>mut</c> variable <paramref name="root"/>, read as the code before it left
+    /// the variable, and the type there: each data value on the path is changed in place, a plain value in its variable or its field,
+    /// and a block after it was copied into the place that held it, since another variable may hold the same block; whether one was.
+    /// </summary>
+    private (string Place, KurzType Type, bool Copied) WritablePath(NameExpression root, List<MemberAccess> members)
+    {
+        var variable = Model.VariableOf(root);
         var place = Place(variable, root.Line);
         var type = Sub(variable.Type);
         var copied = false;
@@ -221,14 +238,39 @@ public sealed partial class Emitter
             type = Layout.Fields(data)[index];
         }
 
+        return (place, type, copied);
+    }
+
+    /// <summary>
+    /// M5, M9: the place of the list or the map at the end of <paramref name="receiver"/>, a <c>mut</c> variable or a path of fields from
+    /// one (M4), the room of its case where the checker read the variable or the last field known not null (N3), for a write that copies
+    /// a block other values hold before it writes (M3). A list or a map in a block this copied is held by the block it was copied from
+    /// too, which counts it once for both and never lets go of it (section 3), so it takes a count of its own here: the write then copies
+    /// it, and the value the old block holds stays as it was.
+    /// </summary>
+    private string CollectionPlace(Expression receiver)
+    {
+        var members = new List<MemberAccess>();
+        var target = Unwrap(receiver);
+        while (target is MemberAccess m)
+        {
+            members.Insert(0, m);
+            target = Unwrap(m.Target);
+        }
+
+        if (members.Count == 0)
+        {
+            return NarrowedPlace((NameExpression)target);
+        }
+
+        var (path, stored, copied) = WritablePath((NameExpression)target, members);
+        var (place, type) = NarrowedPlace(path, stored, TypeOf(receiver), receiver.Line);
         if (copied)
         {
-            fn.Emit($"store {Ir(type)} {value}, ptr {place}");
+            Retain(fn.Value($"load {Ir(type)}, ptr {place}"), type);
         }
-        else
-        {
-            Store(value, type, place);
-        }
+
+        return place;
     }
 
     // ---- equality (D3, D15) and text (A3, A4) ----------------------------------------------------

@@ -296,11 +296,11 @@ public sealed partial class Emitter
     private string AsResult(UnionType result, KurzType value, string v) => Types.Same(result, value) ? v : WithNull(result, value, v, 0);
 
     /// <summary>
-    /// M9, M4: <c>map[key] = value</c> on a <c>mut</c> variable or parameter: the value first, then the key, then the map the variable
-    /// holds as they left it, as a path assignment reads its value first (M4). The map takes both over: a block other values hold is
-    /// copied before the write (M3), the entry of the key takes the value and lets go of its old one and of the key given, and a new
-    /// entry takes both, in the first slot of its probe without an entry, in a block made anew where that slot is of 255 and the
-    /// block has no room left.
+    /// M9, M4: <c>map[key] = value</c> on a <c>mut</c> variable or parameter, or on a path of fields from one: the value first, then
+    /// the key, then the map the variable holds as they left it, as a path assignment reads its value first (M4). The map takes both
+    /// over: a block other values hold is copied before the write (M3), the entry of the key takes the value and lets go of its old
+    /// one and of the key given, and a new entry takes both, in the first slot of its probe without an entry, in a block made anew
+    /// where that slot is of 255 and the block has no room left.
     /// </summary>
     private void EmitMapWrite(Assignment a, IndexExpression index, MapType type)
     {
@@ -311,7 +311,7 @@ public sealed partial class Emitter
             value = Convert(Owned(a.Value), TypeOf(a.Value), type.Value, a.Value.Line);
             key = Convert(Owned(index.Index), TypeOf(index.Index), type.Key, index.Index.Line);
         });
-        var place = NarrowedPlace((NameExpression)Unwrap(index.Target));
+        var place = CollectionPlace(index.Target);
         var set = Helper($"set.{Lower.Mangle(type)}", "void", ["ptr", Ir(type.Key), Ir(type.Value)], () => SetBody(type));
         fn.Emit($"call void {set}(ptr {place}, {Ir(type.Key)} {key}, {Ir(type.Value)} {value})");
     }
@@ -453,16 +453,16 @@ public sealed partial class Emitter
         fn.Block(own);
     }
 
-    /// <summary>The map a <c>mut</c> method changes, through the place of its variable; a map in a field is not emitted (M5), as a list's <c>Add</c> there is not.</summary>
-    private (MapType Type, NameExpression Name) MutMap(CallExpression c, string what)
+    /// <summary>The map a <c>mut</c> method changes, and its receiver, a variable or a path of fields from one, whose place it changes (M5).</summary>
+    private (MapType Type, Expression Receiver) MutMap(CallExpression c)
     {
         var member = (MemberAccess)Unwrap(c.Callee);
-        var type = (MapType)TypeOf(member.Target);
-        return Unwrap(member.Target) is NameExpression n ? (type, n) : throw Unsupported(c.Line, $"a `{what}` on a map in a field (M5)");
+        return ((MapType)TypeOf(member.Target), member.Target);
     }
 
     /// <summary>
-    /// M9: <c>map.Remove(key)</c>, the value of the key's entry, moved out of the map with the count the map held of it, or <c>null</c>
+    /// M9, M5: <c>map.Remove(key)</c> on a variable or a path of fields from one, the value of the key's entry, moved out of the map
+    /// with the count the map held of it, or <c>null</c>
     /// where the map has no entry of the key, as Rust's <c>HashMap::remove</c> gives <c>Option&lt;V&gt;</c> (section 4, the owner,
     /// 2026-10-30, "C# names, Rust's Remove"). Only a map with the key's entry is written: a block other values hold is copied first
     /// (M3), the entry lets go of its own key, and its slot's control byte becomes 255 or 128 (<c>MapErase</c>, as hashbrown's
@@ -470,7 +470,7 @@ public sealed partial class Emitter
     /// </summary>
     private string EmitMapRemove(CallExpression c)
     {
-        var (type, n) = MutMap(c, "Remove");
+        var (type, receiver) = MutMap(c);
         var argument = c.Arguments[0].Value;
         var key = Convert(EmitExpression(argument), TypeOf(argument), type.Key, argument.Line);
         var result = Types.Nullable(type.Value);
@@ -503,7 +503,7 @@ public sealed partial class Emitter
             fn.Block(absent);
             fn.Return($"{Ir(result)} {MakeUnion(result, Types.Null, "zeroinitializer")}");
         });
-        return fn.Value($"call {Ir(result)} {remove}(ptr {NarrowedPlace(n)}, {Ir(type.Key)} {key})");
+        return fn.Value($"call {Ir(result)} {remove}(ptr {CollectionPlace(receiver)}, {Ir(type.Key)} {key})");
     }
 
     /// <summary>
@@ -533,12 +533,13 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// M9: <c>map.Clear()</c>, through the place of the map's variable: a block other values hold is let go of, and the map holds none
-    /// (M3), as a list's <c>Clear</c> does; one it alone holds lets go of its entries' own blocks and keeps its slots (<c>MapClear</c>).
+    /// M9, M5: <c>map.Clear()</c>, through the place of the map's variable or of the field a path from one ends at: a block other
+    /// values hold is let go of, and the map holds none (M3), as a list's <c>Clear</c> does; one it alone holds lets go of its entries'
+    /// own blocks and keeps its slots (<c>MapClear</c>).
     /// </summary>
     private string? EmitMapClear(CallExpression c)
     {
-        var (type, n) = MutMap(c, "Clear");
+        var (type, receiver) = MutMap(c);
         var clear = Helper($"clear.{Lower.Mangle(type)}", "void", ["ptr"], () =>
         {
             var block = fn.Value("load ptr, ptr %a0");
@@ -575,7 +576,7 @@ public sealed partial class Emitter
             fn.Block(none);
             fn.Return(null);
         });
-        fn.Emit($"call void {clear}(ptr {NarrowedPlace(n)})");
+        fn.Emit($"call void {clear}(ptr {CollectionPlace(receiver)})");
         return null;
     }
 

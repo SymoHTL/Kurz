@@ -639,12 +639,14 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// M9, M4: <c>map[key] = value</c> sets the key's entry, an assignment into a path that starts at a <c>mut</c> variable; a map
-    /// reached through a field, an item or a call, and a path that goes on after the key, are not read.
+    /// M9, M4: <c>map[key] = value</c> sets the key's entry, an assignment into a path that starts at a <c>mut</c> variable, the map
+    /// the variable or a path of data fields from it (no other member is a map); one through a nullable field is not changed through,
+    /// as an assignment into such a path (N3), and a map reached through an item or a call, and a path that goes on after the key,
+    /// are not read.
     /// </summary>
     private void CheckMapWrite(Assignment a, IndexExpression index, MapType map, List<MemberAccess> members)
     {
-        if (!WrittenVariable(a, index, members, "an assignment into a map that is no variable, or into a path through an entry (M4, M9)"))
+        if (!WrittenVariable(a, index, members, "an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)"))
         {
             return;
         }
@@ -655,12 +657,13 @@ public sealed partial class Checker
 
     /// <summary>
     /// M9, M4: <c>xs[i] = value</c> writes the item at the position <c>i</c> of a list that a <c>mut</c> variable or parameter holds,
-    /// as C# and Rust write one (section 4, the owner, 2026-10-30, "As C# and Rust"); a list reached through a field, an item or a call,
+    /// or a path of data fields from one, as C# and Rust write one (section 4, the owner, 2026-10-30, "As C# and Rust"); one through a
+    /// nullable field is not changed through, as an assignment into such a path (N3), and a list reached through an item or a call,
     /// and a path that goes on after the item, are not read.
     /// </summary>
     private void CheckListWrite(Assignment a, IndexExpression index, ListType list, List<MemberAccess> members)
     {
-        if (!WrittenVariable(a, index, members, "an assignment into a list that is no variable, or into a path through an item (M4, M9)"))
+        if (!WrittenVariable(a, index, members, "an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)"))
         {
             return;
         }
@@ -675,12 +678,22 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// M4: whether the collection an index assigns into is a variable, a <c>mut</c> one or a <c>mut</c> parameter where the checker
-    /// takes the write, which an arm's statement makes a change of M7; anything else is <c>not supported</c> with <paramref name="unread"/>.
+    /// M4: whether the collection an index assigns into is a variable, a <c>mut</c> one or a <c>mut</c> parameter, or a path of data
+    /// fields from one, where the checker takes the write, which an arm's statement makes a change of the path for M7; a path through
+    /// a nullable field is not changed through (N3), a member that is no field cannot be assigned, as in a path assignment, and
+    /// anything else is <c>not supported</c> with <paramref name="unread"/>.
     /// </summary>
     private bool WrittenVariable(Assignment a, IndexExpression index, List<MemberAccess> members, string unread)
     {
-        if (members.Count > 0 || Unwrap(index.Target) is not NameExpression name || !model.IsVariable(name))
+        var fields = new List<MemberAccess>();
+        var root = Unwrap(index.Target);
+        while (root is MemberAccess { Conditional: false } m)
+        {
+            fields.Insert(0, m);
+            root = Unwrap(m.Target);
+        }
+
+        if (members.Count > 0 || root is not NameExpression name || !model.IsVariable(name))
         {
             NotSupported(a.Line, unread);
             CheckLoosely(index.Index, a.Value);
@@ -688,6 +701,20 @@ public sealed partial class Checker
         }
 
         var (variable, captured) = Lookup(name.Name);
+        if (ThroughNullable(variable!, fields, "an assignment into a path through a nullable field (N3, M4)"))
+        {
+            CheckLoosely(index.Index, a.Value);
+            return false;
+        }
+
+        if (!IsFieldPath(variable!.Type, fields, out var notField))
+        {
+            Report(ErrorIds.AssignImmutable, a.Line, $"`{notField}` is no field of a data value and cannot be assigned (M4)");
+            CheckLoosely(index.Index, a.Value);
+            return false;
+        }
+
+        var path = string.Join(".", fields.Select(m => m.Member).Prepend(name.Name));
         if (captured)
         {
             Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{name.Name}` and cannot change it (F11)");
@@ -698,7 +725,7 @@ public sealed partial class Checker
         }
         else
         {
-            changes[a] = new Change(variable, name.Name, a.Line, $"an assignment changes `{name.Name}`"); // M7, in an arm inside an expression
+            changes[a] = new Change(variable, path, a.Line, $"an assignment changes `{path}`"); // M7, in an arm inside an expression
         }
 
         variable!.Changed = true;

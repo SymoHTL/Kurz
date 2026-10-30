@@ -17,26 +17,33 @@ public sealed partial class Emitter
     private string Narrowed(string value, KurzType stored, KurzType type) =>
         !Types.Same(stored, type) && stored is UnionType union && Types.NonNull(union) is not null ? WithoutNull(value, union) : value;
 
+    /// <summary>N3: the place of a variable as the type the checker read at <paramref name="n"/> (<see cref="NarrowedPlace(string, KurzType, KurzType, int)"/>).</summary>
+    private string NarrowedPlace(NameExpression n) => NarrowedPlace(Place(Model.VariableOf(n), n.Line), Sub(Model.VariableOf(n).Type), TypeOf(n), n.Line).Place;
+
     /// <summary>
-    /// N3: the place of a variable as the type the checker read at <paramref name="n"/>: where the variable is nullable and the read is
-    /// not, the room of its case, which is the place itself where the union has a niche, and where the type it makes nullable is a union,
-    /// whose cases keep their numbers in the same room (<see cref="WithoutNull"/>).
+    /// N3: a place of the type <paramref name="stored"/> read as <paramref name="type"/>, and the type it holds: where the place is
+    /// nullable and the read is not, the room of its case, which is the place itself where the union has a niche, and that case; where
+    /// the type it makes nullable is a union, whose cases keep their numbers in the same room (<see cref="WithoutNull"/>), the place
+    /// itself and that union.
     /// </summary>
-    private string NarrowedPlace(NameExpression n)
+    private (string Place, KurzType Type) NarrowedPlace(string place, KurzType stored, KurzType type, int line)
     {
-        var place = Place(Model.VariableOf(n), n.Line);
-        var stored = Sub(Model.VariableOf(n).Type);
-        if (Types.Same(stored, TypeOf(n)) || stored is not UnionType union || Types.NonNull(union) is not { } inner || layout.Niche(union) is not null)
+        if (Types.Same(stored, type) || stored is not UnionType union || Types.NonNull(union) is not { } inner)
         {
-            return place;
+            return (place, stored);
+        }
+
+        if (layout.Niche(union) is not null)
+        {
+            return (place, inner);
         }
 
         if (inner is UnionType cases)
         {
-            return Ir(union) == Ir(cases) ? place : throw Unsupported(n.Line, $"the place of a `{union}` read as a `{cases}`, whose tags differ in width");
+            return Ir(union) == Ir(cases) ? (place, inner) : throw Unsupported(line, $"the place of a `{union}` read as a `{cases}`, whose tags differ in width");
         }
 
-        return fn.Value($"getelementptr {Ir(union)}, ptr {place}, i32 0, i32 1");
+        return (fn.Value($"getelementptr {Ir(union)}, ptr {place}, i32 0, i32 1"), inner);
     }
 
     /// <summary>
