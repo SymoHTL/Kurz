@@ -12,7 +12,7 @@ namespace Kurz.Compiler.Tests;
 /// say (design record, section 6; the owner, 2026-10-23, "Caller passes it" and "Id + size"), the test build left unoptimised and
 /// the line tables (section 2; the owner, 2026-10-29), the texts of the integers at their edges (A2), a conversion from an unsigned type to a signed one (T20), the empty
 /// string's pointer (R15), the largest string (T15; the owner, 2026-10-23, "C#'s limit"), the integer an enum's value is stored in (D12;
-/// section 4, an assumption there), the runtime of every target emitted, and a
+/// section 4, an assumption there), the layout of a nullable value and the address of one known not null (N1, N3, R10), the runtime of every target emitted, and a
 /// construct of the runtime the emitter does not lay out, which is the compiler's defect.
 /// </summary>
 public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -234,5 +234,16 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         Ran(Toolchain.Run(toolchain.Build(program, "enum-layout")), 0, ["B", "High", "-1", "Low", "200", "true", "true", "A", "A", "70000"], string.Empty);
+    }
+
+    [Fact]
+    public void A_nullable_value_is_a_union_and_the_address_of_one_known_not_null_is_the_address_of_its_value()
+    {
+        // N1 with section 5, a reading of this directory: the tag beside the room of a `long`; N3, R10: where the checker reads a nullable
+        // variable as the type it makes nullable, `&` gives the place of that value in the variable's room, so that a write through it
+        // writes the variable's value
+        var program = Emit("mut long? n = 5\nraw {\n    long* p = &n\n    *p = 7\n}\nprint(n)\n", "raw");
+        Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "null-address")), 0, ["7"], string.Empty);
     }
 }

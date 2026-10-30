@@ -65,9 +65,9 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
-        if (keepCases || result.IsError || result.Type is not UnionType u)
+        if (keepCases || result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null)
         {
-            return result;
+            return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
         }
 
         // O2: the success case is the value; every other case leaves the calling function (O3, O9)
@@ -240,8 +240,11 @@ public sealed partial class Checker
             return;
         }
 
-        CheckExpression(value, null);
+        CheckExpression(value, Untyped(value));
     }
+
+    /// <summary>The type a value is read with where its site's type is unknown, the error: none, but for a <c>null</c>, which takes its type from the site (N6) and so stands for the error (E1).</summary>
+    private static ErrorType? Untyped(Expression value) => Unwrap(value) is NullLiteral ? Types.Error : null;
 
     /// <summary>T19: a callee without type parameters, <c>print</c>, a conversion, a function value or a list's method, takes no type argument; one written is a count no rule gives a meaning (E4).</summary>
     private bool RefusesTypeArguments(CallExpression c, string callee)
@@ -704,8 +707,9 @@ public sealed partial class Checker
     /// <summary>M5, M9, T15, S2 to S8: a call of a member: a list's <c>Add</c>, <c>Where</c> and <c>Clear</c>; a function of <c>File</c> and <c>Directory</c>, and a file's methods; a data value's field of function type.</summary>
     private Typed CheckMethodCall(MemberAccess m, CallExpression c)
     {
-        if (m.Conditional)
+        if (m.Conditional || InChain(m.Target))
         {
+            // N5: C# reads a call after `?.` inside the chain, which section 4 does not say
             NotSupported(m.Line, "`?.` (N5)");
             CheckExpression(m.Target, null);
             CheckArgumentsLoosely(c);
@@ -1001,6 +1005,7 @@ public sealed partial class Checker
                 continue;
             }
 
+            MutArgumentRead(a); // N7
             Push();
             var typed = CheckExpression(a.Value, null);
             var captured = Pop(commit: false);

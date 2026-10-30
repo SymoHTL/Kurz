@@ -39,11 +39,17 @@ public sealed partial class Emitter
             case StringLiteral s:
                 return EmitInterpolation(s);
             case NameExpression n when Model.IsVariable(n):
-                return HeldCopy(n, fn.Value($"load {Ir(type)}, ptr {Place(Model.VariableOf(n), n.Line)}"), type);
+                {
+                    var stored = Sub(Model.VariableOf(n).Type);
+                    return HeldCopy(n, Narrowed(fn.Value($"load {Ir(stored)}, ptr {Place(Model.VariableOf(n), n.Line)}"), stored, type), type);
+                }
+
             case NameExpression n:
                 return Instance(Model.FunctionNameOf(n), NoMap); // R17: a function of the C calling convention as a value, its address
+            case MemberAccess m when Model.IsChainMember(m, out var member):
+                return Temp(EmitChainMember(m, Sub(member), (UnionType)type), type);
             case MemberAccess m:
-                return HeldCopy(m, EmitMember(m), type);
+                return HeldCopy(m, EmitMember(m, type), type);
             case CallExpression c:
                 return Temp(EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it"), type);
             case IndexExpression i when TypeOf(i.Target) is PointerType p:
@@ -119,6 +125,8 @@ public sealed partial class Emitter
                 return StringValue(s.Value);
             case NullConstant when type is PointerType or CFunctionType:
                 return "null";
+            case NullConstant when type is NullType:
+                return "zeroinitializer"; // N1: the value of a nullable type's case `null`, of no size
             case UnitConstant when type is DataType d && layout.IsBlock(d):
                 {
                     // D8: the one value of a type without fields, a block that is never written, since a write copies a block first
@@ -198,15 +206,21 @@ public sealed partial class Emitter
     /// a string's <c>Bytes</c> as a list (T15), a list's <c>Count</c> (M9) and <c>Pointer</c> (R15), and a listener's <c>Port</c> (S9);
     /// every other member is not emitted.
     /// </summary>
-    private string EmitMember(MemberAccess m)
+    private string EmitMember(MemberAccess m, KurzType type) => MemberOf(m, () => EmitExpression(m.Target), TypeOf(m.Target), type);
+
+    /// <summary>The member of the value <paramref name="target"/> gives, of the type <paramref name="targetType"/>, as <paramref name="type"/>: a field of a nullable type read where its path is known not null is its value (N3).</summary>
+    private string MemberOf(MemberAccess m, Func<string> target, KurzType targetType, KurzType type)
     {
-        var targetType = TypeOf(m.Target);
         switch (targetType)
         {
             case DataType d:
-                return Field(EmitExpression(m.Target), d, Layout.FieldIndex(d, m.Member));
+                {
+                    var index = Layout.FieldIndex(d, m.Member);
+                    return Narrowed(Field(target(), d, index), Layout.Fields(d)[index], type);
+                }
+
             case PrimitiveType { Kind: Primitive.String } when m.Member == "Pointer":
-                return fn.Value($"extractvalue %kz.str {EmitExpression(m.Target)}, 0");
+                return fn.Value($"extractvalue %kz.str {target()}, 0");
             case ListType when m.Member == "Count" && Unwrap(m.Target) is MemberAccess { Member: "Bytes" } bytes && TypeOf(bytes.Target) is PrimitiveType { Kind: Primitive.String }:
                 {
                     // the count of a string's bytes, which the string holds, without the list of them
@@ -215,17 +229,17 @@ public sealed partial class Emitter
                 }
 
             case PrimitiveType { Kind: Primitive.String } when m.Member == "Bytes":
-                return Temp(StringBytes(EmitExpression(m.Target)), new ListType(Types.Byte));
+                return Temp(StringBytes(target()), new ListType(Types.Byte));
             case PrimitiveType { Kind: Primitive.String } when m.Member == "Chars":
                 throw Unsupported(m.Line, "`s.Chars` as a list (T15)");
             case ListType when m.Member == "Count":
-                return ListCount(EmitExpression(m.Target));
+                return ListCount(target());
             case ListType list when m.Member == "Pointer":
-                return ListPointer(EmitExpression(m.Target), list.Element);
+                return ListPointer(target(), list.Element);
             case EnumType e when m.Member == "Number":
-                return EnumNumber(EmitExpression(m.Target), e); // D18
+                return EnumNumber(target(), e); // D18
             case HandleType when m.Member == "Port":
-                return fn.Value($"load i32, ptr {HandleField(EmitExpression(m.Target), 12)}"); // S9
+                return fn.Value($"load i32, ptr {HandleField(target(), 12)}"); // S9
 
             default:
                 throw Unsupported(m.Line, $"the member `{m.Member}` of {Lower.Refusal(targetType)}");
@@ -284,7 +298,7 @@ public sealed partial class Emitter
         switch (Unwrap(operand))
         {
             case NameExpression n:
-                return Place(Model.VariableOf(n), n.Line);
+                return NarrowedPlace(n);
             case IndexExpression i when TypeOf(i.Target) is PointerType p:
                 return ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index);
             default:
@@ -368,6 +382,10 @@ public sealed partial class Emitter
                     return Arithmetic(instruction, l, r, type, b.Line, checkedBuild: false);
                 }
 
+            case TokenKind.QuestionQuestion:
+                return Temp(EmitCoalesce(b, type), type);
+            case TokenKind.EqualEqual or TokenKind.NotEqual when leftType is NullType || rightType is NullType:
+                return EmitNullTest(leftType is NullType ? b.Right : b.Left, op == TokenKind.EqualEqual);
             case TokenKind.EqualEqual or TokenKind.NotEqual or TokenKind.Less or TokenKind.LessEqual or TokenKind.Greater or TokenKind.GreaterEqual:
                 return EmitComparison(b, leftType, rightType);
             case TokenKind.Ampersand or TokenKind.Bar or TokenKind.Caret:
@@ -682,8 +700,8 @@ public sealed partial class Emitter
     /// <summary>The text of a value as <see cref="TextOf"/> makes it, a temporary of the region where it made one.</summary>
     private string Text(string value, KurzType type, int line) => MakesText(type) ? Temp(TextOf(value, type, line), Types.String) : TextOf(value, type, line);
 
-    /// <summary>Whether <see cref="TextOf"/> makes a text for a value of the type, which holds a count its caller lets go of: for every type but a string, which is its own text, and a <c>bool</c> and an enum, whose texts are literals.</summary>
-    private static bool MakesText(KurzType type) => type is not (PrimitiveType { Kind: Primitive.String or Primitive.Bool } or EnumType);
+    /// <summary>Whether <see cref="TextOf"/> makes a text for a value of the type, which holds a count its caller lets go of: for every type but a string, which is its own text, and a <c>bool</c>, an enum and <c>null</c>, whose texts are literals.</summary>
+    private static bool MakesText(KurzType type) => type is not (PrimitiveType { Kind: Primitive.String or Primitive.Bool } or EnumType or NullType);
 
     /// <summary>
     /// The text of a value as `print` and an interpolation show it (A1, L6), as a <c>%kz.str</c>, made by the runtime: a string as it
@@ -723,6 +741,8 @@ public sealed partial class Emitter
                 return DerivedText(value, type, line);
             case EnumType e:
                 return EnumText(value, e); // A4
+            case NullType:
+                return StringValue("null"); // A4
             case ListType list:
                 return ListText(value, list, line);
             default:

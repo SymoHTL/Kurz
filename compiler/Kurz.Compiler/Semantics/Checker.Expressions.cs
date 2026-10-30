@@ -53,8 +53,13 @@ public sealed partial class Checker
                 return new Typed(p, new NullConstant()); // R10: a pointer can be `null`
             case NullLiteral when expected is not null && Types.IsError(expected):
                 return Typed.Error; // the type it stands for was the error, which was reported (E1)
+            case NullLiteral when expected is not null && Types.NonNull(expected) is not null:
+                return new Typed(Types.Null, new NullConstant()); // N1: the value of a nullable type's case `null`, which the site makes a value of that type
             case NullLiteral n:
-                NotSupported(n.Line, "null (N1)");
+                // N6: `null` is a value of nullable types and of pointers only, and has no type of its own that a value without one could take
+                Report(ErrorIds.TypeMismatch, n.Line, expected is null
+                    ? "`null` has no type of its own: a nullable type takes it, `string? name = null` (N6)"
+                    : $"`null` where a `{expected}` is required: `null` is a value of nullable types and pointers only (N6, N1)");
                 return Typed.Error;
             case NameExpression n:
                 return CheckName(n, expected);
@@ -361,7 +366,7 @@ public sealed partial class Checker
     /// </summary>
     private static bool HasText(KurzType type, List<DataSymbol> seen) => type switch
     {
-        PrimitiveType or EnumType => true,
+        PrimitiveType or EnumType or NullType => true, // A4: null shows `null`
         ErrorType => true,
         ListType l => HasText(l.Element, seen),
         UnionType u => u.Cases.All(c => HasText(c, seen)),
@@ -405,7 +410,7 @@ public sealed partial class Checker
             model.RecordName(n, variable);
             stateRead |= readingConstant && variable.Kind == VariableKind.Static;
             RequireRawForState(variable, n.Line);
-            return new Typed(variable.Type);
+            return Narrowed(n, new Typed(variable.Type)); // N3
         }
 
         if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
@@ -472,11 +477,9 @@ public sealed partial class Checker
 
     private Typed CheckMember(MemberAccess m)
     {
-        if (m.Conditional)
+        if (m.Conditional || InChain(m.Target))
         {
-            NotSupported(m.Line, "`?.` (N5)");
-            CheckExpression(m.Target, null);
-            return Typed.Error;
+            return CheckChainMember(m); // N5
         }
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
@@ -511,7 +514,7 @@ public sealed partial class Checker
         }
 
         var target = CheckExpression(m.Target, null);
-        return MemberOf(target.Type, m.Member, m.Line);
+        return Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3
     }
 
     /// <summary>D12: <c>Plan.Free</c>, a value of the enum, a constant (section 4); <c>From</c> is called (D18), and any other name is no value of it (V10).</summary>
@@ -620,6 +623,9 @@ public sealed partial class Checker
                 return new Typed(Types.Int); // D18
             case HandleType { Kind: Handle.TcpListener } when member == "Port":
                 return new Typed(Types.Int); // S9
+            case UnionType when Types.NonNull(type) is not null:
+                Report(ErrorIds.NullableUnchecked, line, $"`{member}` is read from a `{type}` without a check (N2)");
+                return Typed.Error;
             case UnionType:
                 Report(ErrorIds.TypeMismatch, line, $"a `{type}` is one of its cases only after a `match` (D9)");
                 return Typed.Error;
@@ -650,6 +656,14 @@ public sealed partial class Checker
 
     private Typed CheckIndex(IndexExpression i)
     {
+        if (InChain(i.Target))
+        {
+            // N5: C# reads an index after `?.` inside the chain, which section 4 does not say
+            NotSupported(i.Line, "an index after `?.` (N5)");
+            CheckLoosely(i.Target, i.Index);
+            return Typed.Error;
+        }
+
         var target = CheckExpression(i.Target, null);
         if (i.Index is RangeExpression range)
         {
@@ -665,6 +679,11 @@ public sealed partial class Checker
         if (target.Type is ListType && !index.IsError && !Types.IsInteger(index.Type))
         {
             Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not a `{index.Type}` (M9, T2)");
+        }
+
+        if (Unchecked(target, i.Line, "indexed"))
+        {
+            return Typed.Error;
         }
 
         switch (target.Type)
@@ -739,7 +758,7 @@ public sealed partial class Checker
         // for the operand of a run-time operation; so `short s = -(5)` is a `short`, as `short s = -5` is
         var literal = IsLiteralOnly(u.Operand);
         var operand = CheckExpression(u.Operand, u.Operator != TokenKind.Bang && literal ? expected : null);
-        if (operand.IsError)
+        if (operand.IsError || Unchecked(operand, u.Line, $"under `{Operator(u.Operator)}`"))
         {
             return Typed.Error;
         }
@@ -884,20 +903,17 @@ public sealed partial class Checker
     {
         if (b.Operator == TokenKind.QuestionQuestion)
         {
-            NotSupported(b.Line, "`??` (N4)");
-            CheckExpression(b.Left, null);
-            CheckExpression(b.Right, null);
-            return Typed.Error;
+            return CheckCoalesce(b); // N4
         }
 
         var cls = ClassOf(b.Operator);
         if (cls == OperatorClass.Comparison && CompareWithNull(b) is { } withNull)
         {
-            return withNull; // R10: a pointer compares with `null`
+            return withNull; // R10: a pointer compares with `null`; N3: a nullable value does
         }
 
-        var (left, right) = Operands(b.Left, b.Right, expected, cls);
-        if (left.IsError || right.IsError)
+        var (left, right) = cls == OperatorClass.Logical ? Logical(b) : Operands(b.Left, b.Right, expected, cls);
+        if (left.IsError || right.IsError || Unchecked(left, b.Line, $"under `{Operator(b.Operator)}`") || Unchecked(right, b.Line, $"under `{Operator(b.Operator)}`"))
         {
             return cls is OperatorClass.Comparison or OperatorClass.Logical ? new Typed(Types.Bool) : Typed.Error;
         }
@@ -1367,6 +1383,7 @@ public sealed partial class Checker
             Line = l.Line,
             TypeParameters = outer.TypeParameters,
             Reserved = outer.Reserved,
+            Known = outer.Known, // N3 with F15: the lambda takes the values its variables have where it is made, and what was known of them
         };
         var parameters = new List<VariableSymbol>();
         foreach (var (p, type) in l.Parameters.Zip(parameterTypes))

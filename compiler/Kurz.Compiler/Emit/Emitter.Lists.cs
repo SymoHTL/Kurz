@@ -531,7 +531,7 @@ public sealed partial class Emitter
         var argument = c.Arguments[0].Value;
         string item = null!;
         InRegion(() => item = Convert(Owned(argument), TypeOf(argument), list.Element, argument.Line));
-        var place = Place(Model.VariableOf(n), n.Line);
+        var place = NarrowedPlace(n);
         var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", Ir(list.Element)], () => AddBody(list.Element));
         fn.Emit($"call void {add}(ptr {place}, {Ir(list.Element)} {item})");
     }

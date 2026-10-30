@@ -291,13 +291,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // strings in variables, fields, a `with`, a path assignment, an arm's name while the arm changes the subject's variable, a
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
-    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block, and
-    // an interpolation of one hole beside a call that changes the place the hole read
+    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block,
+    // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
+    // nullable variable known not null, and an `Add` through the place of one
     private const string Strings = """
         data Person(string Name, int Age)
         data Tag(string Label)
         data Leaf
         data Node(string Label, Node | Leaf Next)
+        data Contact(string? Email)
 
         string Same(string s) => s
 
@@ -417,6 +419,26 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             string inner => print(inner)
             InvalidUtf8 bad => print(bad.At)
         }
+        mut string? maybe = Made(29)
+        fallback = maybe ?? "none"
+        maybe = null
+        print(fallback)
+        print(maybe ?? Made(30))
+        mut Contact? holder = Contact(Made(31))
+        email = holder?.Email ?? "none"
+        holder = null
+        print(email)
+        print(holder?.Email ?? "none")
+        maybe = Made(32)
+        if maybe != null {
+            known = maybe
+            maybe = null
+            print(known)
+        }
+        mut List<string>? items = List<string>()
+        items.Add(Made(33))
+        print(items)
+        print(Contact(null))
         raw {
             room = Bytes.Allocate(4)
             room[0] = 104
@@ -457,6 +479,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[n26]", // a part holds its items' blocks
         "50", // a byte read in place
         "<n28>", // a string of bytes in a function, through the success of its union
+        "n29", // the value `??` gives, which the variable's next value leaves whole
+        "n30", // the right side of `??`, made where the left is null
+        "n31", // the member `?.` reads, which the variable's next value leaves whole
+        "none",
+        "n32", // a read of a variable known not null, the string of its case
+        "[n33]", // an `Add` through the place of a list in a nullable variable
+        "Contact { Email = null }",
         "hi", // a list that took over the room `Bytes.Allocate` gave
         "105",
     ];
