@@ -239,8 +239,10 @@ public sealed partial class Emitter
     /// (D3, the owner, 2026-10-23); a <c>float</c> or a <c>double</c> here is a field's or a case's, which compares as C#'s
     /// <c>Equals</c> does, NaN equal to NaN and 0 to -0 (D3, the owner, 2026-10-09 and 2026-10-24); a <c>decimal</c> by its value,
     /// 1.5 equal to 1.50, as C#'s <c>Equals</c> compares it. <paramref name="ieee"/> is set for the two sides of a list's <c>==</c>,
-    /// whose <c>double</c> and <c>float</c> items, and those of the lists among its items, compare by IEEE's <c>==</c>; a list held in a
-    /// <c>data</c> value or a key compares them as C#'s <c>Equals</c> does (section 4, the owner, 2026-10-30, "Equals inside data/keys").
+    /// whose <c>double</c> and <c>float</c> items, the values of its <c>double?</c> and <c>float?</c> items, and those of the lists among
+    /// its items, compare by IEEE's <c>==</c>, <c>null</c> equal to <c>null</c>, as Rust's <c>Vec&lt;Option&lt;f64&gt;&gt;</c> compares
+    /// (section 4, the owner, 2026-10-30, "As plain double"); a list held in a <c>data</c> value or a key compares them as C#'s
+    /// <c>Equals</c> does (section 4, the owner, 2026-10-30, "Equals inside data/keys", "As plain double").
     /// </summary>
     private string Equal(string left, string right, KurzType type, int line, bool ieee = false)
     {
@@ -266,7 +268,10 @@ public sealed partial class Emitter
 
             case UnionType union:
                 {
-                    var name = Helper($"equal.{Lower.Mangle(type)}", "i1", [Ir(type), Ir(type)], () =>
+                    // a nullable item of a list under `==`: `null` equal to `null` alone (N10), a `double?` or a `float?` one's value by
+                    // IEEE's `==` (section 4, the owner, 2026-10-30, "As plain double")
+                    ieee = ieee && Types.NonNull(union) is { } inner && IeeeItem(inner);
+                    var name = Helper($"equal.{(ieee ? "ieee." : "")}{Lower.Mangle(type)}", "i1", [Ir(type), Ir(type)], () =>
                     {
                         var tag = Tag("%a0", union);
                         var same = fn.Value($"icmp eq i{Number(layout.TagBits(union))} {tag}, {Tag("%a1", union)}");
@@ -276,7 +281,11 @@ public sealed partial class Emitter
                         fn.Block(differ);
                         fn.Return("i1 false");
                         fn.Block(cases);
-                        ByCase(tag, union, union.Cases, c => fn.Return($"i1 {(c is VoidType or NullType ? "true" : Equal(Payload("%a0", union, c), Payload("%a1", union, c), c, line))}"));
+                        ByCase(tag, union, union.Cases, c =>
+                        {
+                            var (a, b) = c is VoidType or NullType ? ("", "") : (Payload("%a0", union, c), Payload("%a1", union, c));
+                            fn.Return($"i1 {(c is VoidType or NullType ? "true" : ieee && c is PrimitiveType p ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, c, line, ieee))}");
+                        });
                     });
                     return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
                 }
@@ -335,11 +344,15 @@ public sealed partial class Emitter
         }
     }
 
-    /// <summary>Whether the list's items, or the items of the lists among them, are of a <c>double</c> or a <c>float</c>.</summary>
-    private static bool FloatingItems(ListType list) => list.Element switch
+    /// <summary>Whether the list's items, or the items of the lists among them, are of a <c>double</c> or a <c>float</c>, or of a nullable type of one.</summary>
+    private static bool FloatingItems(ListType list) => IeeeItem(list.Element);
+
+    /// <summary>Whether an item of the type compares by IEEE's <c>==</c> in a list under <c>==</c>: a <c>double</c>, a <c>float</c>, a list of them and a nullable type of each.</summary>
+    private static bool IeeeItem(KurzType item) => item switch
     {
         PrimitiveType p => Types.IsFloating(p),
         ListType inner => FloatingItems(inner),
+        UnionType u when Types.NonNull(u) is { } inner => IeeeItem(inner),
         _ => false,
     };
 

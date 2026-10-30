@@ -2255,6 +2255,52 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_key_of_a_nullable_type_is_read_and_null_is_one_of_its_keys()
+    {
+        // M9 with N10: a key of a nullable type of a key's type, `null` one of its keys, compares as `==` compares two nullable values,
+        // `null` equal to `null` alone, and a `double?` or a `float?` one's value as a `double` key's (section 4, the owner, 2026-10-30,
+        // "As plain double"; for the other types an assumption there); so does a list of such items in a key, and a `data` key that holds one
+        Clean("mut m = Map<int?, string>()\nm[null] = \"none\"\nm[1] = \"one\"\nint? k = null\nprint(m[k] ?? \"\")\nprint(m.ContainsKey(null))\nprint(m.Remove(1) ?? \"\")");
+        Clean("m = Map<string?, int>()\nprint(m)");
+        Clean("m = Map<char?, int>()\nprint(m)");
+        Clean("mut m = Map<double?, int>()\nm[null] = 1\nm[0.5] = 2\nprint(m[0.5] ?? 0)");
+        Clean("m = Map<float?, int>()\nprint(m)");
+        Clean("enum Tier { Free, Pro }\n\nm = Map<Tier?, int>()\nprint(m)");
+        Clean("data P(int X)\n\nm = Map<P?, int>()\nprint(m)");
+        Clean("m = Map<List<int?>, int>()\nprint(m)");
+        Clean("m = Map<List<int>?, int>()\nprint(m)");
+        Clean("data P(List<double?> Xs)\n\nm = Map<P, int>()\nprint(m)");
+        Clean("mut m = Map<int?, string>()\nm[2] = \"a\"\nfor k, v in m {\n    print(k ?? 0)\n    print(v)\n}");
+    }
+
+    [Fact]
+    public void A_list_of_nullable_items_compares_each_pair_as_two_nullable_values()
+    {
+        // M9 with N10: `==` on two lists of nullable items compares each pair as `==` compares two nullable values, `null` equal to `null`
+        // alone, a `double?` or a `float?` one's value by IEEE's `==` where the lists stand alone and as C#'s `Equals` in a `data` value
+        // (section 4, the owner, 2026-10-30, "As plain double"; for the other types an assumption there)
+        Clean("xs = List<int?>()\nprint(xs == xs)\nprint(xs != List<int?>())");
+        Clean("xs = List<double?>()\nprint(xs == xs)");
+        Clean("xs = List<List<string?>>()\nprint(xs == xs)");
+        Clean("data P(int X)\n\nxs = List<P?>()\nprint(xs == xs)");
+        Clean("xs = List<List<float>?>()\nprint(xs == xs)");
+        Clean("data P(List<double?> Xs)\n\na = P(List<double?>())\nprint(a == a)");
+    }
+
+    [Theory]
+    [InlineData("m = Map<Map<int, int>?, int>()\nprint(m)", 1)]
+    [InlineData("m = Map<File?, int>()\nprint(m)", 1)]
+    [InlineData("m = Map<List<Map<int, int>?>, int>()\nprint(m)", 1)]
+    [InlineData("xs = List<Map<int, int>?>()\nprint(xs == xs)", 2)]
+    [InlineData("xs = List<TcpStream?>()\nprint(xs == xs)", 2)]
+    public void A_nullable_key_or_item_of_a_type_eq_does_not_take_is_type_mismatch(string program, int line)
+    {
+        // M9, T18: the nullable type of a map, a file or a socket compares by nothing, as its type does (section 4, the owner, 2026-10-30,
+        // "type-mismatch")
+        Assert.Equal([(ErrorIds.TypeMismatch, line)], Errors(program));
+    }
+
+    [Fact]
     public void The_entry_of_a_loop_over_a_map_is_a_value_of_Entry()
     {
         // C6: `for e in map` names a value of the built-in data type `Entry<K, V>` with `Key` and `Value`, as C#'s `KeyValuePair` (section 4,
@@ -2320,8 +2366,8 @@ public sealed class CheckerTests
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
     [InlineData("Map<string, int>? m = null\nprint(m?[\"a\"] ?? -1)", "2: `?[` on a map (N5, M9)")]
-    [InlineData("xs = List<int?>()\nprint(xs == xs)", "2: `==` on a `List<int?>`: its items: a nullable item compares by the lifted `==` (N10) (D3, M9)")]
-    [InlineData("m = Map<int?, string>()\nprint(m)", "1: a map with keys of type `int?`: a nullable key compares by the lifted `==` (N10) (M9)")]
+    [InlineData("m = Map<decimal?, int>()\nprint(m)", "1: a map with keys of type `decimal?`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
+    [InlineData("void F<T>(T x) {\n    xs = List<T?>()\n    print(xs == xs)\n}\n\nF(1)", "3: `==` on a `List<T?>`: its items: `==` on a `T` is not read (D3, M9)")]
     [InlineData("m = Map<decimal, int>()\nprint(m)", "1: a map with keys of type `decimal`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
     [InlineData("void F<T>(T x) {\n    m = Map<T, int>()\n    print(m)\n}\n\nF(1)", "2: a map with keys of type `T`: a `T` is no key the checker reads (M9)")]
     [InlineData("m = Map<int | string, int>()\nprint(m)", "1: a map with keys of type `int | string`: a `int | string` is no key the checker reads (M9)")]

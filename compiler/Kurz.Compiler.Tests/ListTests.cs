@@ -901,6 +901,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         enum Tier { Free, Pro }
         data Pt(double X)
         data Samples(List<double> Xs)
+        data Maybes(List<double?> Xs)
 
         void ShowEntry(Entry<string, List<int>> entry) {
             print(entry.Value.Count)
@@ -1180,6 +1181,45 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         byLists[flls] = 3
         print(byLists[flls] ?? 0)
 
+        // keys of a nullable type, `null` among them, and lists of nullable items: `null` equal to `null` alone (N10), a `double?` key's
+        // value and a `double?` item's in a `data` value as C#'s `Equals`, NaN equal to NaN and -0.0 to 0.0, and two lists alone by IEEE's
+        // `==` (section 4, the owner, 2026-10-30, "As plain double"; for the other types an assumption there)
+        mut byMaybe = Map<int?, string>()
+        byMaybe[null] = Made(0)
+        byMaybe[1] = "one"
+        int? noKey = null
+        print(byMaybe[noKey] ?? "missing")
+        print(byMaybe[1] ?? "missing")
+        print(byMaybe[2] ?? "missing")
+        print(byMaybe.Count)
+        print(byMaybe.Remove(1) ?? "missing")
+        print(byMaybe)
+        mut byNote = Map<string?, int>()
+        byNote[Made(1)] = 1
+        byNote[null] = 2
+        print(byNote[Made(1)] ?? 0)
+        print(byNote[null] ?? 0)
+        mut byReal = Map<double?, int>()
+        byReal[nan] = 1
+        byReal[null] = 2
+        byReal[-z] = 3
+        print(byReal[-nan] ?? 0)
+        print(byReal[null] ?? 0)
+        print(byReal[z] ?? 0)
+        print(byReal.Count)
+        mut maybes = List<double?>()
+        maybes.Add(nan)
+        maybes.Add(null)
+        print(maybes == maybes)
+        print(Maybes(maybes) == Maybes(maybes))
+        mut nulls = List<double?>()
+        nulls.Add(null)
+        nulls.Add(-z)
+        mut zeros = List<double?>()
+        zeros.Add(null)
+        zeros.Add(z)
+        print(nulls == zeros)
+
         // the entry, a value of `Entry<K, V>`: kept in a list, read in a lambda, passed and compared, past a `Clear` of the map
         mut book = Map<string, List<int>>()
         mut pages = List<int>()
@@ -1302,6 +1342,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "true",
         "false", // the two lists alone, by IEEE's `==`
         "3", // a list of lists of `float` items as a key
+        "made 0", // an `int?` key: `null` finds `null`
+        "one",
+        "missing",
+        "2",
+        "one",
+        "[null: made 0]",
+        "1", // a `string?` key
+        "2",
+        "1", // a `double?` key: NaN finds NaN, `null` finds `null`, 0.0 finds -0.0
+        "2",
+        "3",
+        "3",
+        "false", // a `List<double?>` alone, by IEEE's `==`
+        "true", // the same list in a `data` value, as C#'s `Equals`
+        "true", // `null` equal to `null`, -0.0 to 0.0
         "made 7", // the entry read in a lambda, passed and compared, after a `Clear` of the map
         "1",
         "true",

@@ -685,11 +685,14 @@ public sealed partial class Checker
     /// "Any type with =="): a string, a number, a <c>char</c>, a <c>bool</c>, a time, an enum, a <c>data</c> value of such fields, a
     /// field of a union of them among them (D3), and a list of such items; a <c>double</c> or a <c>float</c>, alone or in a field,
     /// compares as C#'s <c>double.Equals</c> does in a <c>Dictionary</c> (section 4, the owner, 2026-10-30, "As C#"), and so do the
-    /// items of a list of them in a key (section 4, the owner, 2026-10-30, "Equals inside data/keys"). A map, a function value, a file and
-    /// a socket take no <c>==</c>, and nor does a <c>data</c> value that holds one of them, so they are no key (<c>type-mismatch</c>, T18;
-    /// section 4, the owner, 2026-10-30, "type-mismatch"); the rest are <c>not supported</c>: a nullable key, which compares by the
-    /// lifted <c>==</c> of N10, a <c>decimal</c>, a pointer and a type parameter. A value is any type whose nullable type the checker
-    /// reads (N1, N11), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30, "Flatten, as C#").
+    /// items of a list of them in a key (section 4, the owner, 2026-10-30, "Equals inside data/keys"). A key of a nullable type of such a
+    /// type compares as <c>==</c> compares two nullable values, <c>null</c> equal to <c>null</c> alone (N10), a <c>double?</c> or a
+    /// <c>float?</c> one's value as a <c>double</c> key's (section 4, the owner, 2026-10-30, "As plain double"; for the other types an
+    /// assumption there). A map, a function value, a file and a socket take no <c>==</c>, and nor does a <c>data</c> value that holds one
+    /// of them, so they are no key (<c>type-mismatch</c>, T18; section 4, the owner, 2026-10-30, "type-mismatch"); the rest are <c>not
+    /// supported</c>: a <c>decimal</c>, a pointer, a type parameter and a union of two types beside <c>null</c>. A value is any type whose
+    /// nullable type the checker reads (N1, N11), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30,
+    /// "Flatten, as C#").
     /// </summary>
     private KurzType MapOf(KurzType key, KurzType value, int line)
     {
@@ -730,8 +733,8 @@ public sealed partial class Checker
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or HandleType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
-            case UnionType u when Types.NonNull(u) is not null:
-                return (false, "a nullable key compares by the lifted `==` (N10)");
+            case UnionType u when Types.NonNull(u) is { } held:
+                return KeyOf(held, seen); // N10: `null` equals `null` alone, and two values compare as their type's keys do
             case ListType l:
                 return KeyOf(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case DataType d:
@@ -834,7 +837,9 @@ public sealed partial class Checker
     /// <summary>
     /// M9: why <c>==</c> does not take two lists of the type, null where it does: equal counts and equal items in order, each pair by
     /// <c>==</c>, as Rust's <c>Vec</c> compares (section 4, the owner, 2026-10-30, "By items, as Rust"). Items of a type <c>==</c> does
-    /// not take are <c>type-mismatch</c>; nullable items, which compare by the lifted <c>==</c> of N10, are <c>not supported</c>.
+    /// not take are <c>type-mismatch</c>; a nullable item compares as <c>==</c> compares two nullable values, <c>null</c> equal to
+    /// <c>null</c> alone (N10), a <c>double?</c> or a <c>float?</c> one's value by IEEE's <c>==</c> (section 4, the owner, 2026-10-30,
+    /// "As plain double"; for the other types an assumption there).
     /// </summary>
     private (bool Mismatch, string Why)? ItemEquality(KurzType item)
     {
@@ -848,8 +853,8 @@ public sealed partial class Checker
                 return ItemEquality(l.Element) is { } inner ? inner with { Why = $"its items: {inner.Why}" } : null;
             case DataType:
                 return HeldEquality(item, []);
-            case UnionType u when Types.NonNull(u) is not null:
-                return (false, "a nullable item compares by the lifted `==` (N10)");
+            case UnionType u when Types.NonNull(u) is { } held:
+                return ItemEquality(held); // N10: `null` equals `null` alone, and two values compare as their type's items do
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case UnionType or FunctionType or CFunctionType or HandleType or VoidType:

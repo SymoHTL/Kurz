@@ -369,7 +369,7 @@ public sealed partial class Checker
         PrimitiveType or EnumType or NullType => true, // A4: null shows `null`
         ErrorType => true,
         ListType l => HasText(l.Element, seen),
-        MapType m => HasText(m.Value, seen), // A6: a key is a string, a number, a `char` or a `bool`
+        MapType m => HasText(m.Value, seen), // A6, M9: every type a map takes as its key has a text; a function value and a handle, which have none, are no key
         UnionType u => u.Cases.All(c => HasText(c, seen)),
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
