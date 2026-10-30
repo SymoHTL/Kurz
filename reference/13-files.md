@@ -383,8 +383,10 @@ No case: a case does not name its target (record, section 14).
 ### S12 (decided, §13) Grants
 
 A package that calls the file functions of this chapter, `File` and `Directory`, needs `allow files`,
-and one that calls its socket functions `allow network`. A call without the grant is the compile
-error `files-not-allowed` or `network-not-allowed` at the call. The program itself needs neither.
-*(assumed, §13: `Directory` among the file functions, and the package whose code makes the call)*
+and one that calls its socket functions `allow network`. Every package on the path of calls from the
+program's code to such a function needs the grant, so that no package borrows a grant through
+another that has it (§13, the owner, 2026-10-30, "Every package on path"). A call without the grant
+is the compile error `files-not-allowed` or `network-not-allowed` at the call. The program itself
+needs neither. *(assumed, §13: `Directory` among the file functions)*
 
 No case: a case is a program and no package, and the program needs no grant.

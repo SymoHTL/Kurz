@@ -44,7 +44,9 @@ print(low)
 
 ### T4 (decided, §4) Overflow wraps in a release build
 
-Integer arithmetic that leaves the range of its type wraps around silently.
+Integer arithmetic that leaves the range of its type wraps around silently. A project keeps T5's
+checks in its release build by a setting in its `project.kz` (§4, the owner, 2026-10-30, "Project
+setting"); a case of the corpus has no `project.kz` and takes the default.
 
 Case: [types/overflow-release.kz](../corpus/types/overflow-release.kz)
 ```kurz

@@ -25,6 +25,8 @@ flowchart TD
         and the reference rules that cite them. Judgment step"]
         B3["a wish that cannot hold is contradicted in the reply, not recorded.
         Judgment step"]
+        B4["read the change against the research entries on C#, Rust, Go, Elixir and Goose
+        and name the finding it meets, or say it meets none. Judgment step"]
     end
     subgraph D["While writing"]
         D1["decided, assumed or open: each statement carries exactly one status.
@@ -72,3 +74,5 @@ flowchart TD
 - A sample or a guarantee becomes checkable by a tool: the node names that tool as its gate.
 - The statuses or the format of the reference change (`reference/00-about.md`,
   `tools/lint_reference.py`): node A5.
+- A research entry is added (`knowledge/what-developers-dislike-in-*.md`,
+  `knowledge/what-goose-does-for-speed.md`) or a finding's verdict changes: node B4.
