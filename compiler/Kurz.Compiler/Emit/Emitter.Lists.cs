@@ -410,7 +410,7 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// M9, M4, T14: <c>xs[i] = value</c> on a <c>mut</c> variable or parameter, as C# and Rust write an item (section 4, the owner,
+    /// M9, M4, T14: <c>xs[i] = value</c> on a <c>mut</c> variable or parameter, or on a path of fields from one, as C# and Rust write an item (section 4, the owner,
     /// 2026-10-30, "As C# and Rust"): the value first, then the position, then the list the variable holds as they left it, as a path
     /// assignment reads its value first (M4); a position below 0 or at the count or beyond raises <c>index-out-of-range</c> at the line
     /// (T14), and a block other values hold is copied before the write (M3), as <c>Add</c> copies it. The item takes the value over and
@@ -426,7 +426,7 @@ public sealed partial class Emitter
             var indexType = TypeOf(index.Index);
             position = Resize(EmitExpression(index.Index), indexType, Types.IsSigned(indexType) ? Types.Long : Types.ULong);
         });
-        var place = NarrowedPlace((NameExpression)Unwrap(index.Target));
+        var place = CollectionPlace(index.Target);
         var count = fn.Value($"zext i32 {ListCount(fn.Value($"load ptr, ptr {place}"))} to i64");
         var inside = fn.Label("index");
         var outside = fn.Label("out.of.range");
@@ -587,9 +587,9 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// M9: <c>list.Add(item)</c> on a <c>mut</c> variable or parameter. The item is read first, then the list the variable holds as
-    /// the item left it, as a path assignment reads its value first (M4); a block other values hold is copied before the write (M3),
-    /// and a full one grows. What the argument made besides the item is let go of before the list is read, so that the environment
+    /// M9, M5: <c>list.Add(item)</c> on a <c>mut</c> variable or parameter, or on a path of fields from one. The item is read first,
+    /// then the list the variable holds as the item left it, as a path assignment reads its value first (M4); a block other values
+    /// hold is copied before the write (M3), and a full one grows. What the argument made besides the item is let go of before the list is read, so that the environment
     /// of a lambda it gave to a call, which counts the values it read (F15), holds no count of the list when the list grows, as
     /// M7 states (section 4, the owner, 2026-10-28, "Pass, as Rust").
     /// </summary>
@@ -597,15 +597,10 @@ public sealed partial class Emitter
     {
         var member = (MemberAccess)Unwrap(c.Callee);
         var list = (ListType)TypeOf(member.Target);
-        if (Unwrap(member.Target) is not NameExpression n)
-        {
-            throw Unsupported(c.Line, "an `Add` on a list in a field (M5)");
-        }
-
         var argument = c.Arguments[0].Value;
         string item = null!;
         InRegion(() => item = Convert(Owned(argument), TypeOf(argument), list.Element, argument.Line));
-        var place = NarrowedPlace(n);
+        var place = CollectionPlace(member.Target);
         var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", Ir(list.Element)], () => AddBody(list));
         fn.Emit($"call void {add}(ptr {place}, {Ir(list.Element)} {item})");
     }

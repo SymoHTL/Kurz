@@ -501,8 +501,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - `if`, `while`, `for` over a range, which raises `reversed-range-at-run-time` (C8), `break`,
   `continue` and `return` (chapter 10), and `throw` of a value (O6);
 - `data` types and their values, made with defaults and arguments by name (D1, D2, D8, D11), their
-  fields (D14), `with` (D5), an assignment into a path, its value first (M4), a value of a derived type where its
-  base is required (D6, D7), `==` field by field, a `float` or a `double` field as C#'s `Equals`
+  fields (D14), `with` (D5), an assignment into a path, its value first (M4), each `mut` member of a list or a map
+  at the end of one, `Add`, `Clear`, `Remove`, `list[i] = value` and `map[key] = value` (M5, M9), a value of a
+  derived type where its base is required (D6, D7), `==` field by field, a `float` or a `double` field as C#'s `Equals`
   compares it, NaN equal to NaN (D3), and never equal across types (D3, D15), and their
   text, a generic type's under the name its declaration gives (A3);
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
@@ -517,9 +518,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `T?` of a list or of a data type laid out as a block is the address alone, its `null` an address no
   value of `T` has, 1 for a list, whose value without items is the address 0, and 0 for a block
   (section 4, the owner, 2026-10-30, "Rust's niche"); a read of a variable or a field the checker
-  found known not null is the value of the case `T`, and `&x`, `Add` and `Clear` on such a variable
-  reach the place of that value in the variable's room, the variable's own place where the address
-  is the value (N3, R10); `x == null` and `x != null` compare the tag, or the address with the `null`
+  found known not null is the value of the case `T`, and `&x` on such a variable, and a `mut` member of
+  a list or a map on such a variable or on such a field at the end of a path, reach the place of that
+  value in the variable's or the field's room, the place itself where the address is the value (N3,
+  R10, M5); `x == null` and `x != null` compare the tag, or the address with the `null`
   of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
   reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
   `?.` and `?[` reads each member and item only where the value before it is not null, the index of
@@ -528,7 +530,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
   which raises `index-out-of-range` for an index below 0 or at `Count` or beyond (T14), `list[i] = value`
-  on a `mut` variable or parameter, which runs the value, then the index, raises `index-out-of-range`
+  on a `mut` variable or parameter or on a path of data fields from one, which runs the value, then the index, raises `index-out-of-range`
   there, copies a block another value holds first and lets go of the item it writes over (section 4, the
   owner, 2026-10-30, "As C# and Rust"; M9, M4, M3), `==` and `!=` on two lists of one type, by their
   counts and their items in order, each pair by `==`, a `double` or a `float` item by IEEE's `==`, so
@@ -693,10 +695,13 @@ size, where D10 names small values. One with a base, a type derived from it or a
 type in a field is a pointer to a block that holds the number of the value's own type, then its
 fields, the base's first, so that a block of a derived type reads as one of its base (D6, D7).
 `with` and an assignment into a path through such a value copy the block before the write, so that
-no other variable sees it (D4, M4). Pinned by
+no other variable sees it (D4, M4), and so does a `mut` member of a list or a map in a field of such a
+value, where the list or the map the copy holds takes a count of its own, so that the write copies it
+too and the block it was copied from keeps it as it was (M3, M5, M9). Pinned by
 `DataTests.A_copy_by_with_of_a_derived_value_through_its_base_keeps_its_type_and_leaves_the_original`,
-`DataTests.An_assignment_into_a_path_through_a_block_copies_the_block_so_that_another_variable_keeps_its_value`
-and `DataTests.A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value`.
+`DataTests.An_assignment_into_a_path_through_a_block_copies_the_block_so_that_another_variable_keeps_its_value`,
+`DataTests.A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value`
+and the program of lists and maps in fields of `ListTests`.
 
 A list is the address of its block, null for a list without items, which takes no block, as Rust's
 `Vec::new` allocates nothing. The block holds the count of the list values that hold it, 8 bytes,
@@ -764,7 +769,8 @@ inaccessible, under which the values' programs and twenty rounds of the same pro
 same lines, and so do the strings' program and twenty rounds of strings through every way out of a block,
 and the maps' program and twenty rounds of maps, and the programs of a map's members, loops, entries kept
 past a `Clear`, keys, `double` keys, nullable keys and nullable values and of writes into a list's items and `==` on two
-lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
+lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a program of lists
+and maps in fields written through paths by each `mut` member, beside copies, a block's among them, and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
 since a kept block stays readable, so that a write into one freed under it ends the process; maps made and dropped through every way out of a block, removed, cleared,
 walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
 of three inputs against vectors from outside this repository; two runs of one program that print a
@@ -809,8 +815,7 @@ A program that uses one of these gets one `not supported` at the construct's lin
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
-(M7), a `naked` function (R12), inline assembly (R11), an `Add` or a `Clear` on a list in
-a field and a `Remove` or a `Clear` on a map in a field (M5), `s.Chars` as a list (T15), a call on a file or a socket in a build for
+(M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket in a build for
 Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
@@ -1141,8 +1146,8 @@ a type parameter, and a key that holds one of them as the value of its nullable 
 at any depth or in a field of a `data` key (M9); `==` on two lists, or on a `data` value, that hold a
 value of a type parameter or a pointer, at any depth (D3, M9), and `==` on a base whose derived type is
 generic, whose fields of a type parameter it does not read, and such a base as a key, where a generic
-`data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values have a nullable type N1 does not read; an assignment into a map or a list that
-is no variable, or into a path through an entry or an item (M9, M4), a `mut` method
+`data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values have a nullable type N1 does not read; an assignment into a map or a list
+reached through an item or a call, or into a path that goes on after the key or the item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's
 name (D16), and `equal by` (K8); among the bases of a `data` type a class, an interface or a
@@ -1172,7 +1177,7 @@ round can ask about it by the rule's id.
   as a list's item and as a key, as Rust's derived `PartialEq` compares an enum (section 4, the owner,
   2026-10-30, "Case and value, as Rust"; D3); a `data` value compares a list in a field by its items (D3).
   `map[key] = value` and `list[i] = value` are assignments into a path (M4) and stand on a `mut`
-  variable or parameter, with M4's order, the value before the key or the index; an index of a type
+  variable or parameter or on a path of data fields from one, with M4's order, the value before the key or the index; an index of a type
   other than an integer is `type-mismatch` (T2). Two names in a `for` loop over a list or a range are
   `type-mismatch` at the collection (C6, a proposal). A read of a map in the key of its own `Remove` is a
   value of its own and holds nothing of the map, so whether `Add`'s exception holds for another `mut`
