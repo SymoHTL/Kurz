@@ -515,7 +515,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `hashbrown`'s load factor, and a write to a map another value holds copies the block first (M3), as
   a list's `Add` does. The keys of the hash come from the system's `Random` once per thread, at its
   first map, and each new map takes the first key plus one, as Rust's `RandomState` takes them, so
-  that the order of a map's entries differs between runs (M10) and a block takes its keys with it. A
+  that the order of a map's entries differs between runs (M10) and a block takes its keys with it;
+  where the system gives no bytes, a sandbox that refuses `getrandom` among such cases, the keys stay
+  0, the keys of a fixed hash, where Rust's standard library reads `/dev/urandom` and ends the
+  process when that fails too (this directory's reading). A
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`

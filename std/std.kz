@@ -637,7 +637,8 @@ pub void StringFree(byte* bytes) {
 // the entries' own blocks.
 
 // The keys of the hash of the thread's next map: random bytes of the system at its first map, the
-// first key raised by one for each map after it, as Rust's `RandomState::new` takes and raises them.
+// first key raised by one for each map after it, as Rust's `RandomState::new` takes and raises them;
+// where the system gives none, the keys stay 0.
 thread static mut ulong mapKey0 = 0
 thread static mut ulong mapKey1 = 0
 thread static mut bool mapKeyed = false
