@@ -1,0 +1,18 @@
+// expect: output
+// | found
+// | 1
+// rules: M9
+
+double z = 0.0
+nan = z / z
+mut xs = List<double>()
+xs.Add(nan)
+xs.Add(z)
+mut ys = List<double>()
+ys.Add(nan)
+ys.Add(-z)
+mut seen = Map<List<double>, string>()
+seen[xs] = "found"
+print(seen[ys] ?? "none")
+seen[ys] = "again"
+print(seen.Count)

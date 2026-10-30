@@ -91,7 +91,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 13. Cancellation can cut a function at any await
 
 - Evidence: the async status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Cancellation can in principle occur at any point in time, which leads to subtle bugs".
-- Kurz: answered: "Deadline on chain ID", "Run it, drop the reply" and "One call id, callee drops", section 6 of the record. Before the answers: OPEN.
+- Kurz: answered: "Deadline on chain ID", "Run it, drop the reply", "One call id, callee drops" and "Run again, table restarts", section 6 of the record. Before the answers: OPEN.
 
 ## 14. A library's panic takes down the caller
 

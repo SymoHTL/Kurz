@@ -80,7 +80,7 @@ public sealed partial class Checker
         // a call's own changes: an argument after `mut` against all it holds; `Add` changes its receiver after its argument ran,
         // so against nothing of its own (the owner, 2026-10-25, "Allow, as Rust's clone") but a lambda the argument's value can
         // keep, which holds what it reads past the call (the owner, 2026-10-25, "Refuse, as Rust's borrow", "Refuse if it can keep it");
-        // a receiver's change is recorded for `Add` alone, the one `mut` method the checker reads (`MutReceiver`)
+        // a receiver's change is recorded for every `mut` method the checker reads, each through `MutReceiver`
         if (e is CallExpression call)
         {
             foreach (var a in call.Arguments.Where(a => a.Mut))
@@ -271,6 +271,7 @@ public sealed partial class Checker
     {
         FunctionType or TypeParameterType => true,
         ListType l => HoldsFunction(l.Element, path),
+        MapType m => HoldsFunction(m.Value, path),
         UnionType u => u.Cases.Any(c => HoldsFunction(c, path)),
         DataType d => DataHoldsFunction(d, path),
         _ => false, // a number, a string, a pointer, a C function

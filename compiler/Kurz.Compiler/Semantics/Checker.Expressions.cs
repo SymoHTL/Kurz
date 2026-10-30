@@ -369,6 +369,7 @@ public sealed partial class Checker
         PrimitiveType or EnumType or NullType => true, // A4: null shows `null`
         ErrorType => true,
         ListType l => HasText(l.Element, seen),
+        MapType m => HasText(m.Value, seen), // A6, M9: every type a map takes as its key has a text; a function value and a handle, which have none, are no key
         UnionType u => u.Cases.All(c => HasText(c, seen)),
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
@@ -591,6 +592,8 @@ public sealed partial class Checker
                 }
 
                 break;
+            case MapType when member == "Count":
+                return new Typed(Types.Int); // M9: the count of its entries, as C#'s `Dictionary.Count` (section 4, the owner, 2026-10-30)
             case DataType d:
                 {
                     var field = d.Symbol.Field(member);
@@ -681,6 +684,11 @@ public sealed partial class Checker
             return CheckPart(i, target, range);
         }
 
+        if (target.Type is MapType map)
+        {
+            return CheckMapRead(i, map);
+        }
+
         var index = CheckExpression(i.Index, target.Type is PointerType ? null : Types.Int); // R10: an offset is an `int` or a `long`, so a literal takes the type L10 gives it
         if (target.Type is PointerType)
         {
@@ -714,6 +722,27 @@ public sealed partial class Checker
             default:
                 Report(ErrorIds.TypeMismatch, i.Line, $"a `{target.Type}` is not indexed (M9)");
                 return Typed.Error;
+        }
+    }
+
+    /// <summary>
+    /// M9: <c>map[key]</c>, the value of the key's entry or <c>null</c>, of the nullable type of the map's values (N1), which is the
+    /// values' own type where they are nullable, so that a missing entry and a <c>null</c> one read alike (section 4, the owner,
+    /// 2026-10-30, "Flatten, as C#").
+    /// </summary>
+    private Typed CheckMapRead(IndexExpression i, MapType map)
+    {
+        CheckKey(i.Index, map);
+        return new Typed(Types.Nullable(map.Value));
+    }
+
+    /// <summary>M9: a key of the map, given to an index, to <c>ContainsKey</c> or to <c>Remove</c>.</summary>
+    private void CheckKey(Expression index, MapType map)
+    {
+        var key = CheckExpression(index, map.Key);
+        if (!key.IsError && !Types.Assignable(key.Type, map.Key))
+        {
+            Report(Types.MismatchId(key.Type, map.Key), index.Line, $"a `{key.Type}` where a key of `{map}`, a `{map.Key}`, is required (M9, T1)");
         }
     }
 
@@ -1284,7 +1313,26 @@ public sealed partial class Checker
         else if (equality)
         {
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
-                || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
+                || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
+                || (left.Type is ListType && Types.Same(left.Type, right.Type));
+            var refused = !ok ? null : left.Type switch
+            {
+                // M9: two lists compare by their counts and their items (section 4, the owner, 2026-10-30, "By items, as Rust"); D3: a data
+                // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
+                // "type-mismatch")
+                ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
+                DataType => HeldEquality(left.Type, []) ?? HeldEquality(right.Type, []),
+                _ => null,
+            };
+            switch (refused)
+            {
+                case (true, var why):
+                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} (T18, D3, M9)");
+                    return new Typed(Types.Bool);
+                case (false, var why):
+                    NotSupported(b.Line, $"`{op}` on a `{left.Type}`: {why} (D3, M9)");
+                    return new Typed(Types.Bool);
+            }
         }
 
         if (!ok)

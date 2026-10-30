@@ -1,0 +1,13 @@
+// expect: output
+// | Ann 31
+// | Ann is 31
+// rules: C6
+
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+for e in ages {
+    print("{e.Key} {e.Value}")
+}
+for name, age in ages {
+    print("{name} is {age}")
+}

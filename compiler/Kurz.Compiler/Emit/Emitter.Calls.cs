@@ -31,11 +31,15 @@ public sealed partial class Emitter
             CallKind.FromUtf8Lossy => EmitFromUtf8(c, info, lossy: true),
             CallKind.EnumFrom => EmitEnumFrom(c, info),
             CallKind.ListNew => "null", // M9: a list without items, which takes no block
+            CallKind.MapNew => "null", // M9: a map without entries, which takes no block
             CallKind.ListAdd => EmitListAddCall(c),
             CallKind.ListWhere => EmitListWhere(c, info),
             CallKind.FromRaw => EmitListFromRaw(c, info),
             CallKind.DataNew => EmitConstruction(c, info),
             CallKind.ListClear => EmitListClear(c),
+            CallKind.MapRemove => EmitMapRemove(c),
+            CallKind.MapContainsKey => EmitMapContainsKey(c),
+            CallKind.MapClear => EmitMapClear(c),
             CallKind.FileOpen or CallKind.FileCreate or CallKind.FileReadAll or CallKind.FileWriteAll or CallKind.FileDelete or CallKind.FileRename
                 or CallKind.FileSize or CallKind.FileExists or CallKind.DirectoryCreate or CallKind.DirectoryList or CallKind.DirectoryDelete
                 or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept => EmitFileCall(c, info),

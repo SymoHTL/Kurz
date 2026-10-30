@@ -58,6 +58,8 @@ public sealed partial class Emitter
                 return fn.Value($"load {Ir(type)}, ptr {ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index)}");
             case IndexExpression i when TypeOf(i.Target) is ListType list:
                 return HeldCopy(i, EmitListIndex(i, list), type);
+            case IndexExpression i when TypeOf(i.Target) is MapType map:
+                return EmitMapRead(i, map);
             case UnaryExpression u:
                 return EmitUnary(u, type);
             case BinaryExpression b:
@@ -236,6 +238,8 @@ public sealed partial class Emitter
                 throw Unsupported(m.Line, "`s.Chars` as a list (T15)");
             case ListType when m.Member == "Count":
                 return ListCount(target());
+            case MapType when m.Member == "Count":
+                return fn.Value($"call i32 {StdFunction("MapCount")}(ptr {target()})"); // M9
             case ListType list when m.Member == "Pointer":
                 return ListPointer(target(), list.Element);
             case EnumType e when m.Member == "Number":
@@ -584,7 +588,7 @@ public sealed partial class Emitter
 
         // the two sides as the type the other stands in: a derived value beside its base compares as the base, and is never equal to one (D15)
         var shared = Types.Assignable(leftType, rightType) ? rightType : leftType;
-        var equal = Equal(Convert(left, leftType, shared, line), Convert(right, rightType, shared, line), shared, line);
+        var equal = Equal(Convert(left, leftType, shared, line), Convert(right, rightType, shared, line), shared, line, ieee: shared is ListType); // M9: two lists by IEEE's `==`
         return op == TokenKind.EqualEqual ? equal : fn.Value($"xor i1 {equal}, true");
     }
 
@@ -781,6 +785,8 @@ public sealed partial class Emitter
                 return StringValue("null"); // A4
             case ListType list:
                 return ListText(value, list, line);
+            case MapType map:
+                return MapText(value, map, line);
             default:
                 throw Unsupported(line, $"the text of a `{type}`");
         }
