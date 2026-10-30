@@ -65,6 +65,16 @@ pub void AllocationFailed(long size) {
     sys.Exit(1)
 }
 
+// The end of the process at a thread's first map where the system gave no randomness for the keys of
+// its hash (M9; the owner, 2026-10-30, "End with an error, as Rust"): `error: random-failed` and the
+// exit code 1, with no place and no trace, as `allocation-failed` ends it, where Rust's standard
+// library panics with "failed to retrieve random hash map seed".
+pub void RandomFailed() {
+    sys.Crashing()
+    WriteError("error: random-failed\n")
+    sys.Exit(1)
+}
+
 // The bytes of a path as C reads them, for a call on a file (S1, S2): a copy of the string's bytes
 // ended by a NUL byte, which `FreePath` gives back, or null where the string holds a NUL byte, which
 // no path of the system holds and which is `InvalidInput` to the caller, as Rust's `run_path_with_cstr`

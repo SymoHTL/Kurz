@@ -774,7 +774,7 @@ pub void StringFree(byte* bytes) {
 
 // The keys of the hash of the thread's next map: random bytes of the system at its first map, the
 // first key raised by one for each map after it, as Rust's `RandomState::new` takes and raises them;
-// where the system gives none, the keys stay 0.
+// where the system gives none, `MapKeys` says so and the program ends (M9).
 thread static mut ulong mapKey0 = 0
 thread static mut ulong mapKey1 = 0
 thread static mut bool mapKeyed = false
@@ -889,20 +889,34 @@ byte* MapBlock(long room, long entry, ulong key0, ulong key1, mut long asked) {
     return p
 }
 
-// The first block of a map, of 8 slots of `entry` bytes, with the thread's next keys; null with
-// `asked` set to the bytes asked for where the system refuses.
-pub byte* MapNew(long entry, mut long asked) {
+// The keys of the thread's maps, taken from the system's randomness at its first map: true where the
+// thread has them, and false where the system gave none, the keys then not taken, which the emitted
+// code ends the program for with `random-failed` before it makes the map (M9; the owner, 2026-10-30,
+// "End with an error, as Rust").
+pub bool MapKeys() {
+    mut bool keyed = true
     mut ulong key0 = 0
     mut ulong key1 = 0
     raw {
         if !mapKeyed {
-            sys.Random(Ptr<byte>(&key0), 8)
-            sys.Random(Ptr<byte>(&key1), 8)
-            mapKey0 = key0
-            mapKey1 = key1
-            mapKeyed = true
+            keyed = sys.Random(Ptr<byte>(&key0), 8) && sys.Random(Ptr<byte>(&key1), 8)
+            if keyed {
+                mapKey0 = key0
+                mapKey1 = key1
+                mapKeyed = true
+            }
         }
+    }
 
+    return keyed
+}
+
+// The first block of a map, of 8 slots of `entry` bytes, with the thread's next keys, which `MapKeys`
+// took; null with `asked` set to the bytes asked for where the system refuses.
+pub byte* MapNew(long entry, mut long asked) {
+    mut ulong key0 = 0
+    mut ulong key1 = 0
+    raw {
         key0 = mapKey0
         key1 = mapKey1
         mapKey0 = mapKey0 +% 1

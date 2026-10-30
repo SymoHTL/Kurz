@@ -323,6 +323,13 @@ public sealed partial class Emitter
         var failed = fn.Label("failed");
         fn.CondBranch(fn.Value($"icmp eq ptr {block}, null"), first, held);
         fn.Block(first);
+        var keyed = fn.Label("keyed");
+        var random = fn.Label("random");
+        fn.CondBranch(fn.Value($"call i1 {StdFunction("MapKeys")}()"), keyed, random); // false where the system gave no randomness (M9)
+        fn.Block(random);
+        fn.Emit($"call void {RuntimeFunction("RandomFailed")}()");
+        fn.Unreachable();
+        fn.Block(keyed);
         var made = fn.Value($"call ptr {StdFunction("MapNew")}(i64 {size}, ptr {asked})");
         var keepMade = fn.Label("made");
         fn.CondBranch(fn.Value($"icmp eq ptr {made}, null"), failed, keepMade);

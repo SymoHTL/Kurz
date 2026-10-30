@@ -103,9 +103,13 @@ pub void Release(byte* p, long bytes) {
 }
 
 // `count` bytes of the system's randomness at `bytes`, from `getrandom`, as Rust's standard library
-// takes the keys of a map's hash on Linux; a call a signal interrupted (`EINTR` is 4) is made again,
-// and where the system gives no bytes, those left stay as they are.
-pub void Random(byte* bytes, long count) {
+// takes the keys of a map's hash on Linux: true where they were filled, and false where a call gave no
+// bytes or failed, the bytes left as they are, which the caller ends the program for (M9). A call a
+// signal interrupted (`EINTR` is 4) is made again. Rust's release 1.82 makes it again too, reads
+// `/dev/urandom` where `getrandom` fails with `ENOSYS`, `EPERM` or `EAGAIN`, and panics with "failed to
+// retrieve random hash map seed" where it fails otherwise or that read fails; this runtime reads no
+// `/dev/urandom`.
+pub bool Random(byte* bytes, long count) {
     mut long at = 0
     raw {
         while at < count {
@@ -113,10 +117,12 @@ pub void Random(byte* bytes, long count) {
             if got > 0 {
                 at = at + got
             } else if got == 0 || *__errno_location() != 4 {
-                at = count
+                return false
             }
         }
     }
+
+    return true
 }
 
 // Memory `Memory` gave, `bytes` bytes of it from its start, grown to `grown` bytes with what it holds

@@ -337,9 +337,10 @@ with its bytes copied and the old one freed. A target's directory gives
 `Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
 `Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap`, `Resize` calling `mremap`,
 which moves the pages to other addresses where the ones after them are taken and copies none, and `Random` calling
-`getrandom`, again where a signal interrupted it, on Windows over `kernel32`, `Release` calling `VirtualFree` and `Resize`
+`getrandom`, again where a signal interrupted it, and false where a call gives no bytes or fails otherwise, on Windows
+over `kernel32`, `Release` calling `VirtualFree` and `Resize`
 giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` over `bcrypt`, calling `BCryptGenRandom` with
-the system's preferred generator. The
+the system's preferred generator, and false where it fails. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -419,9 +420,12 @@ to `Print`, which raises `print-failed` there where the system refuses the write
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
-size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). Both
-end with the exit code 1. `EmitterTests` pins both, the first in a test and in a release
-build, the second with a runtime whose `Memory` refuses every request.
+size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). A
+thread's first map on a system that gives no randomness for the keys of its hash ends the process with
+`error: random-failed` and no place (M9; the owner, 2026-10-30, "End with an error, as Rust"). Each
+ends with the exit code 1. `EmitterTests` pins the first two, the first in a test and in a release
+build, the second with a runtime whose `Memory` refuses every request, and `ListTests` the third,
+with a runtime whose `Random` reports a failure.
 
 ## What the emitter emits
 
@@ -578,9 +582,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   list's `Add` and `Clear` do. The keys of the hash come from the system's `Random` for each thread, at its
   first map, and each new map takes the first key plus one, as Rust's `RandomState` takes them, so
   that the order of a map's entries differs between runs (M10) and a block takes its keys with it;
-  where the system gives no bytes, a sandbox that refuses `getrandom` among such cases, the keys stay
-  0, the keys of a fixed hash, where Rust's standard library reads `/dev/urandom` and ends the
-  process when that fails too (this directory's reading). A
+  where the system gives no bytes, a sandbox that refuses `getrandom` among such cases, the first
+  write into the thread's first map ends the program with `random-failed` before it takes a block
+  (M9; the owner, 2026-10-30, "End with an error, as Rust"), as Rust's standard library ends the
+  process where it can read no seed; on Linux Rust reads `/dev/urandom` where `getrandom` fails with
+  `ENOSYS`, `EPERM` or `EAGAIN`, and this runtime reads no such file. `ListTests` holds the end with the host's
+  `Random` edited to report a failure; on Windows the call of `BCryptGenRandom` and its check of the
+  status are held only by reading, and so is the check of `getrandom`'s result on Linux, since no
+  test makes the system refuse. A
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
@@ -723,7 +732,9 @@ lists, each read beside the change it can meet (section 4, the owner, 2026-10-30
 since a kept block stays readable, so that a write into one freed under it ends the process; maps made and dropped through every way out of a block, removed, cleared,
 walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
 of three inputs against vectors from outside this repository; two runs of one program that print a
-map of 20 entries in two orders; the bytes of a map's first block the system refuses;
+map of 20 entries in two orders; the bytes of a map's first block the system refuses; `random-failed`
+at a map's first write where the target's `Random` reports a failure, and a program without a map that
+runs there;
 the target's own `Release`, after
 which a write into a freed block of 32 mebibytes, more than a thread keeps, ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
@@ -777,7 +788,7 @@ ends the program as the system ends it and not with its error line (section 6), 
 `outcomes/stack-overflow.kz` is built and not run, the one case the runner lists so.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
-(section 6), but `allocation-failed`, which writes no place and no trace (O11): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
+(section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
 `_Unwind_Backtrace` of `libgcc_s`, the shared library a program links for it, reads the executable's
 own file, `/proc/self/exe`, through three pages it maps from the system, and takes a frame's name from
 `.symtab`, its line from `.debug_line` and, in a release build built with `--lines`, the calls

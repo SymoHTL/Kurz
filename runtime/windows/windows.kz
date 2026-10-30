@@ -54,12 +54,18 @@ extern "C" in "bcrypt" {
 
 // `count` bytes of the system's randomness at `bytes`, from `BCryptGenRandom` with the system's
 // preferred generator (`BCRYPT_USE_SYSTEM_PREFERRED_RNG` is 2), as Rust's standard library took the
-// keys of a map's hash on Windows from its release 1.53 to 1.77; where the system gives none, the bytes
-// stay as they are. A count above what a `uint` holds is no count a map asks for.
-pub void Random(byte* bytes, long count) {
+// keys of a map's hash on Windows from its release 1.53 to 1.77: true where the call succeeded (an
+// `NTSTATUS` of 0 or above), and false where it failed, the bytes left as they are, which the caller
+// ends the program for (M9). Rust's release 1.77 then called `RtlGenRandom` and panicked with
+// "fallback RNG broken" where that failed too; its release 1.82 calls `ProcessPrng`, documented as
+// always succeeding. A count above what a `uint` holds is no count a map asks for.
+pub bool Random(byte* bytes, long count) {
+    mut int status = 0
     raw {
-        BCryptGenRandom(null, bytes, uint(count), 2)
+        status = BCryptGenRandom(null, bytes, uint(count), 2)
     }
+
+    return status >= 0
 }
 
 // The end of the process with the exit code, at once (design record, section 6). The code is 0 or

@@ -4,10 +4,10 @@ The errors the corpus cases expect. An id is what a corpus header names: `// exp
 <line>` for a compile error, `// expect: throws <id> at <line>` for an exception the program
 raises when it runs (E3). The two tables share one namespace of ids. An id that no case can expect stands in its rule and not
 here: `invalid-source` (L1), since the tools read every case as UTF-8, and `files-not-allowed` and
-`network-not-allowed` (S12), since a case is a program and no package; the two exceptions are
-`print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21), and `allocation-failed`
-(O11), which has its row by the owner's choice (§6, 2026-10-23), and each says in it why no case
-expects it.
+`network-not-allowed` (S12), since a case is a program and no package; the three exceptions are
+`print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21), `allocation-failed`
+(O11), which has its row by the owner's choice (§6, 2026-10-23), and `random-failed` (M9), which has
+its row by the owner's choice (§4, 2026-10-30), and each says in it why no case expects it.
 
 ## Compile errors
 
@@ -79,12 +79,12 @@ expects it.
 
 The exceptions a program can raise, as the header of a case names them. The line is the one that
 holds the construct that raised: the `throw`, the arithmetic, the index, the call of the type, or
-the range of the loop. Every id of the table but `stack-overflow`, `print-failed` and
-`allocation-failed` is raised by the program's code, a check or a `throw`, with its file and its line
+the range of the loop. Every id of the table but `stack-overflow`, `print-failed`,
+`allocation-failed` and `random-failed` is raised by the program's code, a check or a `throw`, with its file and its line
 as constants (§6, an assumption there as to that list and the file), or in a test build by a check of
 the runtime's own code (below); `print-failed` is raised by the runtime with the file and the line its
-`print` passed as constants (A1; §6, the owner, 2026-10-23), and `allocation-failed` names no place
-(O11). A stack overflow, which is, but for a check of the runtime's own code in a test build (below),
+`print` passed as constants (A1; §6, the owner, 2026-10-23), and `allocation-failed` and
+`random-failed` name no place (O11, M9). A stack overflow, which is, but for a check of the runtime's own code in a test build (below),
 the one exception a primitive of the runtime raises with a line it reads from the tables, at the call
 that did not fit or at a primitive's entry check, names no line in a release build built without its line
 tables (O11; §6 for the primitive's raise, an assumption there), and in either build where the stack
@@ -124,7 +124,8 @@ the first raising actor's text where one crash leads to another, and a raise whi
 chosen, its error line naming the file and the line that a throw or a check of the program's code
 carries, with nothing below it, and being the fixed line above for a raise that carries none (§6,
 assumptions there); the error line of `allocation-failed` names the size asked for and no place (O11;
-§6, the owner, 2026-10-23); the error line of every other id ends with its line, or with the note in its place (§6, decided there).
+§6, the owner, 2026-10-23); the error line of `random-failed` is `error: random-failed`, with no place
+(M9; §4, assumed); the error line of every other id ends with its line, or with the note in its place (§6, decided there).
 
 | id | rules | meaning |
 |---|---|---|
@@ -136,6 +137,7 @@ assumptions there); the error line of `allocation-failed` names the size asked f
 | `stack-overflow` | O11 | the stack of the actor is exhausted, on Linux and on Windows (on WebAssembly the program ends, §2, and on the ESP32 models and AVR §6 says what an overflow does); the line is the line of the call that did not fit, read from the line tables (§6, decided there as to the tables), the innermost frame outside the runtime where that one was the runtime's (§6, the owner, 2026-10-21), a line of the standard library's source where that frame's function was the library's, which the error line's file and the trace's first line name; every case that pins it pins a call of the program's own, with a recursion that reaches neither the standard library nor the runtime, kept as calls by the test build (the call confirmed by the owner on 2026-10-10, as O11 cites it; the library's source and the condition on the cases §6, an assumption there), and a release build built without its line tables names none (§2, the answer decided there, its reading an assumption) |
 | `print-failed` | A1 | a `print` whose write call returned an error, a closed pipe, whose signal the runtime sets to ignored at its start (§6, an assumption there), a closed handle or a full disk, at the file and the line of the `print`, which the `print` passes, in every build (§6, decided there as to the id and the row, the owner, 2026-10-21, and as to the line, the owner, 2026-10-23) (no case: a case has no form that makes a write of standard output fail) |
 | `allocation-failed` | O11, T15, M9, R15, S3, S6 | an allocation the system refused, or an operation that would make a string of more bytes, or a list of more items, than the largest `int`, `string.Allocate`, `List<T>.Allocate`, a read of a file or a socket and a read of a whole file among them (S3, S6) (§4, the owner, 2026-10-23 and 2026-10-24; §3, assumed for `string.Allocate` and `List<T>.Allocate`); the error line is `error: allocation-failed (<n> bytes)`, with the size asked for, for a list past the limit the bytes of its items, the count of its items after the operation times the item's size as M9 counts it, padding included, and for a growth the system refuses the bytes the allocator was asked for, the whole request with the list's own counts, before the allocator rounds it up (§4, the owner, 2026-10-24), and for a string's block the system refuses the bytes the allocator was asked for, the 16 of the string's counts among them (§4, assumed), and no place and no trace (§6, the owner, 2026-10-23) (no case: a case cannot make memory run out, and a string over the limit takes 2 GiB) |
+| `random-failed` | M9 | the system gave no randomness for the keys of a map's hash at a thread's first map, a sandbox that refuses `getrandom` or a `BCryptGenRandom` that fails among such cases, which ends the program there, as Rust's standard library ends the process where it can read no seed for a `HashMap` (§4, the owner, 2026-10-30, "End with an error, as Rust"); the id is the name the owner's question gave as an example, and the error line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (§4, assumed) (no case: a case cannot make the system refuse its randomness; `ListTests` runs a map on a runtime whose `Random` reports a failure) |
 
 ## The rules of this chapter
 

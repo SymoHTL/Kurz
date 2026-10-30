@@ -2077,6 +2077,24 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_first_map_on_a_system_that_gives_no_randomness_ends_the_program_with_random_failed()
+    {
+        // M9 (the owner, 2026-10-30, "End with an error, as Rust"): the target's `Random` reports that it filled no bytes, as a
+        // sandbox that refuses `getrandom` or a failing `BCryptGenRandom` would, and the first map ends the program before its block
+        var refused = Edited((TargetFile, "pub bool Random(byte* bytes, long count) {", """
+            pub bool Random(byte* bytes, long count) {
+                return false
+            }
+
+            bool Given(byte* bytes, long count) {
+            """));
+        const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
+        Ran(BuildAndRun(text, refused, "map-no-random"), 1, [], "error: random-failed\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "map-random"), 0, ["1"], ""); // the positive control
+        Ran(BuildAndRun("print(1)\n", refused, "no-map-no-random"), 0, ["1"], ""); // a program without a map asks for no randomness
+    }
+
+    [Fact]
     public void A_map_finds_each_key_it_holds_and_no_other_through_its_growth()
     {
         // 20000 entries grow the block from 8 slots to 32768, through groups of 8 control bytes and probes past full groups; half the
