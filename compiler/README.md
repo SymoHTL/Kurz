@@ -319,12 +319,17 @@ returns null and leaves the end of the process to a caller, which its documentat
 call `handle_alloc_error`. The entry gives a block of one of fifteen size classes, the powers of two
 from 16 to 262144 bytes: the block of its class freed last, else one carved from the thread's
 memory, which it takes from the system's `Memory` a mebibyte at a time; an allocation of more than
-262144 bytes takes memory of its own from `Memory`. It gives null where the system refuses. `std/`'s
+262144 bytes takes the smallest such block the thread keeps that holds it, given out whole, as glibc's
+`malloc` takes the smallest free chunk that holds a large request, else memory of its own from `Memory`,
+each with a header of 16 bytes in front that names the bytes the system gave it (record, section 2:
+the owner, 2026-10-30, "Keep them, as glibc"). It gives null where the system refuses. `std/`'s
 `Free` takes a block back with the size it was asked for, as Rust's `GlobalAlloc::dealloc` takes
 the layout a block was allocated with: a block of a size class to the front of its class's free
-blocks, where the next request of the class takes it, and a larger one to the system through the
-target's `Release`; the mebibytes a thread carved from stay its own. `Reallocate` grows a block with
-its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes through the target's
+blocks, where a request of the class takes it first, and a larger one to the front of the blocks the
+thread keeps where they take no more than 32 mebibytes with it, else to the system through the
+target's `Release`; the mebibytes a thread carved from and the blocks it keeps stay its own. `Reallocate` grows a block with
+its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes stays where it is where its
+header names room enough, as a kept block given out whole can, else grows through the target's
 `Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
 with its bytes copied and the old one freed. A target's directory gives
 `Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Trace` and `Crashing`: on Linux over the C library,
@@ -626,11 +631,16 @@ refuses every request for memory after sixteen, within which a program that make
 through every way out of a block, the body of a `void` function and a lambda's environment among
 them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
 inaccessible, under which the values' programs and twenty rounds of the same program print the
-same lines, and so do the strings' program and twenty rounds of strings through every way out of a block;
+same lines, and so do the strings' program and twenty rounds of strings through every way out of a block,
+and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
+since a kept block stays readable, so that a write into one freed under it ends the process;
 the target's own `Release`, after
-which a write into a freed block of more than 262144 bytes ends the process, and under which lists
+which a write into a freed block of 32 mebibytes, more than a thread keeps, ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
-the same lists all kept do not, and so for strings of 524288 bytes; two lists of blocks of 16
+the same lists all kept do not, and so for strings of 524288 bytes; the same lists of 70000 items within
+the sixteen pieces, each round after the first taking the block the thread kept, and the same lists all
+kept not; five freed blocks of 8 mebibytes, of which the thread keeps the four within 32 mebibytes, a
+write into the fourth after its `Free` ending nothing and one into the fifth ending the process; two lists of blocks of 16
 and 32 mebibytes, the second grown from 16, within the same 64 on Linux, where it grows in place, and
 not on Windows, where its old and new block are held at once, and the first one item longer not on
 either; strings of 1024 bytes made and dropped

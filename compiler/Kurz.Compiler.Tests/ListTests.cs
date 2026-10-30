@@ -658,17 +658,20 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// The edits that make the allocator take every block from pages of its own and make them unreachable when the block is freed, so
-    /// that a read or a write of a freed block ends the process with the system's signal; nothing is used again.
+    /// that a read or a write of a freed block ends the process with the system's signal; nothing is used again. The thread keeps no
+    /// freed block: a kept block stays readable so that a request can take it, so the fence gives every block back to the system.
     /// </summary>
     private static (string Path, string Old, string New)[] Fence => Builder.HostTarget == Target.Windows
         ?
         [
             ("std/std.kz", "if size > 262144 {", "if size >= 0 {"),
+            ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0"),
             (TargetFile, "VirtualFree(Ptr<void>(p), 0, 32768)", "VirtualFree(Ptr<void>(p), ulong(bytes), 16384)"), // MEM_DECOMMIT: the pages stay reserved
         ]
         :
         [
             ("std/std.kz", "if size > 262144 {", "if size >= 0 {"),
+            ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0"),
             (TargetFile, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p), bytes, 0)"), // PROT_NONE: the pages stay mapped
         ];
 
@@ -695,10 +698,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
+        // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
+        // over 100000 items in five rounds
+        const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
+        Ran(BuildAndRun(where, fenced, "list-where-fenced"), 0, ["166670"], "");
 
-        // the positive control: a write into a freed block under the same allocator ends the process
-        var writer = Edited([.. Fence, ("runtime/common/runtime.kz", "pub void Start() {\n    sys.Start()\n", "pub void Start() {\n    sys.Start()\n    byte* p = Allocate(16)\n    raw {\n        std.Free(p, 16)\n        p[0] = 1\n    }\n")]);
-        Crashed(BuildAndRun("print(1)\n", writer, "list-fence-control"));
+        // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
+        // block of more than 262144 bytes, which the thread keeps outside the fence
+        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string write = "    byte* p = Allocate(16)\n    raw {\n        std.Free(p, 16)\n        p[0] = 1\n    }\n";
+        Crashed(BuildAndRun("print(1)\n", Edited([.. Fence, ("runtime/common/runtime.kz", start, start + write)]), "list-fence-control"));
+        const string large = "    byte* p = Allocate(300000)\n    raw {\n        std.Free(p, 300000)\n        p[0] = 1\n    }\n";
+        Crashed(BuildAndRun("print(1)\n", Edited([.. Fence, ("runtime/common/runtime.kz", start, start + large)]), "list-fence-control-large"));
     }
 
     [Fact]
@@ -720,26 +731,30 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.StartsWith("error: allocation-failed (", kept.Error, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void A_block_of_more_than_262144_bytes_goes_back_to_the_system()
-    {
-        // the target's own `Release`: a write into such a block after its `Free` ends the process with the system's signal
-        const string start = "pub void Start() {\n    sys.Start()\n";
-        const string write = "    byte* p = Allocate(300000)\n    raw {\n        p[0] = 1\n        std.Free(p, 300000)\n        p[0] = 2\n    }\n";
-        Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + write)), "list-large-freed"));
-        var kept = Edited(("runtime/common/runtime.kz", start, start + write.Replace("        std.Free(p, 300000)\n", "", StringComparison.Ordinal)));
-        Ran(BuildAndRun("print(1)\n", kept, "list-large-kept"), 0, ["1"], ""); // the positive control: the block not freed
+    // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
+    // all held
+    private const string LargeRounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";
+    private const string LargeHeld = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 70000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
 
-        // the lists of 70000 items grow through blocks of 262160 and 524304 bytes, 150 mebibytes in 200 rounds were none of them given back
-        const string rounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";
-        Ran(BuildAndRun(rounds, Bytes(), "list-large-rounds"), 0, ["14000000"], "");
-        const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 70000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
-        var run = BuildAndRun(held, Bytes(), "list-large-held"); // the positive control: the same lists, all of them held
+    [Fact]
+    public void A_block_of_more_than_262144_bytes_that_the_thread_does_not_keep_goes_back_to_the_system()
+    {
+        // the target's own `Release`: a write into a block of 33554432 bytes, more than the thread keeps with its header, after its
+        // `Free` ends the process with the system's signal
+        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string write = "    byte* p = Allocate(33554432)\n    raw {\n        p[0] = 1\n        std.Free(p, 33554432)\n        p[0] = 2\n    }\n";
+        Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + write)), "list-large-freed"));
+        const string notFreed = "    byte* p = Allocate(33554432)\n    raw {\n        p[0] = 1\n        p[0] = 2\n    }\n";
+        Ran(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + notFreed)), "list-large-not-freed"), 0, ["1"], ""); // the positive control: the block not freed
+
+        // the lists of 70000 items: 150 mebibytes in 200 rounds were none of their blocks given back or given out again
+        Ran(BuildAndRun(LargeRounds, Bytes(), "list-large-rounds"), 0, ["14000000"], "");
+        var run = BuildAndRun(LargeHeld, Bytes(), "list-large-held"); // the positive control: the same lists, all of them held
         Assert.Equal(1, run.Code);
         Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
 
         // strings of 524288 bytes joined from halves of 262144, blocks of 524304 and 262160 bytes with their counts: 150 mebibytes in
-        // 200 rounds were none of them given back
+        // 200 rounds were none of them given back or given out again
         const string fill = "string Fill(int n) {\n    mut s = \"x\"\n    mut i = 0\n    while i < n {\n        s = \"{s}{s}\"\n        i = i + 1\n    }\n    return s\n}\n\n";
         Ran(BuildAndRun(fill + "mut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + long(Fill(19).Bytes.Count)\n}\nprint(total)\n", Bytes(), "string-large-rounds"), 0, ["104857600"], "");
         var strings = BuildAndRun(fill + "mut all = List<string>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    all.Add(Fill(19))\n}\nprint(all.Count)\n", Bytes(), "string-large-held");
@@ -748,12 +763,36 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_freed_block_of_more_than_262144_bytes_is_given_out_again()
+    {
+        // the lists of 70000 items within the system's 16 pieces of memory: the first round asks the system for a block of 262176
+        // bytes with its header, which grows to 524320, and each round after it takes that block back from the thread; blocks given
+        // back at their `Free` would ask the system for one in each of the 200 rounds
+        Ran(BuildAndRun(LargeRounds, Budget(), "list-large-reused"), 0, ["14000000"], "");
+        var run = BuildAndRun(LargeHeld, Budget(), "list-large-reused-held"); // the positive control: the same lists, all of them held
+        Assert.Equal(1, run.Code);
+        Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_thread_keeps_the_freed_blocks_of_more_than_262144_bytes_that_fit_within_33554432_bytes()
+    {
+        // five blocks of 8388544 bytes, 8388560 with their headers, freed in turn: the first four take 33554240 bytes and stay the
+        // thread's, so a write into the fourth after its `Free` ends nothing; the fifth would take the kept bytes past 33554432 and goes
+        // back to the system, where a write into it ends the process with the system's signal
+        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string blocks = "    byte* a = Allocate(8388544)\n    byte* b = Allocate(8388544)\n    byte* c = Allocate(8388544)\n    byte* d = Allocate(8388544)\n    byte* e = Allocate(8388544)\n    raw {\n        std.Free(a, 8388544)\n        std.Free(b, 8388544)\n        std.Free(c, 8388544)\n        std.Free(d, 8388544)\n        std.Free(e, 8388544)\n";
+        Ran(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + blocks + "        d[0] = 1\n    }\n")), "list-kept-within"), 0, ["1"], "");
+        Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + blocks + "        e[0] = 1\n    }\n")), "list-kept-past"));
+    }
+
+    [Fact]
     public void A_block_of_more_than_262144_bytes_grows_by_the_targets_Resize()
     {
         // two lists of `long`s within 64 mebibytes, the first of 2^21 items in a block of 16 mebibytes; the second grows from 16
         // mebibytes to 32. Grown in place, as Linux's `mremap` grows it, the two take 48 mebibytes; copied into a new block, as on
-        // Windows, the old and the new block of the second are held at once beside the first, 64 mebibytes and 48 bytes before the
-        // pieces the small blocks are carved from
+        // Windows, the old and the new block of the second are held together beside the first, 64 mebibytes and 96 bytes with their
+        // headers before the pieces the small blocks are carved from and the blocks the thread keeps
         const string fill = "mut a = List<long>()\nfor i in 0..<2097152 {\n    a.Add(long(i))\n}\nmut b = List<long>()\nfor i in 0..<2097153 {\n    b.Add(long(i))\n}\nmut long total = 0\nfor i in 0..<b.Count {\n    total = total + b[i]\n}\nprint(a.Count)\nprint(b.Count)\nprint(total)\n";
         var run = BuildAndRun(fill, Bytes(), "list-grown-in-place");
         if (Builder.HostTarget == Target.Windows)
