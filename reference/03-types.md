@@ -13,6 +13,14 @@ x = "one"
 print(x)
 ```
 
+Case: [values/list-literal-item-mismatch.kz](../corpus/values/list-literal-item-mismatch.kz)
+```kurz
+List<int> xs = [
+    1, "a",
+]
+print(xs.Count)
+```
+
 ### T2 (decided, §4) Number types
 
 The integer types are `sbyte`, `byte`, `short`, `ushort`, `int` (32 bits), `uint`, `long` (64 bits)
@@ -1097,6 +1105,17 @@ T Pick<T>(T a, T b) => a
 byte small = 1
 int i = 2
 print(Pick(small, i))
+```
+
+Case: [values/list-literal-cannot-infer.kz](../corpus/values/list-literal-cannot-infer.kz)
+```kurz
+x = []
+print(x.Count)
+```
+Case: [values/list-literal-mixed-items.kz](../corpus/values/list-literal-mixed-items.kz)
+```kurz
+x = [1, "a"]
+print(x.Count)
 ```
 
 ### T18 (assumed, §4) Operators

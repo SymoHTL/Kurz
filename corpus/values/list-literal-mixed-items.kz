@@ -1,0 +1,5 @@
+// expect: error cannot-infer at 4
+// rules: M11, T27
+
+x = [1, "a"]
+print(x.Count)

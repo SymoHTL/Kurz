@@ -726,6 +726,13 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     Expression(el.Call);
                     Arms(el.Arms);
                     break;
+                case ListLiteral list:
+                    foreach (var item in list.Items)
+                    {
+                        Expression(item);
+                    }
+
+                    break;
                 case ParenthesizedExpression p:
                     Expression(p.Inner);
                     break;

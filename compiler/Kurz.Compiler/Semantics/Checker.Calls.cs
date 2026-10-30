@@ -28,6 +28,9 @@ public sealed partial class Checker
 
         /// <summary>The argument has no type of its own and is typed by the parameter it lands on: <c>null</c>, which a pointer takes (R10), or the name of a function of Kurz, which a C function type refuses (R17).</summary>
         public bool BySlot { get; init; }
+
+        /// <summary>A list literal (M11): its own type, from its items, where the others fix nothing; read again under the parameter's type, as a literal is (L17).</summary>
+        public bool ListLiteral { get; init; }
     }
 
     private sealed class Candidate
@@ -51,6 +54,9 @@ public sealed partial class Checker
         public string BindingErrorId { get; set; } = ErrorIds.ArgumentMismatch;
 
         public bool CannotInfer { get; set; }
+
+        /// <summary>The message of <c>cannot-infer</c> where this candidate is the call's one: a call's, or a list literal's (M11).</summary>
+        public string CannotInferText { get; init; } = "the type arguments are neither written nor inferable from the arguments (T27)";
 
         /// <summary>The first argument whose own type does not fit its parameter, with the parameter's type after substitution.</summary>
         public (int Argument, KurzType Parameter)? Misfit { get; set; }
@@ -659,6 +665,40 @@ public sealed partial class Checker
         model.RecordCall(c, new CallInfo(CallKind.ListNew, null, null, null, NoMap, [], 0, list));
         return new Typed(list);
     }
+
+    /// <summary>
+    /// M11: <c>[a, b, c]</c> is read as a call of one function <c>List&lt;T&gt; Of&lt;T&gt;(T a, T b, T c)</c>, so that its items are
+    /// typed as a call's arguments are: where a list type stands, written or required, <c>T</c> is its item type and each item is
+    /// read under it, a literal taking it (L17) and a lambda its parameters (F11); where none stands, the items infer <c>T</c> as T27
+    /// infers a type parameter, as Rust's <c>vec![1, 2]</c> is a <c>Vec&lt;i32&gt;</c>, and <c>[]</c> infers nothing (section 4, the
+    /// owner, 2026-10-30, "[1, 2, 3], as C#" and "From its items").
+    /// </summary>
+    private Typed CheckListLiteral(ListLiteral l, KurzType? expected)
+    {
+        var parameter = new TypeParameterSymbol("T", l.Line);
+        var item = new TypeParameterType(parameter);
+        var target = ListTarget(expected);
+        var candidate = new Candidate
+        {
+            Slots = l.Items.Select((_, i) => new Slot($"item {i + 1}", item, Mut: false, HasDefault: false, GenericPosition: true)).ToList(),
+            TypeParameters = [parameter],
+            Map = target is null ? [] : new() { [parameter] = target.Element },
+            Result = new ListType(item),
+            CannotInferText = l.Items.Count == 0
+                ? "`[]` has no item type, and no list type stands where it does: `List<int> xs = []` (M11, T27)"
+                : "the items have no one type, and no list type stands where the list does (M11, T27)",
+        };
+        var call = new CallExpression(l.Line, l, [], l.Items.Select(e => new Argument(e.Line, null, false, e)).ToList());
+        return Call([candidate], call, null);
+    }
+
+    /// <summary>The list type a list literal takes where <paramref name="expected"/> stands: the type itself, or the one list case of a union, a nullable list's among them, as a number literal takes the one number case (L17, D9).</summary>
+    private static ListType? ListTarget(KurzType? expected) => expected switch
+    {
+        ListType list => list,
+        UnionType u => u.Cases.OfType<ListType>().ToList() is [var one] ? one : null,
+        _ => null,
+    };
 
     /// <summary>M9: <c>Map&lt;K, V&gt;()</c>, a map without entries.</summary>
     private Typed CheckMapConstruction(CallExpression c)
@@ -1333,6 +1373,15 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (!a.Mut && Unwrap(a.Value) is ListLiteral)
+            {
+                // M11: typed by its items for the pick, with what that reports kept back, since the parameter's type reaches it
+                Push();
+                var own = CheckExpression(a.Value, null);
+                pres.Add(new Pre { Argument = a, Typed = own, Diagnostics = Pop(commit: false), ListLiteral = true });
+                continue;
+            }
+
             MutArgumentRead(a); // N7
             Push();
             var typed = CheckExpression(a.Value, null);
@@ -1513,7 +1562,7 @@ public sealed partial class Checker
         for (var i = 0; i < pres.Count; i++)
         {
             var pre = pres[i];
-            if (pre.Lambda is not null || pre.LiteralOnly)
+            if (pre.Lambda is not null || pre.LiteralOnly || pre.ListLiteral)
             {
                 continue;
             }
@@ -1556,6 +1605,47 @@ public sealed partial class Checker
             map[p] = common;
         }
 
+        // M11: a list literal takes the type the other arguments fix, and fixes what they leave open by the type its items give it,
+        // the list literals of one position by one type, as the arguments of a position (T27)
+        var listed = new Dictionary<TypeParameterSymbol, List<KurzType>>();
+        var untypedLists = new HashSet<TypeParameterSymbol>();
+        for (var i = 0; i < pres.Count; i++)
+        {
+            var slot = candidate.Slots[candidate.Binding[i]].Type;
+            if (pres[i].ListLiteral && pres[i].Typed.IsError)
+            {
+                untypedLists.UnionWith(candidate.TypeParameters.Where(p => Types.Mentions(slot, p))); // its own error stands, `[]`'s (E1)
+                continue;
+            }
+
+            var found = new Dictionary<TypeParameterSymbol, KurzType>();
+            if (!pres[i].ListLiteral || !Unify(slot, pres[i].Typed.Type, found))
+            {
+                continue; // a literal that does not fit its parameter is the fit's misfit
+            }
+
+            foreach (var (p, type) in found.Where(f => candidate.TypeParameters.Contains(f.Key) && !map.ContainsKey(f.Key)))
+            {
+                if (!listed.TryGetValue(p, out var types))
+                {
+                    listed[p] = types = [];
+                }
+
+                types.Add(type);
+            }
+        }
+
+        foreach (var (p, types) in listed)
+        {
+            if (!types.All(t => Types.Same(t, types[0])))
+            {
+                candidate.CannotInfer = true;
+                return;
+            }
+
+            map[p] = types[0];
+        }
+
         foreach (var p in candidate.TypeParameters)
         {
             if (map.ContainsKey(p))
@@ -1587,7 +1677,7 @@ public sealed partial class Checker
                 }
             }
 
-            if (fixedType is null && untypable)
+            if (fixedType is null && (untypable || untypedLists.Contains(p)))
             {
                 map[p] = Types.Error;
                 continue;
@@ -1689,6 +1779,26 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (pre.ListLiteral)
+            {
+                // M11: the literal takes the parameter's type, as a literal does (L17): where the function is the call's one, what does
+                // not fit is the literal's own error, reported by Commit at its item; among several, a literal whose items do not fit
+                // the parameter's type is a misfit, so that the function whose parameter they fit is picked (F13)
+                if (!only)
+                {
+                    Push();
+                    var under = CheckExpression(pre.Argument.Value, type);
+                    var errors = Pop(commit: false);
+                    if (errors.Count > 0 || under.IsError || !Types.Assignable(under.Type, type))
+                    {
+                        candidate.Misfit ??= (i, type);
+                    }
+                }
+
+                exact &= !pre.Typed.IsError && Types.Same(pre.Typed.Type, type);
+                continue;
+            }
+
             if (pre.Typed.IsError)
             {
                 continue;
@@ -1747,7 +1857,7 @@ public sealed partial class Checker
 
         if (bound.CannotInfer)
         {
-            Report(ErrorIds.CannotInfer, c.Line, "the type arguments are neither written nor inferable from the arguments (T27)");
+            Report(ErrorIds.CannotInfer, c.Line, bound.CannotInferText);
             return;
         }
 
@@ -1860,7 +1970,14 @@ public sealed partial class Checker
                     Report(Types.MismatchId(typed.Type, type), a.Line, $"a `{typed.Type}` where a `{type}` is required (T1)");
                 }
             }
-            else if (pre.LiteralOnly)
+            else if (pre.ListLiteral && pre.Typed.IsError && Types.IsError(type))
+            {
+                foreach (var d in pre.Diagnostics)
+                {
+                    Add(d); // a literal its items do not type, on a parameter that nothing else typed: its own error, `[]`'s (E1)
+                }
+            }
+            else if (pre.LiteralOnly || pre.ListLiteral)
             {
                 var typed = CheckExpression(a.Value, type);
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))

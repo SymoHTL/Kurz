@@ -575,6 +575,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
   program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
   lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
+- list literals (M11): `[1, 2, 3]` and `[]`, read as a call of one function `List<T> Of<T>(T a, T b, T c)`, so
+  that the list type where one stands, a parameter's among them, reaches the items as a parameter's type
+  reaches a call's literals and lambdas, and where none stands the items infer `T` as T27 infers it (section
+  4, the owner, 2026-10-30, "[1, 2, 3], as C#", "From its items"), a comma after the last item accepted
+  ("Accept, as C# 12 and Rust"); the items run in order, each counted and a temporary of the region
+  before the list holds it, and then one block takes all of them, as Rust's `vec!` makes one, a block the
+  system refuses ending the program with `allocation-failed` (M9), and `[]` takes no block;
 - maps (M9): `Map<K, V>()`, which takes no block, `map[key]`, a value of its own of the type `V?`, and of
   the type `V` where `V` is nullable (section 4, the owner, 2026-10-30, "Flatten, as C#"), null for a
   missing key, `map[key] = value`, which runs the value before the key (M4) and over a key
@@ -1098,8 +1105,8 @@ The checker (`Semantics/`) takes a tree the parser read without an error and che
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths none, since they run through a
-class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
-M9 for lists and maps), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
+M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's

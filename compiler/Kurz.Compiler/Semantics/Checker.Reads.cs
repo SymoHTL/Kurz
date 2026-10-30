@@ -67,7 +67,8 @@ public sealed partial class Checker
         // first, then its arguments as written (D11); a string's holes as written, a hole of a `string` holding what it read until
         // the interpolation is made, as Rust's `format!` borrows its arguments (the owner, 2026-10-29, "Refuse, as Rust"), and a
         // hole of any other type made text where it stands; and a `match` or an `else` gives its arms nothing of its subject or its
-        // call but the names they bind, which are variables of their own (M3)
+        // call but the names they bind, which are variables of their own (M3); a list literal holds nothing of an item, which the
+        // list counts as it is made, as `Add` counts its item (M11, M7)
         List<(IReadOnlyList<Held> Held, Expression Part)> ordered = e switch
         {
             CallExpression c => [(Callee(c), c.Callee), .. c.Arguments.Where(a => !a.Mut).Select(a => (HeldBy(a.Value), a.Value))],
@@ -152,6 +153,7 @@ public sealed partial class Checker
         BinaryExpression b => [b.Left, b.Right],
         RangeExpression r => [r.Start, r.End],
         WithExpression w => [w.Target, .. w.Assignments.Select(a => a.Value)],
+        ListLiteral l => l.Items,
         StringLiteral s => s.Segments.OfType<HoleSegment>().Select(h => h.Expression),
         MatchExpression m => [m.Subject, .. ArmValues(m.Arms)],
         ElseExpression x => [x.Call, .. ArmValues(x.Arms)],

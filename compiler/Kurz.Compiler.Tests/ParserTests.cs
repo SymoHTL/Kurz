@@ -639,13 +639,40 @@ public sealed class ParserTests
     }
 
     [Fact]
-    public void A_variable_named_match_before_a_bracket_is_a_name()
+    public void A_match_before_a_bracket_starts_a_match_of_a_list()
     {
-        // L12: `match` starts a match when a token that can start a value follows it; no value of this reference starts with `[`
-        // (M9 builds a list with `List<int>()`), so this is the name, indexed
-        var (tree, diagnostics) = Parse("print(match[0])");
-        Assert.Empty(diagnostics.Items);
-        Assert.Single(tree.Statements);
+        // L12: `match` starts a match when a token that can start a value follows it, and `[` starts a list (M11), so `match[0]` is
+        // a match of the list `[0]`, whose braces are missing here (C1); a name `match` is `reserved-word` where it is declared, so no
+        // program that builds reads otherwise
+        Assert.Equal([(ErrorIds.BracesRequired, 1)], Errors("print(match[0])"));
+    }
+
+    [Theory]
+    [InlineData("xs = [1, 2, 3]", "(assign-or-declare xs (list (int 1) (int 2) (int 3)))")]
+    [InlineData("xs = []", "(assign-or-declare xs (list))")]
+    [InlineData("xs = [[1], []]", "(assign-or-declare xs (list (list (int 1)) (list)))")]
+    [InlineData("xs = [1, 2,]", "(assign-or-declare xs (list (int 1) (int 2)))")]
+    [InlineData("xs = [\n    1,\n    2,\n]", "(assign-or-declare xs (list (int 1) (int 2)))")]
+    [InlineData("x = [1, 2][0]", "(assign-or-declare x (index (list (int 1) (int 2)) (int 0)))")]
+    [InlineData("Run([x => x * 2])", "(call Run (list (lambda (x) (* x (int 2)))))")]
+    [InlineData("xs = ys\n[1]", "(assign-or-declare xs ys) (list (int 1))")]
+    public void A_list_is_written_by_its_items_between_brackets(string program, string expected)
+    {
+        // M11: `[1, 2, 3]` and `[]` (section 4, the owner, 2026-10-30, "[1, 2, 3], as C#"), a comma after the last item accepted
+        // ("Accept, as C# 12 and Rust"), a line break inside the brackets passed (L4), and a `[` that starts a line continuing no
+        // statement (L4), so the last program is two statements and no index
+        Assert.Equal(expected, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("xs = [,]")]
+    [InlineData("xs = [1,,2]")]
+    [InlineData("xs = [1 2]")]
+    [InlineData("xs = [..ys, 3]")]
+    public void A_list_with_an_empty_item_two_items_without_a_comma_or_a_spread_is_syntax(string program)
+    {
+        // M11 with E4: an item stands between two commas, and `..` before an item, C# 12's spread, stands open (section 14)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));
     }
 
     [Fact]

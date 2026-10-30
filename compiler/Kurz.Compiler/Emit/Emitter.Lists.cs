@@ -342,6 +342,32 @@ public sealed partial class Emitter
 
     // ---- the members of a list (M9, T14) -------------------------------------------------------------
 
+    /// <summary>
+    /// M11: <c>[a, b, c]</c>, its items run in order, each counted and a temporary of the region before the list holds it, so that an
+    /// item that leaves the function lets go of the ones before it (O3); then one block with room for all of them, as Rust's
+    /// <c>vec![a, b, c]</c> makes one, and a block the system refuses raises <c>allocation-failed</c> with the bytes asked for (M9).
+    /// <c>[]</c> takes no block, as <c>List&lt;T&gt;()</c> takes none.
+    /// </summary>
+    private string EmitListLiteral(ListLiteral l, ListType list)
+    {
+        if (l.Items.Count == 0)
+        {
+            return "null";
+        }
+
+        var items = l.Items.Select(e => Temp(Convert(Owned(e), TypeOf(e), list.Element, e.Line), list.Element)).ToList();
+        var asked = fn.Alloca("i64", "asked");
+        var room = fn.Value($"call ptr {StdFunction("ListAllocate")}(i64 {items.Count}, i64 {ItemSize(list.Element)}, ptr {asked})");
+        Refused(fn.Value($"icmp eq ptr {room}, null"), asked);
+        for (var i = 0; i < items.Count; i++)
+        {
+            Take(items[i]); // the list holds it from here
+            fn.Emit($"store {Ir(list.Element)} {items[i]}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {room}, i64 {i}")}");
+        }
+
+        return fn.Value($"call ptr {StdFunction("ListTakeOver")}(ptr {room}, i64 {items.Count})");
+    }
+
     /// <summary>The bytes an item of the type takes in a list's block, as LLVM lays out its IR type.</summary>
     private string ItemSize(KurzType type)
     {

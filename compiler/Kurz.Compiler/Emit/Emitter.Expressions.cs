@@ -62,6 +62,8 @@ public sealed partial class Emitter
                 return HeldCopy(i, EmitListIndex(i, list), type);
             case IndexExpression i when TypeOf(i.Target) is MapType map:
                 return EmitMapRead(i, map);
+            case ListLiteral l:
+                return Temp(EmitListLiteral(l, (ListType)type), type);
             case UnaryExpression u:
                 return EmitUnary(u, type);
             case BinaryExpression b:
