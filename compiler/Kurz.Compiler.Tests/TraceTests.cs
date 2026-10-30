@@ -177,7 +177,8 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
         // the reader maps three pages, the third the table that counts the frames past the cut; where the system refuses them, every
         // frame is `<unknown>` and each frame past the hundredth counts one line, with no table: fifty calls of Deep more count fifty
         // lines more, and the frames a walk with no names cannot leave out count too, the raise's two below Deep's and the start's
-        // four above main's, so that the depth 149 has 157 frames and 57 past the hundredth
+        // four above main's, so that the depth 149 has 157 frames and 57 past the hundredth where the C library's start
+        // has those four, which no rule fixes: the count holds at least the calls of Deep and main past the hundredth
         var counts = new List<int>();
         foreach (var depth in new[] { 149, 199 })
         {
@@ -201,7 +202,8 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
             counts.Add(int.Parse(cut.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
         }
 
-        Assert.Equal((57, 107), (counts[0], counts[1]));
+        Assert.True(counts[0] >= 51, $"{counts[0]} frames past the cut");
+        Assert.Equal(50, counts[1] - counts[0]);
     }
 
     [Theory]
