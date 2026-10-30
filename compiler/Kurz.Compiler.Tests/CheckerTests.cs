@@ -2024,6 +2024,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("m = Map<string, int>()\nprint(m[1] ?? 0)")); // a key read
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut m = Map<string, int>()\nm[\"a\"] = null")); // N6
         Assert.Equal([(ErrorIds.NullableUnchecked, 2)], Errors("m = Map<string, int>()\nprint(m[\"a\"] + 1)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 2)], Errors("Map<string, int>? m = null\nprint(m[\"a\"] ?? 0)")); // a nullable map, read
+        Assert.Equal([(ErrorIds.NullableUnchecked, 2)], Errors("mut Map<string, int>? m = null\nm[\"a\"] = 1\nprint(m)")); // and written
+        Clean("mut Map<string, int>? m = Map<string, int>()\nif m != null {\n    m[\"a\"] = 1\n}\nprint(m)"); // N3: known not null
         Assert.Equal([(ErrorIds.CaptureAssign, 2)], Errors("mut m = Map<string, int>()\nf = (int x) => { m[\"a\"] = x }\nf(1)\nprint(m)")); // F11
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("m = Map<string>()\nprint(m)")); // T17
         Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("m = Map()\nprint(m)"));

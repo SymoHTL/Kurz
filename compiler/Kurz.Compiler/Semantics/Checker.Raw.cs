@@ -532,6 +532,18 @@ public sealed partial class Checker
                 return;
             }
 
+            if (Types.NonNull(target.Type) is MapType)
+            {
+                foreach (var d in captured)
+                {
+                    Add(d);
+                }
+
+                Report(ErrorIds.NullableUnchecked, a.Line, $"an entry is written into a `{target.Type}` without a check (N2)");
+                CheckLoosely(index.Index, a.Value);
+                return;
+            }
+
             if (target.Type is not PointerType)
             {
                 NotSupported(a.Line, "an assignment into an index (M9)");

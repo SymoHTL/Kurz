@@ -793,6 +793,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         single[1] = 2
         deep[3] = single
         print(deep)
+
+        // a write into a nullable map known not null reaches the map in the union's room
+        mut Map<string, int>? maybe = Map<string, int>()
+        if maybe != null {
+            maybe["a"] = 1
+            print(maybe["a"] ?? 0)
+        }
+        print(maybe)
         """;
 
     private static readonly string[] MapsPrint =
@@ -843,6 +851,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "xy", // a map in a data value and in `with`
         "[7: [1, 2]]",
         "[3: [1: 2]]",
+        "1", // a write into a nullable map known not null
+        "[a: 1]",
     ];
 
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
