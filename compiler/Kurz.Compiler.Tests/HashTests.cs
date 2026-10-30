@@ -170,7 +170,10 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("h = Crc32.New()\nprint(h.Finish())\n", "mut-required", 2)]
     [InlineData("mut h = Hmac.NewSha256(Bytes())\nmut g = Hmac.NewSha256(Bytes())\nprint(h != g)\n", "type-mismatch", 3)] // H6
     [InlineData("Map<Sha256, int> m = Map<Sha256, int>()\nprint(m.Count)\n", "type-mismatch", 1)]
-    [InlineData("data Hex(int Digits)\nprint(Hex(1))\n", "redeclared", 1)] // the names every file sees
+    [InlineData("data Hex(int Digits)\nprint(Hex(1))\n", "redeclared", 1)] // H1: the names every file sees, as a type, a function, a variable and a parameter
+    [InlineData("int Hex(int n) => n\nprint(1)\n", "redeclared", 1)]
+    [InlineData("int FixedTime = 1\nprint(FixedTime)\n", "redeclared", 1)]
+    [InlineData("void Show(int Md5) {\n    print(Md5)\n}\n\nShow(1)\n", "redeclared", 1)]
     [InlineData("mut h = Sha256.New()\nh = Md5.New()\nprint(h)\n", "type-mismatch", 2)] // H3: four types
     public void The_checker_holds_the_names_the_parameters_and_the_members_of_the_hashes(string text, string id, int line)
     {
