@@ -457,8 +457,7 @@ pub byte* ListCopy(byte* block, long item, mut long asked) {
 // The address the next item goes to, in a block with room for it, whose count of items it raises by
 // one. The count is read as a `uint`, which it never exceeds, so that the item's offset widens without
 // a sign: in a loop of `Add`s the count the `Add` before stored is then read back by a plain load, not a
-// sign-extending one, and 16 MiB of `Bytes.Add` ran in 16 ms instead of 28 on a 13th-generation Intel
-// processor (`EmitterTests` pins the widening).
+// sign-extending one (`EmitterTests` pins the widening).
 pub byte* ListPush(byte* block, long item) {
     mut byte* slot = null
     raw {
