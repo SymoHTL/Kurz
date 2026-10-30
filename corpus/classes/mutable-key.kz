@@ -1,0 +1,8 @@
+// expect: error mutable-key at 6
+// rules: K12
+
+class Tag(mut string Name) equal by Name
+
+mut counts = Map<Tag, int>()
+counts[Tag("a")] = 1
+print(counts[Tag("a")] ?? 0)

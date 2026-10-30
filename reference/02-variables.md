@@ -45,10 +45,13 @@ x = 5
 print(x)
 ```
 
-### V5 (decided, §8) An unused variable is an error
+### V5 (decided, §8) An unused variable is an error in a release build
 
-A variable that is never used is the compile error `unused-variable`. This also catches a
-mistyped name, which would otherwise declare a new variable.
+A variable that is never used is a warning in a test build, the default one, and the compile error
+`unused-variable` in a release build (§8, the owner, 2026-10-30, against the error in every build
+and against a warning in every build). Either catches a mistyped name, which would otherwise
+declare a new variable. A case that expects the error reads the release build: its header carries
+`// build: release`.
 
 Case: [variables/unused.kz](../corpus/variables/unused.kz)
 ```kurz

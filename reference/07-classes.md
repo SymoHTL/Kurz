@@ -54,18 +54,6 @@ A class with `mut` fields compares by identity. A class without them compares by
 by the equality Kurz gives its type, a `double` or `float` with NaN equal to NaN as under D3 and K5. Across
 inheritance (K6, K10) K13 holds.
 
-Case: [classes/equals-member.kz](../corpus/classes/equals-member.kz)
-```kurz
-class User(int Id, mut int Hits) {
-    pub bool Equals(User other) => Id == other.Id
-}
-
-a = User(1, 0)
-b = User(1, 0)
-print(a == b)
-print(a.Equals(b))
-```
-
 Case: [classes/equality-identity.kz](../corpus/classes/equality-identity.kz)
 ```kurz
 class Counter(mut int Count)
@@ -126,10 +114,15 @@ A class can replace the equality of K4 by naming the fields that count. Two inst
 when those fields are equal, and the hash is derived from the same fields, so the two cannot
 disagree. Nothing else overrides equality: a class brings no comparison code of its own. There are
 no operator declarations: `+` on two instances is a method, `a.Add(b)`, and `operator` is no core
-word (L18), so a declaration of one is `syntax` (E4); a method named `Equals` is an ordinary member
-and changes nothing about `==`, which stays K4's and this rule's (the owner, 2026-10-09, against
-C#'s operator declarations with `==`, `!=` and the comparisons excluded; the cost is that a vector
-type reads as `a.Add(b).Scale(2)`). `a + b` on two instances is `type-mismatch` (T1), the error of an
+word (L18), so a declaration of one is `syntax` (E4) (the owner, 2026-10-09, against C#'s operator
+declarations with `==`, `!=` and the comparisons excluded; the cost is that a vector type reads as
+`a.Add(b).Scale(2)`). A method named `Equals` or `GetHashCode` on a class is the compile error
+`equals-method`, whose message points to the `equal by` clause (K8), and `==` stays K4's and this
+rule's (§4, the owner, 2026-10-30, against `==` only where content equality is declared and identity
+in a form of its own, as Rust has them, and against such a method as an ordinary member that changes
+nothing about `==`; the cost is two names no method of a class can take). The id and its line, the
+method's, are the owner's too (§4, 2026-10-30, "Accept both"). `a + b` on two instances is
+`type-mismatch` (T1), the error of an
 arithmetic operator on operands it has no meaning for (the owner, 2026-10-10, confirming the reading
 proposed after the review of round 13). A `double` or `float` among the named fields compares as a field of a
 `data` value does (D3), NaN equal to NaN (the owner, 2026-10-10); under K4's content equality it
@@ -173,7 +166,14 @@ class Vec(int X) {
 print(Vec(1).X)
 ```
 
-Case: [classes/equals-member.kz](../corpus/classes/equals-member.kz)
+Case: [classes/equals-method.kz](../corpus/classes/equals-method.kz)
+```kurz
+class User(int Id) {
+    pub bool Equals(User other) => Id == other.Id
+}
+
+print(User(1) == User(1))
+```
 
 ### K6 (decided, §4) Single inheritance and interfaces
 
@@ -515,12 +515,19 @@ clause with several fields, and its errors, is K15.
 
 Case: [classes/equality-named.kz](../corpus/classes/equality-named.kz)
 
-### K12 (assumed, §4) A `mut` field in the clause
+### K12 (decided, §4) A `mut` field in the clause
 
-A `mut` field can be named in the clause of K8. The record states the cost: when such a field is
-assigned, the hash of the instance changes, so an instance that is a key of a map at that moment
-is no longer found under it, and nothing reports that. The record marks as *(assumed)* this
-reading of the owner's answer on `mut` fields.
+A `mut` field can be named in the clause of K8. When such a field is assigned, the hash of the
+instance changes, so an instance that is a key of a map at that moment would no longer be found
+under it; such a class as the key type of a `Map` is the compile error `mutable-key`, and a program
+keys such a map by a copy of the field (§4, the owner, 2026-10-30, against no `mut` field in the
+clause, against a check of each key's hash in test builds, and against the clause as it stood, under
+which the entry is lost with no report). That answer, which set aside refusing a `mut` field in the
+clause, confirms the reading of the owner's answer on `mut` fields that the record marked as
+assumed. The id and its line, the one that writes the key type, are the owner's too (§4, 2026-10-30,
+"Accept both"). Whether the error
+reaches a key type that holds such a class, or one that a type parameter stands for, stands open
+(§14).
 
 Case: [classes/equality-named-mut.kz](../corpus/classes/equality-named-mut.kz)
 ```kurz
@@ -531,6 +538,15 @@ y = Tag("a")
 print(x == y)
 y.Name = "b"
 print(x == y)
+```
+
+Case: [classes/mutable-key.kz](../corpus/classes/mutable-key.kz)
+```kurz
+class Tag(mut string Name) equal by Name
+
+mut counts = Map<Tag, int>()
+counts[Tag("a")] = 1
+print(counts[Tag("a")] ?? 0)
 ```
 
 ### K15 (assumed, §4) The form of the `equal by` clause

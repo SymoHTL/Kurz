@@ -126,8 +126,11 @@ Each line names a trap; its evidence is in the entry it links.
    can be refused; it paces its posts to the forge and waits on a rate-limit refusal. On 2026-10-02
    a review lost 88 findings that existed only in memory when the forge refused the posts; on
    2026-10-03 a run of 30 paid passes ended while printing, on an arrow the log's code page did
-   not hold ([knowledge/a-paid-result-is-printed-before-it-is-posted.md](knowledge/a-paid-result-is-printed-before-it-is-posted.md)).
-   Gate: `self-tests` (the reviewer's cases for the order, the encoding, the pace and the wait).
+   not hold ([knowledge/a-paid-result-is-printed-before-it-is-posted.md](knowledge/a-paid-result-is-printed-before-it-is-posted.md));
+   on 2026-10-30 the compiler gate on Windows ended so while it printed the output of a red test
+   run, before it named the failing test ([knowledge/a-windows-log-takes-the-consoles-code-page.md](knowledge/a-windows-log-takes-the-consoles-code-page.md)).
+   Gate: `self-tests` (the reviewer's cases for the order, the encoding, the pace and the wait, and
+   the compiler gate's case for the encoding).
 6. **A paid run starts on a bill that was counted, not remembered.** Every review run a session
    starts spends the owner's seat: a run off the pipeline, a dispatch
    (`gh workflow run review.yml`), and the run the forge starts by itself when a session marks a
@@ -285,6 +288,16 @@ Gate: review rule "rules for sessions".
   (CI), the pre-push hook and the write-time hook for the paths; a pick made in code is review
   rule "compiler". A write through a shell command, and a hook cut off at its timeout, pass the
   write-time hook: HAZARD (#4).
+- **A change to the record names the research finding it meets, or says it meets none.** The research
+  entries (`knowledge/what-developers-dislike-in-*.md`, `knowledge/what-goose-does-for-speed.md`) hold
+  what developers dislike in C#, Rust, Go and Elixir, and the mechanisms of Goose's speed, each
+  finding with its verdict for Kurz and the section of the record that answers it; node B4 of
+  [knowledge/diagram-design-change-playbook.md](knowledge/diagram-design-change-playbook.md) reads a
+  change against them, so that the record does not take up a mistake those languages made (the owner,
+  2026-10-30, "Lint + coverage"). Gate: review rule "design record" for the name in the description;
+  `knowledge` for each verdict's citations, a section the record has, and at least one for a finding
+  that Kurz repeats or leaves open, or that an answer settled; what the cited section says on the
+  finding, and whether a change that says it meets none does meet one, are a `judgment step`.
 - **The big design choices are asked before anything is derived from them.** The same incident;
   the procedure is the skill `design-round`. `judgment step`
 - **A design round is numbered questions**, each with its options, what every option costs and a
@@ -484,7 +497,7 @@ Gate: review rule "rules for sessions".
 | merge checks on `main` (ruleset; `merge-checks` asserts it on every run and is red while it is off) | per-item approval for a merge over red (#3), and the window in which the ruleset is off (#27) |
 | every recorded tool decision still turns red (`self-tests`) | the local hooks being switched on, a write through a shell command, a hook cut off at its timeout, a push with `--no-verify` (#4) |
 | workflow facts, the image the `gates` job runs in, named by its digest, with the facts of its Dockerfile, and the LLVM major of that image and of the Windows job's install, held to the compiler's (`ci-config`) | wrap-up (#6) |
-| store shape, expiring numbers, generated numbers that match their digest (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
+| store shape, expiring numbers, generated numbers that match their digest, and the sections of the design record the research findings cite (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, every corpus case the compiler emits builds and runs as its header says, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, and the expectations of the corpus cases the compiler does not emit, being right: nothing runs them (#1) |
