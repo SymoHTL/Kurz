@@ -1,0 +1,6 @@
+// expect: error narrowing-conversion at 4
+// rules: D20
+
+enum Plan { Free = 1, Pro = 5L }
+
+print(Plan.Pro)

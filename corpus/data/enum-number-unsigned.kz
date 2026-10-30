@@ -1,0 +1,6 @@
+// expect: error sign-mix at 4
+// rules: D20
+
+enum Plan { Free = 1, Pro = 2u }
+
+print(Plan.Pro)

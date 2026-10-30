@@ -333,8 +333,8 @@ The Linux file also gives the calls on files and sockets of chapter 13 (section 
 code calls and nothing of `common/` or `std/` does, so that the Windows file gives none of them (S11). Each takes
 a path as the address of its bytes ended by a NUL byte, which `common/`'s `CPath` copies from a string,
 null where the string holds a NUL, and `FreePath` gives back; each returns a number of 0 or more, or a
-failure below 0, the system's error number negated, or -4096 for the name of a directory's entry that
-is not UTF-8. `ErrorKind` gives a failure's `IoKind`, the kind Rust 1.82's `decode_error_kind` gives the
+failure below 0, the system's error number negated, -4096 for the name of a directory's entry that
+is not UTF-8, or -4097 and -4098 for an address (below). `ErrorKind` gives a failure's `IoKind`, the kind Rust 1.82's `decode_error_kind` gives the
 number on Linux, `Other` where Rust's is `Uncategorized`, and `ErrorCode` its number, 0 for -4096 and
 below (S1). `OpenFile` opens close-on-exec, a file it
 creates with the permissions 0666 less the `umask` (S2); `OpenFile` and `ReadFile` call again where a
@@ -345,11 +345,13 @@ before a call that took none (S4); `CloseFile` takes an interrupt for no failure
 `fs::create_dir_all` does, and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
 library's `struct dirent` (S8). `Listen` and `Connect` take an address as `CPath` copies it, read
 its port after its last `:` and its host by `inet_pton` where it is a literal of IPv4, or of IPv6 inside
-`[` and `]`, and else by `getaddrinfo`, and try each address until one binds or connects, as Rust's
+`[` and `]` with a scope id in digits after a `%` and a port without a `+`, as Rust's parse of a socket
+address reads one, and else by `getaddrinfo` as it is written, and try each address until one binds or connects, as Rust's
 `each_addr` does, with the addresses in a page each thread maps at its first use; they fail with -4097,
 `InvalidInput`, for an address that is no host and port or a name that gives no address, and -4098,
-`NotFound`, for a lookup that fails with no error of the system. `Listen` sets `SO_REUSEADDR`, listens
-with room for 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
+`NotFound`, for a lookup that fails with no error of the system, where Rust gives `Uncategorized`, a kind
+the record assumes and lists as open (section 14). `Listen` sets `SO_REUSEADDR`, listens
+with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9).
@@ -653,7 +655,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 273 cases that expect a run, and on Windows the 9 of files besides, with the words the emitter says, and refuses a stale entry; the 55 the
+full and the emitter does not emit, 3 of the 278 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 54 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -681,11 +683,14 @@ stack of 64 KiB with a page below it that faults, takes the page below the lowes
 `pthread_getattr_np` gives for the thread's stack as its guard page, and installs `OnFault` for
 `SIGSEGV` and `SIGBUS` on that stack with `SA_SIGINFO`, `SA_ONSTACK` and `SA_NODEFER`. A thread that
 a library of C starts gets no stack for faults, and its overflow ends as the system ends it. Where the
-stack's limit is `unlimited`, or another mapping lies within the limit and 256 pages below the stack,
-the system stops the stack 256 pages above that mapping, above the guard page, and an overflow ends by
+stack's limit is `unlimited`, or the mapping next below the stack ends within the limit and 256 pages
+more of the stack's top, the system stops the stack 256 pages above the end of that mapping, above the
+guard page, and an overflow ends by
 the system with nothing written, as in Rust (section 2). A fault outside the guard page sets the signal's
 default back and returns, so that the system ends the process, the exit code 139 in a shell for
-`SIGSEGV`; so does a fault in the page below the stack for faults, which reaches no handler. A fault in it while a crash path runs, which `Raise`, `Throw` and the end of a refused
+`SIGSEGV`; so does a fault in the page below the stack for faults, which is no guard page to `OnFault`:
+the system delivers it at the top of that stack again, where `OnFault` runs a second time, over the
+frames of the first, and sets the default back. A fault in the guard page while a crash path runs, which `Raise`, `Throw` and the end of a refused
 allocation mark first through `Crashing`, ends the process with 1 and nothing more written; any other
 writes `error: stack-overflow at <file>:<n>` with the line of the call that did not fit: the frame
 the fault interrupted holds it where the instruction there is a call, and otherwise the frame below
@@ -927,7 +932,7 @@ dropped, so that the variables it uses count as used, but for the operand of `*`
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
-(chapter 7, D13, and the A-rules of their text); `null`,
+(chapter 7, D13, D17, D19, and the A-rules of their text); `null`,
 a nullable type, `?.` and `??` (chapter 4), `null` where no pointer stands among them; `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable

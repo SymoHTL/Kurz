@@ -230,8 +230,8 @@ pub void Crashing() {
 }
 
 // The handler of a fault and the stack it runs on, for the main thread, as Rust's standard library
-// installs its own (checked 2026-10-29: `handler_signal.rs` under
-// `library/std/src/sys/pal/unix/stack_overflow/`). The guard page is the page below the lowest address
+// installs its own (checked 2026-10-30: `install_main_guard_linux` and `signal_handler` in Rust 1.82's
+// `library/std/src/sys/pal/unix/stack_overflow.rs`). The guard page is the page below the lowest address
 // the main thread's stack may grow to, which `pthread_getattr_np` gives, where the system refuses to
 // grow it further. The handler's stack is 64 KiB from the system, with a page below it that faults, so
 // that an overflow of the handler's own stack ends the process. The handler takes `SIGSEGV` (11) and
@@ -1872,8 +1872,9 @@ pub long ListDirectory(byte* path, mut List<string> names) {
 
 // The calls on sockets of a program built for Linux (S9), over TCP, as Rust 1.82's `TcpListener` and
 // `TcpStream` make them on Linux. An address is a host and a port after its last `:`, as Rust's
-// `ToSocketAddrs` reads a `str`: a host that is a literal, of IPv4, or of IPv6 inside `[` and `]`, is read
-// by `inet_pton` with no lookup, and any other is looked up by `getaddrinfo`, whose addresses are tried
+// `ToSocketAddrs` reads a `str`: a host that is a literal, of IPv4, or of IPv6 inside `[` and `]` with a scope
+// id after a `%` and a port without a `+`, is read by `inet_pton` with no lookup, and any other is looked up
+// by `getaddrinfo`, whose addresses are tried
 // in its order until one binds or connects, the failure of the last being the call's, as Rust's
 // `each_addr` tries them. Beside the system's numbers negated, a call fails with -4097 for an address
 // that is no host and port, or a name that gives no address, `InvalidInput` to the caller, as Rust gives
@@ -1915,6 +1916,35 @@ long PortOf(byte* text, long count) {
     }
 
     return port
+}
+
+// The scope id written in the `count` bytes at `text`, after the `%` of an address of IPv6: a number from
+// 0 to 4294967295 in decimal digits, zeros in front taken, as Rust's parse of a socket address reads a
+// `u32` there, or -1.
+long ScopeOf(byte* text, long count) {
+    mut long scope = -1
+    raw {
+        if count > 0 {
+            scope = 0
+        }
+
+        mut long i = 0
+        while i < count && scope >= 0 {
+            long digit = long(text[i]) - 48
+            if digit < 0 || digit > 9 {
+                scope = -1
+            } else {
+                scope = scope * 10 + digit
+                if scope > 4294967295 {
+                    scope = -1
+                }
+            }
+
+            i = i + 1
+        }
+    }
+
+    return scope
 }
 
 // A socket of the family of the address at `address`, of `length` bytes, for TCP (`SOCK_STREAM`, 1,
@@ -1969,7 +1999,7 @@ long Attempt(byte* address, int length, bool listening) {
 
 // `Attempt` on each address of `text`, a host and a port after its last `:`, NUL-ended, in which the
 // call writes a NUL over that `:` while it runs and gives it back after: the descriptor of the first
-// that binds or connects, or the failure, `ENOMEM` (12) where the held cannot be mapped. The port is
+// that binds or connects, or the failure, `ENOMEM` (12) where the thread's page cannot be mapped. The port is
 // written into each address in the order of the network, its high byte first.
 long EachAddress(byte* text, bool listening) {
     mut long result = -12
@@ -2010,12 +2040,33 @@ long EachAddress(byte* text, bool listening) {
 
         text[colon] = 0
         mut int length = 0
-        if colon >= 2 && text[0] == 91 && text[colon - 1] == 93 {
-            // `sockaddr_in6`: the family, `AF_INET6` (10), the port at its byte 2 and the address at 8
+        if colon >= 2 && text[0] == 91 && text[colon - 1] == 93 && text[colon + 1] != 43 {
+            // `sockaddr_in6`: the family, `AF_INET6` (10), the port at its byte 2, the address at 8 and the
+            // scope id after a `%` at 24, as Rust's parse of a socket address reads them, which takes no `+`
+            // before the port: with one, the host is looked up as it is written, below, as Rust looks it up
             text[colon - 1] = 0
-            if inet_pton(10, text + 1, Ptr<void>(held + 8)) == 1 {
+            mut long percent = 1
+            while text[percent] != 0 && text[percent] != 37 {
+                percent = percent + 1
+            }
+
+            mut long scope = 0
+            if text[percent] == 37 {
+                text[percent] = 0
+                scope = ScopeOf(text + percent + 1, colon - 2 - percent)
+            }
+
+            if scope >= 0 && inet_pton(10, text + 1, Ptr<void>(held + 8)) == 1 {
                 held[0] = 10
+                held[24] = byte(scope % 256)
+                held[25] = byte(scope / 256 % 256)
+                held[26] = byte(scope / 65536 % 256)
+                held[27] = byte(scope / 16777216)
                 length = 28
+            }
+
+            if percent < colon - 1 {
+                text[percent] = 37
             }
 
             text[colon - 1] = 93

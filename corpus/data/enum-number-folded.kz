@@ -1,0 +1,7 @@
+// expect: output
+// | 5
+// rules: D20
+
+enum Level { Low = 1, High = 2 + 3 }
+
+print(Level.High.Number)

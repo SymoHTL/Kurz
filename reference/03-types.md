@@ -816,7 +816,9 @@ runs are shared with it, and those of a literal copied *(assumed: as §4 marks i
 front of the first sequence that is not UTF-8, as Rust's `valid_up_to` counts them;
 `string.FromUtf8Lossy(b)` makes a string in which each such sequence reads U+FFFD; and where the
 bytes have a block, the string shares it (§4, the owner, 2026-10-29). The lossy form writes one
-U+FFFD for each maximal part of a sequence, as Rust counts them *(assumed: as §4 marks it)*.
+U+FFFD for each maximal part of a sequence, as Rust counts them, and `InvalidUtf8` is a `data` type
+every file sees, declared before the file's own types, so that a file's own `data InvalidUtf8` is
+`redeclared` (V9), as a file's own `data Invalid` is (D18) *(assumed: as §4 marks them)*.
 
 Case: [types/string-bytes.kz](../corpus/types/string-bytes.kz)
 ```kurz
@@ -867,6 +869,13 @@ match string.FromUtf8(b) {
     InvalidUtf8 e => print(e.At)
 }
 print(string.FromUtf8Lossy(b))
+```
+
+Case: [types/invalid-utf8-redeclared.kz](../corpus/types/invalid-utf8-redeclared.kz)
+```kurz
+data InvalidUtf8(int At)
+
+print(InvalidUtf8(1))
 ```
 
 ### T16 (decided, §4) What `.Chars` yields

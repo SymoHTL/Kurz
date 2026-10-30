@@ -440,8 +440,9 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// D12, D20: an enum and its values, each name once: a name an earlier value has, and the names of the members <c>Number</c> and
-    /// <c>From</c>, which the value would hide, are <c>redeclared</c>, as Rust refuses a name given twice (E0428). The numbers are read
+    /// D12, D20: an enum and its values, each name once: a name an earlier value has is <c>redeclared</c>, as Rust refuses a name given
+    /// twice (E0428), and so are the names of the members <c>Number</c> and <c>From</c> that D18 gives every enum, a rule of Kurz's own,
+    /// since Rust compiles a value of either name (section 4). The numbers are read
     /// once every function is declared (<see cref="CheckEnumNumbers"/>).
     /// </summary>
     private void DeclareEnum(TypeDeclaration d)
@@ -456,7 +457,7 @@ public sealed partial class Checker
             }
             else if (value.Name is "Number" or "From")
             {
-                Report(ErrorIds.Redeclared, value.Line, $"`{d.Name}.{value.Name}` is a member of every enum, which a value of that name would hide (D18, D20)");
+                Report(ErrorIds.Redeclared, value.Line, $"`{value.Name}` is the name of a member D18 gives every enum, which no value of one takes (D18, D20)");
                 symbol.Refused = true;
             }
             else

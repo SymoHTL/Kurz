@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: T15
+
+data InvalidUtf8(int At)
+
+print(InvalidUtf8(1))

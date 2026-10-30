@@ -1767,14 +1767,40 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_match_on_an_enum_without_values_takes_no_arm_and_the_error_of_one_says_why()
+    {
+        // D12: no value reaches the arm of the type or `else`, as Rust 1.82 warns of either that it matches no values; with no arm above
+        // it, the text names the `match` without arms and not "the arms above"
+        Clean("enum Never {}\n\nvoid Show(Never n) {\n    match n {\n    }\n}\n\nprint(1)");
+        foreach (var (arm, text) in new[]
+        {
+            ("Never x => print(x)", "`Never` has no values, so no arm of it is reached: a `match` with no arms covers it (C4, D12)"),
+            ("else => print(1)", "`else` where `Never` has no values to reach it: a `match` with no arms covers it (C4, D12)"),
+        })
+        {
+            var error = Assert.Single(Check($"enum Never {{}}\n\nvoid Show(Never n) {{\n    match n {{\n        {arm}\n    }}\n}}\n\nprint(1)").Diagnostics.Items);
+            Assert.Equal((ErrorIds.UnreachableArm, 5, text), (error.Id, error.Line, error.Message));
+        }
+
+        // an enum with values keeps the texts of the arms above
+        Assert.Equal("the arms above name every value of `Plan` (C4, D12)", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    Plan p => print(p)\n}").Diagnostics.Items).Message);
+        Assert.Equal("`else` after arms that cover every case (C4, C9)", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    else => print(2)\n}").Diagnostics.Items).Message);
+    }
+
+    [Fact]
     public void A_declaration_of_a_built_in_data_type_names_the_rule_that_declares_it()
     {
-        // V9 with D18 and T15: no line of the file declares the type, so the text says who does; a name the file declares twice keeps its text
-        Assert.Equal("`Invalid` is a data type every file sees, declared before the file's own types (D18, V9)", Assert.Single(Check("data Invalid").Diagnostics.Items).Message);
-        Assert.Equal("`InvalidUtf8` is a data type every file sees, declared before the file's own types (T15, V9)", Assert.Single(Check("data InvalidUtf8(int At)").Diagnostics.Items).Message);
-        Assert.Equal("`IoError` is a data type every file sees, declared before the file's own types (S1, V9)", Assert.Single(Check("data IoError(int Code)").Diagnostics.Items).Message);
-        Assert.Equal("`IoKind` is an enum every file sees, declared before the file's own types (S1, V9)", Assert.Single(Check("enum IoKind { Lost }").Diagnostics.Items).Message);
-        Assert.Equal("the name `Rejected` is declared already (V9)", Assert.Single(Check("data Rejected\ndata Rejected").Diagnostics.Items).Message);
+        // V9 with D18, T15 and S1: no line of the file declares the type, so the error names the rule that does; the corpus pins the id and
+        // the line (E2), and this the rule the text names
+        foreach (var (text, rule) in new[] { ("data Invalid", "(D18, V9)"), ("data InvalidUtf8(int At)", "(T15, V9)"), ("data IoError(int Code)", "(S1, V9)"), ("enum IoKind { Lost }", "(S1, V9)") })
+        {
+            var error = Assert.Single(Check(text).Diagnostics.Items);
+            Assert.Equal((ErrorIds.Redeclared, 1), (error.Id, error.Line));
+            Assert.EndsWith(rule, error.Message, StringComparison.Ordinal);
+        }
+
+        // a name the file declares twice names V9 alone
+        Assert.EndsWith("(V9)", Assert.Single(Check("data Rejected\ndata Rejected").Diagnostics.Items).Message, StringComparison.Ordinal);
     }
 
     // ---- files (chapter 13) --------------------------------------------------------------------------------
