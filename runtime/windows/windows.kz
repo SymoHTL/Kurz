@@ -7,11 +7,19 @@ extern "C" in "kernel32" {
     void ExitProcess(uint code)
     void* VirtualAlloc(void* address, ulong size, uint type, uint protection)
     int VirtualFree(void* address, ulong size, uint type)
+    int SetThreadStackGuarantee(uint* size)
 }
 
 // The start of the process: Windows raises no signal at a write to a closed pipe, whose `WriteFile`
-// returns the error itself.
+// returns the error itself. The main thread's stack takes a guarantee of 0x5000 bytes, the room the
+// system keeps on it for the handling of its overflow, as Rust's standard library sets it at its start
+// (design record, section 2); where the system refuses it the program carries on with the system's own
+// room, as Rust's released library does.
 pub void Start() {
+    mut uint room = 20480
+    raw {
+        SetThreadStackGuarantee(&room)
+    }
 }
 
 // `count` bytes from `bytes` written to standard output (`fd` 1) or standard error (`fd` 2) in one

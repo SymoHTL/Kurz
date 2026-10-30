@@ -326,7 +326,8 @@ blocks, where the next request of the class takes it, and a larger one to the sy
 target's `Release`; the mebibytes a thread carved from stay its own. A target's directory gives
 `Start`, `Write`, `Exit`, `Memory`, `Release`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
-`Write` calling again where a signal interrupted it (section 6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
+`Write` calling again where a signal interrupted it (section 6), and `Release` calling `munmap`, on Windows over `kernel32`,
+`Start` setting the guarantee of the main thread's stack (below) and `Release` calling `VirtualFree`. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -674,7 +675,13 @@ full and the emitter does not emit, 3 of the 286 cases that expect a run, and on
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
-`outcomes/stack-overflow.kz` is built and not run, the one case the runner lists so.
+`outcomes/stack-overflow.kz` is built and not run, the one case the runner lists so. On Windows the
+runtime's `Start` sets the guarantee of the main thread's stack, the room the system keeps on it for
+the handling of its overflow, to 0x5000 bytes, 20 KiB of the 1 MiB the linker reserves for it, as
+Rust's standard library does at its start, and a program whose request the system refuses carries on
+with the system's own room, as Rust's released library does (section 2);
+`TraceTests.A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes`
+reads the guarantee in force on Windows and on Linux compiles the program alone.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
 (section 6), but `allocation-failed`, which writes no place and no trace (O11): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
