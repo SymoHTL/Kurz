@@ -587,6 +587,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private const string Maps = """
         data Box(string Name, Map<string, string> Tags)
 
+        enum Plan { Free, Pro }
+
+        T Id<T>(T x) => x
+
         string Made(int n) => "made {n}"
 
         int Total(Map<int, int> m, int n) {
@@ -801,6 +805,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(maybe["a"] ?? 0)
         }
         print(maybe)
+
+        // a map through a generic function, a map of enum values, `Where` over maps, and a read of a call's map
+        same = Id(words)
+        words["a"] = "again"
+        print(same["a"] ?? "none")
+        mut plans = Map<string, Plan>()
+        plans["ann"] = Plan.Pro
+        print(plans)
+        mut every = List<Map<string, int>>()
+        every.Add(Plus(base))
+        every.Add(Map<string, int>())
+        print(every.Where(x => (x["z"] ?? 0) > 0))
+        print(Plus(base)["z"] ?? 0)
         """;
 
     private static readonly string[] MapsPrint =
@@ -853,6 +870,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[3: [1: 2]]",
         "1", // a write into a nullable map known not null
         "[a: 1]",
+        "changed", // a map through a generic function
+        "[ann: Pro]",
+        "[[z: 26]]",
+        "26",
     ];
 
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
