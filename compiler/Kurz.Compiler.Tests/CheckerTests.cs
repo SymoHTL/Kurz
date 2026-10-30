@@ -1996,10 +1996,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(Find + "print(Find(1)?.Name ?? 1)"));
         Clean(Find + "u = Find(1)\nif u != null {\n    print(u?.Name ?? u.Name)\n}");
 
-        // a member after `?.` reads the member before as its own type, whatever a test showed of that member's path, which C# narrows
-        // (compiler/README.md); the path itself reads as the test showed
-        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(Find + "u = Find(1)\nif u?.Email != null {\n    print(u?.Email.Bytes.Count)\n}"));
+        // N3: a member after `?.` reads the member before as a test showed that member's path, as C#'s analysis narrows it
+        // (compiler/README.md), and as the path itself reads; where the test shows nothing of the path, where an assignment ended it
+        // (N7), and where the test is of another variable's path, the nullable member is N2's
+        Clean(Find + "u = Find(1)\nif u?.Email != null {\n    print(u?.Email.Bytes.Count)\n}");
         Clean(Find + "u = Find(1)\nif u?.Email != null {\n    print(u.Email.Bytes.Count)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(Find + "u = Find(1)\nif u?.Email == null {\n    print(u?.Email.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Find + "mut u = Find(1)\nif u?.Email != null {\n    u = Find(2)\n    print(u?.Email.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Find + "u = Find(1)\nv = Find(2)\nif v?.Email != null {\n    print(u?.Email.Bytes.Count)\n}"));
     }
 
     [Theory]
@@ -2389,6 +2393,7 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("class Counter(mut int Count)\n\nc = Counter(0)\nprint(c)", "1: a class (chapter 7)")]
+    [InlineData("class Account(mut string? Email)\n\nAccount? Load(int id) => null\n\nvoid Touch() {\n}\n\na = Load(1)\nif a?.Email != null {\n    Touch()\n    print(a?.Email.Bytes.Count)\n}", "1: a class (chapter 7)")] // N9: the checker narrows no path through a class instance, and a `weak` path runs through one (R5)
     [InlineData("interface Shape {\n    int Area()\n}", "1: an interface (K6, K10)")]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read)", "1: a flags type (D13)")]
     [InlineData("data R(int | string V)\n\nR? G() => null\n\nprint(G()?.V)", "5: `?.` to a `int | string`, which no `?` makes nullable (N1, N5)")]
