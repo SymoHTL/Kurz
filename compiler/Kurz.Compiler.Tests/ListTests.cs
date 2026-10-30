@@ -581,7 +581,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // maps (M9): a read that is a value of its own, a write over a key, a copy written to (M3), a value read from the map it is
     // written into, a key the map keeps after its variable changes, a `mut` parameter, a missing key, growth, a map in a data value
-    // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, keys of each kind the checker takes, and the texts
+    // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, keys of each kind the checker takes, a map in a
+    // union, a block replaced by growth under a `mut` parameter and under a lambda that read it, strings equal by their bytes with
+    // and without a block, and the texts
     private const string Maps = """
         data Box(string Name, Map<string, string> Tags)
 
@@ -598,6 +600,32 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         void Fill(mut Map<string, string> m, string k) {
             m[k] = "{k}!"
         }
+
+        data NotFound
+        data Holder(Map<string, string> M, int N)
+
+        Map<string, int> | NotFound Lookup(int n) {
+            if n == 0 {
+                return NotFound
+            }
+            mut m = Map<string, int>()
+            m["n"] = n
+            return m
+        }
+
+        void Grow(mut Map<int, string> m, int n) {
+            for i in 0..<n {
+                m[i] = "v{i}"
+            }
+        }
+
+        Map<string, int> Plus(Map<string, int> m) {
+            mut copied = m
+            copied["z"] = 26
+            return copied
+        }
+
+        string Joined(string x, string y) => "{x}{y}"
 
         mut names = Map<string, string>()
         for i in 0..<20 {
@@ -675,6 +703,96 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         one[1] = "a"
         one[1] = "b"
         print(one)
+
+        // a value read and written back to its own key
+        mut words = Map<string, string>()
+        words["a"] = "x"
+        words["a"] = Joined(words["a"] ?? "", "y")
+        print(words["a"] ?? "none")
+
+        // a map in a union
+        match Lookup(3) {
+            NotFound => print("none")
+            Map<string, int> found => print(found["n"] ?? -1)
+        }
+        match Lookup(0) {
+            NotFound => print("none")
+            Map<string, int> found => print(found["n"] ?? -1)
+        }
+
+        // a mut parameter whose block the callee replaces by growth
+        mut grown = Map<int, string>()
+        grown[0] = "first"
+        Grow(mut grown, 50)
+        print(grown[49] ?? "none")
+        print(grown[0] ?? "none")
+
+        // a lambda keeps the block it captured while the variable grows
+        mut seen = Map<int, string>()
+        seen[1] = "one"
+        look = () => seen[1] ?? "gone"
+        Grow(mut seen, 40)
+        print(look())
+        print(seen[1] ?? "none")
+
+        // a copy made inside a function, the parameter untouched
+        base = Map<string, int>()
+        more = Plus(base)
+        print(base)
+        print(more)
+
+        // keys equal by their bytes, from a literal and from a join; the empty string
+        mut keys = Map<string, int>()
+        keys["ab"] = 1
+        print(keys[Joined("a", "b")] ?? 0)
+        keys[Joined("c", "d")] = 2
+        print(keys["cd"] ?? 0)
+        keys[""] = 3
+        print(keys[""] ?? 0)
+        keys[Joined("a", "b")] = 4
+        print(keys["ab"] ?? 0)
+
+        // narrow and wide integer keys of both signs, and a char beyond 16 bits
+        mut shorts = Map<short, int>()
+        short neg = -5
+        shorts[neg] = 5
+        print(shorts[-5] ?? 0)
+        mut uints = Map<uint, int>()
+        uints[4294967295U] = 7
+        print(uints[4294967295U] ?? 0)
+        mut emoji = Map<char, string>()
+        emoji['😀'] = "smile"
+        print(emoji['😀'] ?? "none")
+
+        // a map of maps written through a copy of the inner map
+        mut outer = Map<string, Map<string, int>>()
+        mut inner = Map<string, int>()
+        inner["x"] = 1
+        outer["a"] = inner
+        mut changed = outer["a"] ?? Map<string, int>()
+        changed["x"] = 2
+        outer["a"] = changed
+        print(inner["x"] ?? 0)
+        print((outer["a"] ?? Map<string, int>())["x"] ?? 0)
+
+        // a map in a data value, and `with`
+        h = Holder(words, 1)
+        words["a"] = "changed"
+        h2 = h with { N = 2 }
+        print(h2.M["a"] ?? "none")
+
+        // texts
+        mut listed = Map<int, List<int>>()
+        mut items = List<int>()
+        items.Add(1)
+        items.Add(2)
+        listed[7] = items
+        print(listed)
+        mut deep = Map<int, Map<int, int>>()
+        mut single = Map<int, int>()
+        single[1] = 2
+        deep[3] = single
+        print(deep)
         """;
 
     private static readonly string[] MapsPrint =
@@ -704,6 +822,27 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "0",
         "[]",
         "[1: b]", // a write over a key keeps one entry
+        "xy", // a value read from its own key and written back to it
+        "3", // a map in a union
+        "none",
+        "v49", // a `mut` parameter whose block the callee replaced as it grew
+        "v0",
+        "one", // a lambda keeps the block it read while the variable grows
+        "v1",
+        "[]", // a copy written to inside a function, the argument as it was
+        "[z: 26]",
+        "1", // keys equal by their bytes, a literal's and a joined string's, whose count carries the mark of a block
+        "2",
+        "3", // the empty string
+        "4",
+        "5", // a negative `short`, widened with its sign
+        "7",
+        "smile", // a `char` beyond 16 bits
+        "1", // a map of maps written through a copy of its entry
+        "2",
+        "xy", // a map in a data value and in `with`
+        "[7: [1, 2]]",
+        "[3: [1: 2]]",
     ];
 
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
