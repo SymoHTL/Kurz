@@ -22,8 +22,8 @@ abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotA
 and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput`, a name of
 a directory's entry that is not UTF-8 `InvalidData`, and a write of which the system takes no byte
 `WriteZero`, each with the number 0, which every error that is not the system's has. A call that
-names two paths names the first in its error. *(assumed, §12: what raises in such a call, the list, the
-words, the number 0, the text without a path and the first path)*
+names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
+list, the words, the number 0, the text without a path and the first path)*
 
 Case: [system/open-missing.kz](../corpus/system/open-missing.kz)
 ```kurz

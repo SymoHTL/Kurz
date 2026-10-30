@@ -349,8 +349,8 @@ its port after its last `:` and its host by `inet_pton` where it is a literal of
 address reads one, and else by `getaddrinfo` as it is written, and try each address until one binds or connects, as Rust's
 `each_addr` does, with the addresses in a page each thread maps at its first use; they fail with -4097,
 `InvalidInput`, for an address that is no host and port or a name that gives no address, and -4098,
-`NotFound`, for a lookup that fails with no error of the system, where Rust gives `Uncategorized`, a kind
-the record assumes and lists as open (section 14). `Listen` sets `SO_REUSEADDR`, listens
+`NotFound`, the kind the record assumes and lists as open (section 14), for a lookup that fails with no
+error of the system, where Rust gives `Uncategorized`. `Listen` sets `SO_REUSEADDR`, listens
 with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
