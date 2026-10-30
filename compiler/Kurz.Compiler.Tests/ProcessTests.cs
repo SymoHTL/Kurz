@@ -26,13 +26,14 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// The program built for this machine and started by <c>/bin/sh</c> as <c>exec "$0" &lt;words&gt;</c> after the shell command
     /// <paramref name="setup"/>, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where it is null; its exit code,
-    /// its lines and its error stream, with the executable's path. Null on Windows, where the build is held to its refusal.
+    /// its lines and its error stream, with the executable's path. Null on Windows, where the build is held to its refusal, and a
+    /// program that <paramref name="reads"/> none of the five to its build.
     /// </summary>
-    private (int Code, IReadOnlyList<string> Output, string Error, string Executable)? Ran(string text, string name, string words, string setup = "", string? trace = "0")
+    private (int Code, IReadOnlyList<string> Output, string Error, string Executable)? Ran(string text, string name, string words, string setup = "", string? trace = "0", bool reads = true)
     {
         if (Builder.HostTarget == Target.Windows)
         {
-            Assert.Null(Compile(text, toolchain.Runtime).Program);
+            Assert.Equal(reads, Compile(text, toolchain.Runtime).Program is null);
             return null;
         }
 
@@ -86,7 +87,7 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         // a program that reads no argument does not look at them
-        if (Ran("print(1)\n", "argument-unread", bad) is { } unread)
+        if (Ran("print(1)\n", "argument-unread", bad, reads: false) is { } unread)
         {
             Assert.Equal((0, ""), (unread.Code, unread.Error));
             Assert.Equal(["1"], unread.Output);
@@ -173,8 +174,11 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
         finally
         {
-            File.Delete($"{low}-low");
-            File.Delete($"{low}-lower");
+            if (Builder.HostTarget != Target.Windows) // no /dev/shm, whose absence File.Delete refuses
+            {
+                File.Delete($"{low}-low");
+                File.Delete($"{low}-lower");
+            }
         }
     }
 
