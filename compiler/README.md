@@ -319,10 +319,11 @@ returns null and leaves the end of the process to a caller, which its documentat
 call `handle_alloc_error`. The entry gives a block of one of fifteen size classes, the powers of two
 from 16 to 262144 bytes: the block of its class freed last, else one carved from the thread's
 memory, which it takes from the system's `Memory` a mebibyte at a time; an allocation of more than
-262144 bytes takes the smallest such block the thread keeps that holds it, given out whole, as glibc's
-`malloc` takes the smallest free chunk that holds a large request, else memory of its own from `Memory`,
-each with a header of 16 bytes in front that names the bytes the system gave it (record, section 2:
-the owner, 2026-10-30, "Keep them, as glibc"). It gives null where the system refuses. `std/`'s
+262144 bytes takes the smallest such block the thread keeps that holds it and takes no more than twice
+its bytes, the headers counted, given out whole, as glibc's `malloc` takes the smallest free chunk that
+holds a large request, else memory of its own from `Memory`, each with a header of 16 bytes in front
+that names the bytes the system gave it (record, section 2: the owner, 2026-10-30, "Keep them, as
+glibc" and "Only if at least half used"). It gives null where the system refuses. `std/`'s
 `Free` takes a block back with the size it was asked for, as Rust's `GlobalAlloc::dealloc` takes
 the layout a block was allocated with: a block of a size class to the front of its class's free
 blocks, where a request of the class takes it first, and a larger one to the front of the blocks the
@@ -655,7 +656,10 @@ of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the s
 the same lists all kept do not, and so for strings of 524288 bytes; the same lists of 70000 items within
 the sixteen pieces, each round after the first taking the block the thread kept, and the same lists all
 kept not; five freed blocks of 8 mebibytes, of which the thread keeps the four within 32 mebibytes, a
-write into the fourth after its `Free` ending nothing and one into the fifth ending the process; two lists of blocks of 16
+write into the fourth after its `Free` ending nothing and one into the fifth ending the process; a kept
+block of 32 mebibytes not given to a request of less than half its bytes, whose block its `Free` gives
+back to the system, so that a write into it after the `Free` ends the process, and given to one of half,
+whose `Free` keeps it, so that the same write ends nothing; two lists of blocks of 16
 and 32 mebibytes, the second grown from 16, within the same 64 on Linux, where it grows in place, and
 not on Windows, where its old and new block are held at once, and the first one item longer not on
 either; strings of 1024 bytes made and dropped

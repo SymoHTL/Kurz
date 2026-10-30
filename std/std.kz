@@ -78,10 +78,13 @@ long* Heads() {
     return table
 }
 
-// The smallest block the thread keeps that holds `bytes` bytes, its header among them, taken out of the
-// kept blocks, as glibc's malloc takes the smallest free chunk that holds a large request; null where
-// none holds them. The block is given out whole, its header naming its size, since a block the system
-// gave goes back to it only whole on Windows, and a list grown into it grows without the system.
+// The smallest block the thread keeps that holds `bytes` bytes, its header among them, and takes no
+// more than twice them, its own header among its bytes, taken out of the kept blocks, as glibc's malloc
+// takes the smallest free chunk that holds a large request; null where none does, and the request takes
+// memory of its own from the system (the owner, 2026-10-30, "Only if at least half used"). glibc splits
+// the chunk and keeps its rest; Kurz gives the block out whole, its header naming its size, since a
+// block the system gave goes back to it only whole on Windows, and a list grown into it grows without
+// the system, so a request takes a kept block only where it uses at least half of it.
 byte* Reused(long bytes) {
     mut byte* best = null
     raw {
@@ -90,7 +93,7 @@ byte* Reused(long bytes) {
         mut byte* at = kept
         while at != null {
             long room = *Ptr<long>(at)
-            if room >= bytes && (best == null || room < *Ptr<long>(best)) {
+            if room >= bytes && room <= bytes * 2 && (best == null || room < *Ptr<long>(best)) {
                 best = at
                 before = previous
             }
@@ -114,13 +117,13 @@ byte* Reused(long bytes) {
 }
 
 // The allocation entry (design record, section 2): `size` bytes, at an address that is a multiple of
-// 16. A request of more than 262144 bytes takes the smallest block the thread keeps that holds it, else
-// memory of its own from the system, each with its header in front. A smaller one takes a block of its
-// size class: the one of that class freed last, or one carved from the thread's memory, whose pieces
-// the system gives a mebibyte at a time. A block used again holds what was written into it before. Null
-// where the system refuses, for which the runtime's `Allocate` ends the process (the owner, 2026-10-24,
-// "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc` returns null and its callers that cease
-// execution are encouraged to call `handle_alloc_error`.
+// 16. A request of more than 262144 bytes takes the smallest block the thread keeps that holds it and
+// takes no more than twice its bytes, else memory of its own from the system, each with its header in
+// front. A smaller one takes a block of its size class: the one of that class freed last, or one carved
+// from the thread's memory, whose pieces the system gives a mebibyte at a time. A block used again holds
+// what was written into it before. Null where the system refuses, for which the runtime's `Allocate`
+// ends the process (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
+// returns null and its callers that cease execution are encouraged to call `handle_alloc_error`.
 pub byte* Allocate(long size) {
     mut byte* p = null
     if size > 262144 {

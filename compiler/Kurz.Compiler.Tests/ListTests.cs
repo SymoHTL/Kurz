@@ -851,6 +851,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_kept_block_is_given_out_only_to_a_request_of_at_least_half_its_bytes()
+    {
+        // the owner, 2026-10-30, "Only if at least half used": a block of 33554416 bytes, 33554432 with its header, freed and kept,
+        // which fills the 33554432 the thread keeps. A request of 16777184 bytes, 16777200 with its header, less than half of the kept
+        // block's, takes memory of its own from the system, which its `Free` gives back, as the kept block leaves no room for it, so a
+        // write into it after its `Free` ends the process with the system's signal
+        const string start = "pub void Start() {\n    sys.Start()\n";
+        static string Request(long size) => $"    byte* a = Allocate(33554416)\n    raw {{\n        std.Free(a, 33554416)\n    }}\n    byte* q = Allocate({size})\n    raw {{\n        std.Free(q, {size})\n        q[0] = 1\n    }}\n";
+        Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + Request(16777184))), "list-kept-below-half"));
+        // the positive control: a request of 16777200 bytes, 16777216 with its header, half of them, takes the kept block, which its
+        // `Free` keeps again, so a write into it after its `Free` ends nothing
+        Ran(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + Request(16777200))), "list-kept-half"), 0, ["1"], "");
+    }
+
+    [Fact]
     public void A_block_of_more_than_262144_bytes_grows_by_the_targets_Resize()
     {
         // two lists of `long`s within 64 mebibytes, the first of 2^21 items in a block of 16 mebibytes; the second grows from 16
