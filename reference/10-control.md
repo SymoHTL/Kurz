@@ -236,9 +236,9 @@ print(sum)
 map (M10), where an item is an entry, a value of the built-in `data` type `Entry<K, V>`, whose fields
 `Key` and `Value` are the entry's key and value: it has a `data` value's text (A3), it is passed, kept
 and read in a lambda, and a program writes its type, `Entry<string, int>` (§4, the owner, 2026-10-30).
-The type is built in (§4), so a file's own declaration of the name `Entry` is `redeclared` (V9). A
-program makes an entry by `Entry(key, value)` and copies one by `with` (D5), as every `data` type (§4,
-the owner, 2026-10-30). Over a map,
+The type is built in (§4), so a file's own declaration of the name `Entry` is `redeclared` (V9)
+*(assumed: as §4 marks it)*. A program makes an entry by `Entry(key, value)` and copies one by
+`with` (D5), as every `data` type (§4, the owner, 2026-10-30). Over a map,
 `for key, value in map { }` names the key and the value together, under any two names (§4, the owner,
 2026-10-30); two names over a list or a range are `type-mismatch` *(proposed: the error; §4 gives the
 form over a map alone)*. The loop runs over the collection as it was when

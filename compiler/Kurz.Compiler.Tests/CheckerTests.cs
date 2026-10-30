@@ -2340,7 +2340,7 @@ public sealed class CheckerTests
     {
         // C6: `for e in map` names a value of the built-in data type `Entry<K, V>` with `Key` and `Value`, as C#'s `KeyValuePair` (section 4,
         // the owner, 2026-10-30, "A value, as C#"): it is printed, passed, kept, compared and read in a lambda, and its type is written;
-        // a program's own `Entry` is `redeclared`
+        // a program's own `Entry` is `redeclared`, a reading section 4 marks assumed
         Clean("m = Map<string, int>()\nfor e in m {\n    print(e)\n}");
         Clean("void Show(Entry<string, int> e) {\n    print(e.Key)\n}\n\nm = Map<string, int>()\nfor e in m {\n    Show(e)\n}");
         Clean("m = Map<string, List<int>>()\nmut kept = List<Entry<string, List<int>>>()\nfor e in m {\n    kept.Add(e)\n}\nprint(kept)");
