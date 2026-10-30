@@ -1,0 +1,13 @@
+// expect: output
+// | 1
+// | [-0: zero]
+// rules: M9, A6
+
+// 0.0 and -0.0 are one key (M9): the write under 0.0 finds the entry of -0.0, takes the new value and
+// keeps the entry's own key
+double z = 0.0
+mut names = Map<double, string>()
+names[-z] = "minus zero"
+names[z] = "zero"
+print(names.Count)
+print(names)

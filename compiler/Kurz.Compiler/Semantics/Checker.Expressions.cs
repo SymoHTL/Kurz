@@ -1314,7 +1314,8 @@ public sealed partial class Checker
         {
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
                 || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
-                || (left.Type is ListType && Types.Same(left.Type, right.Type));
+                || (left.Type is ListType && Types.Same(left.Type, right.Type))
+                || ((left.Type is UnionType || right.Type is UnionType) && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
             var refused = !ok ? null : left.Type switch
             {
                 // M9: two lists compare by their counts and their items (section 4, the owner, 2026-10-30, "By items, as Rust"); D3: a data
@@ -1322,7 +1323,9 @@ public sealed partial class Checker
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
                 DataType => HeldEquality(left.Type, []) ?? HeldEquality(right.Type, []),
-                _ => null,
+                // two values of a union, or a union and a value of one of its cases, as the union the other side goes to: by the case, then
+                // by the value (section 4, the owner, 2026-10-30, "Case and value, as Rust")
+                _ => ItemEquality(Types.Assignable(left.Type, right.Type) ? right.Type : left.Type),
             };
             switch (refused)
             {

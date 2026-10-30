@@ -162,12 +162,14 @@ internal sealed class Layout(IrModule module)
     /// <summary>
     /// The <c>null</c> of a <c>T?</c> whose <c>T</c> is held through an address, an address no value of <c>T</c> has, as Rust lays out
     /// <c>Option&lt;Box&lt;T&gt;&gt;</c> and <c>Option&lt;Vec&lt;T&gt;&gt;</c> (section 4, the owner, 2026-10-30, "Rust's niche"): a block's is the
-    /// address 0, and a list's the address 1, since a list without items is the address 0. Null for every other union, which keeps its tag.
+    /// address 0, and a list's the address 1, since a list without items is the address 0; a C function's is the address 0, which no
+    /// function has, as Rust lays out <c>Option&lt;extern "C" fn()&gt;</c> (R17). Null for every other union, which keeps its tag.
     /// </summary>
     public string? Niche(UnionType union) => Types.NonNull(union) switch
     {
         ListType => "inttoptr (i64 1 to ptr)",
         DataType d when IsBlock(d) => "null",
+        CFunctionType => "null",
         _ => null,
     };
 

@@ -6,9 +6,11 @@ using VoidType = Kurz.Compiler.Semantics.VoidType;
 namespace Kurz.Compiler.Emit;
 
 /// <summary>
-/// M9: a map is the address of its block, null for a map without entries, which takes no block; the block's functions are the
-/// standard library's (<c>std/std.kz</c>), a control byte of it says whether a slot holds an entry, 255 where it never held one and
-/// 128 where its entry was removed, and a slot holds an entry as <c>{ i64, K, V }</c>, the hash of its key, the key and the value. A
+/// M9: a map is the address of its block, null for a map that never took one (<c>Clear</c> and the <c>Remove</c> of the last entry
+/// leave an empty map that holds its block); the block's functions are the standard library's (<c>std/std.kz</c>), a control byte of
+/// it says whether a slot holds an entry, 255 where it holds none and a probe ends at its group, never filled or emptied in a group
+/// that holds a 255 still, and 128 where its entry was removed in a group with no 255, which a probe passes, and a slot holds an
+/// entry as <c>{ i64, K, V }</c>, the hash of its key, the key and the value. A
 /// key's hash is SipHash-1-3 under the keys of the map's block: of a string's UTF-8 bytes, of any other key of one value widened to 64
 /// bits, and of the hashes of a <c>data</c> value's fields, of a list's items or of a union's tag and value, as words.
 /// </summary>
@@ -164,8 +166,8 @@ public sealed partial class Emitter
     /// The helper that finds the slot of a key's entry in a map's block, <c>%a0</c>, by the key, <c>%a1</c>, and its hash, <c>%a2</c>:
     /// the slot's address, or null where the map has no entry of the key. It reads a group's 8 control bytes as one word and marks
     /// the bytes equal to the hash's control byte as hashbrown's generic group does (a byte after a match can be marked too, which
-    /// the comparison of the hash and the key settles); a group with a slot of 255, which never held an entry, ends the probe, and one
-    /// of 128, whose entry was removed, does not.
+    /// the comparison of the hash and the key settles); a group with a slot of 255, which holds no entry, ends the probe, and one of
+    /// 128, whose entry was removed, does not.
     /// </summary>
     private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () =>
     {
@@ -214,7 +216,7 @@ public sealed partial class Emitter
         fn.Return($"ptr {slot}");
         fn.Block(after);
         var empty = fn.Value($"and i64 {fn.Value($"and i64 {word}, {fn.Value($"shl i64 {word}, 1")}")}, {highs}"); // the bytes of 255, as hashbrown's `match_empty`: 128 has bit 6 clear
-        fn.CondBranch(fn.Value($"icmp ne i64 {empty}, 0"), none, next); // a slot that never held an entry ends the probe
+        fn.CondBranch(fn.Value($"icmp ne i64 {empty}, 0"), none, next); // a slot of 255 ends the probe
         fn.Block(next);
         var stepped = fn.Value($"add i64 {fn.Value($"load i64, ptr {step}")}, 8");
         fn.Emit($"store i64 {stepped}, ptr {step}");
@@ -258,7 +260,9 @@ public sealed partial class Emitter
 
     /// <summary>
     /// M9: <c>map[key]</c>, the value of the key's entry or <c>null</c>, a value of its own that the caller makes a temporary of: the
-    /// entry's value counted once more, since the map keeps its count, so that nothing that changes the map afterwards reaches it.
+    /// entry's value counted once more, since the map keeps its count, so that nothing that changes the map afterwards reaches it. The
+    /// map is read before its key and held without a count of its own while the key is made: a key that changes the map,
+    /// <c>m[F(mut m)]</c> or <c>m[m.Remove(k) ?? d]</c>, is the checker's <c>changed-while-held</c> (M7; <c>CheckerTests</c>).
     /// </summary>
     private string EmitMapRead(IndexExpression index, MapType type)
     {
@@ -291,7 +295,7 @@ public sealed partial class Emitter
     /// M9, M4: <c>map[key] = value</c> on a <c>mut</c> variable or parameter: the value first, then the key, then the map the variable
     /// holds as they left it, as a path assignment reads its value first (M4). The map takes both over: a block other values hold is
     /// copied before the write (M3), the entry of the key takes the value and lets go of its old one and of the key given, and a new
-    /// entry takes both, in the first slot of its probe without an entry, in a block made anew where that slot never held one and the
+    /// entry takes both, in the first slot of its probe without an entry, in a block made anew where that slot is of 255 and the
     /// block has no room left.
     /// </summary>
     private void EmitMapWrite(Assignment a, IndexExpression index, MapType type)
@@ -498,7 +502,11 @@ public sealed partial class Emitter
         return fn.Value($"call {Ir(result)} {remove}(ptr {NarrowedPlace(n)}, {Ir(type.Key)} {key})");
     }
 
-    /// <summary>M9: <c>map.ContainsKey(key)</c>, whether the map has an entry of the key, as C#'s <c>Dictionary.ContainsKey</c>.</summary>
+    /// <summary>
+    /// M9: <c>map.ContainsKey(key)</c>, whether the map has an entry of the key, as C#'s <c>Dictionary.ContainsKey</c>. The map is read
+    /// before its key and held without a count of its own while the key is made: a key that changes the map,
+    /// <c>m.ContainsKey(F(mut m))</c>, is the checker's <c>changed-while-held</c> (M7; <c>CheckerTests</c>).
+    /// </summary>
     private string EmitMapContainsKey(CallExpression c)
     {
         var member = (MemberAccess)Unwrap(c.Callee);
@@ -590,7 +598,8 @@ public sealed partial class Emitter
         }
         else if (layout.IsBlock(whole))
         {
-            throw Unsupported(f.Line, $"a `{whole}` laid out as a block (C6)");
+            // the built-in `Entry` is declared by no unit, so the layout never makes it a block, whatever its type arguments hold
+            throw new InvalidOperationException($"a `{whole}` laid out as a block (C6)");
         }
         else
         {

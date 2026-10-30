@@ -60,7 +60,7 @@ public sealed partial class Checker
     }
 
     /// <summary>N1: whether the checker reads <paramref name="inner"/> made nullable, which <see cref="ResolveNullable"/> names; a map's read takes the same (M9).</summary>
-    private static bool CanBeNullable(KurzType inner) => inner is not (UnionType or FunctionType or PointerType or CFunctionType or VoidType);
+    private static bool CanBeNullable(KurzType inner) => inner is not (UnionType or FunctionType or PointerType or VoidType);
 
     /// <summary>
     /// The path an expression reads, where it is a variable that is no state outside a function (R13, which another function changes),
@@ -377,7 +377,7 @@ public sealed partial class Checker
     /// N5: <c>a?.M</c> is null where <c>a</c> is and <c>a.M</c> otherwise, and each member after it in the chain is read only where the
     /// chain did not stop, as in C#: the chain's value is the nullable type of the member read, or the member's own type where that is
     /// nullable. A member after it in the chain is read from the member before as that member's own type, so a nullable one there is
-    /// N2's. <c>?.</c> on a value that is not nullable is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "Error, as Rust"), and
+    /// N2's, unless the member's path is known not null (N3), which it is then read as. <c>?.</c> on a value that is not nullable is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "Error, as Rust"), and
     /// to a member whose type no <c>?</c> makes nullable (a union, a function, a pointer) <c>not supported</c> (section 4 says nothing of it).
     /// </summary>
     private Typed CheckChainMember(MemberAccess m)
@@ -402,7 +402,11 @@ public sealed partial class Checker
         else
         {
             from = chainMembers[m.Target];
-            if (Types.NonNull(from) is not null)
+            if (Types.NonNull(from) is { } known && PathOf(m.Target) is { } path && frame.Known.Contains(path))
+            {
+                from = known; // N3: a test showed the member's path not null, as C# narrows `u?.Email` after `u?.Email != null`
+            }
+            else if (Types.NonNull(from) is not null)
             {
                 Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is read from a `{from}` without a check (N2)");
                 return Typed.Error;
