@@ -106,6 +106,18 @@ public sealed partial class Checker
                             break;
                         }
 
+                        // N1 (the owner, 2026-10-30, "Allow, as C#"): a `null` arm over a subject whose type has no `null` is an arm no value
+                        // reaches, with no diagnostic, as C# compiles `case null` on a `string`; a second one is `unreachable-arm`, as on a `T?`
+                        if (Unwrap(vp.Value) is NullLiteral && !cases.Any(c => c is NullType or PointerType or TypeParameterType))
+                        {
+                            if (nullNamed)
+                            {
+                                Report(ErrorIds.UnreachableArm, arm.Line, "an earlier arm names the same literal (C4)");
+                            }
+
+                            break;
+                        }
+
                         var value = CheckExpression(vp.Value, subjectType); // each literal reads its reach from the type, a union's by its kind (T8 with D9)
                         if (value.IsError || value.Constant is null)
                         {

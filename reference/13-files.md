@@ -289,25 +289,34 @@ and closes as a file does (S3, S4, S5), and a listener accepts and closes. A lis
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
 what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
 address without a `:`, a port that is not a number from 0 to 65535 and a name whose lookup succeeds
-with no address are `InvalidInput`, as Rust gives them, and a lookup that `getaddrinfo` fails, with
-`EAI_NONAME` or any other of its errors but `EAI_SYSTEM`, is `NotFound`, each with the number 0; a
-lookup that fails with `EAI_SYSTEM` is the error of the system's number in `errno`, its kind and its
-number those of that error. The error of a connection that `Accept` gave names the string its listener's `Bind`
+with no address are `InvalidInput`, as Rust gives them; a lookup that `getaddrinfo` fails with
+`EAI_AGAIN`, a failure the resolver calls temporary, or `EAI_FAIL`, a failure of the name server, is
+`Other`, and one that it fails with `EAI_NONAME`, `EAI_NODATA` or any other of its errors but
+`EAI_SYSTEM` is `NotFound`, each with the number 0; a lookup that fails with `EAI_SYSTEM` is the
+error of the system's number in `errno`, its kind and its number those of that error. The error of a connection that `Accept` gave names the string its listener's `Bind`
 was given, `127.0.0.1:0` where the system picked the port, and one that `Connect` made the string it
 was given. The kind of a lookup that `getaddrinfo` fails is decided (§12, the owner, 2026-10-30,
-"NotFound, as C#"). *(assumed, §12: the reuse of the address, the 128, the type of `Port`, the
+"NotFound, as C#", and "Split NotFound / Other", which gives `EAI_AGAIN` and `EAI_FAIL` the kind
+`Other`, as Rust gives every failed lookup one kind, where .NET reads them as `TryAgain` and
+`NoRecovery`). *(assumed, §12: the reuse of the address, the 128, the type of `Port`, the
 grammar of the port and of a literal, the NUL byte, the errors of an address, `InvalidInput` for a
 lookup that succeeds with no address, the error of the system `EAI_SYSTEM` passes on, the error of
 the last address tried, and the string a connection's error names)*
 
 A read, a write and `TcpStream.Connect` on a socket wait at most 5 seconds by default, as long as a
-call of an actor waits (§6), and the time can be set for each socket, as Rust's `set_read_timeout`
-and `set_write_timeout` set `SO_RCVTIMEO` and `SO_SNDTIMEO` (§12, the owner, 2026-10-30, against a
-timeout as an argument with no default and against a default in the HTTP server alone). *(assumed, §12:
+call of an actor waits (§6), and the time of a read and a write can be set for each socket, as
+Rust's `set_read_timeout` and `set_write_timeout` set `SO_RCVTIMEO` and `SO_SNDTIMEO` (§12, the
+owner, 2026-10-30, against a timeout as an argument with no default and against a default in the
+HTTP server alone). `Connect` creates the socket such a setter would set, and another time reaches it
+through a second form that takes the time, `TcpStream.Connect(address, timeout)`, as Rust's
+`TcpStream::connect_timeout` takes it (§12, the owner, 2026-10-30, "Second form, as Rust", against a
+setting `Connect` reads before it creates the socket and against the 5 seconds alone); the type of
+the time stands open with the member that sets it (§14). *(assumed, §12:
 the bound of `TcpStream.Connect` for the whole call, every address it tries among it)*
 `l.Accept()` waits without a bound by default, as Rust's `TcpListener::accept` waits, and a bound
-can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", against the default
-of 5 seconds on `Accept` too). What a call gives when its time runs out, the member that sets the
+can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", whose option read "No
+default bound on Accept. Read, write and Connect keep 5 s, and a bound can still be set on a
+listener", against the default of 5 seconds on `Accept` too). What a call gives when its time runs out, the member that sets the
 time and how the bound holds for an actor's socket stand open (§14).
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
