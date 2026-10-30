@@ -126,8 +126,11 @@ Each line names a trap; its evidence is in the entry it links.
    can be refused; it paces its posts to the forge and waits on a rate-limit refusal. On 2026-10-02
    a review lost 88 findings that existed only in memory when the forge refused the posts; on
    2026-10-03 a run of 30 paid passes ended while printing, on an arrow the log's code page did
-   not hold ([knowledge/a-paid-result-is-printed-before-it-is-posted.md](knowledge/a-paid-result-is-printed-before-it-is-posted.md)).
-   Gate: `self-tests` (the reviewer's cases for the order, the encoding, the pace and the wait).
+   not hold ([knowledge/a-paid-result-is-printed-before-it-is-posted.md](knowledge/a-paid-result-is-printed-before-it-is-posted.md));
+   on 2026-10-30 the compiler gate on Windows ended so while it printed the output of a red test
+   run, before it named the failing test ([knowledge/a-windows-log-takes-the-consoles-code-page.md](knowledge/a-windows-log-takes-the-consoles-code-page.md)).
+   Gate: `self-tests` (the reviewer's cases for the order, the encoding, the pace and the wait, and
+   the compiler gate's case for the encoding).
 6. **A paid run starts on a bill that was counted, not remembered.** Every review run a session
    starts spends the owner's seat: a run off the pipeline, a dispatch
    (`gh workflow run review.yml`), and the run the forge starts by itself when a session marks a

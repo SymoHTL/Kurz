@@ -1133,5 +1133,6 @@
   {"tool": "tools/pr_gates.py", "anchor": "        if not findings:\n            lines.append(", "replacement": "        if False:\n            lines.append(", "expect": "cap: a post of the reviewer that names no file is listed"},
   {"tool": "tools/pr_gates.py", "anchor": "    return 0 if done else 1\n", "replacement": "    return 0\n", "expect": "cap: the command ends 1 on a refusal and on a thread still open"},
   {"tool": "tools/pr_gates.py", "anchor": "it skips what is there\")\n        print(LIMIT)\n        return 1\n", "replacement": "it skips what is there\")\n        return 1\n", "expect": "cap: the command ends 1 on a refusal and on a thread still open"},
-  {"tool": "tools/pr_gates.py", "anchor": "    print(LIMIT)\n    return 0 if done else 1\n", "replacement": "    return 0 if done else 1\n", "expect": "cap: the command ends 1 on a refusal and on a thread still open"}
+  {"tool": "tools/pr_gates.py", "anchor": "    print(LIMIT)\n    return 0 if done else 1\n", "replacement": "    return 0 if done else 1\n", "expect": "cap: the command ends 1 on a refusal and on a thread still open"},
+  {"tool": "tools/compiler_gate.py", "anchor": "        sys.stdout.reconfigure(encoding=\"utf-8\", errors=\"backslashreplace\")", "replacement": "        pass", "expect": "a red run's output that quotes a character outside the log's code page is printed"}
 ]
