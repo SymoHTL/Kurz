@@ -532,20 +532,42 @@ public sealed partial class Emitter
         string item = null!;
         InRegion(() => item = Convert(Owned(argument), TypeOf(argument), list.Element, argument.Line));
         var place = Place(Model.VariableOf(n), n.Line);
-        var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", Ir(list.Element)], () => AddBody(list.Element));
+        var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", Ir(list.Element)], () => AddBody(list));
         fn.Emit($"call void {add}(ptr {place}, {Ir(list.Element)} {item})");
     }
 
-    /// <summary>The helper of <c>Add</c>: the place of the list in <c>%a0</c>, the item, which the list takes over, in <c>%a1</c>.</summary>
-    private void AddBody(KurzType element)
+    /// <summary>
+    /// The helper of <c>Add</c>: the place of the list in <c>%a0</c>, the item, which the list takes over, in <c>%a1</c>. It holds the
+    /// push alone and calls the helper that makes room (<see cref="ReserveBody"/>) where the block has none, so that the optimiser
+    /// inlines the push where an <c>Add</c> stands and keeps the making of room out of line, as Rust's <c>Vec::push</c> calls a grow
+    /// it does not inline.
+    /// </summary>
+    private void AddBody(ListType list)
     {
-        var size = ItemSize(element);
-        var asked = fn.Alloca("i64", "asked");
+        var size = ItemSize(list.Element);
         var block = fn.Value("load ptr, ptr %a0");
         var push = fn.Label("push");
         var reserve = fn.Label("reserve");
         fn.CondBranch(fn.Value($"call i1 {StdFunction("ListHasRoom")}(ptr {block})"), push, reserve); // room in a block no other value holds
         fn.Block(reserve);
+        var room = Helper($"reserve.{Lower.Mangle(list)}", "void", ["ptr"], () => ReserveBody(list.Element), "noinline", "cold");
+        fn.Emit($"call void {room}(ptr %a0)");
+        fn.Branch(push);
+        fn.Block(push);
+        var slot = fn.Value($"call ptr {StdFunction("ListPush")}(ptr {fn.Value("load ptr, ptr %a0")}, i64 {size})");
+        fn.Emit($"store {Ir(list.Element)} %a1, ptr {slot}");
+        fn.Return(null);
+    }
+
+    /// <summary>
+    /// The helper that makes room for one item more in the list at the place in <c>%a0</c>: a copy of its block where another value
+    /// holds it (M3), else a larger block; a block the system refuses ends the program with <c>allocation-failed</c>.
+    /// </summary>
+    private void ReserveBody(KurzType element)
+    {
+        var size = ItemSize(element);
+        var asked = fn.Alloca("i64", "asked");
+        var block = fn.Value("load ptr, ptr %a0");
         var copy = fn.Label("copy");
         var grow = fn.Label("grow");
         var failed = fn.Label("failed");
@@ -561,21 +583,17 @@ public sealed partial class Emitter
         }
 
         fn.Emit($"store ptr {copied}, ptr %a0");
-        fn.Branch(push);
+        fn.Return(null);
         fn.Block(grow);
         var grown = fn.Value($"call ptr {StdFunction("ListGrow")}(ptr {block}, i64 {size}, ptr {asked})");
         var store = fn.Label("grown");
         fn.CondBranch(fn.Value($"icmp eq ptr {grown}, null"), failed, store);
         fn.Block(store);
         fn.Emit($"store ptr {grown}, ptr %a0");
-        fn.Branch(push);
+        fn.Return(null);
         fn.Block(failed);
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {fn.Value($"load i64, ptr {asked}")})");
         fn.Unreachable();
-        fn.Block(push);
-        var slot = fn.Value($"call ptr {StdFunction("ListPush")}(ptr {fn.Value("load ptr, ptr %a0")}, i64 {size})");
-        fn.Emit($"store {Ir(element)} %a1, ptr {slot}");
-        fn.Return(null);
     }
 
     /// <summary>
@@ -607,7 +625,7 @@ public sealed partial class Emitter
                     Retain(item, list.Element);
                 }
 
-                var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", element], () => AddBody(list.Element));
+                var add = Helper($"add.{Lower.Mangle(list)}", "void", ["ptr", element], () => AddBody(list));
                 fn.Emit($"call void {add}(ptr {kept}, {element} {item})");
                 fn.Block(next);
             });

@@ -218,6 +218,29 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_helper_of_Add_holds_the_push_and_calls_the_making_of_room_out_of_line()
+    {
+        // the push is small enough for the optimiser to inline at every `Add`, as Rust's `Vec::push`; the copy, the growth and the
+        // refused block stay in a helper it never inlines
+        var ir = Compile("mut xs = List<int>()\nxs.Add(1)\nxs.Add(2)\nprint(xs)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program!.Ir;
+        string Body(string name)
+        {
+            var start = ir.IndexOf($"define internal void @\"{name}\"(", StringComparison.Ordinal);
+            Assert.True(start >= 0, $"no {name} in the IR");
+            return ir[start..ir.IndexOf("\n}\n", start, StringComparison.Ordinal)];
+        }
+
+        var add = Body("add.List<int>");
+        Assert.Contains("call void @\"reserve.List<int>\"(ptr %a0)", add, StringComparison.Ordinal);
+        Assert.DoesNotContain("ListGrow", add, StringComparison.Ordinal);
+        Assert.DoesNotContain("ListCopy", add, StringComparison.Ordinal);
+        var reserve = Body("reserve.List<int>");
+        Assert.Contains(" noinline cold ", reserve.Split('\n')[0], StringComparison.Ordinal);
+        Assert.Contains("ListGrow", reserve, StringComparison.Ordinal);
+        Assert.Contains("ListCopy", reserve, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_construct_of_the_runtime_the_emitter_does_not_lay_out_is_the_compilers_defect_and_names_its_file()
     {
         var target = Builder.HostTarget!.Value;

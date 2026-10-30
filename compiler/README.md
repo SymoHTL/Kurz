@@ -565,7 +565,10 @@ items, each laid out as its type is (`std/std.kz`). A copy of a list copies the 
 the count. An `Add` writes in place where one value holds the block and it has room, grows the
 block where it has none, as Rust's `Vec` grows, to twice its room, at least 8 items of a byte, 4 of
 up to a kibibyte and 1 of more, and where other values hold the block it copies the items into a
-block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). An argument that
+block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). The write in place
+is all the helper of an `Add` holds, which the optimiser inlines where the `Add` stands; the growth and
+the copy are a helper of their own, which it never inlines, as Rust's `Vec::push` calls a grow it does
+not inline (`EmitterTests`). An argument that
 changes the list through a `mut` parameter is `changed-while-held` (M7), so the order in which an `Add`
 reads its argument and its list is not seen. What `Add`'s argument made besides its item, the
 environment of a lambda it gave to a call among them, is let go of before the list is read, so that
