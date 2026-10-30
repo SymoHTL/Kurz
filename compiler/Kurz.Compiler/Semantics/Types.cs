@@ -98,6 +98,16 @@ public sealed record ListType(KurzType Element) : KurzType
     public override int GetHashCode() => HashCode.Combine(nameof(ListType), Element);
 }
 
+/// <summary><c>Map&lt;K, V&gt;</c> (M9, T17).</summary>
+public sealed record MapType(KurzType Key, KurzType Value) : KurzType
+{
+    public override string Text => $"Map<{Key.Text}, {Value.Text}>";
+
+    public bool Equals(MapType? other) => other is not null && Types.Same(Key, other.Key) && Types.Same(Value, other.Value);
+
+    public override int GetHashCode() => HashCode.Combine(nameof(MapType), Key, Value);
+}
+
 /// <summary>A <c>data</c> type (D1), with its type arguments where it is generic (T19).</summary>
 public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArguments) : KurzType
 {
@@ -332,6 +342,7 @@ public static class Types
             (NullType, NullType) => true,
             (ErrorType, ErrorType) => true,
             (ListType x, ListType y) => Same(x.Element, y.Element),
+            (MapType x, MapType y) => Same(x.Key, y.Key) && Same(x.Value, y.Value),
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
@@ -435,6 +446,11 @@ public static class Types
         if (from is ListType fl && to is ListType tl)
         {
             return Same(fl.Element, tl.Element);
+        }
+
+        if (from is MapType fm && to is MapType tm)
+        {
+            return Same(fm.Key, tm.Key) && Same(fm.Value, tm.Value);
         }
 
         return false;
@@ -575,6 +591,13 @@ public static class Types
                     return element is ErrorType ? Error : new ListType(element);
                 }
 
+            case MapType m:
+                {
+                    var key = Substitute(m.Key, map);
+                    var value = Substitute(m.Value, map);
+                    return key is ErrorType || value is ErrorType ? Error : new MapType(key, value);
+                }
+
             case DataType d:
                 {
                     var arguments = d.TypeArguments.Select(a => Substitute(a, map)).ToList();
@@ -615,6 +638,7 @@ public static class Types
         {
             TypeParameterType p => ReferenceEquals(p.Symbol, parameter),
             ListType l => Mentions(l.Element, parameter),
+            MapType m => Mentions(m.Key, parameter) || Mentions(m.Value, parameter),
             DataType d => d.TypeArguments.Any(a => Mentions(a, parameter)),
             UnionType u => u.Cases.Any(c => Mentions(c, parameter)),
             FunctionType f => f.Parameters.Any(p => Mentions(p, parameter)) || Mentions(f.Result, parameter),

@@ -31,6 +31,7 @@ public sealed partial class Emitter
             CallKind.FromUtf8Lossy => EmitFromUtf8(c, info, lossy: true),
             CallKind.EnumFrom => EmitEnumFrom(c, info),
             CallKind.ListNew => "null", // M9: a list without items, which takes no block
+            CallKind.MapNew => "null", // M9: a map without entries, which takes no block
             CallKind.ListAdd => EmitListAddCall(c),
             CallKind.ListWhere => EmitListWhere(c, info),
             CallKind.FromRaw => EmitListFromRaw(c, info),

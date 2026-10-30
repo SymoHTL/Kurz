@@ -828,8 +828,15 @@ public sealed partial class Checker
 
         if (n.Name == "Map")
         {
-            NotSupported(n.Line, "Map (M9)");
-            return Types.Error;
+            if (n.TypeArguments.Count != 2)
+            {
+                Report(n.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, n.Line, "`Map` takes two type arguments (M9, T17)");
+                return Types.Error;
+            }
+
+            var key = Resolve(n.TypeArguments[0]);
+            var value = Resolve(n.TypeArguments[1]);
+            return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
         if (n.Name is "File" or "TcpListener" or "TcpStream")
@@ -1957,6 +1964,7 @@ public sealed partial class Checker
             {
                 ListType l => l.Element,
                 ErrorType or VoidType => Types.Error,
+                MapType => Unread(f.Collection.Line),
                 _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
                 _ => Report(f.Collection.Line, t.Type),
             };
@@ -1970,6 +1978,12 @@ public sealed partial class Checker
         KurzType Report(int line, KurzType type)
         {
             this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list or a range, not a `{type}` (C6, C8)");
+            return Types.Error;
+        }
+
+        KurzType Unread(int line)
+        {
+            NotSupported(line, "a `for` loop over a map, whose entries C6 names by a proposal (C6, M10)");
             return Types.Error;
         }
     }

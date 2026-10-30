@@ -579,6 +579,200 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(total)
         """;
 
+    // maps (M9): a read that is a value of its own, a write over a key, a copy written to (M3), a value read from the map it is
+    // written into, a key the map keeps after its variable changes, a `mut` parameter, a missing key, growth, a map in a data value
+    // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, keys of each kind the checker takes, and the texts
+    private const string Maps = """
+        data Box(string Name, Map<string, string> Tags)
+
+        string Made(int n) => "made {n}"
+
+        int Total(Map<int, int> m, int n) {
+            mut total = 0
+            for i in 0..<n {
+                total = total + (m[i] ?? 0)
+            }
+            return total
+        }
+
+        void Fill(mut Map<string, string> m, string k) {
+            m[k] = "{k}!"
+        }
+
+        mut names = Map<string, string>()
+        for i in 0..<20 {
+            names[Made(i)] = Made(i + 100)
+        }
+        kept = names[Made(3)] ?? "none"
+        names[Made(3)] = "over"
+        print(kept)
+        print(names[Made(3)] ?? "none")
+        copy = names
+        names[Made(4)] = "changed"
+        print(copy[Made(4)] ?? "none")
+        print(names[Made(4)] ?? "none")
+        names[Made(5)] = names[Made(6)] ?? "none"
+        print(names[Made(5)] ?? "none")
+        mut key = Made(7)
+        names[key] = "by key"
+        key = "other"
+        print(names[Made(7)] ?? "none")
+        Fill(mut names, Made(8))
+        print(names[Made(8)] ?? "none")
+        print(names["missing"] ?? "none")
+        mut squares = Map<int, int>()
+        for i in 0..<100 {
+            squares[i] = i * i
+        }
+        print(Total(squares, 100))
+        mut tags = Map<string, string>()
+        tags[Made(1)] = Made(2)
+        b = Box("box", tags)
+        tags[Made(1)] = "blue"
+        c = b with { Name = "other" }
+        print(b.Tags[Made(1)] ?? "none")
+        print(c)
+        mut lists = Map<string, List<string>>()
+        mut xs = List<string>()
+        xs.Add(Made(9))
+        lists["a"] = xs
+        xs.Add(Made(10))
+        print(lists["a"] ?? List<string>())
+        mut maps = List<Map<string, string>>()
+        maps.Add(tags)
+        tags[Made(1)] = "green"
+        print(maps[0][Made(1)] ?? "none")
+        mut nested = Map<string, Map<string, string>>()
+        nested["in"] = tags
+        tags = Map<string, string>()
+        print(nested["in"] ?? Map<string, string>())
+        f = () => names[Made(0)] ?? "none"
+        names[Made(0)] = "after"
+        print(f())
+        mut wide = Map<long, string>()
+        int minus = -1
+        wide[minus] = "minus one"
+        print(wide[-1] ?? "none")
+        mut small = Map<byte, int>()
+        small[200] = 7
+        print(small[200] ?? 0)
+        mut big = Map<ulong, int>()
+        big[18446744073709551615UL] = 8
+        print(big[18446744073709551615UL] ?? 0)
+        print(big[0] ?? 0)
+        mut answers = Map<bool, string>()
+        answers[true] = "yes"
+        answers[false] = "no"
+        print(answers[true] ?? "none")
+        print(answers[false] ?? "none")
+        mut chars = Map<char, int>()
+        chars['ü'] = 9
+        print(chars['ü'] ?? 0)
+        print(chars['u'] ?? 0)
+        empty = Map<string, int>()
+        print(empty)
+        mut one = Map<int, string>()
+        one[1] = "a"
+        one[1] = "b"
+        print(one)
+        """;
+
+    private static readonly string[] MapsPrint =
+    [
+        "made 103",
+        "over",
+        "made 104", // the copy keeps what it had (M3)
+        "changed",
+        "made 106",
+        "by key",
+        "made 8!",
+        "none",
+        "328350", // 100 entries, which grow the map from 8 slots to 128
+        "made 2",
+        "Box { Name = other, Tags = [made 1: made 2] }",
+        "[made 9]",
+        "blue",
+        "[made 1: green]",
+        "made 100", // the lambda's copy of `names` (F15)
+        "minus one", // an `int` key widened to the `long` of the map (T8)
+        "7",
+        "8",
+        "0",
+        "yes",
+        "no",
+        "9",
+        "0",
+        "[]",
+        "[1: b]", // a write over a key keeps one entry
+    ];
+
+    // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
+    // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
+    // of maps whose entry is written over, and a map of strings whose value and key a write over a key lets go of
+    private const string MapRounds = """
+        data Pair(Map<int, int> A, int B)
+
+        Map<int, int> Make(int n) {
+            mut m = Map<int, int>()
+            for i in 0..<n {
+                m[i] = i
+            }
+            return m
+        }
+
+        int Seven(Map<int, int> m) => m[7] ?? 0
+
+        int Early(int n) {
+            m = Make(n)
+            if n > 0 {
+                return Seven(m)
+            }
+            return 0
+        }
+
+        void Drop(int n) => Make(n)
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(1000)
+            mut b = a
+            b[7] = 8
+            p = Pair(Make(1000), 1)
+            q = p with { B = 2 }
+            for x in 0..<3 {
+                c = Make(1000)
+                if x == Seven(c) - 6 {
+                    break
+                }
+            }
+            for j in 0..<3 {
+                c = Make(1000)
+                if j == 1 {
+                    continue
+                }
+                total = total + Seven(c)
+            }
+            Make(1000)
+            Drop(1000)
+            l = Make(1000)
+            h = () => Seven(l)
+            mut ms = List<Map<int, int>>()
+            ms.Add(Make(1000))
+            mut nested = Map<int, Map<int, int>>()
+            nested[0] = Make(1000)
+            nested[0] = Make(10)
+            mut words = Map<string, string>()
+            words["{round}"] = "{round}"
+            words["a"] = "b"
+            words["a"] = "{round}"
+            total = total + Early(1000) + Seven(q.A) + Seven(b) - Seven(a) + h() + Seven(ms[0]) + Seven(nested[0] ?? Map<int, int>()) + (words["a"] ?? "").Bytes.Count - (words["{round}"] ?? "").Bytes.Count - 36
+        }
+        print(round)
+        print(total)
+        """;
+
     private static Compilation Compile(string text, CheckedRuntime runtime, params string[] grants) =>
         Builder.Compile(SourceText.FromString("program.kz", text), grants, runtime, testBuild: true);
 
@@ -711,6 +905,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Values, toolchain.Runtime, "list-values"), 0, ValuesPrint, "");
         Ran(BuildAndRun(Sharing, toolchain.Runtime, "list-sharing"), 0, SharingPrint, "");
         Ran(BuildAndRun(Strings, toolchain.Runtime, "string-values", "raw"), 0, StringsPrint, "");
+        Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
     }
 
     [Fact]
@@ -720,9 +915,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Values, fenced, "list-values-fenced"), 0, ValuesPrint, "");
         Ran(BuildAndRun(Sharing, fenced, "list-sharing-fenced"), 0, SharingPrint, "");
         Ran(BuildAndRun(Strings, fenced, "string-values-fenced", "raw"), 0, StringsPrint, "");
+        Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
+        Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process
         var writer = Edited([.. Fence, ("runtime/common/runtime.kz", "pub void Start() {\n    sys.Start()\n", "pub void Start() {\n    sys.Start()\n    byte* p = Allocate(16)\n    raw {\n        std.Free(p, 16)\n        p[0] = 1\n    }\n")]);
@@ -734,6 +931,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         Ran(BuildAndRun(Rounds, Budget(), "list-rounds"), 0, ["3000", "12003000"], "");
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
+        Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -746,6 +944,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var kept = BuildAndRun(strings, Budget(), "string-rounds-held");
         Assert.Equal(1, kept.Code);
         Assert.StartsWith("error: allocation-failed (", kept.Error, StringComparison.Ordinal);
+
+        // and a map of 1000 entries held each round, a block of 32800 bytes in the size class of 65536: 196 megabytes
+        const string maps = "Map<int, int> Make(int n) {\n    mut m = Map<int, int>()\n    for i in 0..<n {\n        m[i] = i\n    }\n    return m\n}\n\nmut all = List<Map<int, int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    all.Add(Make(1000))\n}\nprint(all.Count)\n";
+        var full = BuildAndRun(maps, Budget(), "map-rounds-held");
+        Assert.Equal(1, full.Code);
+        Assert.StartsWith("error: allocation-failed (", full.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -921,6 +1125,39 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string text = "mut xs = List<long>()\nxs.Add(1)\nprint(xs.Count)\n";
         Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "list-refused"), 1, [], "error: allocation-failed (48 bytes)\n");
         Ran(BuildAndRun(text, toolchain.Runtime, "list-granted"), 0, ["1"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_map_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
+    {
+        // the first block of a `Map<long, long>`: 32 bytes of counts and keys and 8 entries of a hash, a key and a value
+        const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-refused"), 1, [], "error: allocation-failed (224 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "map-granted"), 0, ["1"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_key_is_hashed_by_SipHash_1_3_under_keys_the_system_gives_each_process()
+    {
+        // the hash Rust's `HashMap` takes by default: the two vectors under keys of 0 are CPython's `siphash13` of the same bytes, the
+        // third is under the reference implementation's keys, from the same code in Python, which gives the reference's SipHash-2-4
+        // vectors with two and four rounds
+        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string hash = "    byte* p = Allocate(15)\n    raw {\n        p[0] = 97\n        p[1] = 98\n        p[2] = 99\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 3))\n    WriteError(\"\\n\")\n    raw {\n        for i in 0..<15 {\n            p[i] = byte(i)\n        }\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 15))\n    WriteError(\"\\n\")\n    WriteNumber(std.SipHash13(506097522914230528UL, 1084818905618843912UL, p, 15))\n    WriteError(\"\\n\")\n";
+        var runtime = Edited(("std/std.kz", "\nulong SipHash13(", "\npub ulong SipHash13("), ("runtime/common/runtime.kz", start, start + hash));
+        Ran(BuildAndRun("print(1)\n", runtime, "map-siphash"), 0, ["1"], "13851880170939887858\n17514137373579004394\n15213397504630561110\n");
+
+        // the keys differ between two runs of one program, so the order of a map's 20 entries does too (M10), as in Rust
+        const string text = "mut m = Map<int, int>()\nfor i in 0..<20 {\n    m[i] = i\n}\nprint(m)\n";
+        var compilation = Compile(text, toolchain.Runtime);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var program = toolchain.Build(compilation.Program, "map-order");
+        var first = Toolchain.Run(program);
+        var second = Toolchain.Run(program);
+        Assert.Equal((0, ""), (first.Code, first.Error));
+        Assert.Equal((0, ""), (second.Code, second.Error));
+        Assert.NotEqual(first.Output, second.Output);
+        Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first.Output).Trim('[', ']').Split(", ").Order());
     }
 
     [Theory]

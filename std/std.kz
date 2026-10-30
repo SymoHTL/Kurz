@@ -625,3 +625,291 @@ pub void StringFree(byte* bytes) {
 
     Free(bytes - 16, 16 + room)
 }
+
+// The block of a map (M9). A map value is the address of its block, null for a map without entries,
+// which takes no block. A block holds the count of the map values that hold it, 8 bytes, the count of
+// its entries and the count of slots it has room for, a power of two, 4 bytes each, the two keys of
+// its hash, 8 bytes each, and from its 32nd byte the slots, each `entry` bytes, as the emitted code
+// lays out an entry: the hash of its key, 8 bytes, 0 in a slot without an entry, then the key and the
+// value. An entry stands in the slot its hash gives, or in the first slot after it without one, the
+// last slot followed by the first. A map value is copied without its entries, and a write into a block
+// that other values hold first copies the block (M3), as a list's. The emitted code holds the counts of
+// the entries' own blocks.
+
+// The keys of the hash of the thread's next map: random bytes of the system at its first map, the
+// first key raised by one for each map after it, as Rust's `RandomState::new` takes and raises them.
+thread static mut ulong mapKey0 = 0
+thread static mut ulong mapKey1 = 0
+thread static mut bool mapKeyed = false
+
+// The count of the map's entries.
+pub int MapCount(byte* block) {
+    mut int count = 0
+    raw {
+        if block != null {
+            count = *Ptr<int>(block + 8)
+        }
+    }
+
+    return count
+}
+
+// The count of slots of a map's block.
+pub int MapRoom(byte* block) {
+    mut int room = 0
+    raw {
+        room = *Ptr<int>(block + 12)
+    }
+
+    return room
+}
+
+// The address of the first slot of a map's block.
+pub byte* MapSlots(byte* block) {
+    mut byte* slots = null
+    raw {
+        slots = block + 32
+    }
+
+    return slots
+}
+
+// One more map value holds the block.
+pub void MapRetain(byte* block) {
+    ListRetain(block)
+}
+
+// One map value less holds the block: whether it was the last, after which the caller lets go of the
+// entries' own blocks and frees the block with `MapFree`.
+pub bool MapRelease(byte* block) {
+    return ListRelease(block)
+}
+
+// Whether another map value holds the block too.
+pub bool MapShared(byte* block) {
+    return ListShared(block)
+}
+
+// The block given back to the allocator, its slots each `entry` bytes.
+pub void MapFree(byte* block, long entry) {
+    Free(block, 32 + long(MapRoom(block)) * entry)
+}
+
+// A block of `room` slots of `entry` bytes, held by one map value, with no entry and the keys `key0`
+// and `key1`; null with `asked` set to the bytes asked for where the system refuses.
+byte* MapBlock(long room, long entry, ulong key0, ulong key1, mut long asked) {
+    long size = 32 + room * entry
+    mut byte* p = null
+    raw {
+        p = Allocate(size)
+        if p == null {
+            asked = size
+        } else {
+            *Ptr<long>(p) = 1
+            *Ptr<int>(p + 8) = 0
+            *Ptr<int>(p + 12) = int(room)
+            *Ptr<ulong>(p + 16) = key0
+            *Ptr<ulong>(p + 24) = key1
+            mut long i = 0
+            while i < room {
+                *Ptr<ulong>(p + 32 + i * entry) = 0
+                i = i + 1
+            }
+        }
+    }
+
+    return p
+}
+
+// The first block of a map, of 8 slots of `entry` bytes, with the thread's next keys; null with
+// `asked` set to the bytes asked for where the system refuses.
+pub byte* MapNew(long entry, mut long asked) {
+    mut ulong key0 = 0
+    mut ulong key1 = 0
+    raw {
+        if !mapKeyed {
+            sys.Random(Ptr<byte>(&key0), 8)
+            sys.Random(Ptr<byte>(&key1), 8)
+            mapKey0 = key0
+            mapKey1 = key1
+            mapKeyed = true
+        }
+
+        key0 = mapKey0
+        key1 = mapKey1
+        mapKey0 = mapKey0 +% 1
+    }
+
+    return MapBlock(8, entry, key0, key1, mut asked)
+}
+
+// For a write to a block other map values hold (M3): a copy of its slots and its keys, held by one map
+// value, the old block held by one value less, which never frees it. The caller counts the copied
+// entries' own blocks. Null with `asked` set to the bytes asked for where the system refuses.
+pub byte* MapCopy(byte* block, long entry, mut long asked) {
+    long size = 32 + long(MapRoom(block)) * entry
+    mut byte* p = null
+    raw {
+        p = Allocate(size)
+        if p == null {
+            asked = size
+        } else {
+            *Ptr<long>(p) = 1
+            mut long i = 8
+            while i < size {
+                p[i] = block[i]
+                i = i + 1
+            }
+
+            *Ptr<long>(block) = *Ptr<long>(block) - 1
+        }
+    }
+
+    return p
+}
+
+// Whether one more entry would fill more than seven of the block's eight slots, the load at which
+// Rust's `HashMap` grows its table.
+pub bool MapFull(byte* block) {
+    return (long(MapCount(block)) + 1) * 8 > long(MapRoom(block)) * 7
+}
+
+// The first slot without an entry at or after the slot the hash gives, in a block that has one: where
+// an entry of that hash goes.
+pub byte* MapEmpty(byte* block, ulong hash, long entry) {
+    long mask = long(MapRoom(block)) - 1
+    mut long i = long(hash & ulong(mask))
+    mut byte* slot = null
+    raw {
+        slot = block + 32 + i * entry
+        while *Ptr<ulong>(slot) != 0 {
+            i = (i + 1) & mask
+            slot = block + 32 + i * entry
+        }
+    }
+
+    return slot
+}
+
+// For an entry added to a full block no other value holds: a block of twice its slots with its
+// entries and its keys, the old block freed; null with `asked` set to the bytes asked for where the
+// system refuses, and with the bytes of the grown block where its slots would be more than the
+// largest `int` counts.
+pub byte* MapGrow(byte* block, long entry, mut long asked) {
+    long room = long(MapRoom(block))
+    if room * 2 > 2147483647 {
+        asked = 32 + room * 2 * entry
+        return null
+    }
+
+    mut ulong key0 = 0
+    mut ulong key1 = 0
+    raw {
+        key0 = *Ptr<ulong>(block + 16)
+        key1 = *Ptr<ulong>(block + 24)
+    }
+
+    byte* p = MapBlock(room * 2, entry, key0, key1, mut asked)
+    if p == null {
+        return null
+    }
+
+    raw {
+        *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
+        mut long i = 0
+        while i < room {
+            byte* from = block + 32 + i * entry
+            ulong hash = *Ptr<ulong>(from)
+            if hash != 0 {
+                byte* to = MapEmpty(p, hash, entry)
+                mut long j = 0
+                while j < entry {
+                    to[j] = from[j]
+                    j = j + 1
+                }
+            }
+
+            i = i + 1
+        }
+    }
+
+    Free(block, 32 + room * entry)
+    return p
+}
+
+// The count of the map's entries raised by one.
+pub void MapAdded(byte* block) {
+    raw {
+        *Ptr<int>(block + 8) = *Ptr<int>(block + 8) + 1
+    }
+}
+
+// The hash of the `count` bytes at `bytes` under the keys of the map's block, with its highest bit set,
+// so that no entry's hash is the 0 of a slot without one.
+pub ulong MapHash(byte* block, byte* bytes, long count) {
+    mut ulong key0 = 0
+    mut ulong key1 = 0
+    raw {
+        key0 = *Ptr<ulong>(block + 16)
+        key1 = *Ptr<ulong>(block + 24)
+    }
+
+    return SipHash13(key0, key1, bytes, count) | 9223372036854775808UL
+}
+
+// SipHash-1-3 of the `count` bytes at `bytes` under the keys `key0` and `key1`, the hash Rust's
+// `HashMap` takes by default: one round for each word of eight bytes, read with its first byte lowest,
+// and three after the last word, which holds the bytes left and the count in its highest byte.
+ulong SipHash13(ulong key0, ulong key1, byte* bytes, long count) {
+    mut ulong v0 = key0 ^ 8317987319222330741UL
+    mut ulong v1 = key1 ^ 7237128888997146477UL
+    mut ulong v2 = key0 ^ 7816392313619706465UL
+    mut ulong v3 = key1 ^ 8387220255154660723UL
+    long whole = count / 8 * 8
+    mut long at = 0
+    while at <= whole {
+        mut ulong word = 0
+        mut int n = 8
+        if at == whole {
+            word = ulong(count) << 56
+            n = int(count - whole)
+        }
+
+        mut int k = 0
+        raw {
+            while k < n {
+                word = word | ulong(bytes[at + long(k)]) << (8 * k)
+                k = k + 1
+            }
+        }
+
+        v3 = v3 ^ word
+        SipRound(mut v0, mut v1, mut v2, mut v3)
+        v0 = v0 ^ word
+        at = at + 8
+    }
+
+    v2 = v2 ^ 255UL
+    SipRound(mut v0, mut v1, mut v2, mut v3)
+    SipRound(mut v0, mut v1, mut v2, mut v3)
+    SipRound(mut v0, mut v1, mut v2, mut v3)
+    return v0 ^ v1 ^ v2 ^ v3
+}
+
+// One round of SipHash over its four words.
+void SipRound(mut ulong v0, mut ulong v1, mut ulong v2, mut ulong v3) {
+    v0 = v0 +% v1
+    v1 = v1 << 13 | v1 >> 51
+    v1 = v1 ^ v0
+    v0 = v0 << 32 | v0 >> 32
+    v2 = v2 +% v3
+    v3 = v3 << 16 | v3 >> 48
+    v3 = v3 ^ v2
+    v0 = v0 +% v3
+    v3 = v3 << 21 | v3 >> 43
+    v3 = v3 ^ v0
+    v2 = v2 +% v1
+    v1 = v1 << 17 | v1 >> 47
+    v1 = v1 ^ v2
+    v2 = v2 << 32 | v2 >> 32
+}

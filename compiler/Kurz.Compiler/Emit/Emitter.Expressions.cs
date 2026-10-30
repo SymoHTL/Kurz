@@ -56,6 +56,8 @@ public sealed partial class Emitter
                 return fn.Value($"load {Ir(type)}, ptr {ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index)}");
             case IndexExpression i when TypeOf(i.Target) is ListType list:
                 return HeldCopy(i, EmitListIndex(i, list), type);
+            case IndexExpression i when TypeOf(i.Target) is MapType map:
+                return EmitMapRead(i, map);
             case UnaryExpression u:
                 return EmitUnary(u, type);
             case BinaryExpression b:
@@ -745,6 +747,8 @@ public sealed partial class Emitter
                 return StringValue("null"); // A4
             case ListType list:
                 return ListText(value, list, line);
+            case MapType map:
+                return MapText(value, map, line);
             default:
                 throw Unsupported(line, $"the text of a `{type}`");
         }

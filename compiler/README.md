@@ -324,9 +324,11 @@ memory, which it takes from the system's `Memory` a mebibyte at a time; an alloc
 the layout a block was allocated with: a block of a size class to the front of its class's free
 blocks, where the next request of the class takes it, and a larger one to the system through the
 target's `Release`; the mebibytes a thread carved from stay its own. A target's directory gives
-`Start`, `Write`, `Exit`, `Memory`, `Release`, `Trace` and `Crashing`: on Linux over the C library,
+`Start`, `Write`, `Exit`, `Memory`, `Release`, `Random`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
-`Write` calling again where a signal interrupted it (section 6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
+`Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap` and `Random` calling
+`getrandom`, again where a signal interrupted it, on Windows over `kernel32`, `Release` calling `VirtualFree`,
+and `Random` over `bcrypt`, calling `BCryptGenRandom` with the system's preferred generator. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -354,7 +356,8 @@ the record assumes and lists as open (section 14). `Listen` sets `SO_REUSEADDR`,
 with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
-`BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9).
+`BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
+block of a map, its growth and the hash of its keys (M9, below).
 
 The text of a `float` and of a `double` is computed in `common/` from the value's bits, which the
 emitted code passes as a `uint` and a `ulong`: the fewest digits that read back as the same value,
@@ -495,6 +498,26 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
   program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
   lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
+- maps (M9): `Map<K, V>()`, which takes no block, `map[key]`, a value of its own of the type `V?`,
+  null for a missing key, `map[key] = value`, which runs the value before the key (M4) and over a key
+  the map holds writes the value, letting go of the one before and of the key given, their text,
+  `[key: value, ...]` in the order of the map's slots and `[]` without entries (A6, M10), and maps of
+  every key the checker takes and every value the emitter lays out, in variables, parameters, fields,
+  unions, lists and maps. A map is the address of a block, null for a map without entries: the count
+  of the values that hold it, 8 bytes, the count of its entries and the number of its slots, a power
+  of two, 4 bytes each, and the two keys of its hash, 8 bytes each, then the slots, each the hash of
+  its key, 8 bytes, 0 for an empty slot, the key and the value, laid out as a `data` value of the
+  three. A key's hash is SipHash-1-3 of its bytes, a string's UTF-8 bytes and any other key widened to
+  64 bits, with the highest bit set, the hash Rust's `HashMap` takes by default; the slot of a key is
+  the first, from the hash's low bits on, that is empty or holds the key, the next slot after a full
+  one (linear probing, this directory's reading, where Rust's `hashbrown` probes groups of control
+  bytes). A map grows to twice its slots where an entry would fill more than seven eighths of them,
+  `hashbrown`'s load factor, and a write to a map another value holds copies the block first (M3), as
+  a list's `Add` does. The keys of the hash come from the system's `Random` once per thread, at its
+  first map, and each new map takes the first key plus one, as Rust's `RandomState` takes them, so
+  that the order of a map's entries differs between runs (M10) and a block takes its keys with it. A
+  block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
+  asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
   and `TcpStream`, each of a file's and a stream's `Read`, `Write` and `Close` and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
@@ -625,7 +648,11 @@ refuses every request for memory after sixteen, within which a program that make
 through every way out of a block, the body of a `void` function and a lambda's environment among
 them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
 inaccessible, under which the values' programs and twenty rounds of the same program print the
-same lines, and so do the strings' program and twenty rounds of strings through every way out of a block;
+same lines, and so do the strings' program and twenty rounds of strings through every way out of a block,
+and the maps' program and twenty rounds of maps; maps made and dropped through every way out of a block
+for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
+of three inputs against vectors from outside this repository; two runs of one program that print a
+map of 20 entries in two orders; the bytes of a map's first block the system refuses;
 the target's own `Release`, after
 which a write into a freed block of more than 262144 bytes ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
@@ -652,11 +679,11 @@ checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` or a `Clear` on a list in
-a field (M5), `==` on a value that holds a list (D3), `s.Chars` as a list (T15), a call on a file or a socket in a build for
+a field (M5), `==` on a value that holds a list or a map (D3), `s.Chars` as a list (T15), a call on a file or a socket in a build for
 Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
-The reference counting of section 3 is emitted for lists, strings, the environments of lambdas and
+The reference counting of section 3 is emitted for lists, strings, maps, the environments of lambdas and
 the values that hold them (above) and for nothing else: memory a value of a block type takes is never
 given back, the lists and strings it holds among it (above), so a program that makes such values
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
@@ -893,10 +920,10 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, and N9's paths none, since they run through a
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
-M9 for lists), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+M9 for lists and maps), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files and sockets: S1 to S11; S12's grants are a
 package's, and the checker reads a program), and the rules of `print` and of a value's text that
-these chapters reach: A1 to A4, A8, A10 for a type parameter, A11, A12 and A14. A program's
+these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
 grant other than these two is none R7 and R16 name, and the checker refuses it as its caller's
@@ -972,7 +999,11 @@ type in C's layout (R16, R17); the text of a raw pointer, of a C function value 
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
-file; `Map` (M8, M9, M10), an assignment into an index or into a path through one, a `mut` method
+file; a map with keys other than strings, integers, `char` and `bool`, or with values whose nullable
+type N1 does not read, a type parameter among them, since the record says neither which types a key
+takes nor what the read of a nullable value is, a `for` loop over a map, whose entries C6 names by a
+proposal, and an assignment into a map that is no variable or into a path through an entry (M9, M10,
+C6, M4), an assignment into an index or into a path through one, a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's
 name (D16), and `equal by` (K8); among the bases of a `data` type a class, an interface or a
@@ -1142,8 +1173,8 @@ round can ask about it by the rule's id.
   ("confirmed"), at any depth: a type met again on the way, `Q<() => int>` through the field `N` of a
   `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
-  itself with other arguments, `P<List<T>>` in a `P<T>`. A map and a class, which section 4 assumes
-  can hold one, the checker says `not supported` to (M9, chapter 7) before the walk asks, and a
+  itself with other arguments, `P<List<T>>` in a `P<T>`. A map can when its value can, and a class, which section 4 assumes
+  can hold one, the checker says `not supported` to (chapter 7) before the walk asks, and a
   nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter

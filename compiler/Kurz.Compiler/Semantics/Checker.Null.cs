@@ -45,17 +45,22 @@ public sealed partial class Checker
     private KurzType ResolveNullable(NullableType n)
     {
         var inner = Resolve(n.Inner);
-        switch (inner)
+        if (inner is ErrorType)
         {
-            case ErrorType:
-                return Types.Error;
-            case UnionType or FunctionType or PointerType or CFunctionType or TypeParameterType or VoidType:
-                NotSupported(n.Line, $"a nullable `{inner}` (N1)");
-                return Types.Error;
-            default:
-                return Types.Nullable(inner);
+            return Types.Error;
         }
+
+        if (!CanBeNullable(inner))
+        {
+            NotSupported(n.Line, $"a nullable `{inner}` (N1)");
+            return Types.Error;
+        }
+
+        return Types.Nullable(inner);
     }
+
+    /// <summary>N1: whether the checker reads <paramref name="inner"/> made nullable, which <see cref="ResolveNullable"/> names; a map's read takes the same (M9).</summary>
+    private static bool CanBeNullable(KurzType inner) => inner is not (UnionType or FunctionType or PointerType or CFunctionType or TypeParameterType or VoidType);
 
     /// <summary>
     /// The path an expression reads, where it is a variable that is no state outside a function (R13, which another function changes),

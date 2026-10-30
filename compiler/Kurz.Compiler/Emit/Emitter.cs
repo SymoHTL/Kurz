@@ -778,6 +778,9 @@ public sealed partial class Emitter
             case IndexExpression i when TypeOf(i.Target) is PointerType p:
                 place = ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index);
                 break;
+            case IndexExpression i when TypeOf(i.Target) is MapType map:
+                EmitMapWrite(a, i, map);
+                return;
             default:
                 throw Unsupported(a.Line, $"an assignment to {ExpressionName(a.Target)}");
         }

@@ -47,6 +47,21 @@ pub long Write(int fd, byte* bytes, long count) {
     return long(written)
 }
 
+// The system's generator of random bytes.
+extern "C" in "bcrypt" {
+    int BCryptGenRandom(void* algorithm, byte* bytes, uint count, uint options)
+}
+
+// `count` bytes of the system's randomness at `bytes`, from `BCryptGenRandom` with the system's
+// preferred generator (`BCRYPT_USE_SYSTEM_PREFERRED_RNG` is 2), as Rust's standard library took the
+// keys of a map's hash on Windows from its release 1.53 to 1.77; where the system gives none, the bytes
+// stay as they are. A count above what a `uint` holds is no count a map asks for.
+pub void Random(byte* bytes, long count) {
+    raw {
+        BCryptGenRandom(null, bytes, uint(count), 2)
+    }
+}
+
 // The end of the process with the exit code, at once (design record, section 6). The code is 0 or
 // above: `ExitProcess` takes a DWORD, and a negative `int` does not fit the `uint` it is converted to.
 pub void Exit(int code) {

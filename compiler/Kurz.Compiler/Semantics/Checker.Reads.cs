@@ -271,6 +271,7 @@ public sealed partial class Checker
     {
         FunctionType or TypeParameterType => true,
         ListType l => HoldsFunction(l.Element, path),
+        MapType m => HoldsFunction(m.Value, path),
         UnionType u => u.Cases.Any(c => HoldsFunction(c, path)),
         DataType d => DataHoldsFunction(d, path),
         _ => false, // a number, a string, a pointer, a C function

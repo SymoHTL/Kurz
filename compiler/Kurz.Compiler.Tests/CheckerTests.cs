@@ -2003,6 +2003,44 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Email + "mut e = Email(1)\nmatch e {\n    null => print(0)\n    string s => {\n        e = Email(2)\n        print(e.Bytes.Count)\n    }\n}"));
     }
 
+    // ---- maps (M9) ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_map_gives_a_missing_key_as_null_and_takes_an_entry_through_a_mut_variable()
+    {
+        // M9: `Map<K, V>()` makes a map without entries, `m[k]` is a `V?` that is null for a missing key (N2), and `m[k] = v` changes the
+        // variable (M4); a key takes what widens into the key type (T8), as an argument does; a map stands in a parameter, a `mut` one
+        // among them, and in a field
+        Assert.Equal("Map<string, int>", TypeOf("m = Map<string, int>()\nprint(m)", "m"));
+        Assert.Equal("int?", TypeOf("m = Map<string, int>()\nn = m[\"a\"]\nprint(n)", "n"));
+        Clean("mut m = Map<long, string>()\nint k = 1\nm[k] = \"a\"\nprint(m[k] ?? \"none\")");
+        Clean("void Fill(mut Map<char, bool> m) {\n    m['a'] = true\n}\n\nmut seen = Map<char, bool>()\nFill(mut seen)\nprint(seen)");
+        Clean("data Index(Map<string, int> Ids)\n\ni = Index(Map<string, int>())\nprint(i.Ids[\"a\"] ?? 0)");
+        Clean("int Bump(mut Map<string, int> t) {\n    t[\"b\"] = 2\n    return 1\n}\n\nmut m = Map<string, int>()\nm[\"a\"] = Bump(mut m)\nprint(m)"); // M4: the value is made before the write
+
+        Assert.Equal([(ErrorIds.AssignImmutable, 2)], Errors("m = Map<string, int>()\nm[\"a\"] = 1"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut m = Map<string, int>()\nm[1] = 1")); // T1: a key
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut m = Map<string, int>()\nm[\"a\"] = \"b\"")); // a value
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("m = Map<string, int>()\nprint(m[1] ?? 0)")); // a key read
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut m = Map<string, int>()\nm[\"a\"] = null")); // N6
+        Assert.Equal([(ErrorIds.NullableUnchecked, 2)], Errors("m = Map<string, int>()\nprint(m[\"a\"] + 1)"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 2)], Errors("mut m = Map<string, int>()\nf = (int x) => { m[\"a\"] = x }\nf(1)\nprint(m)")); // F11
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("m = Map<string>()\nprint(m)")); // T17
+        Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("m = Map()\nprint(m)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("m = Map<string, int>(1)\nprint(m)"));
+        Assert.Equal([(ErrorIds.NoText, 4)], Errors("data Rule(() => int Step)\n\nm = Map<string, Rule>()\nprint(m)")); // A7: the text of its values
+        Assert.Equal([(ErrorIds.StaticState, 1)], Errors("thread static mut Map<string, int> m = Map<string, int>()\nprint(1)", grants: "raw")); // F12
+    }
+
+    [Fact]
+    public void A_write_into_a_map_a_call_still_holds_is_changed_while_held()
+    {
+        // M7: an arm's assignment and a `mut` argument change the map the call's first argument holds
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, Find(2) else {\n    NotFound => {\n        ages[\"a\"] = 1\n        5\n    }\n}))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors("int Fill(mut Map<string, int> m) {\n    m[\"a\"] = 1\n    return 1\n}\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, Fill(mut ages)))"));
+        Clean("int Fill(mut Map<string, int> m) {\n    m[\"a\"] = 1\n    return 1\n}\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, 0) + Fill(mut ages))"); // the call around the read has ended
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
@@ -2018,7 +2056,15 @@ public sealed class CheckerTests
     [InlineData("T? Id<T>(T x) => x\n\nprint(1)", "1: a nullable `T` (N1)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
-    [InlineData("mut ages = Map<string, int>()\nages[\"Ann\"] = 31", "1: Map (M9)")]
+    [InlineData("mut m = Map<double, int>()\nm[1.5] = 1", "1: a map with keys of type `double` (M9)")]
+    [InlineData("data P(int X)\n\nm = Map<P, int>()\nprint(m)", "3: a map with keys of type `P` (M9)")]
+    [InlineData("m = Map<string, int?>()\nprint(m)", "1: a map with values of type `int?` (M9, N1)")]
+    [InlineData("void F<T>(T x) {\n    m = Map<string, T>()\n    print(m)\n}\n\nF(1)", "2: a map with values of type `T` (M9, N1)")]
+    [InlineData("m = Map<string, () => int>()\nprint(1)", "1: a map with values of type `() => int` (M9, N1)")]
+    [InlineData("m = Map<string, int | string>()\nprint(1)", "1: a map with values of type `int | string` (M9, N1)")]
+    [InlineData("m = Map<string, int>()\nfor e in m {\n    print(e)\n}", "2: a `for` loop over a map, whose entries C6 names by a proposal (C6, M10)")]
+    [InlineData("data Box(Map<string, int> M)\n\nmut b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a map that is no variable, or into a path through an entry (M4, M9)")]
+    [InlineData("mut m = Map<string, List<int>>()\nm[\"a\"][0] = 1", "2: an assignment into an index (M9)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
     [InlineData("print(string(1))", "1: a conversion to `string` (A5 to A7)")]

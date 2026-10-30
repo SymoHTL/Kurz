@@ -43,6 +43,7 @@ extern "C" {
     int inet_pton(int family, byte* text, void* address)
     int getaddrinfo(byte* host, byte* service, void* hints, void* list)
     void freeaddrinfo(void* list)
+    long getrandom(byte* bytes, long count, uint options)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -97,6 +98,23 @@ pub byte* Memory(long bytes) {
 pub void Release(byte* p, long bytes) {
     raw {
         munmap(Ptr<void>(p), bytes)
+    }
+}
+
+// `count` bytes of the system's randomness at `bytes`, from `getrandom`, as Rust's standard library
+// takes the keys of a map's hash on Linux; a call a signal interrupted (`EINTR` is 4) is made again,
+// and where the system gives no bytes, those left stay as they are.
+pub void Random(byte* bytes, long count) {
+    mut long at = 0
+    raw {
+        while at < count {
+            long got = getrandom(bytes + at, count - at, 0)
+            if got > 0 {
+                at = at + got
+            } else if got == 0 || *__errno_location() != 4 {
+                at = count
+            }
+        }
     }
 }
 

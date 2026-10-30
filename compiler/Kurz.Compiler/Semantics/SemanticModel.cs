@@ -23,6 +23,9 @@ public enum CallKind
     /// <summary><c>List&lt;T&gt;()</c> (M9).</summary>
     ListNew,
 
+    /// <summary><c>Map&lt;K, V&gt;()</c> (M9).</summary>
+    MapNew,
+
     /// <summary>A data value made by the type's name (D2); <see cref="CallInfo.Data"/> is the type.</summary>
     DataNew,
 

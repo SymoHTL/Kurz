@@ -147,6 +147,7 @@ internal sealed class Layout(IrModule module)
                 DataType d => Fields(d).Select(Refusal).FirstOrDefault(r => r is not null),
                 UnionType u => u.Cases.Where(c => c is not VoidType).Select(Refusal).FirstOrDefault(r => r is not null),
                 ListType l => Refusal(l.Element),
+                MapType m => Refusal(m.Key) ?? Refusal(m.Value),
                 FunctionType f => f.Parameters.Append(f.Result).Where(t => t is not VoidType).Select(Refusal).FirstOrDefault(r => r is not null),
                 _ => Lower.Supported(type) ? null : Lower.Refusal(type),
             };

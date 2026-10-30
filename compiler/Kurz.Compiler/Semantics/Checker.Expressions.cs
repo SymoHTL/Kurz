@@ -369,6 +369,7 @@ public sealed partial class Checker
         PrimitiveType or EnumType or NullType => true, // A4: null shows `null`
         ErrorType => true,
         ListType l => HasText(l.Element, seen),
+        MapType m => HasText(m.Value, seen), // A6: a key is a string, a number, a `char` or a `bool`
         UnionType u => u.Cases.All(c => HasText(c, seen)),
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
@@ -670,6 +671,11 @@ public sealed partial class Checker
             return CheckPart(i, target, range);
         }
 
+        if (target.Type is MapType map)
+        {
+            return CheckMapRead(i, target, map);
+        }
+
         var index = CheckExpression(i.Index, target.Type is PointerType ? null : Types.Int); // R10: an offset is an `int` or a `long`, so a literal takes the type L10 gives it
         if (target.Type is PointerType)
         {
@@ -699,6 +705,18 @@ public sealed partial class Checker
                 Report(ErrorIds.TypeMismatch, i.Line, $"a `{target.Type}` is not indexed (M9)");
                 return Typed.Error;
         }
+    }
+
+    /// <summary>M9: <c>map[key]</c>, the value of the key's entry or <c>null</c>, of the nullable type of the map's values (N1).</summary>
+    private Typed CheckMapRead(IndexExpression i, Typed target, MapType map)
+    {
+        var key = CheckExpression(i.Index, map.Key);
+        if (!key.IsError && !Types.Assignable(key.Type, map.Key))
+        {
+            Report(Types.MismatchId(key.Type, map.Key), i.Index.Line, $"a `{key.Type}` where a key of `{target.Type}`, a `{map.Key}`, is required (M9, T1)");
+        }
+
+        return new Typed(Types.Nullable(map.Value));
     }
 
     /// <summary>

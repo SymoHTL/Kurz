@@ -163,7 +163,7 @@ public sealed partial class Checker
     {
         PrimitiveType { Kind: Primitive.String } => Holding.Counted,
         PrimitiveType => Holding.Nothing,
-        ListType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
+        ListType or MapType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
         UnionType u => Worst(u.Cases.Select(c => Holds(c, seen))),
         DataType d => seen.Contains(d.Symbol) ? Holding.Counted : HoldsFields(d, seen),
         TypeParameterType => Holding.Unknown,
@@ -254,6 +254,7 @@ public sealed partial class Checker
     {
         PointerType p => pointers.Contains(p) || HoldsPointer(p.Pointee, pointers),
         ListType l => HoldsPointer(l.Element, pointers),
+        MapType m => HoldsPointer(m.Value, pointers),
         UnionType u => u.Cases.Any(c => HoldsPointer(c, pointers)),
         FunctionType f => f.Parameters.Append(f.Result).Any(t => HoldsPointer(t, pointers)),
         CFunctionType f => f.Parameters.Append(f.Result).Any(t => HoldsPointer(t, pointers)),
@@ -270,6 +271,8 @@ public sealed partial class Checker
                 return true;
             case ListType l:
                 return HoldsRaw(l.Element, seen);
+            case MapType m:
+                return HoldsRaw(m.Value, seen);
             case UnionType u:
                 return u.Cases.Any(c => HoldsRaw(c, seen));
             case DataType d when !seen.Contains(d.Symbol):
@@ -518,6 +521,17 @@ public sealed partial class Checker
                 return;
             }
 
+            if (target.Type is MapType map)
+            {
+                foreach (var d in captured)
+                {
+                    Add(d);
+                }
+
+                CheckMapWrite(a, index, map, members);
+                return;
+            }
+
             if (target.Type is not PointerType)
             {
                 NotSupported(a.Line, "an assignment into an index (M9)");
@@ -586,6 +600,57 @@ public sealed partial class Checker
         else if (!Types.Assignable(value.Type, current))
         {
             Report(Types.MismatchId(value.Type, current), a.Value.Line, $"a `{value.Type}` where a `{current}` is required (T1)");
+        }
+    }
+
+    /// <summary>
+    /// M9, M4: <c>map[key] = value</c> sets the key's entry, an assignment into a path that starts at a <c>mut</c> variable; a map
+    /// reached through a field, an item or a call, and a path that goes on after the key, are not read.
+    /// </summary>
+    private void CheckMapWrite(Assignment a, IndexExpression index, MapType map, List<MemberAccess> members)
+    {
+        if (members.Count > 0 || Unwrap(index.Target) is not NameExpression name || !model.IsVariable(name))
+        {
+            NotSupported(a.Line, "an assignment into a map that is no variable, or into a path through an entry (M4, M9)");
+            CheckLoosely(index.Index, a.Value);
+            return;
+        }
+
+        var (variable, captured) = Lookup(name.Name);
+        if (captured)
+        {
+            Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{name.Name}` and cannot change it (F11)");
+        }
+        else if (!variable!.Mut)
+        {
+            Report(ErrorIds.AssignImmutable, a.Line, $"`{name.Name}` was declared without `mut`: nothing reachable through it changes (D4, M4)");
+        }
+        else
+        {
+            changes[a] = new Change(variable, name.Name, a.Line, $"an assignment changes `{name.Name}`"); // M7, in an arm inside an expression
+        }
+
+        variable!.Changed = true;
+        var key = CheckExpression(index.Index, map.Key);
+        if (!key.IsError && !Types.Assignable(key.Type, map.Key))
+        {
+            Report(Types.MismatchId(key.Type, map.Key), index.Index.Line, $"a `{key.Type}` where a key of `{map}`, a `{map.Key}`, is required (M9, T1)");
+        }
+
+        model.RecordType(index, new Typed(map.Value));
+        var value = CheckExpression(a.Value, map.Value, keepCases: map.Value is UnionType);
+        if (value.IsError)
+        {
+            return;
+        }
+
+        if (Types.IsVoid(value.Type))
+        {
+            Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
+        }
+        else if (!Types.Assignable(value.Type, map.Value))
+        {
+            Report(Types.MismatchId(value.Type, map.Value), a.Value.Line, $"a `{value.Type}` where a `{map.Value}` is required (T1)");
         }
     }
 

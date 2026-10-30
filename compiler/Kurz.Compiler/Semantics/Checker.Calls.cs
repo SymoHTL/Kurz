@@ -119,9 +119,7 @@ public sealed partial class Checker
 
                     if (n.Name == "Map")
                     {
-                        NotSupported(c.Line, "Map (M9)");
-                        CheckArgumentsLoosely(c);
-                        return Typed.Error;
+                        return CheckMapConstruction(c);
                     }
 
                     if (cFunctions.TryGetValue(n.Name, out var cFunction))
@@ -652,6 +650,57 @@ public sealed partial class Checker
         var list = new ListType(element);
         model.RecordCall(c, new CallInfo(CallKind.ListNew, null, null, null, NoMap, [], 0, list));
         return new Typed(list);
+    }
+
+    /// <summary>M9: <c>Map&lt;K, V&gt;()</c>, a map without entries.</summary>
+    private Typed CheckMapConstruction(CallExpression c)
+    {
+        if (c.TypeArguments.Count != 2)
+        {
+            Report(c.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, c.Line, "`Map` takes two type arguments (M9, T17)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (c.Arguments.Count != 0)
+        {
+            Report(ErrorIds.ArgumentMismatch, c.Line, "`Map<K, V>()` takes no arguments (M9)");
+            CheckArgumentsLoosely(c);
+        }
+
+        var key = Resolve(c.TypeArguments[0]);
+        var value = Resolve(c.TypeArguments[1]);
+        var map = Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, c.Line);
+        if (Types.IsError(map))
+        {
+            return Typed.Error;
+        }
+
+        model.RecordCall(c, new CallInfo(CallKind.MapNew, null, null, null, NoMap, [], 0, map));
+        return new Typed(map);
+    }
+
+    /// <summary>
+    /// M9: the type of a map the checker reads, with a key whose equality and hash it gives, a string, an integer, a <c>char</c> or a
+    /// <c>bool</c>, and a value whose nullable type the checker reads (N1), which the read <c>map[key]</c> is; any other is <c>not
+    /// supported</c>, since the record does not say which types a key takes, and what a read of a nullable value or of a type
+    /// parameter, which can stand for one, is waits for section 4.
+    /// </summary>
+    private KurzType MapOf(KurzType key, KurzType value, int line)
+    {
+        if (!(Types.IsInteger(key) || key is PrimitiveType { Kind: Primitive.String or Primitive.Char or Primitive.Bool }))
+        {
+            NotSupported(line, $"a map with keys of type `{key}` (M9)");
+            return Types.Error;
+        }
+
+        if (!CanBeNullable(value))
+        {
+            NotSupported(line, $"a map with values of type `{value}` (M9, N1)");
+            return Types.Error;
+        }
+
+        return new MapType(key, value);
     }
 
     /// <summary>D2, D7, D11: a data value made by the type's name with the base's fields first.</summary>
@@ -1324,6 +1373,8 @@ public sealed partial class Checker
                 return true;
             case ListType l when argument is ListType la:
                 return Unify(l.Element, la.Element, map);
+            case MapType m when argument is MapType ma:
+                return Unify(m.Key, ma.Key, map) && Unify(m.Value, ma.Value, map);
             case DataType d when argument is DataType da && ReferenceEquals(d.Symbol, da.Symbol):
                 return d.TypeArguments.Zip(da.TypeArguments).All(pair => Unify(pair.First, pair.Second, map));
             case FunctionType f when argument is FunctionType fa && f.Parameters.Count == fa.Parameters.Count:
