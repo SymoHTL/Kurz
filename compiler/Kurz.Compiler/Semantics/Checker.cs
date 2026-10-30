@@ -270,12 +270,17 @@ public sealed partial class Checker
         }
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
+        // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
+        // top-level code, never `unused-variable` (V13) and no name a function cannot declare (the owner, 2026-10-30, "Top-level code only")
+        var arguments = new VariableSymbol("args", new ListType(Types.String), false, VariableKind.Parameter, 0);
+        frame.Scope.Variables[arguments.Name] = arguments;
+        model.RecordArguments(arguments);
         foreach (var s in program.Statements)
         {
             CheckStatement(s);
         }
 
-        foreach (var v in frame.Scope.Variables.Values)
+        foreach (var v in frame.Scope.Variables.Values.Where(v => !ReferenceEquals(v, arguments)))
         {
             topLevel[v.Name] = v.Type;
         }
@@ -1269,20 +1274,22 @@ public sealed partial class Checker
         functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
 
     /// <summary>
-    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9), and the types of
-    /// files and sockets and their functions (S2, S8, S9).
+    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9), the types of
+    /// files and sockets and their functions (S2, S8, S9), and <c>Environment</c> (S13, S14).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
-        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream";
+        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment";
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["Entry"] = "C6" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
     /// (T15), <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18), and <c>IoError</c> with its <c>IoKind</c>, the
     /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux (S1; section 12, the owner,
-    /// 2026-10-29, "One union, as Rust"), and <c>Entry</c>, the entry of a loop over a map, a value as C#'s <c>KeyValuePair</c> is one (C6;
+    /// 2026-10-29, "One union, as Rust"), <c>EnvError</c> with its <c>EnvKind</c>, the case of a read of a variable of the environment that
+    /// gave no string, in the form of <c>IoError</c> (S14; section 12, the owner, 2026-10-30, "An outcome, as Rust"), and <c>Entry</c>, the
+    /// entry of a loop over a map, a value as C#'s <c>KeyValuePair</c> is one (C6;
     /// section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies by <c>with</c> as every data type
     /// (section 4, the owner, 2026-10-30, "Both, as a data type").
     /// </summary>
@@ -1300,6 +1307,8 @@ public sealed partial class Checker
                 HostUnreachable, ConnectionRefused, ConnectionReset, ConnectionAborted, NotConnected, WriteZero, InvalidData, Other
             }
             data IoError(IoKind Kind, int Code, string Path)
+            enum EnvKind { NotPresent, NotUnicode }
+            data EnvError(EnvKind Kind, string Name)
             data Entry<K, V>(K Key, V Value)
             """),
         new DiagnosticBag());
@@ -1700,6 +1709,14 @@ public sealed partial class Checker
     private void CheckAssignOrDeclare(AssignOrDeclare a)
     {
         var (variable, captured) = Lookup(a.Name);
+        if (variable is not null && ReferenceEquals(variable, model.Arguments))
+        {
+            // S13: the top-level code's own `args`; the reads after it read the program's arguments (E1)
+            Report(ErrorIds.Redeclared, a.Line, "`args` is the program's arguments, which the top-level code sees (S13, V9)");
+            CheckExpression(a.Value, null);
+            return;
+        }
+
         if (variable is not null)
         {
             RequireRawForState(variable, a.Line);

@@ -1996,7 +1996,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence
-        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
         const string write = "    byte* p = Allocate(16)\n    raw {\n        std.Free(p, 16)\n        p[0] = 1\n    }\n";
         Crashed(BuildAndRun("print(1)\n", Edited([.. Fence, ("runtime/common/runtime.kz", start, start + write)]), "list-fence-control"));
         const string large = "    byte* p = Allocate(300000)\n    raw {\n        std.Free(p, 300000)\n        p[0] = 1\n    }\n";
@@ -2039,7 +2039,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // the target's own `Release`: a write into a block of 33554432 bytes, more than the thread keeps with its header, after its
         // `Free` ends the process with the system's signal
-        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
         const string write = "    byte* p = Allocate(33554432)\n    raw {\n        p[0] = 1\n        std.Free(p, 33554432)\n        p[0] = 2\n    }\n";
         Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + write)), "list-large-freed"));
         const string notFreed = "    byte* p = Allocate(33554432)\n    raw {\n        p[0] = 1\n        p[0] = 2\n    }\n";
@@ -2078,7 +2078,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // five blocks of 8388544 bytes, 8388560 with their headers, freed in turn: the first four take 33554240 bytes and stay the
         // thread's, so a write into the fourth after its `Free` ends nothing; the fifth would take the kept bytes past 33554432 and goes
         // back to the system, where a write into it ends the process with the system's signal
-        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
         const string blocks = "    byte* a = Allocate(8388544)\n    byte* b = Allocate(8388544)\n    byte* c = Allocate(8388544)\n    byte* d = Allocate(8388544)\n    byte* e = Allocate(8388544)\n    raw {\n        std.Free(a, 8388544)\n        std.Free(b, 8388544)\n        std.Free(c, 8388544)\n        std.Free(d, 8388544)\n        std.Free(e, 8388544)\n";
         Ran(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + blocks + "        d[0] = 1\n    }\n")), "list-kept-within"), 0, ["1"], "");
         Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + blocks + "        e[0] = 1\n    }\n")), "list-kept-past"));
@@ -2091,7 +2091,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // which fills the 33554432 the thread keeps. A request of 16777184 bytes, 16777200 with its header, less than half of the kept
         // block's, takes memory of its own from the system, which its `Free` gives back, as the kept block leaves no room for it, so a
         // write into it after its `Free` ends the process with the system's signal
-        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
         static string Request(long size) => $"    byte* a = Allocate(33554416)\n    raw {{\n        std.Free(a, 33554416)\n    }}\n    byte* q = Allocate({size})\n    raw {{\n        std.Free(q, {size})\n        q[0] = 1\n    }}\n";
         Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + Request(16777184))), "list-kept-below-half"));
         // the positive control: a request of 16777200 bytes, 16777216 with its header, half of them, takes the kept block, which its
@@ -2381,7 +2381,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // the hash Rust's `HashMap` takes by default: the two vectors under keys of 0 are CPython's `siphash13` of the same bytes, the
         // third is under the reference implementation's keys, from the same code in Python, which gives the reference's SipHash-2-4
         // vectors with two and four rounds
-        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
         const string hash = "    byte* p = Allocate(15)\n    raw {\n        p[0] = 97\n        p[1] = 98\n        p[2] = 99\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 3))\n    WriteError(\"\\n\")\n    raw {\n        for i in 0..<15 {\n            p[i] = byte(i)\n        }\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 15))\n    WriteError(\"\\n\")\n    WriteNumber(std.SipHash13(506097522914230528UL, 1084818905618843912UL, p, 15))\n    WriteError(\"\\n\")\n";
         var runtime = Edited(("std/std.kz", "\nulong SipHash13(", "\npub ulong SipHash13("), ("runtime/common/runtime.kz", start, start + hash));
         Ran(BuildAndRun("print(1)\n", runtime, "map-siphash"), 0, ["1"], "13851880170939887858\n17514137373579004394\n15213397504630561110\n");

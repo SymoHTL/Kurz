@@ -1,4 +1,4 @@
-# 13. Files and sockets
+# 13. Files, sockets and the process
 
 ### S1 (decided, §12) A failed call returns `IoError`
 
@@ -412,7 +412,8 @@ the system completes without the accept.
 ### S11 (decided, §12) Not on Windows
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
-none of these calls. A build for any other target whose runtime lacks them says `not supported` at the
+none of these calls, and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
+and `File.Modified` (S13 to S15; §12, assumed). A build for any other target whose runtime lacks them says `not supported` at the
 call as well, as the record says of a call of the program that reaches a function a target's runtime
 lacks (§2, §12, the owner, 2026-10-30).
 
@@ -424,7 +425,9 @@ A package that calls the file functions of this chapter, `File` and `Directory`,
 and one that calls its socket functions `allow network`. Every package on the path of calls from the
 program's code to such a function needs the grant, so that no package borrows a grant through
 another that has it (§13, the owner, 2026-10-30, "Every package on path"). A call without the grant
-is the compile error `files-not-allowed` or `network-not-allowed` at the call. For a package on the
+is the compile error `files-not-allowed` or `network-not-allowed` at the call. A package that reads a
+variable of the environment needs `allow env` in the same way, and a read without it is `env-not-allowed`;
+the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno"). For a package on the
 path that calls no such function itself, the error stands at its call that leads on toward the
 function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
 error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
@@ -437,3 +440,114 @@ shortest"). *(assumed, §13: `Directory` among the file functions; such a call c
 the function)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
 
 No case: a case is a program and no package, and the program needs no grant.
+
+### S13 (decided, §2, §12) The command line
+
+Top-level code sees `args`, a `List<string>` of the program's arguments without its name, and
+`Environment.Args()` is the list with the program's name first (§12, the owner, 2026-10-30, "Both"). Only
+the top-level statements see `args`: in a function it is `unknown-name`, as a top-level variable is
+(V10), and a function may name a parameter or a variable of its own `args`, while a top-level `args` of
+the program's own is `redeclared` (§12, the owner, 2026-10-30, "Top-level code only"). An argument that
+is not UTF-8 ends the process with the run-time error `invalid-argument` (§12, the owner, 2026-10-30,
+"Refused, as Rust"): `Environment.Args()` raises it at its call, and `args`, made before the first
+statement of a top-level code that names it, with no place and no trace, as `random-failed`. The
+program's name is the first argument as the process was started, and `kurz run app.kz -- a b` gives the
+program the words after `--` (§2, the owner, 2026-10-30, "After `--`, as cargo"). *(assumed, §12: the
+id, the place of `args`'s refusal, the name)*
+
+No case expects `invalid-argument`: a case gives its program no argument; `ProcessTests` runs a built
+program with an argument that is not UTF-8.
+
+Case: [system/arguments.kz](../corpus/system/arguments.kz)
+```kurz
+print(args)
+print(args.Count)
+print(Environment.Args().Count)
+```
+
+Case: [system/args-parameter.kz](../corpus/system/args-parameter.kz)
+```kurz
+int Count(List<string> args) {
+    return args.Count
+}
+
+print(Count(args))
+```
+
+Case: [system/args-in-function.kz](../corpus/system/args-in-function.kz)
+```kurz
+int Count() {
+    return args.Count
+}
+
+print(Count())
+```
+
+Case: [system/args-redeclared.kz](../corpus/system/args-redeclared.kz)
+```kurz
+args = 1
+print(args)
+```
+
+### S14 (decided, §12, §13) The environment
+
+`Environment.Variable(name)` reads one variable of the process's environment, `string | EnvError`: a
+variable that is not set is the kind `NotPresent`, and one whose value is not UTF-8 the kind
+`NotUnicode` (§12, the owner, 2026-10-30, "An outcome, as Rust"). Every file sees `data EnvError(EnvKind
+Kind, string Name)` and `enum EnvKind { NotPresent, NotUnicode }`, as it sees `IoError` (S1), and the
+text of an `EnvError` (A3) is the words of its kind in lower case, a colon and the name,
+`not present: HOME`; a name that is empty or holds `=` or a NUL byte is `NotPresent`. A package that
+reads a variable needs `allow env` (S12). *(assumed, §12: the name `Variable`, the type, its text and
+the names that are `NotPresent`)*
+
+Case: [system/environment-missing.kz](../corpus/system/environment-missing.kz)
+```kurz
+string Read(string name) => Environment.Variable(name) else {
+    EnvError e => "{e}"
+}
+
+match Environment.Variable("KURZ_CASE_NOT_SET") {
+    string value => print(value)
+    EnvError e => {
+        print(e)
+        print(e.Kind)
+        print(e.Name)
+    }
+}
+print(Read("A=B"))
+```
+
+### S15 (decided, §12) The clock and the time of a file
+
+`timestamp.Now` is the time of the wall clock, a `timestamp` (T24), read from
+`clock_gettime(CLOCK_REALTIME)` on Linux, and `File.Modified(path)` is the time the file at `path` was
+last written, `timestamp | IoError` (§12, the owner, 2026-10-30, "`Timestamp.Now`, as C#" and
+"`timestamp.Now`"). The clock goes back where the system's clock is set back; a directory gives its
+time; and a time the 64 bits of a `timestamp` do not hold is an `IoError` of the kind `InvalidData`.
+*(assumed, §12: the clock set back, the directory and the time out of range)*
+
+Case: [system/clock.kz](../corpus/system/clock.kz)
+```kurz
+first = timestamp.Now
+second = timestamp.Now
+print(second >= first)
+```
+
+Case: [system/file-modified.kz](../corpus/system/file-modified.kz)
+```kurz
+void | IoError Times() {
+    File.WriteAll("stamped.txt", "x".Bytes)
+    written = File.Modified("stamped.txt")
+    print(written <= timestamp.Now)
+    print(timestamp.Now - written < 1min)
+    File.Delete("stamped.txt")
+    match File.Modified("no-such-file.txt") {
+        timestamp t => print(t)
+        IoError e => print(e)
+    }
+}
+
+Times() else {
+    IoError e => print(e)
+}
+```

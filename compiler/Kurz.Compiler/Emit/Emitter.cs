@@ -156,6 +156,15 @@ public sealed partial class Emitter
         Trace("main", "kz.main", 1);
         InScope(() =>
         {
+            if (Model.Arguments is { Read: true } arguments)
+            {
+                // S13: `args`, made before the first statement, its refusal with no place (the owner, 2026-10-30, "Refused, as Rust")
+                var slot = fn.Alloca("ptr", "args");
+                fn.Emit($"store ptr {EmitArguments(1, 0, Model.ArgumentsLine)}, ptr {slot}");
+                slots[arguments] = slot;
+                Declare(slot, arguments.Type);
+            }
+
             foreach (var s in program.Tree.Statements)
             {
                 EmitStatement(s);
@@ -183,8 +192,8 @@ public sealed partial class Emitter
             }
         }
 
-        var main = new IrFunction("i32 @main()");
-        main.Emit($"call void {start}()");
+        var main = new IrFunction("i32 @main(i32 %argc, ptr %argv)");
+        main.Emit($"call void {start}(i32 %argc, ptr %argv)");
         main.Emit("call void @kz.main()");
         main.Emit($"call void {finish}()");
         main.Unreachable();

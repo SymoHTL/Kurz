@@ -182,7 +182,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             var program = Compile("print(1)\n", Builder.CheckRuntime(target)).Program;
             Assert.True(program is not null, $"no program for {target}");
-            Assert.Contains("define i32 @main()", program.Ir, StringComparison.Ordinal);
+            Assert.Contains("define i32 @main(i32 %argc, ptr %argv)", program.Ir, StringComparison.Ordinal);
             Assert.Contains(call, program.Ir, StringComparison.Ordinal);
         }
     }
@@ -262,7 +262,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var target = Builder.HostTarget!.Value;
         var path = $"runtime/{Runtime.Directory(target)}/";
         var files = Runtime.Files.Select(f => f.Path.StartsWith(path, StringComparison.Ordinal)
-            ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub void Start() {", "pub void Start() {\n    print(\"ab\".Chars[0])", StringComparison.Ordinal)))
+            ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub void Start(int count, byte* values) {", "pub void Start(int count, byte* values) {\n    print(\"ab\".Chars[0])", StringComparison.Ordinal)))
             : f).ToList();
         var errors = new List<string>();
         var runtime = Runtime.Check(files, target, errors);

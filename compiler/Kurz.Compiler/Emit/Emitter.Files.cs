@@ -169,6 +169,16 @@ public sealed partial class Emitter
                     break;
                 }
 
+            case CallKind.FileModified:
+                {
+                    var nanoseconds = fn.Alloca("i64", "modified");
+                    var r = SysCall("FileModified", $"ptr {c}, ptr {nanoseconds}");
+                    FreePath(c, path);
+                    FailBelowZero(o, r, path);
+                    Succeed(o, fn.Value($"load i64, ptr {nanoseconds}"));
+                    break;
+                }
+
             case CallKind.DirectoryList:
                 {
                     var names = new ListType(Types.String);
@@ -549,5 +559,141 @@ public sealed partial class Emitter
         }
 
         return words.ToString();
+    }
+
+    // ---- the command line, the environment and the clock --------------------------------------------------
+
+    /// <summary>What a build for Windows says <c>not supported</c> with at a read of the command line, the environment or the clock (S11).</summary>
+    internal const string ProcessNotOnWindows = "a read of the command line, the environment or the clock, which the runtime of Windows does not give (S11)";
+
+    /// <summary>Whether the data type is <c>EnvError</c>, which no file can declare beside the one every file sees (S14, V9).</summary>
+    private static bool IsEnvError(KurzType type) => type is DataType { Symbol.Name: "EnvError" };
+
+    /// <summary>
+    /// S13: the program's arguments from the one at <paramref name="skip"/> on, a list the caller holds a count of. One that is not UTF-8
+    /// raises <c>invalid-argument</c> at <paramref name="line"/>, or, where the line is 0, before the first statement, ends the process
+    /// with no place; a build for Windows says <c>not supported</c> at <paramref name="readAt"/>, or at the line where it is 0.
+    /// </summary>
+    private string EmitArguments(int skip, int line, int readAt = 0)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(readAt == 0 ? line : readAt, ProcessNotOnWindows);
+        }
+
+        var list = fn.Alloca("ptr", "args");
+        fn.Emit($"store ptr null, ptr {list}");
+        var refused = fn.Value($"call i32 {SysFunction("Arguments")}(i32 {Number(skip)}, ptr {list})");
+        var bad = fn.Label("args.refused");
+        var ok = fn.Label("args");
+        fn.CondBranch(fn.Value($"icmp ne i32 {refused}, 0"), bad, ok);
+        fn.Block(bad);
+        if (line > 0)
+        {
+            Raise("invalid-argument", line);
+        }
+        else
+        {
+            fn.Emit($"call void {RuntimeFunction("InvalidArgument")}()");
+            fn.Unreachable();
+        }
+
+        fn.Block(ok);
+        return fn.Value($"load ptr, ptr {list}");
+    }
+
+    /// <summary>
+    /// S14: <c>Environment.Variable(name)</c>, the value of the variable or the case <c>EnvError</c> with its kind and the name, of which
+    /// it holds a count: <c>NotPresent</c> where the variable is not set or the name is empty or holds <c>=</c> or a NUL byte, as Rust's
+    /// <c>var</c> reads them, and <c>NotUnicode</c> where its value is not UTF-8.
+    /// </summary>
+    private string EmitVariable(CallExpression c, CallInfo info)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(c.Line, ProcessNotOnWindows);
+        }
+
+        var union = (UnionType)Sub(info.Result);
+        var error = (DataType)union.Cases.Single(IsEnvError);
+        var name = Arguments(c, info, _ => Types.String, _ => false, _ => null, cConvention: false, owned: false).Single()["%kz.str ".Length..];
+        var slot = fn.Alloca(Ir(union), "env");
+        var done = fn.Label("env.done");
+        var copy = fn.Value($"call ptr {RuntimeFunction("CPath")}(%kz.str {name})");
+        var nul = fn.Label("env.nul");
+        var read = fn.Label("env.read");
+        fn.CondBranch(fn.Value($"icmp eq ptr {copy}, null"), nul, read);
+        fn.Block(nul);
+        StoreEnvError(slot, union, error, "NotPresent", name, done);
+        fn.Block(read);
+        var value = fn.Alloca("%kz.str", "value");
+        fn.Emit($"store %kz.str {StringValue(string.Empty)}, ptr {value}");
+        var r = fn.Value($"call i32 {SysFunction("Variable")}(ptr {copy}, ptr {value})");
+        FreePath(copy, name);
+        var found = fn.Label("env.found");
+        var missing = fn.Label("env.missing");
+        var invalid = fn.Label("env.invalid");
+        fn.Terminate($"switch i32 {r}, label %{invalid} [ i32 0, label %{found} i32 1, label %{missing} ]");
+        fn.Block(found);
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, Types.String, fn.Value($"load %kz.str, ptr {value}"))}, ptr {slot}");
+        fn.Branch(done);
+        fn.Block(missing);
+        StoreEnvError(slot, union, error, "NotPresent", name, done);
+        fn.Block(invalid);
+        StoreEnvError(slot, union, error, "NotUnicode", name, done);
+        fn.Block(done);
+        return fn.Value($"load {Ir(union)}, ptr {slot}");
+    }
+
+    /// <summary>The case <c>EnvError</c> of the kind and the name, of which it holds a count (S14).</summary>
+    private void StoreEnvError(string slot, UnionType union, DataType error, string kind, string name, string done)
+    {
+        Retain(name, Types.String);
+        var withKind = fn.Value($"insertvalue {Ir(error)} undef, {Ir(Layout.Fields(error)[0])} {KindValue(error, kind)}, 0");
+        var value = fn.Value($"insertvalue {Ir(error)} {withKind}, %kz.str {name}, 1");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, error, value)}, ptr {slot}");
+        fn.Branch(done);
+    }
+
+    /// <summary>
+    /// S15: <c>timestamp.Now</c>, the wall clock in nanoseconds from 1970-01-01; where the runtime cannot map the page the system writes
+    /// the time into, the process ends as an allocation the system refused does, with the bytes of the page (O11).
+    /// </summary>
+    private string EmitNow(int line)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(line, ProcessNotOnWindows);
+        }
+
+        var slot = fn.Alloca("i64", "now");
+        var read = fn.Label("now");
+        var refused = fn.Label("now.refused");
+        fn.CondBranch(fn.Value($"call i1 {SysFunction("Now")}(ptr {slot})"), read, refused);
+        fn.Block(refused);
+        fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 4096)");
+        fn.Unreachable();
+        fn.Block(read);
+        return fn.Value($"load i64, ptr {slot}");
+    }
+
+    /// <summary>S14: in the helper of the text of an <c>EnvError</c> in <c>%a0</c>: the words of its kind in lower case, a colon and the name, <c>not present: HOME</c>.</summary>
+    private void EnvErrorText(DataType error)
+    {
+        var kind = (EnumType)Layout.Fields(error)[0];
+        var value = fn.Value($"extractvalue {Ir(error)} %a0, 0");
+        var name = fn.Value($"extractvalue {Ir(error)} %a0, 1");
+        var values = kind.Symbol.Values;
+        var labels = values.Select(_ => fn.Label("kind")).ToList();
+        var other = fn.Label("other");
+        fn.Terminate($"switch {Ir(kind)} {value}, label %{other} [ {string.Join(" ", values.Select((_, i) => $"{Ir(kind)} {IntegerText(Lower.EnumStored(kind.Symbol, i), kind)}, label %{labels[i]}"))} ]");
+        for (var i = 0; i < values.Count; i++)
+        {
+            fn.Block(labels[i]);
+            fn.Return($"%kz.str {fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue(Words(values[i]) + ": ")}, %kz.str {name})")}");
+        }
+
+        fn.Block(other);
+        fn.Unreachable(); // a kind is one of its values (D18)
     }
 }

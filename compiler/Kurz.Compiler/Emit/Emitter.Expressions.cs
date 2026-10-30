@@ -48,6 +48,8 @@ public sealed partial class Emitter
                 return Instance(Model.FunctionNameOf(n), NoMap); // R17: a function of the C calling convention as a value, its address
             case MemberAccess m when Model.IsChainMember(m, out var member):
                 return Temp(EmitChainMember(m, Sub(member), (UnionType)type), type);
+            case MemberAccess m when Model.IsClockRead(m):
+                return EmitNow(m.Line);
             case MemberAccess m:
                 return HeldCopy(m, EmitMember(m, type), type);
             case CallExpression c:

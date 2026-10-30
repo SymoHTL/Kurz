@@ -16,8 +16,9 @@ extern "C" in "kernel32" {
 // returns the error itself. The main thread's stack takes a guarantee of 0x5000 bytes, the room the
 // system keeps on it for the handling of its overflow, as Rust's standard library sets it at its start
 // (design record, section 2); where the system refuses it the program carries on with the system's own
-// room, as Rust's released library does.
-pub void Start() {
+// room, as Rust's released library does. The arguments are not kept: the runtime of Windows gives no
+// call that reads them (S11).
+pub void Start(int count, byte* values) {
     mut uint room = 20480
     raw {
         SetThreadStackGuarantee(&room)

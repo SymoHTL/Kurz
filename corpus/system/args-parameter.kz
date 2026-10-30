@@ -1,0 +1,9 @@
+// expect: output
+// | 0
+// rules: S13
+
+int Count(List<string> args) {
+    return args.Count
+}
+
+print(Count(args))

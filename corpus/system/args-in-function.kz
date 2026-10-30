@@ -1,0 +1,8 @@
+// expect: error unknown-name at 5
+// rules: S13
+
+int Count() {
+    return args.Count
+}
+
+print(Count())

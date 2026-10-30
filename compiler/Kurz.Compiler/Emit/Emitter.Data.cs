@@ -473,6 +473,9 @@ public sealed partial class Emitter
                 case DataType d when IsIoError(d):
                     IoErrorText(d); // S1: its words and its path, in place of A3's text of a data value
                     break;
+                case DataType d when IsEnvError(d):
+                    EnvErrorText(d); // S14: its words and its name, in the form of an `IoError`'s
+                    break;
                 case DataType d:
                     fn.Return($"%kz.str {RecordText(d, Layout.Fields(d).Select((_, i) => fn.Value($"extractvalue {Ir(d)} %a0, {Number(i)}")).ToList(), line)}");
                     break;
