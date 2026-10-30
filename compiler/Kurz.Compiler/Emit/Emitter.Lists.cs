@@ -378,7 +378,12 @@ public sealed partial class Emitter
             return StringByte(index, bytes.Target);
         }
 
-        var list = EmitExpression(index.Target);
+        return ListItem(EmitExpression(index.Target), index, type);
+    }
+
+    /// <summary>M9: the item of the list at the index <paramref name="index"/> names, read in place; a position outside its items raises <c>index-out-of-range</c> at the line.</summary>
+    private string ListItem(string list, IndexExpression index, ListType type)
+    {
         var indexType = TypeOf(index.Index);
         var position = Resize(EmitExpression(index.Index), indexType, Types.IsSigned(indexType) ? Types.Long : Types.ULong);
         var count = fn.Value($"zext i32 {ListCount(list)} to i64");

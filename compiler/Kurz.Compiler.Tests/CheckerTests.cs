@@ -1982,6 +1982,59 @@ public sealed class CheckerTests
         Clean(Find + "u = Find(1)\nif u != null {\n    print(u?.Name ?? u.Name)\n}");
     }
 
+    [Theory]
+    [InlineData("x = 1\nprint(x ?? 2)", 2)]
+    [InlineData("data User(string Name)\n\nu = User(\"a\")\nprint(u?.Name)", 4)]
+    [InlineData("xs = List<int>()\nprint(xs?[0])", 2)]
+    public void Coalescing_or_a_chain_on_a_value_that_is_not_nullable_is_a_type_mismatch(string program, int line)
+    {
+        // section 4, the owner, 2026-10-30, "Error, as Rust": `??` and `?.` on a value whose type has no `null`, and `?[` with them (an
+        // assumption there)
+        Assert.Equal([(ErrorIds.TypeMismatch, line)], Errors(program));
+    }
+
+    [Fact]
+    public void A_conditional_index_reads_the_item_of_a_nullable_list_and_goes_on_in_the_chain()
+    {
+        // N5 with section 4, the owner, 2026-10-30, "Add, as C#": `xs?[i]` is the item's type made nullable, or the item's own where it is
+        // nullable; a member after it reads the item as its own type; the index is an integer; a string is indexed through its bytes
+        const string Lists = "data User(string Name, string? Email)\n\nList<int>? Numbers() => null\nList<User>? Users() => null\nList<string?>? Names() => null\n\n";
+        Assert.Equal("int?", TypeOf(Lists + "n = Numbers()?[0]\nprint(n)", "n"));
+        Assert.Equal("string?", TypeOf(Lists + "n = Names()?[0]\nprint(n)", "n"));
+        Assert.Equal("string?", TypeOf(Lists + "n = Users()?[0].Name\nprint(n)", "n"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(Lists + "print(Users()?[0].Email.Bytes.Count)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(Lists + "print(Numbers()?[\"a\"])"));
+        Assert.Equal([(ErrorIds.StringIndex, 2)], Errors("string? s = \"a\"\nprint(s?[0])"));
+        Clean(Lists + "xs = Numbers()\nif xs != null {\n    print(xs?[0] ?? xs[0])\n}");
+    }
+
+    [Fact]
+    public void Equality_with_a_nullable_value_is_lifted_and_an_order_is_not()
+    {
+        // section 4, the owner, 2026-10-30, "Lift == and !=": a nullable side compares with a value or another nullable value of a type
+        // its own compares with; `<` stays N2's; a side equal to a value that is not nullable is known not null where the test holds, as
+        // C#'s analysis reads it, and one equal to a nullable value is not
+        const string Find = "int? Find(int n) => null\n\n";
+        Clean(Find + "print(Find(1) == 0)\nprint(Find(1) != Find(2))\nprint(1L == Find(1))");
+        Clean(Email + "print(Email(1) == \"a\")\nprint(Email(1) != Email(2))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Find + "print(Find(1) == \"a\")"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 3)], Errors(Find + "print(Find(1) < 1)"));
+        Clean(Email + "e = Email(1)\nif e == \"a\" {\n    print(e.Bytes.Count)\n}");
+        Clean(Email + "e = Email(1)\nif e != \"a\" {\n    print(0)\n} else {\n    print(e.Bytes.Count)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Email + "e = Email(1)\nif e == Email(2) {\n    print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Email + "e = Email(1)\nif e != \"a\" {\n    print(e.Bytes.Count)\n}"));
+    }
+
+    [Fact]
+    public void A_nullable_type_parameter_filled_with_a_nullable_type_is_that_type()
+    {
+        // section 4, the owner, 2026-10-30, "Flatten, as C#": `T?` of a `T` that is `int?` is `int?`
+        const string First = "T? First<T>(List<T> xs) {\n    if xs.Count == 0 {\n        return null\n    }\n    return xs[0]\n}\n\n";
+        Assert.Equal("int?", TypeOf(First + "items = List<int?>()\nn = First(items)\nprint(n)", "n"));
+        Assert.Equal("int?", TypeOf(First + "items = List<int>()\nn = First(items)\nprint(n)", "n"));
+        Clean("T Or<T>(T? a, T b) => a ?? b\n\nprint(Or(1, 2))");
+    }
+
     [Fact]
     public void A_match_on_a_nullable_value_takes_a_null_arm_for_its_null()
     {
@@ -2016,13 +2069,13 @@ public sealed class CheckerTests
     [InlineData("class Counter(mut int Count)\n\nc = Counter(0)\nprint(c)", "1: a class (chapter 7)")]
     [InlineData("interface Shape {\n    int Area()\n}", "1: an interface (K6, K10)")]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read)", "1: a flags type (D13)")]
-    [InlineData("data User(string Name)\n\nu = User(\"a\")\nprint(u?.Name)", "4: `?.` on a `User`, which is not nullable (N5)")]
-    [InlineData("x = 1\nprint(x ?? 2)", "2: `??` on a `int`, which is not nullable (N4)")]
     [InlineData("data R(int | string V)\n\nR? G() => null\n\nprint(G()?.V)", "5: `?.` to a `int | string`, which no `?` makes nullable (N1, N5)")]
-    [InlineData("data User(List<int> Items)\n\nUser? Find() => null\n\nprint(Find()?.Items[0])", "5: an index after `?.` (N5)")]
+    [InlineData("data User(List<int> Items)\n\nUser? Find() => null\n\nprint(Find()?.Items[0])", "5: an index after `?.` or `?[` (N5)")]
+    [InlineData("List<int>? Find() => null\n\nprint(Find()?[0][1])", "3: an index after `?.` or `?[` (N5)")]
+    [InlineData("List<int>? Find() => null\n\nprint(Find()?[0..<1])", "3: a part after `?[` (N5, M9)")]
+    [InlineData("mut List<int>? xs = null\nxs?[0] = 1", "2: an assignment through `?[` (N5)")]
     [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: `?.` (N5)")]
     [InlineData("int? | string x = 1\nprint(x)", "1: a nullable case of a union, `int?` (N1, D9)")]
-    [InlineData("T? Id<T>(T x) => x\n\nprint(1)", "1: a nullable `T` (N1)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
     [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable field (N3, M5)")]

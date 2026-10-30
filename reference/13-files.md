@@ -286,10 +286,10 @@ its address and passes `listen` a backlog of 128. An address without a `:`, a po
 number from 0 to 65535 and a name that gives no address are `InvalidInput`, and a lookup that fails is
 `NotFound`, each with the number 0, but for the error of the system a lookup names. The error of a
 connection that `Accept` gave names the string its listener's `Bind` was given, `127.0.0.1:0` where
-the system picked the port, and one that `Connect` made the string it was given. *(assumed, §12: the
-reuse of the address, the 128, the type of `Port`, the grammar of the port and of a literal, the NUL
-byte, the errors of an address and of a lookup, the error of the last address tried, and the string a
-connection's error names; the kind of a failed lookup is open, record section 14)*
+the system picked the port, and one that `Connect` made the string it was given. The kind of a
+lookup that fails is decided (§12, the owner, 2026-10-30). *(assumed, §12: the reuse of the address,
+the 128, the type of `Port`, the grammar of the port and of a literal, the NUL byte, the errors of an
+address, the error of the last address tried, and the string a connection's error names)*
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
@@ -379,8 +379,9 @@ the system completes without the accept.
 ### S11 (decided, §12) Not on Windows
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
-none of these calls. A build for a target other than Linux and Windows meets the question the record
-keeps open (section 14), of a runtime that lacks a function the code outside its directory calls.
+none of these calls. A build for any other target whose runtime lacks them says `not supported` at the
+call as well, as the record says of every function a target's runtime lacks (§2, §12, the owner,
+2026-10-30).
 
 No case: a case does not name its target (record, section 14).
 

@@ -656,10 +656,15 @@ public sealed partial class Checker
 
     private Typed CheckIndex(IndexExpression i)
     {
+        if (i.Conditional)
+        {
+            return CheckConditionalIndex(i); // N5
+        }
+
         if (InChain(i.Target))
         {
             // N5: C# reads an index after `?.` inside the chain, which section 4 does not say
-            NotSupported(i.Line, "an index after `?.` (N5)");
+            NotSupported(i.Line, "an index after `?.` or `?[` (N5)");
             CheckLoosely(i.Target, i.Index);
             return Typed.Error;
         }
@@ -913,6 +918,12 @@ public sealed partial class Checker
         }
 
         var (left, right) = cls == OperatorClass.Logical ? Logical(b) : Operands(b.Left, b.Right, expected, cls);
+        if (b.Operator is TokenKind.EqualEqual or TokenKind.NotEqual && !left.IsError && !right.IsError && (Types.NonNull(left.Type) is not null || Types.NonNull(right.Type) is not null))
+        {
+            // section 4, the owner, 2026-10-30, "Lift == and !=": `null` equals `null` alone, and two values compare as their types do (N10)
+            return Comparison(b, new Typed(Types.NonNull(left.Type) ?? left.Type), new Typed(Types.NonNull(right.Type) ?? right.Type));
+        }
+
         if (left.IsError || right.IsError || Unchecked(left, b.Line, $"under `{Operator(b.Operator)}`") || Unchecked(right, b.Line, $"under `{Operator(b.Operator)}`"))
         {
             return cls is OperatorClass.Comparison or OperatorClass.Logical ? new Typed(Types.Bool) : Typed.Error;

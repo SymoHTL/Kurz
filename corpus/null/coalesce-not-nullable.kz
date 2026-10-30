@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 5
+// rules: N4
+
+n = 5
+print(n ?? 0)

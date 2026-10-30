@@ -894,9 +894,11 @@ number only where one is written" simple. As Rust reads a declaration, a value's
 is `redeclared`; a number is a constant expression, a negative one and one folded from literals
 (T18) among them; and an enum without values is a type. A number's type is `int`, where Rust's is
 `isize` (§4), so that one past the range of an `int` is `constant-overflow`, a literal without a
-suffix, which takes the type `int` there (L10), and a folded one (T6) alike. A value named `Number` or `From`, the names
-of D18's two members, is `redeclared` too, a rule of Kurz's own, since Rust compiles a value of
-either name (§4, the owner, 2026-10-29). A comparison with `<`, `<=`, `>` or `>=` of values of an
+suffix, which takes the type `int` there (L10), and a folded one (T6) alike. A value may be named `Number` or `From`, the
+names of D18's two members, as Rust compiles a value of either name, and the place of the name
+tells which is meant: `Plan.From(2)`, a call, is D18's conversion and `Plan.From` the value, while
+`p.Number` on a value is its number and `Plan.Number` on the type the value (§4, the owner,
+2026-10-30). A comparison with `<`, `<=`, `>` or `>=` of values of an
 enum whose declaration writes no number is `enum-number`, and so is a number that is not a constant
 expression, while a number of another type gets the error a value of that type gets where an `int`
 is required (T1): `type-mismatch` for `1.5` or `"two"`, `narrowing-conversion` for `5L` and
@@ -939,9 +941,20 @@ print(Plan.Pro)
 
 Case: [data/enum-value-member-name.kz](../corpus/data/enum-value-member-name.kz)
 ```kurz
-enum Plan { Free, From }
+enum Plan { Free = 1, From = 2, Number = 3 }
 
-print(Plan.Free)
+void Show(int n) {
+    match Plan.From(n) {
+        Plan.From => print("from")
+        Plan p => print(p)
+        Invalid => print("invalid")
+    }
+}
+
+print(Plan.From)
+print(Plan.Number.Number)
+Show(2)
+Show(7)
 ```
 
 Case: [data/enum-number-negative.kz](../corpus/data/enum-number-negative.kz)

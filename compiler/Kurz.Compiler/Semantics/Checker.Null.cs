@@ -30,17 +30,17 @@ internal sealed class LoopExits
 /// </summary>
 public sealed partial class Checker
 {
-    // N5: the type of each member of a chain of `?.` before the chain makes it nullable, which the next member of the chain reads
-    private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
+    // N5: the type of each member, and of each item of `?[`, of a chain before the chain makes it nullable, which the next member of the chain reads
+    private readonly Dictionary<Expression, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
 
     // N3, N7: what was known after the right side of each `&&` and `||`, which a path the left side showed must still be in
     private readonly Dictionary<BinaryExpression, ImmutableHashSet<NullPath>> afterRight = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
-    /// N1: <c>T?</c>, the union <c>T | null</c>, laid out as every union is (section 5). What a <c>?</c> makes nullable that is a union,
-    /// a nullable type among them (<c>T??</c>), a function type, a pointer, which <c>null</c> is a value of already (R10), a C function
-    /// type, a type parameter, which a nullable type could stand for, and <c>void</c> are <c>not supported</c>: section 4 says nothing of
-    /// them.
+    /// N1: <c>T?</c>, the union <c>T | null</c>. A type parameter's <c>T?</c> is the type that fills it where that type is nullable
+    /// already, <c>T??</c> being <c>T?</c> (section 4, the owner, 2026-10-30, "Flatten, as C#"), which <see cref="Types.Substitute"/>
+    /// makes. What a <c>?</c> makes nullable that is a union, a nullable type among them (<c>T??</c>), a function type, a pointer, which
+    /// <c>null</c> is a value of already (R10), a C function type and <c>void</c> are <c>not supported</c>: section 4 says nothing of them.
     /// </summary>
     private KurzType ResolveNullable(NullableType n)
     {
@@ -49,7 +49,7 @@ public sealed partial class Checker
         {
             case ErrorType:
                 return Types.Error;
-            case UnionType or FunctionType or PointerType or CFunctionType or TypeParameterType or VoidType:
+            case UnionType or FunctionType or PointerType or CFunctionType or VoidType:
                 NotSupported(n.Line, $"a nullable `{inner}` (N1)");
                 return Types.Error;
             default:
@@ -129,10 +129,23 @@ public sealed partial class Checker
                     return b.Operator == TokenKind.NotEqual ? (paths, none) : (none, paths);
                 }
 
+            case BinaryExpression { Operator: TokenKind.EqualEqual or TokenKind.NotEqual } b:
+                {
+                    // the lifted `==` (N10): equal to a value that is not nullable, a nullable side is not null, as C#'s analysis reads it (section 4)
+                    var paths = NonNullBeside(b.Left, b.Right).Union(NonNullBeside(b.Right, b.Left));
+                    return b.Operator == TokenKind.EqualEqual ? (paths, none) : (none, paths);
+                }
+
             default:
                 return (none, none);
         }
     }
+
+    /// <summary>N3, N10: the paths <paramref name="e"/> shows not null where it equals <paramref name="other"/>: those of a nullable <paramref name="e"/> beside a value whose type has no <c>null</c>.</summary>
+    private ImmutableHashSet<NullPath> NonNullBeside(Expression e, Expression other) =>
+        model.HasType(e) && model.HasType(other) && Types.NonNull(model.TypeOf(e).Type) is not null && model.TypeOf(other) is { IsError: false } o && Types.NonNull(o.Type) is null && o.Type is not NullType
+            ? NonNullPaths(e)
+            : ImmutableHashSet<NullPath>.Empty;
 
     /// <summary>N7: of what the left side of <paramref name="b"/> showed, what the right side left as it was; nothing where the right side was not read.</summary>
     private ImmutableHashSet<NullPath> KeptPastRight(BinaryExpression b, ImmutableHashSet<NullPath> shown) =>
@@ -307,7 +320,7 @@ public sealed partial class Checker
     /// <summary>
     /// N4: <c>a ?? b</c> is <c>a</c> where it is not null and <c>b</c> otherwise, as in C#: the type <c>a</c> makes nullable where
     /// <c>b</c> fits it, else <c>a</c>'s nullable type where <c>b</c> fits that. <c>b</c> runs only where <c>a</c> is null, so only what held
-    /// before it is known after. A left side that is not nullable is <c>not supported</c> (section 4 says nothing of it).
+    /// before it is known after. A left side that is not nullable is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "Error, as Rust").
     /// </summary>
     private Typed CheckCoalesce(BinaryExpression b)
     {
@@ -320,7 +333,7 @@ public sealed partial class Checker
 
         if (Types.NonNull(left.Type) is not { } inner)
         {
-            NotSupported(b.Line, $"`??` on a `{left.Type}`, which is not nullable (N4)");
+            Report(ErrorIds.TypeMismatch, b.Line, $"`??` needs a nullable left side; `{left.Type}` is not one (N4)");
             CheckLoosely(b.Right);
             return Typed.Error;
         }
@@ -349,15 +362,15 @@ public sealed partial class Checker
         return Typed.Error;
     }
 
-    /// <summary>N5: whether the member is read in a chain of <c>?.</c>: the chain goes on through members until a parenthesis ends it.</summary>
-    private static bool InChain(Expression e) => e is MemberAccess m && (m.Conditional || InChain(m.Target));
+    /// <summary>N5: whether the member is read in a chain of <c>?.</c> or <c>?[</c>: the chain goes on through members until a parenthesis ends it.</summary>
+    private static bool InChain(Expression e) => e is IndexExpression { Conditional: true } || (e is MemberAccess m && (m.Conditional || InChain(m.Target)));
 
     /// <summary>
     /// N5: <c>a?.M</c> is null where <c>a</c> is and <c>a.M</c> otherwise, and each member after it in the chain is read only where the
     /// chain did not stop, as in C#: the chain's value is the nullable type of the member read, or the member's own type where that is
     /// nullable. A member after it in the chain is read from the member before as that member's own type, so a nullable one there is
-    /// N2's. <c>?.</c> on a value that is not nullable, and to a member whose type no <c>?</c> makes nullable (a union, a function, a
-    /// pointer), is <c>not supported</c> (section 4 says nothing of them).
+    /// N2's. <c>?.</c> on a value that is not nullable is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "Error, as Rust"), and
+    /// to a member whose type no <c>?</c> makes nullable (a union, a function, a pointer) <c>not supported</c> (section 4 says nothing of it).
     /// </summary>
     private Typed CheckChainMember(MemberAccess m)
     {
@@ -372,7 +385,7 @@ public sealed partial class Checker
         {
             if (Types.NonNull(target.Type) is not { } inner)
             {
-                NotSupported(m.Line, $"`?.` on a `{target.Type}`, which is not nullable (N5)");
+                Report(ErrorIds.TypeMismatch, m.Line, $"`?.` needs a nullable left side; `{target.Type}` is not one (N5)");
                 return Typed.Error;
             }
 
@@ -380,7 +393,7 @@ public sealed partial class Checker
         }
         else
         {
-            from = chainMembers[(MemberAccess)m.Target];
+            from = chainMembers[m.Target];
             if (Types.NonNull(from) is not null)
             {
                 Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is read from a `{from}` without a check (N2)");
@@ -403,5 +416,54 @@ public sealed partial class Checker
         chainMembers[m] = member.Type;
         model.RecordChainMember(m, member.Type);
         return new Typed(Types.NonNull(member.Type) is null ? Types.Nullable(member.Type) : member.Type);
+    }
+
+    /// <summary>
+    /// N5: <c>xs?[i]</c> is null where <c>xs</c> is and its item at <c>i</c> otherwise, and the rest of the chain is skipped with it, as
+    /// C#'s <c>?[]</c> (section 4, the owner, 2026-10-30, "Add, as C#"): the type of the item made nullable, or the item's own where it is
+    /// nullable. The index runs only where the list is not null, so only what held before it is known after. On a value that is not
+    /// nullable it is <c>type-mismatch</c>, as <c>?.</c> is (section 4, an assumption there); a part, <c>xs?[a..b]</c>, is
+    /// <c>not supported</c> (section 4 names the item).
+    /// </summary>
+    private Typed CheckConditionalIndex(IndexExpression i)
+    {
+        var target = CheckNullable(i.Target);
+        if (i.Index is RangeExpression)
+        {
+            NotSupported(i.Line, "a part after `?[` (N5, M9)");
+            CheckLoosely(i.Index);
+            return Typed.Error;
+        }
+
+        var before = frame.Known;
+        var index = CheckExpression(i.Index, Types.Int);
+        frame.Known = before.Intersect(frame.Known);
+        if (target.IsError)
+        {
+            return Typed.Error;
+        }
+
+        if (Types.NonNull(target.Type) is not { } inner)
+        {
+            Report(ErrorIds.TypeMismatch, i.Line, $"`?[` needs a nullable left side; `{target.Type}` is not one (N5)");
+            return Typed.Error;
+        }
+
+        if (inner is not ListType list)
+        {
+            Report(inner is PrimitiveType { Kind: Primitive.String } ? ErrorIds.StringIndex : ErrorIds.TypeMismatch, i.Line, inner is PrimitiveType { Kind: Primitive.String }
+                ? "a string is indexed through `.Bytes` or `.Chars` (T15)"
+                : $"a `{inner}` is not indexed (M9)");
+            return Typed.Error;
+        }
+
+        if (!index.IsError && !Types.IsInteger(index.Type))
+        {
+            Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not a `{index.Type}` (M9, T2)");
+            return Typed.Error;
+        }
+
+        chainMembers[i] = list.Element;
+        return new Typed(Types.Nullable(list.Element));
     }
 }

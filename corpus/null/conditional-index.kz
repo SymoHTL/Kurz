@@ -1,0 +1,19 @@
+// expect: output
+// | 2
+// | -1
+// | -1
+// rules: N5
+
+List<int>? Scores(bool some) {
+    if some {
+        mut xs = List<int>()
+        xs.Add(1)
+        xs.Add(2)
+        return xs
+    }
+    return null
+}
+
+print(Scores(true)?[1] ?? -1)
+print(Scores(false)?[1] ?? -1)
+print(Scores(false)?[5] ?? -1)

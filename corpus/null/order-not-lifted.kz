@@ -1,0 +1,12 @@
+// expect: error nullable-unchecked at 12
+// rules: N10
+
+int? Find(string text, string part) {
+    if text == part {
+        return 0
+    }
+    return null
+}
+
+a = Find("b", "b")
+print(a < 1)
