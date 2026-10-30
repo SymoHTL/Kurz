@@ -540,7 +540,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// The members the reference gives a type: a string's <c>Bytes</c> and <c>Chars</c> (T15), a list's
-    /// <c>Count</c> (M9), a data value's fields (D1). A member no rule gives the type is a name that is not
+    /// <c>Count</c> (M9), a data value's fields (D1), a listener's <c>Port</c> (S9). A member no rule gives the type is a name that is not
     /// visible here, V10's <c>unknown-name</c> (the reading in <c>compiler/README.md</c>); a member of a
     /// union is <c>type-mismatch</c>, since a union is one of its cases only after a <c>match</c> (D9). A
     /// type parameter has members only through a limit (T19), so a member of one without a limit is
@@ -618,6 +618,8 @@ public sealed partial class Checker
                 }
 
                 return new Typed(Types.Int); // D18
+            case HandleType { Kind: Handle.TcpListener } when member == "Port":
+                return new Typed(Types.Int); // S9
             case UnionType:
                 Report(ErrorIds.TypeMismatch, line, $"a `{type}` is one of its cases only after a `match` (D9)");
                 return Typed.Error;

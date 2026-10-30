@@ -2,14 +2,15 @@
 
 ### S1 (decided, §12) A failed call returns `IoError`
 
-A call on a file or a socket returns what it failed with as the case `IoError` of its result and
-raises nothing: `File.Open(path)` is a `File | IoError`. Every file sees `data IoError(IoKind Kind, int
+A call on a file or a socket returns a failure of the system, or of the path or the address it was
+given, as the case `IoError` of its result, and raises no exception for it, while what raises anywhere
+raises in it too (S3, S6): `File.Open(path)` is a `File | IoError`. Every file sees `data IoError(IoKind Kind, int
 Code, string Path)`, as it sees `Invalid` (D18): `Kind` is the kind of the failure, `Code` the
 system's number for it, and `Path` the path or the address the call was about. The text of an
 `IoError` (A3) is the words of its kind, its name's words in lower case, a colon and its path,
 `not found: data/x.bin`, and the words alone where the path is empty; the kind `Other` adds the
 system's number after its words, `other (os error 24): probe.txt`. `IoKind` is an `enum` (D12)
-whose values are the kinds Rust's `ErrorKind` gives the error numbers of Linux, with each
+whose values are the kinds Rust 1.82's `ErrorKind` gives the error numbers of Linux, with each
 abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotADirectory`,
 `IsADirectory`, `DirectoryNotEmpty`, `ReadOnlyFilesystem`, `FilesystemLoop`,
 `StaleNetworkFileHandle`, `InvalidInput`, `InvalidFilename`, `ArgumentListTooLong`, `StorageFull`,
@@ -18,7 +19,7 @@ abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotA
 `Unsupported`, `TimedOut`, `BrokenPipe`, `AddressInUse`, `AddressNotAvailable`, `NetworkDown`,
 `NetworkUnreachable`, `HostUnreachable`, `ConnectionRefused`, `ConnectionReset`,
 `ConnectionAborted` and `NotConnected`; beside them `WriteZero` and `InvalidData`, which no number gives,
-and `Other` for a number none of them has. A path that holds a NUL byte is `InvalidInput`, a name of
+and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput`, a name of
 a directory's entry that is not UTF-8 `InvalidData`, and a write of which the system takes no byte
 `WriteZero`, each with the number 0, which every error that is not the system's has. A call that
 names two paths names the first in its error. *(assumed, §12: the list, the words, the number 0, the
@@ -146,7 +147,7 @@ A `File` is a handle: a copy is a second holder of the one file, as a list's cop
 ignoring an error of that close. `f.Close()` closes it before that and returns `void | IoError`; a
 `Close` through one holder closes it for all. Every call on a closed file, `Close` among them, returns
 the error the system gives a descriptor that is not open, `Other` with the number 9, with the path
-the file was opened with. A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the copy, the closed file's error,
+the file was opened with. A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's error,
 the close that ignores its error, and no text)*
 
 Case: [system/close-twice.kz](../corpus/system/close-twice.kz)
@@ -262,13 +263,20 @@ Tree() else {
 
 ### S9 (decided, §12) Listening and connecting
 
-`TcpListener.Bind(address)` listens on a literal address with its port, of IPv4, `"127.0.0.1:8080"`,
-or of IPv6, `"[::1]:8080"`, and looks up no name; `l.Port` is the port it bound, which the system
-picks for the port 0; `l.Accept()` returns a connection that waits as a `TcpStream`; and
-`TcpStream.Connect(address)` connects to a listener at a literal address. Each returns its value or an
-`IoError`. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5), and a stream reads,
-writes and closes as a file does (S3, S4, S5). A listener's socket reuses its address. *(assumed,
-§12: the reuse of the address)*
+`TcpListener.Bind(address)` listens on an address; `l.Port` is the port it bound, an `int`, which the
+system picks for the port 0; `l.Accept()` returns a connection that waits as a `TcpStream`; and
+`TcpStream.Connect(address)` connects to a listener. Each returns its value or an `IoError`. An address
+is a host and a port after its last `:`: a host that is a literal of IPv4, `"127.0.0.1:8080"`, or of
+IPv6, `"[::1]:8080"`, is read with no lookup, and any other, `"localhost:8080"`, is looked up through
+`getaddrinfo`, whose addresses are tried in its order until one binds or connects, the error being the
+last one's. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
+and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
+its address and holds up to 128 connections that wait. An address without a `:`, a port that is not a
+number from 0 to 65535 and a name that gives no address are `InvalidInput`, and a lookup that fails is
+`NotFound`, each with the number 0, but for the error of the system a lookup names. The error of a
+connection that `Accept` gave names its listener's address. *(assumed, §12: the reuse of the address,
+the 128, the type of `Port`, the errors of an address and of a lookup, and the address a connection's
+error names)*
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
@@ -278,7 +286,11 @@ void | IoError Echo() {
     server = listener.Accept()
     client.Write("hello".Bytes)
     mut buffer = Bytes()
-    server.Read(mut buffer, 5)
+    mut read = 1
+    while buffer.Count < 5 && read > 0 {
+        read = server.Read(mut buffer, 5 - buffer.Count)
+    }
+
     print(string.FromUtf8(buffer) else {
         InvalidUtf8 => "not UTF-8"
     })
@@ -286,6 +298,59 @@ void | IoError Echo() {
 
 Echo() else {
     IoError e => print(e)
+}
+```
+
+Case: [system/bind-name.kz](../corpus/system/bind-name.kz)
+```kurz
+void | IoError Named() {
+    listener = TcpListener.Bind("localhost:0")
+    print(listener.Port > 0)
+    client = TcpStream.Connect("localhost:{listener.Port}")
+    server = listener.Accept()
+    client.Close()
+    server.Close()
+    print("connected")
+}
+
+Named() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/connect-refused.kz](../corpus/system/connect-refused.kz)
+```kurz
+void | IoError Refused() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    port = listener.Port
+    listener.Close()
+    match TcpStream.Connect("127.0.0.1:{port}") {
+        TcpStream => print("connected")
+        IoError e => {
+            print(e.Kind)
+            print(e.Code)
+        }
+    }
+}
+
+Refused() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/bad-address.kz](../corpus/system/bad-address.kz)
+```kurz
+match TcpListener.Bind("127.0.0.1") {
+    TcpListener => print("bound")
+    IoError e => print(e)
+}
+
+match TcpStream.Connect("127.0.0.1:65536") {
+    TcpStream => print("connected")
+    IoError e => {
+        print(e)
+        print(e.Code)
+    }
 }
 ```
 
@@ -298,10 +363,10 @@ No case: a case prints what its calls return, and the same output stands for a c
 and for one that switches; S9's case connects before it accepts, which the system completes without
 the accept.
 
-### S11 (decided, §12) Linux alone
+### S11 (decided, §12) Not on Windows
 
-The calls of this chapter are Linux's: in a build for Windows, a call of them is `not supported`,
-and the runtime of Windows gives none of them.
+In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
+none of these calls.
 
 No case: a case does not name its target (record, section 14).
 

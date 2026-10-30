@@ -92,14 +92,23 @@ public enum CallKind
     /// <summary><c>Directory.Delete(path)</c> (S8).</summary>
     DirectoryDelete,
 
-    /// <summary>A file's <c>Read(mut into, max)</c> (S3).</summary>
+    /// <summary>A file's or a stream's <c>Read(mut into, max)</c> (S3, S9).</summary>
     FileRead,
 
-    /// <summary>A file's <c>Write(bytes)</c> (S4).</summary>
+    /// <summary>A file's or a stream's <c>Write(bytes)</c> (S4, S9).</summary>
     FileWrite,
 
-    /// <summary>A file's <c>Close()</c> (S5).</summary>
+    /// <summary>A file's, a listener's or a stream's <c>Close()</c> (S5, S9).</summary>
     FileClose,
+
+    /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
+    TcpBind,
+
+    /// <summary><c>TcpStream.Connect(address)</c> (S9).</summary>
+    TcpConnect,
+
+    /// <summary>A listener's <c>Accept()</c> (S9).</summary>
+    TcpAccept,
 }
 
 /// <summary>

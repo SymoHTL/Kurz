@@ -8,7 +8,11 @@ void | IoError Echo() {
     server = listener.Accept()
     client.Write("hello".Bytes)
     mut buffer = Bytes()
-    server.Read(mut buffer, 5)
+    mut read = 1
+    while buffer.Count < 5 && read > 0 {
+        read = server.Read(mut buffer, 5 - buffer.Count)
+    }
+
     print(string.FromUtf8(buffer) else {
         InvalidUtf8 => "not UTF-8"
     })

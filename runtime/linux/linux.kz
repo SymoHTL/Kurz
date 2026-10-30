@@ -1,5 +1,5 @@
 // The runtime's code for Linux (design record, section 2): the functions `runtime/common/` calls as
-// `sys`, and the calls on files a program makes (section 12), over the C library, which a program
+// `sys`, and the calls on files and sockets a program makes (section 12), over the C library, which a program
 // built for Linux links as the platform links it. It is the code of 64-bit Linux, where C's `size_t`
 // and `ssize_t` are 64 bits as `long` is: the compiler builds for a 64-bit machine alone
 // (compiler/README.md, "The runtime").
@@ -33,6 +33,16 @@ extern "C" {
     void* readdir(void* directory)
     int closedir(void* directory)
     long strlen(byte* text)
+    int socket(int family, int type, int protocol)
+    int setsockopt(int fd, int level, int name, void* value, int length)
+    int bind(int fd, void* address, int length)
+    int listen(int fd, int backlog)
+    int getsockname(int fd, void* address, int* length)
+    int connect(int fd, void* address, int length)
+    int accept4(int fd, void* address, int* length, int options)
+    int inet_pton(int family, byte* text, void* address)
+    int getaddrinfo(byte* host, byte* service, void* hints, void* list)
+    void freeaddrinfo(void* list)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -1858,9 +1868,245 @@ pub long ListDirectory(byte* path, mut List<string> names) {
     return result
 }
 
+// ---- sockets (design record, section 12) ------------------------------------------------------------
+
+// The calls on sockets of a program built for Linux (S9), over TCP, as Rust 1.82's `TcpListener` and
+// `TcpStream` make them on Linux. An address is a host and a port after its last `:`, as Rust's
+// `ToSocketAddrs` reads a `str`: a host that is a literal, of IPv4, or of IPv6 inside `[` and `]`, is read
+// by `inet_pton` with no lookup, and any other is looked up by `getaddrinfo`, whose addresses are tried
+// in its order until one binds or connects, the failure of the last being the call's, as Rust's
+// `each_addr` tries them. Beside the system's numbers negated, a call fails with -4097 for an address
+// that is no host and port, or a name that gives no address, `InvalidInput` to the caller, as Rust gives
+// it, and with -4098 for a lookup that fails with no error of the system, `NotFound` (S9).
+
+// The page of each thread that holds a call's address and what the calls of the system take by address,
+// mapped at its first use: a literal address at its byte 0, with room for one of IPv6, 28 bytes; the
+// length `getsockname` takes at 32; the 1 that `setsockopt` sets at 36; the hints for `getaddrinfo` at
+// 64, 48 bytes; and the list it gives at 112.
+thread static mut byte* endpoints = null
+
+// The port written in the `count` bytes at `text`: a number from 0 to 65535 in decimal digits, after a
+// `+` that may stand first, as Rust reads a `u16`, or -1.
+long PortOf(byte* text, long count) {
+    mut long port = -1
+    raw {
+        mut long i = 0
+        if count > 0 && text[0] == 43 {
+            i = 1
+        }
+
+        if i < count {
+            port = 0
+        }
+
+        while i < count && port >= 0 {
+            long digit = long(text[i]) - 48
+            if digit < 0 || digit > 9 {
+                port = -1
+            } else {
+                port = port * 10 + digit
+                if port > 65535 {
+                    port = -1
+                }
+            }
+
+            i = i + 1
+        }
+    }
+
+    return port
+}
+
+// A socket of the family of the address at `address`, of `length` bytes, for TCP (`SOCK_STREAM`, 1,
+// with `SOCK_CLOEXEC`, 524288, as Rust's standard library opens every descriptor close-on-exec); with
+// `listening`, bound to the address after `SO_REUSEADDR` (2, of `SOL_SOCKET`, 1) is set to 1, and
+// listening with room for 128 connections that wait, as Rust's `TcpListener::bind` sets them; else
+// connected to it, `connect` made again where a signal interrupted it (`EINTR`, 4) and a socket that is
+// connected already (`EISCONN`, 106) taken, as Rust's `connect` takes it: the descriptor, or the
+// failure with the socket closed.
+long Attempt(byte* address, int length, bool listening) {
+    mut long result = -1
+    raw {
+        int* error = __errno_location()
+        int family = int(address[0]) + int(address[1]) * 256
+        int fd = socket(family, 524289, 0)
+        if fd < 0 {
+            return -long(*error)
+        }
+
+        mut int done = 0
+        if listening {
+            done = setsockopt(fd, 1, 2, Ptr<void>(endpoints + 36), 4)
+            if done == 0 {
+                done = bind(fd, Ptr<void>(address), length)
+            }
+
+            if done == 0 {
+                done = listen(fd, 128)
+            }
+        } else {
+            done = connect(fd, Ptr<void>(address), length)
+            while done != 0 && *error == 4 {
+                done = connect(fd, Ptr<void>(address), length)
+            }
+
+            if done != 0 && *error == 106 {
+                done = 0
+            }
+        }
+
+        if done != 0 {
+            long failure = -long(*error)
+            close(fd)
+            return failure
+        }
+
+        result = long(fd)
+    }
+
+    return result
+}
+
+// `Attempt` on each address of `text`, a host and a port after its last `:`, NUL-ended, in which the
+// call writes a NUL over that `:` while it runs and gives it back after: the descriptor of the first
+// that binds or connects, or the failure, `ENOMEM` (12) where the held cannot be mapped. The port is
+// written into each address in the order of the network, its high byte first.
+long EachAddress(byte* text, bool listening) {
+    mut long result = -12
+    raw {
+        if endpoints == null {
+            endpoints = Memory(4096)
+        }
+
+        byte* held = endpoints
+        if held == null {
+            return result
+        }
+
+        long count = strlen(text)
+        mut long colon = count - 1
+        while colon >= 0 && text[colon] != 58 {
+            colon = colon - 1
+        }
+
+        if colon < 0 {
+            return -4097
+        }
+
+        long port = PortOf(text + colon + 1, count - colon - 1)
+        if port < 0 {
+            return -4097
+        }
+
+        byte portHigh = byte(port / 256)
+        byte portLow = byte(port % 256)
+        mut long i = 0
+        while i < 112 {
+            held[i] = 0
+            i = i + 1
+        }
+
+        *Ptr<int>(held + 36) = 1
+
+        text[colon] = 0
+        mut int length = 0
+        if colon >= 2 && text[0] == 91 && text[colon - 1] == 93 {
+            // `sockaddr_in6`: the family, `AF_INET6` (10), the port at its byte 2 and the address at 8
+            text[colon - 1] = 0
+            if inet_pton(10, text + 1, Ptr<void>(held + 8)) == 1 {
+                held[0] = 10
+                length = 28
+            }
+
+            text[colon - 1] = 93
+        } else if inet_pton(2, text, Ptr<void>(held + 4)) == 1 {
+            // `sockaddr_in`: the family, `AF_INET` (2), the port at its byte 2 and the address at 4
+            held[0] = 2
+            length = 16
+        }
+
+        if length > 0 {
+            held[2] = portHigh
+            held[3] = portLow
+            result = Attempt(held, length, listening)
+        } else {
+            // the hints of `struct addrinfo`: `ai_socktype` at its byte 8 `SOCK_STREAM`, the family any,
+            // as Rust's `LookupHost` asks; a failure other than `EAI_SYSTEM` (-11) names no error number
+            *Ptr<int>(held + 72) = 1
+            int looked = getaddrinfo(text, null, Ptr<void>(held + 64), Ptr<void>(held + 112))
+            if looked == -11 {
+                result = -long(*__errno_location())
+            } else if looked != 0 {
+                result = -4098
+            } else {
+                // each `struct addrinfo`: `ai_addrlen` at its byte 16, `ai_addr` at 24 and `ai_next` at 40
+                byte* list = Ptr<byte>(*Ptr<long>(held + 112))
+                mut byte* entry = list
+                result = -4097
+                while entry != null && result < 0 {
+                    byte* address = Ptr<byte>(*Ptr<long>(entry + 24))
+                    address[2] = portHigh
+                    address[3] = portLow
+                    result = Attempt(address, *Ptr<int>(entry + 16), listening)
+                    entry = Ptr<byte>(*Ptr<long>(entry + 40))
+                }
+
+                freeaddrinfo(Ptr<void>(list))
+            }
+        }
+
+        text[colon] = 58
+    }
+
+    return result
+}
+
+// A socket listening on the address `text` (S9): its descriptor, with the port it is bound to written
+// to `port`, read by `getsockname` as Rust's `local_addr` reads it, which the system picks for the port
+// 0; or the failure, the socket closed.
+pub long Listen(byte* text, int* port) {
+    long fd = EachAddress(text, true)
+    if fd < 0 {
+        return fd
+    }
+
+    mut long result = fd
+    raw {
+        byte* held = endpoints
+        *Ptr<int>(held + 32) = 28
+        if getsockname(int(fd), Ptr<void>(held), Ptr<int>(held + 32)) != 0 {
+            result = -long(*__errno_location())
+            close(int(fd))
+        } else {
+            *port = int(held[2]) * 256 + int(held[3])
+        }
+    }
+
+    return result
+}
+
+// A socket connected to the address `text` (S9): its descriptor, or the failure.
+pub long Connect(byte* text) => EachAddress(text, false)
+
+// A connection that waits on the listening socket `fd`, taken by `accept4`, close-on-exec, and made again
+// where a signal interrupted it, as Rust's `accept` takes it: its descriptor, or the failure.
+pub long Accept(int fd) {
+    mut long result = -1
+    raw {
+        int* error = __errno_location()
+        result = long(accept4(fd, null, null, 524288))
+        while result < 0 && *error == 4 {
+            result = long(accept4(fd, null, null, 524288))
+        }
+    }
+
+    return Checked(result)
+}
+
 // The kind of a failure of the calls above: the kind Rust 1.82's `decode_error_kind` gives the error
 // number on Linux, each abbreviation written out, `AddrInUse` as `AddressInUse`, `Other` for a number
-// it gives no kind, and `InvalidData` for a name that is not UTF-8 (S1).
+// it gives no kind, `InvalidData` for a name that is not UTF-8 (S1), `InvalidInput` for an address that
+// is no host and port or gives no address, and `NotFound` for a lookup that failed (S9).
 pub IoKind ErrorKind(long failure) => match -failure {
     1 => IoKind.PermissionDenied
     2 => IoKind.NotFound
@@ -1900,13 +2146,15 @@ pub IoKind ErrorKind(long failure) => match -failure {
     116 => IoKind.StaleNetworkFileHandle
     122 => IoKind.FilesystemQuotaExceeded
     4096 => IoKind.InvalidData
+    4097 => IoKind.InvalidInput
+    4098 => IoKind.NotFound
     else => IoKind.Other
 }
 
 // The number of a failure of the calls above (S1): the system's error number, or 0 for a name that is
-// not UTF-8, which is no error of the system's.
+// not UTF-8, an address or a lookup, which is no error of the system's.
 pub int ErrorCode(long failure) {
-    if failure == -4096 {
+    if failure <= -4096 {
         return 0
     }
 

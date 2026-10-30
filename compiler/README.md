@@ -329,20 +329,29 @@ target's `Release`; the mebibytes a thread carved from stay its own. A target's 
 `Write` calling again where a signal interrupted it (section 6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
-The Linux file also gives the calls on files of chapter 13 (section 12), which the emitted code calls
-and nothing of `common/` or `std/` does, so that the Windows file gives none of them (S11). Each takes
+The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
+code calls and nothing of `common/` or `std/` does, so that the Windows file gives none of them (S11). Each takes
 a path as the address of its bytes ended by a NUL byte, which `common/`'s `CPath` copies from a string,
 null where the string holds a NUL, and `FreePath` gives back; each returns a number of 0 or more, or a
 failure below 0, the system's error number negated, or -4096 for the name of a directory's entry that
 is not UTF-8. `ErrorKind` gives a failure's `IoKind`, the kind Rust 1.82's `decode_error_kind` gives the
-number on Linux, and `ErrorCode` its number, 0 for -4096 (S1). `OpenFile` opens close-on-exec, a file it
+number on Linux, `Other` where Rust's is `Uncategorized`, and `ErrorCode` its number, 0 for -4096 and
+below (S1). `OpenFile` opens close-on-exec, a file it
 creates with the permissions 0666 less the `umask` (S2); `OpenFile` and `ReadFile` call again where a
 signal interrupted them; `WriteFile` calls `Write` again with the rest and returns the bytes written
 before a call that took none (S4); `CloseFile` takes an interrupt for no failure; `FileSize` and
 `FileExists` read `stat` into a page each thread maps at its first use, at the offsets of x86-64's
 `struct stat`; `CreateDirectories` creates the directories above that are missing, as Rust's
 `fs::create_dir_all` does, and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
-library's `struct dirent` (S8). `std/` gives the room a read makes in a list of bytes before it,
+library's `struct dirent` (S8). `Listen` and `Connect` take an address as `CPath` copies it, read
+its port after its last `:` and its host by `inet_pton` where it is a literal of IPv4, or of IPv6 inside
+`[` and `]`, and else by `getaddrinfo`, and try each address until one binds or connects, as Rust's
+`each_addr` does, with the addresses in a page each thread maps at its first use; they fail with -4097,
+`InvalidInput`, for an address that is no host and port or a name that gives no address, and -4098,
+`NotFound`, for a lookup that fails with no error of the system. `Listen` sets `SO_REUSEADDR`, listens
+with room for 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
+it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
+socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9).
 
 The text of a `float` and of a `double` is computed in `common/` from the value's bits, which the
@@ -477,11 +486,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
   program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
   lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
-- files (chapter 13), in a build for Linux: each call of `File` and `Directory` and each of a file's
-  `Read`, `Write` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
+- files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
+  and `TcpStream`, each of a file's and a stream's `Read`, `Write` and `Close` and each of a listener's
+  `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` and `ErrorCode` and its path the call's first,
-  whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File` is the address of a block of 32 bytes,
-  the count of the values that hold it, the descriptor and the path, counted as a list's block is and
+  whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 32 bytes,
+  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, and the path or the address, which a stream from `Accept` takes from its listener (S9), counted as a list's block is and
   closed at zero, the error of that close ignored, and `Close` writes -1 as the descriptor before it
   closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
@@ -633,7 +643,7 @@ checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` or a `Clear` on a list in
-a field (M5), `==` on a value that holds a list (D3), `s.Chars` as a list (T15), a call on a file in a build for
+a field (M5), `==` on a value that holds a list (D3), `s.Chars` as a list (T15), a call on a file or a socket in a build for
 Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
@@ -868,7 +878,7 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
 M9 for lists), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17) and 13 (files: S1 to S8, S10 and S11; S12's grants are a
+flow), 11's raw forms (R7, R10 to R17) and 13 (files and sockets: S1 to S11; S12's grants are a
 package's, and the checker reads a program), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -938,7 +948,7 @@ another function of its name, with a `mut` parameter or with a type that cannot 
 which no rule names an id, which leaves its body read with its diagnostics dropped and its calls
 unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the type of a C
 function does not write, the type of a C function with a type that cannot cross to C, and a data
-type in C's layout (R16, R17); a socket, `TcpListener` and `TcpStream` (S9); the text of a raw pointer, of a C function value and of a value
+type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one

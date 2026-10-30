@@ -63,13 +63,13 @@ internal static class Lower
     /// <summary>The alignment of a value of the type in memory, as LLVM lays out its IR type: 16 for an <c>i128</c> (T29), else its size up to 8.</summary>
     public static int Align(KurzType type) => IrType(type) == "i128" ? 16 : Math.Min(Size(type), 8);
 
-    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, the time types, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, a file, pointers to them and C function types over them.</summary>
+    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, the time types, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, a file or a socket, pointers to them and C function types over them.</summary>
     public static bool Supported(KurzType type) => type switch
     {
         PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt
             or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Decimal or Primitive.Bool or Primitive.Char or Primitive.String
             or Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp,
-        VoidType or EnumType or HandleType { Kind: Handle.File } => true,
+        VoidType or EnumType or HandleType => true,
         PointerType p => Supported(p.Pointee),
         CFunctionType f => f.Parameters.All(Supported) && Supported(f.Result),
         _ => false,
