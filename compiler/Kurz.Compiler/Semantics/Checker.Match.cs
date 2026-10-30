@@ -74,7 +74,7 @@ public sealed partial class Checker
                             else if (type is EnumType e && EveryValueNamed(e, literals))
                             {
                                 // an enum without values: no value reaches the arm, as Rust 1.82 warns that such an arm matches no values
-                                Report(ErrorIds.UnreachableArm, arm.Line, e.Symbol.Values.Count == 0 ? $"`{type}` has no values, so no arm of it is reached: a `match` with no arms covers it (C4, D12)" : $"the arms above name every value of `{type}` (C4, D12)");
+                                Report(ErrorIds.UnreachableArm, arm.Line, e.Symbol.Values.Count == 0 ? $"`{type}` has no values, so no arm of it is reached{(Types.Same(subjectType, e) ? ": a `match` with no arms covers it" : "")} (C4, D12)" : $"the arms above name every value of `{type}` (C4, D12)");
                             }
                             else
                             {

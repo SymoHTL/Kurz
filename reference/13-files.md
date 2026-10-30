@@ -148,8 +148,10 @@ ignoring an error of that close. `f.Close()` closes it before that and returns `
 `Close` through one holder closes it for all. Every call on a closed file, `Close` among them, returns
 the error the system gives a descriptor that is not open, `Other` with the number 9, with the path
 the file was opened with, since a close stores -1 in the file's descriptor before the system closes
-it, so that no later call passes the system a number it may have given another file. A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's error,
-the close that ignores its error, and no text)*
+it, so that no call that starts after that store passes the system a number it may have given
+another file, while a call through another holder that read the descriptor before the store can
+still reach one. A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's
+error, the -1 stored at the close, the close that ignores its error, and no text)*
 
 Case: [system/close-twice.kz](../corpus/system/close-twice.kz)
 ```kurz
@@ -272,11 +274,13 @@ its last `:`: a host that is a literal of IPv4, `"127.0.0.1:8080"`, or of IPv6, 
 with no lookup, and any other, `"localhost:8080"`, is looked up through `getaddrinfo`, whose addresses
 are tried in its order until one binds or connects, the error being the last one's. The port is read
 as Rust reads a `u16`, a `+` and zeros in front taken. A literal is what `inet_pton` reads, of IPv6
-inside `[` and `]` with a scope id in digits after a `%` and a port of digits alone, as Rust's parse of
-a socket address reads one, and any other host, `[::1]` before the port `+0` among them, is looked up
-as it is written. An address that holds a NUL byte is `InvalidInput`, as a path is (S1). A listener
+inside `[` and `]` with a scope id after a `%` of digits from 0 to 4294967295, zeros in front taken,
+and a port of digits alone, as Rust's parse of a socket address reads one, and any other host,
+`[::1]` before the port `+0`, an empty scope id and one past 4294967295 among them, is looked up as
+it is written. An address that holds a NUL byte is `InvalidInput`, as a path is (S1). A listener
 takes every interface where its address is a wildcard, `0.0.0.0`, `[::]`, which takes IPv4 too on
-Linux's dual stack, on by default, or a name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
+Linux's dual stack, on by default, since the runtime sets no `IPV6_V6ONLY`, as Rust sets none, or a
+name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
 and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
 its address and passes `listen` a backlog of 128. An address without a `:`, a port that is not a
 number from 0 to 65535 and a name that gives no address are `InvalidInput`, and a lookup that fails is

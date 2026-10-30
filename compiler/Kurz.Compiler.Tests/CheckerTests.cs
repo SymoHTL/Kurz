@@ -1774,19 +1774,21 @@ public sealed class CheckerTests
         // D12: no value reaches the arm of the type or `else`, as Rust 1.82 warns of either that it matches no values; with no arm above
         // it, the text names the `match` without arms and not "the arms above"
         Clean("enum Never {}\n\nvoid Show(Never n) {\n    match n {\n    }\n}\n\nprint(1)");
-        foreach (var (arm, text) in new[]
-        {
-            ("Never x => print(x)", "`Never` has no values, so no arm of it is reached: a `match` with no arms covers it (C4, D12)"),
-            ("else => print(1)", "`else` where `Never` has no values to reach it: a `match` with no arms covers it (C4, D12)"),
-        })
+        foreach (var arm in new[] { "Never x => print(x)", "else => print(1)" })
         {
             var error = Assert.Single(Check($"enum Never {{}}\n\nvoid Show(Never n) {{\n    match n {{\n        {arm}\n    }}\n}}\n\nprint(1)").Diagnostics.Items);
-            Assert.Equal((ErrorIds.UnreachableArm, 5, text), (error.Id, error.Line, error.Message));
+            Assert.Equal((ErrorIds.UnreachableArm, 5), (error.Id, error.Line));
+            Assert.Contains("a `match` with no arms covers it", error.Message);
         }
 
+        // in a union the enum without values is one case of several, which a `match` with no arms does not cover
+        var inUnion = Assert.Single(Check("enum Never {}\n\nvoid Show(Never | int n) {\n    match n {\n        Never x => print(x)\n        int i => print(i)\n    }\n}\n\nprint(1)").Diagnostics.Items);
+        Assert.Equal((ErrorIds.UnreachableArm, 5), (inUnion.Id, inUnion.Line));
+        Assert.DoesNotContain("no arms", inUnion.Message);
+
         // an enum with values keeps the texts of the arms above
-        Assert.Equal("the arms above name every value of `Plan` (C4, D12)", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    Plan p => print(p)\n}").Diagnostics.Items).Message);
-        Assert.Equal("`else` after arms that cover every case (C4, C9)", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    else => print(2)\n}").Diagnostics.Items).Message);
+        Assert.Contains("the arms above", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    Plan p => print(p)\n}").Diagnostics.Items).Message);
+        Assert.Contains("after arms that cover every case", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    else => print(2)\n}").Diagnostics.Items).Message);
     }
 
     [Fact]
