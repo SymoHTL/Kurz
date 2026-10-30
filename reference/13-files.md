@@ -292,7 +292,8 @@ address without a `:`, a port that is not a number from 0 to 65535 and a name wh
 with no address are `InvalidInput`, as Rust gives them; a lookup that `getaddrinfo` fails with
 `EAI_AGAIN`, a failure the resolver calls temporary, or `EAI_FAIL`, a failure of the name server, is
 `Other`, and one that it fails with `EAI_NONAME`, `EAI_NODATA` or any other of its errors but
-`EAI_SYSTEM` is `NotFound`, each with the number 0; a lookup that fails with `EAI_SYSTEM` is the
+`EAI_SYSTEM` is `NotFound`, each with the number 0, so that the text of such an `Other` reads
+`other (os error 0): db.local:5432` (S1); a lookup that fails with `EAI_SYSTEM` is the
 error of the system's number in `errno`, its kind and its number those of that error. The error of a connection that `Accept` gave names the string its listener's `Bind`
 was given, `127.0.0.1:0` where the system picked the port, and one that `Connect` made the string it
 was given. The kind of a lookup that `getaddrinfo` fails is decided (§12, the owner, 2026-10-30,

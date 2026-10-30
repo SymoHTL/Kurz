@@ -16,8 +16,9 @@ nothing, as C# compiles `case null` on a `string` (§4, the owner, 2026-10-30, "
 second answer, against `type-mismatch`, as Rust refuses `None =>` on an `i32`, and against
 `unreachable-arm`); over a subject of a type parameter, which a nullable type can fill (N11), it is
 `type-mismatch`, as `null` where a `T` is required is (N6), and whether it builds stands open (§14).
-An arm after `else`, a `null` arm among them, is `syntax` (C9). *(proposed: that a second `null`
-arm is `unreachable-arm`, as a second arm of one literal is (C4); the answers named it not)*
+An arm after `else`, a `null` arm among them, is `syntax` (C9). A second `null` arm is
+`unreachable-arm`, as a second arm of one literal is (C4), over a `T?` and over a subject with no `null`
+alike. *(assumed, §4: the second `null` arm, which the answers named not)*
 
 Case: [null/coalesce.kz](../corpus/null/coalesce.kz)
 ```kurz
@@ -63,6 +64,19 @@ void Show(string s) {
 
 Show("ab")
 Show("abc")
+```
+
+Case: [null/match-null-arm-twice.kz](../corpus/null/match-null-arm-twice.kz)
+```kurz
+void Show(string s) {
+    match s {
+        null => print("none")
+        null => print("again")
+        string t => print(t.Bytes.Count)
+    }
+}
+
+Show("ab")
 ```
 
 ### N2 (decided, §4) No use without a check
