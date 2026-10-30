@@ -1981,6 +1981,10 @@ public sealed class CheckerTests
         // N1, O8: `null` is a literal pattern, which covers the case `null`
         Clean(Email + "match Email(1) {\n    null => print(0)\n    string s => print(s.Bytes.Count)\n}");
         Assert.Equal([(ErrorIds.MatchNotExhaustive, 8)], Errors(Email + "match Email(1) {\n    string s => print(s.Bytes.Count)\n}"));
+
+        // the `null` arm tests the case, as `e == null` does, so a variable known not null is read as its nullable type there (N3)
+        Clean(Email + "e = Email(1)\nif e != null {\n    match e {\n        null => print(0)\n        string s => print(s.Bytes.Count)\n    }\n}");
+        Clean("mut string? d = \"x\"\nprint(match d {\n    null => 0\n    string s => s.Bytes.Count\n})");
     }
 
     // ---- what the checker does not read ---------------------------------------------------------------------

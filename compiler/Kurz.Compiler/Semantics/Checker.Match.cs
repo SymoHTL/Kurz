@@ -17,7 +17,8 @@ public sealed partial class Checker
     /// </summary>
     private MatchResult CheckMatch(Expression subject, IReadOnlyList<MatchArm> arms, bool isExpression, KurzType? expected, int line)
     {
-        var typed = CheckExpression(subject, null, keepCases: true);
+        // N3: a `null` arm tests the subject's case, as `x == null` does, so a variable known not null is read as its nullable type
+        var typed = arms.Any(a => a.Pattern is ValuePattern { Value: var v } && Unwrap(v) is NullLiteral) ? CheckNullable(subject, keepCases: true) : CheckExpression(subject, null, keepCases: true);
         var subjectType = typed.Type;
         var known = !typed.IsError;
         if (Types.IsVoid(subjectType))

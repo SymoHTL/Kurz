@@ -293,7 +293,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
     // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block,
     // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
-    // nullable variable known not null, and an `Add` through the place of one
+    // nullable variable known not null, an `Add` through the place of one, and a `match` with a `null` arm on one whose arm changes it
     private const string Strings = """
         data Person(string Name, int Age)
         data Tag(string Label)
@@ -438,6 +438,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         mut List<string>? items = List<string>()
         items.Add(Made(33))
         print(items)
+        maybe = Made(34)
+        match maybe {
+            null => print("none")
+            string present => {
+                maybe = null
+                print(present)
+            }
+        }
         print(Contact(null))
         raw {
             room = Bytes.Allocate(4)
@@ -485,6 +493,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "none",
         "n32", // a read of a variable known not null, the string of its case
         "[n33]", // an `Add` through the place of a list in a nullable variable
+        "n34", // the name of a `null` arm's `match` on a variable known not null, which the arm's assignment leaves whole
         "Contact { Email = null }",
         "hi", // a list that took over the room `Bytes.Allocate` gave
         "105",

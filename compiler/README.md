@@ -1172,8 +1172,9 @@ round can ask about it by the rule's id.
   narrowing. Section 4's "a call of a `mut` method on a value that a narrowed path runs through" is
   read as a path through the value to a field of it, and a list has no field; the value itself has
   its type, not the nullable one, inside the method, which cannot make it null.
-- N3: a test, `??` and `?.` read a variable or a path of fields known not null as the nullable
-  type it has, so that a second test, and `u?.Name` after `if u != null`, read as C# reads them.
+- N3: a test, a `match` with a `null` arm, `??` and `?.` read a variable or a path of fields known
+  not null as the nullable type it has, so that a second test, a `null` arm and `u?.Name` after
+  `if u != null` read as C# reads them.
 - N2: an operand of any operator is `nullable-unchecked`, `==` and `!=` with a value of the type it
   makes nullable among them, as Rust compares an `Option<i32>` with an `i32` nowhere, where C# lifts
   `x == 1` on an `int?`; so are a condition, the list of a `for`, the list of an index, a member read

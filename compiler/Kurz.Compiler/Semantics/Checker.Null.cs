@@ -206,10 +206,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// N3: a value a test, <c>??</c> or <c>?.</c> reads the case of: a variable or a path of fields known not null is read as the nullable
+    /// N3: a value a test, a <c>match</c> with a <c>null</c> arm, <c>??</c> or <c>?.</c> reads the case of: a variable or a path of fields known not null is read as the nullable
     /// type it has, so that a second test, or a <c>??</c> or <c>?.</c> after a test, reads as the first did.
     /// </summary>
-    private Typed CheckNullable(Expression e)
+    private Typed CheckNullable(Expression e, bool keepCases = false)
     {
         var known = frame.Known;
         if (PathOf(e) is { } path && Unwrap(e) is NameExpression or MemberAccess { Conditional: false })
@@ -217,7 +217,7 @@ public sealed partial class Checker
             frame.Known = frame.Known.Remove(path); // a variable or a path of fields, which runs nothing that could change what is known
         }
 
-        var typed = CheckExpression(e, null);
+        var typed = CheckExpression(e, null, keepCases);
         frame.Known = known;
         return typed;
     }
