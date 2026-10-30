@@ -1,5 +1,7 @@
 // expect: output
 // | 13
+// | 13
+// | 13
 // rules: N3, N10
 
 string? Email(int id) {
@@ -12,4 +14,13 @@ string? Email(int id) {
 email = Email(1)
 if email == "a@example.com" {
     print(email.Bytes.Count)
+}
+if "a@example.com" == email {
+    print(email.Bytes.Count)
+}
+other = Email(1)
+if other != null {
+    if email == other {
+        print(email.Bytes.Count)
+    }
 }

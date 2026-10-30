@@ -402,8 +402,8 @@ for i in a..<n {
 
 ### C9 (decided, §5) What else an arm can test, and `match` as an expression
 
-An arm can name a literal, which matches a value equal to it, and the last arm can be `else`,
-which matches whatever no arm before it matched. A `match` over literals that does not list
+An arm can name a literal, which matches a value equal to it, `null` among them (N1), and the
+last arm can be `else`, which matches whatever no arm before it matched. A `match` over literals that does not list
 every value of its type needs the `else` arm (O8). `match` can be used as an expression: its
 value is the value of the arm that ran, and its type is the type the arms share; where a type is
 written or expected, each arm's value has to fit it (T1), and where none is, the arms have to

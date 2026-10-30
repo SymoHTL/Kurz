@@ -17,6 +17,15 @@ thread static mut long left = 0
 // its class in its first 8 bytes.
 thread static mut long* heads = null
 
+// The blocks of more than 262144 bytes that each thread freed and keeps (the owner, 2026-10-30, "Keep
+// them, as glibc"): the first of them, null where it keeps none, and the bytes they take, at most
+// 33554432, 32 mebibytes, as glibc's malloc serves from its heap, where it keeps what is freed, the
+// requests below a threshold that a freed block of up to that size raises. Such a block starts with a
+// header of 16 bytes, the bytes the system gave it and, while it is kept, the address of the kept block
+// after it; what the allocation entry gives out starts after the header.
+thread static mut byte* kept = null
+thread static mut long keptBytes = 0
+
 // The size class of a request of at most 262144 bytes, counted from 0: the smallest power of two from
 // 16 that holds it.
 long Class(long size) {
@@ -69,18 +78,68 @@ long* Heads() {
     return table
 }
 
+// The smallest block the thread keeps that holds `bytes` bytes, its header among them, and takes no
+// more than twice them, its own header among its bytes, taken out of the kept blocks, as glibc's malloc
+// takes the smallest free chunk that holds a large request; null where none does, and the request takes
+// memory of its own from the system (the owner, 2026-10-30, "Only if at least half used"). glibc splits
+// the chunk and keeps its rest; Kurz gives the block out whole, its header naming its size, since a
+// block the system gave goes back to it only whole on Windows, and a list grown into it grows without
+// the system, so a request takes a kept block only where it uses at least half of it.
+byte* Reused(long bytes) {
+    mut byte* best = null
+    raw {
+        mut byte* before = null
+        mut byte* previous = null
+        mut byte* at = kept
+        while at != null {
+            long room = *Ptr<long>(at)
+            if room >= bytes && room <= bytes * 2 && (best == null || room < *Ptr<long>(best)) {
+                best = at
+                before = previous
+            }
+
+            previous = at
+            at = Ptr<byte>(*Ptr<long>(at + 8))
+        }
+
+        if best != null {
+            if before == null {
+                kept = Ptr<byte>(*Ptr<long>(best + 8))
+            } else {
+                *Ptr<long>(before + 8) = *Ptr<long>(best + 8)
+            }
+
+            keptBytes = keptBytes - *Ptr<long>(best)
+        }
+    }
+
+    return best
+}
+
 // The allocation entry (design record, section 2): `size` bytes, at an address that is a multiple of
-// 16. A request of more than 262144 bytes takes memory of its own from the system. A smaller one takes
-// a block of its size class: the one of that class freed last, or one carved from the thread's memory,
-// whose pieces the system gives a mebibyte at a time. A block used again holds what was written into
-// it before. Null where the system refuses, for which the runtime's `Allocate` ends the process (the
-// owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc` returns null and its
-// callers that cease execution are encouraged to call `handle_alloc_error`.
+// 16. A request of more than 262144 bytes takes the smallest block the thread keeps that holds it and
+// takes no more than twice its bytes, else memory of its own from the system, each with its header in
+// front. A smaller one takes a block of its size class: the one of that class freed last, or one carved
+// from the thread's memory, whose pieces the system gives a mebibyte at a time. A block used again holds
+// what was written into it before. Null where the system refuses, for which the runtime's `Allocate`
+// ends the process (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
+// returns null and its callers that cease execution are encouraged to call `handle_alloc_error`.
 pub byte* Allocate(long size) {
     mut byte* p = null
     if size > 262144 {
+        long bytes = (size + 15) / 16 * 16 + 16
+        p = Reused(bytes)
         raw {
-            p = sys.Memory((size + 15) / 16 * 16)
+            if p == null {
+                p = sys.Memory(bytes)
+                if p != null {
+                    *Ptr<long>(p) = bytes
+                }
+            }
+
+            if p != null {
+                p = p + 16
+            }
         }
 
         return p
@@ -112,13 +171,22 @@ pub byte* Allocate(long size) {
 
 // A block the allocation entry gave, given back with the `size` it was asked for, as Rust's
 // `GlobalAlloc::dealloc` takes the layout a block was allocated with: a block of more than 262144
-// bytes to the system, a smaller one to the front of its size class's free blocks, where the next
-// request of that class takes it. Where the table of size classes cannot be carved, the block is not
-// used again.
+// bytes to the front of the blocks the thread keeps, where its bytes, as its header names them, fit
+// within the 33554432 the kept blocks may take, else to the system; a smaller one to the front of its
+// size class's free blocks, where a request of that class takes it first. Where the table of size
+// classes cannot be carved, the block is not used again.
 pub void Free(byte* p, long size) {
     if size > 262144 {
         raw {
-            sys.Release(p, (size + 15) / 16 * 16)
+            byte* block = p - 16
+            long bytes = *Ptr<long>(block)
+            if keptBytes + bytes <= 33554432 {
+                *Ptr<long>(block + 8) = long(kept)
+                kept = block
+                keptBytes = keptBytes + bytes
+            } else {
+                sys.Release(block, bytes)
+            }
         }
 
         return
@@ -132,6 +200,52 @@ pub void Free(byte* p, long size) {
             table[k] = long(p)
         }
     }
+}
+
+// A block the allocation entry gave for `size` bytes, grown to `grown` bytes with the bytes it holds, as
+// Rust's `GlobalAlloc::realloc`: a block of more than 262144 bytes is itself where its header names
+// room enough, as a kept block given out whole may, as glibc's `realloc` leaves a mapped chunk that
+// holds the size, else grown by the target's `Resize`, which can grow it without a copy, as the C
+// library's `realloc` grows a block it mapped; else, and where `Resize` gives null, a new block with the
+// bytes copied and the old one freed. Null where the system refuses, the block then left as it was.
+pub byte* Reallocate(byte* p, long size, long grown) {
+    if size > 262144 {
+        long bytes = (grown + 15) / 16 * 16 + 16
+        mut byte* moved = null
+        raw {
+            byte* block = p - 16
+            long room = *Ptr<long>(block)
+            if bytes <= room {
+                moved = p
+            } else {
+                byte* q = sys.Resize(block, room, bytes)
+                if q != null {
+                    *Ptr<long>(q) = bytes
+                    moved = q + 16
+                }
+            }
+        }
+
+        if moved != null {
+            return moved
+        }
+    }
+
+    byte* q = Allocate(grown)
+    if q == null {
+        return null
+    }
+
+    raw {
+        mut long i = 0
+        while i < size {
+            q[i] = p[i]
+            i = i + 1
+        }
+    }
+
+    Free(p, size)
+    return q
 }
 
 // The block of a list (M9, R15). A list value is the address of its block, null for a list without
@@ -284,8 +398,9 @@ byte* Moved(byte* block, long count, long room, long item, mut long asked) {
 }
 
 // For an `Add` to a list no other value holds: a block with room for one more item, the block itself
-// where it has room, else a grown block with its items, the old block freed; a first block for a list
-// without one. Null, with `asked` set, as `Moved` gives it.
+// where it has room, else the block grown by `Reallocate`, as Rust's `Vec` grows its buffer by
+// `realloc`; a first block for a list without one, as `Moved` gives it. Null, with `asked` set, as
+// `Moved` gives it.
 pub byte* ListGrow(byte* block, long item, mut long asked) {
     mut long count = 0
     mut long room = 0
@@ -300,9 +415,19 @@ pub byte* ListGrow(byte* block, long item, mut long asked) {
         return block
     }
 
-    byte* p = Moved(block, count, room, item, mut asked)
-    if p != null && block != null {
-        Free(block, 16 + room * item)
+    if block == null || count == 2147483647 {
+        return Moved(block, count, room, item, mut asked)
+    }
+
+    long grown = Grown(room, item)
+    long bytes = 16 + grown * item
+    byte* p = Reallocate(block, 16 + room * item, bytes)
+    raw {
+        if p == null {
+            asked = bytes
+        } else {
+            *Ptr<int>(p + 12) = int(grown)
+        }
     }
 
     return p
@@ -330,12 +455,15 @@ pub byte* ListCopy(byte* block, long item, mut long asked) {
 }
 
 // The address the next item goes to, in a block with room for it, whose count of items it raises by
-// one.
+// one. The count is read as a `uint`, which it never exceeds, so that the item's offset widens without
+// a sign: in a loop of `Add`s the count the `Add` before stored is then read back by a plain load, not a
+// sign-extending one, and 16 MiB of `Bytes.Add` ran in 16 ms instead of 28 on a 13th-generation Intel
+// processor (`EmitterTests` pins the widening).
 pub byte* ListPush(byte* block, long item) {
     mut byte* slot = null
     raw {
-        int count = *Ptr<int>(block + 8)
-        *Ptr<int>(block + 8) = count + 1
+        uint count = *Ptr<uint>(block + 8)
+        *Ptr<uint>(block + 8) = count + 1
         slot = block + 16 + long(count) * item
     }
 

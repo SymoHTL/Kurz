@@ -76,6 +76,12 @@ pub void Release(byte* p, long bytes) {
     }
 }
 
+// Memory `Memory` gave, grown in place: not by this runtime on Windows, where a region `VirtualAlloc`
+// reserved cannot grow, so null, and the allocator copies the block into a new one.
+pub byte* Resize(byte* p, long bytes, long grown) {
+    return null
+}
+
 // The trace of the calls below an error line (design record, section 6), which Windows reads through
 // `dbghelp.dll` and the PDB: not written on Windows by this runtime, so the error line stands alone.
 pub void Trace() {
