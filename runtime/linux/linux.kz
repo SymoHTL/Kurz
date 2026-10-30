@@ -624,13 +624,19 @@ void Frame(long ip, long at) {
 // out, kept in the third page in a table of 251 slots chosen by the address's remainder by 251, where
 // two addresses whose difference is a multiple of 251 take turns, so that a recursion, whose frames
 // repeat a few return addresses, reads the file one time per address on the walk that counts the rest.
+// Where `Open` could not map the pages, no table is kept, and the file is not readable either, so that
+// each frame counts one line.
 void Count(long at) {
     raw {
-        long* table = Ptr<long>(page + 8192)
+        mut long* table = null
+        if page != null {
+            table = Ptr<long>(page + 8192)
+        }
+
         long slot = at % 251 * 2
         // the lines times 4, plus the kind of `KindOf`, plus 1; 0 for an address not counted
         mut long known = 0
-        if table[slot] == at {
+        if table != null && table[slot] == at {
             known = table[slot + 1]
         }
 
@@ -661,8 +667,10 @@ void Count(long at) {
             }
 
             known = count * 4 + kind + 1
-            table[slot] = at
-            table[slot + 1] = known
+            if table != null {
+                table[slot] = at
+                table[slot + 1] = known
+            }
         }
 
         frames = frames + (known - 1) / 4

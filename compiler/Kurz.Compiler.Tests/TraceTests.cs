@@ -171,6 +171,29 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
         Assert.Equal(cut ?? (depth == 98 ? "  at main in program.kz:9" : null), trace[^1]);
     }
 
+    [Fact]
+    public void A_trace_is_cut_after_a_hundred_frames_where_the_reader_could_not_map_its_pages()
+    {
+        // the reader maps three pages, the third the table that counts the frames past the cut; where the system refuses them, every
+        // frame is `<unknown>` and each frame past the hundredth counts one line, with no table
+        const string text = "int Deep(int n) {\n    if n == 0 {\n        return 1 / n\n    }\n\n    return Deep(n - 1) + 1\n}\n\nprint(Deep(149))\n";
+        var refused = ListTests.Edited(("runtime/linux/linux.kz", "void* got = mmap(null, 12288, 3, 34, -1, 0)", "void* got = mmap(null, 12288, 3, 0, -1, 0)"));
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], refused, testBuild: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var run = Toolchain.Run(toolchain.Build(compilation.Program, "trace-cut-without-pages"), null);
+        var (error, trace) = Split(run.Error);
+        Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Empty(trace);
+            return;
+        }
+
+        Assert.Equal(101, trace.Count);
+        Assert.All(trace.Take(100), l => Assert.Matches(Unknown(), l));
+        Assert.Matches(Cut(), trace[^1]);
+    }
+
     [Theory]
     [InlineData("0", false)]
     [InlineData(null, true)] // absent

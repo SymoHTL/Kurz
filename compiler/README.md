@@ -676,13 +676,17 @@ corpus runner holds the trace of every crash it runs to its error line's place a
 is cut, to a hundred frames above the cut line (E3), and every other test that compares a crash's standard
 error sets `KURZ_TRACE=0` for the program it runs.
 
-On Linux the runtime's `Start` installs the handler of a fault (section 6) for the process's one
-thread, as Rust's standard library installs its own: `Faults` maps a stack of 64 KiB with a page
-below it that faults, takes the page below the lowest address `pthread_getattr_np` gives for the
-thread's stack as its guard page, and installs `OnFault` for `SIGSEGV` and `SIGBUS` on that stack
-with `SA_SIGINFO`, `SA_ONSTACK` and `SA_NODEFER`. A fault outside the guard page sets the signal's
+On Linux the runtime's `Start` installs the handler of a fault (section 6) for the process's first
+thread, the one thread the runtime runs, as Rust's standard library installs its own: `Faults` maps a
+stack of 64 KiB with a page below it that faults, takes the page below the lowest address
+`pthread_getattr_np` gives for the thread's stack as its guard page, and installs `OnFault` for
+`SIGSEGV` and `SIGBUS` on that stack with `SA_SIGINFO`, `SA_ONSTACK` and `SA_NODEFER`. A thread that
+a library of C starts gets no stack for faults, and its overflow ends as the system ends it. Where the
+stack's limit is `unlimited`, or another mapping lies within the limit and 256 pages below the stack,
+the system stops the stack 256 pages above that mapping, above the guard page, and an overflow ends by
+the system with nothing written, as in Rust (section 2). A fault outside the guard page sets the signal's
 default back and returns, so that the system ends the process, the exit code 139 in a shell for
-`SIGSEGV`. A fault in it while a crash path runs, which `Raise`, `Throw` and the end of a refused
+`SIGSEGV`; so does a fault in the page below the stack for faults, which reaches no handler. A fault in it while a crash path runs, which `Raise`, `Throw` and the end of a refused
 allocation mark first through `Crashing`, ends the process with 1 and nothing more written; any other
 writes `error: stack-overflow at <file>:<n>` with the line of the call that did not fit: the frame
 the fault interrupted holds it where the instruction there is a call, and otherwise the frame below
