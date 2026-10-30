@@ -78,7 +78,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 10. Let it crash: a lasting fault restarts in a loop, and the limit takes the tree down
 
 - Evidence: Supervisor (https://elixir.hexdocs.pm/Supervisor.html): "`:max_restarts` - the maximum number of restarts allowed in a time frame. Defaults to `3`." and "`:max_seconds` - the time frame in which `:max_restarts` applies. Defaults to `5`." Supervisor Behaviour, OTP design principles (https://www.erlang.org/doc/system/sup_princ.html): "If more than `MaxR` number of restarts occur in the last `MaxT` seconds, the supervisor terminates all the child processes and then itself." Of the supervisor above it, the page says: "It either restarts the terminated supervisor or terminates itself."
-- Kurz: answered: "Growing pause", section 6 of the record. Before the answers: REPEATED.
+- Kurz: answered: "Growing pause" and "No limit, as Akka", section 6 of the record: a lasting fault restarts about every 30 s without end and takes no tree down, and a limit holds where `max N in` is written. Before the answers: REPEATED.
 
 ## 11. Hot code upgrades are too complex to use
 
@@ -90,7 +90,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Mix release (https://mix.hexdocs.pm/Mix.Tasks.Release.html), on build-time configuration: "it is evaluated whenever you compile your code or whenever you assemble the release." Application (https://elixir.hexdocs.pm/Application.html): "In any case, compile-time environments should be avoided." and "Whenever possible, reading the application environment at runtime should be the first choice."
 - Since: `config/runtime.exs` runs at start, and `Application.compile_env` makes a compile-time read explicit; the Application page says Mix tools "compare the compilation values with the runtime values whenever your system starts", "raising an error in case they differ".
-- Kurz: answered: "Typed settings data", section 12 of the record. Before the answers: OPEN.
+- Kurz: answered: "Typed settings data", section 12 of the record; a program with settings does not build for Windows ("Not supported, as files", section 12). Before the answers: OPEN.
 
 ## 13. Macros: code nobody sees, large expansions, compile-time dependencies
 
@@ -119,7 +119,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: global (https://www.erlang.org/doc/apps/kernel/global.html): "A network of overlapping partitions might cause the internal state of `global` to become inconsistent." and, of its resolver `random_exit_name/3`: "The function randomly selects one of the pids for registration and kills the other one." Mnesia system information (https://www.erlang.org/doc/apps/mnesia/mnesia_chap7.html): "Determining what data to keep after a communication failure is outside the scope of Mnesia." State of Elixir 2025, question 34: "Distributed state (Mnesia / ETS across nodes) 83 resp. 10.1%".
 - Since: since OTP 25, `global` by default cuts overlapping partitions into fully connected ones (same page). The Mnesia page suggests determining "which "island" contains most of the nodes" and "Using option {majority,true} for critical tables"; the repair of data stays with the application.
-- Kurz: answered: "Raft membership", "Phi accrual + majority, as Akka" and "Raft: neither side wins", section 7 of the record. Open there (section 14): whether the policy that runs an item on all sides with a `merge` block still has a side to run on, and what a durable `send` refused during a split gives its sender. Before the answers: OPEN.
+- Kurz: answered: "Raft membership", "Phi accrual + majority, as Akka" and "Raft: neither side wins", section 7 of the record, and a durable `send` whose second copy is across a split is refused ("Keep 2, name the cost", section 13). Open there (section 14): whether the policy that runs an item on all sides with a `merge` block still has a side to run on, and what a durable `send` refused during a split gives its sender. Before the answers: OPEN.
 
 ## 18. Messages between nodes can be lost
 

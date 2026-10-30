@@ -123,7 +123,8 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
   2.8x to 5.9x faster than Box on the three benchmarks that have both." (design). Kurz: no heap at
   all CONFLICTS with the counted values of sections 3 and 4; a region freed in one sweep was
   ALREADY in part (the sweep at a message's end, section 13) and is answered: "Region per message",
-  section 13 of the record (Q1).
+  section 13 of the record (Q1), with the blocks that hold no counted pointer alone ("No counted
+  pointers", section 13).
 - G2, memory never moves. "push returns a reference to the new element, so a program can link
   elements while building the array. A vector<T> or Vec<T> may reallocate and cannot provide this
   guarantee." (front page); "a grown-to-n array occupies n elements, where Vec/vector carry up to 2x

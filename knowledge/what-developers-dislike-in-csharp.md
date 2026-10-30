@@ -96,7 +96,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 15. An event handler keeps its listener alive
 
 - Evidence: "Weak event patterns - WPF" (https://learn.microsoft.com/en-us/dotnet/desktop/wpf/events/weak-event-patterns): "Listening for events can lead to memory leaks." and "However, this technique creates a strong reference from the event source to the event listener."
-- Kurz: answered: "Subscription value", section 3 of the record. Before the answers: REPEATED.
+- Kurz: answered: "Subscription value" and "Ring stays an error", section 3 of the record: the holder of a subscription decides how long the source keeps the handler, and a handler that reads that holder closes a ring, which is a compile error instead of a listener kept alive. Before the answers: REPEATED.
 
 ## 16. Dates and times without a zone
 

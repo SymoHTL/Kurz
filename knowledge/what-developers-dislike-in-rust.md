@@ -81,7 +81,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Rust project goals, "Experiment with relaxing the Orphan Rule" (https://github.com/rust-lang/rust-project-goals/blob/main/src/2024h2/Relaxing-the-Orphan-Rule.md): "it prevents providing a third-party library that integrates two other libraries with each other, and instead requires convincing the author of one of the two libraries to add (optional) support for the other, or requires using a newtype wrapper."; the async status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Some of the problems are due to the design of Rust itself. The coherence rules in particular."
 - Since: The goal's page gives its status as "Not accepted".
-- Kurz: answered: "Any package + check", section 4 of the record. Before the answers: REPEATED.
+- Kurz: answered: "Any package + check" and "Rust's impl block", section 4 of the record: any package declares the glue with an `impl` block, and the build refuses two declarations of one pair. Before the answers: REPEATED.
 
 ## 12. `Pin` and self-referential structs
 
