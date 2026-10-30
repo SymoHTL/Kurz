@@ -148,9 +148,9 @@ ignoring an error of that close. `f.Close()` closes it before that and returns `
 the error the system gives a descriptor that is not open, `Other` with the number 9, with the path
 the file was opened with, since a close stores -1 in the file's descriptor before the system closes
 it, so that no call that starts after that store passes the system a number it may have given
-another file. A call through another holder that read the descriptor before the store, or that
-waits in the system with it, can still reach such a number, and so read or write a file its holder
-never opened: the record names that hazard in the cost of the answer and keeps what bounds it open
+another file. A call through another holder that read the descriptor before the store and enters
+the system after the close can still reach such a number, and so read or write a file its holder
+never opened, while a call already in the system keeps the file it entered with: the record names that hazard in the cost of the answer and keeps what bounds it open
 (§12, §14). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's
 error, the -1 stored at the close, the close that ignores its error, and no text)*
 
@@ -286,11 +286,12 @@ Linux's dual stack, on by default, since the runtime sets no `IPV6_V6ONLY`, as R
 name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
 and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
-what `getaddrinfo` returns: an address without a `:`, a port that is not a number from 0 to 65535
-and a name whose lookup succeeds with no address of the family asked for are `InvalidInput`, as Rust
-gives them, and a lookup that `getaddrinfo` fails, with `EAI_NONAME` or any other of its errors, is
-`NotFound`, each with the number 0, but for `EAI_SYSTEM`, with which the lookup passes on the error
-of the system. The error of a connection that `Accept` gave names the string its listener's `Bind`
+what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
+address without a `:`, a port that is not a number from 0 to 65535 and a name whose lookup succeeds
+with no address are `InvalidInput`, as Rust gives them, and a lookup that `getaddrinfo` fails, with
+`EAI_NONAME` or any other of its errors but `EAI_SYSTEM`, is `NotFound`, each with the number 0; a
+lookup that fails with `EAI_SYSTEM` is the error of the system's number in `errno`, its kind and its
+number those of that error. The error of a connection that `Accept` gave names the string its listener's `Bind`
 was given, `127.0.0.1:0` where the system picked the port, and one that `Connect` made the string it
 was given. The kind of a lookup that `getaddrinfo` fails is decided (§12, the owner, 2026-10-30,
 "NotFound, as C#"). *(assumed, §12: the reuse of the address, the 128, the type of `Port`, the
