@@ -341,8 +341,8 @@ which moves the pages to other addresses where the ones after them are taken and
 interrupted it, reading `/dev/urandom` where the system refuses `getrandom` (`ENOSYS`, `EPERM`), from then on, or its
 pool is not ready (`EAGAIN`), and false where Rust's standard library panics (below), on Windows
 over `kernel32`, `Start` setting the guarantee of the main thread's stack (below), `Release` calling `VirtualFree` and `Resize`
-giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` over `bcrypt`, calling `BCryptGenRandom` with
-the system's preferred generator, and false where it fails. The
+giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` calling `ProcessPrng` of
+`bcryptprimitives.dll`, and false where the library or the call is missing (below). The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -602,7 +602,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   1.82"); the library names no import library, so the runtime loads it by `LoadLibraryExA` from the
   system's directory alone (`LOAD_LIBRARY_SEARCH_SYSTEM32`, 2048) and finds the call by
   `GetProcAddress`, as Go's runtime loads it, and gives false, so `random-failed`, where either is
-  missing, before Windows 8 (section 4, an assumption there). The result of `GetProcAddress` is a
+  missing, on a system older than Windows 10, Rust's floor (section 4, an assumption there). The result of `GetProcAddress` is a
   nullable C function type, `(extern "C" (byte*, ulong) => int)?`, whose `null` is the address 0
   (R17), called once a test knows it not null (N3).
   `ListTests` holds the end with the host's `Random` edited to give false, and on Linux the keys
@@ -610,8 +610,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   with a file that is not there as its control, which ends with `random-failed`. Held only by
   reading: `GRND_INSECURE` and the turn to `GRND_NONBLOCK`, `EPERM`, `EAGAIN`, `EINTR`, the
   descriptor kept open and read again, the other errors of `getrandom` and a read of the file that
-  fails, which no test makes the system give, and on Windows the call of `BCryptGenRandom` and its
-  check of the status. A
+  fails, which no test makes the system give, and on Windows a library or a call the runtime does not
+  find. A
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`

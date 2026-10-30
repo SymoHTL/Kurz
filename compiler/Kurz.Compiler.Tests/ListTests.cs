@@ -2082,7 +2082,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_first_map_on_a_system_that_gives_no_randomness_ends_the_program_with_random_failed()
     {
         // M9 (the owner, 2026-10-30, "End with an error, as Rust"): the target's `Random` reports that it filled no bytes, as a
-        // Linux whose `getrandom` and `/dev/urandom` both fail or a failing `BCryptGenRandom` would, and the first map ends the program before its block
+        // Linux whose `getrandom` and `/dev/urandom` both fail or a Windows without `ProcessPrng` would, and the first map ends the program before its block
         var refused = Edited((TargetFile, "pub bool Random(byte* bytes, long count) {", """
             pub bool Random(byte* bytes, long count) {
                 return false
@@ -2101,7 +2101,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         if (!OperatingSystem.IsLinux())
         {
-            return; // Windows' `Random` calls `BCryptGenRandom` alone, with no file to fall back to
+            return; // Windows' `Random` calls `ProcessPrng` alone, with no file to fall back to
         }
 
         // M9 (the owner, 2026-10-30, "Rust's full path"): each `getrandom` of the runtime is a system call of a number the kernel does
