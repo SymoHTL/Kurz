@@ -257,16 +257,11 @@ public sealed partial class Emitter
         Succeed(o, NewHandle(fn.Value($"trunc i64 {r} to i32"), address));
     }
 
-    /// <summary>M9: <c>list.Clear()</c>, through the place of the list's variable.</summary>
+    /// <summary>M9, M5: <c>list.Clear()</c>, through the place of the list's variable or of the field a path from one ends at.</summary>
     private string? EmitListClear(CallExpression c)
     {
         var member = (MemberAccess)Unwrap(c.Callee);
         var list = (ListType)TypeOf(member.Target);
-        if (Unwrap(member.Target) is not NameExpression n)
-        {
-            throw Unsupported(c.Line, "a `Clear` on a list in a field (M5)");
-        }
-
         var clear = Helper($"clear.{Lower.Mangle(list)}", "void", ["ptr"], () =>
         {
             // a block other values hold is let go of, and the list holds none (M3); one it alone holds lets go of its items and keeps its room
@@ -287,7 +282,7 @@ public sealed partial class Emitter
             fn.Emit($"call void {StdFunction("ListClear")}(ptr {block})");
             fn.Return(null);
         });
-        fn.Emit($"call void {clear}(ptr {NarrowedPlace(n)})");
+        fn.Emit($"call void {clear}(ptr {CollectionPlace(member.Target)})");
         return null;
     }
 
