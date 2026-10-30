@@ -1955,6 +1955,11 @@ public sealed class CheckerTests
         Clean(Email + Cleared + "mut e = Email(1)\nif Cleared(mut e) && e != null {\n    print(e.Bytes.Count)\n}");
         Clean(Email + Cleared + "mut e = Email(1)\nif e != null && Cleared(mut e) && e != null {\n    print(e.Bytes.Count)\n}");
 
+        // a `mut` method or a `mut` argument on a path through a nullable variable or field not known not null (M5, M7)
+        const string Box = "data Box(int N, List<int> Items)\n\nBox? Find() => null\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut b = Find()\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "b.Items.Add(1)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "Bump(mut b.N)"));
+
         // a variable passed as `mut` is read as its own type, which a `mut` parameter of the type it makes nullable does not take (M7)
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Set(mut string s) {\n    s = \"b\"\n}\n\nmut string? e = \"a\"\nSet(mut e)"));
     }
@@ -2018,6 +2023,9 @@ public sealed class CheckerTests
     [InlineData("T? Id<T>(T x) => x\n\nprint(1)", "1: a nullable `T` (N1)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
+    [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable field (N3, M5)")]
+    [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable field (N3, M5)")]
+    [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable field passed as `mut` (N3, M7)")]
     [InlineData("mut ages = Map<string, int>()\nages[\"Ann\"] = 31", "1: Map (M9)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]

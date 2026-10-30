@@ -891,6 +891,11 @@ public sealed partial class Checker
             return; // reported where the receiver was read
         }
 
+        if (ThroughNullable(variable, members, "a `mut` method on a path through a nullable field (N3, M5)"))
+        {
+            return;
+        }
+
         if (!IsFieldPath(variable.Type, members, out var notField))
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{notField}` is no field of a data value: only a path of data fields from a `mut` variable reaches a value that changes (M5, M4)");
@@ -912,6 +917,39 @@ public sealed partial class Checker
         }
 
         variable.Changed = true;
+    }
+
+    /// <summary>
+    /// N3: whether a path of fields from <paramref name="variable"/> runs through a nullable variable or field; one the checker knows
+    /// not null is reported as <paramref name="construct"/>, which the emitter does not change through, as an assignment into such a
+    /// path (M4), and another was reported where the path was read (N2).
+    /// </summary>
+    private bool ThroughNullable(VariableSymbol variable, List<MemberAccess> members, string construct)
+    {
+        var current = variable.Type;
+        var through = new NullPath(variable, string.Empty);
+        foreach (var m in members)
+        {
+            if (Types.NonNull(current) is not null)
+            {
+                if (frame.Known.Contains(through))
+                {
+                    NotSupported(m.Line, construct);
+                }
+
+                return true;
+            }
+
+            if (current is not DataType d || d.Symbol.Field(m.Member) is not { } field)
+            {
+                return false;
+            }
+
+            through = through with { Fields = through.Fields.Length == 0 ? m.Member : through.Fields + "." + m.Member };
+            current = SubstituteData(d, field.Type);
+        }
+
+        return false;
     }
 
     /// <summary>M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not tell passes.</summary>
@@ -1597,6 +1635,11 @@ public sealed partial class Checker
 
         var (variable, captured) = Lookup(name.Name);
         if (variable is null || Types.IsError(variable.Type))
+        {
+            return;
+        }
+
+        if (ThroughNullable(variable, members, "a path through a nullable field passed as `mut` (N3, M7)"))
         {
             return;
         }

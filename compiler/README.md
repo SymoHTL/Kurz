@@ -948,7 +948,8 @@ function type, C function type, type parameter or `void`, and a nullable case of
 which N1 does not name (N1, D9), `??` and `?.` on a value that is not nullable and `?.` to a member
 of a type no `?` makes nullable, which section 4 does not say (N4, N5), a call and an index after
 `?.`, which C# reads inside the chain and section 4 does not say (N5), and an assignment into a path
-through a nullable field known not null, which the emitter does not write through (N3, M4); `weak` (R3,
+through a nullable field known not null, which the emitter does not write through (N3, M4), a `mut`
+method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
 (R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
