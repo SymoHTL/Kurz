@@ -750,13 +750,15 @@ at a map's first write where the target's `Random` reports a failure, and a prog
 runs there; on Linux a map whose keys come from `/dev/urandom` where the system refuses `getrandom`
 with `ENOSYS`, and `random-failed` where that file is not there either;
 the target's own `Release`, after
-which a write into a freed block of 32 mebibytes, more than a thread keeps, ends the process, and under which lists
+which a write into a freed block of 33554432 bytes, which its header of 16 bytes takes past the 33554432
+a thread keeps, ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
 the same lists all kept do not, and so for strings of 524288 bytes; the same lists of 70000 items within
 the sixteen pieces, each round after the first taking the block the thread kept, and the same lists all
-kept not; five freed blocks of 8 mebibytes, of which the thread keeps the four within 32 mebibytes, a
+kept not; five freed blocks of 8388544 bytes, 8388560 with their headers, of which the thread keeps the
+four, 33554240 bytes, within 33554432, a
 write into the fourth after its `Free` ending nothing and one into the fifth ending the process; a kept
-block of 32 mebibytes not given to a request of less than half its bytes, whose block its `Free` gives
+block of 33554416 bytes, 33554432 with its header, not given to a request of less than half its bytes, whose block its `Free` gives
 back to the system, so that a write into it after the `Free` ends the process, and given to one of half,
 whose `Free` keeps it, so that the same write ends nothing; two lists of blocks of 16
 and 32 mebibytes, the second grown from 16, within the same 64 on Linux, where it grows in place, and

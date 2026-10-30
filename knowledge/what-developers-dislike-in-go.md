@@ -113,7 +113,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 16. Network timeouts default to none
 
 - Evidence: net/http source (https://github.com/golang/go/blob/master/src/net/http/client.go): "A Timeout of zero means no timeout." gosec, third party (https://github.com/securego/gosec): "G112 — Detect `ReadHeaderTimeout` not configured as a potential risk" and "G114 — Use of `net/http` serve function that has no support for setting timeouts".
-- Kurz: answered: "5 s default, settable", section 12 of the record. Before the answers: REPEATED.
+- Kurz: answered: "5 s default, settable" for a read, a write and `Connect`, and "Accept waits, as Rust", section 12 of the record. Before the answers: REPEATED.
 
 ## 17. Errors lose where they came from
 
