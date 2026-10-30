@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 4
+// rules: D20
+
+enum Plan { Free = 1, Pro = 1.5 }
+
+print(Plan.Free)

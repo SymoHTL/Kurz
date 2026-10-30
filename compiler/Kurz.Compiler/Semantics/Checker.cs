@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using Kurz.Compiler.Syntax;
 using Kurz.Compiler.Text;
@@ -150,6 +151,12 @@ public sealed partial class Checker
 
         /// <summary>The variables of the functions around this lambda that its body reads (F11, F15).</summary>
         public HashSet<VariableSymbol> Captures { get; } = [];
+
+        /// <summary>N3, N7: the variables and paths of fields that the flow of the code shows are not null where the checker reads; a lambda starts with what held where it was made (F15).</summary>
+        public ImmutableHashSet<NullPath> Known { get; set; } = [];
+
+        /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs.</summary>
+        public List<LoopExits> Loops { get; } = [];
     }
 
     private sealed class Scope
@@ -441,8 +448,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// D12, D20: an enum and its values, each name once: a name an earlier value has is <c>redeclared</c>, as Rust refuses a name given
-    /// twice (E0428), and so are the names of the members <c>Number</c> and <c>From</c> that D18 gives every enum, a rule of Kurz's own,
-    /// since Rust compiles a value of either name (section 4). The numbers are read
+    /// twice (E0428). A value may take the name of a member D18 gives every enum, <c>Number</c> or <c>From</c>, as Rust compiles a value
+    /// of either name, and the place of the name tells them apart (section 4, the owner, 2026-10-30, "Allow, as Rust", "By position"):
+    /// <c>Plan.From(n)</c> is the conversion (<see cref="CheckEnumFrom"/>), <c>Plan.From</c> and <c>Plan.Number</c> are values
+    /// (<see cref="EnumValue"/>) and <c>p.Number</c> is the member. The numbers are read
     /// once every function is declared (<see cref="CheckEnumNumbers"/>).
     /// </summary>
     private void DeclareEnum(TypeDeclaration d)
@@ -453,11 +462,6 @@ public sealed partial class Checker
             if (symbol.Values.Contains(value.Name))
             {
                 Report(ErrorIds.Redeclared, value.Line, $"`{d.Name}` has a value `{value.Name}` already (D20, V9)");
-                symbol.Refused = true;
-            }
-            else if (value.Name is "Number" or "From")
-            {
-                Report(ErrorIds.Redeclared, value.Line, $"`{value.Name}` is the name of a member D18 gives every enum, which no value of one takes (D18, D20)");
                 symbol.Refused = true;
             }
             else
@@ -751,11 +755,16 @@ public sealed partial class Checker
             case NamedType n:
                 return ResolveNamed(n);
             case NullableType n:
-                NotSupported(n.Line, "a nullable type (N1)");
-                return Types.Error;
+                return ResolveNullable(n);
             case Syntax.UnionType u:
                 {
                     var cases = u.Cases.Select(Resolve).ToList();
+                    if (cases.FirstOrDefault(c => Types.NonNull(c) is not null) is { } nullable)
+                    {
+                        NotSupported(u.Line, $"a nullable case of a union, `{nullable}` (N1, D9)"); // its `null` would be one of the union's cases (O1)
+                        return Types.Error;
+                    }
+
                     return cases.Any(Types.IsError) ? Types.Error : Types.Union(cases);
                 }
 
@@ -1398,17 +1407,32 @@ public sealed partial class Checker
                 return Flow.Completes;
             case IfStatement i:
                 {
+                    // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
                     CheckCondition(i.Condition);
+                    var start = frame.Known;
+                    var (whenTrue, whenFalse) = Tests(i.Condition);
+                    frame.Known = start.Union(whenTrue);
                     var then = CheckBlock(i.Then);
+                    var afterThen = frame.Known;
+                    frame.Known = start.Union(whenFalse);
                     var other = i.Else is null ? Flow.Completes : CheckStatement(i.Else);
+                    var reaching = new List<ImmutableHashSet<NullPath>>();
+                    if (then == Flow.Completes)
+                    {
+                        reaching.Add(afterThen);
+                    }
+
+                    if (other == Flow.Completes)
+                    {
+                        reaching.Add(frame.Known);
+                    }
+
+                    frame.Known = Join(reaching, start);
                     return then == Flow.Ends && i.Else is not null && other == Flow.Ends ? Flow.Ends : Flow.Completes;
                 }
 
             case WhileStatement w:
-                CheckCondition(w.Condition);
-                frame.LoopDepth++;
-                CheckBlock(w.Body);
-                frame.LoopDepth--;
+                CheckLoop(w.Condition, w.Body);
                 return Flow.Completes;
             case ForInStatement f:
                 CheckForIn(f);
@@ -1424,12 +1448,20 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.BreakOutsideLoop, b.Line, "`break` with no loop around it (C7)");
                 }
+                else
+                {
+                    frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop
+                }
 
                 return Flow.Ends;
             case ContinueStatement c:
                 if (frame.LoopDepth == 0)
                 {
                     Report(ErrorIds.BreakOutsideLoop, c.Line, "`continue` with no loop around it (C7)");
+                }
+                else
+                {
+                    frame.Loops[^1].Continues.Add(frame.Known); // N3: what holds at the loop's head
                 }
 
                 return Flow.Ends;
@@ -1595,7 +1627,7 @@ public sealed partial class Checker
         {
             Report(ErrorIds.Syntax, condition.Line, "a call with a `void` success used as a value (O10)");
         }
-        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Bool })
+        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Bool } && !Unchecked(t, condition.Line, "as a condition"))
         {
             Report(ErrorIds.TypeMismatch, condition.Line, $"a condition is a `bool`, not a `{t.Type}` (C3)");
         }
@@ -1651,6 +1683,7 @@ public sealed partial class Checker
         }
 
         Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
+        Assigned(new NullPath(model.DeclarationOf(v), string.Empty), type, t); // N7: a value that is not null, as C# reads a declaration
     }
 
     /// <summary>V8: an assignment where the name is visible, a declaration where it is not; F16 inside a top-level function.</summary>
@@ -1685,6 +1718,7 @@ public sealed partial class Checker
 
             variable.Changed = true;
             model.RecordAssignment(a, variable);
+            Assigned(new NullPath(variable, string.Empty), variable.Type, value); // N7
             return;
         }
 
@@ -1731,6 +1765,13 @@ public sealed partial class Checker
 
             members.Insert(0, m);
             root = Unwrap(m.Target);
+        }
+
+        if (root is IndexExpression { Conditional: true })
+        {
+            NotSupported(root.Line, "an assignment through `?[` (N5)");
+            CheckLoosely(a.Target, a.Value);
+            return;
         }
 
         if (root is UnaryExpression { Operator: TokenKind.Star } or IndexExpression)
@@ -1794,6 +1835,7 @@ public sealed partial class Checker
         }
 
         FieldSymbol? last = null;
+        var through = changed is null ? (NullPath?)null : new NullPath(changed, string.Empty);
         foreach (var m in members)
         {
             if (Types.IsError(current))
@@ -1801,6 +1843,24 @@ public sealed partial class Checker
                 break;
             }
 
+            if (Types.NonNull(current) is not null)
+            {
+                // N2, N3: a path through a nullable variable or field; one known not null is not written through, which the emitter does not do
+                if (through is { } known && frame.Known.Contains(known))
+                {
+                    NotSupported(m.Line, "an assignment into a path through a nullable variable or field (N3, M4)");
+                }
+                else
+                {
+                    Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is written through a `{current}` without a check (N2)");
+                }
+
+                current = Types.Error;
+                last = null;
+                break;
+            }
+
+            through = through is { } p ? p with { Fields = p.Fields.Length == 0 ? m.Member : p.Fields + "." + m.Member } : null;
             if (current is DataType d && d.Symbol.Field(m.Member) is { } field)
             {
                 last = field;
@@ -1827,7 +1887,7 @@ public sealed partial class Checker
             changes[a] = new Change(changed, path, a.Line, $"an assignment changes `{path}`"); // M7, in an arm inside an expression
         }
 
-        var value = CheckExpression(a.Value, Types.IsError(current) ? null : current, keepCases: current is UnionType);
+        var value = CheckExpression(a.Value, Types.IsError(current) ? Untyped(a.Value) : current, keepCases: current is UnionType);
         if (last is null || Types.IsError(current) || value.IsError)
         {
             return;
@@ -1841,6 +1901,8 @@ public sealed partial class Checker
         {
             Report(Types.MismatchId(value.Type, current), a.Value.Line, $"a `{value.Type}` where a `{current}` is required (T1)");
         }
+
+        Assigned(through, current, value); // N7, N9: a path of `data` fields is narrowed by its assignment as a variable is
     }
 
     /// <summary>Reads the parts of a statement the checker does not read, with their diagnostics dropped, so that the variables they use count as used (E1).</summary>
@@ -1899,15 +1961,14 @@ public sealed partial class Checker
             {
                 ListType l => l.Element,
                 ErrorType or VoidType => Types.Error,
+                _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
                 _ => Report(f.Collection.Line, t.Type),
             };
         }
 
         PushScope();
         DeclareChecked(f.Variable, element, false, VariableKind.Loop, f.VariableLine, f);
-        frame.LoopDepth++;
-        CheckBlock(f.Body);
-        frame.LoopDepth--;
+        CheckLoop(null, f.Body);
         PopScope();
 
         KurzType Report(int line, KurzType type)

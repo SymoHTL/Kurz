@@ -244,6 +244,8 @@ public sealed partial class Emitter
     {
         switch (type)
         {
+            case NullType:
+                return "true"; // N1: `null` is the one value of its case
             case PrimitiveType { Kind: Primitive.String }:
                 return fn.Value($"call i1 {RuntimeFunction("Same")}(%kz.str {left}, %kz.str {right})");
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || p.Kind is Primitive.Char or Primitive.Bool:
@@ -272,7 +274,7 @@ public sealed partial class Emitter
                         fn.Block(differ);
                         fn.Return("i1 false");
                         fn.Block(cases);
-                        ByCase(tag, union, union.Cases, c => fn.Return($"i1 {(c is VoidType ? "true" : Equal(Payload("%a0", union, c), Payload("%a1", union, c), c, line))}"));
+                        ByCase(tag, union, union.Cases, c => fn.Return($"i1 {(c is VoidType or NullType ? "true" : Equal(Payload("%a0", union, c), Payload("%a1", union, c), c, line))}"));
                     });
                     return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
                 }
@@ -471,9 +473,10 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A function of the module the emitted code calls for a type, emitted once: <paramref name="body"/> fills it with its arguments
-    /// as <c>%a0</c>, <c>%a1</c> and so on, while the function being emitted waits.
+    /// as <c>%a0</c>, <c>%a1</c> and so on, while the function being emitted waits; <paramref name="attributes"/> are its own function
+    /// attributes.
     /// </summary>
-    private string Helper(string key, string result, IReadOnlyList<string> parameters, Action body)
+    private string Helper(string key, string result, IReadOnlyList<string> parameters, Action body, params string[] attributes)
     {
         var name = $"@\"{key}\"";
         if (!helpers.Add(name))
@@ -483,7 +486,7 @@ public sealed partial class Emitter
 
         var saved = fn;
         var (savedRegions, savedScopes) = (regions, scopes);
-        fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})");
+        fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})", attributes);
         (regions, scopes) = ([], []); // a helper makes no temporary and has no variable
         try
         {

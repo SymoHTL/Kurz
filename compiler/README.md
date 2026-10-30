@@ -333,14 +333,25 @@ returns null and leaves the end of the process to a caller, which its documentat
 call `handle_alloc_error`. The entry gives a block of one of fifteen size classes, the powers of two
 from 16 to 262144 bytes: the block of its class freed last, else one carved from the thread's
 memory, which it takes from the system's `Memory` a mebibyte at a time; an allocation of more than
-262144 bytes takes memory of its own from `Memory`. It gives null where the system refuses. `std/`'s
+262144 bytes takes the smallest such block the thread keeps that holds it and takes no more than twice
+its bytes, the headers counted, given out whole, as glibc's `malloc` takes the smallest free chunk that
+holds a large request, else memory of its own from `Memory`, each with a header of 16 bytes in front
+that names the bytes the system gave it (record, section 2: the owner, 2026-10-30, "Keep them, as
+glibc" and "Only if at least half used"). It gives null where the system refuses. `std/`'s
 `Free` takes a block back with the size it was asked for, as Rust's `GlobalAlloc::dealloc` takes
 the layout a block was allocated with: a block of a size class to the front of its class's free
-blocks, where the next request of the class takes it, and a larger one to the system through the
-target's `Release`; the mebibytes a thread carved from stay its own. A target's directory gives
-`Start`, `Write`, `Exit`, `Memory`, `Release`, `Trace` and `Crashing`: on Linux over the C library,
+blocks, where a request of the class takes it first, and a larger one to the front of the blocks the
+thread keeps where they take no more than 32 mebibytes with it, else to the system through the
+target's `Release`; the mebibytes a thread carved from and the blocks it keeps stay its own. `Reallocate` grows a block with
+its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes stays where it is where its
+header names room enough, as a kept block given out whole can, else grows through the target's
+`Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
+with its bytes copied and the old one freed. A target's directory gives
+`Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
-`Write` calling again where a signal interrupted it (section 6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
+`Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap` and `Resize` calling `mremap`,
+which moves the pages to other addresses where the ones after them are taken and copies none, on Windows over
+`kernel32`, `Release` calling `VirtualFree` and `Resize` giving null, as a region `VirtualAlloc` reserved cannot grow. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -363,8 +374,8 @@ its port after its last `:` and its host by `inet_pton` where it is a literal of
 address reads one, and else by `getaddrinfo` as it is written, and try each address until one binds or connects, as Rust's
 `each_addr` does, with the addresses in a page each thread maps at its first use; they fail with -4097,
 `InvalidInput`, for an address that is no host and port or a name that gives no address, and -4098,
-`NotFound`, for a lookup that fails with no error of the system, where Rust gives `Uncategorized`, a kind
-the record assumes and lists as open (section 14). `Listen` sets `SO_REUSEADDR`, listens
+`NotFound`, the kind the record gives it (section 12), for a lookup that fails with no
+error of the system, where Rust gives `Uncategorized`. `Listen` sets `SO_REUSEADDR`, listens
 with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
@@ -452,7 +463,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   negative, as Rust stores the value of an enum without fields (section 4, an assumption there); `==`
   and `!=` compare the values, `<`, `<=`, `>` and `>=` their numbers, `.Number` widens the value to
   an `int`, `Plan.From(n)` picks the value by a switch on the numbers or makes the case `Invalid`, a
-  data type every file sees, and the text of a value is a literal of its name (A4);
+  data type every file sees, and the text of a value is a literal of its name (A4); a value named
+  `From` or `Number` is the value where no call follows `Plan.From` and where `Number` follows the
+  type's name (D20);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
@@ -490,6 +503,19 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (O1, O2), a success case without a value (O10), `match` with arms of a type, of a value and
   `else` (C4, C9, O8), postfix `else` after a call (O5), and `throw` of a data value and the bare
   `throw` of an arm of `else`, which throws the case that reached it (O7);
+- nullable types (N1): `T?` is the union `T | null`, laid out as every union is, its `null` a case
+  of no size, `{}` in the IR, whose value is `zeroinitializer` and whose text is `null` (A4), and a
+  `T?` of a list or of a data type laid out as a block is the address alone, its `null` an address no
+  value of `T` has, 1 for a list, whose value without items is the address 0, and 0 for a block
+  (section 4, the owner, 2026-10-30, "Rust's niche"); a read of a variable or a field the checker
+  found known not null is the value of the case `T`, and `&x`, `Add` and `Clear` on such a variable
+  reach the place of that value in the variable's room, the variable's own place where the address
+  is the value (N3, R10); `x == null` and `x != null` compare the tag, or the address with the `null`
+  of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
+  reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
+  `?.` and `?[` reads each member and item only where the value before it is not null, the index of
+  `?[` among it, each a value of its own that takes a count of what it read (N4, N5); a `T?` of a
+  type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
   which raises `index-out-of-range` for an index below 0 or at `Count` or beyond (T14), `list[a..<b]` and
@@ -578,8 +604,11 @@ the count of its items and the count it has room for, 4 bytes each, and from its
 items, each laid out as its type is (`std/std.kz`). A copy of a list copies the address and raises
 the count. An `Add` writes in place where one value holds the block and it has room, grows the
 block where it has none, as Rust's `Vec` grows, to twice its room, at least 8 items of a byte, 4 of
-up to a kibibyte and 1 of more, and where other values hold the block it copies the items into a
-block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). An argument that
+up to a kibibyte and 1 of more, by `Reallocate`, as Rust's `Vec` grows its buffer by `realloc`, and where other values hold the block it copies the items into a
+block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). The write in place
+is all the helper of an `Add` holds, which the optimiser inlines where the `Add` stands; the growth and
+the copy are a helper of their own, which it never inlines, as Rust's `Vec::push` calls a grow it does
+not inline (`EmitterTests`). An argument that
 changes the list through a `mut` parameter is `changed-while-held` (M7), so the order in which an `Add`
 reads its argument and its list is not seen. What `Add`'s argument made besides its item, the
 environment of a lambda it gave to a call among them, is let go of before the list is read, so that
@@ -632,11 +661,22 @@ refuses every request for memory after sixteen, within which a program that make
 through every way out of a block, the body of a `void` function and a lambda's environment among
 them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
 inaccessible, under which the values' programs and twenty rounds of the same program print the
-same lines, and so do the strings' program and twenty rounds of strings through every way out of a block;
+same lines, and so do the strings' program and twenty rounds of strings through every way out of a block,
+and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
+since a kept block stays readable, so that a write into one freed under it ends the process;
 the target's own `Release`, after
-which a write into a freed block of more than 262144 bytes ends the process, and under which lists
+which a write into a freed block of 32 mebibytes, more than a thread keeps, ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
-the same lists all kept do not, and so for strings of 524288 bytes; strings of 1024 bytes made and dropped
+the same lists all kept do not, and so for strings of 524288 bytes; the same lists of 70000 items within
+the sixteen pieces, each round after the first taking the block the thread kept, and the same lists all
+kept not; five freed blocks of 8 mebibytes, of which the thread keeps the four within 32 mebibytes, a
+write into the fourth after its `Free` ending nothing and one into the fifth ending the process; a kept
+block of 32 mebibytes not given to a request of less than half its bytes, whose block its `Free` gives
+back to the system, so that a write into it after the `Free` ends the process, and given to one of half,
+whose `Free` keeps it, so that the same write ends nothing; two lists of blocks of 16
+and 32 mebibytes, the second grown from 16, within the same 64 on Linux, where it grows in place, and
+not on Windows, where its old and new block are held at once, and the first one item longer not on
+either; strings of 1024 bytes made and dropped
 for 3000 rounds within the sixteen pieces, and five of them kept each round not; the count
 `string.Allocate` asks past its limit, lowered in the runtime's text, and the bytes of a string's
 block the system refuses; the number of `allocation-failed` past the limit, with the limit
@@ -669,7 +709,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 278 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 54 the
+full and the emitter does not emit, 3 of the 285 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 39 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -895,7 +935,8 @@ brace. Each is pinned as it is, so that a fix shows.
 The checker (`Semantics/`) takes a tree the parser read without an error and checks it against
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
-generic data type as a base), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
+generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths none, since they run through a
+class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
 M9 for lists), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files and sockets: S1 to S11; S12's grants are a
 package's, and the checker reads a program), and the rules of `print` and of a value's text that
@@ -932,7 +973,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `unused-variable`, `assign-immutable`, `capture-assign`, `mut-required`, `mut-at-call`, `changed-while-held`,
 `argument-mismatch`, `ambiguous-call`, `cannot-infer`, `duplicate-function`,
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
-`match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`,
+`match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
 `naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
@@ -946,8 +987,13 @@ dropped, so that the variables it uses count as used, but for the operand of `*`
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
-(chapter 7, D13, D17, D19, and the A-rules of their text); `null`,
-a nullable type, `?.` and `??` (chapter 4), `null` where no pointer stands among them; `weak` (R3,
+(chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable union,
+function type, C function type or `void`, and a nullable case of a written union, which N1 does not
+name (N1, D9), `?.` or `?[` to a member or an item of a type no `?` makes nullable, which section 4 does not say (N5),
+a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
+a part after `?[` and an assignment through it, which section 4 does not name (N5), and an assignment into a path
+through a nullable variable or field known not null, which the emitter does not write through (N3, M4), a `mut`
+method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
 (R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
@@ -983,7 +1029,7 @@ rule gives a meaning (below); a conversion to `string`, `bool` or `char` (A5 to 
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
-lists the rule ids whose cases the checker may say `not supported` to, and six cases by name that
+lists the rule ids whose cases the checker may say `not supported` to, and five cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the
 checker reads in full is held to its header whatever it cites.
 
@@ -1057,7 +1103,7 @@ round can ask about it by the rule's id.
   classes; the checker reads it for data types.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
-- E1 with D20: an enum whose declaration was reported, a name written twice, a member's name or a
+- E1 with D20: an enum whose declaration was reported, a name written twice or a
   number that breaks D20, gives `.Number`, `From` and an order of its values without a second
   error, and keeps every value but the one the defect named.
 - M7 with D12: a value of an enum is copied, as a number is, being a number in memory (above), as
@@ -1118,8 +1164,7 @@ round can ask about it by the rule's id.
   target and a `with`'s target before what follows them, and an interpolation's holes as written, a
   hole of a `string` holding what it read until the interpolation is made and a hole of another type
   made text where it stands (the owner, 2026-10-29, "Refuse, as Rust"); a hole closes on its line, so
-  what changes a place inside one is a `mut` argument. Either side of `??` is its value, a reading
-  no program shows, since the checker says `not supported` to `??` (chapter 4). A statement inside an arm is read on its own, while
+  what changes a place inside one is a `mut` argument. Either side of `??` is its value (N4). A statement inside an arm is read on its own, while
   what it changes, a `mut` argument, an assignment or a `mut` method, changes it within the
   expression around the arm; and one `changed-while-held` is reported for each change, at its line,
   however many reads it meets and statements it stands in (E1). `Add`, the one `mut` method the
@@ -1141,9 +1186,9 @@ round can ask about it by the rule's id.
   ("confirmed"), at any depth: a type met again on the way, `Q<() => int>` through the field `N` of a
   `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
-  itself with other arguments, `P<List<T>>` in a `P<T>`. A map, a nullable type and a class, which
-  section 4 assumes can hold one, the checker says `not supported` to (M9, N1, chapter 7) before the
-  walk asks. A function value is copied (the owner, 2026-10-25, "Copied"), and
+  itself with other arguments, `P<List<T>>` in a `P<T>`. A map and a class, which section 4 assumes
+  can hold one, the checker says `not supported` to (M9, chapter 7) before the walk asks, and a
+  nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter
   counts it once more for the expression (above), the cost the design record names.
@@ -1154,6 +1199,59 @@ round can ask about it by the rule's id.
   type, so a call that a lambda with an inferred result returns unwraps (O2), and the result F7
   infers from the value lists no case: a case the calling function does not list is
   `unlisted-case` (O3).
+- N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
+  `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
+  ways meet, at the end of an `if`, after the arms of a `match` or an `else` and at the head of a
+  loop, a path is known not null where every way that reaches the point keeps it. A loop's condition
+  and body are read again from what a round leaves, what the condition's own `mut` arguments end
+  among it, their diagnostics dropped, until a reading keeps what it began with; after the loop
+  holds what a false condition shows, joined with what holds at each `break`, a `for` leaves with
+  what its head holds as well, since it can run no round, and `while true` leaves by its `break`s
+  alone. A declaration of a value that is not null narrows its variable, as C# reads
+  `string? s = "a"`. An assignment's narrowing lasts past the block that holds it where every way
+  that reaches the join keeps it: `if f == null { f = "x" }` narrows `f` after the `if` (section 4,
+  the owner, 2026-10-30, "Yes, as C#"). What the left side of `&&` or `||` shows holds past the right side only where the right
+  side did not change it: `e != null && Cleared(mut e)` shows nothing of `e`, since the `mut`
+  argument ends the narrowing as an assignment does (N7). An arm of a `match` that no `null`
+  reaches, a type's, a literal's or an `else` after the `null` arm, knows the subject's variable or
+  path of fields not null, as C# reads a pattern, so that after a `match` whose `null` arm leaves
+  the variable is known not null.
+- N3 with N7 and M7: a `mut` method the checker reads, `Add` and `Clear` of a list, ends no
+  narrowing. Section 4's "a call of a `mut` method on a value that a narrowed path runs through" is
+  read as a path through the value to a field of it, and a list has no field; the value itself has
+  its type, not the nullable one, inside the method, which cannot make it null.
+- N3: `== null`, `!= null`, a `match` with a `null` arm, `??`, `?.` and `?[` read a variable or a
+  path of fields known not null as the nullable type it has, so that a second test, a `null` arm and
+  `u?.Name` after `if u != null` read as C# reads them; any other operand of them keeps what it
+  changed, so that `Take(mut x) ?? d` ends what was known of `x` (N7). An `==` beside a value reads
+  the variable as N10 says.
+- N2: an operand of any operator but `==` and `!=`, which N10 lifts, is `nullable-unchecked`, and
+  the error's line below it says how to check (section 4); so are a condition, the list of a `for`, the list of an index or a part, an
+  index of a list or of `?[`, a member read
+  through the value, the value `with` copies, and a value where the type it makes nullable is
+  required, which takes `nullable-unchecked` in place of `type-mismatch` there. A variable passed as
+  `mut` is read as its own type (N7), so that a `string?` given to a `mut string` is `type-mismatch`
+  with M7's text: no check makes it a variable of the parameter's type.
+- N6 with N1: `null` where nothing gives it a nullable type or a pointer, in a variable declared
+  without a type or as the argument of a type parameter, is `type-mismatch`, and so are `null`
+  compared with a value that is never null, and `<`, `<=`, `>` and `>=` with `null`. A `null`
+  argument of a call the checker does not read carries no error (E1).
+- N4: `a ?? b` has the type `a` makes nullable where `b` fits it, and `a`'s nullable type where `b`
+  fits that alone, as C# types it; after it holds what held before `b`, since `b` runs only where
+  `a` is null.
+- N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with, and
+  that one's own type where it is nullable, never a `T??`; a member after them in the chain reads
+  the member or the item before as its own type, so that a nullable one there is
+  `nullable-unchecked`, whatever a test showed of that member's path, which C# narrows: after
+  `if u?.Email != null`, `u?.Email.Bytes` is `nullable-unchecked` and `u.Email.Bytes` reads as the
+  test showed; a parenthesis ends the chain. After `?[` holds what held before its index, since the
+  index runs only where the list is not null, and an index that changes the list is
+  `changed-while-held` (M7), since the list is read before it.
+- N10 with N3: a nullable side of `==`, on either side, beside a value whose type is not nullable, read as the checker
+  typed it, so that a variable known not null counts as such a value, is known not null where the
+  test holds; beside another nullable value it is not, as C#'s analysis reads both.
+- N1 with C9 and O8: an arm may name `null`, which covers the case `null` (section 4, the owner,
+  2026-10-30, "Allow, as C#").
 - R7 with E1: every `raw` block in a package without the grant is `raw-not-allowed`, one inside
   another among them, since each is a block the grant would allow; its body is checked as one with
   the grant is, so a read through a pointer there raises nothing more.

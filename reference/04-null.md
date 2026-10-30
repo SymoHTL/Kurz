@@ -4,6 +4,12 @@
 
 `null` exists. `T?` is short for `T | null`: a value of that type is a `T` or `null`.
 
+An arm of a `match` may name `null`, which matches the `null` of a `T?` value, as C#'s `case null`
+and Rust's `None =>` do, and a `match` over a `T?` covers `null` by that arm or by `else` (O8,
+C9; §4, the owner, 2026-10-30, "Allow, as C#"). An arm that no `null` reaches, one of a type, one
+of a literal, or an `else` after the `null` arm, knows the variable or the path of fields the
+`match` tests not null, as C#'s analysis reads a pattern (N3).
+
 Case: [null/coalesce.kz](../corpus/null/coalesce.kz)
 ```kurz
 string? Email(int id) {
@@ -17,10 +23,33 @@ print(Email(1) ?? "none")
 print(Email(2) ?? "none")
 ```
 
+Case: [null/match-null-arm.kz](../corpus/null/match-null-arm.kz)
+```kurz
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+void Show(int id) {
+    match Email(id) {
+        null => print("none")
+        string s => print(s.Bytes.Count)
+    }
+}
+
+Show(1)
+Show(2)
+```
+
 ### N2 (decided, §4) No use without a check
 
 Using a value of type `T?` where a `T` is needed, or reaching a member through it, without a
-check is the compile error `nullable-unchecked`.
+check is the compile error `nullable-unchecked`. The error writes a second line below it, indented
+by two spaces, ``help: check it with `!= null`, or give a value for null with `??` `` (§4, the
+owner, 2026-10-30); the record marks the two spaces as *(assumed)*. A case pins an error's id and
+line (E2), so the second line has no case here.
 
 Case: [null/unchecked.kz](../corpus/null/unchecked.kz)
 ```kurz
@@ -38,18 +67,22 @@ print(email.Bytes.Count)
 ### N3 (decided, §4) What a check is
 
 What counts as a check follows the flow of the code, as the nullable analysis of C# does: what
-that analysis proves about a variable holds here, with the two differences this chapter states
-(N9, and the end of a narrowing by assignment in N7). The record marks the version as
-*(assumed)*: C# 12. The list that follows shows the forms the corpus covers; it is not the rule,
-and a form C# narrows that it leaves out, such as the block of `if name != null && other { }` or
-the code after `if name != null { } else { return }`, narrows here too. A variable of the type
-`T?` has the type `T`:
+that analysis proves about a variable holds here, with the one difference this chapter states
+(N9). The record marks the version as *(assumed)*: C# 12. The list that follows shows the forms
+the corpus covers; it is not the rule, and a form C# narrows that it leaves out, such as the block
+of `if name != null && other { }` or the code after `if name != null { } else { return }`,
+narrows here too. A variable of the type
+`T?` is known not null, and stands where a `T` is needed (N4 and N5 say how `??`, `?.` and `?[`
+read it):
 
 - in the block of `if name != null { }`, and in the `else` block of `if name == null { }`;
 - after an `if name == null { }` whose block always leaves, for the rest of the block that holds
   the `if`;
 - in the body of `while name != null { }`;
 - on the right of `name != null && ...` and of `name == null || ...`;
+- in the block of `if name == value { }` and of `if value == name { }`, where the type of `value`
+  is not nullable or `value` is a variable or a path known not null at that point, and in the
+  `else` block of `if name != value { }` and of `if value != name { }` (N10);
 - after an assignment of a value whose type is not nullable (N7).
 
 `!` turns a test around, and a test of `a?.b != null` shows that `a` is not null either. A block
@@ -251,16 +284,59 @@ email = "b@example.com"
 print(email.Bytes.Count)
 ```
 
+Case: [null/equality-narrows.kz](../corpus/null/equality-narrows.kz)
+```kurz
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+email = Email(1)
+if email == "a@example.com" {
+    print(email.Bytes.Count)
+}
+if "a@example.com" == email {
+    print(email.Bytes.Count)
+}
+other = Email(1)
+if other != null {
+    if email == other {
+        print(email.Bytes.Count)
+    }
+}
+```
+
 ### N4 (decided, §4) `??`
 
-`a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#.
+`a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#. `??` on a value whose type is
+not nullable is `type-mismatch`, as Rust has no `unwrap_or` on an `i32` (§4, the owner,
+2026-10-30). A variable or a path of fields that N3 or N7 shows not null is no such value: `??`
+reads it as the nullable type it is declared with, as C# reads `??` on a variable its analysis
+knows not null, so `??` on it is no `type-mismatch`, and N5's `?.` and `?[` read it the same way;
+`memory/tree-value.kz` rests on that, with `root.Left?.Key ?? 0` after an assignment narrowed
+`root.Left`. *(this reading is proposed: §4 makes the error of a value whose type is not nullable,
+and a check makes a value known not null without changing the type it is declared with)*
 
 Case: [null/coalesce.kz](../corpus/null/coalesce.kz)
 
+Case: [null/coalesce-not-nullable.kz](../corpus/null/coalesce-not-nullable.kz)
+```kurz
+n = 5
+print(n ?? 0)
+```
+
 ### N5 (decided, §4) `?.`
 
-`a?.Member` is null when `a` is null and the member otherwise, as in C#. The rest of the chain is
-skipped with it.
+`a?.Member` is null when `a` is null and the member otherwise, as in C#. `a?[i]` is null when
+the list `a` is null, without running the index, and its item at `i` otherwise, as C#'s `?[]`
+(§4, the owner, 2026-10-30). The rest of the chain is skipped with either. `?.` on a value whose
+type is not nullable is `type-mismatch` (§4, the owner, 2026-10-30), and so is `?[` *(the record
+marks this as assumed: the answer on `?[` did not name it)*. A variable or a path that N3 or N7
+shows not null is read as the nullable type it is declared with, so `?.` and `?[` on it are no
+`type-mismatch`, as C# reads them, by the reading N4 proposes; `memory/tree-value.kz` reads
+`root.Left?.Key` after an assignment narrowed `root.Left`.
 
 Case: [null/conditional-access.kz](../corpus/null/conditional-access.kz)
 ```kurz
@@ -273,6 +349,35 @@ string? Email(int id) {
 
 print(Email(1)?.Bytes.Count ?? 0)
 print(Email(2)?.Bytes.Count ?? 0)
+```
+
+Case: [null/conditional-index.kz](../corpus/null/conditional-index.kz)
+```kurz
+List<int>? Scores(bool some) {
+    if some {
+        mut xs = List<int>()
+        xs.Add(1)
+        xs.Add(2)
+        return xs
+    }
+    return null
+}
+
+int At(int i) {
+    print("index {i}")
+    return i
+}
+
+print(Scores(true)?[At(1)])
+print(Scores(false)?[At(1)])
+```
+
+Case: [null/conditional-access-not-nullable.kz](../corpus/null/conditional-access-not-nullable.kz)
+```kurz
+data User(string Name)
+
+u = User("Ann")
+print(u?.Name)
 ```
 
 ### N6 (assumed, §4) `null` needs a nullable type
@@ -291,10 +396,13 @@ print(name)
 ### N7 (decided, §4) An assignment to a narrowed variable
 
 An assignment replaces what is known about a variable, as in C#. Assigning a value whose type is
-not nullable narrows the variable from that line on, up to the end of the block that holds the
-assignment; where the branches of an `if` or the paths around a loop meet, the variable is
-nullable when any of them leaves it nullable, the join C# makes, so `if c { e = Email(2) }`
-narrows `e` inside the block and not after it *(assumed: proposed on 2026-10-03)*. A `weak`
+not nullable narrows the variable from that line on, and past the end of the block that holds the
+assignment where every way that reaches the code after that block keeps it: where the branches of
+an `if` or the paths around a loop meet, the variable is nullable when any of them leaves it
+nullable, the join C# makes. So after `if f == null { f = "x" }` the variable `f` is not null,
+since the way through the block assigned it and the way around the block found it not null, while
+`if c { e = "x" }` narrows an `e` that may be null inside the block and not after it, since the
+way around the block leaves it as it was (§4, the owner, 2026-10-30, "Yes, as C#"). A `weak`
 reference (R3) is never narrowed by an assignment: nothing need hold its new target, which can be
 freed before the next line. Assigning a nullable value to a narrowed `mut` variable is allowed
 and makes it nullable again from that line on, so a use after it needs a new check (N2). That is what lets a loop walk a chain: `node = node.Next` assigns a nullable
@@ -306,6 +414,27 @@ assign.
 Case: [null/while-narrows.kz](../corpus/null/while-narrows.kz)
 
 Case: [null/assignment-narrows.kz](../corpus/null/assignment-narrows.kz)
+
+Case: [null/assignment-join.kz](../corpus/null/assignment-join.kz)
+```kurz
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+void Show(int id) {
+    mut f = Email(id)
+    if f == null {
+        f = "x"
+    }
+    print(f.Bytes.Count)
+}
+
+Show(2)
+Show(1)
+```
 
 Case: [null/assignment-ends-narrowing.kz](../corpus/null/assignment-ends-narrowing.kz)
 ```kurz
@@ -439,4 +568,80 @@ class Account(mut string? Email)
 mut acc = Account(null)
 acc.Email = "x"
 print(acc.Email.Bytes.Count)
+```
+
+### N10 (decided, §4) `==` and `!=` with a nullable value
+
+`==` and `!=` with a nullable value on either side are lifted, as C#'s are: `null` equals `null`
+alone, two values compare as their types do (D3, T18), and `a == 1` is `false` for an `a` that is
+null. `<`, `<=`, `>` and `>=` with a nullable value stay `nullable-unchecked` (N2). A test
+`a == b` or `b == a`, with a nullable `a` and a `b` whose type is not nullable or that is a
+variable or a path known not null at that point (N3), shows that `a` is not null where it is true,
+and `a != b` or `b != a` where it is false, so `"x" == email` narrows `email` as `email == "x"`
+does. That is C#'s analysis, which reads what is known of `b` at that point and not its declared
+type; beside a `b` that may be null, the test shows nothing of `a`, since both can be null.
+
+Case: [null/lifted-equality.kz](../corpus/null/lifted-equality.kz)
+```kurz
+int? Find(string text, string part) {
+    if text == part {
+        return 0
+    }
+    return null
+}
+
+a = Find("b", "b")
+b = Find("b", "c")
+print(a == 0)
+print(b == 0)
+print(b == null)
+print(a == b)
+print(b != 0)
+print(b == Find("x", "y"))
+```
+
+Case: [null/order-not-lifted.kz](../corpus/null/order-not-lifted.kz)
+```kurz
+int? Find(string text, string part) {
+    if text == part {
+        return 0
+    }
+    return null
+}
+
+a = Find("b", "b")
+print(a < 1)
+```
+
+Case: [null/equality-narrows.kz](../corpus/null/equality-narrows.kz)
+
+### N11 (decided, §4) A nullable type parameter
+
+`T?` of a type parameter `T` is the type that fills the parameter where that type is nullable
+already, since `T??` is `T?`, as C# reads `T?` of a type parameter without a constraint that is
+filled with a nullable type, `int?`: a missing value and a value that is `null` read alike. Where
+the type that fills the parameter is not nullable, `T?` is that type's nullable type, so `First`
+on a `List<int>` gives an `int?` and its `return null` gives `null`. C# from version 9 on differs
+there for a value type: it reads `T?` of such a parameter as `T` for `T` = `int` and refuses its
+`return null`.
+
+Case: [null/nullable-type-parameter.kz](../corpus/null/nullable-type-parameter.kz)
+```kurz
+T? First<T>(List<T> xs) {
+    if xs.Count == 0 {
+        return null
+    }
+    return xs[0]
+}
+
+mut some = List<int?>()
+some.Add(7)
+none = List<int?>()
+mut nulls = List<int?>()
+nulls.Add(null)
+print(First(some))
+print(First(none))
+print(First(nulls))
+ints = List<int>()
+print(First(ints))
 ```

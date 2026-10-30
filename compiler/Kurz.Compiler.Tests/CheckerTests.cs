@@ -890,8 +890,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ndata Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => xs.Count + n\n\nmut cart = Cart(List<int>())\nprint(Count(cart.Items, Find(2) else {\n    NotFound => {\n        cart.Items = List<int>()\n        5\n    }\n}))")); // a path assignment
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 22)], Errors(grow + "int Foo(List<int> xs, int n) => n\n\n" + find + "mut numbers = List<int>()\nprint(Sum(numbers, Find(2) else {\n    NotFound => {\n        print(Foo(numbers, Grow(mut numbers)))\n        5\n    }\n}))")); // one change, two holders: one error
 
-        // a read through `?.` and a value of a type with a generic base are not read (N5, T19), so the walk meets no held read of them
-        Assert.Equal(["11: `?.` (N5)"], NotSupported("data Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => n\n\nint Clear(mut Cart c) {\n    c = Cart(List<int>())\n    return 0\n}\n\nmut cart = Cart(List<int>())\nprint(Count(cart?.Items, Clear(mut cart)))"));
+        // a read through `?.` takes a count of its own, as a call's result does, so the walk meets no held read of it (N5); a read of a
+        // field of a variable known not null is the field (N3); a value of a type with a generic base is not read (T19)
+        const string Cart = "data Cart(List<int> Items)\n\nint Count(List<int>? xs, int n) => n\n\nint Clear(mut Cart? c) {\n    c = null\n    return 0\n}\n\nmut Cart? cart = Cart(List<int>())\n";
+        Clean(Cart + "print(Count(cart?.Items, Clear(mut cart)))");
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11)], Errors(Cart + "print(Count(cart.Items, Clear(mut cart)))"));
         Assert.Equal(["2: a generic data type as a base (T19)"], NotSupported("data Base<T>(T X)\ndata Derived(List<int> Items) : Base<int>\n\nint Reset(mut Base<int> b) {\n    b = Base(2)\n    return 0\n}\n\nint Size(Base<int> b, int n) => n\n\nmut Base<int> p = Base(1)\nprint(Size(p, Reset(mut p)))"));
 
         // `Add` changes its receiver after its argument ran, so a read of it there is held by nothing that the change meets (the
@@ -1535,7 +1538,6 @@ public sealed class CheckerTests
     [InlineData("long* p = null\nprint(\"at {p}\")", "", "2: the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)")]
     [InlineData("data Block(long* Next)\n\nprint(Block(null))", "", "3: the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)")]
     [InlineData("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nextern \"C\" (long) => long f = Twice\nprint(f)", "native", "6: the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)")]
-    [InlineData("T Id<T>(T x) => x\nprint(Id(null))", "", "2: null (N1)")]
     public void A_raw_form_no_rule_gives_an_id_is_not_supported(string program, string grants, string first)
     {
         // the README's list: what R10 to R17 leave open, each `not supported` at its line and nothing more (E1)
@@ -1772,19 +1774,21 @@ public sealed class CheckerTests
         // D12: no value reaches the arm of the type or `else`, as Rust 1.82 warns of either that it matches no values; with no arm above
         // it, the text names the `match` without arms and not "the arms above"
         Clean("enum Never {}\n\nvoid Show(Never n) {\n    match n {\n    }\n}\n\nprint(1)");
-        foreach (var (arm, text) in new[]
-        {
-            ("Never x => print(x)", "`Never` has no values, so no arm of it is reached: a `match` with no arms covers it (C4, D12)"),
-            ("else => print(1)", "`else` where `Never` has no values to reach it: a `match` with no arms covers it (C4, D12)"),
-        })
+        foreach (var arm in new[] { "Never x => print(x)", "else => print(1)" })
         {
             var error = Assert.Single(Check($"enum Never {{}}\n\nvoid Show(Never n) {{\n    match n {{\n        {arm}\n    }}\n}}\n\nprint(1)").Diagnostics.Items);
-            Assert.Equal((ErrorIds.UnreachableArm, 5, text), (error.Id, error.Line, error.Message));
+            Assert.Equal((ErrorIds.UnreachableArm, 5), (error.Id, error.Line));
+            Assert.Contains("a `match` with no arms covers it", error.Message);
         }
 
+        // in a union the enum without values is one case of several, which a `match` with no arms does not cover
+        var inUnion = Assert.Single(Check("enum Never {}\n\nvoid Show(Never | int n) {\n    match n {\n        Never x => print(x)\n        int i => print(i)\n    }\n}\n\nprint(1)").Diagnostics.Items);
+        Assert.Equal((ErrorIds.UnreachableArm, 5), (inUnion.Id, inUnion.Line));
+        Assert.DoesNotContain("no arms", inUnion.Message);
+
         // an enum with values keeps the texts of the arms above
-        Assert.Equal("the arms above name every value of `Plan` (C4, D12)", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    Plan p => print(p)\n}").Diagnostics.Items).Message);
-        Assert.Equal("`else` after arms that cover every case (C4, C9)", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    else => print(2)\n}").Diagnostics.Items).Message);
+        Assert.Contains("the arms above", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    Plan p => print(p)\n}").Diagnostics.Items).Message);
+        Assert.Contains("after arms that cover every case", Assert.Single(Check("enum Plan { Free }\n\nmatch Plan.Free {\n    Plan.Free => print(1)\n    else => print(2)\n}").Diagnostics.Items).Message);
     }
 
     [Fact]
@@ -1858,16 +1862,261 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(Program.Replace("T ", "string ", StringComparison.Ordinal).Replace("V", "\"b\"", StringComparison.Ordinal).Replace("W", "\"a\"", StringComparison.Ordinal)));
     }
 
+    // ---- null (chapter 4) --------------------------------------------------------------------------------------
+
+    /// <summary>A function of a nullable result, on lines 1 to 7: a program after it starts on line 8.</summary>
+    private const string Email = "string? Email(int id) {\n    if id == 1 {\n        return \"a\"\n    }\n    return null\n}\n\n";
+
+    [Fact]
+    public void A_nullable_type_is_its_type_or_null_and_a_call_of_one_is_a_value_of_it()
+    {
+        // N1, N8: a call's nullable result is the value, not the success of an outcome list; N4: `??` gives the type it makes nullable
+        // where its right side fits that, else the nullable type
+        Assert.Equal("string?", TypeOf(Email + "e = Email(1)\nprint(e)", "e"));
+        Assert.Equal("string", TypeOf(Email + "e = Email(1) ?? \"none\"\nprint(e)", "e"));
+        Assert.Equal("string?", TypeOf(Email + "e = Email(1) ?? Email(2)\nprint(e)", "e"));
+    }
+
+    [Theory]
+    [InlineData("x = null\nprint(x)", 1)] // no type to take
+    [InlineData("int x = null\nprint(x)", 1)] // a type without `null`
+    [InlineData("x = 1\nprint(x == null)", 2)] // a comparison with a value that is never null
+    [InlineData("int? x = 1\nprint(x < null)", 2)] // an order, which `null` has none of
+    [InlineData("T Id<T>(T x) => x\nprint(Id(null))", 2)] // a type parameter, which a nullable type could stand for
+    public void Null_where_no_nullable_type_or_pointer_takes_it_is_a_type_mismatch(string program, int line)
+    {
+        // N6 (section 4, an assumption there): `null` has no type of its own
+        Assert.Equal([(ErrorIds.TypeMismatch, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("print(n + 1)")]
+    [InlineData("print(-n)")]
+    [InlineData("int m = n\nprint(m)")]
+    [InlineData("if b.Flag {\n    print(1)\n}")]
+    [InlineData("for i in b.Items {\n    print(i)\n}")]
+    [InlineData("print(b.Items[0])")]
+    [InlineData("print(b.Items.Count)")]
+    [InlineData("print(b.Name.Bytes.Count)")]
+    [InlineData("print(Maybe() with { Name = null })")]
+    public void A_nullable_value_where_its_type_is_needed_without_a_check_is_nullable_unchecked(string statement)
+    {
+        // N2: an operator's operand, a value of the type it makes nullable, a condition, a loop's list, an index's list, a member's
+        // value and the value `with` copies
+        const string Program = "data Box(List<int>? Items, bool? Flag, string? Name)\n\nint? Find(int id) {\n    return null\n}\n\nBox? Maybe() => null\n\nn = Find(1)\nb = Box(null, null, null)\nprint(n)\nprint(b)\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Program + statement));
+    }
+
+    [Fact]
+    public void A_test_narrows_where_it_holds_and_where_ways_meet_only_what_each_keeps_is_known()
+    {
+        // N3 as C# reads it (section 4, an assumption there): a test narrows the branch it guards, `!`, `&&` and `||` as they come out,
+        // `else` and an early leave the code after them, and a declaration and an assignment of a value that is not null their target
+        Clean(Email + "e = Email(1)\nif e != null {\n    print(e.Bytes.Count)\n}");
+        Clean(Email + "e = Email(1)\nif e == null {\n    print(0)\n} else {\n    print(e.Bytes.Count)\n}");
+        Clean(Email + "e = Email(1)\nif !(e == null) && e.Bytes.Count > 0 {\n    print(e.Bytes.Count)\n}");
+        Clean(Email + "e = Email(1)\nif e == null || e.Bytes.Count == 0 {\n    print(0)\n} else {\n    print(e.Bytes.Count)\n}");
+        Clean(Email + "void Show(string? e) {\n    if e == null {\n        return\n    }\n    print(e.Bytes.Count)\n}\n\nShow(Email(1))");
+        Clean("string? d = \"x\"\nprint(d.Bytes.Count)");
+        Clean(Email + "mut f = Email(1)\nif f == null {\n    f = \"x\"\n}\nprint(f.Bytes.Count)");
+        Clean("data User(string? Email)\n\nmut u = User(null)\nu.Email = \"b\"\nprint(u.Email.Bytes.Count)");
+
+        // where one way in leaves it nullable, it is: after an `if` whose one branch did not test it, and on `||`'s right side
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Email + "e = Email(1)\nif e == null {\n    print(0)\n}\nprint(e.Bytes.Count)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Email + "e = Email(1)\nif e != null || e.Bytes.Count == 0 {\n    print(0)\n}"));
+    }
+
+    [Fact]
+    public void A_loop_knows_at_its_head_what_every_round_keeps_and_after_it_what_each_way_out_keeps()
+    {
+        // N3, N7: a round that leaves it nullable at its end or at a `continue` reads the loop again from there; after the loop holds
+        // what a false condition shows, joined with what holds at each `break`
+        Clean(Email + "mut e = Email(1)\nwhile e != null {\n    print(e.Bytes.Count)\n    e = Email(2)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Email + "mut e = Email(1)\nif e != null {\n    mut i = 0\n    while i < 2 {\n        print(e.Bytes.Count)\n        e = Email(2)\n        i = i + 1\n    }\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Email + "mut e = Email(1)\nif e != null {\n    for i in 0..<2 {\n        if i == 1 {\n            print(e.Bytes.Count)\n        }\n        e = Email(2)\n    }\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + "mut e = Email(1)\nif e != null {\n    for i in 0..<2 {\n        if i == 1 {\n            e = Email(2)\n            continue\n        }\n        print(e.Bytes.Count)\n    }\n}"));
+        Clean(Email + "mut e = Email(1)\nwhile true {\n    if e != null {\n        break\n    }\n    e = Email(1)\n}\nprint(e.Bytes.Count)");
+        Clean(Email + "mut e = Email(1)\nwhile e == null {\n    e = Email(1)\n}\nprint(e.Bytes.Count)");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + "mut e = Email(1)\nwhile e == null {\n    if Email(2) == null {\n        break\n    }\n    e = Email(1)\n}\nprint(e.Bytes.Count)"));
+
+        // the condition is read again with what its own `mut` argument ended, which every round after the first starts with
+        const string Refill = "bool Refill(mut string? t) {\n    t = null\n    return true\n}\n\nmut string? s = \"abc\"\nmut n = 0\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Refill + "while s.Bytes.Count > 0 && Refill(mut s) && n < 3 {\n    n = n + 1\n}\nprint(n)"));
+        Clean(Refill + "while s != null && s.Bytes.Count > 0 && Refill(mut s) && n < 3 {\n    n = n + 1\n}\nprint(n)");
+
+        // a `for` can run no round, so after it holds what its head holds, joined with each `break`
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors("mut xs = List<int>()\nmut string? y = null\nfor x in xs {\n    y = \"a\"\n    break\n}\nprint(y.Bytes.Count)"));
+        Clean("mut xs = List<int>()\nmut string? y = \"b\"\nfor x in xs {\n    y = \"a\"\n    break\n}\nprint(y.Bytes.Count)");
+    }
+
+    [Fact]
+    public void An_assignment_or_a_mut_argument_ends_what_was_known_of_its_target_and_of_every_path_through_it()
+    {
+        // N7: an assignment of a nullable value and a `mut` argument end it for the path and every path through it
+        const string Reset = "void Reset(mut string? s) {\n    s = null\n}\n\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Email + "mut e = Email(1)\nif e != null {\n    e = Email(2)\n    print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + Reset + "mut e = Email(1)\nif e != null {\n    Reset(mut e)\n    print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors("data User(string? Email)\n\nmut u = User(\"a\")\nif u.Email != null {\n    u = User(null)\n    print(u.Email.Bytes.Count)\n}"));
+
+        // the right side of `&&` and `||` runs after the left side's test, so what it changes the test no longer shows on any way out
+        const string Cleared = "bool Cleared(mut string? s) {\n    s = null\n    return true\n}\n\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + Cleared + "mut e = Email(1)\nif e != null && Cleared(mut e) {\n    print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 17)], Errors(Email + Cleared + "mut e = Email(1)\nif e == null || Cleared(mut e) {\n    print(0)\n} else {\n    print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + Cleared + "mut e = Email(1)\nwhile e != null && Cleared(mut e) {\n    print(e.Bytes.Count)\n}"));
+        Clean(Email + Cleared + "mut e = Email(1)\nif Cleared(mut e) && e != null {\n    print(e.Bytes.Count)\n}");
+        Clean(Email + Cleared + "mut e = Email(1)\nif e != null && Cleared(mut e) && e != null {\n    print(e.Bytes.Count)\n}");
+
+        // a `mut` argument inside an operand of `??` or of a test ends it too: only a plain read there runs nothing that could change it
+        const string Take = "string? Take(mut string? s) {\n    s = null\n    return null\n}\n\nmut string? x = \"abc\"\nif x != null {\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Take + "    print(Take(mut x) ?? \"d\")\n    print(x.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Take + "    print(Take(mut x) == null)\n    print(x.Bytes.Count)\n}"));
+        Clean(Take + "    print(Take(mut x) ?? \"d\")\n    if x != null {\n        print(x.Bytes.Count)\n    }\n}");
+
+        // a `mut` method or a `mut` argument on a path through a nullable variable or field not known not null (M5, M7)
+        const string Box = "data Box(int N, List<int> Items)\n\nBox? Find() => null\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut b = Find()\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "b.Items.Add(1)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "Bump(mut b.N)"));
+
+        // a variable passed as `mut` is read as its own type, which a `mut` parameter of the type it makes nullable does not take (M7)
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Set(mut string s) {\n    s = \"b\"\n}\n\nmut string? e = \"a\"\nSet(mut e)"));
+    }
+
+    [Fact]
+    public void Coalescing_runs_its_right_side_only_where_the_left_is_null_and_a_chain_stops_at_the_first_null()
+    {
+        // N4, N5 as C# reads them: a right side of neither type is the mismatch; `?.` makes the member's type nullable, keeps a nullable
+        // member's type, and goes on through the members after it, which read the member before as its own type, so that a nullable
+        // one there is N2's; a parenthesis ends the chain; after a test, `?.` and `??` read the nullable type, as a second test does
+        const string Find = "data User(string Name, string? Email)\n\nUser? Find(int id) => null\n\n";
+        Assert.Equal("string?", TypeOf(Find + "n = Find(1)?.Name\nprint(n)", "n"));
+        Assert.Equal("string?", TypeOf(Find + "n = Find(1)?.Email\nprint(n)", "n"));
+        Assert.Equal("int?", TypeOf(Find + "n = Find(1)?.Name.Bytes.Count\nprint(n)", "n"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors(Find + "print(Find(1)?.Email.Bytes.Count)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors(Find + "print((Find(1)?.Name).Bytes.Count)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(Find + "print(Find(1)?.Name ?? 1)"));
+        Clean(Find + "u = Find(1)\nif u != null {\n    print(u?.Name ?? u.Name)\n}");
+
+        // a member after `?.` reads the member before as its own type, whatever a test showed of that member's path, which C# narrows
+        // (compiler/README.md); the path itself reads as the test showed
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(Find + "u = Find(1)\nif u?.Email != null {\n    print(u?.Email.Bytes.Count)\n}"));
+        Clean(Find + "u = Find(1)\nif u?.Email != null {\n    print(u.Email.Bytes.Count)\n}");
+    }
+
+    [Theory]
+    [InlineData("x = 1\nprint(x ?? 2)", 2)]
+    [InlineData("data User(string Name)\n\nu = User(\"a\")\nprint(u?.Name)", 4)]
+    [InlineData("xs = List<int>()\nprint(xs?[0])", 2)]
+    public void Coalescing_or_a_chain_on_a_value_that_is_not_nullable_is_a_type_mismatch(string program, int line)
+    {
+        // section 4, the owner, 2026-10-30, "Error, as Rust": `??` and `?.` on a value whose type has no `null`, and `?[` with them (an
+        // assumption there)
+        Assert.Equal([(ErrorIds.TypeMismatch, line)], Errors(program));
+    }
+
+    [Fact]
+    public void A_conditional_index_reads_the_item_of_a_nullable_list_and_goes_on_in_the_chain()
+    {
+        // N5 with section 4, the owner, 2026-10-30, "Add, as C#": `xs?[i]` is the item's type made nullable, or the item's own where it is
+        // nullable; a member after it reads the item as its own type; the index is an integer; a string is indexed through its bytes
+        const string Lists = "data User(string Name, string? Email)\n\nList<int>? Numbers() => null\nList<User>? Users() => null\nList<string?>? Names() => null\n\n";
+        Assert.Equal("int?", TypeOf(Lists + "n = Numbers()?[0]\nprint(n)", "n"));
+        Assert.Equal("string?", TypeOf(Lists + "n = Names()?[0]\nprint(n)", "n"));
+        Assert.Equal("string?", TypeOf(Lists + "n = Users()?[0].Name\nprint(n)", "n"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(Lists + "print(Users()?[0].Email.Bytes.Count)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(Lists + "print(Numbers()?[\"a\"])"));
+        Assert.Equal([(ErrorIds.StringIndex, 2)], Errors("string? s = \"a\"\nprint(s?[0])"));
+        Clean(Lists + "xs = Numbers()\nif xs != null {\n    print(xs?[0] ?? xs[0])\n}");
+
+        // the list is read before its index runs and held without a count, so an index that changes it is refused (M7)
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Pop(mut List<string>? xs) {\n    xs = null\n    return 0\n}\n\nmut List<string>? names = List<string>()\nnames.Add(\"a\")\nprint(names?[Pop(mut names)])"));
+    }
+
+    [Fact]
+    public void A_part_of_a_nullable_list_and_a_nullable_index_are_nullable_unchecked()
+    {
+        // N2: a part of a nullable list, a nullable index of a list and the nullable index of `?[`, as an index of a nullable list is
+        const string Lists = "int? Find(int id) => null\nList<int>? Numbers() => null\n\nxs = List<int>()\nn = Find(1)\nys = Numbers()\nprint(xs.Count)\nprint(n)\nprint(ys)\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Lists + "print(ys[0..<1])"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Lists + "print(xs[n])"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Lists + "print(ys?[n])"));
+        Clean(Lists + "if n != null && ys != null {\n    print(ys[0..<1])\n    print(xs[n])\n    print(ys?[n])\n}");
+    }
+
+    [Fact]
+    public void Equality_with_a_nullable_value_is_lifted_and_an_order_is_not()
+    {
+        // section 4, the owner, 2026-10-30, "Lift == and !=": a nullable side compares with a value or another nullable value of a type
+        // its own compares with; `<` stays N2's; a side equal to a value that is not nullable is known not null where the test holds, as
+        // C#'s analysis reads it, and one equal to a nullable value is not
+        const string Find = "int? Find(int n) => null\n\n";
+        Clean(Find + "print(Find(1) == 0)\nprint(Find(1) != Find(2))\nprint(1L == Find(1))");
+        Clean(Email + "print(Email(1) == \"a\")\nprint(Email(1) != Email(2))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Find + "print(Find(1) == \"a\")"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 3)], Errors(Find + "print(Find(1) < 1)"));
+        Clean("byte? Small() => null\nuint? Big() => null\n\nprint(Small() == 200)\nprint(Big() != 5)\nprint(5 == Big())"); // a literal takes the type of the nullable side's value
+        Clean(Email + "e = Email(1)\nif e == \"a\" {\n    print(e.Bytes.Count)\n}");
+        Clean(Email + "e = Email(1)\nif e != \"a\" {\n    print(0)\n} else {\n    print(e.Bytes.Count)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Email + "e = Email(1)\nif e == Email(2) {\n    print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Email + "e = Email(1)\nif e != \"a\" {\n    print(e.Bytes.Count)\n}"));
+    }
+
+    [Fact]
+    public void A_nullable_type_parameter_filled_with_a_nullable_type_is_that_type()
+    {
+        // section 4, the owner, 2026-10-30, "Flatten, as C#": `T?` of a `T` that is `int?` is `int?`
+        const string First = "T? First<T>(List<T> xs) {\n    if xs.Count == 0 {\n        return null\n    }\n    return xs[0]\n}\n\n";
+        Assert.Equal("int?", TypeOf(First + "items = List<int?>()\nn = First(items)\nprint(n)", "n"));
+        Assert.Equal("int?", TypeOf(First + "items = List<int>()\nn = First(items)\nprint(n)", "n"));
+        Clean("T Or<T>(T? a, T b) => a ?? b\n\nprint(Or(1, 2))");
+    }
+
+    [Fact]
+    public void A_match_on_a_nullable_value_takes_a_null_arm_for_its_null()
+    {
+        // N1, C9, O8 (section 4, the owner, 2026-10-30, "Allow, as C#"): an arm may name `null`, which covers the case `null`
+        Clean(Email + "match Email(1) {\n    null => print(0)\n    string s => print(s.Bytes.Count)\n}");
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 8)], Errors(Email + "match Email(1) {\n    string s => print(s.Bytes.Count)\n}"));
+
+        // the `null` arm tests the case, as `e == null` does, so a variable known not null is read as its nullable type there (N3)
+        Clean(Email + "e = Email(1)\nif e != null {\n    match e {\n        null => print(0)\n        string s => print(s.Bytes.Count)\n    }\n}");
+        Clean("mut string? d = \"x\"\nprint(match d {\n    null => 0\n    string s => s.Bytes.Count\n})");
+    }
+
+    [Fact]
+    public void An_arm_no_null_reaches_knows_the_subject_not_null()
+    {
+        // N3 as C# reads a pattern: a type's arm, a literal's and an `else` after the `null` arm know the subject's variable not null,
+        // and after the `match` holds what every arm that completes keeps
+        Clean(Email + "e = Email(1)\nmatch e {\n    null => print(0)\n    string s => print(e.Bytes.Count)\n}");
+        Clean(Email + "e = Email(1)\nmatch e {\n    null => print(0)\n    else => print(e.Bytes.Count)\n}");
+        Clean(Email + "void Show(string? e) {\n    match e {\n        null => return\n        string s => print(s)\n    }\n    print(e.Bytes.Count)\n}\n\nShow(Email(1))");
+
+        // the `null` arm, an `else` no `null` arm comes before, the code after a `null` arm that completes, and an arm that changes it
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Email + "e = Email(1)\nmatch e {\n    null => print(e.Bytes.Count)\n    string s => print(s)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Email + "e = Email(1)\nmatch e {\n    string s => print(s)\n    else => print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Email + "e = Email(1)\nmatch e {\n    null => print(0)\n    string s => print(s)\n}\nprint(e.Bytes.Count)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Email + "mut e = Email(1)\nmatch e {\n    null => print(0)\n    string s => {\n        e = Email(2)\n        print(e.Bytes.Count)\n    }\n}"));
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
     [InlineData("class Counter(mut int Count)\n\nc = Counter(0)\nprint(c)", "1: a class (chapter 7)")]
     [InlineData("interface Shape {\n    int Area()\n}", "1: an interface (K6, K10)")]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read)", "1: a flags type (D13)")]
-    [InlineData("string? Email(int id) => null\n\nprint(1)", "1: a nullable type (N1)")]
-    [InlineData("x = null\nprint(1)", "1: null (N1)")]
-    [InlineData("data User(string Name)\n\nu = User(\"a\")\nprint(u?.Name)", "4: `?.` (N5)")]
-    [InlineData("x = 1\nprint(x ?? 2)", "2: `??` (N4)")]
+    [InlineData("data R(int | string V)\n\nR? G() => null\n\nprint(G()?.V)", "5: `?.` to a `int | string`, which no `?` makes nullable (N1, N5)")]
+    [InlineData("data User(List<int> Items)\n\nUser? Find() => null\n\nprint(Find()?.Items[0])", "5: an index after `?.` or `?[` (N5)")]
+    [InlineData("List<int>? Find() => null\n\nprint(Find()?[0][1])", "3: an index after `?.` or `?[` (N5)")]
+    [InlineData("List<int>? Find() => null\n\nprint(Find()?[0..<1])", "3: a part after `?[` (N5, M9)")]
+    [InlineData("List<int | string>? Find() => null\n\nprint(Find()?[0])", "3: `?[` to a `int | string`, which no `?` makes nullable (N1, N5)")]
+    [InlineData("mut List<int>? xs = null\nxs?[0] = 1", "2: an assignment through `?[` (N5)")]
+    [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: `?.` (N5)")]
+    [InlineData("int? | string x = 1\nprint(x)", "1: a nullable case of a union, `int?` (N1, D9)")]
+    [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
+    [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
+    [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable variable or field (N3, M5)")]
+    [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable variable or field (N3, M5)")]
+    [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
     [InlineData("mut ages = Map<string, int>()\nages[\"Ann\"] = 31", "1: Map (M9)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]

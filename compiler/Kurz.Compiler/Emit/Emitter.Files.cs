@@ -287,7 +287,7 @@ public sealed partial class Emitter
             fn.Emit($"call void {StdFunction("ListClear")}(ptr {block})");
             fn.Return(null);
         });
-        fn.Emit($"call void {clear}(ptr {Place(Model.VariableOf(n), n.Line)})");
+        fn.Emit($"call void {clear}(ptr {NarrowedPlace(n)})");
         return null;
     }
 

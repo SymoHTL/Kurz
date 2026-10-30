@@ -9,6 +9,7 @@ extern "C" {
     void _exit(int status)
     void* mmap(void* address, long length, int protection, int options, int fd, long offset)
     int munmap(void* address, long length)
+    void* mremap(void* address, long length, long grown, int options, ...)
     void* signal(int number, void* handler)
     int* __errno_location()
     int open(byte* path, int mode, ...)
@@ -98,6 +99,22 @@ pub void Release(byte* p, long bytes) {
     raw {
         munmap(Ptr<void>(p), bytes)
     }
+}
+
+// Memory `Memory` gave, `bytes` bytes of it from its start, grown to `grown` bytes with what it holds
+// by `mremap` (`MREMAP_MAYMOVE` is 1), which moves its pages to other addresses where the ones after it
+// are taken, and copies none of them: its address, or null where the system refuses
+// (`MAP_FAILED`), the memory then left as it was.
+pub byte* Resize(byte* p, long bytes, long grown) {
+    mut byte* q = null
+    raw {
+        void* got = mremap(Ptr<void>(p), bytes, grown, 1)
+        if long(got) != -1 {
+            q = Ptr<byte>(got)
+        }
+    }
+
+    return q
 }
 
 // The end of the process with the exit code, at once: `_exit` runs no handler of the C library
@@ -1872,8 +1889,8 @@ pub long ListDirectory(byte* path, mut List<string> names) {
 
 // The calls on sockets of a program built for Linux (S9), over TCP, as Rust 1.82's `TcpListener` and
 // `TcpStream` make them on Linux. An address is a host and a port after its last `:`, as Rust's
-// `ToSocketAddrs` reads a `str`: a host that is a literal, of IPv4, or of IPv6 inside `[` and `]` with a scope
-// id after a `%` and a port without a `+`, is read by `inet_pton` with no lookup, and any other is looked up
+// `ToSocketAddrs` reads a `str`: a host that is a literal, of IPv4, or of IPv6 inside `[` and `]`, where a scope
+// id may follow a `%` and the port takes no `+`, is read by `inet_pton` with no lookup, and any other is looked up
 // by `getaddrinfo`, whose addresses are tried
 // in its order until one binds or connects, the failure of the last being the call's, as Rust's
 // `each_addr` tries them. Beside the system's numbers negated, a call fails with -4097 for an address

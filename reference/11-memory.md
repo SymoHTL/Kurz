@@ -652,7 +652,7 @@ Case: [values/text-timestamp.kz](../corpus/values/text-timestamp.kz)
 
 Case: [values/text-longtimestamp.kz](../corpus/values/text-longtimestamp.kz)
 
-### R15 (decided, §3) The memory of a string and a list
+### R15 (decided, §3, §12) The memory of a string and a list
 
 A string and a list show their memory inside a `raw` block alone: `s.Pointer` is the pointer to the
 bytes of a string, whose count `s.Bytes.Count` gives (T15), `l.Pointer` the pointer to the first
@@ -690,6 +690,10 @@ handed to `List<T>.FromRaw` is a misuse of `raw` code (§3, the owner, 2026-10-2
 (R10), outside a `raw` block it is `raw-required` (R10), and more than the largest `int` of items
 asked of it raises `allocation-failed` with the bytes of those items, as M9 counts them
 *(assumed: as §3 marks them)*.
+
+A `raw` member copies a string into a block that ends in a NUL byte, for a C function that takes one
+(§12, the owner, 2026-10-30, against a type of its own for a C string, as Rust's `CString`); its name,
+what it does with a string that holds a NUL byte, and what frees the block stand open (§14).
 
 Case: [memory/string-from-raw.kz](../corpus/memory/string-from-raw.kz)
 ```kurz

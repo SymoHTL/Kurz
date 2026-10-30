@@ -1,0 +1,9 @@
+// expect: output
+// | true
+// | false
+// rules: D18
+
+enum Level { High = 1, Low = -1 }
+
+print(Level.Low < Level.High)
+print(Level.High < Level.Low)

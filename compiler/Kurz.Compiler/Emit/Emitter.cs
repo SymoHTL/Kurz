@@ -247,7 +247,7 @@ public sealed partial class Emitter
         return Constant(constant, value.Type is DataType && type is DataType ? Sub(value.Type) : type, line);
     }
 
-    private string Zero(KurzType type) => Ir(type) switch
+    private string Zero(KurzType type) => type is UnionType u && layout.Niche(u) is { } niche ? niche : Ir(type) switch
     {
         "ptr" => "null",
         "i1" => "false",

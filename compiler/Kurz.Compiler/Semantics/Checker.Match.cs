@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Kurz.Compiler.Syntax;
 
 namespace Kurz.Compiler.Semantics;
@@ -16,7 +17,8 @@ public sealed partial class Checker
     /// </summary>
     private MatchResult CheckMatch(Expression subject, IReadOnlyList<MatchArm> arms, bool isExpression, KurzType? expected, int line)
     {
-        var typed = CheckExpression(subject, null, keepCases: true);
+        // N3: a `null` arm tests the subject's case, as `x == null` does, so a variable known not null is read as its nullable type
+        var typed = arms.Any(a => a.Pattern is ValuePattern { Value: var v } && Unwrap(v) is NullLiteral) ? CheckNullable(subject, keepCases: true) : CheckExpression(subject, null, keepCases: true);
         var subjectType = typed.Type;
         var known = !typed.IsError;
         if (Types.IsVoid(subjectType))
@@ -33,9 +35,15 @@ public sealed partial class Checker
         var armWrong = false;
         var armReported = false;
         var allEnd = true;
+        var start = frame.Known; // N3: each arm starts with what held after the subject, and after the match holds what every arm that completes keeps
+        var reaching = new List<ImmutableHashSet<NullPath>>();
+        var subjectPath = Types.NonNull(subjectType) is not null ? PathOf(subject) : null; // N3: a nullable variable or path of fields the arms test
+        var nullNamed = false;
         foreach (var arm in arms)
         {
             PushScope();
+            frame.Known = start;
+            KurzType? patternType = null;
             switch (arm.Pattern)
             {
                 case ElsePattern:
@@ -50,6 +58,7 @@ public sealed partial class Checker
                     {
                         // a subject the checker could not type: the arms name cases of a type it does not know, so nothing is resolved
                         var type = known ? Resolve(tp.Type) : Types.Error;
+                        patternType = type;
                         model.RecordPattern(tp, type);
                         if (known && !Types.IsError(type))
                         {
@@ -65,7 +74,7 @@ public sealed partial class Checker
                             else if (type is EnumType e && EveryValueNamed(e, literals))
                             {
                                 // an enum without values: no value reaches the arm, as Rust 1.82 warns that such an arm matches no values
-                                Report(ErrorIds.UnreachableArm, arm.Line, e.Symbol.Values.Count == 0 ? $"`{type}` has no values, so no arm of it is reached: a `match` with no arms covers it (C4, D12)" : $"the arms above name every value of `{type}` (C4, D12)");
+                                Report(ErrorIds.UnreachableArm, arm.Line, e.Symbol.Values.Count == 0 ? $"`{type}` has no values, so no arm of it is reached{(Types.Same(subjectType, e) ? ": a `match` with no arms covers it" : "")} (C4, D12)" : $"the arms above name every value of `{type}` (C4, D12)");
                             }
                             else
                             {
@@ -128,6 +137,21 @@ public sealed partial class Checker
                     throw new InvalidOperationException(arm.Pattern.GetType().Name);
             }
 
+            // N3, as C# reads a pattern: in an arm no `null` reaches, a type's, a literal's or an `else` after the `null` arm, the subject's
+            // path is known not null
+            var namesNull = arm.Pattern is ValuePattern { Value: var named } && Unwrap(named) is NullLiteral;
+            var notNull = arm.Pattern switch
+            {
+                ElsePattern => nullNamed,
+                TypePattern => patternType is { } t && !Types.IsError(t) && t is not NullType && Types.NonNull(t) is null,
+                _ => !namesNull,
+            };
+            if (subjectPath is { } path && notNull)
+            {
+                frame.Known = frame.Known.Add(path);
+            }
+
+            nullNamed |= namesNull;
             if (isExpression)
             {
                 switch (arm.Body)
@@ -159,14 +183,22 @@ public sealed partial class Checker
                         CheckStatement(arm.Body);
                         break;
                 }
+
+                if (arm.Body is not ThrowStatement)
+                {
+                    reaching.Add(frame.Known);
+                }
             }
             else if (CheckStatement(arm.Body) == Flow.Completes)
             {
                 allEnd = false;
+                reaching.Add(frame.Known);
             }
 
             PopScope();
         }
+
+        frame.Known = Join(reaching, start);
 
         var exhaustive = !known || hasElse || armWrong || Covers(cases, covered, literals); // an arm that named no case was reported; the match is not reported again for it (E1)
         if (!exhaustive)
@@ -191,10 +223,10 @@ public sealed partial class Checker
     /// <summary>C4: whether an arm's type names a case: the case itself, or a data type derived from it (D6); no widening (T8) makes a case.</summary>
     private static bool IsCaseOf(KurzType type, KurzType c) => Types.Same(type, c) || (type is DataType && c is DataType && Types.Assignable(type, c));
 
-    /// <summary>C9: what an arm may name beside a type and <c>else</c>: a literal, with its sign where it is a number (L17).</summary>
+    /// <summary>C9: what an arm may name beside a type and <c>else</c>: a literal, with its sign where it is a number (L17), and <c>null</c>, the case of a nullable value (N1, C9; section 4, the owner, 2026-10-30, "Allow, as C#").</summary>
     private static bool IsLiteralPattern(Expression e) => Unwrap(e) switch
     {
-        IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral => true,
+        IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral => true,
         StringLiteral s => s.IsPlain,
         UnaryExpression { Operator: TokenKind.Minus, Operand: IntegerLiteral or RealLiteral or UnitLiteral } => true,
         _ => false,
@@ -208,9 +240,10 @@ public sealed partial class Checker
     private static bool EveryValueNamed(EnumType e, List<(KurzType Type, Constant Value)> literals) =>
         Enumerable.Range(0, e.Symbol.Values.Count).All(i => literals.Any(l => Types.Same(l.Type, e) && l.Value is EnumConstant { Index: var named } && named == i));
 
-    /// <summary>O8, C9: every case is covered by an arm of its type or a base's, for <c>bool</c> by the arms of both its literals, and for an enum by the arms of all its values (D12).</summary>
+    /// <summary>O8, C9: every case is covered by an arm of its type or a base's, for <c>bool</c> by the arms of both its literals, for an enum by the arms of all its values (D12), and for <c>null</c> by its arm (N1).</summary>
     private static bool Covers(List<KurzType> cases, List<KurzType> covered, List<(KurzType Type, Constant Value)> literals) =>
-        cases.Count > 0 && cases.All(c => covered.Any(t => IsCaseOf(c, t)) || (c is PrimitiveType { Kind: Primitive.Bool } && literals.Count(l => l.Value is BoolConstant) == 2) || (c is EnumType e && EveryValueNamed(e, literals)));
+        cases.Count > 0 && cases.All(c => covered.Any(t => IsCaseOf(c, t)) || (c is PrimitiveType { Kind: Primitive.Bool } && literals.Count(l => l.Value is BoolConstant) == 2) || (c is EnumType e && EveryValueNamed(e, literals))
+            || (c is NullType && literals.Any(l => l.Value is NullConstant)));
 
     /// <summary>C9: the type the arms of a <c>match</c> expression share, or the one written or expected around it; an arm of another type is reported at that arm (E1).</summary>
     private KurzType ArmsType(List<(KurzType Type, int Line)> armTypes, KurzType? expected)
@@ -271,15 +304,18 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var cases = result.Type is UnionType u ? u.Cases.ToList() : [result.Type];
+        var cases = result.Type is UnionType u && Types.NonNull(u) is null ? u.Cases.ToList() : [result.Type]; // N8: a `T?` is no outcome list
         var success = cases[0];
         var rest = cases.Skip(1).ToList();
         var handled = new List<KurzType>();
         var hasElse = false;
         var armWrong = false;
+        var start = frame.Known; // N3: the success goes on with what held after the call, an arm with that too, and after both holds what each keeps
+        var reaching = new List<ImmutableHashSet<NullPath>> { start };
         foreach (var arm in e.Arms)
         {
             PushScope();
+            frame.Known = start;
             switch (arm.Pattern)
             {
                 case ElsePattern:
@@ -334,9 +370,11 @@ public sealed partial class Checker
             }
 
             CheckElseArmBody(arm.Body, success);
+            reaching.Add(frame.Known);
             PopScope();
         }
 
+        frame.Known = Join(reaching, start);
         if (!hasElse && !armWrong)
         {
             // E1: an arm that names no case was reported at the arm; which case it meant is unknown, so no case is reported as unlisted

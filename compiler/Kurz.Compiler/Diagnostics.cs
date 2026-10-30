@@ -28,10 +28,17 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
     public bool IsError => Kind == DiagnosticKind.Error;
 
     /// <summary>
-    /// The diagnostic as the command writes it, the file's name and the line in front: <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> (design
-    /// record, section 2), or <c>hello.kz:3: not supported: &lt;text&gt;</c>.
+    /// What to do about the error, the line below it, or null: <c>nullable-unchecked</c> says how to check (section 4, the owner,
+    /// 2026-10-30, "Text + help line"), indented by two spaces as the command's own failures indent their <c>help:</c> (section 2, an
+    /// assumption in section 4).
     /// </summary>
-    public string At(string file) => IsError ? $"{file}:{Line}: {Id}: {Message}" : $"{file}:{Line}: not supported: {Message}";
+    public string? Help => IsError && Id == ErrorIds.NullableUnchecked ? "check it with `!= null`, or give a value for null with `??`" : null;
+
+    /// <summary>
+    /// The diagnostic as the command writes it, the file's name and the line in front: <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> (design
+    /// record, section 2), or <c>hello.kz:3: not supported: &lt;text&gt;</c>, with its <see cref="Help"/> on the line below.
+    /// </summary>
+    public string At(string file) => (IsError ? $"{file}:{Line}: {Id}: {Message}" : $"{file}:{Line}: not supported: {Message}") + (Help is { } help ? $"\n  help: {help}" : string.Empty);
 
     /// <summary>The diagnostic as one line: <c>4: error syntax: ...</c>, or <c>4: not supported: ...</c>.</summary>
     public override string ToString() =>

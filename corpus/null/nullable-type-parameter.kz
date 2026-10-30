@@ -1,0 +1,24 @@
+// expect: output
+// | 7
+// | null
+// | null
+// | null
+// rules: N11
+
+T? First<T>(List<T> xs) {
+    if xs.Count == 0 {
+        return null
+    }
+    return xs[0]
+}
+
+mut some = List<int?>()
+some.Add(7)
+none = List<int?>()
+mut nulls = List<int?>()
+nulls.Add(null)
+print(First(some))
+print(First(none))
+print(First(nulls))
+ints = List<int>()
+print(First(ints))

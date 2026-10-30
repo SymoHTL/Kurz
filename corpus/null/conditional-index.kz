@@ -1,0 +1,23 @@
+// expect: output
+// | index 1
+// | 2
+// | null
+// rules: N5
+
+List<int>? Scores(bool some) {
+    if some {
+        mut xs = List<int>()
+        xs.Add(1)
+        xs.Add(2)
+        return xs
+    }
+    return null
+}
+
+int At(int i) {
+    print("index {i}")
+    return i
+}
+
+print(Scores(true)?[At(1)])
+print(Scores(false)?[At(1)])

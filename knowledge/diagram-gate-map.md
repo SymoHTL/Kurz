@@ -66,7 +66,11 @@ flowchart TD
         LIVING entry without diagram or update triggers, fewer living entries than their floor;
         expired or future-dated numbers, a TTL over 90 days; a generated block that is empty, or a page
         whose digest is stale: a number, the generated date or the TTL edited by hand
-        (a recomputed digest passes: HAZARD issue 18); fewer entries than the floor"]
+        (a recomputed digest passes: HAZARD issue 18); fewer entries than the floor;
+        in the research entries, a finding with no verdict, two, or one in no word of its entry,
+        a section of the design record a verdict cites that the record does not have, a repeated,
+        open or answered finding that cites none (not what the section says: review rule design record),
+        an entry with no finding, fewer research entries than their floor"]
         G9["reference: a rule without id, status or the record section it cites;
         a decided, assumed or proposed rule with neither a case nor a reason;
         a case on an open rule; a sample that differs from its corpus file;
@@ -87,7 +91,7 @@ flowchart TD
         dotnet missing or out of time; kurz --version, which it prints, exited with another code than 0 (the command
         refused the clang it found or found none, did not start or ran out of time), or exited with 0 and wrote no line
         that names a clang release in the command's one-line form. Read: the output of dotnet test, one summary per
-        test project, summed;
+        test project, summed, and printed on a red run into a log that takes every character;
         the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
         Inside the suite: the walk of every corpus case the checker reads clean, red on a node a code generator reads
         that the checker's record (SemanticModel) holds no entry for, or on fewer than 160 cases or 2,900 entries
@@ -99,7 +103,7 @@ flowchart TD
         pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, red on
         output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 221 cases run on Linux or 207 on Windows, and on Linux on a crash whose trace is empty, holds a line that
+        than 243 cases run on Linux or 229 on Windows, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start
         at the error line's place; TraceTests, red on a trace
         other than the one each Linux program pins: its frames, names and lines, the cut and its count, the
@@ -145,7 +149,7 @@ flowchart TD
         less the umask, on a descriptor opened without close-on-exec, on a directory
         created again that fails, on the text of an error without a path, on an address read otherwise than Rust
         reads it, a scope id and a port with a sign among them, on a bind of IPv6's loopback that does not give
-        the error the machine's kernel gives, on a listener on IPv6's wildcard that a connection of IPv4 does not
+        what the machine's kernel gives, the bound address where it holds `::1` and its error elsewhere, on a listener on IPv6's wildcard that a connection of IPv4 does not
         reach where the kernel's dual stack is on, on a write to a connection whose peer closed it that is not
         BrokenPipe, and on a build for Windows that does not say not supported at a call on a file.
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
@@ -248,7 +252,9 @@ flowchart TD
         Nothing asserts the policy: HAZARD issue 10"]
         R5["review rules, .review/review-rules.yaml of the default branch: one section per surface, the
         section compiler for compiler/, runtime/ and std/, which reads a borrow of the emitter that names no count and
-        no refusal of the checker, and a change inside an expression that the checker's walk of M7 does not count.
+        no refusal of the checker, and a change inside an expression that the checker's walk of M7 does not count,
+        the section design record, which reads a change to the record whose description neither names the research
+        finding it meets nor says it meets none (node B4 of the design playbook; the citations are G3's).
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).
         The reviewer is a model that is given one batch of the diff: it can miss a defect, it cannot
         see a file outside its batch, and a breach it rates low opens no thread and holds no merge.

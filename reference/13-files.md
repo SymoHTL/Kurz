@@ -19,11 +19,10 @@ abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotA
 `Unsupported`, `TimedOut`, `BrokenPipe`, `AddressInUse`, `AddressNotAvailable`, `NetworkDown`,
 `NetworkUnreachable`, `HostUnreachable`, `ConnectionRefused`, `ConnectionReset`,
 `ConnectionAborted` and `NotConnected`; beside them `WriteZero` and `InvalidData`, which no number gives,
-and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput`, a name of
-a directory's entry that is not UTF-8 `InvalidData`, and a write of which the system takes no byte
-`WriteZero`, each with the number 0, which every error that is not the system's has. A call that
-names two paths names the first in its error. *(assumed, §12: what raises in such a call, the list, the
-words, the number 0, the text without a path and the first path)*
+and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput` and a write
+of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has. A call that
+names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
+list, the words, the number 0, the text without a path and the first path)*
 
 Case: [system/open-missing.kz](../corpus/system/open-missing.kz)
 ```kurz
@@ -148,8 +147,12 @@ ignoring an error of that close. `f.Close()` closes it before that and returns `
 `Close` through one holder closes it for all. Every call on a closed file, `Close` among them, returns
 the error the system gives a descriptor that is not open, `Other` with the number 9, with the path
 the file was opened with, since a close stores -1 in the file's descriptor before the system closes
-it, so that no later call passes the system a number it may have given another file. A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's error,
-the close that ignores its error, and no text)*
+it, so that no call that starts after that store passes the system a number it may have given
+another file. A call through another holder that read the descriptor before the store, or that
+waits in the system with it, can still reach such a number, and so read or write a file its holder
+never opened: the record names that hazard in the cost of the answer and keeps what bounds it open
+(§12, §14). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's
+error, the -1 stored at the close, the close that ignores its error, and no text)*
 
 Case: [system/close-twice.kz](../corpus/system/close-twice.kz)
 ```kurz
@@ -238,7 +241,9 @@ Move() else {
 `Directory.Create(path)` creates the directory at `path` and every directory above it that is
 missing, with the permissions 0777 less the `umask`, `void | IoError`, and succeeds where the
 directory exists; `Directory.List(path)` is the names of the directory's entries, without `.` and
-`..`, in the order the system gives them, `List<string> | IoError`; and `Directory.Delete(path)`
+`..`, in the order the system gives them, or an `IoError`: each name that is UTF-8 as a string, and
+each that is not as a case that carries its bytes, so that one such name hides no other entry (§12,
+the owner, 2026-10-30), the name and the form of that case standing open (§14); and `Directory.Delete(path)`
 deletes an empty directory, `void | IoError`. *(assumed, §12: the permissions, the order and the
 entries left out)*
 
@@ -272,20 +277,33 @@ its last `:`: a host that is a literal of IPv4, `"127.0.0.1:8080"`, or of IPv6, 
 with no lookup, and any other, `"localhost:8080"`, is looked up through `getaddrinfo`, whose addresses
 are tried in its order until one binds or connects, the error being the last one's. The port is read
 as Rust reads a `u16`, a `+` and zeros in front taken. A literal is what `inet_pton` reads, of IPv6
-inside `[` and `]` with a scope id in digits after a `%` and a port of digits alone, as Rust's parse of
-a socket address reads one, and any other host, `[::1]` before the port `+0` among them, is looked up
-as it is written. An address that holds a NUL byte is `InvalidInput`, as a path is (S1). A listener
+inside `[` and `]` with a scope id after a `%` of digits from 0 to 4294967295, zeros in front taken,
+and a port of digits alone, as Rust's parse of a socket address reads one, and any other host,
+`[::1]` before the port `+0`, an empty scope id and one past 4294967295 among them, is looked up as
+it is written. An address that holds a NUL byte is `InvalidInput`, as a path is (S1). A listener
 takes every interface where its address is a wildcard, `0.0.0.0`, `[::]`, which takes IPv4 too on
-Linux's dual stack, on by default, or a name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
+Linux's dual stack, on by default, since the runtime sets no `IPV6_V6ONLY`, as Rust sets none, or a
+name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
 and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
-its address and passes `listen` a backlog of 128. An address without a `:`, a port that is not a
-number from 0 to 65535 and a name that gives no address are `InvalidInput`, and a lookup that fails is
-`NotFound`, each with the number 0, but for the error of the system a lookup names. The error of a
-connection that `Accept` gave names the string its listener's `Bind` was given, `127.0.0.1:0` where
-the system picked the port, and one that `Connect` made the string it was given. *(assumed, §12: the
-reuse of the address, the 128, the type of `Port`, the grammar of the port and of a literal, the NUL
-byte, the errors of an address and of a lookup, the error of the last address tried, and the string a
-connection's error names; the kind of a failed lookup is open, record section 14)*
+its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
+what `getaddrinfo` returns: an address without a `:`, a port that is not a number from 0 to 65535
+and a name whose lookup succeeds with no address of the family asked for are `InvalidInput`, as Rust
+gives them, and a lookup that `getaddrinfo` fails, with `EAI_NONAME` or any other of its errors, is
+`NotFound`, each with the number 0, but for `EAI_SYSTEM`, with which the lookup passes on the error
+of the system. The error of a connection that `Accept` gave names the string its listener's `Bind`
+was given, `127.0.0.1:0` where the system picked the port, and one that `Connect` made the string it
+was given. The kind of a lookup that `getaddrinfo` fails is decided (§12, the owner, 2026-10-30,
+"NotFound, as C#"). *(assumed, §12: the reuse of the address, the 128, the type of `Port`, the
+grammar of the port and of a literal, the NUL byte, the errors of an address, `InvalidInput` for a
+lookup that succeeds with no address, the error of the system `EAI_SYSTEM` passes on, the error of
+the last address tried, and the string a connection's error names)*
+
+A read, a write, `l.Accept()` and `TcpStream.Connect` on a socket wait at most 5 seconds by default,
+as long as a call of an actor waits (§6), and the time can be set for each socket, as Rust's
+`set_read_timeout` and `set_write_timeout` set `SO_RCVTIMEO` and `SO_SNDTIMEO` (§12, the owner,
+2026-10-30, against a timeout as an argument with no default and against a default in the HTTP server
+alone). What a call gives when its time runs out, the member that sets the time and how the bound
+holds for an actor's socket stand open (§14).
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
@@ -375,16 +393,22 @@ the system completes without the accept.
 ### S11 (decided, §12) Not on Windows
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
-none of these calls. A build for a target other than Linux and Windows meets the question the record
-keeps open (section 14), of a runtime that lacks a function the code outside its directory calls.
+none of these calls. A build for any other target whose runtime lacks them says `not supported` at the
+call as well, as the record says of a call of the program that reaches a function a target's runtime
+lacks (§2, §12, the owner, 2026-10-30).
 
 No case: a case does not name its target (record, section 14).
 
 ### S12 (decided, §13) Grants
 
 A package that calls the file functions of this chapter, `File` and `Directory`, needs `allow files`,
-and one that calls its socket functions `allow network`. A call without the grant is the compile
-error `files-not-allowed` or `network-not-allowed` at the call. The program itself needs neither.
-*(assumed, §13: `Directory` among the file functions, and the package whose code makes the call)*
+and one that calls its socket functions `allow network`. Every package on the path of calls from the
+program's code to such a function needs the grant, so that no package borrows a grant through
+another that has it (§13, the owner, 2026-10-30, "Every package on path"). A call without the grant
+is the compile error `files-not-allowed` or `network-not-allowed` at the call. For a package on the
+path that calls no such function itself, the error stands at its call that leads on toward the
+function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
+error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
+itself needs neither. *(assumed, §13: `Directory` among the file functions)*
 
 No case: a case is a program and no package, and the program needs no grant.
