@@ -435,7 +435,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void An_address_is_a_host_and_a_port_after_its_last_colon_and_a_lookup_that_fails_is_not_found()
     {
         // a port as Rust reads a `u16`, `+` and zeros in front taken; a host that is no literal looked up, `127.1` by the C library's
-        // reading of a number, the empty one failing with `EAI_NONAME`, which names no error of the system (S9)
+        // reading of a number, the empty one failing with `EAI_NONAME`, which names no error of the system; a NUL byte `InvalidInput`, as in a path (S9)
         const string text = """
             void Try(string address) {
                 match TcpListener.Bind(address) {
@@ -452,25 +452,89 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Try("127.0.0.1:0x10")
             Try("[::1]:x")
             Try(":0")
+            Try("127.0.0.1:0\0")
 
             """;
-        Ran(text, "socket-addresses", ["bound", "bound", "bound", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "NotFound 0"]);
+        Ran(text, "socket-addresses", ["bound", "bound", "bound", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "NotFound 0", "InvalidInput 0"]);
+    }
+
+    /// <summary>
+    /// What a bind on IPv6's loopback gives on this machine: the line of a program that bound it, the system's error where the machine has
+    /// IPv6 and not that address, `EADDRNOTAVAIL` (99), or where the kernel has no IPv6 at all and no <c>/proc/net/if_inet6</c>, the
+    /// error of the socket, `EAFNOSUPPORT` (97), to which Rust gives no kind.
+    /// </summary>
+    private static string Loopback6(string bound)
+    {
+        var inet6 = File.Exists("/proc/net/if_inet6");
+        return inet6 && File.ReadAllText("/proc/net/if_inet6").Contains("00000000000000000000000000000001", StringComparison.Ordinal) ? bound
+            : inet6 ? "AddressNotAvailable 99" : "Other 97";
     }
 
     [Fact]
     public void A_literal_of_ipv6_binds_where_the_machine_has_its_loopback()
     {
-        // `[::1]` is read by `inet_pton` into an address of IPv6 (S9); a machine without the address of IPv6's loopback gives the system's error
-        var loopback = File.Exists("/proc/net/if_inet6") && File.ReadAllText("/proc/net/if_inet6").Contains("00000000000000000000000000000001", StringComparison.Ordinal);
-        const string text = "match TcpListener.Bind(\"[::1]:0\") {\n    TcpListener l => print(l.Port > 0)\n    IoError e => print(e.Kind)\n}\n";
-        if (loopback || Builder.HostTarget == Target.Windows)
-        {
-            Ran(text, "socket-ipv6", ["true"]);
-        }
-        else
-        {
-            Ran(text, "socket-ipv6", ["AddressNotAvailable"]);
-        }
+        // `[::1]` is read by `inet_pton` into an address of IPv6 (S9); a machine without that address, or without IPv6, gives the system's error
+        const string text = "match TcpListener.Bind(\"[::1]:0\") {\n    TcpListener l => print(l.Port > 0)\n    IoError e => print(\"{e.Kind} {e.Code}\")\n}\n";
+        Ran(text, "socket-ipv6", [Loopback6("true")]);
+    }
+
+    [Fact]
+    public void A_literal_of_ipv6_takes_a_scope_id_and_one_whose_port_has_a_sign_is_looked_up_as_rust_looks_it_up()
+    {
+        // Rust's parse of a socket address reads `[host%scope]:port`, a `u32` after the `%` and digits alone in the port; where it fails,
+        // Rust looks the host up as it is written, and `[::1]` is no name, so each lookup fails before a socket is made (S9)
+        const string text = """
+            void Try(string address) {
+                match TcpListener.Bind(address) {
+                    TcpListener => print("bound")
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
+            }
+
+            Try("[::1]:+0")
+            Try("[::1%x]:0")
+            Try("[::1%]:0")
+            Try("[::1%4294967296]:0")
+            Try("[::1%1]:0")
+            Try("[::1%4294967295]:00000")
+
+            """;
+        Ran(text, "socket-ipv6-scope", ["NotFound 0", "NotFound 0", "NotFound 0", "NotFound 0", Loopback6("bound"), Loopback6("bound")]);
+    }
+
+    [Fact]
+    public void A_write_to_a_connection_whose_peer_closed_it_is_a_broken_pipe_and_raises_no_signal()
+    {
+        // the runtime ignores `SIGPIPE` at its start (section 2), so a write fails with `EPIPE` (32), `BrokenPipe`, as in Rust, and does not end the
+        // process by the signal: the first write after the peer's close is taken by the system, the peer answers it with a reset, and a later one fails
+        const string text = """
+            void | IoError Broken() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+                server = listener.Accept()
+                server.Close()
+                mut writes = 0
+                mut failed = false
+                while !failed && writes < 1000 {
+                    client.Write("x".Bytes) else {
+                        IoError e => {
+                            print("{e.Kind} {e.Code}")
+                            failed = true
+                        }
+                    }
+
+                    writes = writes + 1
+                }
+
+                print(writes > 1)
+            }
+
+            Broken() else {
+                IoError e => print(e)
+            }
+
+            """;
+        Ran(text, "socket-broken-pipe", ["BrokenPipe 32", "true"]);
     }
 
     [Fact]

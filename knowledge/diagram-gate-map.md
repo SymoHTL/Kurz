@@ -142,8 +142,10 @@ flowchart TD
         the largest int of bytes (lowered to 20) that is not read whole or one byte more that is, on a read or a
         write in the wrong direction that is not error 9, on a file or a directory whose mode is not 0666 or 0777
         less the umask, on a descriptor opened without close-on-exec, on a directory
-        created again that fails, on the text of an error without a path, and on a build for Windows that does not
-        say not supported at a call on a file.
+        created again that fails, on the text of an error without a path, on an address read otherwise than Rust
+        reads it, a scope id and a port with a sign among them, on a bind of IPv6's loopback that does not give
+        the error the machine's kernel gives, on a write to a connection whose peer closed it that is not
+        BrokenPipe, and on a build for Windows that does not say not supported at a call on a file.
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
         no program of them"]

@@ -245,7 +245,10 @@ public sealed partial class Emitter
         Succeed(o, null);
     }
 
-    /// <summary>S9: a listener's <c>Accept()</c>, a stream that holds the listener's address.</summary>
+    /// <summary>
+    /// S9: a listener's <c>Accept()</c>, a stream that holds the listener's address on a count of its own, which
+    /// <see cref="NewHandle"/> takes, so that the address outlives the listener's block.
+    /// </summary>
     private void EmitAccept(FileOutcome o, string handle)
     {
         var r = SysCall("Accept", $"i32 {HandleDescriptor(handle)}");

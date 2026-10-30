@@ -345,7 +345,8 @@ before a call that took none (S4); `CloseFile` takes an interrupt for no failure
 `fs::create_dir_all` does, and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
 library's `struct dirent` (S8). `Listen` and `Connect` take an address as `CPath` copies it, read
 its port after its last `:` and its host by `inet_pton` where it is a literal of IPv4, or of IPv6 inside
-`[` and `]`, and else by `getaddrinfo`, and try each address until one binds or connects, as Rust's
+`[` and `]` with a scope id in digits after a `%` and a port without a `+`, as Rust's parse of a socket
+address reads one, and else by `getaddrinfo` as it is written, and try each address until one binds or connects, as Rust's
 `each_addr` does, with the addresses in a page each thread maps at its first use; they fail with -4097,
 `InvalidInput`, for an address that is no host and port or a name that gives no address, and -4098,
 `NotFound`, for a lookup that fails with no error of the system. `Listen` sets `SO_REUSEADDR`, listens
