@@ -212,7 +212,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(program is not null, "no program");
         var start = program.Ir.IndexOf("define internal ptr @\"std.ListPush.", StringComparison.Ordinal);
         Assert.True(start >= 0, "no ListPush in the IR");
-        var body = program.Ir[start..program.Ir.IndexOf("\n}\n", start, StringComparison.Ordinal)];
+        var body = program.Ir[start..program.Ir.IndexOf("\n}", start, StringComparison.Ordinal)];
         Assert.Contains("zext i32 %", body, StringComparison.Ordinal);
         Assert.DoesNotContain("sext i32 %", body, StringComparison.Ordinal);
     }
@@ -227,7 +227,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             var start = ir.IndexOf($"define internal void @\"{name}\"(", StringComparison.Ordinal);
             Assert.True(start >= 0, $"no {name} in the IR");
-            return ir[start..ir.IndexOf("\n}\n", start, StringComparison.Ordinal)];
+            return ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
         }
 
         var add = Body("add.List<int>");
