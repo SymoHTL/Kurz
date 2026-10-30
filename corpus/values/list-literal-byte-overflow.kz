@@ -1,0 +1,5 @@
+// expect: error constant-overflow at 4
+// rules: M11, L17
+
+Bytes b = [1, 300]
+print(b.Count)

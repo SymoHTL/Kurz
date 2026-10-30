@@ -428,6 +428,12 @@ match d {
 }
 ```
 
+Case: [values/list-literal-byte-overflow.kz](../corpus/values/list-literal-byte-overflow.kz)
+```kurz
+Bytes b = [1, 300]
+print(b.Count)
+```
+
 ### L11 (decided, §4) Number literals
 
 Number literals take every form C# gives them: decimal digits; hexadecimal digits after `0x` or `0X` and

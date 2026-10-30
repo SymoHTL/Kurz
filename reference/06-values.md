@@ -577,6 +577,17 @@ print(name)
 print("{Rename(mut name)}{name}")
 ```
 
+Case: [values/list-literal-held.kz](../corpus/values/list-literal-held.kz)
+```kurz
+List<int> Grow(mut List<int> list) {
+    list.Add(2)
+    return list
+}
+
+mut xs = [1]
+print([xs, Grow(mut xs)])
+```
+
 ### M8 (decided, §4) One family of collections
 
 There is one family of collections, and every value can cross between actors.
@@ -1004,3 +1015,99 @@ system's randomness, as Rust's `HashMap` takes them (§4, the owner, 2026-10-30)
 
 No case: no order can be expected, so a case can show a map of one entry only, which the case of
 A6 does.
+
+### M11 (decided, §4, §8) A list written by its items
+
+`[1, 2, 3]` is a list of the items between the brackets, and `[]` a list without items, as C# 12's
+collection expression writes one (§4, the owner, 2026-10-30, "[1, 2, 3], as C#"). The literal takes
+the list type where one stands, a written type, `List<int> xs = [1, 2, 3]`, or a parameter's,
+`Take([1, 2])`, and each item is read under its item type as an argument is under its parameter's: a
+literal takes it (L17), so `Bytes b = [1, 300]` is `constant-overflow`, a lambda takes its parameters
+from it (F11), and an item of another type is `type-mismatch` (T1). Where a union stands whose cases
+hold one list type, a nullable list among them, the literal takes that one *(assumed, §4: as a number
+literal takes the one number case of a union, L17)*. Where no list type stands, the items give it, as
+T27 infers a type parameter from a call's arguments (§4, the owner, 2026-10-30, "From its items"):
+`x = [1, 2]` is a `List<int>` and `[1, 2L]` a `List<long>`, while `x = []` and `[1, "a"]` are
+`cannot-infer`, and `[1, null]` is the `type-mismatch` of a `null` that no nullable type takes (N6).
+
+A comma after the last item is accepted, `[1, 2,]` (§4, the owner, 2026-10-30, "Accept, as C# 12
+and Rust"); a line break inside the brackets continues the statement (L4), and a line that starts
+with `[` continues none, so `[` after an expression on its line is that expression's index (M9) and
+`[` where an expression starts is a list. `..` before an item, C# 12's spread, `[..xs, 3]`, is
+`syntax` (E4); whether a list takes the items of another so stands open (§14).
+
+The items run from left to right, each counted as it is made, and the list takes the room for all of
+them in one block after the last, as Rust's `vec![1, 2, 3]` makes one `Vec`; a block the system refuses
+raises `allocation-failed` with the bytes asked for (M9), and an item that leaves the function, a
+case of its call's result (O3), leaves no list behind *(assumed, §4: the order of a call's
+arguments, and the one block for all items that the answer names)*. An item read from a variable
+that an item after it changes keeps the value it was read with, as `Add` counts its item before the list
+grows (M7), so `[xs, Grow(mut xs)]` holds `xs` as it was *(assumed, §4: the reading of M7's count
+for an item the list counts as it is made)*.
+
+Case: [values/list-literal.kz](../corpus/values/list-literal.kz)
+```kurz
+int Sum(List<int> numbers) {
+    mut total = 0
+    for x in numbers {
+        total = total + x
+    }
+
+    return total
+}
+
+List<int> xs = [1, 2, 3]
+print(xs)
+ys = [4, 5]
+print(ys.Count)
+print(Sum([1, 2]))
+Bytes b = [104, 105]
+print(string.FromUtf8Lossy(b))
+nested = [[1], [2, 3]]
+print(nested)
+List<string> none = []
+print(none.Count)
+lines = [
+    1,
+    2,
+]
+print(lines)
+List<int | string> mixed = [1, "a"]
+print(mixed.Count)
+List<int?> maybe = [1, null]
+print(maybe.Count)
+```
+Case: [values/list-literal-cannot-infer.kz](../corpus/values/list-literal-cannot-infer.kz)
+```kurz
+x = []
+print(x.Count)
+```
+Case: [values/list-literal-mixed-items.kz](../corpus/values/list-literal-mixed-items.kz)
+```kurz
+x = [1, "a"]
+print(x.Count)
+```
+Case: [values/list-literal-null-item.kz](../corpus/values/list-literal-null-item.kz)
+```kurz
+x = [1, null]
+print(x.Count)
+```
+Case: [values/list-literal-byte-overflow.kz](../corpus/values/list-literal-byte-overflow.kz)
+```kurz
+Bytes b = [1, 300]
+print(b.Count)
+```
+Case: [values/list-literal-item-mismatch.kz](../corpus/values/list-literal-item-mismatch.kz)
+```kurz
+List<int> xs = [
+    1, "a",
+]
+print(xs.Count)
+```
+Case: [values/list-literal-spread.kz](../corpus/values/list-literal-spread.kz)
+```kurz
+xs = [1, 2]
+ys = [..xs, 3]
+print(ys.Count)
+```
+Case: [values/list-literal-held.kz](../corpus/values/list-literal-held.kz)

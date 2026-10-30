@@ -1754,7 +1754,7 @@ public sealed class Parser
 
     private static bool CanStartExpression(TokenKind kind) => kind is TokenKind.Name or TokenKind.Keyword
         or TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.UnitLiteral or TokenKind.StringLiteral or TokenKind.CharLiteral
-        or TokenKind.LeftParen or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.Star or TokenKind.Ampersand; // no expression starts with `[`
+        or TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.Star or TokenKind.Ampersand;
 
     private Expression ParseUnary()
     {
@@ -2043,6 +2043,31 @@ public sealed class Parser
                 suppressNewlines--;
                 Expect(TokenKind.RightParen, "`)`");
                 return new ParenthesizedExpression(token.Line, inner);
+            }
+
+            case TokenKind.LeftBracket:
+            {
+                // M11: `[1, 2, 3]`, a list written by its items, as C# 12's collection expression (section 4, the owner, 2026-10-30,
+                // "[1, 2, 3], as C#"), with a comma after the last item accepted, as C# 12 and Rust accept it ("Accept, as C# 12 and
+                // Rust"); a `[` after an expression is its index, and a line that starts with `[` continues no statement (L4)
+                Advance();
+                suppressNewlines++;
+                var savedNoLambda = noLambda;
+                noLambda = false; // an item takes a lambda as an argument does
+                var items = new List<Expression>();
+                while (!At(TokenKind.RightBracket))
+                {
+                    items.Add(ParseExpression());
+                    if (!Match(TokenKind.Comma))
+                    {
+                        break;
+                    }
+                }
+
+                suppressNewlines--;
+                noLambda = savedNoLambda;
+                Expect(TokenKind.RightBracket, "`]`");
+                return new ListLiteral(token.Line, items);
             }
 
             case TokenKind.Bad:

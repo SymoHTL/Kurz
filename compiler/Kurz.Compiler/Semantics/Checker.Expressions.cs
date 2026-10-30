@@ -72,6 +72,15 @@ public sealed partial class Checker
                 return CheckCall(c, expected, keepCases);
             case IndexExpression i:
                 return CheckIndex(i);
+            case ListLiteral l when expected is not null && Types.IsError(expected):
+                foreach (var item in l.Items)
+                {
+                    CheckArgumentLoosely(item); // the type it stands for was the error, which was reported (E1)
+                }
+
+                return Typed.Error;
+            case ListLiteral l:
+                return CheckListLiteral(l, expected);
             case UnaryExpression u:
                 return CheckUnary(u, expected);
             case BinaryExpression b:

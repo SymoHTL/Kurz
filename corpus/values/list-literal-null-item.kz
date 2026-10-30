@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 4
+// rules: M11, N6
+
+x = [1, null]
+print(x.Count)

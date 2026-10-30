@@ -151,6 +151,7 @@ internal static class SyntaxPrinter
         TypeMemberAccess m => $"(. {Type(m.Type).TrimEnd()} {m.Member})",
         CallExpression c => $"(call {Print(c.Callee)}{(c.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", c.TypeArguments.Select(t => Type(t).TrimEnd())) + ">")}{(c.Arguments.Count == 0 ? "" : " " + Arguments(c.Arguments))})",
         IndexExpression i => $"(index {Print(i.Target)} {Print(i.Index)})",
+        ListLiteral l => "(list" + string.Concat(l.Items.Select(item => " " + Print(item))) + ")",
         UnaryExpression u => $"({Op(u.Operator)} {Print(u.Operand)})",
         BinaryExpression b => $"({Op(b.Operator)} {Print(b.Left)} {Print(b.Right)})",
         RangeExpression r => $"({(r.Inclusive ? ".." : "..<")} {Print(r.Start)} {Print(r.End)})",

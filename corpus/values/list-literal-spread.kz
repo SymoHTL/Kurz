@@ -1,0 +1,6 @@
+// expect: error syntax at 5
+// rules: M11, E4
+
+xs = [1, 2]
+ys = [..xs, 3]
+print(ys.Count)

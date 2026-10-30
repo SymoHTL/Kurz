@@ -1,0 +1,41 @@
+// expect: output
+// | [1, 2, 3]
+// | 2
+// | 3
+// | hi
+// | [[1], [2, 3]]
+// | 0
+// | [1, 2]
+// | 2
+// | 2
+// rules: M11
+
+int Sum(List<int> numbers) {
+    mut total = 0
+    for x in numbers {
+        total = total + x
+    }
+
+    return total
+}
+
+List<int> xs = [1, 2, 3]
+print(xs)
+ys = [4, 5]
+print(ys.Count)
+print(Sum([1, 2]))
+Bytes b = [104, 105]
+print(string.FromUtf8Lossy(b))
+nested = [[1], [2, 3]]
+print(nested)
+List<string> none = []
+print(none.Count)
+lines = [
+    1,
+    2,
+]
+print(lines)
+List<int | string> mixed = [1, "a"]
+print(mixed.Count)
+List<int?> maybe = [1, null]
+print(maybe.Count)

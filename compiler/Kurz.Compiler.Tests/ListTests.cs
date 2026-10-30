@@ -17,11 +17,13 @@ namespace Kurz.Compiler.Tests;
 public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     // nested lists, a list in a data value and in `with`, a path assignment, a list of strings, a loop's `continue`, a list in a
-    // value laid out as a block, and the texts
+    // value laid out as a block, the texts, and list literals (M11) whose items an item after them changes the variables of or that
+    // leave their function after a counted item
     private const string Values = """
         data Cart(string Owner, List<int> Items)
         data Leaf
         data Tree(List<int> Items, Tree | Leaf Next)
+        data TooBig
 
         List<int> Range(int n) {
             mut xs = List<int>()
@@ -40,6 +42,25 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
             return total
         }
+
+        List<int> Grow(mut List<int> list) {
+            list.Add(5)
+            return list
+        }
+
+        string Relabel(mut string s) {
+            s = "m{s}"
+            return s
+        }
+
+        List<int> | TooBig Checked(int n) {
+            if n > 3 {
+                return TooBig
+            }
+            return Range(n)
+        }
+
+        List<List<int>> | TooBig Pair(int n) => [Range(n), Checked(n)]
 
         mut grid = List<List<int>>()
         grid.Add(Range(3))
@@ -74,6 +95,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ts.Add(9)
         print(t)
         print(ts)
+        mut held = Range(2)
+        print([held, Grow(mut held), held])
+        mut label = "n{Sum(Range(3))}"
+        print([label, Relabel(mut label)])
+        print(Pair(2) else { TooBig => List<List<int>>() })
+        print(Pair(5) else { TooBig => List<List<int>>() })
         """;
 
     private static readonly string[] ValuesPrint =
@@ -91,6 +118,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "1",
         "Tree { Items = [0, 1], Next = Leaf }", // a list a block holds: the block keeps it (M3)
         "[0, 1, 9]",
+        "[[0, 1], [0, 1, 5], [0, 1, 5]]", // the first item keeps the list it was read with, counted as it was made (M11)
+        "[n3, mn3]",
+        "[[0, 1], [0, 1]]",
+        "[]", // the second item left `Pair`, which let go of the first (O3)
     ];
 
     // a `mut` parameter beside a parameter given a copy of the same list, a loop over a list that the loop adds to, the name an arm
