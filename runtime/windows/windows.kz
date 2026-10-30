@@ -16,7 +16,7 @@ extern "C" in "kernel32" {
 // (design record, section 2); where the system refuses it the program carries on with the system's own
 // room, as Rust's released library does.
 pub void Start() {
-    mut uint room = 20480
+    mut uint room = 0
     raw {
         SetThreadStackGuarantee(&room)
     }
