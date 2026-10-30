@@ -337,7 +337,9 @@ with its bytes copied and the old one freed. A target's directory gives
 `Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
 `Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap`, `Resize` calling `mremap`,
 which moves the pages to other addresses where the ones after them are taken and copies none, and `Random` calling
-`getrandom`, again where a signal interrupted it, and false where a call gives no bytes or fails otherwise, on Windows
+`getrandom` with `GRND_INSECURE`, or with `GRND_NONBLOCK` where the kernel refuses that flag, again where a signal
+interrupted it, reading `/dev/urandom` where the system refuses `getrandom` (`ENOSYS`, `EPERM`), from then on, or its
+pool is not ready (`EAGAIN`), and false where Rust's standard library panics (below), on Windows
 over `kernel32`, `Release` calling `VirtualFree` and `Resize`
 giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` over `bcrypt`, calling `BCryptGenRandom` with
 the system's preferred generator, and false where it fails. The
@@ -582,14 +584,25 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   list's `Add` and `Clear` do. The keys of the hash come from the system's `Random` for each thread, at its
   first map, and each new map takes the first key plus one, as Rust's `RandomState` takes them, so
   that the order of a map's entries differs between runs (M10) and a block takes its keys with it;
-  where the system gives no bytes, a sandbox that refuses `getrandom` among such cases, the first
-  write into the thread's first map ends the program with `random-failed` before it takes a block
-  (M9; the owner, 2026-10-30, "End with an error, as Rust"), as Rust's standard library ends the
-  process where it can read no seed; on Linux Rust reads `/dev/urandom` where `getrandom` fails with
-  `ENOSYS`, `EPERM` or `EAGAIN`, and this runtime reads no such file. `ListTests` holds the end with the host's
-  `Random` edited to report a failure; on Windows the call of `BCryptGenRandom` and its check of the
-  status are held only by reading, and so is the check of `getrandom`'s result on Linux, since no
-  test makes the system refuse. A
+  the Linux runtime's `Random` takes them as Rust's standard library takes the seed of a `HashMap`
+  (`library/std/src/sys/pal/unix/rand.rs`, checked at the tag 1.82.0): `getrandom` with
+  `GRND_INSECURE`, `GRND_NONBLOCK` for the rest of the process where the kernel refuses that flag with
+  `EINVAL`, the call made again for the bytes left and where `EINTR` interrupted it, and
+  `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
+  `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
+  pool is not ready, `EAGAIN`; the two flags and the descriptor are plain `static mut`s where Rust
+  keeps `AtomicBool`s and a `OnceLock`, Kurz having no atomic form, and the runtime runs one thread.
+  Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
+  a file that ends first, and where `BCryptGenRandom` fails on Windows, `Random` gives false and the
+  first write into the thread's first map ends the program with `random-failed` before it takes a
+  block (M9; the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path").
+  `ListTests` holds the end with the host's `Random` edited to give false, and on Linux the keys
+  read from `/dev/urandom` where each `getrandom` is a system call the kernel refuses with `ENOSYS`,
+  with a file that is not there as its control, which ends with `random-failed`. Held only by
+  reading: `GRND_INSECURE` and the turn to `GRND_NONBLOCK`, `EPERM`, `EAGAIN`, `EINTR`, the
+  descriptor kept open and read again, the other errors of `getrandom` and a read of the file that
+  fails, which no test makes the system give, and on Windows the call of `BCryptGenRandom` and its
+  check of the status. A
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
@@ -734,7 +747,8 @@ walked, kept as entries and written into a list's item, for 3000 rounds within t
 of three inputs against vectors from outside this repository; two runs of one program that print a
 map of 20 entries in two orders; the bytes of a map's first block the system refuses; `random-failed`
 at a map's first write where the target's `Random` reports a failure, and a program without a map that
-runs there;
+runs there; on Linux a map whose keys come from `/dev/urandom` where the system refuses `getrandom`
+with `ENOSYS`, and `random-failed` where that file is not there either;
 the target's own `Release`, after
 which a write into a freed block of 32 mebibytes, more than a thread keeps, ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and

@@ -66,9 +66,10 @@ pub void AllocationFailed(long size) {
 }
 
 // The end of the process at a thread's first map where the system gave no randomness for the keys of
-// its hash (M9; the owner, 2026-10-30, "End with an error, as Rust"): `error: random-failed` and the
-// exit code 1, with no place and no trace, as `allocation-failed` ends it, where Rust's standard
-// library panics with "failed to retrieve random hash map seed".
+// its hash, the target's `Random` false (M9; the owner, 2026-10-30, "End with an error, as Rust" and
+// "Rust's full path"): `error: random-failed` and the exit code 1, with no place and no trace, as
+// `allocation-failed` ends it, where Rust's standard library panics with "failed to retrieve random
+// hash map seed".
 pub void RandomFailed() {
     sys.Crashing()
     WriteError("error: random-failed\n")

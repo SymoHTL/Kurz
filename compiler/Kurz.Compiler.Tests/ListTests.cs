@@ -2080,7 +2080,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_first_map_on_a_system_that_gives_no_randomness_ends_the_program_with_random_failed()
     {
         // M9 (the owner, 2026-10-30, "End with an error, as Rust"): the target's `Random` reports that it filled no bytes, as a
-        // sandbox that refuses `getrandom` or a failing `BCryptGenRandom` would, and the first map ends the program before its block
+        // Linux whose `getrandom` and `/dev/urandom` both fail or a failing `BCryptGenRandom` would, and the first map ends the program before its block
         var refused = Edited((TargetFile, "pub bool Random(byte* bytes, long count) {", """
             pub bool Random(byte* bytes, long count) {
                 return false
@@ -2092,6 +2092,30 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, refused, "map-no-random"), 1, [], "error: random-failed\n");
         Ran(BuildAndRun(text, toolchain.Runtime, "map-random"), 0, ["1"], ""); // the positive control
         Ran(BuildAndRun("print(1)\n", refused, "no-map-no-random"), 0, ["1"], ""); // a program without a map asks for no randomness
+    }
+
+    [Fact]
+    public void On_linux_a_first_map_where_the_system_refuses_getrandom_takes_its_keys_from_dev_urandom()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // Windows' `Random` calls `BCryptGenRandom` alone, with no file to fall back to
+        }
+
+        // M9 (the owner, 2026-10-30, "Rust's full path"): each `getrandom` of the runtime is a system call of a number the kernel does
+        // not have, 100000, which it refuses with ENOSYS (seen on x86_64), as a kernel before 3.17 refuses `getrandom`; the keys come
+        // from `/dev/urandom`
+        (string Path, string Old, string New)[] enosys =
+        [
+            (TargetFile, "    long getrandom(byte* bytes, long count, uint options)\n", "    long getrandom(byte* bytes, long count, uint options)\n    long syscall(long number, ...)\n"),
+            (TargetFile, "getrandom(bytes, count, 4)", "syscall(100000, bytes, count, 4)"),
+            (TargetFile, "getrandom(bytes, count, 1)", "syscall(100000, bytes, count, 1)"),
+        ];
+        const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
+        Ran(BuildAndRun(text, Edited(enosys), "map-urandom"), 0, ["1"], "");
+
+        // the control: the same runtime with a file that is not there in the place of `/dev/urandom` ends where Rust panics
+        Ran(BuildAndRun(text, Edited([.. enosys, (TargetFile, @"""/dev/urandom\0""", @"""/dev/no-urandom\0""")]), "map-no-urandom"), 1, [], "error: random-failed\n");
     }
 
     [Fact]
