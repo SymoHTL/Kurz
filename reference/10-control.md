@@ -503,8 +503,9 @@ match n {
 Inside a generic function (T19), a `match` on a value whose type is a type parameter has arms that
 name types, `int i`, as C#'s `x is int i` tests such a value: each copy of the function, one for
 each list of type arguments, resolves the arms for its type argument, and nothing is paid at run
-time where that argument is a value type, while an arm that names a class or an interface tests the
-run-time type of the value where the argument is a class or an interface (§4, the owner, 2026-10-30, "Allowed, as C#", against the refusal, as Rust has no
+time where every value of the type argument is of that one type, as an `int`, a `string` or a `data`
+type that has no derived type (D6), while an arm tests the value at run time where the argument is a
+class, an interface, a `data` type that has derived types or a union, `T?` among them (§4, the owner, 2026-10-30, "Allowed, as C#", against the refusal, as Rust has no
 specialization and Go no type switch on a type parameter, at the cost of an interface method for a
 fast path; the cost is behaviour for each type that the signature does not show). Such an arm is
 no `type-mismatch` (C4). *(assumed, §4: that in a copy whose type argument an arm does not name, the
