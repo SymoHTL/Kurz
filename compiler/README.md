@@ -493,8 +493,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   there, copies a block another value holds first and lets go of the item it writes over (section 4, the
   owner, 2026-10-30, "As C# and Rust"; M9, M4, M3), `==` and `!=` on two lists of one type, by their
   counts and their items in order, each pair by `==`, a `double` or a `float` item by IEEE's `==`, so
-  that NaN is unequal to NaN there, as Rust's `Vec` compares (section 4, the owner, 2026-10-30, "By
-  items, as Rust"), `list[a..<b]` and
+  that NaN is unequal to NaN there and in the lists among the items, as Rust's `Vec` compares (section
+  4, the owner, 2026-10-30, "By items, as Rust"), while a list in a `data` value that `==` compares or
+  in a key compares such items as C#'s `Equals`, NaN equal to NaN (section 4, the owner, 2026-10-30,
+  "Equals inside data/keys"; D3), `list[a..<b]` and
   `list[a..b]`, a new list of a copy of those items, which raises `reversed-range-at-run-time` for ends in the
   wrong order and then `index-out-of-range` for a start below 0 or an end past the count (section 4, the owner,
   2026-10-29, "A List<T>, a value"), `Where`, which calls its test once for each item, in
@@ -515,7 +517,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   each key and value from it, in the order of its slots (section 4, the owner, 2026-10-30, "Key and
   Value, as C#"; C6, M10), `e` a value of the built-in `data` type `Entry<K, V>` of the two, laid out
   as every `data` value of its fields is, borrowed as an item of a list is, with its text and its
-  `==` (section 4, the owner, 2026-10-30, "A value, as C#"; D3, A3), their text,
+  `==` (section 4, the owner, 2026-10-30, "A value, as C#"; D3, A3), and made by `Entry(key, value)`
+  and copied by `with` as every `data` value (section 4, the owner, 2026-10-30, "Both, as a data type";
+  D5), their text,
   `[key: value, ...]` in the order of the map's slots and `[]` without entries (A6, M10), and maps of
   every key the checker takes and every value the emitter lays out, in variables, parameters, fields,
   unions, lists and maps. A map is the address of a block, null for a map without entries: the count
@@ -532,7 +536,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the checker takes as a key (section 4, the owner, 2026-10-30, "Any type with =="), is hashed by
   SipHash-1-3 over 64-bit words, each item's own hash for a list, a union's tag and its case's hash, a
   `data` type laid out as a block its type's number and each field's hash, as Rust's derived `Hash`
-  feeds each field to one hasher, and compared by `==` (D3), lists by their counts and items.
+  feeds each field to one hasher, and compared by `==` (D3), lists by their counts and items, their
+  `double` and `float` items as C#'s `Equals` compares them and hashed as a `double` key is (section 4,
+  the owner, 2026-10-30, "Equals inside data/keys").
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
   no entry since the block was made or cleared, 128 for one whose entry was removed, else 7 bits of its
   entry's hash, bits 56 to 62; a lookup reads the control bytes of a group of 8 slots as one word and
@@ -727,7 +733,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 287 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 39 the
+full and the emitter does not emit, 3 of the 290 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 39 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -1039,11 +1045,8 @@ type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a type `==` takes and the compiler does not hash: a `decimal`, a nullable type, a
 type parameter, a union of two types beside `null`, and a list or a `data` value that holds one of
-them; a list of `double` or `float` items in a `data` value that `==` compares or in a key, and a `data`
-value that holds a file or a socket there, each a fork the record leaves open (D3, M9, section 14);
-`==` on two lists of nullable items, which compare by N1's lifted `==`; a map whose values have a
-nullable type N1 does not read; an `Entry` a program makes, by `Entry(...)` or by `with` (C6); an
-assignment into a map or a list that
+them; `==` on two lists of nullable items, which compare by N1's lifted `==`; a map whose values have a
+nullable type N1 does not read; an assignment into a map or a list that
 is no variable, or into a path through an entry or an item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's

@@ -733,8 +733,6 @@ public sealed partial class Checker
                 return (true, $"`==` takes no `{type}`");
             case UnionType u when Types.NonNull(u) is not null:
                 return (false, "a nullable key compares by the lifted `==` (N1)");
-            case ListType l when FloatItems(l):
-                return (false, FloatItemsFork(l));
             case ListType l:
                 return KeyOf(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case DataType d:
@@ -771,21 +769,21 @@ public sealed partial class Checker
     /// <summary>
     /// M9 with D3: why a field of a <c>data</c> key is no key, null where it is one: a key's type, or a union of them, <c>null</c> among its
     /// cases, which compares by its case and its value. A field of a map or a function value is <c>type-mismatch</c> (section 4, the owner,
-    /// 2026-10-30, "type-mismatch"); one of a file or a socket is <c>not supported</c>, a fork no answer took.
+    /// 2026-10-30, "type-mismatch"), and so is one of a file or a socket (section 4, the owner, 2026-10-30, "Handle ==": "type-mismatch").
     /// </summary>
     private (bool Mismatch, string Why)? FieldKeyOf(KurzType type, HashSet<DataSymbol> seen) => type switch
     {
         UnionType u => u.Cases.Where(c => c is not NullType).Select(c => FieldKeyOf(c, seen)).FirstOrDefault(w => w is not null),
-        HandleType => (false, HeldHandleFork(type)),
         _ => KeyOf(type, seen),
     };
 
     /// <summary>
     /// D3 with M9: why <c>==</c> does not take a <c>data</c> value whose field, at any depth, is of the type, null where it does: a field
     /// compares by the equality Kurz gives its type (D3), a union's by its case and its value (D9), a list's by its items (section 4, the
-    /// owner, 2026-10-30, "By items, as Rust"). A map or a function value there is <c>type-mismatch</c> (section 4, the owner, 2026-10-30,
-    /// "type-mismatch"); the rest are <c>not supported</c>: a list of <c>double</c> or <c>float</c> items and a file or a socket, each a fork
-    /// no answer took, and a pointer and a type parameter. <paramref name="seen"/> holds the data types on the way.
+    /// owner, 2026-10-30, "By items, as Rust"), a <c>double</c> or a <c>float</c> item as C#'s <c>Equals</c> compares it (section 4, the
+    /// owner, 2026-10-30, "Equals inside data/keys"). A map, a function value, a file or a socket there is <c>type-mismatch</c> (section 4,
+    /// the owner, 2026-10-30, "type-mismatch" twice); a pointer and a type parameter are <c>not supported</c>. <paramref name="seen"/> holds
+    /// the data types on the way.
     /// </summary>
     private (bool Mismatch, string Why)? HeldEquality(KurzType type, HashSet<DataSymbol> seen)
     {
@@ -797,12 +795,8 @@ public sealed partial class Checker
                 return null;
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or CFunctionType:
+            case FunctionType or CFunctionType or HandleType:
                 return (true, $"`==` takes no `{type}`");
-            case HandleType:
-                return (false, HeldHandleFork(type));
-            case ListType l when FloatItems(l):
-                return (false, FloatItemsFork(l));
             case ListType l:
                 return HeldEquality(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
@@ -866,37 +860,9 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>Whether the items of the list, through lists and union cases, are of a <c>double</c> or a <c>float</c>.</summary>
-    private static bool FloatItems(ListType list) => Floating(list.Element);
-
-    private static bool Floating(KurzType type) => type switch
-    {
-        PrimitiveType p => Types.IsFloating(p),
-        ListType l => Floating(l.Element),
-        UnionType u => u.Cases.Any(Floating),
-        _ => false,
-    };
-
-    /// <summary>
-    /// The fork of a list of <c>double</c> items held in a <c>data</c> value or a key: <c>==</c> compares its items as Rust does, NaN
-    /// unequal to NaN (section 4, "By items, as Rust"), while a <c>data</c> value equals itself (D3) and a key finds NaN (section 4, "As C#").
-    /// </summary>
-    private static string FloatItemsFork(ListType list) =>
-        $"whether a `{list}` in a `data` value or a key equals itself where an item is NaN is not decided";
-
-    /// <summary>The fork of a file or a socket held in a <c>data</c> value that <c>==</c> compares or a key holds: <c>==</c> takes no handle.</summary>
-    private static string HeldHandleFork(KurzType handle) => $"whether `==` takes a value that holds a `{handle}` is not decided";
-
     /// <summary>D2, D7, D11: a data value made by the type's name with the base's fields first.</summary>
     private Typed CheckConstruction(DataSymbol data, CallExpression c, KurzType? expected)
     {
-        if (BuiltInEntry(data))
-        {
-            NotSupported(c.Line, "an `Entry` a program makes, where a loop over a map alone makes one (C6)");
-            CheckArgumentsLoosely(c);
-            return Typed.Error;
-        }
-
         if (!data.HasFields)
         {
             // D8 writes the value as the bare name: `Name()` is text no rule gives a meaning (E4); an argument is D11's error

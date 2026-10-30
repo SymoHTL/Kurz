@@ -605,13 +605,14 @@ range (§4, the owner, 2026-10-29). `Map<K, V>()` makes an empty map; `map[key] 
 an assignment into a path (M4); `map[key]` is the value or `null`. A map's key is a value of any type
 `==` compares, a list by its items and a `data` value by its fields, hashed over the same items and
 fields; a map as a key is `type-mismatch`, since `==` takes no map, and so is a `data` value that holds
-a map or a function value (D3), a key of a nullable type compares as `==` compares two nullable values
-(§4, assumed there), and a `double` or a `float` key, alone or as a field of a `data` key, compares as
-C#'s `double.Equals` in a `Dictionary`: NaN finds NaN, and 0.0 and -0.0 are one key, hashed alike.
-Whether a list of `double` items as a key finds NaN, and whether a value that holds a file or a socket
-is a key, are open (record, section 14). `xs == ys` on two lists of one type is `true` where their
-counts are equal and their items are equal in order, each pair by `==`, so that NaN is unequal to NaN
-there, and `!=` is its negation; lists of items `==` does not take are `type-mismatch`. A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10). `Count` is
+a map, a function value, a file or a socket (D3), a key of a nullable type compares as `==` compares two
+nullable values (§4, assumed there), and a `double` or a `float` key, alone, as a field of a `data` key
+or as an item of a list in a key, at any depth, compares as C#'s `double.Equals` in a `Dictionary`: NaN
+finds NaN, and 0.0 and -0.0 are one key, hashed alike. `xs == ys` on two lists of one type is `true`
+where their counts are equal and their items are equal in order, each pair by `==`, so that NaN is
+unequal to NaN there, also in the lists among the items, and `!=` is its negation; lists of items `==`
+does not take are `type-mismatch`. A list held in a `data` value under `==` compares its `double` and
+`float` items as C#'s `Equals` does (D3). A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10). `Count` is
 the number of a map's entries, an `int`; `ContainsKey(key)` is a `bool`; `Remove(key)`, a `mut` method,
 takes the key's entry out of the map and gives its value, or `null` where there is none, of the type
 `map[key]` has, and copies a map another value holds first (M3); `Clear()`, a `mut` method, removes every
@@ -790,6 +791,23 @@ names[-z] = "minus zero"
 print(names.Count)
 print(names[nan] ?? "none")
 print(names[z] ?? "none")
+```
+
+Case: [values/map-key-list-double.kz](../corpus/values/map-key-list-double.kz)
+```kurz
+double z = 0.0
+nan = z / z
+mut xs = List<double>()
+xs.Add(nan)
+xs.Add(z)
+mut ys = List<double>()
+ys.Add(nan)
+ys.Add(-z)
+mut seen = Map<List<double>, string>()
+seen[xs] = "found"
+print(seen[ys] ?? "none")
+seen[ys] = "again"
+print(seen.Count)
 ```
 
 Case: [values/list-equality.kz](../corpus/values/list-equality.kz)

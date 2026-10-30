@@ -238,9 +238,11 @@ public sealed partial class Emitter
     /// data by their type and their fields (D3, D15), and the values of a field of a union by their case and that case's values
     /// (D3, the owner, 2026-10-23); a <c>float</c> or a <c>double</c> here is a field's or a case's, which compares as C#'s
     /// <c>Equals</c> does, NaN equal to NaN and 0 to -0 (D3, the owner, 2026-10-09 and 2026-10-24); a <c>decimal</c> by its value,
-    /// 1.5 equal to 1.50, as C#'s <c>Equals</c> compares it.
+    /// 1.5 equal to 1.50, as C#'s <c>Equals</c> compares it. <paramref name="ieee"/> is set for the two sides of a list's <c>==</c>,
+    /// whose <c>double</c> and <c>float</c> items, and those of the lists among its items, compare by IEEE's <c>==</c>; a list held in a
+    /// <c>data</c> value or a key compares them as C#'s <c>Equals</c> does (section 4, the owner, 2026-10-30, "Equals inside data/keys").
     /// </summary>
-    private string Equal(string left, string right, KurzType type, int line)
+    private string Equal(string left, string right, KurzType type, int line, bool ieee = false)
     {
         switch (type)
         {
@@ -288,10 +290,12 @@ public sealed partial class Emitter
             case ListType list:
                 {
                     // M9: `==` compares two lists by their counts and their items in order, each pair by `==`, as Rust's `Vec` does,
-                    // a `double` item by IEEE's `==`, NaN unequal to NaN (section 4, the owner, 2026-10-30, "By items, as Rust"); so do a
-                    // key of a map, which hashes a list over its items (section 4, "Any type with =="), and a field of a `data` value
-                    // that holds one (D3), where the checker takes no list of such items
-                    var name = Helper($"equal.{Lower.Mangle(type)}", "i1", ["ptr", "ptr"], () =>
+                    // a `double` item by IEEE's `==`, NaN unequal to NaN (section 4, the owner, 2026-10-30, "By items, as Rust"); a key
+                    // of a map, which hashes a list over its items (section 4, "Any type with =="), and a field of a `data` value that
+                    // holds one (D3) compare its `double` items as C#'s `Equals`, NaN equal to NaN (section 4, the owner, 2026-10-30,
+                    // "Equals inside data/keys"), so that a value equals itself and a key is found again
+                    ieee = ieee && FloatingItems(list);
+                    var name = Helper($"equal.{(ieee ? "ieee." : "")}{Lower.Mangle(type)}", "i1", ["ptr", "ptr"], () =>
                     {
                         var count = ListCount("%a0");
                         var items = fn.Label("items");
@@ -313,7 +317,7 @@ public sealed partial class Emitter
                         var a = fn.Value($"load {Ir(list.Element)}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {first}, i64 {wide}")}");
                         var b = fn.Value($"load {Ir(list.Element)}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {second}, i64 {wide}")}");
                         var more = fn.Label("more");
-                        var equal = list.Element is PrimitiveType p && Types.IsFloating(p) ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, list.Element, line);
+                        var equal = ieee && list.Element is PrimitiveType p ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, list.Element, line, ieee);
                         fn.CondBranch(equal, more, differ);
                         fn.Block(more);
                         fn.Emit($"store i32 {fn.Value($"add i32 {i}, 1")}, ptr {counter}");
@@ -330,6 +334,14 @@ public sealed partial class Emitter
                 throw Unsupported(line, $"`==` on a `{type}`");
         }
     }
+
+    /// <summary>Whether the list's items, or the items of the lists among them, are of a <c>double</c> or a <c>float</c>.</summary>
+    private static bool FloatingItems(ListType list) => list.Element switch
+    {
+        PrimitiveType p => Types.IsFloating(p),
+        ListType inner => FloatingItems(inner),
+        _ => false,
+    };
 
     private void EqualBody(DataType type, int line)
     {

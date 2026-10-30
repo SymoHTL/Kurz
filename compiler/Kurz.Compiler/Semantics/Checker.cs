@@ -1275,9 +1275,6 @@ public sealed partial class Checker
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9), and the types of
     /// files and sockets and their functions (S2, S8, S9).
     /// </summary>
-    /// <summary>C6: the built-in <c>Entry</c>, whose values a loop over a map makes; a program's own <c>Entry</c> is <c>redeclared</c>.</summary>
-    private bool BuiltInEntry(DataSymbol data) => dataTypes.TryGetValue("Entry", out var entry) && ReferenceEquals(data, entry);
-
     private static bool IsBuiltInName(string name) =>
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream";
 
@@ -1289,7 +1286,8 @@ public sealed partial class Checker
     /// (T15), <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18), and <c>IoError</c> with its <c>IoKind</c>, the
     /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux (S1; section 12, the owner,
     /// 2026-10-29, "One union, as Rust"), and <c>Entry</c>, the entry of a loop over a map, a value as C#'s <c>KeyValuePair</c> is one (C6;
-    /// section 4, the owner, 2026-10-30, "A value, as C#").
+    /// section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies by <c>with</c> as every data type
+    /// (section 4, the owner, 2026-10-30, "Both, as a data type").
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(
         SourceText.FromString(

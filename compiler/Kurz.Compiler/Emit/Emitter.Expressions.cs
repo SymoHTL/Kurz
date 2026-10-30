@@ -552,7 +552,7 @@ public sealed partial class Emitter
 
         // the two sides as the type the other stands in: a derived value beside its base compares as the base, and is never equal to one (D15)
         var shared = Types.Assignable(leftType, rightType) ? rightType : leftType;
-        var equal = Equal(Convert(left, leftType, shared, b.Line), Convert(right, rightType, shared, b.Line), shared, b.Line);
+        var equal = Equal(Convert(left, leftType, shared, b.Line), Convert(right, rightType, shared, b.Line), shared, b.Line, ieee: shared is ListType); // M9: two lists by IEEE's `==`
         return op == TokenKind.EqualEqual ? equal : fn.Value($"xor i1 {equal}, true");
     }
 

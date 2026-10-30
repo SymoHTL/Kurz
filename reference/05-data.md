@@ -39,11 +39,12 @@ owner, 2026-10-23). The two values of that case compare as a field of the case's
 `double` or `float` case that holds NaN equals itself, as a C# record calls `Equals` on a field of
 type `object` (§4, the owner, 2026-10-24); there Kurz departs from Rust's `PartialEq`, which
 compares the two values with their `==`, under which NaN is unequal to itself (§4). A field that is a
-list compares by its items (M9). `==` on a `data` value that holds a map or a function value, in a field
+list compares by its items (M9), and its `double` or `float` items, at any depth, compare as C#'s
+`Equals` compares them, NaN equal to NaN and 0.0 equal to -0.0, so that such a value equals itself,
+where `==` on two lists outside a `data` value compares those items by IEEE's `==` (M9) (§4, the owner,
+2026-10-30). `==` on a `data` value that holds a map, a function value, a file or a socket, in a field
 or at any depth below one, through a field's fields, a list's items, a union's cases and the fields of a
-type derived from it, is `type-mismatch` at the `==` (§4, the owner, 2026-10-30). Whether a list of
-`double` items in a field equals itself where an item is NaN, and whether `==` takes a value that holds
-a file or a socket, are open (record, section 14).
+type derived from it, is `type-mismatch` at the `==` (§4, the owner, 2026-10-30).
 
 Case: [classes/equal-by-nan.kz](../corpus/classes/equal-by-nan.kz)
 ```kurz
@@ -86,6 +87,31 @@ data Box(Map<string, int> Counts)
 
 b = Box(Map<string, int>())
 print(b == b)
+```
+
+Case: [data/equality-holds-file.kz](../corpus/data/equality-holds-file.kz)
+```kurz
+data Log(File Out)
+
+void Same(Log a, Log b) {
+    print(a == b)
+}
+
+print(1)
+```
+
+Case: [data/equality-list-nan.kz](../corpus/data/equality-list-nan.kz)
+```kurz
+data Samples(List<double> Xs)
+
+double z = 0.0
+nan = z / z
+mut xs = List<double>()
+xs.Add(nan)
+mut ys = List<double>()
+ys.Add(nan)
+print(Samples(xs) == Samples(ys))
+print(xs == ys)
 ```
 
 Case: [data/equality-union-field.kz](../corpus/data/equality-union-field.kz)

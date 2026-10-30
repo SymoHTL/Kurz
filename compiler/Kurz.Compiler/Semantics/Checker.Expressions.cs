@@ -1511,17 +1511,6 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (target.Type is DataType entry && BuiltInEntry(entry.Symbol))
-        {
-            NotSupported(w.Line, "an `Entry` a program makes through `with`, where a loop over a map alone makes one (C6)");
-            foreach (var a in w.Assignments)
-            {
-                CheckExpression(a.Value, Untyped(a.Value));
-            }
-
-            return Typed.Error;
-        }
-
         if (target.Type is not DataType d)
         {
             if (!Unchecked(target, w.Line, "copied by `with`"))

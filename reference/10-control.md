@@ -235,7 +235,8 @@ print(sum)
 the built-in `data` type `Entry<K, V>`, whose fields `Key` and `Value` are the entry's key and value:
 it has a `data` value's text (A3), it is passed, kept and read in a lambda, and a program writes its
 type, `Entry<string, int>`; a declaration of the name `Entry` is `redeclared` (§4, the owner,
-2026-10-30). A program makes no entry, by `Entry(...)` or by `with` (§4, assumed there). Over a map,
+2026-10-30). A program makes an entry by `Entry(key, value)` and copies one by `with` (D5), as every
+`data` type (§4, the owner, 2026-10-30). Over a map,
 `for key, value in map { }` names the key and the value together, under any two names (§4, the owner,
 2026-10-30); two names over a list or a range are `type-mismatch` *(proposed: the error; §4 gives the
 form over a map alone)*. The loop runs over the collection as it was when
@@ -275,6 +276,15 @@ for e in ages {
     print(e)
     print(Name(e))
 }
+```
+
+Case: [control/entry-make.kz](../corpus/control/entry-make.kz)
+```kurz
+a = Entry("Ann", 31)
+print(a)
+b = a with { Value = 32 }
+print(b)
+print(b == Entry("Ann", 32))
 ```
 
 Case: [control/entry-redeclared.kz](../corpus/control/entry-redeclared.kz)

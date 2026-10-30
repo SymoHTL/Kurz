@@ -2159,11 +2159,11 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_data_value_that_holds_a_map_or_a_function_value_takes_no_equality()
+    public void A_data_value_that_holds_a_map_a_function_a_file_or_a_socket_takes_no_equality()
     {
         // D3, M9: `==` on a data value that holds a map or a function value, at any depth: a field, a field of a field, an item, a case of
         // a union and a derived type's field, is `type-mismatch` at the `==`, and such a value is no key (section 4, the owner, 2026-10-30,
-        // "type-mismatch")
+        // "type-mismatch"); so is one that holds a file or a socket (section 4, the owner, 2026-10-30, "Handle ==": "type-mismatch")
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data Box(Map<string, int> M)\n\na = Box(Map<string, int>())\nb = Box(Map<string, int>())\nprint(a == b)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data Rule((int) => int Apply)\n\nr = Rule(x => x)\nprint(r != r)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data In(List<Map<int, int>> Ms)\ndata Out(int A, In I)\n\no = Out(1, In(List<Map<int, int>>()))\nprint(o == o)"));
@@ -2173,6 +2173,22 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data Box(Map<string, int> M)\n\nm = Map<Box, int>()\nprint(m)")); // no key
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data Rule((int) => int Apply)\n\nm = Map<List<Rule>, int>()\nprint(m)"));
         Clean("data Box(List<int> Items)\n\na = Box(List<int>())\nprint(a == a)"); // a list compares by its items
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data H(File F)\n\nvoid Same(H a, H b) {\n    print(a == b)\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data H(List<TcpStream> Ss)\n\nvoid Same(H a, H b) {\n    print(a != b)\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data H(TcpListener? L)\n\nvoid Same(H a, H b) {\n    print(a == b)\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data H(File F)\n\nm = Map<H, int>()\nprint(m)")); // no key
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data H(TcpListener? L)\n\nm = Map<List<H>, int>()\nprint(m)"));
+    }
+
+    [Fact]
+    public void A_list_of_double_items_in_a_data_value_or_a_key_compares_as_C_s_Equals()
+    {
+        // D3, M9: a list of `double` or `float` items in a data value under `==`, or in a key, compares its items as C#'s `Equals`, so that
+        // the value equals itself and the key is found again (section 4, the owner, 2026-10-30, "Equals inside data/keys")
+        Clean("data P(List<double> Y)\n\na = P(List<double>())\nprint(a == a)");
+        Clean("data P(List<List<float>> Y)\n\nm = Map<P, int>()\nprint(m)");
+        Clean("m = Map<List<double>, int>()\nprint(m)");
+        Clean("data P(List<double> Y)\n\nxs = List<P>()\nprint(xs == xs)");
     }
 
     [Fact]
@@ -2189,6 +2205,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("data Entry(int X)\n\nprint(1)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("m = Map<string, int>()\nfor e in m {\n    int v = e\n    print(v)\n}"));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("m = Map<string, Map<int, int>>()\nfor e in m {\n    print(e == e)\n}")); // D3: it holds a map
+    }
+
+    [Fact]
+    public void A_program_makes_an_Entry_by_its_name_and_copies_one_by_with()
+    {
+        // C6, D5: `Entry(k, v)` makes an `Entry<K, V>` and `e with { Value = v }` copies one, as every data type (section 4, the owner,
+        // 2026-10-30, "Both, as a data type")
+        Clean("x = Entry(\"a\", 1)\nprint(x)\nprint(x.Key)");
+        Assert.Equal("Entry<string, int>", TypeOf("x = Entry(\"a\", 1)\nprint(x)", "x"));
+        Clean("m = Map<string, int>()\nfor e in m {\n    print(Entry(e.Key, 2))\n    print(e with { Value = 2 })\n}");
+        Clean("Entry<string, List<int>> y = Entry(Key: \"b\", Value: List<int>())\nprint(y with { Key = \"c\" })");
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("m = Map<string, int>()\nfor e in m {\n    print(e with { Value = \"two\" })\n}"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("Entry<string, int> x = Entry(1, \"a\")\nprint(x)"));
     }
 
     [Fact]
@@ -2227,14 +2256,7 @@ public sealed class CheckerTests
     [InlineData("T? Id<T>(T x) => x\n\nprint(1)", "1: a nullable `T` (N1)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
-    [InlineData("m = Map<List<double>, int>()\nprint(m)", "1: a map with keys of type `List<double>`: whether a `List<double>` in a `data` value or a key equals itself where an item is NaN is not decided (M9)")]
-    [InlineData("data P(List<List<float>> Y)\n\nm = Map<P, int>()\nprint(m)", "3: a map with keys of type `P`: its field `Y`: whether a `List<List<float>>` in a `data` value or a key equals itself where an item is NaN is not decided (M9)")]
-    [InlineData("data H(File F)\n\nm = Map<H, int>()\nprint(m)", "3: a map with keys of type `H`: its field `F`: whether `==` takes a value that holds a `File` is not decided (M9)")]
-    [InlineData("data P(List<double> Y)\n\na = P(List<double>())\nprint(a == a)", "4: `==` on a `P`: its field `Y`: whether a `List<double>` in a `data` value or a key equals itself where an item is NaN is not decided (D3, M9)")]
-    [InlineData("data H(File F)\n\nvoid Same(H a, H b) {\n    print(a == b)\n}\n\nprint(1)", "4: `==` on a `H`: its field `F`: whether `==` takes a value that holds a `File` is not decided (D3, M9)")]
     [InlineData("xs = List<int?>()\nprint(xs == xs)", "2: `==` on a `List<int?>`: its items: a nullable item compares by the lifted `==` (N1) (D3, M9)")]
-    [InlineData("m = Map<string, int>()\nfor e in m {\n    print(Entry(e.Key, 2))\n}", "3: an `Entry` a program makes, where a loop over a map alone makes one (C6)")]
-    [InlineData("m = Map<string, int>()\nfor e in m {\n    print(e with { Value = 2 })\n}", "3: an `Entry` a program makes through `with`, where a loop over a map alone makes one (C6)")]
     [InlineData("m = Map<int?, string>()\nprint(m)", "1: a map with keys of type `int?`: a nullable key compares by the lifted `==` (N1) (M9)")]
     [InlineData("m = Map<decimal, int>()\nprint(m)", "1: a map with keys of type `decimal`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
     [InlineData("void F<T>(T x) {\n    m = Map<T, int>()\n    print(m)\n}\n\nF(1)", "2: a map with keys of type `T`: a `T` is no key the checker reads (M9)")]

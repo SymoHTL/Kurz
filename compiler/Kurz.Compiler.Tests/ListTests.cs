@@ -888,6 +888,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         data Tree(int V, List<Tree> Kids)
         enum Tier { Free, Pro }
         data Pt(double X)
+        data Samples(List<double> Xs)
 
         void ShowEntry(Entry<string, List<int>> entry) {
             print(entry.Value.Count)
@@ -1131,6 +1132,32 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(pts[Pt(z)] ?? 0)
         print(pts.Count)
 
+        // a list of `double` or `float` items in a key and in a `data` value, as C#'s `Equals`: NaN equal to NaN, a NaN of other bits
+        // among them, and -0.0 to 0.0, so the key is found again and the value equals itself, while two lists alone compare by IEEE's
+        // `==` (section 4, the owner, 2026-10-30, "Equals inside data/keys")
+        mut ws = List<double>()
+        ws.Add(nan)
+        ws.Add(z)
+        mut vs = List<double>()
+        vs.Add(-nan)
+        vs.Add(-z)
+        mut byList = Map<List<double>, string>()
+        byList[ws] = "found"
+        print(byList[vs] ?? "none")
+        mut bySamples = Map<Samples, int>()
+        bySamples[Samples(ws)] = 1
+        bySamples[Samples(vs)] = 2
+        print(bySamples.Count)
+        print(Samples(ws) == Samples(vs))
+        print(ws == vs)
+        mut fls = List<float>()
+        fls.Add(float(nan))
+        mut flls = List<List<float>>()
+        flls.Add(fls)
+        mut byLists = Map<List<List<float>>, int>()
+        byLists[flls] = 3
+        print(byLists[flls] ?? 0)
+
         // the entry, a value of `Entry<K, V>`: kept in a list, read in a lambda, passed and compared, past a `Clear` of the map
         mut book = Map<string, List<int>>()
         mut pages = List<int>()
@@ -1140,6 +1167,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         for e in book {
             kept.Add(e)
             book.Clear()
+            kept.Add(Entry(e.Key, e.Value))
+            kept.Add(e with { Value = List<int>() })
             f = () => e.Key
             print(f())
             ShowEntry(e)
@@ -1147,6 +1176,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
         print(kept)
         print(book.Count)
+
+        // an entry a program makes and copies (section 4, the owner, 2026-10-30, "Both, as a data type")
+        pair = Entry(Made(1), 2)
+        print(pair)
+        print(pair == Entry("made 1", 2))
+        print(pair with { Value = 3 })
         """;
 
     private static readonly string[] MapMembersPrint =
@@ -1227,11 +1262,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "1", // a `data` key with a `double` field
         "2",
         "2",
+        "found", // a list key with a NaN and -0.0 among its items
+        "1", // a `data` key that holds such a list
+        "true",
+        "false", // the two lists alone, by IEEE's `==`
+        "3", // a list of lists of `float` items as a key
         "made 7", // the entry read in a lambda, passed and compared, after a `Clear` of the map
         "1",
         "true",
-        "[Entry { Key = made 7, Value = [1] }]",
+        "[Entry { Key = made 7, Value = [1] }, Entry { Key = made 7, Value = [1] }, Entry { Key = made 7, Value = [] }]", // one made, one copied
         "0",
+        "Entry { Key = made 1, Value = 2 }",
+        "true",
+        "Entry { Key = made 1, Value = 3 }",
     ];
 
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
@@ -1323,6 +1366,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(zs == ns)
         print(Grown(mut same) == same)
         print(List<List<int>>() == List<List<int>>())
+        mut dds = List<List<double>>()
+        dds.Add(ds)
+        print(dds == dds)
         """;
 
     private static readonly string[] ListWritesPrint =
@@ -1347,11 +1393,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "true", // -0.0 equal to 0.0
         "true", // a list a call changed, compared with the result the call gave
         "true",
+        "false", // NaN unequal to NaN in the lists among the items too
     ];
 
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
-    // of maps whose entry is written over, and a map of strings whose value and key a write over a key lets go of
+    // of maps whose entry is written over, a map of strings whose value and key a write over a key lets go of, and entries kept, made
+    // and copied
     private const string MapRounds = """
         data Pair(Map<int, int> A, int B)
 
@@ -1423,6 +1471,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             for e in kept {
                 total = total + e.Value.Count - 100
                 ents.Add(e)
+                ents.Add(Entry(e.Key, Make(10)))
+                ents.Add(e with { Key = "{round} {e.Key}" })
             }
             other = held
             held.Clear()
@@ -1434,7 +1484,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             ls[0] = ls[1]
             ls[1] = Make(100)
             total = total + Early(1000) + Seven(q.A) + Seven(b) - Seven(a) + h() + Seven(ms[0]) + Seven(nested[0] ?? Map<int, int>()) + (words["a"] ?? "").Bytes.Count - (words["{round}"] ?? "").Bytes.Count - 36
-            total = total + Seven(out) + Seven(ls[1]) - 14 + other.Count + kept.Count - 4 + ents.Count - 2
+            total = total + Seven(out) + Seven(ls[1]) - 14 + other.Count + kept.Count - 4 + ents.Count - 6
         }
         print(round)
         print(total)
