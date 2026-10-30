@@ -604,9 +604,14 @@ whose end lies below its start is `reversed-range` or `reversed-range-at-run-tim
 range (§4, the owner, 2026-10-29). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
 an assignment into a path (M4); `map[key]` is the value or `null`. A map's key is a value of any type
 `==` compares, a list by its items and a `data` value by its fields, hashed over the same items and
-fields; a map as a key is `type-mismatch`, since `==` takes no map, a key of a nullable type compares as
-`==` compares two nullable values (§4, assumed there), and a `double` or `float` key is open (record,
-section 14). A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10). `Count` is
+fields; a map as a key is `type-mismatch`, since `==` takes no map, and so is a `data` value that holds
+a map or a function value (D3), a key of a nullable type compares as `==` compares two nullable values
+(§4, assumed there), and a `double` or a `float` key, alone or as a field of a `data` key, compares as
+C#'s `double.Equals` in a `Dictionary`: NaN finds NaN, and 0.0 and -0.0 are one key, hashed alike.
+Whether a list of `double` items as a key finds NaN, and whether a value that holds a file or a socket
+is a key, are open (record, section 14). `xs == ys` on two lists of one type is `true` where their
+counts are equal and their items are equal in order, each pair by `==`, so that NaN is unequal to NaN
+there, and `!=` is its negation; lists of items `==` does not take are `type-mismatch`. A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10). `Count` is
 the number of a map's entries, an `int`; `ContainsKey(key)` is a `bool`; `Remove(key)`, a `mut` method,
 takes the key's entry out of the map and gives its value, or `null` where there is none, of the type
 `map[key]` has, and copies a map another value holds first (M3); `Clear()`, a `mut` method, removes every
@@ -616,7 +621,7 @@ that holds `null` alike. `list[i] = value` writes the item at position `i` of a 
 `mut` variable or a `mut` parameter, as an assignment into a path (M4): the value first, then the
 position; an `i` below 0 or at `Count` or beyond raises `index-out-of-range` (T14), and a list that
 shares its block with another value is copied first (M3). (§4, the owner, 2026-10-30: the keys, the
-hash, the members, the nullable value and the write of an item.) The names are the ones the record's
+hash, the members, the nullable value, the write of an item and `==` on two lists.) The names are the ones the record's
 samples use, `Clear` is the one section 12 gives, and a map's members are the ones section 4 gives. The
 naming of the standard library is open beyond the calls on files and sockets and a map's members (record,
 sections 12 and 14).
@@ -772,6 +777,34 @@ print(scores["Ann"] ?? -1)
 print(scores["Cid"] ?? -1)
 print(scores.ContainsKey("Ann"))
 print(scores.Remove("Bea") ?? 0)
+```
+
+Case: [values/map-key-double.kz](../corpus/values/map-key-double.kz)
+```kurz
+double z = 0.0
+nan = z / z
+mut names = Map<double, string>()
+names[nan] = "nan"
+names[z] = "zero"
+names[-z] = "minus zero"
+print(names.Count)
+print(names[nan] ?? "none")
+print(names[z] ?? "none")
+```
+
+Case: [values/list-equality.kz](../corpus/values/list-equality.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+mut ys = List<int>()
+ys.Add(1)
+print(xs == ys)
+ys.Add(2)
+print(xs == ys)
+double z = 0.0
+mut ds = List<double>()
+ds.Add(z / z)
+print(ds == ds)
 ```
 
 Case: [values/list-write.kz](../corpus/values/list-write.kz)

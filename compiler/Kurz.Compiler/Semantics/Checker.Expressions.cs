@@ -405,13 +405,6 @@ public sealed partial class Checker
     private Typed CheckName(NameExpression n, KurzType? expected = null)
     {
         var (variable, _) = Lookup(n.Name);
-        if (variable is { Type: EntryType })
-        {
-            variable.Read = true;
-            NotSupported(n.Line, $"the entry `{n.Name}` of a map as a value of its own, which C6 reads through `Key` and `Value` alone (C6)");
-            return Typed.Error;
-        }
-
         if (variable is not null)
         {
             variable.Read = true;
@@ -521,33 +514,8 @@ public sealed partial class Checker
             }
         }
 
-        if (Unwrap(m.Target) is NameExpression name && Lookup(name.Name) is ({ Type: EntryType entry } variable, var captured))
-        {
-            return EntryMember(m, name, variable, entry, captured);
-        }
-
         var target = CheckExpression(m.Target, null);
         return Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3
-    }
-
-    /// <summary>
-    /// C6: <c>e.Key</c> and <c>e.Value</c> of the entry <c>for e in map</c> names (section 4, the owner, 2026-10-30, "Key and Value, as
-    /// C#"), read from the map the loop holds; a lambda that reads the entry is not read, since what the entry is as a value of its own,
-    /// which a lambda's environment would hold, no answer gives.
-    /// </summary>
-    private Typed EntryMember(MemberAccess m, NameExpression name, VariableSymbol variable, EntryType entry, bool captured)
-    {
-        variable.Read = true;
-        if (captured)
-        {
-            NotSupported(m.Line, "an entry of a map read in a lambda (C6, F15)");
-            return Typed.Error;
-        }
-
-        model.RecordName(name, variable);
-        model.RecordType(name, new Typed(entry));
-        model.RecordType(m.Target, new Typed(entry));
-        return MemberOf(entry, m.Member, m.Line);
     }
 
     /// <summary>D12: <c>Plan.Free</c>, a value of the enum, a constant (section 4); <c>From</c> is called (D18), and any other name is no value of it (V10).</summary>
@@ -626,8 +594,6 @@ public sealed partial class Checker
                 break;
             case MapType when member == "Count":
                 return new Typed(Types.Int); // M9: the count of its entries, as C#'s `Dictionary.Count` (section 4, the owner, 2026-10-30)
-            case EntryType entry when member is "Key" or "Value":
-                return new Typed(member == "Key" ? entry.Key : entry.Value); // C6, as C#'s `KeyValuePair` (section 4, the owner, 2026-10-30)
             case DataType d:
                 {
                     var field = d.Symbol.Field(member);
@@ -1325,7 +1291,26 @@ public sealed partial class Checker
         else if (equality)
         {
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
-                || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
+                || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
+                || (left.Type is ListType && Types.Same(left.Type, right.Type));
+            var refused = !ok ? null : left.Type switch
+            {
+                // M9: two lists compare by their counts and their items (section 4, the owner, 2026-10-30, "By items, as Rust"); D3: a data
+                // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
+                // "type-mismatch")
+                ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
+                DataType => HeldEquality(left.Type, []) ?? HeldEquality(right.Type, []),
+                _ => null,
+            };
+            switch (refused)
+            {
+                case (true, var why):
+                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} (T18, D3, M9)");
+                    return new Typed(Types.Bool);
+                case (false, var why):
+                    NotSupported(b.Line, $"`{op}` on a `{left.Type}`: {why} (D3, M9)");
+                    return new Typed(Types.Bool);
+            }
         }
 
         if (!ok)
@@ -1518,6 +1503,17 @@ public sealed partial class Checker
         var target = CheckExpression(w.Target, null);
         if (target.IsError)
         {
+            foreach (var a in w.Assignments)
+            {
+                CheckExpression(a.Value, Untyped(a.Value));
+            }
+
+            return Typed.Error;
+        }
+
+        if (target.Type is DataType entry && BuiltInEntry(entry.Symbol))
+        {
+            NotSupported(w.Line, "an `Entry` a program makes through `with`, where a loop over a map alone makes one (C6)");
             foreach (var a in w.Assignments)
             {
                 CheckExpression(a.Value, Untyped(a.Value));

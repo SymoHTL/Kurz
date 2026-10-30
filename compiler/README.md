@@ -491,7 +491,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   which raises `index-out-of-range` for an index below 0 or at `Count` or beyond (T14), `list[i] = value`
   on a `mut` variable or parameter, which runs the value, then the index, raises `index-out-of-range`
   there, copies a block another value holds first and lets go of the item it writes over (section 4, the
-  owner, 2026-10-30, "As C# and Rust"; M9, M4, M3), `list[a..<b]` and
+  owner, 2026-10-30, "As C# and Rust"; M9, M4, M3), `==` and `!=` on two lists of one type, by their
+  counts and their items in order, each pair by `==`, a `double` or a `float` item by IEEE's `==`, so
+  that NaN is unequal to NaN there, as Rust's `Vec` compares (section 4, the owner, 2026-10-30, "By
+  items, as Rust"), `list[a..<b]` and
   `list[a..b]`, a new list of a copy of those items, which raises `reversed-range-at-run-time` for ends in the
   wrong order and then `index-out-of-range` for a start below 0 or an end past the count (section 4, the owner,
   2026-10-29, "A List<T>, a value"), `Where`, which calls its test once for each item, in
@@ -508,9 +511,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `ContainsKey(key)`, `Remove(key)`, which takes the entry out, lets go of its key and gives its value,
   moved out of the block, and `Clear()`, which lets go of every entry and keeps the slots, or of the block
   where another value holds it (section 4, the owner, 2026-10-30, "C# names, Rust's Remove"), `for e in
-  map` with `e.Key` and `e.Value` and `for key, value in map`, which hold the block the map had when the
-  loop started and borrow each key and value from it, in the order of its slots (section 4, the owner,
-  2026-10-30, "Key and Value, as C#"; C6, M10), their text,
+  map` and `for key, value in map`, which hold the block the map had when the loop started and borrow
+  each key and value from it, in the order of its slots (section 4, the owner, 2026-10-30, "Key and
+  Value, as C#"; C6, M10), `e` a value of the built-in `data` type `Entry<K, V>` of the two, laid out
+  as every `data` value of its fields is, borrowed as an item of a list is, with its text and its
+  `==` (section 4, the owner, 2026-10-30, "A value, as C#"; D3, A3), their text,
   `[key: value, ...]` in the order of the map's slots and `[]` without entries (A6, M10), and maps of
   every key the checker takes and every value the emitter lays out, in variables, parameters, fields,
   unions, lists and maps. A map is the address of a block, null for a map without entries: the count
@@ -519,8 +524,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   can still take before the block grows, 4 bytes, padded to 48 bytes, then a control byte for
   each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
   key and the value, laid out as a `data` value of the three. A key's hash is SipHash-1-3 of its
-  bytes, a string's UTF-8 bytes and any other key widened to 64 bits, a time's 16 bytes, the hash
-  Rust's `HashMap` takes by default; a key that is a list, a `data` value or a union, of every type
+  bytes, a string's UTF-8 bytes and any other key widened to 64 bits, a time's 16 bytes, a `double`'s
+  8 bytes and a `float`'s widened to a `double`, with every NaN as the one NaN of the bits
+  `0x7FF8000000000000` and -0.0 as 0.0, as .NET's `double.GetHashCode` folds them, since such a key
+  compares as C#'s `double.Equals`, NaN equal to NaN and -0.0 to 0.0 (section 4, the owner, 2026-10-30,
+  "As C#"; D3), the hash Rust's `HashMap` takes by default; a key that is a list, a `data` value or a union, of every type
   the checker takes as a key (section 4, the owner, 2026-10-30, "Any type with =="), is hashed by
   SipHash-1-3 over 64-bit words, each item's own hash for a list, a union's tag and its case's hash, a
   `data` type laid out as a block its type's number and each field's hash, as Rust's derived `Hash`
@@ -676,10 +684,10 @@ through every way out of a block, the body of a `void` function and a lambda's e
 them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
 inaccessible, under which the values' programs and twenty rounds of the same program print the
 same lines, and so do the strings' program and twenty rounds of strings through every way out of a block,
-and the maps' program and twenty rounds of maps, and the programs of a map's members, loops, keys and
-nullable values and of writes into a list's items, each read beside the change it can meet (section 4,
-the owner, 2026-10-30); maps made and dropped through every way out of a block, removed, cleared,
-walked and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
+and the maps' program and twenty rounds of maps, and the programs of a map's members, loops, entries kept
+past a `Clear`, keys, `double` keys and nullable values and of writes into a list's items and `==` on two
+lists, each read beside the change it can meet (section 4, the owner, 2026-10-30); maps made and dropped through every way out of a block, removed, cleared,
+walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
 of three inputs against vectors from outside this repository; two runs of one program that print a
 map of 20 entries in two orders; the bytes of a map's first block the system refuses;
 the target's own `Release`, after
@@ -709,7 +717,7 @@ checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), an `Add` or a `Clear` on a list in
-a field and a `Remove` or a `Clear` on a map in a field (M5), `==` on a value that holds a map (D3), `s.Chars` as a list (T15), a call on a file or a socket in a build for
+a field and a `Remove` or a `Clear` on a map in a field (M5), `s.Chars` as a list (T15), a call on a file or a socket in a build for
 Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
@@ -719,7 +727,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 284 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 39 the
+full and the emitter does not emit, 3 of the 287 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 39 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -1029,12 +1037,13 @@ type in C's layout (R16, R17); the text of a raw pointer, of a C function value 
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
-file; a map's key of a type `==` takes and the compiler does not hash: a `double` or a `float`, whose place
-as a key the record leaves open (section 14), a `decimal`, a nullable type, a type parameter, a union of
-two types beside `null`, and a list or a `data` value that holds one of them; a `data` value that holds
-a map or a function as a key, whose `==` the record leaves open (section 14); a map whose values have a
-nullable type N1 does not read; the entry of a `for` loop over a map read but through `Key` and `Value`
-or in a lambda, which the record leaves open (C6, section 14); an assignment into a map or a list that
+file; a map's key of a type `==` takes and the compiler does not hash: a `decimal`, a nullable type, a
+type parameter, a union of two types beside `null`, and a list or a `data` value that holds one of
+them; a list of `double` or `float` items in a `data` value that `==` compares or in a key, and a `data`
+value that holds a file or a socket there, each a fork the record leaves open (D3, M9, section 14);
+`==` on two lists of nullable items, which compare by N1's lifted `==`; a map whose values have a
+nullable type N1 does not read; an `Entry` a program makes, by `Entry(...)` or by `with` (C6); an
+assignment into a map or a list that
 is no variable, or into a path through an entry or an item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's
@@ -1058,8 +1067,10 @@ round can ask about it by the rule's id.
 
 - M9 with N1, M4 and A6: a map's key of a type `==` does not take, a map, a function, a handle or a
   value of `void` among them, is `type-mismatch`, and so is a list of one, since section 4 takes any
-  type `==` compares; `==` between two maps is `type-mismatch`, as between
-  two lists (T18, D3), where a `data` value that holds a list compares it by its items (D3).
+  type `==` compares; `==` between two maps is `type-mismatch` (T18, D3). `==` on two lists takes two
+  lists of one type, `List<int>` beside `List<long>` being `type-mismatch` as Rust's `Vec<i32>` beside
+  `Vec<i64>` is, and items of a union of two types beside `null` are `type-mismatch`, as `==` on such a
+  union outside a field is; a `data` value compares a list in a field by its items (D3).
   `map[key] = value` and `list[i] = value` are assignments into a path (M4) and stand on a `mut`
   variable or parameter, with M4's order, the value before the key or the index; an index of a type
   other than an integer is `type-mismatch` (T2). Two names in a `for` loop over a list or a range are

@@ -38,7 +38,12 @@ values of that case are equal, as Rust's derived `PartialEq` compares a field of
 owner, 2026-10-23). The two values of that case compare as a field of the case's type does, so a
 `double` or `float` case that holds NaN equals itself, as a C# record calls `Equals` on a field of
 type `object` (§4, the owner, 2026-10-24); there Kurz departs from Rust's `PartialEq`, which
-compares the two values with their `==`, under which NaN is unequal to itself (§4).
+compares the two values with their `==`, under which NaN is unequal to itself (§4). A field that is a
+list compares by its items (M9). `==` on a `data` value that holds a map or a function value, in a field
+or at any depth below one, through a field's fields, a list's items, a union's cases and the fields of a
+type derived from it, is `type-mismatch` at the `==` (§4, the owner, 2026-10-30). Whether a list of
+`double` items in a field equals itself where an item is NaN, and whether `==` takes a value that holds
+a file or a socket, are open (record, section 14).
 
 Case: [classes/equal-by-nan.kz](../corpus/classes/equal-by-nan.kz)
 ```kurz
@@ -73,6 +78,14 @@ double z = 0.0
 nan = z / z
 print(Box(nan) == Box(nan))
 print(Box(nan) == Box("NaN"))
+```
+
+Case: [data/equality-holds-map.kz](../corpus/data/equality-holds-map.kz)
+```kurz
+data Box(Map<string, int> Counts)
+
+b = Box(Map<string, int>())
+print(b == b)
 ```
 
 Case: [data/equality-union-field.kz](../corpus/data/equality-union-field.kz)

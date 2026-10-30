@@ -1,0 +1,15 @@
+// expect: output
+// | 2
+// | nan
+// | minus zero
+// rules: M9
+
+double z = 0.0
+nan = z / z
+mut names = Map<double, string>()
+names[nan] = "nan"
+names[z] = "zero"
+names[-z] = "minus zero"
+print(names.Count)
+print(names[nan] ?? "none")
+print(names[z] ?? "none")

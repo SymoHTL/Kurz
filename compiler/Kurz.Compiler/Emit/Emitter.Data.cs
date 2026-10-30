@@ -287,8 +287,10 @@ public sealed partial class Emitter
 
             case ListType list:
                 {
-                    // M9: a key of a map compares lists item by item, as it hashes them over their items (section 4, the owner,
-                    // 2026-10-30, "Any type with =="), and so does a field of a `data` value that holds one (D3)
+                    // M9: `==` compares two lists by their counts and their items in order, each pair by `==`, as Rust's `Vec` does,
+                    // a `double` item by IEEE's `==`, NaN unequal to NaN (section 4, the owner, 2026-10-30, "By items, as Rust"); so do a
+                    // key of a map, which hashes a list over its items (section 4, "Any type with =="), and a field of a `data` value
+                    // that holds one (D3), where the checker takes no list of such items
                     var name = Helper($"equal.{Lower.Mangle(type)}", "i1", ["ptr", "ptr"], () =>
                     {
                         var count = ListCount("%a0");
@@ -311,7 +313,8 @@ public sealed partial class Emitter
                         var a = fn.Value($"load {Ir(list.Element)}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {first}, i64 {wide}")}");
                         var b = fn.Value($"load {Ir(list.Element)}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {second}, i64 {wide}")}");
                         var more = fn.Label("more");
-                        fn.CondBranch(Equal(a, b, list.Element, line), more, differ);
+                        var equal = list.Element is PrimitiveType p && Types.IsFloating(p) ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, list.Element, line);
+                        fn.CondBranch(equal, more, differ);
                         fn.Block(more);
                         fn.Emit($"store i32 {fn.Value($"add i32 {i}, 1")}, ptr {counter}");
                         fn.Branch(check);

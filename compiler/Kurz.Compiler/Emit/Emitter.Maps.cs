@@ -17,9 +17,6 @@ public sealed partial class Emitter
     // the IR types of the entries defined in the module
     private readonly HashSet<string> entries = new(StringComparer.Ordinal);
 
-    // the slots of the key and of the value of the entry each `for e in map` names, which `e.Key` and `e.Value` read (C6)
-    private readonly Dictionary<VariableSymbol, (string Key, string Value)> entrySlots = new(ReferenceEqualityComparer.Instance);
-
     /// <summary>The IR type of an entry in a slot of the map's block.</summary>
     private string EntryType(MapType type)
     {
@@ -59,6 +56,19 @@ public sealed partial class Emitter
                 {
                     var name = Helper($"hash.{Lower.Mangle(type)}", "i64", ["ptr", Ir(type)], () => HashBody(type));
                     return fn.Value($"call i64 {name}(ptr {block}, {Ir(type)} {key})");
+                }
+
+            case PrimitiveType p when Types.IsFloating(p):
+                {
+                    // section 4, the owner, 2026-10-30, "As C#": a key compares as C#'s `double.Equals`, NaN equal to NaN and -0.0 to 0.0
+                    // (Equal), so every NaN hashes as the one NaN and -0.0 as 0.0, as .NET's `double.GetHashCode` does
+                    var wide = p.Kind == Primitive.Double ? key : fn.Value($"fpext float {key} to double");
+                    var bits = fn.Value($"bitcast double {wide} to i64");
+                    var zero = fn.Value($"select i1 {fn.Value($"fcmp oeq double {wide}, 0.0")}, i64 0, i64 {bits}");
+                    var one = fn.Value($"select i1 {fn.Value($"fcmp uno double {wide}, {wide}")}, i64 9221120237041090560, i64 {zero}");
+                    var slot = fn.Alloca("i64", "key");
+                    fn.Emit($"store i64 {one}, ptr {slot}");
+                    return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
                 }
 
             case PrimitiveType p when Ir(p) == "i128":
@@ -554,22 +564,30 @@ public sealed partial class Emitter
     /// C6, M10: <c>for e in map</c> and <c>for key, value in map</c> run the block for each entry, in the order of the map's slots,
     /// over the map as it was when the loop started: the loop holds the map's block, so that a write to the variable inside the block,
     /// <c>Remove</c> and <c>Clear</c> among them, copies it first or lets go of it (M3), as a loop over a list holds its block. The
-    /// names are the entry's key and value, borrowed from that block.
+    /// names are the entry's key and value, borrowed from that block, or the entry, a value of <c>Entry&lt;K, V&gt;</c> of the two
+    /// (section 4, the owner, 2026-10-30, "A value, as C#"), borrowed as an item of a list is.
     /// </summary>
     private void EmitForInMap(ForInStatement f, MapType type)
     {
         var map = Owned(f.Collection);
         regions[^1].Add((map, type)); // the statement's end, a `return` or a `break` lets go of it
-        var key = fn.Alloca(Ir(type.Key), f.Variable);
-        var value = fn.Alloca(Ir(type.Value), f.Second?.Name ?? "value");
-        if (f.Second is null)
+        var whole = f.Second is null ? (DataType)Model.DeclarationOf(f).Type : null;
+        string key = null!;
+        string value = null!;
+        if (whole is null)
         {
-            entrySlots[Model.DeclarationOf(f)] = (key, value);
+            key = fn.Alloca(Ir(type.Key), f.Variable);
+            value = fn.Alloca(Ir(type.Value), f.Second!.Name);
+            slots[Model.DeclarationOf(f)] = key;
+            slots[Model.DeclarationOf(f.Second)] = value;
+        }
+        else if (layout.IsBlock(whole))
+        {
+            throw Unsupported(f.Line, $"a `{whole}` laid out as a block (C6)");
         }
         else
         {
-            slots[Model.DeclarationOf(f)] = key;
-            slots[Model.DeclarationOf(f.Second)] = value;
+            slots[Model.DeclarationOf(f)] = fn.Alloca(Ir(whole), f.Variable);
         }
 
         var entry = EntryType(type);
@@ -595,8 +613,18 @@ public sealed partial class Emitter
         fn.CondBranch(held, full, onward);
         fn.Block(full);
         var slot = fn.Value($"getelementptr {entry}, ptr {entries}, i64 {i}");
-        fn.Emit($"store {Ir(type.Key)} {fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}")}, ptr {key}");
-        fn.Emit($"store {Ir(type.Value)} {fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}")}, ptr {value}");
+        var k = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
+        var v = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
+        if (whole is null)
+        {
+            fn.Emit($"store {Ir(type.Key)} {k}, ptr {key}");
+            fn.Emit($"store {Ir(type.Value)} {v}, ptr {value}");
+        }
+        else
+        {
+            var pair = fn.Value($"insertvalue {Ir(whole)} {fn.Value($"insertvalue {Ir(whole)} poison, {Ir(type.Key)} {k}, 0")}, {Ir(type.Value)} {v}, 1");
+            fn.Emit($"store {Ir(whole)} {pair}, ptr {slots[Model.DeclarationOf(f)]}");
+        }
         fn.Branch(body);
         fn.Block(body);
         loops.Push((exit, onward, regions.Count, scopes.Count));
@@ -606,13 +634,6 @@ public sealed partial class Emitter
         fn.Emit($"store i64 {fn.Value($"add i64 {fn.Value($"load i64, ptr {counter}")}, 1")}, ptr {counter}");
         fn.Branch(check);
         fn.Block(exit);
-    }
-
-    /// <summary>C6: <c>e.Key</c> or <c>e.Value</c> of the entry a loop over a map names, borrowed from the block the loop holds.</summary>
-    private string EntryMember(MemberAccess m, EntryType type)
-    {
-        var (key, value) = entrySlots[Model.VariableOf((NameExpression)Unwrap(m.Target))];
-        return m.Member == "Key" ? fn.Value($"load {Ir(type.Key)}, ptr {key}") : fn.Value($"load {Ir(type.Value)}, ptr {value}");
     }
 
     /// <summary>The helper that lets go of one holder of a map's block: the last lets go of its entries' own blocks and frees it.</summary>

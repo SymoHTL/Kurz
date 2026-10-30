@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: C6
+
+data Entry(string Name)
+
+print(1)

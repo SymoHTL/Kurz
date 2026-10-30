@@ -108,19 +108,6 @@ public sealed record MapType(KurzType Key, KurzType Value) : KurzType
     public override int GetHashCode() => HashCode.Combine(nameof(MapType), Key, Value);
 }
 
-/// <summary>
-/// The entry that <c>for e in map</c> names (C6), read through its <c>Key</c> and its <c>Value</c> alone: what an entry is as a value of
-/// its own, its type's name and its text, no answer gives.
-/// </summary>
-public sealed record EntryType(KurzType Key, KurzType Value) : KurzType
-{
-    public override string Text => $"entry of Map<{Key.Text}, {Value.Text}>";
-
-    public bool Equals(EntryType? other) => other is not null && Types.Same(Key, other.Key) && Types.Same(Value, other.Value);
-
-    public override int GetHashCode() => HashCode.Combine(nameof(EntryType), Key, Value);
-}
-
 /// <summary>A <c>data</c> type (D1), with its type arguments where it is generic (T19).</summary>
 public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArguments) : KurzType
 {

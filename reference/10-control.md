@@ -231,12 +231,14 @@ print(sum)
 ### C6 (assumed, §8, §13) `for ... in`
 
 `for name in collection { }` runs its block once for each item: in order for a list and a range
-(C8), and in the order of the map's storage for a map (M10), where an item is an entry with a
-`Key` and a `Value`, the entry's key and value (§4, the owner, 2026-10-30). Over a map,
+(C8), and in the order of the map's storage for a map (M10), where an item is an entry, a value of
+the built-in `data` type `Entry<K, V>`, whose fields `Key` and `Value` are the entry's key and value:
+it has a `data` value's text (A3), it is passed, kept and read in a lambda, and a program writes its
+type, `Entry<string, int>`; a declaration of the name `Entry` is `redeclared` (§4, the owner,
+2026-10-30). A program makes no entry, by `Entry(...)` or by `with` (§4, assumed there). Over a map,
 `for key, value in map { }` names the key and the value together, under any two names (§4, the owner,
 2026-10-30); two names over a list or a range are `type-mismatch` *(proposed: the error; §4 gives the
-form over a map alone)*. An entry is read through `Key` and `Value` alone (§4, assumed there); what it
-is as a value of its own is open (record, section 14). The loop runs over the collection as it was when
+form over a map alone)*. The loop runs over the collection as it was when
 the loop started: the collection is a value (M1), and a change to the variable inside the block is a
 change to the variable, not to what the loop walks *(proposed reading of M3; for a map §4, assumed
 there)*. The record's stream sample uses this form.
@@ -261,6 +263,25 @@ for e in ages {
 for name, age in ages {
     print("{name} is {age}")
 }
+```
+
+Case: [control/for-in-map-entry.kz](../corpus/control/for-in-map-entry.kz)
+```kurz
+string Name(Entry<string, int> entry) => entry.Key
+
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+for e in ages {
+    print(e)
+    print(Name(e))
+}
+```
+
+Case: [control/entry-redeclared.kz](../corpus/control/entry-redeclared.kz)
+```kurz
+data Entry(string Name)
+
+print(1)
 ```
 
 Case: [control/for-two-names-list.kz](../corpus/control/for-two-names-list.kz)

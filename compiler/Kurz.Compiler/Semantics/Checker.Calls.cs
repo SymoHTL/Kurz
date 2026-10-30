@@ -682,12 +682,15 @@ public sealed partial class Checker
 
     /// <summary>
     /// M9: the type of a map the checker reads. A key is a value of a type that compares by content (section 4, the owner, 2026-10-30,
-    /// "Any type with =="): a string, an integer, a <c>char</c>, a <c>bool</c>, a time, an enum, a <c>data</c> value of such fields, a
-    /// field of a union of them among them (D3), and a list of such items. A map, a function value and a file or a socket take no
-    /// <c>==</c>, so they are no key (<c>type-mismatch</c>, T18); the rest are <c>not supported</c>: a nullable key, which compares by
-    /// the lifted <c>==</c> of N1, a <c>double</c> or a <c>float</c>, whether a key at all is a fork no answer took, and a
-    /// <c>decimal</c>, a pointer, a type parameter, a value that holds a map or a function value. A value is any type whose nullable
-    /// type the checker reads (N1), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30, "Flatten, as C#").
+    /// "Any type with =="): a string, a number, a <c>char</c>, a <c>bool</c>, a time, an enum, a <c>data</c> value of such fields, a
+    /// field of a union of them among them (D3), and a list of such items; a <c>double</c> or a <c>float</c>, alone or in a field,
+    /// compares as C#'s <c>double.Equals</c> does in a <c>Dictionary</c> (section 4, the owner, 2026-10-30, "As C#"). A map, a function
+    /// value and a file or a socket take no <c>==</c>, and nor does a <c>data</c> value that holds a map or a function value, so they are
+    /// no key (<c>type-mismatch</c>, T18; section 4, the owner, 2026-10-30, "type-mismatch"); the rest are <c>not supported</c>: a
+    /// nullable key, which compares by the lifted <c>==</c> of N1, a list of <c>double</c> or <c>float</c> items and a <c>data</c> value
+    /// that holds a file or a socket, each a fork no answer took, and a <c>decimal</c>, a pointer and a type parameter. A value is any type
+    /// whose nullable type the checker reads (N1), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30,
+    /// "Flatten, as C#").
     /// </summary>
     private KurzType MapOf(KurzType key, KurzType value, int line)
     {
@@ -720,10 +723,8 @@ public sealed partial class Checker
         {
             case ErrorType or EnumType:
                 return null;
-            case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || p.Kind is Primitive.String or Primitive.Char or Primitive.Bool:
+            case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || Types.IsFloating(p) || p.Kind is Primitive.String or Primitive.Char or Primitive.Bool:
                 return null;
-            case PrimitiveType p when Types.IsFloating(p):
-                return (false, $"whether a `{p}` is a key is not decided"); // Rust's `HashMap` takes none, as `f64` has no `Hash`; C#'s `Dictionary` takes one
             case PrimitiveType p:
                 return (false, $"the hash of a `{p}`, which reads 1.5 and 1.50 as one value, is not built");
             case MapType m:
@@ -732,6 +733,8 @@ public sealed partial class Checker
                 return (true, $"`==` takes no `{type}`");
             case UnionType u when Types.NonNull(u) is not null:
                 return (false, "a nullable key compares by the lifted `==` (N1)");
+            case ListType l when FloatItems(l):
+                return (false, FloatItemsFork(l));
             case ListType l:
                 return KeyOf(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case DataType d:
@@ -745,7 +748,7 @@ public sealed partial class Checker
                     {
                         if (FieldKeyOf(SubstituteData(d, field.Type), seen) is { } why)
                         {
-                            return (false, $"its field `{field.Name}`: {why}");
+                            return why with { Why = $"its field `{field.Name}`: {why.Why}" };
                         }
                     }
 
@@ -765,20 +768,135 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>M9 with D3: why a field of a <c>data</c> key is not read, null where it is: a key's type, or a union of them, <c>null</c> among its cases, which compares by its case and its value.</summary>
-    private string? FieldKeyOf(KurzType type, HashSet<DataSymbol> seen)
+    /// <summary>
+    /// M9 with D3: why a field of a <c>data</c> key is no key, null where it is one: a key's type, or a union of them, <c>null</c> among its
+    /// cases, which compares by its case and its value. A field of a map or a function value is <c>type-mismatch</c> (section 4, the owner,
+    /// 2026-10-30, "type-mismatch"); one of a file or a socket is <c>not supported</c>, a fork no answer took.
+    /// </summary>
+    private (bool Mismatch, string Why)? FieldKeyOf(KurzType type, HashSet<DataSymbol> seen) => type switch
     {
-        if (type is UnionType u)
-        {
-            return u.Cases.Where(c => c is not NullType).Select(c => FieldKeyOf(c, seen)).FirstOrDefault(w => w is not null);
-        }
+        UnionType u => u.Cases.Where(c => c is not NullType).Select(c => FieldKeyOf(c, seen)).FirstOrDefault(w => w is not null),
+        HandleType => (false, HeldHandleFork(type)),
+        _ => KeyOf(type, seen),
+    };
 
-        return KeyOf(type, seen) is { } why ? why.Why : null;
+    /// <summary>
+    /// D3 with M9: why <c>==</c> does not take a <c>data</c> value whose field, at any depth, is of the type, null where it does: a field
+    /// compares by the equality Kurz gives its type (D3), a union's by its case and its value (D9), a list's by its items (section 4, the
+    /// owner, 2026-10-30, "By items, as Rust"). A map or a function value there is <c>type-mismatch</c> (section 4, the owner, 2026-10-30,
+    /// "type-mismatch"); the rest are <c>not supported</c>: a list of <c>double</c> or <c>float</c> items and a file or a socket, each a fork
+    /// no answer took, and a pointer and a type parameter. <paramref name="seen"/> holds the data types on the way.
+    /// </summary>
+    private (bool Mismatch, string Why)? HeldEquality(KurzType type, HashSet<DataSymbol> seen)
+    {
+        switch (type)
+        {
+            case ErrorType or EnumType or NullType or VoidType:
+                return null;
+            case PrimitiveType:
+                return null;
+            case MapType m:
+                return (true, $"`==` between two `{m}` is `type-mismatch`");
+            case FunctionType or CFunctionType:
+                return (true, $"`==` takes no `{type}`");
+            case HandleType:
+                return (false, HeldHandleFork(type));
+            case ListType l when FloatItems(l):
+                return (false, FloatItemsFork(l));
+            case ListType l:
+                return HeldEquality(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
+            case UnionType u:
+                return u.Cases.Select(c => HeldEquality(c, seen)).FirstOrDefault(w => w is not null);
+            case DataType d:
+                {
+                    if (!seen.Add(d.Symbol))
+                    {
+                        return null; // its fields are read where the data type was met first
+                    }
+
+                    foreach (var field in d.Symbol.Fields)
+                    {
+                        if (HeldEquality(SubstituteData(d, field.Type), seen) is { } why)
+                        {
+                            return why with { Why = $"its field `{field.Name}`: {why.Why}" };
+                        }
+                    }
+
+                    foreach (var derived in dataTypes.Values.Where(x => x.Base == d.Symbol))
+                    {
+                        if (HeldEquality(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen) is { } inherited)
+                        {
+                            return inherited with { Why = $"its derived type `{derived.Name}`: {inherited.Why}" };
+                        }
+                    }
+
+                    return null;
+                }
+
+            default:
+                return (false, $"`==` on a `{type}` is not read");
+        }
     }
+
+    /// <summary>
+    /// M9: why <c>==</c> does not take two lists of the type, null where it does: equal counts and equal items in order, each pair by
+    /// <c>==</c>, as Rust's <c>Vec</c> compares (section 4, the owner, 2026-10-30, "By items, as Rust"). Items of a type <c>==</c> does
+    /// not take are <c>type-mismatch</c>; nullable items, which compare by the lifted <c>==</c> of N1, are <c>not supported</c>.
+    /// </summary>
+    private (bool Mismatch, string Why)? ItemEquality(KurzType item)
+    {
+        switch (item)
+        {
+            case ErrorType or EnumType:
+                return null;
+            case PrimitiveType:
+                return null;
+            case ListType l:
+                return ItemEquality(l.Element) is { } inner ? inner with { Why = $"its items: {inner.Why}" } : null;
+            case DataType:
+                return HeldEquality(item, []);
+            case UnionType u when Types.NonNull(u) is not null:
+                return (false, "a nullable item compares by the lifted `==` (N1)");
+            case MapType m:
+                return (true, $"`==` between two `{m}` is `type-mismatch`");
+            case UnionType or FunctionType or CFunctionType or HandleType or VoidType:
+                return (true, $"`==` takes no `{item}`");
+            default:
+                return (false, $"`==` on a `{item}` is not read");
+        }
+    }
+
+    /// <summary>Whether the items of the list, through lists and union cases, are of a <c>double</c> or a <c>float</c>.</summary>
+    private static bool FloatItems(ListType list) => Floating(list.Element);
+
+    private static bool Floating(KurzType type) => type switch
+    {
+        PrimitiveType p => Types.IsFloating(p),
+        ListType l => Floating(l.Element),
+        UnionType u => u.Cases.Any(Floating),
+        _ => false,
+    };
+
+    /// <summary>
+    /// The fork of a list of <c>double</c> items held in a <c>data</c> value or a key: <c>==</c> compares its items as Rust does, NaN
+    /// unequal to NaN (section 4, "By items, as Rust"), while a <c>data</c> value equals itself (D3) and a key finds NaN (section 4, "As C#").
+    /// </summary>
+    private static string FloatItemsFork(ListType list) =>
+        $"whether a `{list}` in a `data` value or a key equals itself where an item is NaN is not decided";
+
+    /// <summary>The fork of a file or a socket held in a <c>data</c> value that <c>==</c> compares or a key holds: <c>==</c> takes no handle.</summary>
+    private static string HeldHandleFork(KurzType handle) => $"whether `==` takes a value that holds a `{handle}` is not decided";
 
     /// <summary>D2, D7, D11: a data value made by the type's name with the base's fields first.</summary>
     private Typed CheckConstruction(DataSymbol data, CallExpression c, KurzType? expected)
     {
+        if (BuiltInEntry(data))
+        {
+            NotSupported(c.Line, "an `Entry` a program makes, where a loop over a map alone makes one (C6)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
         if (!data.HasFields)
         {
             // D8 writes the value as the bare name: `Name()` is text no rule gives a meaning (E4); an argument is D11's error

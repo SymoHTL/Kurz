@@ -238,8 +238,6 @@ public sealed partial class Emitter
                 return ListCount(target());
             case MapType when m.Member == "Count":
                 return fn.Value($"call i32 {StdFunction("MapCount")}(ptr {target()})"); // M9
-            case EntryType entry:
-                return EntryMember(m, entry); // C6
             case ListType list when m.Member == "Pointer":
                 return ListPointer(target(), list.Element);
             case EnumType e when m.Member == "Number":
