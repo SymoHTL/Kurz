@@ -41,7 +41,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   builds the programs that pin what no case can, a refused write and a refused allocation among
   them (`EmitterTests`), and an eighth those of data values and unions, with the width of a tag and
   the copy of a block before a write (`DataTests`); a ninth makes and removes the places of `run`
-  and `exec` under a directory of its own (`PlaceTests`).
+  and `exec` under a directory of its own (`PlaceTests`); a tenth runs the suites' probe, below, on
+  programs it writes (`ProbeTests`).
 
 ## Building and testing
 
@@ -74,6 +75,19 @@ tests of the command's `--version` and `build` and every test that builds a prog
 with the command's own lines, and the gate fails on `kurz --version`. The image the `gates` job runs in has it, and so does a local run of the gates in
 that image (`knowledge/the-gates-job-runs-in-its-image.md`); the workflow `compiler-windows`
 installs it on every run.
+
+The test assembly is also a command, the suites' probe of a program in a file: after a test run,
+from inside `compiler/`,
+
+    dotnet Kurz.Compiler.Tests/bin/Release/net10.0/Kurz.Compiler.Tests.dll <file> [--fenced] [--grant <name>]...
+
+builds the program with the runtime of this machine's target, or with `--fenced` under the
+allocator that makes every block it frees inaccessible (`ListTests.Fenced`, the one definition of
+that edit), runs it as the suites run a program, and prints what it wrote, what it wrote on its
+error stream and `exit <code>`; its own exit code is 0 where the program ran, 1 where the program
+has errors, which it prints, and 2 for an argument it does not read or a file it does not find
+(`knowledge/a-probe-under-the-fence-is-a-command.md`). The test host runs the suites through an
+entry of its own, so the assembly's entry (`Probe.cs`) is the command's alone.
 
 ## The command
 
