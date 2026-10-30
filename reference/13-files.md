@@ -278,7 +278,7 @@ as it is written. An address that holds a NUL byte is `InvalidInput`, as a path 
 takes every interface where its address is a wildcard, `0.0.0.0`, `[::]` or a name that resolves to
 either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
 and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
-its address and holds up to 128 connections that wait. An address without a `:`, a port that is not a
+its address and passes `listen` a backlog of 128. An address without a `:`, a port that is not a
 number from 0 to 65535 and a name that gives no address are `InvalidInput`, and a lookup that fails is
 `NotFound`, each with the number 0, but for the error of the system a lookup names. The error of a
 connection that `Accept` gave names the string its listener's `Bind` was given, `127.0.0.1:0` where
@@ -369,8 +369,8 @@ A call on a file or a socket is a system call that blocks the thread that makes 
 without actors serves one connection at a time.
 
 No case: a case prints what its calls return, and the same output stands for a call that blocks
-and for one that switches; S9's case connects before it accepts, which the system completes without
-the accept.
+and for one that switches; S9's cases `tcp-echo.kz` and `bind-name.kz` connect before they accept, which
+the system completes without the accept.
 
 ### S11 (decided, §12) Not on Windows
 

@@ -106,7 +106,7 @@ flowchart TD
         switch KURZ_TRACE=0, the release build with and without --lines, an executable stripped of its symbols
         or of its line tables, and a stack overflow's error line, cut trace and exit code in a test build and a
         release build with and without --lines, with KURZ_TRACE=0, inside the runtime, and a fault outside the
-        guard page that the system ends, a trace cut where the reader could not map its pages, and on a count
+        guard page that the system ends, a trace cut where the reader could not map its pages with a count other than one line a frame, and on a count
         past the cut that reads the file at every frame, whose
         release run with --lines outlasts the 30 seconds of a run; the build command's lines and refusals; and the refused write and the refused allocation,
         each with its error line; DataTests, red on a tag wider or narrower than the largest type number among the

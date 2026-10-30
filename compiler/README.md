@@ -333,8 +333,8 @@ The Linux file also gives the calls on files and sockets of chapter 13 (section 
 code calls and nothing of `common/` or `std/` does, so that the Windows file gives none of them (S11). Each takes
 a path as the address of its bytes ended by a NUL byte, which `common/`'s `CPath` copies from a string,
 null where the string holds a NUL, and `FreePath` gives back; each returns a number of 0 or more, or a
-failure below 0, the system's error number negated, or -4096 for the name of a directory's entry that
-is not UTF-8. `ErrorKind` gives a failure's `IoKind`, the kind Rust 1.82's `decode_error_kind` gives the
+failure below 0, the system's error number negated, -4096 for the name of a directory's entry that
+is not UTF-8, or -4097 and -4098 for an address (below). `ErrorKind` gives a failure's `IoKind`, the kind Rust 1.82's `decode_error_kind` gives the
 number on Linux, `Other` where Rust's is `Uncategorized`, and `ErrorCode` its number, 0 for -4096 and
 below (S1). `OpenFile` opens close-on-exec, a file it
 creates with the permissions 0666 less the `umask` (S2); `OpenFile` and `ReadFile` call again where a
@@ -349,8 +349,9 @@ its port after its last `:` and its host by `inet_pton` where it is a literal of
 address reads one, and else by `getaddrinfo` as it is written, and try each address until one binds or connects, as Rust's
 `each_addr` does, with the addresses in a page each thread maps at its first use; they fail with -4097,
 `InvalidInput`, for an address that is no host and port or a name that gives no address, and -4098,
-`NotFound`, for a lookup that fails with no error of the system. `Listen` sets `SO_REUSEADDR`, listens
-with room for 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
+`NotFound`, for a lookup that fails with no error of the system, where Rust gives `Uncategorized`, a kind
+the record assumes and lists as open (section 14). `Listen` sets `SO_REUSEADDR`, listens
+with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9).
@@ -682,11 +683,14 @@ stack of 64 KiB with a page below it that faults, takes the page below the lowes
 `pthread_getattr_np` gives for the thread's stack as its guard page, and installs `OnFault` for
 `SIGSEGV` and `SIGBUS` on that stack with `SA_SIGINFO`, `SA_ONSTACK` and `SA_NODEFER`. A thread that
 a library of C starts gets no stack for faults, and its overflow ends as the system ends it. Where the
-stack's limit is `unlimited`, or another mapping lies within the limit and 256 pages below the stack,
-the system stops the stack 256 pages above that mapping, above the guard page, and an overflow ends by
+stack's limit is `unlimited`, or the mapping next below the stack ends within the limit and 256 pages
+more of the stack's top, the system stops the stack 256 pages above the end of that mapping, above the
+guard page, and an overflow ends by
 the system with nothing written, as in Rust (section 2). A fault outside the guard page sets the signal's
 default back and returns, so that the system ends the process, the exit code 139 in a shell for
-`SIGSEGV`; so does a fault in the page below the stack for faults, which reaches no handler. A fault in it while a crash path runs, which `Raise`, `Throw` and the end of a refused
+`SIGSEGV`; so does a fault in the page below the stack for faults, which is no guard page to `OnFault`:
+the system delivers it at the top of that stack again, where `OnFault` runs a second time, over the
+frames of the first, and sets the default back. A fault in the guard page while a crash path runs, which `Raise`, `Throw` and the end of a refused
 allocation mark first through `Crashing`, ends the process with 1 and nothing more written; any other
 writes `error: stack-overflow at <file>:<n>` with the line of the call that did not fit: the frame
 the fault interrupted holds it where the instruction there is a call, and otherwise the frame below

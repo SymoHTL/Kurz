@@ -175,23 +175,33 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     public void A_trace_is_cut_after_a_hundred_frames_where_the_reader_could_not_map_its_pages()
     {
         // the reader maps three pages, the third the table that counts the frames past the cut; where the system refuses them, every
-        // frame is `<unknown>` and each frame past the hundredth counts one line, with no table
-        const string text = "int Deep(int n) {\n    if n == 0 {\n        return 1 / n\n    }\n\n    return Deep(n - 1) + 1\n}\n\nprint(Deep(149))\n";
-        var refused = ListTests.Edited(("runtime/linux/linux.kz", "void* got = mmap(null, 12288, 3, 34, -1, 0)", "void* got = mmap(null, 12288, 3, 0, -1, 0)"));
-        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], refused, testBuild: true);
-        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-        var run = Toolchain.Run(toolchain.Build(compilation.Program, "trace-cut-without-pages"), null);
-        var (error, trace) = Split(run.Error);
-        Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
-        if (!OperatingSystem.IsLinux())
+        // frame is `<unknown>` and each frame past the hundredth counts one line, with no table: fifty calls of Deep more count fifty
+        // lines more, and the frames a walk with no names cannot leave out count too, the raise's two below Deep's and the start's
+        // four above main's, so that the depth 149 has 157 frames and 57 past the hundredth
+        var counts = new List<int>();
+        foreach (var depth in new[] { 149, 199 })
         {
-            Assert.Empty(trace);
-            return;
+            var text = $"int Deep(int n) {{\n    if n == 0 {{\n        return 1 / n\n    }}\n\n    return Deep(n - 1) + 1\n}}\n\nprint(Deep({depth}))\n";
+            var refused = ListTests.Edited(("runtime/linux/linux.kz", "void* got = mmap(null, 12288, 3, 34, -1, 0)", "void* got = mmap(null, 12288, 3, 0, -1, 0)"));
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], refused, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var run = Toolchain.Run(toolchain.Build(compilation.Program, $"trace-cut-without-pages-{depth}"), null);
+            var (error, trace) = Split(run.Error);
+            Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
+            if (!OperatingSystem.IsLinux())
+            {
+                Assert.Empty(trace);
+                return;
+            }
+
+            Assert.Equal(101, trace.Count);
+            Assert.All(trace.Take(100), l => Assert.Matches(Unknown(), l));
+            var cut = Regex.Match(trace[^1], @"^  \.\.\. ([0-9]+) more frames$");
+            Assert.True(cut.Success, trace[^1]);
+            counts.Add(int.Parse(cut.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
         }
 
-        Assert.Equal(101, trace.Count);
-        Assert.All(trace.Take(100), l => Assert.Matches(Unknown(), l));
-        Assert.Matches(Cut(), trace[^1]);
+        Assert.Equal((57, 107), (counts[0], counts[1]));
     }
 
     [Theory]
