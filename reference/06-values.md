@@ -602,9 +602,24 @@ and `xs[a..b]` are a new list of the items from position `a` to `b`, the second 
 items copied (M3); a start below 0 or an end past the count raises `index-out-of-range`, and a range
 whose end lies below its start is `reversed-range` or `reversed-range-at-run-time`, as C8 says of a
 range (§4, the owner, 2026-10-29). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
-an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the
-record's samples use, and `Clear` is the one section 12 gives. The naming of the standard library is open
-beyond the calls on files and sockets (record, sections 12 and 14).
+an assignment into a path (M4); `map[key]` is the value or `null`. A map's key is a value of any type
+`==` compares, a list by its items and a `data` value by its fields, hashed over the same items and
+fields; a map as a key is `type-mismatch`, since `==` takes no map, a key of a nullable type compares as
+`==` compares two nullable values (§4, assumed there), and a `double` or `float` key is open (record,
+section 14). A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10). `Count` is
+the number of a map's entries, an `int`; `ContainsKey(key)` is a `bool`; `Remove(key)`, a `mut` method,
+takes the key's entry out of the map and gives its value, or `null` where there is none, of the type
+`map[key]` has, and copies a map another value holds first (M3); `Clear()`, a `mut` method, removes every
+entry, and a map that shares its block with another value lets go of it (M3). A map's value may be of a
+nullable type: `map[key]` and `Remove(key)` on a `Map<K, V?>` are a `V?`, a missing entry and an entry
+that holds `null` alike. `list[i] = value` writes the item at position `i` of a list reached through a
+`mut` variable or a `mut` parameter, as an assignment into a path (M4): the value first, then the
+position; an `i` below 0 or at `Count` or beyond raises `index-out-of-range` (T14), and a list that
+shares its block with another value is copied first (M3). (§4, the owner, 2026-10-30: the keys, the
+hash, the members, the nullable value and the write of an item.) The names are the ones the record's
+samples use, `Clear` is the one section 12 gives, and a map's members are the ones section 4 gives. The
+naming of the standard library is open beyond the calls on files and sockets and a map's members (record,
+sections 12 and 14).
 
 Case: [values/list.kz](../corpus/values/list.kz)
 ```kurz
@@ -706,12 +721,85 @@ print(xs.Count)
 print(ys.Count)
 ```
 
+Case: [values/map-members.kz](../corpus/values/map-members.kz)
+```kurz
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+ages["Bea"] = 27
+print(ages.Count)
+print(ages.ContainsKey("Ann"))
+print(ages.Remove("Ann") ?? 0)
+print(ages.Remove("Ann") ?? 0)
+print(ages.Count)
+print(ages.ContainsKey("Ann"))
+copy = ages
+ages.Clear()
+print(ages.Count)
+print(copy.Count + 1)
+```
+
+Case: [values/map-keys.kz](../corpus/values/map-keys.kz)
+```kurz
+data Point(int X, int Y)
+
+mut names = Map<Point, string>()
+names[Point(1, 0)] = "east"
+print(names[Point(1, 0)] ?? "none")
+mut sums = Map<List<int>, int>()
+mut key = List<int>()
+key.Add(1)
+key.Add(2)
+sums[key] = 3
+mut same = List<int>()
+same.Add(1)
+same.Add(2)
+print(sums[same] ?? 0)
+print(names[Point(0, 1)] ?? "none")
+```
+
+Case: [values/map-key-map.kz](../corpus/values/map-key-map.kz)
+```kurz
+seen = Map<Map<string, int>, bool>()
+print(seen.Count)
+```
+
+Case: [values/map-nullable-value.kz](../corpus/values/map-nullable-value.kz)
+```kurz
+mut scores = Map<string, int?>()
+scores["Ann"] = null
+scores["Bea"] = 2
+print(scores["Ann"] ?? -1)
+print(scores["Cid"] ?? -1)
+print(scores.ContainsKey("Ann"))
+print(scores.Remove("Bea") ?? 0)
+```
+
+Case: [values/list-write.kz](../corpus/values/list-write.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(4)
+xs.Add(5)
+ys = xs
+xs[1] = 9
+print(xs)
+print(ys)
+```
+
+Case: [values/list-write-out-of-range.kz](../corpus/values/list-write-out-of-range.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+xs[1] = 2
+print(xs)
+```
+
 ### M10 (decided, §4) The order of a map's entries
 
 A map has no order a program may rely on. A `for` loop over it (C6) and its text (A6) yield the
 entries in the order of the map's storage, which can differ between runs and versions, as the
 documentation of C#'s `Dictionary` leaves its order undefined. Two runs of one program can print
-the same map differently.
+the same map differently, and do as a rule, since the hash of a map's keys takes keys drawn from the
+system's randomness, as Rust's `HashMap` takes them (§4, the owner, 2026-10-30).
 
 No case: no order can be expected, so a case can show a map of one entry only, which the case of
 A6 does.

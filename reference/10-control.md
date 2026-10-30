@@ -232,10 +232,14 @@ print(sum)
 
 `for name in collection { }` runs its block once for each item: in order for a list and a range
 (C8), and in the order of the map's storage for a map (M10), where an item is an entry with a
-`Key` and a `Value` *(proposed: the names)*. The loop runs over the collection as it was when the
-loop started: the collection is a value (M1), and a change to the variable inside the block is a
-change to the variable, not to what the loop walks *(proposed reading of M3)*. The record's stream
-sample uses this form.
+`Key` and a `Value`, the entry's key and value (§4, the owner, 2026-10-30). Over a map,
+`for key, value in map { }` names the key and the value together, under any two names (§4, the owner,
+2026-10-30); two names over a list or a range are `type-mismatch` *(proposed: the error; §4 gives the
+form over a map alone)*. An entry is read through `Key` and `Value` alone (§4, assumed there); what it
+is as a value of its own is open (record, section 14). The loop runs over the collection as it was when
+the loop started: the collection is a value (M1), and a change to the variable inside the block is a
+change to the variable, not to what the loop walks *(proposed reading of M3; for a map §4, assumed
+there)*. The record's stream sample uses this form.
 
 Case: [control/for-in.kz](../corpus/control/for-in.kz)
 ```kurz
@@ -243,6 +247,27 @@ mut xs = List<int>()
 xs.Add(4)
 xs.Add(5)
 for x in xs {
+    print(x)
+}
+```
+
+Case: [control/for-in-map.kz](../corpus/control/for-in-map.kz)
+```kurz
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+for e in ages {
+    print("{e.Key} {e.Value}")
+}
+for name, age in ages {
+    print("{name} is {age}")
+}
+```
+
+Case: [control/for-two-names-list.kz](../corpus/control/for-two-names-list.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(4)
+for i, x in xs {
     print(x)
 }
 ```

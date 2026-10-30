@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 4
+// rules: M9
+
+seen = Map<Map<string, int>, bool>()
+print(seen.Count)

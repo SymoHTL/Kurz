@@ -1,0 +1,14 @@
+// expect: output
+// | -1
+// | -1
+// | true
+// | 2
+// rules: M9
+
+mut scores = Map<string, int?>()
+scores["Ann"] = null
+scores["Bea"] = 2
+print(scores["Ann"] ?? -1)
+print(scores["Cid"] ?? -1)
+print(scores.ContainsKey("Ann"))
+print(scores.Remove("Bea") ?? 0)
