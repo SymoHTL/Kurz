@@ -323,10 +323,15 @@ memory, which it takes from the system's `Memory` a mebibyte at a time; an alloc
 `Free` takes a block back with the size it was asked for, as Rust's `GlobalAlloc::dealloc` takes
 the layout a block was allocated with: a block of a size class to the front of its class's free
 blocks, where the next request of the class takes it, and a larger one to the system through the
-target's `Release`; the mebibytes a thread carved from stay its own. A target's directory gives
-`Start`, `Write`, `Exit`, `Memory`, `Release`, `Trace` and `Crashing`: on Linux over the C library,
+target's `Release`; the mebibytes a thread carved from stay its own. `Reallocate` grows a block with
+its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes through the target's
+`Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
+with its bytes copied and the old one freed. A target's directory gives
+`Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
-`Write` calling again where a signal interrupted it (section 6), and `Release` calling `munmap`, on Windows over `kernel32`, `Release` calling `VirtualFree`. The
+`Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap` and `Resize` calling `mremap`,
+which moves the pages to other addresses where the ones after them are taken and copies none, on Windows over
+`kernel32`, `Release` calling `VirtualFree` and `Resize` giving null, as a region `VirtualAlloc` reserved cannot grow. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -564,7 +569,7 @@ the count of its items and the count it has room for, 4 bytes each, and from its
 items, each laid out as its type is (`std/std.kz`). A copy of a list copies the address and raises
 the count. An `Add` writes in place where one value holds the block and it has room, grows the
 block where it has none, as Rust's `Vec` grows, to twice its room, at least 8 items of a byte, 4 of
-up to a kibibyte and 1 of more, and where other values hold the block it copies the items into a
+up to a kibibyte and 1 of more, by `Reallocate`, as Rust's `Vec` grows its buffer by `realloc`, and where other values hold the block it copies the items into a
 block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). The write in place
 is all the helper of an `Add` holds, which the optimiser inlines where the `Add` stands; the growth and
 the copy are a helper of their own, which it never inlines, as Rust's `Vec::push` calls a grow it does
@@ -625,7 +630,10 @@ same lines, and so do the strings' program and twenty rounds of strings through 
 the target's own `Release`, after
 which a write into a freed block of more than 262144 bytes ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
-the same lists all kept do not, and so for strings of 524288 bytes; strings of 1024 bytes made and dropped
+the same lists all kept do not, and so for strings of 524288 bytes; two lists of blocks of 16
+and 32 mebibytes, the second grown from 16, within the same 64 on Linux, where it grows in place, and
+not on Windows, where its old and new block are held at once, and the first one item longer not on
+either; strings of 1024 bytes made and dropped
 for 3000 rounds within the sixteen pieces, and five of them kept each round not; the count
 `string.Allocate` asks past its limit, lowered in the runtime's text, and the bytes of a string's
 block the system refuses; the number of `allocation-failed` past the limit, with the limit

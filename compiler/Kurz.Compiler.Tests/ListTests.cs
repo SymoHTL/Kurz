@@ -598,7 +598,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// The runtime of this machine's target whose system refuses a request that would take what it gave and was not given back past
-    /// 64 mebibytes; its own `Memory` and `Release` run behind the count.
+    /// 64 mebibytes; its own `Memory`, `Release` and `Resize` run behind the count, a `Resize` counted by what it adds.
     /// </summary>
     private static CheckedRuntime Bytes() => Edited(
         (TargetFile, "pub byte* Memory(long bytes) {", """
@@ -630,6 +630,30 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             void Released(byte* p, long bytes) {
+            """),
+        (TargetFile, "pub byte* Resize(byte* p, long bytes, long grown) {", """
+            pub byte* Resize(byte* p, long bytes, long grown) {
+                mut long total = 0
+                raw {
+                    live = live + grown - bytes
+                    total = live
+                }
+
+                mut byte* q = null
+                if total <= 67108864 {
+                    q = Resized(p, bytes, grown)
+                }
+
+                if q == null {
+                    raw {
+                        live = live - grown + bytes
+                    }
+                }
+
+                return q
+            }
+
+            byte* Resized(byte* p, long bytes, long grown) {
             """));
 
     /// <summary>
@@ -721,6 +745,31 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var strings = BuildAndRun(fill + "mut all = List<string>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    all.Add(Fill(19))\n}\nprint(all.Count)\n", Bytes(), "string-large-held");
         Assert.Equal(1, strings.Code); // the positive control: the same strings, all of them held
         Assert.StartsWith("error: allocation-failed (", strings.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_block_of_more_than_262144_bytes_grows_by_the_targets_Resize()
+    {
+        // two lists of `long`s within 64 mebibytes, the first of 2^21 items in a block of 16 mebibytes; the second grows from 16
+        // mebibytes to 32. Grown in place, as Linux's `mremap` grows it, the two take 48 mebibytes; copied into a new block, as on
+        // Windows, the old and the new block of the second are held at once beside the first, 64 mebibytes and 48 bytes before the
+        // pieces the small blocks are carved from
+        const string fill = "mut a = List<long>()\nfor i in 0..<2097152 {\n    a.Add(long(i))\n}\nmut b = List<long>()\nfor i in 0..<2097153 {\n    b.Add(long(i))\n}\nmut long total = 0\nfor i in 0..<b.Count {\n    total = total + b[i]\n}\nprint(a.Count)\nprint(b.Count)\nprint(total)\n";
+        var run = BuildAndRun(fill, Bytes(), "list-grown-in-place");
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Equal(1, run.Code);
+            Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
+        }
+        else
+        {
+            Ran(run, 0, ["2097152", "2097153", "2199024304128"], "");
+        }
+
+        // the positive control: the first list one item longer, in a block of 32 mebibytes, beside the second's 32, outgrows them
+        var over = BuildAndRun(fill.Replace("0..<2097152 {", "0..<2097153 {", StringComparison.Ordinal), Bytes(), "list-grown-over");
+        Assert.Equal(1, over.Code);
+        Assert.StartsWith("error: allocation-failed (", over.Error, StringComparison.Ordinal);
     }
 
     [Theory]

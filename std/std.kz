@@ -134,6 +134,40 @@ pub void Free(byte* p, long size) {
     }
 }
 
+// A block the allocation entry gave for `size` bytes, grown to `grown` bytes with the bytes it holds, as
+// Rust's `GlobalAlloc::realloc`: a block of more than 262144 bytes, which the system gave, by the
+// target's `Resize`, which can grow it without a copy, as the C library's `realloc` grows a block it
+// mapped; else, and where `Resize` gives null, a new block with the bytes copied and the old one freed.
+// Null where the system refuses, the block then left as it was.
+pub byte* Reallocate(byte* p, long size, long grown) {
+    if size > 262144 {
+        mut byte* moved = null
+        raw {
+            moved = sys.Resize(p, (size + 15) / 16 * 16, (grown + 15) / 16 * 16)
+        }
+
+        if moved != null {
+            return moved
+        }
+    }
+
+    byte* q = Allocate(grown)
+    if q == null {
+        return null
+    }
+
+    raw {
+        mut long i = 0
+        while i < size {
+            q[i] = p[i]
+            i = i + 1
+        }
+    }
+
+    Free(p, size)
+    return q
+}
+
 // The block of a list (M9, R15). A list value is the address of its block, null for a list without
 // items, which takes no block, as Rust's `Vec::new` allocates nothing. A block holds the count of the
 // list values that hold it, 8 bytes, the count of its items and the count it has room for, 4 bytes
@@ -284,8 +318,9 @@ byte* Moved(byte* block, long count, long room, long item, mut long asked) {
 }
 
 // For an `Add` to a list no other value holds: a block with room for one more item, the block itself
-// where it has room, else a grown block with its items, the old block freed; a first block for a list
-// without one. Null, with `asked` set, as `Moved` gives it.
+// where it has room, else the block grown by `Reallocate`, as Rust's `Vec` grows its buffer by
+// `realloc`; a first block for a list without one, as `Moved` gives it. Null, with `asked` set, as
+// `Moved` gives it.
 pub byte* ListGrow(byte* block, long item, mut long asked) {
     mut long count = 0
     mut long room = 0
@@ -300,9 +335,19 @@ pub byte* ListGrow(byte* block, long item, mut long asked) {
         return block
     }
 
-    byte* p = Moved(block, count, room, item, mut asked)
-    if p != null && block != null {
-        Free(block, 16 + room * item)
+    if block == null || count == 2147483647 {
+        return Moved(block, count, room, item, mut asked)
+    }
+
+    long grown = Grown(room, item)
+    long bytes = 16 + grown * item
+    byte* p = Reallocate(block, 16 + room * item, bytes)
+    raw {
+        if p == null {
+            asked = bytes
+        } else {
+            *Ptr<int>(p + 12) = int(grown)
+        }
     }
 
     return p
