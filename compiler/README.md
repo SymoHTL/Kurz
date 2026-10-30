@@ -380,7 +380,8 @@ address reads one, and else by `getaddrinfo` as it is written, and try each addr
 `each_addr` does, with the addresses in a page each thread maps at its first use; they fail with -4097,
 `InvalidInput`, for an address that is no host and port or a name that gives no address, and -4098,
 `NotFound`, the kind the record gives it (section 12), for a lookup that fails with no
-error of the system, where Rust gives `Uncategorized`. `Listen` sets `SO_REUSEADDR`, listens
+error of the system, where Rust gives `Uncategorized`, and -4099, `Other`, for one that fails with `EAI_AGAIN` or
+`EAI_FAIL` (section 12, "Split NotFound / Other"). `Listen` sets `SO_REUSEADDR`, listens
 with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
@@ -1397,7 +1398,11 @@ round can ask about it by the rule's id.
   typed it, so that a variable known not null counts as such a value, is known not null where the
   test holds; beside another nullable value it is not, as C#'s analysis reads both.
 - N1 with C9 and O8: an arm may name `null`, which covers the case `null` (section 4, the owner,
-  2026-10-30, "Allow, as C#").
+  2026-10-30, "Allow, as C#"). Over a subject whose type has no `null`, a `string` or a union without
+  `null`, the arm builds with no diagnostic, covers nothing and is emitted as a test that never takes
+  the value, and a second one is `unreachable-arm` (section 4, a second answer "Allow, as C#");
+  over a subject of a type parameter it is `type-mismatch`, as `null` where a `T` is required is
+  (N6), which section 14 holds open.
 - R7 with E1: every `raw` block in a package without the grant is `raw-not-allowed`, one inside
   another among them, since each is a block the grant would allow; its body is checked as one with
   the grant is, so a read through a pointer there raises nothing more.

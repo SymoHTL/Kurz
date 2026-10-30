@@ -41,7 +41,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: 2024 State of Rust Survey Results (https://blog.rust-lang.org/2025/02/13/2024-State-Of-Rust-Survey-results/): "We have seen mentions of struggles with async programming (an all-time favourite), debuggability of errors (which people generally love, but they are not perfect for everyone) or Rust tooling being slow or resource intensive (rust-analyzer and rustfmt)."; the async vision document's status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Mixing sync and async code is tricky and it's not always obvious how to do it".
 - Since: Announcing Rust 1.75.0 (https://blog.rust-lang.org/2023/12/28/Rust-1.75.0/): "Rust 1.75 supports use of async fn and -> impl Trait in traits."; the 2025 results name "the very popular let chains and async closures features, which were stabilized last year".
-- Kurz: AVOIDED. Section 6: "There is no `async`/`await`. Every call looks synchronous; the runtime parks the actor while it waits." The colour does not vanish, it moves into the compiler: a function that can wait becomes a state machine (section 6, assumed), and a function that takes the C calling convention may not wait: "a wait for a reply inside it, or inside a function it calls that can wait, which section 6 makes a state machine, is a compile error" (section 2, decided).
+- Kurz: REPEATED in part: no `async` is written. Section 6: "There is no `async`/`await`. Every call looks synchronous; the runtime parks the actor while it waits." The colour does not vanish, it moves into the compiler: a function that can wait becomes a state machine (section 6, assumed), and a function that takes the C calling convention may not wait: "a wait for a reply inside it, or inside a function it calls that can wait, which section 6 makes a state machine, is a compile error" (section 2, decided).
 
 ## 5. Debugging support is weak
 
@@ -81,7 +81,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Rust project goals, "Experiment with relaxing the Orphan Rule" (https://github.com/rust-lang/rust-project-goals/blob/main/src/2024h2/Relaxing-the-Orphan-Rule.md): "it prevents providing a third-party library that integrates two other libraries with each other, and instead requires convincing the author of one of the two libraries to add (optional) support for the other, or requires using a newtype wrapper."; the async status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Some of the problems are due to the design of Rust itself. The coherence rules in particular."
 - Since: The goal's page gives its status as "Not accepted".
-- Kurz: answered: "Any package + check", section 4 of the record. Before the answers: REPEATED.
+- Kurz: answered: "Any package + check" and "Rust's impl block", section 4 of the record: any package declares the glue with an `impl` block, and the build refuses two declarations of one pair. Before the answers: REPEATED.
 
 ## 12. `Pin` and self-referential structs
 
@@ -132,7 +132,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: 2089-implied-bounds, the Rust RFC Book (https://rust-lang.github.io/rfcs/2089-implied-bounds.html): "The ToOwned bound has then to be carried everywhere".
 - Since: The RFC was accepted; its tracking issue (https://github.com/rust-lang/rust/issues/44491) is open on 2026-10-30.
-- Kurz: AVOIDED. A type parameter takes interface limits alone: "A type parameter is limited to the types that implement an interface by naming the interface after a colon" (T19).
+- Kurz: REPEATED: a type parameter takes interface limits as Rust takes trait bounds: "A type parameter is limited to the types that implement an interface by naming the interface after a colon" (T19, section 4), and a generic function sends a value of a type parameter only where the parameter carries a limit inferred for every type, as Rust's `Send` ("Inferred limit, as Send", section 6), so such limits reach the signatures of the callers as Rust's bounds do.
 
 ## 22. What unsafe code may do is not fully written down
 
