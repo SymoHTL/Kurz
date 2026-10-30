@@ -1030,7 +1030,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             if k == 3 {
                 continue
             }
-            if k == 100 {
+            if seen == 5 {
                 break
             }
             seen = seen + 1
@@ -1095,6 +1095,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(lists[List<int>()] ?? 0)
         k1.Add(9)
         print(lists[k1] ?? 0)
+        print(lists[k2[0..<2]] ?? 0)
         mut tags = Map<Tag, int>()
         tags[Tag(null, k1)] = 1
         tags[Tag("n", k1)] = 2
@@ -1293,7 +1294,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "0",
         "45090", // a loop with two names
         "135", // a loop with one
-        "9", // a `continue`
+        "5", // a `continue`, and a `break` after five entries, whatever the order of the slots
         "10", // a loop that removes and writes the map it walks
         "10",
         "true",
@@ -1309,7 +1310,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "0",
         "12", // a part of a list
         "5", // a list without items
-        "0", // the map's key is a value of its own (M3)
+        "0", // the map's key is a value of its own (M3): `k1` changed, and no entry is found under its items
+        "12", // and the entry is still found under the items the key had
         "1", // a `data` key with a nullable field and a list
         "2",
         "0",
@@ -2080,7 +2082,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_first_map_on_a_system_that_gives_no_randomness_ends_the_program_with_random_failed()
     {
         // M9 (the owner, 2026-10-30, "End with an error, as Rust"): the target's `Random` reports that it filled no bytes, as a
-        // Linux whose `getrandom` and `/dev/urandom` both fail or a failing `BCryptGenRandom` would, and the first map ends the program before its block
+        // Linux whose `getrandom` and `/dev/urandom` both fail or a Windows without `ProcessPrng` would, and the first map ends the program before its block
         var refused = Edited((TargetFile, "pub bool Random(byte* bytes, long count) {", """
             pub bool Random(byte* bytes, long count) {
                 return false
@@ -2099,7 +2101,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         if (!OperatingSystem.IsLinux())
         {
-            return; // Windows' `Random` calls `BCryptGenRandom` alone, with no file to fall back to
+            return; // Windows' `Random` calls `ProcessPrng` alone, with no file to fall back to
         }
 
         // M9 (the owner, 2026-10-30, "Rust's full path"): each `getrandom` of the runtime is a system call of a number the kernel does

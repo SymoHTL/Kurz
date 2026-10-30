@@ -2,7 +2,7 @@
 // | Entry { Key = Ann, Value = 31 }
 // | Entry { Key = Ann, Value = 32 }
 // | true
-// rules: C6
+// rules: C6, D5, D3
 
 a = Entry("Ann", 31)
 print(a)

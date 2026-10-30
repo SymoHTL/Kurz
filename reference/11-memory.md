@@ -910,6 +910,32 @@ value must be non-null in Rust, so that a declaration where C may give `null` ta
 
 Case: [memory/c-function-type.kz](../corpus/memory/c-function-type.kz)
 
+Case: [memory/c-function-type-nullable.kz](../corpus/memory/c-function-type-nullable.kz)
+```kurz
+// the nullable form of a C function type holds `null` where C may give none (R17), a map's value is
+// read as one (M9), and a call through it is read where a test knows it not null, as any nullable
+// value is (N3)
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+(extern "C" (long) => long)? none = null
+print(none == null)
+(extern "C" (long) => long)? f = Twice
+mut table = Map<string, extern "C" (long) => long>()
+table["twice"] = Twice
+g = table["twice"]
+raw {
+    if f != null {
+        print(f(4))
+    }
+
+    if g != null {
+        print(g(5))
+    }
+}
+```
+
 Case: [memory/c-function-type-outside-raw.kz](../corpus/memory/c-function-type-outside-raw.kz)
 ```kurz
 extern "C" long Twice(long x) {

@@ -8,6 +8,8 @@
     <RootNamespace>Kurz.Compiler.Tests</RootNamespace>
     <!-- test names read as sentences, with underscores for spaces; a helper's return type is for reading, not speed -->
     <NoWarn>$(NoWarn);CA1707;CA1859</NoWarn>
+    <!-- the assembly's entry for `dotnet` is the session's probe (Probe.cs); the test host runs the suite through its own -->
+    <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
 
   <ItemGroup>
