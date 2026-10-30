@@ -928,7 +928,7 @@ print(m.Count)
 
 Case: [values/map-union-value.kz](../corpus/values/map-union-value.kz)
 ```kurz
-// a map's value of a union is read as the union's nullable form: the value where the key has an entry, `null` where it has none (M9)
+// a map's value of a union is read as the union's nullable form (M9, N1): the value where the key has an entry, `null` where it has none
 mut m = Map<string, int | string>()
 m["a"] = 1
 match m["a"] {
@@ -941,6 +941,19 @@ match m["b"] {
     int n => print(n)
     string s => print(s)
 }
+```
+
+Case: [values/map-function-value.kz](../corpus/values/map-function-value.kz)
+```kurz
+// a map's value of a function type is read as that type's nullable form (M9, N1): the function where the key has an entry, `null`
+// where it has none
+mut ops = Map<string, (int) => int>()
+ops["double"] = x => x * 2
+f = ops["double"]
+if f != null {
+    print(f(5))
+}
+print(ops["none"] == null)
 ```
 
 Case: [values/map-union-key.kz](../corpus/values/map-union-key.kz)

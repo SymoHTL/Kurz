@@ -892,8 +892,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // `ContainsKey`, `Remove` of an entry whose value a variable holds and of one a copy holds, a `Remove` whose result nothing holds,
     // removals and writes over many rounds, whose slots are taken again, `Clear` of a block the map alone holds and of one a copy
     // holds, loops with one name and two, a `break` and a `continue`, a write, a `Remove` and a `Clear` inside a loop over the same map,
-    // the names read after them, and keys of enums, `data` values, lists, a type that holds itself and a time; the texts print one entry,
-    // since the order of several differs between runs (M10)
+    // the names read after them, keys of enums, `data` values, lists, a type that holds itself and a time, and values of a union and
+    // function values; the texts print one entry, since the order of several differs between runs (M10)
     private const string MapMembers = """
         data P(int X, string Name)
         data Tag(string? Note, List<int> Ids)
@@ -1266,6 +1266,32 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(ValueAt(names, "x") ?? "none")
         print(Twice(Made(8)))
         print(Twice(List<int>()))
+
+        // values of a union and function values, read and removed, each kept past a write over its key and a `Clear` (N1; section 4,
+        // the owner, 2026-10-30, "Nullable form, as Option")
+        mut mixed = Map<string, int | string>()
+        mixed["n"] = 5
+        mixed["s"] = Made(6)
+        taken = mixed["s"]
+        mixed["s"] = Made(7)
+        gone = mixed.Remove("s")
+        mixed.Clear()
+        print(taken ?? 0)
+        print(gone ?? 0)
+        suffix = Made(8)
+        mut ops = Map<string, (int) => string>()
+        ops["tag"] = x => "{x} {suffix}"
+        f = ops["tag"]
+        ops["tag"] = x => "{x}"
+        g = ops.Remove("tag")
+        ops.Clear()
+        if f != null {
+            print(f(1))
+        }
+        if g != null {
+            print(g(2))
+        }
+        print(ops.Count)
         """;
 
     private static readonly string[] MapMembersPrint =
@@ -1382,6 +1408,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "made 9",
         "1",
         "1",
+        "made 6", // values of a union and function values, read and removed
+        "made 7",
+        "1 made 8",
+        "2",
+        "0",
     ];
 
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from

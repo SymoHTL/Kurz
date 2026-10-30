@@ -82,6 +82,91 @@ void Show(string s) {
 Show("ab")
 ```
 
+Case: [null/nullable-union.kz](../corpus/null/nullable-union.kz)
+```kurz
+// `(int | string)?` is `int | string | null` (N1): a `match` takes its `null` in an arm, and a test leaves the union, whose `match`
+// needs no `null` arm (N3)
+(int | string)? Find(int id) {
+    if id == 1 {
+        return 7
+    }
+    if id == 2 {
+        return "text"
+    }
+    return null
+}
+
+void Show(int id) {
+    match Find(id) {
+        null => print("none")
+        int n => print(n)
+        string s => print(s)
+    }
+}
+
+Show(1)
+Show(2)
+Show(3)
+x = Find(1)
+if x != null {
+    match x {
+        int n => print(n + 1)
+        string s => print(s)
+    }
+}
+print(Find(3) == null)
+print(Find(2) == null)
+```
+
+Case: [null/nullable-function.kz](../corpus/null/nullable-function.kz)
+```kurz
+// `((int) => int)?` holds a function value or `null` (N1): a call after a test (N3), and `??` with a lambda for its `null` (N4)
+((int) => int)? Pick(bool twice) {
+    if twice {
+        return x => x * 2
+    }
+    return null
+}
+
+f = Pick(true)
+if f != null {
+    print(f(4))
+}
+print(Pick(false) == null)
+g = Pick(false) ?? (x => x + 1)
+print(g(4))
+```
+
+Case: [values/map-union-value.kz](../corpus/values/map-union-value.kz)
+```kurz
+// a map's value of a union is read as the union's nullable form (M9, N1): the value where the key has an entry, `null` where it has none
+mut m = Map<string, int | string>()
+m["a"] = 1
+match m["a"] {
+    null => print("none")
+    int n => print(n)
+    string s => print(s)
+}
+match m["b"] {
+    null => print("none")
+    int n => print(n)
+    string s => print(s)
+}
+```
+
+Case: [values/map-function-value.kz](../corpus/values/map-function-value.kz)
+```kurz
+// a map's value of a function type is read as that type's nullable form (M9, N1): the function where the key has an entry, `null`
+// where it has none
+mut ops = Map<string, (int) => int>()
+ops["double"] = x => x * 2
+f = ops["double"]
+if f != null {
+    print(f(5))
+}
+print(ops["none"] == null)
+```
+
 ### N2 (decided, §4) No use without a check
 
 Using a value of type `T?` where a `T` is needed, or reaching a member through it, without a
@@ -101,6 +186,20 @@ string? Email(int id) {
 
 email = Email(1)
 print(email.Bytes.Count)
+```
+
+Case: [null/nullable-function-unchecked.kz](../corpus/null/nullable-function-unchecked.kz)
+```kurz
+// a call of a nullable function value without a check uses it where a function value is needed (N2)
+((int) => int)? Pick(bool twice) {
+    if twice {
+        return x => x * 2
+    }
+    return null
+}
+
+f = Pick(true)
+print(f(4))
 ```
 
 ### N3 (decided, §4) What a check is
@@ -366,6 +465,10 @@ raw {
 }
 ```
 
+Case: [null/nullable-union.kz](../corpus/null/nullable-union.kz)
+
+Case: [null/nullable-function.kz](../corpus/null/nullable-function.kz)
+
 ### N4 (decided, §4) `??`
 
 `a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#. `??` on a value whose type is
@@ -384,6 +487,8 @@ Case: [null/coalesce-not-nullable.kz](../corpus/null/coalesce-not-nullable.kz)
 n = 5
 print(n ?? 0)
 ```
+
+Case: [null/nullable-function.kz](../corpus/null/nullable-function.kz)
 
 ### N5 (decided, §4) `?.`
 
