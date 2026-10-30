@@ -1157,5 +1157,6 @@
   {"tool": "tools/lint_knowledge.py", "anchor": "        if not found:", "replacement": "        if False:", "expect": "research: an entry with no finding"},
   {"tool": "tools/lint_knowledge.py", "anchor": "    if not sections:", "replacement": "    if False:", "expect": "research: findings and no record to look their sections up in"},
   {"tool": "tools/lint_knowledge.py", "anchor": "NUMBER = r\"\\d+(?!\\d|-|\\.\\d)\"", "replacement": "NUMBER = r\"\\d+(?!\\d|-)\"", "expect": "research: a decimal of Goose's spec is no section of the record"},
-  {"tool": "tools/lint_knowledge.py", "anchor": "NUMBER = r\"\\d+(?!\\d|-|\\.\\d)\"", "replacement": "NUMBER = r\"\\d+(?!\\d|\\.\\d)\"", "expect": "research: a date after a section is no section of the record"}
+  {"tool": "tools/lint_knowledge.py", "anchor": "NUMBER = r\"\\d+(?!\\d|-|\\.\\d)\"", "replacement": "NUMBER = r\"\\d+(?!\\d|\\.\\d)\"", "expect": "research: a date after a section is no section of the record"},
+  {"tool": "tools/compiler_gate.py", "anchor": "        sys.stdout.reconfigure(encoding=\"utf-8\", errors=\"backslashreplace\")", "replacement": "        pass", "expect": "a red run's output that quotes a character outside the log's code page is printed"}
 ]

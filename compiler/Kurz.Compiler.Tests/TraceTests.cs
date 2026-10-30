@@ -321,6 +321,25 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     }
 
     [Fact]
+    public void A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes()
+    {
+        // design record, section 2: the guarantee keeps room on the main thread's stack for the system's dispatch of its overflow
+        // exception, 0x5000 bytes set at the start (the owner, 2026-10-30, "0x5000 at start, as Rust"); a query with 0 changes nothing
+        // and gives the guarantee in force. Linux keeps no guarantee: its handler runs on the stack for signals (section 6)
+        const string text = "extern \"C\" in \"kernel32\" {\n    int SetThreadStackGuarantee(uint* size)\n}\n\nmut uint size = 0\nraw {\n    SetThreadStackGuarantee(&size)\n}\n\nprint(size)\n";
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), ["raw", "native"], toolchain.Runtime, true, false);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // `kernel32` is a library of Windows alone
+        }
+
+        var run = Toolchain.Run(toolchain.Build(compilation.Program, "guarantee"), null);
+        Assert.Equal((0, ""), (run.Code, run.Error));
+        Assert.Equal(["20480"], run.Output);
+    }
+
+    [Fact]
     public void A_fault_outside_the_guard_page_ends_the_process_as_the_system_ends_it()
     {
         if (!OperatingSystem.IsLinux())

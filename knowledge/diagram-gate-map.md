@@ -91,7 +91,7 @@ flowchart TD
         dotnet missing or out of time; kurz --version, which it prints, exited with another code than 0 (the command
         refused the clang it found or found none, did not start or ran out of time), or exited with 0 and wrote no line
         that names a clang release in the command's one-line form. Read: the output of dotnet test, one summary per
-        test project, summed;
+        test project, summed, and printed on a red run into a log that takes every character;
         the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
         Inside the suite: the walk of every corpus case the checker reads clean, red on a node a code generator reads
         that the checker's record (SemanticModel) holds no entry for, or on fewer than 160 cases or 2,900 entries

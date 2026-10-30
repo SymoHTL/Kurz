@@ -25,7 +25,9 @@ test command ran out of time; `kurz --version` exited with another code than 0, 
 does where it refused the clang it found or found none, did not start or ran out of time, or exited
 with 0 and wrote no line that names a clang release in the command's form. The summary line is the one the test runner prints,
 `Passed! - Failed: 0, Passed: N, Skipped: 0, Total: N`, one per test project, and the counts are
-summed over them."""
+summed over them. The output of a red run is printed into a log that takes every character
+(knowledge/a-windows-log-takes-the-consoles-code-page.md)."""
+import io
 import os
 import re
 import subprocess
@@ -133,7 +135,15 @@ def judge(code, output, floor=FLOOR):
     return errors, (failed, passed, skipped, total)
 
 
+def readable_log():
+    # a log redirected to a file takes the console's code page on Windows, and xunit marks a difference with an arrow
+    # that cp1252 lacks: the print of a red run's output ended the gate before it named the failing test
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def main():
+    readable_log()
     errors = config_errors(kit.ROOT)
     if errors:
         for e in errors:
@@ -232,6 +242,18 @@ def self_test():
         cases.append(("a version run out of time is refused", False, "no exception"))
     except kit.Unanswered as e:
         cases.append(("a version run out of time is refused", "within 1 s" in str(e), str(e)))
+    saved = sys.stdout
+    sys.stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")  # a redirected stdout on Windows
+    try:
+        readable_log()
+        print("Assert.Equal() Failure: Collections differ\n           ↓ (pos 0)")
+        sys.stdout.flush()
+        said = sys.stdout.buffer.getvalue().decode("utf-8")
+    except UnicodeError as e:
+        said = f"the print raised {e}"
+    finally:
+        sys.stdout = saved
+    cases.append(("a red run's output that quotes a character outside the log's code page is printed", "↓ (pos 0)" in said, said))
     with kit.scratch("compiler-gate-") as root:
         cases.append(("a missing package config is red", any("missing" in e for e in config_errors(root)), config_errors(root)))
         os.makedirs(os.path.join(root, "compiler"))
