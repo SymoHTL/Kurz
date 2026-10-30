@@ -351,6 +351,16 @@ public sealed class CommandTests : IDisposable
         // S13; the owner, 2026-10-30, "After `--`, as cargo": a further `--`, a flag of the command and a word with a space are the program's
         var source = Path.Combine(root, "words.kz");
         File.WriteAllText(source, "print(args)\nprint(Environment.Args().Count)\n");
+        if (OperatingSystem.IsWindows())
+        {
+            // S11: the runtime of Windows gives no argument, and the build says so; the words reach the start of the program as
+            // `The_program_takes_the_commands_input_output_and_error_the_words_given_and_the_callers_directory` holds
+            var (code, output, error) = KurzWithPlaces("run", source, "--", "a");
+            Assert.Equal((1, ""), (code, output));
+            Assert.StartsWith($"{source}:1: not supported: ", error, StringComparison.Ordinal);
+            return;
+        }
+
         Assert.Equal((0, "[a, --, --release, b c]\n5\n", ""), KurzWithPlaces("run", source, "--", "a", "--", "--release", "b c"));
         Assert.Equal((0, "[]\n1\n", ""), KurzWithPlaces("run", "--release", source, "--"));
         Assert.Equal((0, "[]\n1\n", ""), KurzWithPlaces("run", source)); // the positive control of the split: no `--`, no word
