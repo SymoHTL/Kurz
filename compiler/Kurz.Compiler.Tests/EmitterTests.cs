@@ -204,6 +204,20 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_push_of_a_list_widens_its_count_without_a_sign()
+    {
+        // std's ListPush reads the count as a `uint`, so that the item's offset is no sign extension and a loop of `Add`s reads the count
+        // the `Add` before stored by a plain load
+        var program = Compile("mut b = Bytes()\nb.Add(1)\nprint(b.Count)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        var start = program.Ir.IndexOf("define internal ptr @\"std.ListPush.", StringComparison.Ordinal);
+        Assert.True(start >= 0, "no ListPush in the IR");
+        var body = program.Ir[start..program.Ir.IndexOf("\n}\n", start, StringComparison.Ordinal)];
+        Assert.Contains("zext i32 %", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("sext i32 %", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_construct_of_the_runtime_the_emitter_does_not_lay_out_is_the_compilers_defect_and_names_its_file()
     {
         var target = Builder.HostTarget!.Value;
