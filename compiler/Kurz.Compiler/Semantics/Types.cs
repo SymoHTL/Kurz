@@ -214,6 +214,8 @@ public static class Types
     public static readonly VoidType Void = new();
     public static readonly ErrorType Error = new();
     public static readonly HandleType File = new(Handle.File);
+    public static readonly HandleType TcpListener = new(Handle.TcpListener);
+    public static readonly HandleType TcpStream = new(Handle.TcpStream);
 
     /// <summary>The built-in types by the names L19 reserves.</summary>
     public static readonly IReadOnlyDictionary<string, PrimitiveType> ByName = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal)

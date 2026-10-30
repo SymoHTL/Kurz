@@ -195,7 +195,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A field of a data value (D1), a string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself,
-    /// a string's <c>Bytes</c> as a list (T15), and a list's <c>Count</c> (M9) and <c>Pointer</c> (R15); every other member is not emitted.
+    /// a string's <c>Bytes</c> as a list (T15), a list's <c>Count</c> (M9) and <c>Pointer</c> (R15), and a listener's <c>Port</c> (S9);
+    /// every other member is not emitted.
     /// </summary>
     private string EmitMember(MemberAccess m)
     {
@@ -223,6 +224,8 @@ public sealed partial class Emitter
                 return ListPointer(EmitExpression(m.Target), list.Element);
             case EnumType e when m.Member == "Number":
                 return EnumNumber(EmitExpression(m.Target), e); // D18
+            case HandleType when m.Member == "Port":
+                return fn.Value($"load i32, ptr {HandleField(EmitExpression(m.Target), 12)}"); // S9
 
             default:
                 throw Unsupported(m.Line, $"the member `{m.Member}` of {Lower.Refusal(targetType)}");

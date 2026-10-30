@@ -827,13 +827,12 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            if (n.Name != "File")
+            return n.Name switch
             {
-                NotSupported(n.Line, "a socket (S9)");
-                return Types.Error;
-            }
-
-            return Types.File;
+                "File" => Types.File,
+                "TcpListener" => Types.TcpListener,
+                _ => Types.TcpStream,
+            };
         }
 
         var parameter = TypeParameter(n.Name);

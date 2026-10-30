@@ -7,14 +7,17 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The decisions on files that no corpus case pins (chapter 13; design record, section 12): a file closes when the last value that
+/// The decisions on files and sockets that no corpus case pins (chapter 13; design record, section 12): a file closes when the last value that
 /// holds it lets go of it, which a process allowed few descriptors shows over many opens, and so do the calls that open a file or a
 /// directory for themselves (S5, S6, S8); a copy of a file holds the one file (S5); a read into a list another value holds copies the
 /// list first, and a count and a <c>max</c> past the largest <c>int</c> raise <c>allocation-failed</c> before the read (S3); a whole
 /// file a list holds is read whole, and one byte more raises <c>allocation-failed</c> (S6); a read of a file opened to write and a write
 /// of one opened to read are the system's error 9, a file and a directory take 0666 and 0777 less the <c>umask</c>, and a descriptor is
 /// opened close-on-exec (S2, S8); a directory that exists is created again without an error, and one under a file is not (S8); the text
-/// of an error without a path (S1); and a build for Windows says <c>not supported</c> at a call on a file (S11). Each program runs under
+/// of an error without a path (S1); a socket is opened close-on-exec, a listener reuses its address, an address is read at its last
+/// colon, a literal of IPv6 binds where the machine has its loopback, and a connection <c>Accept</c> gave names its listener's address
+/// (S9), while the error of the system a lookup names is held by no test, since nothing makes <c>getaddrinfo</c> fail so on demand; and a
+/// build for Windows says <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
 /// the runtime of this machine and under the fenced allocator of <see cref="ListTests.Fenced"/>, where no other runtime is named; on
 /// Windows each is held to the build's refusal instead.
 /// </summary>
@@ -345,6 +348,155 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void The_text_of_an_error_without_a_path_is_the_words_of_its_kind()
     {
         Ran("match File.Open(\"\") {\n    File => print(\"opened\")\n    IoError e => print(e)\n}\n", "file-empty-path", ["not found"]);
+    }
+
+    // ---- sockets (S9) ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_socket_is_opened_close_on_exec()
+    {
+        // the flags of the listener, the connected stream and the accepted one, the first three descriptors the program opens
+        const string flags = """
+            void | IoError Flags() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+                server = listener.Accept()
+                mut n = 3
+                while n <= 5 {
+                    info = File.ReadAll("/proc/self/fdinfo/{n}")
+                    print(string.FromUtf8(info) else {
+                        InvalidUtf8 => "not UTF-8"
+                    })
+                    n = n + 1
+                }
+
+                client.Close()
+                server.Close()
+            }
+
+            Flags() else {
+                IoError e => print(e)
+            }
+
+            """;
+        Assert.Equal([true, true, true], CloseOnExec(toolchain.Runtime, "socket-cloexec"));
+
+        // the positive control: the runtime's socket and accept without `SOCK_CLOEXEC`
+        var without = ListTests.Edited(("runtime/linux/linux.kz", "int fd = socket(family, 524289, 0)", "int fd = socket(family, 1, 0)"), ("runtime/linux/linux.kz", "accept4(fd, null, null, 524288)", "accept4(fd, null, null, 0)"));
+        Assert.Equal([false, false, false], CloseOnExec(without, "socket-cloexec-without"));
+
+        List<bool> CloseOnExec(CheckedRuntime runtime, string name)
+        {
+            if (Builder.HostTarget == Target.Windows)
+            {
+                RefusedOnWindows(Compile(flags, toolchain.Runtime));
+                return runtime == toolchain.Runtime ? [true, true, true] : [false, false, false];
+            }
+
+            var compilation = Compile(flags, runtime);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var run = Toolchain.Run(toolchain.Build(compilation.Program, name));
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            return run.Output.Where(l => l.StartsWith("flags:", StringComparison.Ordinal)).Select(l => (Convert.ToInt64(l["flags:".Length..].Trim(), 8) & 0x80000) != 0).ToList();
+        }
+    }
+
+    private const string Rebind = """
+        void | IoError Rebind() {
+            listener = TcpListener.Bind("127.0.0.1:0")
+            port = listener.Port
+            client = TcpStream.Connect("127.0.0.1:{port}")
+            server = listener.Accept()
+            server.Close()
+            client.Close()
+            listener.Close()
+            again = TcpListener.Bind("127.0.0.1:{port}")
+            print(again.Port == port)
+        }
+
+        Rebind() else {
+            IoError e => print(e.Kind)
+        }
+
+        """;
+
+    [Fact]
+    public void A_listener_binds_a_port_whose_closed_connection_waits_since_it_reuses_its_address()
+    {
+        // the side that closes first keeps the connection's port waiting (`TIME_WAIT`), which `SO_REUSEADDR` binds again (S9)
+        Ran(Rebind, "socket-rebind", ["true"]);
+
+        // the positive control: the option set to 0
+        var without = ListTests.Edited(("runtime/linux/linux.kz", "*Ptr<int>(held + 36) = 1", "*Ptr<int>(held + 36) = 0"));
+        Ran(Rebind, "socket-rebind-without", ["AddressInUse"], runtimes: [without]);
+    }
+
+    [Fact]
+    public void An_address_is_a_host_and_a_port_after_its_last_colon_and_a_lookup_that_fails_is_not_found()
+    {
+        // a port as Rust reads a `u16`, `+` and zeros in front taken; a host that is no literal looked up, `127.1` by the C library's
+        // reading of a number, the empty one failing with `EAI_NONAME`, which names no error of the system (S9)
+        const string text = """
+            void Try(string address) {
+                match TcpListener.Bind(address) {
+                    TcpListener => print("bound")
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
+            }
+
+            Try("127.0.0.1:+0")
+            Try("127.0.0.1:00000")
+            Try("127.1:0")
+            Try("127.0.0.1:")
+            Try("127.0.0.1:-1")
+            Try("127.0.0.1:0x10")
+            Try("[::1]:x")
+            Try(":0")
+
+            """;
+        Ran(text, "socket-addresses", ["bound", "bound", "bound", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "NotFound 0"]);
+    }
+
+    [Fact]
+    public void A_literal_of_ipv6_binds_where_the_machine_has_its_loopback()
+    {
+        // `[::1]` is read by `inet_pton` into an address of IPv6 (S9); a machine without the address of IPv6's loopback gives the system's error
+        var loopback = File.Exists("/proc/net/if_inet6") && File.ReadAllText("/proc/net/if_inet6").Contains("00000000000000000000000000000001", StringComparison.Ordinal);
+        const string text = "match TcpListener.Bind(\"[::1]:0\") {\n    TcpListener l => print(l.Port > 0)\n    IoError e => print(e.Kind)\n}\n";
+        if (loopback || Builder.HostTarget == Target.Windows)
+        {
+            Ran(text, "socket-ipv6", ["true"]);
+        }
+        else
+        {
+            Ran(text, "socket-ipv6", ["AddressNotAvailable"]);
+        }
+    }
+
+    [Fact]
+    public void A_connection_that_accept_gave_names_its_listener_s_address_in_its_errors()
+    {
+        const string text = """
+            void | IoError Named() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+                server = listener.Accept()
+                server.Close()
+                mut buffer = Bytes()
+                match server.Read(mut buffer, 1) {
+                    int => print("read")
+                    IoError e => print(e)
+                }
+
+                client.Close()
+            }
+
+            Named() else {
+                IoError e => print(e)
+            }
+
+            """;
+        Ran(text, "socket-accepted-path", ["other (os error 9): 127.0.0.1:0"]);
     }
 
     [Fact]
