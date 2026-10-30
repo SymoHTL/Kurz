@@ -110,6 +110,7 @@ public sealed partial class Checker
                         // reaches, with no diagnostic, as C# compiles `case null` on a `string`; a second one is `unreachable-arm`, as on a `T?`
                         if (Unwrap(vp.Value) is NullLiteral && !cases.Any(c => c is NullType or PointerType or TypeParameterType))
                         {
+                            RecordThrough(vp.Value, new Typed(Types.Null, new NullConstant()));
                             if (nullNamed)
                             {
                                 Report(ErrorIds.UnreachableArm, arm.Line, "an earlier arm names the same literal (C4)");
