@@ -88,8 +88,8 @@ public sealed record Argument(int Line, string? Name, bool Mut, Expression Value
 /// <summary>A call, a construction (D2) or a conversion (T10); type arguments where the call writes them (T19).</summary>
 public sealed record CallExpression(int Line, Expression Callee, IReadOnlyList<TypeSyntax> TypeArguments, IReadOnlyList<Argument> Arguments) : Expression(Line);
 
-/// <summary><c>list[i]</c> or <c>map[key]</c> (M9); the line is the bracket's.</summary>
-public sealed record IndexExpression(int Line, Expression Target, Expression Index) : Expression(Line);
+/// <summary><c>list[i]</c> or <c>map[key]</c> (M9), and <c>list?[i]</c> (N5); the line is the bracket's.</summary>
+public sealed record IndexExpression(int Line, Expression Target, Expression Index, bool Conditional = false) : Expression(Line);
 
 /// <summary><c>-x</c> and <c>!x</c> (T18), <c>~x</c> (T22), and of a raw pointer the read <c>*p</c> and the address <c>&amp;x</c> (R10).</summary>
 public sealed record UnaryExpression(int Line, TokenKind Operator, Expression Operand) : Expression(Line);

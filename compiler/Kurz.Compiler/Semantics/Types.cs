@@ -252,11 +252,8 @@ public static class Types
     /// <summary>N1: the type a nullable type makes nullable, the case of <c>T | null</c> beside <c>null</c>; null for any other type.</summary>
     public static KurzType? NonNull(KurzType type) => type is UnionType { Cases: [var inner, NullType] } ? inner : null;
 
-    /// <summary>N1: <c>T?</c>, the union <c>T | null</c>.</summary>
-    public static UnionType Nullable(KurzType inner) => new([inner, Null]);
-
-    /// <summary>N1: <c>T?</c> of a <c>T</c> that may be nullable itself, which is then <c>T</c> (section 4, the owner, 2026-10-30, "Flatten, as C#").</summary>
-    public static UnionType Flattened(KurzType inner) => inner is UnionType u && NonNull(u) is not null ? u : Nullable(inner);
+    /// <summary>N1: <c>T?</c>, the union <c>T | null</c>; of a type that is nullable already, that type (section 4, "Flatten, as C#").</summary>
+    public static UnionType Nullable(KurzType inner) => NonNull(inner) is not null ? (UnionType)inner : new([inner, Null]);
 
     public static bool IsInteger(KurzType type) => type is PrimitiveType { Kind: <= Primitive.ULong };
 

@@ -448,8 +448,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// D12, D20: an enum and its values, each name once: a name an earlier value has is <c>redeclared</c>, as Rust refuses a name given
-    /// twice (E0428), and so are the names of the members <c>Number</c> and <c>From</c> that D18 gives every enum, a rule of Kurz's own,
-    /// since Rust compiles a value of either name (section 4). The numbers are read
+    /// twice (E0428). A value may take the name of a member D18 gives every enum, <c>Number</c> or <c>From</c>, as Rust compiles a value
+    /// of either name, and the place of the name tells them apart (section 4, the owner, 2026-10-30, "Allow, as Rust", "By position"):
+    /// <c>Plan.From(n)</c> is the conversion (<see cref="CheckEnumFrom"/>), <c>Plan.From</c> and <c>Plan.Number</c> are values
+    /// (<see cref="EnumValue"/>) and <c>p.Number</c> is the member. The numbers are read
     /// once every function is declared (<see cref="CheckEnumNumbers"/>).
     /// </summary>
     private void DeclareEnum(TypeDeclaration d)
@@ -460,11 +462,6 @@ public sealed partial class Checker
             if (symbol.Values.Contains(value.Name))
             {
                 Report(ErrorIds.Redeclared, value.Line, $"`{d.Name}` has a value `{value.Name}` already (D20, V9)");
-                symbol.Refused = true;
-            }
-            else if (value.Name is "Number" or "From")
-            {
-                Report(ErrorIds.Redeclared, value.Line, $"`{value.Name}` is the name of a member D18 gives every enum, which no value of one takes (D18, D20)");
                 symbol.Refused = true;
             }
             else
@@ -1778,6 +1775,13 @@ public sealed partial class Checker
 
             members.Insert(0, m);
             root = Unwrap(m.Target);
+        }
+
+        if (root is IndexExpression { Conditional: true })
+        {
+            NotSupported(root.Line, "an assignment through `?[` (N5)");
+            CheckLoosely(a.Target, a.Value);
+            return;
         }
 
         if (root is UnaryExpression { Operator: TokenKind.Star } or IndexExpression)

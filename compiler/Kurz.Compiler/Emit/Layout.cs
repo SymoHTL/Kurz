@@ -15,7 +15,8 @@ namespace Kurz.Compiler.Emit;
 /// holds, is a pointer to a block that starts with the number of the value's own type, then its fields, the base's first (D7), so
 /// that the block of a derived value reads as a block of its base (D6). A union is its tag, as wide as the largest number among its
 /// cases needs, a byte while those numbers are below 256 (section 5), then room for its largest case, aligned as its most aligned
-/// case.
+/// case; a <c>T?</c> of a list or of a block is the address alone, with an address no value of <c>T</c> has as its <c>null</c>
+/// (<see cref="Niche"/>).
 /// </summary>
 internal sealed class Layout(IrModule module)
 {
@@ -158,12 +159,26 @@ internal sealed class Layout(IrModule module)
         }
     }
 
-    /// <summary>The IR type of a value: <see cref="Lower.IrType"/>, a data type's structure or <c>ptr</c> for a block, and a union's structure of its tag and its room.</summary>
+    /// <summary>
+    /// The <c>null</c> of a <c>T?</c> whose <c>T</c> is held through an address, an address no value of <c>T</c> has, as Rust lays out
+    /// <c>Option&lt;Box&lt;T&gt;&gt;</c> and <c>Option&lt;Vec&lt;T&gt;&gt;</c> (section 4, the owner, 2026-10-30, "Rust's niche"): a block's is the
+    /// address 0, and a list's the address 1, since a list without items is the address 0. Null for every other union, which keeps its tag.
+    /// </summary>
+    public string? Niche(UnionType union) => Types.NonNull(union) switch
+    {
+        ListType => "inttoptr (i64 1 to ptr)",
+        DataType d when IsBlock(d) => "null",
+        _ => null,
+    };
+
+    /// <summary>The IR type of a value: <see cref="Lower.IrType"/>, a data type's structure or <c>ptr</c> for a block, and a union's structure of its tag and its room, or <c>ptr</c> where it has a <see cref="Niche"/>.</summary>
     public string Ir(KurzType type)
     {
         switch (type)
         {
             case DataType d when IsBlock(d):
+                return "ptr";
+            case UnionType u when Niche(u) is not null:
                 return "ptr";
             case DataType d:
                 {
@@ -215,6 +230,8 @@ internal sealed class Layout(IrModule module)
             case VoidType:
                 return (0, 1);
             case DataType d when IsBlock(d):
+                return (8, 8);
+            case UnionType u when Niche(u) is not null:
                 return (8, 8);
             case DataType d:
                 return Structure(Fields(d).Select(Measure));

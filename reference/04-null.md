@@ -20,7 +20,10 @@ print(Email(2) ?? "none")
 ### N2 (decided, §4) No use without a check
 
 Using a value of type `T?` where a `T` is needed, or reaching a member through it, without a
-check is the compile error `nullable-unchecked`.
+check is the compile error `nullable-unchecked`. The error writes a second line below it, indented
+by two spaces, ``help: check it with `!= null`, or give a value for null with `??` `` (§4, the
+owner, 2026-10-30); the record marks the two spaces as *(assumed)*. A case pins an error's id and
+line (E2), so the second line has no case here.
 
 Case: [null/unchecked.kz](../corpus/null/unchecked.kz)
 ```kurz
@@ -50,6 +53,8 @@ the code after `if name != null { } else { return }`, narrows here too. A variab
   the `if`;
 - in the body of `while name != null { }`;
 - on the right of `name != null && ...` and of `name == null || ...`;
+- in the block of `if name == value { }` where the type of `value` is not nullable, and in the
+  `else` block of `if name != value { }` (N10);
 - after an assignment of a value whose type is not nullable (N7).
 
 `!` turns a test around, and a test of `a?.b != null` shows that `a` is not null either. A block
@@ -251,16 +256,42 @@ email = "b@example.com"
 print(email.Bytes.Count)
 ```
 
+Case: [null/equality-narrows.kz](../corpus/null/equality-narrows.kz)
+```kurz
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+email = Email(1)
+if email == "a@example.com" {
+    print(email.Bytes.Count)
+}
+```
+
 ### N4 (decided, §4) `??`
 
-`a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#.
+`a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#. `??` on a value whose type is
+not nullable is `type-mismatch`, as Rust has no `unwrap_or` on an `i32` (§4, the owner,
+2026-10-30).
 
 Case: [null/coalesce.kz](../corpus/null/coalesce.kz)
 
+Case: [null/coalesce-not-nullable.kz](../corpus/null/coalesce-not-nullable.kz)
+```kurz
+n = 5
+print(n ?? 0)
+```
+
 ### N5 (decided, §4) `?.`
 
-`a?.Member` is null when `a` is null and the member otherwise, as in C#. The rest of the chain is
-skipped with it.
+`a?.Member` is null when `a` is null and the member otherwise, as in C#. `a?[i]` is null when
+the list `a` is null, without running the index, and its item at `i` otherwise, as C#'s `?[]`
+(§4, the owner, 2026-10-30). The rest of the chain is skipped with either. `?.` on a value whose
+type is not nullable is `type-mismatch` (§4, the owner, 2026-10-30), and so is `?[` *(the record
+marks this as assumed: the answer on `?[` did not name it)*.
 
 Case: [null/conditional-access.kz](../corpus/null/conditional-access.kz)
 ```kurz
@@ -273,6 +304,31 @@ string? Email(int id) {
 
 print(Email(1)?.Bytes.Count ?? 0)
 print(Email(2)?.Bytes.Count ?? 0)
+```
+
+Case: [null/conditional-index.kz](../corpus/null/conditional-index.kz)
+```kurz
+List<int>? Scores(bool some) {
+    if some {
+        mut xs = List<int>()
+        xs.Add(1)
+        xs.Add(2)
+        return xs
+    }
+    return null
+}
+
+print(Scores(true)?[1] ?? -1)
+print(Scores(false)?[1] ?? -1)
+print(Scores(false)?[5] ?? -1)
+```
+
+Case: [null/conditional-access-not-nullable.kz](../corpus/null/conditional-access-not-nullable.kz)
+```kurz
+data User(string Name)
+
+u = User("Ann")
+print(u?.Name)
 ```
 
 ### N6 (assumed, §4) `null` needs a nullable type
@@ -439,4 +495,70 @@ class Account(mut string? Email)
 mut acc = Account(null)
 acc.Email = "x"
 print(acc.Email.Bytes.Count)
+```
+
+### N10 (decided, §4) `==` and `!=` with a nullable value
+
+`==` and `!=` with a nullable value on either side are lifted, as C#'s are: `null` equals `null`
+alone, two values compare as their types do (D3, T18), and `a == 1` is `false` for an `a` that is
+null. `<`, `<=`, `>` and `>=` with a nullable value stay `nullable-unchecked` (N2). A test
+`a == b` with a `b` whose type is not nullable shows that `a` is not null where it is true, and
+`a != b` where it is false, as C#'s analysis reads them (N3).
+
+Case: [null/lifted-equality.kz](../corpus/null/lifted-equality.kz)
+```kurz
+int? Find(string text, string part) {
+    if text == part {
+        return 0
+    }
+    return null
+}
+
+a = Find("b", "b")
+b = Find("b", "c")
+print(a == 0)
+print(b == 0)
+print(b == null)
+print(a == b)
+print(b != 0)
+print(b == Find("x", "y"))
+```
+
+Case: [null/order-not-lifted.kz](../corpus/null/order-not-lifted.kz)
+```kurz
+int? Find(string text, string part) {
+    if text == part {
+        return 0
+    }
+    return null
+}
+
+a = Find("b", "b")
+print(a < 1)
+```
+
+Case: [null/equality-narrows.kz](../corpus/null/equality-narrows.kz)
+
+### N11 (decided, §4) A nullable type parameter
+
+`T?` of a type parameter `T` is the type that fills the parameter where that type is nullable
+already, since `T??` is `T?`, as in C#: a missing value and a value that is `null` read alike.
+
+Case: [null/nullable-type-parameter.kz](../corpus/null/nullable-type-parameter.kz)
+```kurz
+T? First<T>(List<T> xs) {
+    if xs.Count == 0 {
+        return null
+    }
+    return xs[0]
+}
+
+mut some = List<int?>()
+some.Add(7)
+none = List<int?>()
+mut nulls = List<int?>()
+nulls.Add(null)
+print(First(some))
+print(First(none))
+print(First(nulls))
 ```

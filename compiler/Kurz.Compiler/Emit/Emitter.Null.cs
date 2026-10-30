@@ -5,7 +5,8 @@ using UnionType = Kurz.Compiler.Semantics.UnionType;
 namespace Kurz.Compiler.Emit;
 
 /// <summary>
-/// Chapter 4: a <c>T?</c> is the union <c>T | null</c>, laid out as every union is, its <c>null</c> a case of no size (N1); a read the
+/// Chapter 4: a <c>T?</c> is the union <c>T | null</c>, laid out as every union is, its <c>null</c> a case of no size, or of a list or a
+/// block the address alone, its <c>null</c> an address no value has (<see cref="Layout.Niche"/>) (N1); a read the
 /// checker found known not null is the value of the case <c>T</c> (N3); <c>x == null</c> tests the case (N3), <c>a ?? b</c> runs
 /// <c>b</c> only where <c>a</c> is null (N4), and a chain of <c>?.</c> reads each member only where the value before it is not null (N5).
 /// </summary>
@@ -15,12 +16,12 @@ public sealed partial class Emitter
     private string Narrowed(string value, KurzType stored, KurzType type) =>
         !Types.Same(stored, type) && stored is UnionType union && Types.NonNull(union) is { } inner ? Payload(value, union, inner) : value;
 
-    /// <summary>N3: the place of a variable as the type the checker read at <paramref name="n"/>: where the variable is nullable and the read is not, the room of its case.</summary>
+    /// <summary>N3: the place of a variable as the type the checker read at <paramref name="n"/>: where the variable is nullable and the read is not, the room of its case, which is the place itself where the union has a niche.</summary>
     private string NarrowedPlace(NameExpression n)
     {
         var place = Place(Model.VariableOf(n), n.Line);
         var stored = Sub(Model.VariableOf(n).Type);
-        return !Types.Same(stored, TypeOf(n)) && stored is UnionType union && Types.NonNull(union) is not null
+        return !Types.Same(stored, TypeOf(n)) && stored is UnionType union && Types.NonNull(union) is not null && layout.Niche(union) is null
             ? fn.Value($"getelementptr {Ir(union)}, ptr {place}, i32 0, i32 1")
             : place;
     }
@@ -95,6 +96,35 @@ public sealed partial class Emitter
             var value = MemberOf(m, () => payload, inner, member);
             var owned = Counted(member) && !Take(value) ? Retained(value, member) : value;
             fn.Emit($"store {Ir(result)} {Convert(owned, member, result, m.Line)}, ptr {slot}");
+        });
+        fn.Branch(done);
+        fn.Block(done);
+        return fn.Value($"load {Ir(result)}, ptr {slot}");
+    }
+
+    /// <summary>
+    /// N5: <c>xs?[i]</c>, a value of its own that the caller makes a temporary of: <c>null</c> where the list is null, which stops the
+    /// rest of the chain, and otherwise its item at the index, counted once more, made a value of the chain's nullable type; the index
+    /// runs only where the list is not null, as C#'s <c>?[]</c> runs it.
+    /// </summary>
+    private string EmitConditionalIndex(IndexExpression i, UnionType result)
+    {
+        var targetType = (UnionType)TypeOf(i.Target);
+        var list = (ListType)Types.NonNull(targetType)!;
+        var target = EmitExpression(i.Target);
+        var slot = fn.Alloca(Ir(result), "chain");
+        var read = fn.Label("read");
+        var stop = fn.Label("stop");
+        var done = fn.Label("chained");
+        fn.CondBranch(IsCase(Tag(target, targetType), targetType, Types.Null), stop, read);
+        fn.Block(stop);
+        fn.Emit($"store {Ir(result)} {MakeUnion(result, Types.Null, "zeroinitializer")}, ptr {slot}");
+        fn.Branch(done);
+        fn.Block(read);
+        InRegion(() =>
+        {
+            var item = Retained(ListItem(Payload(target, targetType, list), i, list), list.Element);
+            fn.Emit($"store {Ir(result)} {Convert(item, list.Element, result, i.Line)}, ptr {slot}");
         });
         fn.Branch(done);
         fn.Block(done);

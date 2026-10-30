@@ -52,6 +52,8 @@ public sealed partial class Emitter
                 return HeldCopy(m, EmitMember(m, type), type);
             case CallExpression c:
                 return Temp(EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it"), type);
+            case IndexExpression { Conditional: true } i:
+                return Temp(EmitConditionalIndex(i, (UnionType)type), type);
             case IndexExpression i when TypeOf(i.Target) is PointerType p:
                 return fn.Value($"load {Ir(type)}, ptr {ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index)}");
             case IndexExpression i when TypeOf(i.Target) is ListType list:
@@ -497,31 +499,65 @@ public sealed partial class Emitter
 
     private string EmitComparison(BinaryExpression b, KurzType leftType, KurzType rightType)
     {
-        var op = b.Operator;
         var left = EmitExpression(b.Left);
         var right = EmitExpression(b.Right);
+        return Types.NonNull(leftType) is not null || Types.NonNull(rightType) is not null
+            ? LiftedEquality(b, left, leftType, right, rightType)
+            : Compare(b.Operator, left, leftType, right, rightType, b.Line);
+    }
+
+    /// <summary>
+    /// <c>==</c> and <c>!=</c> with a nullable value on a side, lifted as C#'s (section 4, the owner, 2026-10-30, "Lift == and !="):
+    /// <c>null</c> equals <c>null</c> alone, and two values compare as their types do.
+    /// </summary>
+    private string LiftedEquality(BinaryExpression b, string left, KurzType leftType, string right, KurzType rightType)
+    {
+        string IsNull(string value, KurzType type) => type is UnionType union && Types.NonNull(union) is not null ? IsCase(Tag(value, union), union, Types.Null) : "false";
+        var leftNull = IsNull(left, leftType);
+        var rightNull = IsNull(right, rightType);
+        var slot = fn.Alloca("i1", "equal");
+        var nulls = fn.Label("null");
+        var values = fn.Label("values");
+        var done = fn.Label("compared");
+        fn.CondBranch(fn.Value($"or i1 {leftNull}, {rightNull}"), nulls, values);
+        fn.Block(nulls);
+        fn.Emit($"store i1 {fn.Value($"and i1 {leftNull}, {rightNull}")}, ptr {slot}");
+        fn.Branch(done);
+        fn.Block(values);
+        var l = Types.NonNull(leftType) is { } li ? (Payload(left, (UnionType)leftType, li), li) : (left, leftType);
+        var r = Types.NonNull(rightType) is { } ri ? (Payload(right, (UnionType)rightType, ri), ri) : (right, rightType);
+        fn.Emit($"store i1 {Compare(TokenKind.EqualEqual, l.Item1, l.Item2, r.Item1, r.Item2, b.Line)}, ptr {slot}");
+        fn.Branch(done);
+        fn.Block(done);
+        var equal = fn.Value($"load i1, ptr {slot}");
+        return b.Operator == TokenKind.EqualEqual ? equal : fn.Value($"xor i1 {equal}, true");
+    }
+
+    /// <summary>T18, D3: two values that are not nullable, compared as their types are.</summary>
+    private string Compare(TokenKind op, string left, KurzType leftType, string right, KurzType rightType, int line)
+    {
         if (Types.IsFloating(leftType) || Types.IsFloating(rightType))
         {
             // T18, T23: both sides as the wider floating-point type, an integer side widened into it; NaN is equal to nothing and
             // unequal to everything, itself among them, and 0 equals -0, as in C#
             var common = leftType is PrimitiveType { Kind: Primitive.Double } || rightType is PrimitiveType { Kind: Primitive.Double } ? Types.Double : Types.Float;
-            var l = Convert(left, leftType, common, b.Line);
-            var r = Convert(right, rightType, common, b.Line);
+            var l = Convert(left, leftType, common, line);
+            var r = Convert(right, rightType, common, line);
             return fn.Value($"fcmp {FloatingCondition(op)} {Ir(common)} {l}, {r}");
         }
 
         if (Types.IsDecimal(leftType) || Types.IsDecimal(rightType))
         {
             // T18, T23: by their values, an integer side widened into a `decimal`
-            var order = DecimalOrder(Convert(left, leftType, Types.Decimal, b.Line), Convert(right, rightType, Types.Decimal, b.Line));
+            var order = DecimalOrder(Convert(left, leftType, Types.Decimal, line), Convert(right, rightType, Types.Decimal, line));
             return fn.Value($"icmp {Condition(op, signed: true)} i32 {order}, 0");
         }
 
         if (Types.IsInteger(leftType) && Types.IsInteger(rightType))
         {
-            var common = Types.CommonInteger((PrimitiveType)leftType, (PrimitiveType)rightType) ?? throw Unsupported(b.Line, $"a comparison of a `{leftType}` and a `{rightType}`");
-            var l = Convert(left, leftType, common, b.Line);
-            var r = Convert(right, rightType, common, b.Line);
+            var common = Types.CommonInteger((PrimitiveType)leftType, (PrimitiveType)rightType) ?? throw Unsupported(line, $"a comparison of a `{leftType}` and a `{rightType}`");
+            var l = Convert(left, leftType, common, line);
+            var r = Convert(right, rightType, common, line);
             return fn.Value($"icmp {Condition(op, Types.IsSigned(common))} {Ir(common)} {l}, {r}");
         }
 
@@ -547,12 +583,12 @@ public sealed partial class Emitter
 
         if (op is not (TokenKind.EqualEqual or TokenKind.NotEqual))
         {
-            throw Unsupported(b.Line, $"`{op}` on a `{leftType}`");
+            throw Unsupported(line, $"`{op}` on a `{leftType}`");
         }
 
         // the two sides as the type the other stands in: a derived value beside its base compares as the base, and is never equal to one (D15)
         var shared = Types.Assignable(leftType, rightType) ? rightType : leftType;
-        var equal = Equal(Convert(left, leftType, shared, b.Line), Convert(right, rightType, shared, b.Line), shared, b.Line, ieee: shared is ListType); // M9: two lists by IEEE's `==`
+        var equal = Equal(Convert(left, leftType, shared, line), Convert(right, rightType, shared, line), shared, line, ieee: shared is ListType); // M9: two lists by IEEE's `==`
         return op == TokenKind.EqualEqual ? equal : fn.Value($"xor i1 {equal}, true");
     }
 

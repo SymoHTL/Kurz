@@ -684,13 +684,12 @@ public sealed partial class Checker
     /// M9: the type of a map the checker reads. A key is a value of a type that compares by content (section 4, the owner, 2026-10-30,
     /// "Any type with =="): a string, a number, a <c>char</c>, a <c>bool</c>, a time, an enum, a <c>data</c> value of such fields, a
     /// field of a union of them among them (D3), and a list of such items; a <c>double</c> or a <c>float</c>, alone or in a field,
-    /// compares as C#'s <c>double.Equals</c> does in a <c>Dictionary</c> (section 4, the owner, 2026-10-30, "As C#"). A map, a function
-    /// value and a file or a socket take no <c>==</c>, and nor does a <c>data</c> value that holds a map or a function value, so they are
-    /// no key (<c>type-mismatch</c>, T18; section 4, the owner, 2026-10-30, "type-mismatch"); the rest are <c>not supported</c>: a
-    /// nullable key, which compares by the lifted <c>==</c> of N1, a list of <c>double</c> or <c>float</c> items and a <c>data</c> value
-    /// that holds a file or a socket, each a fork no answer took, and a <c>decimal</c>, a pointer and a type parameter. A value is any type
-    /// whose nullable type the checker reads (N1), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30,
-    /// "Flatten, as C#").
+    /// compares as C#'s <c>double.Equals</c> does in a <c>Dictionary</c> (section 4, the owner, 2026-10-30, "As C#"), and so do the
+    /// items of a list of them in a key (section 4, the owner, 2026-10-30, "Equals inside data/keys"). A map, a function value, a file and
+    /// a socket take no <c>==</c>, and nor does a <c>data</c> value that holds one of them, so they are no key (<c>type-mismatch</c>, T18;
+    /// section 4, the owner, 2026-10-30, "type-mismatch"); the rest are <c>not supported</c>: a nullable key, which compares by the
+    /// lifted <c>==</c> of N10, a <c>decimal</c>, a pointer and a type parameter. A value is any type whose nullable type the checker
+    /// reads (N1, N11), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30, "Flatten, as C#").
     /// </summary>
     private KurzType MapOf(KurzType key, KurzType value, int line)
     {
@@ -732,7 +731,7 @@ public sealed partial class Checker
             case FunctionType or HandleType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
             case UnionType u when Types.NonNull(u) is not null:
-                return (false, "a nullable key compares by the lifted `==` (N1)");
+                return (false, "a nullable key compares by the lifted `==` (N10)");
             case ListType l:
                 return KeyOf(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case DataType d:
@@ -835,7 +834,7 @@ public sealed partial class Checker
     /// <summary>
     /// M9: why <c>==</c> does not take two lists of the type, null where it does: equal counts and equal items in order, each pair by
     /// <c>==</c>, as Rust's <c>Vec</c> compares (section 4, the owner, 2026-10-30, "By items, as Rust"). Items of a type <c>==</c> does
-    /// not take are <c>type-mismatch</c>; nullable items, which compare by the lifted <c>==</c> of N1, are <c>not supported</c>.
+    /// not take are <c>type-mismatch</c>; nullable items, which compare by the lifted <c>==</c> of N10, are <c>not supported</c>.
     /// </summary>
     private (bool Mismatch, string Why)? ItemEquality(KurzType item)
     {
@@ -850,7 +849,7 @@ public sealed partial class Checker
             case DataType:
                 return HeldEquality(item, []);
             case UnionType u when Types.NonNull(u) is not null:
-                return (false, "a nullable item compares by the lifted `==` (N1)");
+                return (false, "a nullable item compares by the lifted `==` (N10)");
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case UnionType or FunctionType or CFunctionType or HandleType or VoidType:
@@ -1085,7 +1084,7 @@ public sealed partial class Checker
         var (kind, slots, result) = m.Member switch
         {
             "ContainsKey" => (CallKind.MapContainsKey, (List<Slot>)[new Slot("key", map.Key, false, false, false)], (KurzType)Types.Bool),
-            "Remove" => (CallKind.MapRemove, [new Slot("key", map.Key, false, false, false)], Types.Flattened(map.Value)),
+            "Remove" => (CallKind.MapRemove, [new Slot("key", map.Key, false, false, false)], Types.Nullable(map.Value)),
             _ => (CallKind.MapClear, [], Types.Void),
         };
         var candidate = new Candidate { Slots = slots, Result = result };
@@ -1130,6 +1129,11 @@ public sealed partial class Checker
             return; // reported where the receiver was read
         }
 
+        if (ThroughNullable(variable, members, "a `mut` method on a path through a nullable field (N3, M5)"))
+        {
+            return;
+        }
+
         if (!IsFieldPath(variable.Type, members, out var notField))
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{notField}` is no field of a data value: only a path of data fields from a `mut` variable reaches a value that changes (M5, M4)");
@@ -1151,6 +1155,39 @@ public sealed partial class Checker
         }
 
         variable.Changed = true;
+    }
+
+    /// <summary>
+    /// N3: whether a path of fields from <paramref name="variable"/> runs through a nullable variable or field; one the checker knows
+    /// not null is reported as <paramref name="construct"/>, which the emitter does not change through, as an assignment into such a
+    /// path (M4), and another was reported where the path was read (N2).
+    /// </summary>
+    private bool ThroughNullable(VariableSymbol variable, List<MemberAccess> members, string construct)
+    {
+        var current = variable.Type;
+        var through = new NullPath(variable, string.Empty);
+        foreach (var m in members)
+        {
+            if (Types.NonNull(current) is not null)
+            {
+                if (frame.Known.Contains(through))
+                {
+                    NotSupported(m.Line, construct);
+                }
+
+                return true;
+            }
+
+            if (current is not DataType d || d.Symbol.Field(m.Member) is not { } field)
+            {
+                return false;
+            }
+
+            through = through with { Fields = through.Fields.Length == 0 ? m.Member : through.Fields + "." + m.Member };
+            current = SubstituteData(d, field.Type);
+        }
+
+        return false;
     }
 
     /// <summary>M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not tell passes.</summary>
@@ -1838,6 +1875,11 @@ public sealed partial class Checker
 
         var (variable, captured) = Lookup(name.Name);
         if (variable is null || Types.IsError(variable.Type))
+        {
+            return;
+        }
+
+        if (ThroughNullable(variable, members, "a path through a nullable field passed as `mut` (N3, M7)"))
         {
             return;
         }

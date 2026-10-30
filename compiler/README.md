@@ -351,8 +351,8 @@ its port after its last `:` and its host by `inet_pton` where it is a literal of
 address reads one, and else by `getaddrinfo` as it is written, and try each address until one binds or connects, as Rust's
 `each_addr` does, with the addresses in a page each thread maps at its first use; they fail with -4097,
 `InvalidInput`, for an address that is no host and port or a name that gives no address, and -4098,
-`NotFound`, for a lookup that fails with no error of the system, where Rust gives `Uncategorized`, a kind
-the record assumes and lists as open (section 14). `Listen` sets `SO_REUSEADDR`, listens
+`NotFound`, the kind the record gives it (section 12), for a lookup that fails with no
+error of the system, where Rust gives `Uncategorized`. `Listen` sets `SO_REUSEADDR`, listens
 with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
@@ -441,7 +441,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   negative, as Rust stores the value of an enum without fields (section 4, an assumption there); `==`
   and `!=` compare the values, `<`, `<=`, `>` and `>=` their numbers, `.Number` widens the value to
   an `int`, `Plan.From(n)` picks the value by a switch on the numbers or makes the case `Invalid`, a
-  data type every file sees, and the text of a value is a literal of its name (A4);
+  data type every file sees, and the text of a value is a literal of its name (A4); a value named
+  `From` or `Number` is the value where no call follows `Plan.From` and where `Number` follows the
+  type's name (D20);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
@@ -480,12 +482,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `else` (C4, C9, O8), postfix `else` after a call (O5), and `throw` of a data value and the bare
   `throw` of an arm of `else`, which throws the case that reached it (O7);
 - nullable types (N1): `T?` is the union `T | null`, laid out as every union is, its `null` a case
-  of no size, `{}` in the IR, whose value is `zeroinitializer` and whose text is `null` (A4); a read
-  of a variable or a field the checker found known not null is the value of the case `T`, and `&x`,
-  `Add` and `Clear` on such a variable reach the place of that value in the variable's room (N3,
-  R10); `x == null` and `x != null` compare the tag (N3); `a ?? b` runs `b` only where `a` is null,
-  and a chain of `?.` reads each member only where the value before it is not null, each a value of
-  its own that takes a count of what it read (N4, N5);
+  of no size, `{}` in the IR, whose value is `zeroinitializer` and whose text is `null` (A4), and a
+  `T?` of a list or of a data type laid out as a block is the address alone, its `null` an address no
+  value of `T` has, 1 for a list, whose value without items is the address 0, and 0 for a block
+  (section 4, the owner, 2026-10-30, "Rust's niche"); a read of a variable or a field the checker
+  found known not null is the value of the case `T`, and `&x`, `Add` and `Clear` on such a variable
+  reach the place of that value in the variable's room, the variable's own place where the address
+  is the value (N3, R10); `x == null` and `x != null` compare the tag, or the address with the `null`
+  of its type (N3); `==` and `!=` with a nullable side are `false` for one `null` and `true` for two,
+  and compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
+  `?.` and `?[` reads each member and item only where the value before it is not null, the index of
+  `?[` among it, each a value of its own that takes a count of what it read (N4, N5); a `T?` of a
+  type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
   which raises `index-out-of-range` for an index below 0 or at `Count` or beyond (T14), `list[i] = value`
@@ -733,7 +741,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 290 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 39 the
+full and the emitter does not emit, 3 of the 296 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 38 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -793,9 +801,6 @@ ask about it.
 
 - A `print` hands its line to one write call, called again for what a call did not take, through a
   buffer per thread that holds the line until that call returns. Pinned by the corpus runner.
-- N1 with section 5: a `T?` takes the layout of a union, its tag beside its room, where `T` is a
-  block too, whose null address Rust's `Option<Box<T>>` takes for its `None`, in the pointer alone;
-  the cost is the tag and its padding beside every nullable value. Pinned by `EmitterTests`.
 
 ## What the compiler says about a program
 
@@ -1015,11 +1020,13 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
 (chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable union,
-function type, C function type, type parameter or `void`, and a nullable case of a written union,
-which N1 does not name (N1, D9), `??` and `?.` on a value that is not nullable and `?.` to a member
-of a type no `?` makes nullable, which section 4 does not say (N4, N5), a call and an index after
-`?.`, which C# reads inside the chain and section 4 does not say (N5), and an assignment into a path
-through a nullable field known not null, which the emitter does not write through (N3, M4); `weak` (R3,
+function type, C function type or `void`, and a nullable case of a written union, which N1 does not
+name (N1, D9), `?.` to a member of a type no `?` makes nullable, which section 4 does not say (N5),
+a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
+a part after `?[` and an assignment through it, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
+emitter does not read through a chain (N5, M9), and an assignment into a path
+through a nullable field known not null, which the emitter does not write through (N3, M4), a `mut`
+method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
 (R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
@@ -1045,7 +1052,7 @@ type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a type `==` takes and the compiler does not hash: a `decimal`, a nullable type, a
 type parameter, a union of two types beside `null`, and a list or a `data` value that holds one of
-them; `==` on two lists of nullable items, which compare by N1's lifted `==`; a map whose values have a
+them; `==` on two lists of nullable items, which compare by N10's lifted `==`; a map whose values have a
 nullable type N1 does not read; an assignment into a map or a list that
 is no variable, or into a path through an entry or an item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
@@ -1147,7 +1154,7 @@ round can ask about it by the rule's id.
   classes; the checker reads it for data types.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
-- E1 with D20: an enum whose declaration was reported, a name written twice, a member's name or a
+- E1 with D20: an enum whose declaration was reported, a name written twice or a
   number that breaks D20, gives `.Number`, `From` and an order of its values without a second
   error, and keeps every value but the one the defect named.
 - M7 with D12: a value of an enum is copied, as a number is, being a number in memory (above), as
@@ -1208,8 +1215,7 @@ round can ask about it by the rule's id.
   target and a `with`'s target before what follows them, and an interpolation's holes as written, a
   hole of a `string` holding what it read until the interpolation is made and a hole of another type
   made text where it stands (the owner, 2026-10-29, "Refuse, as Rust"); a hole closes on its line, so
-  what changes a place inside one is a `mut` argument. Either side of `??` is its value, a reading
-  no program shows, since the checker says `not supported` to `??` (chapter 4). A statement inside an arm is read on its own, while
+  what changes a place inside one is a `mut` argument. Either side of `??` is its value (N4). A statement inside an arm is read on its own, while
   what it changes, a `mut` argument, an assignment or a `mut` method, changes it within the
   expression around the arm; and one `changed-while-held` is reported for each change, at its line,
   however many reads it meets and statements it stands in (E1). `Add`, the one `mut` method the
@@ -1267,9 +1273,8 @@ round can ask about it by the rule's id.
 - N3: a test, a `match` with a `null` arm, `??` and `?.` read a variable or a path of fields known
   not null as the nullable type it has, so that a second test, a `null` arm and `u?.Name` after
   `if u != null` read as C# reads them.
-- N2: an operand of any operator is `nullable-unchecked`, `==` and `!=` with a value of the type it
-  makes nullable among them, as Rust compares an `Option<i32>` with an `i32` nowhere, where C# lifts
-  `x == 1` on an `int?`; so are a condition, the list of a `for`, the list of an index, a member read
+- N2: an operand of any operator but `==` and `!=`, which N10 lifts, is `nullable-unchecked`, and
+  the error's line below it says how to check (section 4); so are a condition, the list of a `for`, the list of an index, a member read
   through the value, the value `with` copies, and a value where the type it makes nullable is
   required, which takes `nullable-unchecked` in place of `type-mismatch` there. A variable passed as
   `mut` is read as its own type (N7), so that a `string?` given to a `mut string` is `type-mismatch`
@@ -1281,10 +1286,14 @@ round can ask about it by the rule's id.
 - N4: `a ?? b` has the type `a` makes nullable where `b` fits it, and `a`'s nullable type where `b`
   fits that alone, as C# types it; after it holds what held before `b`, since `b` runs only where
   `a` is null.
-- N5: a chain of `?.` has the nullable type of the member it ends with, and that member's own type
-  where it is nullable, never a `T??`; a member after `?.` in the chain reads the member before as
-  its own type, so that a nullable one there is `nullable-unchecked`, and a parenthesis ends the
-  chain.
+- N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with, and
+  that one's own type where it is nullable, never a `T??`; a member after them in the chain reads
+  the member or the item before as its own type, so that a nullable one there is
+  `nullable-unchecked`, and a parenthesis ends the chain. After `?[` holds what held before its
+  index, since the index runs only where the list is not null.
+- N10 with N3: a nullable side of `==` beside a value whose type is not nullable, read as the checker
+  typed it, so that a variable known not null counts as such a value, is known not null where the
+  test holds; beside another nullable value it is not, as C#'s analysis reads both.
 - N1 with O8: `null` is a literal pattern of a `match`, which covers the case `null`.
 - R7 with E1: every `raw` block in a package without the grant is `raw-not-allowed`, one inside
   another among them, since each is a block the grant would allow; its body is checked as one with

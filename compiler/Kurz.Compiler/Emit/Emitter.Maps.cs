@@ -264,7 +264,7 @@ public sealed partial class Emitter
     {
         var map = EmitExpression(index.Target);
         var key = Convert(EmitExpression(index.Index), TypeOf(index.Index), type.Key, index.Index.Line);
-        var result = Types.Flattened(type.Value);
+        var result = Types.Nullable(type.Value);
         var get = Helper($"get.{Lower.Mangle(type)}", Ir(result), ["ptr", Ir(type.Key)], () =>
         {
             var entry = EntryType(type);
@@ -458,7 +458,7 @@ public sealed partial class Emitter
         var (type, n) = MutMap(c, "Remove");
         var argument = c.Arguments[0].Value;
         var key = Convert(EmitExpression(argument), TypeOf(argument), type.Key, argument.Line);
-        var result = Types.Flattened(type.Value);
+        var result = Types.Nullable(type.Value);
         var remove = Helper($"remove.{Lower.Mangle(type)}", Ir(result), ["ptr", Ir(type.Key)], () =>
         {
             var entry = EntryType(type);

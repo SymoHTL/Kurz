@@ -99,7 +99,7 @@ flowchart TD
         pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, red on
         output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 236 cases run on Linux or 222 on Windows, and on Linux on a crash whose trace is empty, holds a line that
+        than 255 cases run on Linux or 241 on Windows, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start
         at the error line's place; TraceTests, red on a trace
         other than the one each Linux program pins: its frames, names and lines, the cut and its count, the
@@ -145,7 +145,7 @@ flowchart TD
         less the umask, on a descriptor opened without close-on-exec, on a directory
         created again that fails, on the text of an error without a path, on an address read otherwise than Rust
         reads it, a scope id and a port with a sign among them, on a bind of IPv6's loopback that does not give
-        the error the machine's kernel gives, on a listener on IPv6's wildcard that a connection of IPv4 does not
+        what the machine's kernel gives, the bound address where it holds `::1` and its error elsewhere, on a listener on IPv6's wildcard that a connection of IPv4 does not
         reach where the kernel's dual stack is on, on a write to a connection whose peer closed it that is not
         BrokenPipe, and on a build for Windows that does not say not supported at a call on a file.
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run

@@ -262,4 +262,22 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "null-address")), 0, ["7"], string.Empty);
     }
+
+    [Fact]
+    public void A_nullable_list_or_block_is_its_address_alone_with_a_null_no_value_of_it_has()
+    {
+        // section 4, the owner, 2026-10-30, "Rust's niche": a `List<int>?` and a node's `Next` take 8 bytes, a block's `null` is the
+        // address 0 and a list's the address 1, since a list without items is the address 0; the `long?` beside them keeps its tag
+        const string Program = "data Node(int Value, Node? Next)\n\nList<int>? Items(int n) {\n    if n < 0 {\n        return null\n    }\n    mut xs = List<int>()\n"
+            + "    for i in 0..<n {\n        xs.Add(i)\n    }\n    return xs\n}\n\nint Length(Node? node) {\n    mut Node? at = node\n    mut count = 0\n"
+            + "    while at != null {\n        count = count + 1\n        at = at.Next\n    }\n    return count\n}\n\n"
+            + "print(Items(0))\nprint(Items(-1))\nprint(Items(2))\nprint(Items(0) == null)\nprint(Items(-1)?[0])\nprint(Length(Node(1, Node(2, null))))\nprint(Length(null))\n"
+            + "mut long? wide = 5\nprint(wide)\n";
+        var program = Emit(Program);
+        Assert.Contains("icmp eq ptr", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("inttoptr (i64 1 to ptr)", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("type { i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its type's number, `Value` and `Next`
+        Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "null-niche")), 0, ["[]", "null", "[0, 1]", "false", "null", "2", "0", "5"], string.Empty);
+    }
 }

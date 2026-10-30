@@ -293,8 +293,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
     // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block,
     // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
-    // nullable variable known not null, an `Add` through the place of one, a `match` with a `null` arm on one whose arm changes it, and
-    // a nullable parameter read in the arm of its case and after a `match` whose `null` arm leaves
+    // nullable variable known not null, an `Add` through the place of one, the item `?[` reads, a list without items in a nullable
+    // variable, a `match` with a `null` arm on one whose arm changes it, and a nullable parameter read in the arm of its case and after
+    // a `match` whose `null` arm leaves
     private const string Strings = """
         data Person(string Name, int Age)
         data Tag(string Label)
@@ -447,6 +448,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         mut List<string>? items = List<string>()
         items.Add(Made(33))
         print(items)
+        mut List<string>? labels = List<string>()
+        labels.Add(Made(36))
+        first = labels?[0] ?? "none"
+        labels = null
+        print(first)
+        print(labels?[0] ?? "none")
+        mut List<string>? empty = List<string>()
+        print(empty == null)
         maybe = Made(34)
         match maybe {
             null => print("none")
@@ -504,6 +513,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "none",
         "n32", // a read of a variable known not null, the string of its case
         "[n33]", // an `Add` through the place of a list in a nullable variable
+        "n36", // the item `?[` reads, which the variable's next value leaves whole
+        "none",
+        "false", // a list without items, the address 0, beside the `null` of a nullable list, the address 1
         "n34", // the name of a `null` arm's `match` on a variable known not null, which the arm's assignment leaves whole
         "n35", // a parameter read in the arm of its case
         "n35", // and after a `match` whose `null` arm leaves
@@ -894,6 +906,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(entry.Value.Count)
         }
 
+        T? ValueAt<T>(Map<string, T> src, string k) => src[k]
+
+        int Twice<T>(T x) {
+            mut tm = Map<string, T>()
+            tm["a"] = x
+            tm["b"] = x
+            tm.Remove("a")
+            return tm.Count
+        }
+
         string Made(int n) => "made {n}"
 
         int Sum(Map<int, int> sm) {
@@ -1182,6 +1204,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(pair)
         print(pair == Entry("made 1", 2))
         print(pair with { Value = 3 })
+
+        // values of a type parameter, `T?` of a nullable `T` being `T` (N11)
+        mut ages = Map<string, int?>()
+        ages["a"] = null
+        ages["b"] = 2
+        print(ValueAt(ages, "a") ?? -1)
+        print(ValueAt(ages, "b") ?? -1)
+        print(ValueAt(ages, "c") ?? -1)
+        mut names = Map<string, string>()
+        names["x"] = Made(9)
+        print(ValueAt(names, "x") ?? "none")
+        print(Twice(Made(8)))
+        print(Twice(List<int>()))
         """;
 
     private static readonly string[] MapMembersPrint =
@@ -1275,6 +1310,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "Entry { Key = made 1, Value = 2 }",
         "true",
         "Entry { Key = made 1, Value = 3 }",
+        "-1", // values of a type parameter
+        "2",
+        "-1",
+        "made 9",
+        "1",
+        "1",
     ];
 
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
