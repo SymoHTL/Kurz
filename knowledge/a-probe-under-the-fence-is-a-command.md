@@ -33,6 +33,14 @@ deleted them again. The third-time rule makes that a command.
 A program that a probe found at fault becomes a line of a fenced program of `ListTests`: the probe
 answers a question, the suite holds the answer.
 
+The fence gives no block back: each block is memory of its own from the system, a page at the
+least, made inaccessible at its free and kept so. A program that allocates a lot over its run ends
+at the machine's memory, killed by the system (`exit 137` on Linux), which is no read of a freed
+block: on 2026-10-30 an S3 server written in Kurz and built under the fence answered a real
+client's requests up to a multipart upload of 11 MiB, whose SHA-256 written in Kurz made a list
+for each chunk of 64 bytes, took its memory to 3.7 GB. Probe such a program with less data, and
+read 137 as the fence's cost, 139 as a fault.
+
 Gate: `compiler-tests` (`ProbeTests`: a clean program with and without the fence, a read through a
 list's pointer after its block was freed that ends the program under the fence and prints the
 value without it, a program's errors, and a command line the probe does not read).
