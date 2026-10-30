@@ -244,7 +244,9 @@ directory exists; `Directory.List(path)` is the names of the directory's entries
 `..`, in the order the system gives them, or an `IoError`: each name that is UTF-8 as a string, and
 each that is not as a case that carries its bytes, so that one such name hides no other entry (§12,
 the owner, 2026-10-30), the name and the form of that case standing open (§14), and a path, a `string`, naming no such entry to
-open, rename or delete it *(assumed, §12)*; and `Directory.Delete(path)`
+open, rename or delete it *(assumed, §12)*, while whether the file functions take a path given as bytes for such
+an entry, as Rust's `Path` holds an `OsStr`, or such an entry stays one a program lists and cannot open, rename or
+delete, stands open (§14); and `Directory.Delete(path)`
 deletes an empty directory, `void | IoError`. *(assumed, §12: the permissions, the order and the
 entries left out)*
 
@@ -306,13 +308,15 @@ the last address tried, and the string a connection's error names)*
 
 A read, a write and `TcpStream.Connect` on a socket wait at most 5 seconds by default, as long as a
 call of an actor waits (§6), and the time of a read and a write can be set for each socket, as
-Rust's `set_read_timeout` and `set_write_timeout` set `SO_RCVTIMEO` and `SO_SNDTIMEO` (§12, the
+Rust's `set_read_timeout` and `set_write_timeout` set a time for each socket (§12, the
 owner, 2026-10-30, against a timeout as an argument with no default and against a default in the
 HTTP server alone). `Connect` creates the socket such a setter would set, and another time reaches it
 through a second form that takes the time, `TcpStream.Connect(address, timeout)`, as Rust's
 `TcpStream::connect_timeout` takes it (§12, the owner, 2026-10-30, "Second form, as Rust", against a
 setting `Connect` reads before it creates the socket and against the 5 seconds alone); the type of
-the time stands open with the member that sets it (§14). *(assumed, §12:
+the time stands open with the member that sets it (§14). The socket options `SO_RCVTIMEO` and
+`SO_SNDTIMEO`, which Rust's setters set, bound a call on a blocking socket outside an actor alone, and how
+the bound holds for an actor's socket, which runs without blocking, stands open (§14). *(assumed, §12:
 the bound of `TcpStream.Connect` for the whole call, every address it tries among it)*
 `l.Accept()` waits without a bound by default, as Rust's `TcpListener::accept` waits, and a bound
 can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", whose option read "No
@@ -424,8 +428,12 @@ is the compile error `files-not-allowed` or `network-not-allowed` at the call. F
 path that calls no such function itself, the error stands at its call that leads on toward the
 function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
 error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
-itself needs neither. *(assumed, §13: `Directory` among the file functions; a call through an interface on the path as a call of
-every implementer the program has, and a call of a function value as a call of every function whose value
-the program takes)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
+itself needs neither. A call through an interface on the path counts as a call of every implementer of
+`std/` and of the packages, and a call of a function value as a call of every such function whose value is
+taken, while an implementer or a function of the program's own code is no path that needs the grant (§13,
+the owner, 2026-10-30, "Program's own don't count"). Where several paths lead through one line, its one
+error names the shortest, two of one length in the order of the source (§13, the owner, 2026-10-30, "The
+shortest"). *(assumed, §13: `Directory` among the file functions; such a call counted where it never reaches
+the function)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
 
 No case: a case is a program and no package, and the program needs no grant.
