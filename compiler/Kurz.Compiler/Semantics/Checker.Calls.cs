@@ -785,7 +785,7 @@ public sealed partial class Checker
                 return (false, $"the hash of a `{p}`, which reads 1.5 and 1.50 as one value, is not built");
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or HandleType or CFunctionType or VoidType:
+            case FunctionType or HandleType or HasherType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
@@ -870,7 +870,7 @@ public sealed partial class Checker
                 return null;
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or CFunctionType or HandleType:
+            case FunctionType or CFunctionType or HandleType or HasherType:
                 return (true, $"`==` takes no `{type}`");
             case ListType l:
                 return HeldEquality(l.Element, seen, path) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
@@ -939,7 +939,7 @@ public sealed partial class Checker
                 return u.Cases.Where(c => c is not NullType).Select(ItemEquality).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or CFunctionType or HandleType or VoidType:
+            case FunctionType or CFunctionType or HandleType or HasherType or VoidType:
                 return (true, $"`==` takes no `{item}`");
             default:
                 return (false, $"`==` on a `{item}` is not read");
@@ -1053,6 +1053,11 @@ public sealed partial class Checker
                 return CheckFileFunction(n.Name, m, c); // S2, S6 to S9
             }
 
+            if (IsHashName(n.Name))
+            {
+                return CheckHashFunction(n.Name, m, c); // H1 to H4
+            }
+
             if (enums.TryGetValue(n.Name, out var enumSymbol))
             {
                 if (m.Member == "From")
@@ -1143,6 +1148,11 @@ public sealed partial class Checker
         if (target.Type is HandleType handle && !(handle.Kind == Handle.TcpListener && m.Member == "Port"))
         {
             return CheckFileMethod(handle, m, c); // S3 to S5, S9
+        }
+
+        if (target.Type is HasherType hasher)
+        {
+            return CheckHasherMethod(hasher, m, c); // H3
         }
 
         var member = Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3: a nullable C function known not null (R17)

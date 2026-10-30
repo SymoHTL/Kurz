@@ -1,0 +1,6 @@
+// expect: error mut-required at 5
+// rules: H3
+
+h = Sha256.New()
+h.Update("abc".Bytes)
+print(h)

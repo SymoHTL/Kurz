@@ -1,0 +1,18 @@
+// expect: output
+// | true
+// | false
+// | false
+// | true
+// | false
+// | true
+// rules: H4
+
+Bytes key = "key".Bytes
+Bytes message = "The quick brown fox jumps over the lazy dog".Bytes
+Bytes tag = Hmac.Sha256(key, message)
+print(Hmac.VerifySha256(key, message, tag))
+print(Hmac.VerifySha256(key, "The quick brown fox jumps over the lazy cat".Bytes, tag))
+print(Hmac.VerifySha256(key, message, tag[0..<16]))
+print(FixedTime.Equal(tag, Hmac.Sha256(key, message)))
+print(FixedTime.Equal("abc".Bytes, "abd".Bytes))
+print(FixedTime.Equal(Bytes(), Bytes()))

@@ -377,6 +377,7 @@ public sealed partial class Checker
     private static bool HasText(KurzType type, List<DataSymbol> seen) => type switch
     {
         PrimitiveType or EnumType or NullType => true, // A4: null shows `null`
+        HasherType => true, // H6: the name of its type
         ErrorType => true,
         ListType l => HasText(l.Element, seen),
         MapType m => HasText(m.Value, seen), // A6, M9: every type a map takes as its key has a text; a function value and a handle, which have none, are no key
