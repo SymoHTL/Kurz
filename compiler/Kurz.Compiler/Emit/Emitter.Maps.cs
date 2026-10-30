@@ -288,8 +288,12 @@ public sealed partial class Emitter
         return Temp(fn.Value($"call {Ir(result)} {get}(ptr {map}, {Ir(type.Key)} {key})"), result);
     }
 
-    /// <summary>An entry's value as the result of a read or a <c>Remove</c>: in the case of its own of the nullable type, or as it is where the values are nullable (section 4, the owner, 2026-10-30, "Flatten, as C#").</summary>
-    private string AsResult(UnionType result, KurzType value, string v) => Types.Same(result, value) ? v : MakeUnion(result, value, v);
+    /// <summary>
+    /// An entry's value as the result of a read or a <c>Remove</c>: a value of the nullable type (<see cref="WithNull"/>), a union's cases
+    /// among its cases (section 4, the owner, 2026-10-30, "Nullable form, as Option"), or as it is where the values are nullable (section
+    /// 4, the owner, 2026-10-30, "Flatten, as C#").
+    /// </summary>
+    private string AsResult(UnionType result, KurzType value, string v) => Types.Same(result, value) ? v : WithNull(result, value, v, 0);
 
     /// <summary>
     /// M9, M4: <c>map[key] = value</c> on a <c>mut</c> variable or parameter: the value first, then the key, then the map the variable

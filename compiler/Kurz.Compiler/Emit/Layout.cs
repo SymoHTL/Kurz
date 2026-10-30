@@ -163,15 +163,22 @@ internal sealed class Layout(IrModule module)
     /// The <c>null</c> of a <c>T?</c> whose <c>T</c> is held through an address, an address no value of <c>T</c> has, as Rust lays out
     /// <c>Option&lt;Box&lt;T&gt;&gt;</c> and <c>Option&lt;Vec&lt;T&gt;&gt;</c> (section 4, the owner, 2026-10-30, "Rust's niche"): a block's is the
     /// address 0, and a list's the address 1, since a list without items is the address 0; a C function's is the address 0, which no
-    /// function has, as Rust lays out <c>Option&lt;extern "C" fn()&gt;</c> (R17). Null for every other union, which keeps its tag.
+    /// function has, as Rust lays out <c>Option&lt;extern "C" fn()&gt;</c> (R17); a function value's is the pair of no code and no
+    /// environment, the address 0 in its code, which no function value has, as Rust lays out <c>Option&lt;fn()&gt;</c> (section 4, the
+    /// owner, 2026-10-30, "Nullable form, as Option": "a <c>null</c> niche in a function value"). Null for every other union, which keeps
+    /// its tag.
     /// </summary>
     public string? Niche(UnionType union) => Types.NonNull(union) switch
     {
         ListType => "inttoptr (i64 1 to ptr)",
         DataType d when IsBlock(d) => "null",
         CFunctionType => "null",
+        FunctionType => "zeroinitializer",
         _ => null,
     };
+
+    /// <summary>The IR type of a union with a <see cref="Niche"/>: the function value's pair for a nullable function value, else an address.</summary>
+    public static string NicheIr(UnionType union) => Types.NonNull(union) is FunctionType ? "%kz.fn" : "ptr";
 
     /// <summary>The IR type of a value: <see cref="Lower.IrType"/>, a data type's structure or <c>ptr</c> for a block, and a union's structure of its tag and its room, or <c>ptr</c> where it has a <see cref="Niche"/>.</summary>
     public string Ir(KurzType type)
@@ -181,7 +188,7 @@ internal sealed class Layout(IrModule module)
             case DataType d when IsBlock(d):
                 return "ptr";
             case UnionType u when Niche(u) is not null:
-                return "ptr";
+                return NicheIr(u);
             case DataType d:
                 {
                     var name = $"%\"d.{Lower.Mangle(d)}\"";
@@ -234,7 +241,7 @@ internal sealed class Layout(IrModule module)
             case DataType d when IsBlock(d):
                 return (8, 8);
             case UnionType u when Niche(u) is not null:
-                return (8, 8);
+                return Types.NonNull(u) is FunctionType ? (16, 8) : (8, 8);
             case DataType d:
                 return Structure(Fields(d).Select(Measure));
             case UnionType u:

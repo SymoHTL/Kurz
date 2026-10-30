@@ -1,6 +1,7 @@
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using UnionType = Kurz.Compiler.Semantics.UnionType;
+using VoidType = Kurz.Compiler.Semantics.VoidType;
 
 namespace Kurz.Compiler.Emit;
 
@@ -12,18 +13,73 @@ namespace Kurz.Compiler.Emit;
 /// </summary>
 public sealed partial class Emitter
 {
-    /// <summary>N3: a value read from a place of the type <paramref name="stored"/> as <paramref name="type"/>: where the place is nullable and the read is not, the value of its case.</summary>
+    /// <summary>N3: a value read from a place of the type <paramref name="stored"/> as <paramref name="type"/>: where the place is nullable and the read is not, the value without its <c>null</c>.</summary>
     private string Narrowed(string value, KurzType stored, KurzType type) =>
-        !Types.Same(stored, type) && stored is UnionType union && Types.NonNull(union) is { } inner ? Payload(value, union, inner) : value;
+        !Types.Same(stored, type) && stored is UnionType union && Types.NonNull(union) is not null ? WithoutNull(value, union) : value;
 
-    /// <summary>N3: the place of a variable as the type the checker read at <paramref name="n"/>: where the variable is nullable and the read is not, the room of its case, which is the place itself where the union has a niche.</summary>
+    /// <summary>
+    /// N3: the place of a variable as the type the checker read at <paramref name="n"/>: where the variable is nullable and the read is
+    /// not, the room of its case, which is the place itself where the union has a niche, and where the type it makes nullable is a union,
+    /// whose cases keep their numbers in the same room (<see cref="WithoutNull"/>).
+    /// </summary>
     private string NarrowedPlace(NameExpression n)
     {
         var place = Place(Model.VariableOf(n), n.Line);
         var stored = Sub(Model.VariableOf(n).Type);
-        return !Types.Same(stored, TypeOf(n)) && stored is UnionType union && Types.NonNull(union) is not null && layout.Niche(union) is null
-            ? fn.Value($"getelementptr {Ir(union)}, ptr {place}, i32 0, i32 1")
-            : place;
+        if (Types.Same(stored, TypeOf(n)) || stored is not UnionType union || Types.NonNull(union) is not { } inner || layout.Niche(union) is not null)
+        {
+            return place;
+        }
+
+        if (inner is UnionType cases)
+        {
+            return Ir(union) == Ir(cases) ? place : throw Unsupported(n.Line, $"the place of a `{union}` read as a `{cases}`, whose tags differ in width");
+        }
+
+        return fn.Value($"getelementptr {Ir(union)}, ptr {place}, i32 0, i32 1");
+    }
+
+    /// <summary>
+    /// N1: a value of <paramref name="inner"/> as a value of its nullable type: the case of its type, and of a union each of its cases as
+    /// the same case of the nullable union, whose tag holds the same number of the case's type (section 4, the owner, 2026-10-30,
+    /// "Nullable form, as Option"), the value itself where the two are laid out alike.
+    /// </summary>
+    private string WithNull(UnionType nullable, KurzType inner, string value, int line)
+    {
+        if (inner is not UnionType cases)
+        {
+            return MakeUnion(nullable, inner, value);
+        }
+
+        return Ir(nullable) == Ir(cases) ? value : ConvertUnion(value, cases, nullable, line);
+    }
+
+    /// <summary>
+    /// N3: a value of a nullable type known not null, as the type it makes nullable: the value of its case, and of a nullable union the
+    /// union of its other cases, each with the same number in its tag, the value itself where the two are laid out alike.
+    /// </summary>
+    private string WithoutNull(string value, UnionType nullable)
+    {
+        var inner = Types.NonNull(nullable)!;
+        if (inner is not UnionType cases)
+        {
+            return Payload(value, nullable, inner);
+        }
+
+        if (Ir(nullable) == Ir(cases))
+        {
+            return value;
+        }
+
+        var result = fn.Alloca(Ir(cases), "union");
+        var done = fn.Label("narrowed");
+        ByCase(Tag(value, nullable), nullable, cases.Cases, c =>
+        {
+            fn.Emit($"store {Ir(cases)} {MakeUnion(cases, c, c is VoidType ? null : Payload(value, nullable, c))}, ptr {result}");
+            fn.Branch(done);
+        });
+        fn.Block(done);
+        return fn.Value($"load {Ir(cases)}, ptr {result}");
     }
 
     /// <summary>A value made where it is read, for a place that holds it: counted once more, since what it was read from keeps its own count.</summary>
@@ -61,7 +117,7 @@ public sealed partial class Emitter
         fn.CondBranch(IsCase(Tag(left, leftType), leftType, Types.Null), other, value);
         fn.Block(value);
         var inner = Types.NonNull(leftType)!;
-        var kept = Types.Same(type, leftType) ? Retained(left, leftType) : Convert(Retained(Payload(left, leftType, inner), inner), inner, type, b.Line);
+        var kept = Types.Same(type, leftType) ? Retained(left, leftType) : Convert(Retained(WithoutNull(left, leftType), inner), inner, type, b.Line);
         fn.Emit($"store {Ir(type)} {kept}, ptr {slot}");
         fn.Branch(done);
         fn.Block(other);

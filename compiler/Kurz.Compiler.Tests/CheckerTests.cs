@@ -1877,6 +1877,25 @@ public sealed class CheckerTests
         Assert.Equal("string?", TypeOf(Email + "e = Email(1) ?? Email(2)\nprint(e)", "e"));
     }
 
+    [Fact]
+    public void A_union_and_a_function_type_have_their_nullable_form()
+    {
+        // N1 (section 4, the owner, 2026-10-30, "Nullable form, as Option"): `(int | string)?` is `int | string | null`, a test leaves
+        // the union (N3), and `?.`, `?[` and a map's read give it; a lambda takes the types of a nullable function type, and a call of a
+        // nullable function value is N2's, as a member read from one is
+        const string Find = "(int | string)? Find() => null\n\n";
+        Assert.Equal("(int | string)?", TypeOf(Find + "x = Find()\nprint(x)", "x"));
+        Clean(Find + "x = Find()\nif x != null {\n    int | string y = x\n    print(y)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 4)], Errors(Find + "x = Find()\nint | string y = x\nprint(y)"));
+        Assert.Equal("(int | string)?", TypeOf("data R(int | string V)\n\nR? G() => null\n\nx = G()?.V\nprint(x)", "x"));
+        Assert.Equal("(int | string)?", TypeOf("List<int | string>? Items() => null\n\nx = Items()?[0]\nprint(x)", "x"));
+        Assert.Equal("(() => int)?", TypeOf("m = Map<string, () => int>()\nx = m[\"a\"]\nprint(x == null)", "x"));
+        Assert.Equal("(int | string)?", TypeOf("mut m = Map<string, int | string>()\nx = m.Remove(\"a\")\nprint(x)", "x"));
+        const string Pick = "((int) => int)? Pick() {\n    return x => x * 2\n}\n\n";
+        Clean(Pick + "f = Pick()\nif f != null {\n    print(f(1))\n}\nprint((Pick() ?? (x => x + 1))(2))");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors(Pick + "f = Pick()\nprint(f(1))"));
+    }
+
     [Theory]
     [InlineData("x = null\nprint(x)", 1)] // no type to take
     [InlineData("int x = null\nprint(x)", 1)] // a type without `null`
@@ -2439,11 +2458,9 @@ public sealed class CheckerTests
     [InlineData("class Account(mut string? Email)\n\nAccount? Load(int id) => null\n\nvoid Touch() {\n}\n\na = Load(1)\nif a?.Email != null {\n    Touch()\n    print(a?.Email.Bytes.Count)\n}", "1: a class (chapter 7)")] // N9: the checker narrows no path through a class instance, and a `weak` path runs through one (R5)
     [InlineData("interface Shape {\n    int Area()\n}", "1: an interface (K6, K10)")]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read)", "1: a flags type (D13)")]
-    [InlineData("data R(int | string V)\n\nR? G() => null\n\nprint(G()?.V)", "5: `?.` to a `int | string`, which no `?` makes nullable (N1, N5)")]
     [InlineData("data User(List<int> Items)\n\nUser? Find() => null\n\nprint(Find()?.Items[0])", "5: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0][1])", "3: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0..<1])", "3: a part after `?[` (N5, M9)")]
-    [InlineData("List<int | string>? Find() => null\n\nprint(Find()?[0])", "3: `?[` to a `int | string`, which no `?` makes nullable (N1, N5)")]
     [InlineData("mut List<int>? xs = null\nxs?[0] = 1", "2: an assignment through `?[` (N5)")]
     [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: `?.` (N5)")]
     [InlineData("int? | string x = 1\nprint(x)", "1: a nullable case of a union, `int?` (N1, D9)")]
@@ -2456,8 +2473,6 @@ public sealed class CheckerTests
     [InlineData("void F<T>(T x) {\n    m = Map<T, int>()\n    print(m)\n}\n\nF(1)", "2: a map with keys of type `T`: a `T` is no key the checker reads (M9)")]
     [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nvoid Same(Base a, Base b) {\n    print(a == b)\n}\n\nprint(1)", "5: `==` on a `Base`: its derived type `Derived`: its field `V`: `==` on a `T` is not read (D3, M9)")]
     [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nmut m = Map<Base, int>()\nprint(m.Count)", "4: a map with keys of type `Base`: its derived type `Derived`: its field `V`: a `T` is no key the checker reads (M9)")]
-    [InlineData("m = Map<string, () => int>()\nprint(1)", "1: a map with values of type `() => int` (M9, N1)")]
-    [InlineData("m = Map<string, int | string>()\nprint(1)", "1: a map with values of type `int | string` (M9, N1)")]
     [InlineData("data Box(Map<string, int> M)\n\nmut b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a map that is no variable, or into a path through an entry (M4, M9)")]
     [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable variable or field (N3, M5)")]
     [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable variable or field (N3, M5)")]
