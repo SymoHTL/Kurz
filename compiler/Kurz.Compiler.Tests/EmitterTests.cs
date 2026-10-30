@@ -12,7 +12,7 @@ namespace Kurz.Compiler.Tests;
 /// say (design record, section 6; the owner, 2026-10-23, "Caller passes it" and "Id + size"), the test build left unoptimised and
 /// the line tables (section 2; the owner, 2026-10-29), the texts of the integers at their edges (A2), a conversion from an unsigned type to a signed one (T20), the empty
 /// string's pointer (R15), the largest string (T15; the owner, 2026-10-23, "C#'s limit"), the integer an enum's value is stored in (D12;
-/// section 4, an assumption there), the runtime of every target emitted, and a
+/// section 4, an assumption there), the layout of a nullable value and the address of one known not null (N1, N3, R10), the runtime of every target emitted, and a
 /// construct of the runtime the emitter does not lay out, which is the compiler's defect.
 /// </summary>
 public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -271,5 +271,34 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         Ran(Toolchain.Run(toolchain.Build(program, "enum-layout")), 0, ["B", "High", "-1", "Low", "200", "true", "true", "A", "A", "70000"], string.Empty);
+    }
+
+    [Fact]
+    public void A_nullable_value_is_a_union_and_the_address_of_one_known_not_null_is_the_address_of_its_value()
+    {
+        // N1 with section 5, a reading of this directory: the tag beside the room of a `long`; N3, R10: where the checker reads a nullable
+        // variable as the type it makes nullable, `&` gives the place of that value in the variable's room, so that a write through it
+        // writes the variable's value
+        var program = Emit("mut long? n = 5\nraw {\n    long* p = &n\n    *p = 7\n}\nprint(n)\n", "raw");
+        Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "null-address")), 0, ["7"], string.Empty);
+    }
+
+    [Fact]
+    public void A_nullable_list_or_block_is_its_address_alone_with_a_null_no_value_of_it_has()
+    {
+        // section 4, the owner, 2026-10-30, "Rust's niche": a `List<int>?` and a node's `Next` take 8 bytes, a block's `null` is the
+        // address 0 and a list's the address 1, since a list without items is the address 0; the `long?` beside them keeps its tag
+        const string Program = "data Node(int Value, Node? Next)\n\nList<int>? Items(int n) {\n    if n < 0 {\n        return null\n    }\n    mut xs = List<int>()\n"
+            + "    for i in 0..<n {\n        xs.Add(i)\n    }\n    return xs\n}\n\nint Length(Node? node) {\n    mut Node? at = node\n    mut count = 0\n"
+            + "    while at != null {\n        count = count + 1\n        at = at.Next\n    }\n    return count\n}\n\n"
+            + "print(Items(0))\nprint(Items(-1))\nprint(Items(2))\nprint(Items(0) == null)\nprint(Items(-1)?[0])\nprint(Length(Node(1, Node(2, null))))\nprint(Length(null))\n"
+            + "mut long? wide = 5\nprint(wide)\n";
+        var program = Emit(Program);
+        Assert.Contains("icmp eq ptr", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("inttoptr (i64 1 to ptr)", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("type { i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its type's number, `Value` and `Next`
+        Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "null-niche")), 0, ["[]", "null", "[0, 1]", "false", "null", "2", "0", "5"], string.Empty);
     }
 }

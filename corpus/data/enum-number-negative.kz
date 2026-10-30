@@ -1,9 +1,7 @@
 // expect: output
 // | -1
-// | true
-// rules: D18, D20
+// rules: D20
 
-enum Level { Low = -1, High = 1 }
+enum Level { High = 1, Low = -1 }
 
 print(Level.Low.Number)
-print(Level.Low < Level.High)

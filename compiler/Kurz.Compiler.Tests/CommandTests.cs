@@ -170,6 +170,21 @@ public sealed class CommandTests : IDisposable
     }
 
     [Fact]
+    public void A_nullable_unchecked_error_says_how_to_check_on_the_line_below_and_no_other_error_does()
+    {
+        // section 4, the owner, 2026-10-30, "Text + help line", indented as the command's own `help:` (an assumption there)
+        var source = Path.Combine(root, "refused.kz");
+        File.WriteAllText(source, "string? Name() => null\n\nprint(Name().Bytes.Count)\nprint(y)\n");
+        var (code, output, error) = Kurz("build", source);
+        Assert.Equal((1, ""), (code, output));
+        var lines = error.Split('\n');
+        Assert.StartsWith($"{source}:3: nullable-unchecked: ", lines[0], StringComparison.Ordinal);
+        Assert.Equal("  help: check it with `!= null`, or give a value for null with `??`", lines[1]);
+        Assert.StartsWith($"{source}:4: unknown-name: ", lines[2], StringComparison.Ordinal);
+        Assert.Equal([""], lines[3..]);
+    }
+
+    [Fact]
     public void Build_refuses_to_write_over_its_source_or_a_directory()
     {
         var source = Path.Combine(root, "hello");

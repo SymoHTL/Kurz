@@ -65,9 +65,9 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
-        if (keepCases || result.IsError || result.Type is not UnionType u)
+        if (keepCases || result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null)
         {
-            return result;
+            return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
         }
 
         // O2: the success case is the value; every other case leaves the calling function (O3, O9)
@@ -240,8 +240,11 @@ public sealed partial class Checker
             return;
         }
 
-        CheckExpression(value, null);
+        CheckExpression(value, Untyped(value));
     }
+
+    /// <summary>The type a value is read with where its site's type is unknown, the error: none, but for a <c>null</c>, which takes its type from the site (N6) and so stands for the error (E1).</summary>
+    private static ErrorType? Untyped(Expression value) => Unwrap(value) is NullLiteral ? Types.Error : null;
 
     /// <summary>T19: a callee without type parameters, <c>print</c>, a conversion, a function value or a list's method, takes no type argument; one written is a count no rule gives a meaning (E4).</summary>
     private bool RefusesTypeArguments(CallExpression c, string callee)
@@ -704,8 +707,9 @@ public sealed partial class Checker
     /// <summary>M5, M9, T15, S2 to S8: a call of a member: a list's <c>Add</c>, <c>Where</c> and <c>Clear</c>; a function of <c>File</c> and <c>Directory</c>, and a file's methods; a data value's field of function type.</summary>
     private Typed CheckMethodCall(MemberAccess m, CallExpression c)
     {
-        if (m.Conditional)
+        if (m.Conditional || InChain(m.Target))
         {
+            // N5: C# reads a call after `?.` inside the chain, which section 4 does not say
             NotSupported(m.Line, "`?.` (N5)");
             CheckExpression(m.Target, null);
             CheckArgumentsLoosely(c);
@@ -887,6 +891,11 @@ public sealed partial class Checker
             return; // reported where the receiver was read
         }
 
+        if (ThroughNullable(variable, members, "a `mut` method on a path through a nullable field (N3, M5)"))
+        {
+            return;
+        }
+
         if (!IsFieldPath(variable.Type, members, out var notField))
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{notField}` is no field of a data value: only a path of data fields from a `mut` variable reaches a value that changes (M5, M4)");
@@ -908,6 +917,39 @@ public sealed partial class Checker
         }
 
         variable.Changed = true;
+    }
+
+    /// <summary>
+    /// N3: whether a path of fields from <paramref name="variable"/> runs through a nullable variable or field; one the checker knows
+    /// not null is reported as <paramref name="construct"/>, which the emitter does not change through, as an assignment into such a
+    /// path (M4), and another was reported where the path was read (N2).
+    /// </summary>
+    private bool ThroughNullable(VariableSymbol variable, List<MemberAccess> members, string construct)
+    {
+        var current = variable.Type;
+        var through = new NullPath(variable, string.Empty);
+        foreach (var m in members)
+        {
+            if (Types.NonNull(current) is not null)
+            {
+                if (frame.Known.Contains(through))
+                {
+                    NotSupported(m.Line, construct);
+                }
+
+                return true;
+            }
+
+            if (current is not DataType d || d.Symbol.Field(m.Member) is not { } field)
+            {
+                return false;
+            }
+
+            through = through with { Fields = through.Fields.Length == 0 ? m.Member : through.Fields + "." + m.Member };
+            current = SubstituteData(d, field.Type);
+        }
+
+        return false;
     }
 
     /// <summary>M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not tell passes.</summary>
@@ -1001,6 +1043,7 @@ public sealed partial class Checker
                 continue;
             }
 
+            MutArgumentRead(a); // N7
             Push();
             var typed = CheckExpression(a.Value, null);
             var captured = Pop(commit: false);
@@ -1418,8 +1461,9 @@ public sealed partial class Checker
 
         var (index, parameter) = bound.Misfit!.Value;
         var pre = pres[index];
-        if (pre.Lambda is null && bound.Slots[bound.Binding[index]].Mut && Types.Assignable(pre.Typed.Type, parameter))
+        if (pre.Lambda is null && bound.Slots[bound.Binding[index]].Mut && Types.Assignable(Types.NonNull(pre.Typed.Type) ?? pre.Typed.Type, parameter))
         {
+            // a nullable variable among them, which no check makes a variable of the parameter's type (N7)
             Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"a `{pre.Typed.Type}` passed as `mut` where a `mut {parameter}` is required: a `mut` parameter takes a variable of its own type, since the callee writes a `{parameter}` back into it (M7, T1)");
             return;
         }
@@ -1591,6 +1635,11 @@ public sealed partial class Checker
 
         var (variable, captured) = Lookup(name.Name);
         if (variable is null || Types.IsError(variable.Type))
+        {
+            return;
+        }
+
+        if (ThroughNullable(variable, members, "a path through a nullable field passed as `mut` (N3, M7)"))
         {
             return;
         }

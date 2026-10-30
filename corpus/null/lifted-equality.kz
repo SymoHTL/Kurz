@@ -1,0 +1,24 @@
+// expect: output
+// | true
+// | false
+// | true
+// | false
+// | true
+// | true
+// rules: N10
+
+int? Find(string text, string part) {
+    if text == part {
+        return 0
+    }
+    return null
+}
+
+a = Find("b", "b")
+b = Find("b", "c")
+print(a == 0)
+print(b == 0)
+print(b == null)
+print(a == b)
+print(b != 0)
+print(b == Find("x", "y"))

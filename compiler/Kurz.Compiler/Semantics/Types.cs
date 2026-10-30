@@ -81,6 +81,12 @@ public sealed record ErrorType : KurzType
     public override string Text => "?";
 }
 
+/// <summary>The type of <c>null</c>, the case of a nullable type that is no value of the type it makes nullable (N1): one value, of no size.</summary>
+public sealed record NullType : KurzType
+{
+    public override string Text => "null";
+}
+
 /// <summary><c>List&lt;T&gt;</c> (M9, T17).</summary>
 public sealed record ListType(KurzType Element) : KurzType
 {
@@ -140,7 +146,10 @@ public sealed record HandleType(Handle Kind) : KurzType
 /// </summary>
 public sealed record UnionType(IReadOnlyList<KurzType> Cases) : KurzType
 {
-    public override string Text => string.Join(" | ", Cases.Select(c => c is FunctionType or UnionType or CFunctionType ? "(" + c.Text + ")" : c.Text));
+    /// <summary>A nullable type is written with its <c>?</c>, <c>string?</c> (N1); any other union with its cases.</summary>
+    public override string Text => Types.NonNull(this) is { } inner
+        ? (inner is FunctionType or CFunctionType ? "(" + inner.Text + ")?" : inner.Text + "?")
+        : string.Join(" | ", Cases.Select(c => c is FunctionType or UnionType or CFunctionType ? "(" + c.Text + ")" : c.Text));
 
     public bool Equals(UnionType? other) => other is not null && Types.Same(this, other);
 
@@ -213,6 +222,7 @@ public static class Types
     public static readonly PrimitiveType LongTimestamp = new(Primitive.LongTimestamp);
     public static readonly VoidType Void = new();
     public static readonly ErrorType Error = new();
+    public static readonly NullType Null = new();
     public static readonly HandleType File = new(Handle.File);
     public static readonly HandleType TcpListener = new(Handle.TcpListener);
     public static readonly HandleType TcpStream = new(Handle.TcpStream);
@@ -228,6 +238,12 @@ public static class Types
     public static bool IsError(KurzType type) => type is ErrorType;
 
     public static bool IsVoid(KurzType type) => type is VoidType;
+
+    /// <summary>N1: the type a nullable type makes nullable, the case of <c>T | null</c> beside <c>null</c>; null for any other type.</summary>
+    public static KurzType? NonNull(KurzType type) => type is UnionType { Cases: [var inner, NullType] } ? inner : null;
+
+    /// <summary>N1: <c>T?</c>, the union <c>T | null</c>; of a type that is nullable already, that type (section 4, "Flatten, as C#").</summary>
+    public static UnionType Nullable(KurzType inner) => NonNull(inner) is not null ? (UnionType)inner : new([inner, Null]);
 
     public static bool IsInteger(KurzType type) => type is PrimitiveType { Kind: <= Primitive.ULong };
 
@@ -313,6 +329,7 @@ public static class Types
         {
             (PrimitiveType x, PrimitiveType y) => x.Kind == y.Kind,
             (VoidType, VoidType) => true,
+            (NullType, NullType) => true,
             (ErrorType, ErrorType) => true,
             (ListType x, ListType y) => Same(x.Element, y.Element),
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
@@ -455,12 +472,18 @@ public static class Types
     /// <see cref="Assignable"/> says no: <c>narrowing-conversion</c> for an integer or time type put
     /// into a narrower one, whatever the signedness (T7, T23, T29); <c>sign-mix</c> for an integer
     /// put where a type of the other signedness and at least its width is required (T23);
+    /// <c>nullable-unchecked</c> for a nullable value where the type it makes nullable would fit (N2);
     /// <c>type-mismatch</c> for everything else (T1).
     /// </summary>
     public static string MismatchId(KurzType from, KurzType to)
     {
         ArgumentNullException.ThrowIfNull(from);
         ArgumentNullException.ThrowIfNull(to);
+        if (NonNull(from) is { } inner && NonNull(to) is null && Assignable(inner, to))
+        {
+            return ErrorIds.NullableUnchecked; // N2: a `T?` where a `T` is required, which a check would make fit
+        }
+
         if (IsInteger(from) && IsInteger(to))
         {
             return Width(to) < Width(from) ? ErrorIds.NarrowingConversion : ErrorIds.SignMix;

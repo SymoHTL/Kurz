@@ -244,6 +244,8 @@ public sealed partial class Emitter
     {
         switch (type)
         {
+            case NullType:
+                return "true"; // N1: `null` is the one value of its case
             case PrimitiveType { Kind: Primitive.String }:
                 return fn.Value($"call i1 {RuntimeFunction("Same")}(%kz.str {left}, %kz.str {right})");
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || p.Kind is Primitive.Char or Primitive.Bool:
@@ -272,7 +274,7 @@ public sealed partial class Emitter
                         fn.Block(differ);
                         fn.Return("i1 false");
                         fn.Block(cases);
-                        ByCase(tag, union, union.Cases, c => fn.Return($"i1 {(c is VoidType ? "true" : Equal(Payload("%a0", union, c), Payload("%a1", union, c), c, line))}"));
+                        ByCase(tag, union, union.Cases, c => fn.Return($"i1 {(c is VoidType or NullType ? "true" : Equal(Payload("%a0", union, c), Payload("%a1", union, c), c, line))}"));
                     });
                     return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
                 }

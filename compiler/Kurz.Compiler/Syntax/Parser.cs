@@ -1760,7 +1760,7 @@ public sealed class Parser
 
         // R10: `*p` reads through a pointer and `&x` takes the address of a variable, a field or an element, prefix operators as C#
         // writes them in `unsafe` code, binding as `-` does, so `*p.Next` reads through `p.Next`; the front end reads a place as a
-        // name, a path with no `?.`, an element or what a pointer points to, in parentheses or not (IsPlace), and `&` of anything
+        // name, a path with no `?.` or `?[`, an element or what a pointer points to, in parentheses or not (IsPlace), and `&` of anything
         // else is text no rule gives a meaning (E4)
         if (At(TokenKind.Star) || At(TokenKind.Ampersand))
         {
@@ -1777,21 +1777,21 @@ public sealed class Parser
         return ParsePostfix();
     }
 
-    /// <summary>The operand <c>&amp;</c> takes: a name, a path with no <c>?.</c>, an element or what a pointer points to, in parentheses or not.</summary>
+    /// <summary>The operand <c>&amp;</c> takes: a name, a path with no <c>?.</c> or <c>?[</c>, an element or what a pointer points to, in parentheses or not.</summary>
     private static bool IsPlace(Expression expression) => expression switch
     {
         NameExpression or UnaryExpression { Operator: TokenKind.Star } => true,
-        IndexExpression i => HasNoConditionalLink(i.Target),
+        IndexExpression { Conditional: false } i => HasNoConditionalLink(i.Target),
         MemberAccess { Conditional: false } m => HasNoConditionalLink(m.Target),
         ParenthesizedExpression p => IsPlace(p.Inner),
         _ => false,
     };
 
-    /// <summary>A path whose every link is <c>.</c> or an index: <c>a?.b.c</c> holds a <c>?.</c> below its last link.</summary>
+    /// <summary>A path whose every link is <c>.</c> or an index without <c>?</c>: <c>a?.b.c</c> holds a <c>?.</c> below its last link.</summary>
     private static bool HasNoConditionalLink(Expression expression) => expression switch
     {
         MemberAccess m => !m.Conditional && HasNoConditionalLink(m.Target),
-        IndexExpression i => HasNoConditionalLink(i.Target),
+        IndexExpression i => !i.Conditional && HasNoConditionalLink(i.Target),
         _ => true,
     };
 
@@ -1868,14 +1868,17 @@ public sealed class Parser
                 }
             }
 
-            if (At(TokenKind.LeftBracket))
+            if (At(TokenKind.LeftBracket) || (At(TokenKind.Question) && Peek().Kind == TokenKind.LeftBracket))
             {
-                var open = Advance(); // M9: `list[i]`, `map[key]`
+                // M9: `list[i]`, `map[key]`; N5: `list?[i]`, as C#'s `?[]` (section 4, the owner, 2026-10-30, "Add, as C#"), a `?` no
+                // expression takes otherwise
+                var conditional = Match(TokenKind.Question);
+                var open = Advance();
                 suppressNewlines++;
                 var indexValue = ParseExpression();
                 suppressNewlines--;
                 Expect(TokenKind.RightBracket, "`]`");
-                expression = new IndexExpression(open.Line, expression, indexValue);
+                expression = new IndexExpression(open.Line, expression, indexValue, conditional);
                 continue;
             }
 
