@@ -33,6 +33,9 @@ public sealed partial class Checker
     // N5: the type of each member of a chain of `?.` before the chain makes it nullable, which the next member of the chain reads
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
 
+    // N3, N7: what was known after the right side of each `&&` and `||`, which a path the left side showed must still be in
+    private readonly Dictionary<BinaryExpression, ImmutableHashSet<NullPath>> afterRight = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>
     /// N1: <c>T?</c>, the union <c>T | null</c>, laid out as every union is (section 5). What a <c>?</c> makes nullable that is a union,
     /// a nullable type among them (<c>T??</c>), a function type, a pointer, which <c>null</c> is a value of already (R10), a C function
@@ -90,7 +93,8 @@ public sealed partial class Checker
     /// <summary>
     /// N3: what a condition shows where it is true and where it is false: <c>x != null</c> and <c>x == null</c> the paths of
     /// <see cref="NonNullPaths"/>, <c>!</c> the two turned around, and <c>&amp;&amp;</c> and <c>||</c> what holds on every way
-    /// they can come out so (the reading C# takes).
+    /// they can come out so (the reading C# takes), where what the left side showed holds past the right side only if the right side
+    /// did not change it (N7).
     /// </summary>
     private (ImmutableHashSet<NullPath> True, ImmutableHashSet<NullPath> False) Tests(Expression condition)
     {
@@ -107,14 +111,16 @@ public sealed partial class Checker
                 {
                     var (lt, lf) = Tests(b.Left);
                     var (rt, rf) = Tests(b.Right);
-                    return (lt.Union(rt), lf.Intersect(lt.Union(rf)));
+                    var kept = KeptPastRight(b, lt);
+                    return (kept.Union(rt), lf.Intersect(kept.Union(rf)));
                 }
 
             case BinaryExpression { Operator: TokenKind.BarBar } b:
                 {
                     var (lt, lf) = Tests(b.Left);
                     var (rt, rf) = Tests(b.Right);
-                    return (lt.Intersect(lf.Union(rt)), lf.Union(rf));
+                    var kept = KeptPastRight(b, lf);
+                    return (lt.Intersect(kept.Union(rt)), kept.Union(rf));
                 }
 
             case BinaryExpression { Operator: TokenKind.EqualEqual or TokenKind.NotEqual } b when Unwrap(b.Left) is NullLiteral != Unwrap(b.Right) is NullLiteral:
@@ -127,6 +133,10 @@ public sealed partial class Checker
                 return (none, none);
         }
     }
+
+    /// <summary>N7: of what the left side of <paramref name="b"/> showed, what the right side left as it was; nothing where the right side was not read.</summary>
+    private ImmutableHashSet<NullPath> KeptPastRight(BinaryExpression b, ImmutableHashSet<NullPath> shown) =>
+        afterRight.TryGetValue(b, out var after) ? shown.Intersect(after) : ImmutableHashSet<NullPath>.Empty;
 
     /// <summary>The join where paths meet: what each of them keeps; <paramref name="otherwise"/> where no path reaches the point.</summary>
     private static ImmutableHashSet<NullPath> Join(IEnumerable<ImmutableHashSet<NullPath>> reaching, ImmutableHashSet<NullPath> otherwise)
@@ -178,6 +188,7 @@ public sealed partial class Checker
         var (whenTrue, whenFalse) = Tests(b.Left);
         frame.Known = before.Union(b.Operator == TokenKind.AmpersandAmpersand ? whenTrue : whenFalse);
         var right = CheckExpression(b.Right, Types.Bool);
+        afterRight[b] = frame.Known;
         frame.Known = before.Intersect(frame.Known);
         return (left, right);
     }

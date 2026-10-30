@@ -1947,6 +1947,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + Reset + "mut e = Email(1)\nif e != null {\n    Reset(mut e)\n    print(e.Bytes.Count)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors("data User(string? Email)\n\nmut u = User(\"a\")\nif u.Email != null {\n    u = User(null)\n    print(u.Email.Bytes.Count)\n}"));
 
+        // the right side of `&&` and `||` runs after the left side's test, so what it changes the test no longer shows on any way out
+        const string Cleared = "bool Cleared(mut string? s) {\n    s = null\n    return true\n}\n\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + Cleared + "mut e = Email(1)\nif e != null && Cleared(mut e) {\n    print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 17)], Errors(Email + Cleared + "mut e = Email(1)\nif e == null || Cleared(mut e) {\n    print(0)\n} else {\n    print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + Cleared + "mut e = Email(1)\nwhile e != null && Cleared(mut e) {\n    print(e.Bytes.Count)\n}"));
+        Clean(Email + Cleared + "mut e = Email(1)\nif Cleared(mut e) && e != null {\n    print(e.Bytes.Count)\n}");
+        Clean(Email + Cleared + "mut e = Email(1)\nif e != null && Cleared(mut e) && e != null {\n    print(e.Bytes.Count)\n}");
+
         // a variable passed as `mut` is read as its own type, which a `mut` parameter of the type it makes nullable does not take (M7)
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Set(mut string s) {\n    s = \"b\"\n}\n\nmut string? e = \"a\"\nSet(mut e)"));
     }
