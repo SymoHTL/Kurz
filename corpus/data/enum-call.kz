@@ -1,0 +1,6 @@
+// expect: error syntax at 6
+// rules: D18
+
+enum Plan { Free = 1, Pro = 2 }
+
+print(Plan(2))

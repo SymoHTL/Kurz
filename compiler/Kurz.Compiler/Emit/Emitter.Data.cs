@@ -430,7 +430,7 @@ public sealed partial class Emitter
         }
 
         fn.Block(invalid);
-        fn.Emit($"store {Ir(union)} {MakeUnion(union, union.Cases[1], "zeroinitializer")}, ptr {slot}");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, union.Cases.Single(c => !Types.Same(c, type)), "zeroinitializer")}, ptr {slot}");
         fn.Branch(done);
         fn.Block(done);
         return fn.Value($"load {Ir(union)}, ptr {slot}");

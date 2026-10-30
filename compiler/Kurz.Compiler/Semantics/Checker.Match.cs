@@ -41,7 +41,7 @@ public sealed partial class Checker
                 case ElsePattern:
                     if (known && Covers(cases, covered, literals))
                     {
-                        Report(ErrorIds.UnreachableArm, arm.Line, "`else` after arms that cover every case (C4, C9)");
+                        Report(ErrorIds.UnreachableArm, arm.Line, covered.Count == 0 && literals.Count == 0 ? $"`else` where `{subjectType}` has no values to reach it: a `match` with no arms covers it (C4, D12)" : "`else` after arms that cover every case (C4, C9)");
                     }
 
                     hasElse = true;
@@ -64,7 +64,8 @@ public sealed partial class Checker
                             }
                             else if (type is EnumType e && EveryValueNamed(e, literals))
                             {
-                                Report(ErrorIds.UnreachableArm, arm.Line, $"the arms above name every value of `{type}` (C4, D12)");
+                                // an enum without values: no value reaches the arm, as Rust 1.82 warns that such an arm matches no values
+                                Report(ErrorIds.UnreachableArm, arm.Line, e.Symbol.Values.Count == 0 ? $"`{type}` has no values, so no arm of it is reached: a `match` with no arms covers it (C4, D12)" : $"the arms above name every value of `{type}` (C4, D12)");
                             }
                             else
                             {

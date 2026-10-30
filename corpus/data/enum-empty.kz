@@ -1,0 +1,12 @@
+// expect: output
+// | declared
+// rules: D12, D20
+
+enum Never {}
+
+void Show(Never n) {
+    match n {
+    }
+}
+
+print("declared")

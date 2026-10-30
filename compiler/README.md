@@ -653,7 +653,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 273 cases that expect a run, and on Windows the 9 of files besides, with the words the emitter says, and refuses a stale entry; the 55 the
+full and the emitter does not emit, 3 of the 278 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 54 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -923,7 +923,7 @@ dropped, so that the variables it uses count as used, but for the operand of `*`
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
-(chapter 7, D13, and the A-rules of their text); `null`,
+(chapter 7, D13, D17, D19, and the A-rules of their text); `null`,
 a nullable type, `?.` and `??` (chapter 4), `null` where no pointer stands among them; `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
