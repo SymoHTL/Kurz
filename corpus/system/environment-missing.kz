@@ -1,0 +1,20 @@
+// expect: output
+// | not present: KURZ_CASE_NOT_SET
+// | NotPresent
+// | KURZ_CASE_NOT_SET
+// | not present: A=B
+// rules: S14
+
+string Read(string name) => Environment.Variable(name) else {
+    EnvError e => "{e}"
+}
+
+match Environment.Variable("KURZ_CASE_NOT_SET") {
+    string value => print(value)
+    EnvError e => {
+        print(e)
+        print(e.Kind)
+        print(e.Name)
+    }
+}
+print(Read("A=B"))

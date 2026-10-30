@@ -62,10 +62,21 @@ public static class Processes
     }
 
     /// <summary>
-    /// How <c>kurz run</c> and <c>kurz exec</c> start the program: in the caller's directory, with no argument, and with the
-    /// command's standard input, output and error as they are, nothing redirected (the owner, 2026-10-29, "Inherit all three").
+    /// How <c>kurz run</c> and <c>kurz exec</c> start the program: in the caller's directory, with the words after <c>--</c> as its
+    /// arguments, each as it was given (the owner, 2026-10-30, "After <c>--</c>, as cargo"), and with the command's standard input,
+    /// output and error as they are, nothing redirected (the owner, 2026-10-29, "Inherit all three").
     /// </summary>
-    public static ProcessStartInfo Inheriting(string file) => new(file) { UseShellExecute = false };
+    public static ProcessStartInfo Inheriting(string file, IReadOnlyList<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var info = new ProcessStartInfo(file) { UseShellExecute = false };
+        foreach (var a in arguments)
+        {
+            info.ArgumentList.Add(a);
+        }
+
+        return info;
+    }
 
     /// <summary>
     /// Runs the program to its end, as <see cref="Inheriting"/> starts it, and gives its exit code: on Linux 128 and the signal's
@@ -74,11 +85,11 @@ public static class Processes
     /// (the owner, 2026-10-29, "Command waits it out", as cargo does on Windows and C's <c>system()</c> does). A program that does
     /// not start throws <see cref="System.ComponentModel.Win32Exception"/>.
     /// </summary>
-    public static int Run(string file)
+    public static int Run(string file, IReadOnlyList<string> arguments)
     {
         using var interrupt = PosixSignalRegistration.Create(PosixSignal.SIGINT, c => c.Cancel = true);
         using var quit = OperatingSystem.IsWindows() ? null : PosixSignalRegistration.Create(PosixSignal.SIGQUIT, c => c.Cancel = true);
-        using var process = Process.Start(Inheriting(file)) ?? throw new System.ComponentModel.Win32Exception($"`{file}` did not start");
+        using var process = Process.Start(Inheriting(file, arguments)) ?? throw new System.ComponentModel.Win32Exception($"`{file}` did not start");
         process.WaitForExit();
         return process.ExitCode;
     }

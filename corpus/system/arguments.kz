@@ -1,0 +1,9 @@
+// expect: output
+// | []
+// | 0
+// | 1
+// rules: S13
+
+print(args)
+print(args.Count)
+print(Environment.Args().Count)

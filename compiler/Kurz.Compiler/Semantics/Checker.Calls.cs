@@ -1050,7 +1050,12 @@ public sealed partial class Checker
 
             if (n.Name is "File" or "Directory" or "TcpListener" or "TcpStream")
             {
-                return CheckFileFunction(n.Name, m, c); // S2, S6 to S9
+                return CheckFileFunction(n.Name, m, c); // S2, S6 to S9, S15
+            }
+
+            if (n.Name == "Environment")
+            {
+                return CheckEnvironmentFunction(m, c); // S13, S14
             }
 
             if (IsHashName(n.Name))

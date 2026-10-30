@@ -12,9 +12,10 @@ use sys
 thread static mut byte* buffer = null
 thread static mut long room = 0
 
-// Called by the emitted `main` before the program's first statement.
-pub void Start() {
-    sys.Start()
+// Called by the emitted `main` before the program's first statement, with the arguments the C library's
+// start gave it (S13).
+pub void Start(int count, byte* values) {
+    sys.Start(count, values)
 }
 
 // Called by the emitted `main` after the program's last statement: the end of the process with the
@@ -73,6 +74,15 @@ pub void AllocationFailed(long size) {
 pub void RandomFailed() {
     sys.Crashing()
     WriteError("error: random-failed\n")
+    sys.Exit(1)
+}
+
+// The end of the process where an argument made before the program's first statement, `args`, is not
+// UTF-8 (S13; the owner, 2026-10-30, "Refused, as Rust"): `error: invalid-argument` and the exit code 1,
+// with no place and no trace, as `random-failed` ends it.
+pub void InvalidArgument() {
+    sys.Crashing()
+    WriteError("error: invalid-argument\n")
     sys.Exit(1)
 }
 

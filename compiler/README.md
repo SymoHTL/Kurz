@@ -214,7 +214,8 @@ directory `kurz` the command makes and every place are the user's alone, 0700 (t
 no child inherits it, takes the lock of, `flock`'s on Linux and `LockFileEx`'s on Windows, waiting
 for it, and writes the mark `kurz place 1` into before anything else is written to the place; the
 executable is `program`, `program.exe` on Windows, beside the build's other files. The program runs
-in the caller's directory with no argument and with the command's standard input, output and error
+in the caller's directory with the words after the command's first `--` as its arguments, each as it was
+given (S13; the owner, 2026-10-30, "After `--`, as cargo"), and with the command's standard input, output and error
 (the owner, 2026-10-29, "Inherit all three"); while it runs, the command ignores Ctrl-C, and on Linux
 SIGQUIT, so that the program alone ends by them (the owner, 2026-10-29, "Command waits it out"). The
 command then removes the place, its other files first and the lock file last, and ends with the
@@ -250,9 +251,9 @@ Any other command line gets the usage on standard error and the exit code 1:
 
     usage: kurz --version [--verbose]
            kurz build [--release] [--lines] <file.kz> [-o <output>]
-           kurz run [--release] [--lines] <file.kz>
-           kurz exec [--release] [--lines] "<program text>"
-           run and exec pass no arguments to the program
+           kurz run [--release] [--lines] <file.kz> [-- <argument>...]
+           kurz exec [--release] [--lines] "<program text>" [-- <argument>...]
+           run and exec pass the words after -- to the program
 
 ### Readings the record leaves open to the command
 
@@ -269,9 +270,10 @@ ask about it.
 - `build` builds for a 64-bit machine alone: the emitter lays a pointer out in 8 bytes, and the
   runtime declares C's `size_t` as a `long`. Pinned by
   `CommandTests.The_target_is_a_64_bit_Linux_or_Windows_machine`.
-- `run` takes `--release`, `--lines` and the file, each once, in any order, and nothing else, `-o`
-  among it; `exec` takes `--release` and `--lines` before its text alone, each once, and one
-  text, which may be empty: an empty
+- `run` takes `--release`, `--lines` and the file before its first `--`, each once, in any order, and
+  nothing else, `-o` among it; `exec` takes `--release` and `--lines` before its text alone, each
+  once, and one text before its first `--`, which may be empty; every word after that `--` is the
+  program's, a further `--` among them: an empty
   text is an empty program and ends with 0. A missing file or text gets the usage. Pinned by
   `CommandTests`.
 - The name of a place, of its lock file and of the executable, and the text of the mark, are this
@@ -281,9 +283,14 @@ ask about it.
   ([a .NET open takes a lock that does not wait](../knowledge/a-dotnet-open-takes-a-lock-that-does-not-wait.md)).
   Pinned by `PlaceTests`.
 - The program runs in the caller's directory, and the command waits for it however long it runs.
-  Pinned by `CommandTests.The_program_takes_the_commands_input_output_and_error_no_argument_and_the_callers_directory`
+  Pinned by `CommandTests.The_program_takes_the_commands_input_output_and_error_the_words_given_and_the_callers_directory`
   and, on Linux, by the endless program of
   `CommandTests.On_linux_an_interrupt_or_a_quit_ends_the_program_alone_and_the_command_ends_with_its_code`.
+- The command reads its own command line and environment as .NET decodes them, so a word after `--`
+  or a variable whose bytes are not UTF-8 reaches the program `run` and `exec` start with U+FFFD for
+  each sequence that is not, where `cargo run` passes the bytes as they are; a program `build` made
+  and started on its own gets them as they are, which `ProcessTests` holds (S13, S14). Held only by
+  reading: .NET gives no way to pass bytes that are not a string.
 
 ## The runtime
 
@@ -319,7 +326,8 @@ holds what the compiler carries to the files of the tree.
 
 A build checks the runtime for its target and emits it into the program's module, its functions
 under IR names of their own; nothing of it is compiled apart (record, section 2, round 17). The
-emitted `main` calls the runtime's `Start`, then the program's top level, then `Finish`, which ends
+emitted `main` takes the count and the addresses of the process's arguments, as C's `main` does, and
+calls the runtime's `Start` with them, then the program's top level, then `Finish`, which ends
 the process with the exit code 0 through the target's `Exit`, the runtime's one exit (section 6).
 `common/` gives what the emitted code calls: `Print`, the text of an integer, of a `char` and of a
 `float` and a `double` (below), the arithmetic, the conversions and the text of a `decimal` (below), the
@@ -348,7 +356,7 @@ header names room enough, as a kept block given out whole can, else grows throug
 `Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
 with its bytes copied and the old one freed. A target's directory gives
 `Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Random`, `Trace` and `Crashing`: on Linux over the C library,
-`Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
+`Start` keeping the count and the addresses of the arguments (S13), setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
 `Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap`, `Resize` calling `mremap`,
 which moves the pages to other addresses where the ones after them are taken and copies none, and `Random` calling
 `getrandom` with `GRND_INSECURE`, or with `GRND_NONBLOCK` where the kernel refuses that flag, again where a signal
@@ -387,6 +395,18 @@ it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a si
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
 block of a map, its growth and the hash of its keys (M9, below).
+
+The Linux file also gives the command line, the environment and the clock (S13 to S15), which the
+emitted code calls and nothing of `common/` or `std/` does, so that the Windows file gives none of them
+(S11). `Arguments` adds the arguments `Start` kept, from the one at its first parameter on, to a list,
+each a string `FromUtf8` makes of its bytes, and gives 0, or the number of the first that is not UTF-8;
+`Variable` reads `getenv` and gives 0 with the value, 1 for a name that is empty or holds `=` and for a
+variable that is not set, as Rust's `var_os` gives none for them, and 2 for a value that is not UTF-8;
+`Now` reads `clock_gettime` with `CLOCK_REALTIME` into the page `stat` fills, the nanoseconds from
+1970-01-01, and gives false where the page cannot be mapped; and `FileModified` reads `st_mtim` at
+byte 88 of `struct stat`, -4096, `InvalidData`, for a time the 64 bits of a `timestamp` do not hold
+(T24). `common/`'s `InvalidArgument` writes `error: invalid-argument` and ends the process with 1,
+with no place, as `random-failed` ends it.
 
 The text of a `float` and of a `double` is computed in `common/` from the value's bits, which the
 emitted code passes as a `uint` and a `ulong`: the fewest digits that read back as the same value,
@@ -661,6 +681,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   largest `int` of bytes, lowered to 20 in the library's text, and one byte more; a read and a write in
   the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
   created again and one under a file; the text of an error without a path; and the refusal for Windows;
+- the command line, the environment and the clock (S13 to S15), in a build for Linux: `args` is a
+  slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
+  statement where the top-level code names `args`, and `Environment.Args()` the list from the first
+  on at its call; a number other than 0 calls `InvalidArgument` for `args` and raises
+  `invalid-argument` at the call for `Environment.Args()`. `Environment.Variable` copies its name as
+  `CPath` does, a name with a NUL byte giving `NotPresent` without a call, and makes the value or the
+  `EnvError` of `Variable`'s answer, whose text is the words of its kind and its name (S14);
+  `timestamp.Now` calls `Now` and ends the program with `allocation-failed` of the page's 4096 bytes
+  where it gives false; and `File.Modified` is a call on a file (above) whose value is the
+  nanoseconds `FileModified` read. `ProcessTests` pins what no case can: the words a process was
+  given and the program's name, an argument that is not UTF-8 read by either form and by neither,
+  a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
+  the clock against the test's, the time of a file and of a directory at both edges of a
+  `timestamp`, and the refusal for Windows;
 - lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code
@@ -828,8 +862,8 @@ A program that uses one of these gets one `not supported` at the construct's lin
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
-(M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket in a build for
-Windows (S11), and a construct of the other chapters the checker does not read. The line
+(M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket and a read of the
+command line, the environment or the clock in a build for Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
 The reference counting of section 3 is emitted for lists, strings, maps, the environments of lambdas and
@@ -1073,8 +1107,8 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths none, since they run through a
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17) and 13 (files and sockets: S1 to S11; S12's grants are a
-package's, and the checker reads a program), and the rules of `print` and of a value's text that
+flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
+among them, are a package's, and the checker reads a program), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a

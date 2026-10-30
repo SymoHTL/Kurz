@@ -10,7 +10,7 @@ public sealed partial class Checker
     private DataType IoError => new(dataTypes["IoError"], []);
 
     /// <summary>
-    /// S2, S6, S7, S8: a function of <c>File</c> or <c>Directory</c> on a path, a <c>string</c>, and S9: <c>TcpListener.Bind</c> and
+    /// S2, S6, S7, S8, S15: a function of <c>File</c> or <c>Directory</c> on a path, a <c>string</c>, and S9: <c>TcpListener.Bind</c> and
     /// <c>TcpStream.Connect</c> on an address, a <c>string</c>; each result is its success or the case <c>IoError</c> (S1; section 12, the
     /// owner, 2026-10-29, "One union, as Rust" and "Rust's types, Kurz casing").
     /// </summary>
@@ -28,6 +28,7 @@ public sealed partial class Checker
             ("File", "Rename") => (CallKind.FileRename, [Path("from"), Path("to")], Types.Void),
             ("File", "Size") => (CallKind.FileSize, [Path("path")], Types.Long),
             ("File", "Exists") => (CallKind.FileExists, [Path("path")], Types.Bool),
+            ("File", "Modified") => (CallKind.FileModified, [Path("path")], Types.Timestamp),
             ("Directory", "Create") => (CallKind.DirectoryCreate, [Path("path")], Types.Void),
             ("Directory", "List") => (CallKind.DirectoryList, [Path("path")], new ListType(Types.String)),
             ("Directory", "Delete") => (CallKind.DirectoryDelete, [Path("path")], Types.Void),
@@ -37,7 +38,7 @@ public sealed partial class Checker
         };
         if (function is not { } f)
         {
-            Report(ErrorIds.UnknownName, m.Line, $"`{type}` has no function `{m.Member}` (S2, S6 to S9, V10)");
+            Report(ErrorIds.UnknownName, m.Line, $"`{type}` has no function `{m.Member}` (S2, S6 to S9, S15, V10)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -80,6 +81,37 @@ public sealed partial class Checker
         }
 
         var candidate = new Candidate { Slots = f.Slots, Result = Types.Union([f.Success, IoError]) };
+        return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
+    }
+
+    // ---- the command line and the environment (chapter 13) -----------------------------------------------
+
+    /// <summary>
+    /// S13: <c>Environment.Args()</c>, the program's arguments with its name first, as Rust's <c>std::env::args()</c> (section 12, the
+    /// owner, 2026-10-30, "Both"); S14: <c>Environment.Variable(name)</c>, a variable of the environment or the case <c>EnvError</c>, as
+    /// Rust's <c>env::var</c> (section 12, the owner, 2026-10-30, "An outcome, as Rust").
+    /// </summary>
+    private Typed CheckEnvironmentFunction(MemberAccess m, CallExpression c)
+    {
+        (CallKind Kind, List<Slot> Slots, KurzType Result)? function = m.Member switch
+        {
+            "Args" => (CallKind.EnvironmentArgs, [], new ListType(Types.String)),
+            "Variable" => (CallKind.EnvironmentVariable, [new Slot("name", Types.String, false, false, false)], Types.Union([Types.String, new DataType(dataTypes["EnvError"], [])])),
+            _ => null,
+        };
+        if (function is not { } f)
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`Environment` has no function `{m.Member}` (S13, S14, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, $"`Environment.{m.Member}`"))
+        {
+            return Typed.Error;
+        }
+
+        var candidate = new Candidate { Slots = f.Slots, Result = f.Result };
         return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
     }
 }

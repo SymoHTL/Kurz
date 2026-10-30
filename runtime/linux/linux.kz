@@ -30,6 +30,7 @@ extern "C" {
     int mkdir(byte* path, int mode)
     int rmdir(byte* path)
     int stat(byte* path, void* status)
+    int clock_gettime(int clock, void* time)
     void* opendir(byte* path)
     void* readdir(void* directory)
     int closedir(void* directory)
@@ -54,11 +55,18 @@ extern "C" in "gcc_s" {
     ulong _Unwind_GetIPInfo(void* context, int* before)
 }
 
-// The start of the process: the signal of a closed pipe, `SIGPIPE` (13), set to ignored, so that a
-// write to a closed pipe returns an error, which `print` raises as `print-failed` (design record,
-// section 6); `SIG_IGN` is the handler 1. Then the handler of a fault, `Faults`.
-pub void Start() {
+// The arguments the C library's start gave `main`, their count and the address of their pointers, which
+// `Arguments` reads (S13).
+static mut int argumentCount = 0
+static mut byte* argumentValues = null
+
+// The start of the process: the arguments kept, then the signal of a closed pipe, `SIGPIPE` (13), set to
+// ignored, so that a write to a closed pipe returns an error, which `print` raises as `print-failed`
+// (design record, section 6); `SIG_IGN` is the handler 1. Then the handler of a fault, `Faults`.
+pub void Start(int count, byte* values) {
     raw {
+        argumentCount = count
+        argumentValues = values
         signal(13, Ptr<void>(1))
         Faults()
     }
@@ -1875,6 +1883,33 @@ pub long FileExists(byte* path) {
     return 1
 }
 
+// The time the file at `path` was last written, in nanoseconds from 1970-01-01, put in `nanoseconds`
+// (S15): 0, the failure, or -4096 for a time the 64 bits of a `timestamp` do not hold, `InvalidData` to the
+// caller, as Rust's `modified()` gives an error where the system's value is no time. `st_mtim` stands at
+// byte 88 of x86-64's `struct stat`, its seconds and then its nanoseconds.
+pub long FileModified(byte* path, mut long nanoseconds) {
+    long result = Status(path)
+    if result < 0 {
+        return result
+    }
+
+    raw {
+        long seconds = *Ptr<long>(status + 88)
+        long part = *Ptr<long>(status + 96)
+        if seconds > 9223372036 || seconds < -9223372037 || (seconds == 9223372036 && part > 854775807) || (seconds == -9223372037 && part < 145224192) {
+            return -4096
+        }
+
+        if seconds < 0 {
+            nanoseconds = (seconds + 1) * 1000000000 + (part - 1000000000) // the last second the 64 bits reach before 1970 holds no whole second's nanoseconds
+        } else {
+            nanoseconds = seconds * 1000000000 + part
+        }
+    }
+
+    return 0
+}
+
 // Whether a directory has the path: its type in `st_mode` (`S_IFMT`, 0o170000) is `S_IFDIR` (0o40000).
 bool IsDirectory(byte* path) {
     if Status(path) < 0 {
@@ -1989,6 +2024,98 @@ pub long ListDirectory(byte* path, mut List<string> names) {
     }
 
     return result
+}
+
+// ---- the clock, the command line and the environment (design record, section 12) ---------------------
+
+// The time of the wall clock in nanoseconds from 1970-01-01, put in `nanoseconds` (S15), read by
+// `clock_gettime` with `CLOCK_REALTIME` (0), as C#'s `DateTime.UtcNow` reads the system's clock, into the
+// page of the thread that `stat` fills, its `struct timespec` the seconds at byte 0 and the nanoseconds at
+// byte 8: true, or false where the page cannot be mapped. After the year 2262 the time leaves the 64 bits of
+// a `timestamp` (T24).
+pub bool Now(mut long nanoseconds) {
+    raw {
+        if status == null {
+            status = Memory(4096)
+        }
+
+        if status == null {
+            return false
+        }
+
+        clock_gettime(0, Ptr<void>(status))
+        nanoseconds = *Ptr<long>(status) * 1000000000 + *Ptr<long>(status + 8)
+    }
+
+    return true
+}
+
+// The arguments of the process from the one at `skip` on, added to `list` in their order (S13): 0, or the
+// number of the first that is not UTF-8, counted from 1, which a `string` does not hold, as Rust's
+// `env::args()` panics on it.
+pub int Arguments(int skip, mut List<string> list) {
+    mut int at = skip
+    raw {
+        while at < argumentCount {
+            byte* value = *Ptr<byte*>(argumentValues + long(at) * 8)
+            long count = strlen(value)
+            byte* items = Bytes.Allocate(count)
+            mut long i = 0
+            while i < count {
+                items[i] = value[i]
+                i = i + 1
+            }
+
+            match string.FromUtf8(Bytes.FromRaw(items, count)) {
+                string text => list.Add(text)
+                InvalidUtf8 => return at + 1
+            }
+
+            at = at + 1
+        }
+    }
+
+    return 0
+}
+
+// The value of the environment's variable `key`, a NUL-ended name, put in `value` (S14): 0, 1 where
+// the variable is not set or the name is empty or holds `=`, as Rust's `var_os` gives none for them, or
+// 2 where its value is not UTF-8. The name holds no NUL byte: the caller gives such a name 1 itself.
+pub int Variable(byte* key, mut string value) {
+    raw {
+        mut long i = 0
+        while key[i] != 0 {
+            if key[i] == 61 {
+                return 1
+            }
+
+            i = i + 1
+        }
+
+        if i == 0 {
+            return 1
+        }
+
+        byte* found = getenv(key)
+        if found == null {
+            return 1
+        }
+
+        long count = strlen(found)
+        byte* items = Bytes.Allocate(count)
+        mut long j = 0
+        while j < count {
+            items[j] = found[j]
+            j = j + 1
+        }
+
+        match string.FromUtf8(Bytes.FromRaw(items, count)) {
+            string text => value = text
+            InvalidUtf8 => return 2
+        }
+    }
+
+    return 0
 }
 
 // ---- sockets (design record, section 12) ------------------------------------------------------------

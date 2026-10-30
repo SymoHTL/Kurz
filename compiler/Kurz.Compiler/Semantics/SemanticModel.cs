@@ -95,6 +95,9 @@ public enum CallKind
     /// <summary><c>File.Exists(path)</c> (S7).</summary>
     FileExists,
 
+    /// <summary><c>File.Modified(path)</c> (S15).</summary>
+    FileModified,
+
     /// <summary><c>Directory.Create(path)</c> (S8).</summary>
     DirectoryCreate,
 
@@ -121,6 +124,12 @@ public enum CallKind
 
     /// <summary>A listener's <c>Accept()</c> (S9).</summary>
     TcpAccept,
+
+    /// <summary><c>Environment.Args()</c> (S13).</summary>
+    EnvironmentArgs,
+
+    /// <summary><c>Environment.Variable(name)</c> (S14).</summary>
+    EnvironmentVariable,
 
     /// <summary><c>Sha256.Hash(bytes)</c>, <c>Md5.Hash(bytes)</c> or <c>Crc32.Hash(bytes)</c> (H1); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
     Hash,
@@ -196,6 +205,16 @@ public sealed class SemanticModel
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// <c>args</c>, the program's arguments without its name, which the top-level code sees (S13), and the line of its first read; null
+    /// in a file that is no program's top-level code.
+    /// </summary>
+    public VariableSymbol? Arguments { get; private set; }
+
+    /// <summary>The line of the first read of <see cref="Arguments"/>, 0 where nothing reads it.</summary>
+    public int ArgumentsLine { get; private set; }
 
     /// <summary>The type of an expression, and its value where it is a constant; for a call that stands as a value, its success (O2).</summary>
     public Typed TypeOf(Expression expression) => types.TryGetValue(expression, out var t) ? t : throw Missing("expression", expression.Line);
@@ -260,6 +279,21 @@ public sealed class SemanticModel
     /// the type of its target makes nullable, and <paramref name="member"/> is its own type, which <see cref="TypeOf"/> gives nullable.
     /// </summary>
     public bool IsChainMember(MemberAccess access, out KurzType member) => chainMembers.TryGetValue(access, out member!);
+
+    /// <summary>Whether the member is <c>timestamp.Now</c>, the read of the wall clock (S15).</summary>
+    public bool IsClockRead(MemberAccess access) => clockReads.Contains(access);
+
+    internal void RecordClockRead(MemberAccess access) => clockReads.Add(access);
+
+    internal void RecordArguments(VariableSymbol arguments) => Arguments = arguments;
+
+    internal void RecordArgumentsRead(int line)
+    {
+        if (ArgumentsLine == 0 || line < ArgumentsLine)
+        {
+            ArgumentsLine = line;
+        }
+    }
 
     internal void RecordType(Expression expression, Typed typed) => types[expression] = typed;
 

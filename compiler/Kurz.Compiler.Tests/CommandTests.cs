@@ -281,6 +281,8 @@ public sealed class CommandTests : IDisposable
     [InlineData("run", "--release", "--release", "a.kz")]
     [InlineData("run", "--lines", "--lines", "a.kz")]
     [InlineData("run", "a.kz", "-o", "out")]
+    [InlineData("run", "--", "a.kz")]
+    [InlineData("run", "--release", "--", "a.kz")]
     [InlineData("exec")]
     [InlineData("exec", "--release")]
     [InlineData("exec", "print(1)", "print(2)")]
@@ -289,11 +291,13 @@ public sealed class CommandTests : IDisposable
     [InlineData("exec", "--release", "--lines")]
     [InlineData("exec", "--lines", "--lines", "print(1)")]
     [InlineData("exec", "print(1)", "--lines")]
+    [InlineData("exec", "--", "print(1)")]
+    [InlineData("exec", "print(1)", "a", "--", "b")]
     public void A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1(params string[] arguments) =>
         Assert.Equal(
             (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] <file.kz> [-o <output>]\n"
-                + "       kurz run [--release] [--lines] <file.kz>\n       kurz exec [--release] [--lines] \"<program text>\"\n"
-                + "       run and exec pass no arguments to the program\n"),
+                + "       kurz run [--release] [--lines] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] \"<program text>\" [-- <argument>...]\n"
+                + "       run and exec pass the words after -- to the program\n"),
             Kurz(arguments));
 
     /// <summary>
@@ -339,6 +343,28 @@ public sealed class CommandTests : IDisposable
         Assert.Equal((0, "-2147483648\n", ""), KurzWithPlaces("exec", "--release", "int Next(int n) => n + 1\nprint(Next(2147483647))"));
         Assert.Equal((0, "", ""), KurzWithPlaces("exec", "")); // an empty text is an empty program, as an empty file is
         NoPlaceLeft(made: true);
+    }
+
+    [Fact]
+    public void Run_and_exec_give_the_program_the_words_after_the_first_dashes_as_they_were_given()
+    {
+        // S13; the owner, 2026-10-30, "After `--`, as cargo": a further `--`, a flag of the command and a word with a space are the program's
+        var source = Path.Combine(root, "words.kz");
+        File.WriteAllText(source, "print(args)\nprint(Environment.Args().Count)\n");
+        if (OperatingSystem.IsWindows())
+        {
+            // S11: the runtime of Windows gives no argument, and the build says so; the words reach the start of the program as
+            // `The_program_takes_the_commands_input_output_and_error_the_words_given_and_the_callers_directory` holds
+            var (code, output, error) = KurzWithPlaces("run", source, "--", "a");
+            Assert.Equal((1, ""), (code, output));
+            Assert.StartsWith($"{source}:1: not supported: ", error, StringComparison.Ordinal);
+            return;
+        }
+
+        Assert.Equal((0, "[a, --, --release, b c]\n5\n", ""), KurzWithPlaces("run", source, "--", "a", "--", "--release", "b c"));
+        Assert.Equal((0, "[]\n1\n", ""), KurzWithPlaces("run", "--release", source, "--"));
+        Assert.Equal((0, "[]\n1\n", ""), KurzWithPlaces("run", source)); // the positive control of the split: no `--`, no word
+        Assert.Equal((0, "[x]\n", ""), KurzWithPlaces("exec", "--lines", "print(args)", "--", "x"));
     }
 
     [Fact]
@@ -442,7 +468,7 @@ public sealed class CommandTests : IDisposable
         Assert.Matches($@"^error: the place for the run cannot be made\n  note: .+\n  help: check that {Regex.Escape(places)} can be written\n$", error);
 
         using var writer = new StringWriter();
-        Assert.Equal(1, Command.RunProgram(file, root, writer)); // an empty file, which no system starts
+        Assert.Equal(1, Command.RunProgram(file, [], root, writer)); // an empty file, which no system starts
         Assert.Matches($@"^error: the built program cannot be started\n  note: .+\n  help: check that programs may run from {Regex.Escape(root)}\n$", writer.ToString());
     }
 
@@ -456,13 +482,15 @@ public sealed class CommandTests : IDisposable
     }
 
     [Fact]
-    public void The_program_takes_the_commands_input_output_and_error_no_argument_and_the_callers_directory()
+    public void The_program_takes_the_commands_input_output_and_error_the_words_given_and_the_callers_directory()
     {
-        // the owner, 2026-10-29, "Inherit all three": nothing redirected
-        var info = Processes.Inheriting("program");
+        // the owner, 2026-10-29, "Inherit all three": nothing redirected; 2026-10-30, "After `--`, as cargo": the words as they were given
+        var info = Processes.Inheriting("program", ["a", "b c", ""]);
         Assert.Equal(
-            (false, false, false, false, 0, ""),
-            (info.UseShellExecute, info.RedirectStandardInput, info.RedirectStandardOutput, info.RedirectStandardError, info.ArgumentList.Count, info.WorkingDirectory));
+            (false, false, false, false, ""),
+            (info.UseShellExecute, info.RedirectStandardInput, info.RedirectStandardOutput, info.RedirectStandardError, info.WorkingDirectory));
+        Assert.Equal(["a", "b c", ""], info.ArgumentList);
+        Assert.Empty(Processes.Inheriting("program", []).ArgumentList);
     }
 
     [Fact]
