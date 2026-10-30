@@ -1,0 +1,18 @@
+// expect: output
+// | 1
+// | 2
+// | 2
+// rules: M9
+
+// a `double` case of a union that is a map's key compares as a `double` key does, as C#'s `Equals`: NaN finds its entry, and 0.0
+// and -0.0 are one key (M9)
+double z = 0.0
+mut m = Map<int | double, int>()
+int | double k = z / z
+m[k] = 1
+print(m[k] ?? 0)
+int | double p = 0.0
+int | double q = -0.0
+m[p] = 2
+print(m[q] ?? 0)
+print(m.Count)

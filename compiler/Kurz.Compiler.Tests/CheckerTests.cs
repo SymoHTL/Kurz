@@ -2088,6 +2088,21 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_null_arm_over_a_subject_with_no_null_is_an_arm_no_value_reaches()
+    {
+        // N1 (section 4, the owner, 2026-10-30, "Allow, as C#"): a `null` arm over a `string` or over a union without `null` builds with no
+        // diagnostic, as C# compiles `case null` on a `string`; it covers nothing (O8), and a second one is `unreachable-arm`, as on a `T?` (C4)
+        Clean("void Show(string s) {\n    match s {\n        null => print(0)\n        string t => print(t.Bytes.Count)\n    }\n}\n\nShow(\"ab\")");
+        Clean("int | string x = 1\nprint(match x {\n    null => 0\n    int i => i\n    string s => s.Bytes.Count\n})");
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 2)], Errors("void Show(string s) {\n    match s {\n        null => print(0)\n    }\n}\n\nShow(\"ab\")"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 4)], Errors("void Show(string s) {\n    match s {\n        null => print(0)\n        null => print(1)\n        string t => print(t.Bytes.Count)\n    }\n}\n\nShow(\"ab\")"));
+
+        // a subject of a type parameter, which a nullable type can fill (N11), is no subject the answer named: its `null` arm stays
+        // `type-mismatch`, as `null` where a `T` is required is (N6), and the case stands open (section 14)
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("void Show<T>(T x) {\n    match x {\n        null => print(0)\n        else => print(1)\n    }\n}\n\nShow(1)"));
+    }
+
+    [Fact]
     public void An_arm_no_null_reaches_knows_the_subject_not_null()
     {
         // N3 as C# reads a pattern: a type's arm, a literal's and an `else` after the `null` arm know the subject's variable not null,
@@ -2316,10 +2331,16 @@ public sealed class CheckerTests
     [Fact]
     public void A_union_compares_by_its_case_and_its_value()
     {
-        // section 4, the owner, 2026-10-30, "Case and value, as Rust": `==` on two values of a union, or on a union and a value of one of
-        // its cases, compares the case, then the value, alone, as an item and in a field; a union of cases `==` takes is a key, and one with
-        // a case `==` does not take is `type-mismatch`, as a value and as a key
-        Clean("int | string a = 1\nint | string b = \"1\"\nprint(a == b)\nprint(a != 1)");
+        // section 4, the owner, 2026-10-30, "Case and value, as Rust": `==` on two values of a union compares the case, then the value,
+        // alone, as an item and in a field; a union of cases `==` takes is a key, and one with a case `==` does not take is `type-mismatch`,
+        // as a value and as a key; a union beside a value of one of its cases is `type-mismatch` on either side, as Rust refuses
+        // `Some(5) == 5` (section 4, the owner, 2026-10-30, "Refuse, as Rust")
+        Clean("int | string a = 1\nint | string b = \"1\"\nprint(a == b)\nprint(a != b)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | string a = 1\nprint(a == 1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | string a = 1\nprint(\"1\" != a)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | long a = 1\nprint(a == 1)")); // no widening of the literal into a case (T8)
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("List<int> l = List<int>()\nList<int> | Map<int, int> u = l\nprint(l == u)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("List<int> l = List<int>()\nList<int> | Map<int, int> u = l\nprint(u == l)"));
         Clean("m = Map<int | string, int>()\nprint(m)");
         Clean("m = Map<List<int | string>, int>()\nprint(m)");
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | () => int a = 1\nprint(a == a)"));
@@ -2474,7 +2495,7 @@ public sealed class CheckerTests
     [InlineData("m = Map<decimal, int>()\nprint(m)", "1: a map with keys of type `decimal`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
     [InlineData("void F<T>(T x) {\n    m = Map<T, int>()\n    print(m)\n}\n\nF(1)", "2: a map with keys of type `T`: a `T` is no key the checker reads (M9)")]
     [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nvoid Same(Base a, Base b) {\n    print(a == b)\n}\n\nprint(1)", "5: `==` on a `Base`: its derived type `Derived`: its field `V`: `==` on a `T` is not read (D3, M9)")]
-    [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nmut m = Map<Base, int>()\nprint(m.Count)", "4: a map with keys of type `Base`: its field `V`: a `T` is no key the checker reads (M9)")]
+    [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nmut m = Map<Base, int>()\nprint(m.Count)", "4: a map with keys of type `Base`: its derived type `Derived`: its field `V`: a `T` is no key the checker reads (M9)")]
     [InlineData("m = Map<string, () => int>()\nprint(1)", "1: a map with values of type `() => int` (M9, N1)")]
     [InlineData("m = Map<string, int | string>()\nprint(1)", "1: a map with values of type `int | string` (M9, N1)")]
     [InlineData("data Box(Map<string, int> M)\n\nmut bs = List<Box>()\nbs[0].M[\"a\"] = 1", "4: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]

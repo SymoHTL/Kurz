@@ -1025,6 +1025,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         for k, v in Map<int, int>() {
             print("never")
         }
+        mut reached = 0
+        for k, v in sums {
+            if k == 3 {
+                continue
+            }
+            reached = reached + 1
+        }
+        print(reached)
         mut seen = 0
         for k, v in sums {
             if k == 3 {
@@ -1294,7 +1302,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "0",
         "45090", // a loop with two names
         "135", // a loop with one
-        "5", // a `continue`, and a `break` after five entries, whatever the order of the slots
+        "9", // a `continue`
+        "5", // and a `break` after five entries, whatever the order of the slots
         "10", // a loop that removes and writes the map it walks
         "10",
         "true",

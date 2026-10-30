@@ -33,7 +33,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: State of Elixir 2025, question 45, 244 answers, the top row of the page's table: "Better LSP, IDE Support & Debuggers 58 resp. 23.8%"; question 44: "Tooling, LSP & IDE Experience 82 resp. 18.3%", and its summary: "A significant number of comments cite instability with the Language Server (LSP), slow compilation times, and a lack of advanced debugging tools compared to other ecosystems." Announcing the official Elixir Language Server team (https://elixir-lang.org/blog/2024/08/15/welcome-elixir-language-server-team/): the community "had, for some time, three distinct language server implementations, each with their own strengths."
 - Since: the same post says the maintainers agreed "to move forward with a single Language Server Protocol project", and its update reads "the new language server is called Expert and is currently available in alpha as open source." The release post of Elixir v1.18 (https://elixir-lang.org/blog/2024/12/19/elixir-v1-18-0-released/) names "LSP listeners" in its title.
-- Kurz: answered: the owner's words, read as a local language server that is the incremental compiler of "Recompute what changed", recorded as assumed in section 2 of the record. Before the answers: OPEN.
+- Kurz: OPEN: the owner's words are read as a local language server that is the incremental compiler of "Recompute what changed", a reading recorded as assumed in section 2 of the record and not an answer.
 
 ## 3. Slow compilation, and one change recompiles many files
 
@@ -73,12 +73,12 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: GenServer (https://elixir.hexdocs.pm/GenServer.html), on `call/3`: "The default value is 5000. If no reply is received within the specified time, the function call fails and the caller exits." The same paragraph describes the server in that case as "just late with the reply".
 - Since: the gen_server documentation of Erlang/OTP (https://www.erlang.org/doc/apps/stdlib/gen_server.html) says that since OTP 24 `gen_server:call` uses process aliases, so a late reply no longer reaches the caller; the server still does the work.
-- Kurz: answered: "Deadline on chain ID", section 6 of the record. Before the answers: REPEATED.
+- Kurz: answered: "Deadline on chain ID", section 6 of the record, for a caller that waits: an inbox drops a message whose deadline passed. A call whose caller crashed runs to its end and its reply is dropped ("Run it, drop the reply", section 6), the work nobody waits for that this finding names, which the owner took at that cost. Before the answers: REPEATED.
 
 ## 10. Let it crash: a lasting fault restarts in a loop, and the limit takes the tree down
 
 - Evidence: Supervisor (https://elixir.hexdocs.pm/Supervisor.html): "`:max_restarts` - the maximum number of restarts allowed in a time frame. Defaults to `3`." and "`:max_seconds` - the time frame in which `:max_restarts` applies. Defaults to `5`." Supervisor Behaviour, OTP design principles (https://www.erlang.org/doc/system/sup_princ.html): "If more than `MaxR` number of restarts occur in the last `MaxT` seconds, the supervisor terminates all the child processes and then itself." Of the supervisor above it, the page says: "It either restarts the terminated supervisor or terminates itself."
-- Kurz: answered: "Growing pause", section 6 of the record. Before the answers: REPEATED.
+- Kurz: answered: "Growing pause" and "No limit, as Akka", section 6 of the record: a lasting fault restarts about every 30 s without end and takes no tree down, and a limit holds where `max N in` is written; a `retry` of a message that crashes its callee every time restarts that callee up to the `retry`'s count, a cost the owner took ("Keep, name the costs", section 6). Before the answers: REPEATED.
 
 ## 11. Hot code upgrades are too complex to use
 
@@ -90,7 +90,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Mix release (https://mix.hexdocs.pm/Mix.Tasks.Release.html), on build-time configuration: "it is evaluated whenever you compile your code or whenever you assemble the release." Application (https://elixir.hexdocs.pm/Application.html): "In any case, compile-time environments should be avoided." and "Whenever possible, reading the application environment at runtime should be the first choice."
 - Since: `config/runtime.exs` runs at start, and `Application.compile_env` makes a compile-time read explicit; the Application page says Mix tools "compare the compilation values with the runtime values whenever your system starts", "raising an error in case they differ".
-- Kurz: answered: "Typed settings data", section 12 of the record. Before the answers: OPEN.
+- Kurz: answered: "Typed settings data", section 12 of the record; a program with settings does not build for Windows ("Not supported, as files", section 12). Before the answers: OPEN.
 
 ## 13. Macros: code nobody sees, large expansions, compile-time dependencies
 
@@ -119,13 +119,13 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: global (https://www.erlang.org/doc/apps/kernel/global.html): "A network of overlapping partitions might cause the internal state of `global` to become inconsistent." and, of its resolver `random_exit_name/3`: "The function randomly selects one of the pids for registration and kills the other one." Mnesia system information (https://www.erlang.org/doc/apps/mnesia/mnesia_chap7.html): "Determining what data to keep after a communication failure is outside the scope of Mnesia." State of Elixir 2025, question 34: "Distributed state (Mnesia / ETS across nodes) 83 resp. 10.1%".
 - Since: since OTP 25, `global` by default cuts overlapping partitions into fully connected ones (same page). The Mnesia page suggests determining "which "island" contains most of the nodes" and "Using option {majority,true} for critical tables"; the repair of data stays with the application.
-- Kurz: answered: "Raft membership", section 7 of the record. Before the answers: OPEN.
+- Kurz: answered: "Raft membership", "Phi accrual + majority, as Akka" and "Raft: neither side wins", section 7 of the record, and a durable `send` whose second copy is across a split is refused ("Keep 2, name the cost", section 13). Open there (section 14): whether the policy that runs an item on all sides with a `merge` block still has a side to run on, and what a durable `send` refused during a split gives its sender. Before the answers: OPEN.
 
 ## 18. Messages between nodes can be lost
 
 - Evidence: Processes, Erlang reference manual (https://www.erlang.org/doc/system/ref_man_processes.html): "When communicating over the distribution, signals can be lost if the distribution channel goes down." Of order it guarantees one thing: "if an entity sends multiple signals to the same destination entity, the order is preserved;"
 - Since: no change; teams add acknowledgements or an external queue (State of Elixir 2025, question 34: "Message queues / streams (RabbitMQ, Kafka, AWS SQS/SNS, Google Pub/Sub, NATS) 257 resp. 31.3%").
-- Kurz: answered: "Durable: at least once", section 7 of the record. Before the answers: OPEN.
+- Kurz: REPEATED for a `send` to an actor that is not durable on another machine, delivered one time or not at all, as Erlang delivers it (section 7, assumed there); answered for a durable actor: "Durable: at least once", section 7 of the record. Before the answers: OPEN.
 
 ## 19. Selective receive scans the whole mailbox
 
@@ -135,7 +135,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 20. Blocking native code stalls the threads that run processes
 
 - Evidence: erl_nif (https://www.erlang.org/doc/apps/erts/erl_nif.html): "It is difficult to give an exact maximum amount of time that a native function is allowed to work, but usually a well-behaving native function is to return to its caller within 1 millisecond." and "A native function doing lengthy work before returning degrades responsiveness of the VM, and can cause miscellaneous strange behaviors."
-- Kurz: answered: "Readiness I/O, as Tokio", section 12 of the record. Before the answers: OPEN.
+- Kurz: OPEN: "Readiness I/O, as Tokio", section 12 of the record, covers the calls on files and sockets; a `raw` call of a C function that blocks holds its thread and the actors that thread runs, which stands open (section 14). Before the answers: OPEN.
 
 ## 21. Large process state and message copies cost CPU
 
@@ -146,7 +146,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 22. Off-heap binaries kept alive by processes that rarely collect
 
 - Evidence: Erlang garbage collector: "This approach does not catch all problems with binary memory not being released soon enough, but it does catch a lot of them." binary (https://www.erlang.org/doc/apps/stdlib/binary.html): "Using copy/1 on a binary that references a larger binary can potentially free up the larger binary for garbage collection."
-- Kurz: AVOIDED. Section 6 shares big values as Erlang does ("Erlang does the same for binaries above 64 bytes"), but a count drops when a holder ends, with no collection in between: section 4 (the owner, 2026-10-24, "Full counting now") lowers it "at the end of its scope, at an assignment over it and where the value that holds it ends".
+- Kurz: AVOIDED for a big value a count holds. Section 6 shares big values as Erlang does ("Erlang does the same for binaries above 64 bytes"), but a count drops when a holder ends, with no collection in between: section 4 (the owner, 2026-10-24, "Full counting now") lowers it "at the end of its scope, at an assignment over it and where the value that holds it ends". The actor's sweep of section 13, which runs after a threshold ("Live size x2, as Go"), is for what no count frees.
 
 ## 23. The atom table has a fixed limit, and atoms are never freed
 

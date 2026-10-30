@@ -69,7 +69,7 @@ flowchart TD
         (a recomputed digest passes: HAZARD issue 18); fewer entries than the floor;
         in the research entries, a finding with no verdict, two, or one in no word of its entry,
         a section of the design record a verdict cites that the record does not have, a repeated,
-        open or answered finding that cites none (not what the section says: review rule design record),
+        open or answered finding that cites none (not what the section says: a judgment step),
         an entry with no finding, fewer research entries than their floor"]
         G9["reference: a rule without id, status or the record section it cites;
         a decided, assumed or proposed rule with neither a case nor a reason;

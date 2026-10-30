@@ -46,7 +46,8 @@ print(low)
 
 Integer arithmetic that leaves the range of its type wraps around silently. A project keeps T5's
 checks in its release build by a setting in its `project.kz` (§4, the owner, 2026-10-30, "Project
-setting"); a case of the corpus has no `project.kz` and takes the default.
+setting") *(assumed, §4: the name `overflow-checks`, and the whole program, its packages
+among it)*; a case of the corpus has no `project.kz` and takes the default.
 
 Case: [types/overflow-release.kz](../corpus/types/overflow-release.kz)
 ```kurz

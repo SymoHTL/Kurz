@@ -698,7 +698,7 @@ public sealed partial class Checker
     /// </summary>
     private KurzType MapOf(KurzType key, KurzType value, int line)
     {
-        switch (KeyOf(key, []))
+        switch (KeyOf(key, [], []))
         {
             case (true, var why):
                 Report(ErrorIds.TypeMismatch, line, $"a map's key is compared with `==`, which `{key}` does not take: {why} (M9, T18)");
@@ -723,9 +723,10 @@ public sealed partial class Checker
     /// by its case and its value (D3; section 4, the owner, 2026-10-30, "Case and value, as Rust"). A field of a map or a function value
     /// is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "type-mismatch"), and so is one of a file or a socket (section 4, the
     /// owner, 2026-10-30, "Handle ==": "type-mismatch"). <paramref name="seen"/> holds the data types on the way, each with its type
-    /// arguments, whose fields are read at the first meeting (<see cref="Met"/>).
+    /// arguments, whose fields are read at the first meeting (<see cref="Met"/>), and <paramref name="path"/> the data types the walk is
+    /// inside of (<see cref="Inside"/>).
     /// </summary>
-    private (bool Mismatch, string Why)? KeyOf(KurzType type, List<DataType> seen)
+    private (bool Mismatch, string Why)? KeyOf(KurzType type, List<DataType> seen, HashSet<DataSymbol> path)
     {
         switch (type)
         {
@@ -740,33 +741,40 @@ public sealed partial class Checker
             case FunctionType or HandleType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
             case UnionType u:
-                return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
+                return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
-                return KeyOf(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
+                return KeyOf(l.Element, seen, path) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case DataType d:
                 {
-                    if (Met(seen, d))
+                    if (Met(seen, d) || Inside(path, d))
                     {
-                        return null; // its fields are read where the data type was met first
+                        return null; // its fields are read where the data type was met first, or it holds a value of its own type
                     }
 
-                    foreach (var field in d.Symbol.Fields)
+                    try
                     {
-                        if (KeyOf(SubstituteData(d, field.Type), seen) is { } why)
+                        foreach (var field in d.Symbol.Fields)
                         {
-                            return why with { Why = $"its field `{field.Name}`: {why.Why}" };
+                            if (KeyOf(SubstituteData(d, field.Type), seen, path) is { } why)
+                            {
+                                return why with { Why = $"its field `{field.Name}`: {why.Why}" };
+                            }
                         }
-                    }
 
-                    foreach (var derived in dataTypes.Values.Where(x => x.Base == d.Symbol))
-                    {
-                        if (KeyOf(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen) is { } inherited)
+                        foreach (var derived in dataTypes.Values.Where(x => x.Base == d.Symbol))
                         {
-                            return inherited;
+                            if (KeyOf(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen, path) is { } inherited)
+                            {
+                                return inherited with { Why = $"its derived type `{derived.Name}`: {inherited.Why}" };
+                            }
                         }
-                    }
 
-                    return null;
+                        return null;
+                    }
+                    finally
+                    {
+                        path.Remove(d.Symbol);
+                    }
                 }
 
             default:
@@ -790,14 +798,22 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// Whether a walk over types is inside the data type already, with other type arguments; else it is inside it from now on, until the
+    /// walk leaves it. A generic data type met inside itself holds a value of its own type, whose instances can grow without end,
+    /// <c>Node&lt;List&lt;T&gt;&gt;</c> in <c>Node&lt;T&gt;</c>; a build refuses such a type (D1, T19), so the walk reads it no deeper.
+    /// </summary>
+    private static bool Inside(HashSet<DataSymbol> path, DataType d) => !path.Add(d.Symbol);
+
+    /// <summary>
     /// D3 with M9: why <c>==</c> does not take a <c>data</c> value whose field, at any depth, is of the type, null where it does: a field
     /// compares by the equality Kurz gives its type (D3), a union's by its case and its value (D9), a list's by its items (section 4, the
     /// owner, 2026-10-30, "By items, as Rust"), a <c>double</c> or a <c>float</c> item as C#'s <c>Equals</c> compares it (section 4, the
     /// owner, 2026-10-30, "Equals inside data/keys"). A map, a function value, a file or a socket there is <c>type-mismatch</c> (section 4,
     /// the owner, 2026-10-30, "type-mismatch" twice); a pointer and a type parameter are <c>not supported</c>. <paramref name="seen"/> holds
-    /// the data types on the way, each with its type arguments (<see cref="Met"/>).
+    /// the data types on the way, each with its type arguments (<see cref="Met"/>), and <paramref name="path"/> the data types the walk is
+    /// inside of (<see cref="Inside"/>).
     /// </summary>
-    private (bool Mismatch, string Why)? HeldEquality(KurzType type, List<DataType> seen)
+    private (bool Mismatch, string Why)? HeldEquality(KurzType type, List<DataType> seen, HashSet<DataSymbol> path)
     {
         switch (type)
         {
@@ -810,33 +826,40 @@ public sealed partial class Checker
             case FunctionType or CFunctionType or HandleType:
                 return (true, $"`==` takes no `{type}`");
             case ListType l:
-                return HeldEquality(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
+                return HeldEquality(l.Element, seen, path) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
-                return u.Cases.Select(c => HeldEquality(c, seen)).FirstOrDefault(w => w is not null);
+                return u.Cases.Select(c => HeldEquality(c, seen, path)).FirstOrDefault(w => w is not null);
             case DataType d:
                 {
-                    if (Met(seen, d))
+                    if (Met(seen, d) || Inside(path, d))
                     {
-                        return null; // its fields are read where the data type was met first
+                        return null; // its fields are read where the data type was met first, or it holds a value of its own type
                     }
 
-                    foreach (var field in d.Symbol.Fields)
+                    try
                     {
-                        if (HeldEquality(SubstituteData(d, field.Type), seen) is { } why)
+                        foreach (var field in d.Symbol.Fields)
                         {
-                            return why with { Why = $"its field `{field.Name}`: {why.Why}" };
+                            if (HeldEquality(SubstituteData(d, field.Type), seen, path) is { } why)
+                            {
+                                return why with { Why = $"its field `{field.Name}`: {why.Why}" };
+                            }
                         }
-                    }
 
-                    foreach (var derived in dataTypes.Values.Where(x => x.Base == d.Symbol))
-                    {
-                        if (HeldEquality(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen) is { } inherited)
+                        foreach (var derived in dataTypes.Values.Where(x => x.Base == d.Symbol))
                         {
-                            return inherited with { Why = $"its derived type `{derived.Name}`: {inherited.Why}" };
+                            if (HeldEquality(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen, path) is { } inherited)
+                            {
+                                return inherited with { Why = $"its derived type `{derived.Name}`: {inherited.Why}" };
+                            }
                         }
-                    }
 
-                    return null;
+                        return null;
+                    }
+                    finally
+                    {
+                        path.Remove(d.Symbol);
+                    }
                 }
 
             default:
@@ -864,7 +887,7 @@ public sealed partial class Checker
             case ListType l:
                 return ItemEquality(l.Element) is { } inner ? inner with { Why = $"its items: {inner.Why}" } : null;
             case DataType:
-                return HeldEquality(item, []);
+                return HeldEquality(item, [], []);
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(ItemEquality).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case MapType m:

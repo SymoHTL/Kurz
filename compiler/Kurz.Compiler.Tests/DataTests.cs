@@ -266,6 +266,8 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("data User(int Id)\n\nprint(SizeOf<User>())\n", 3, "the size of a `User` (R14)")]
     [InlineData("data Thing(int A)\ndata Box<T>(T V) : Thing\n\nprint(Box<int>(1, 2).V)\n", 4, "a generic data type in a relation of inheritance, `Box<int>` (D6, T19)")]
     [InlineData("data Leaf\ndata Tree<T>(T V, Tree<T> | Leaf Next)\n\nprint(Tree<int>(1, Leaf).V)\n", 4, "a generic data type that holds a value of its own type, `Tree<int>` (D1, T19)")]
+    [InlineData("data Node<T>(int V, Node<List<T>>? Next)\n\nm = Map<Node<int>, int>()\nprint(m)\n", 3, "a generic data type that holds a value of its own type, `Node<int>` (D1, T19)")] // the checker's walk of a key ends inside it (M9)
+    [InlineData("data Node<T>(int V, Node<List<T>>? Next)\n\nn = Node<int>(1, null)\nprint(n == n)\n", 3, "a generic data type that holds a value of its own type, `Node<int>` (D1, T19)")] // and its walk of `==` (D3)
     [InlineData("data Thing(int A)\ndata Box<T>(T V) : Thing\ndata Bag(Box<int> Weight)\n\nBag Empty() => Empty()\n\nEmpty()\n", 5, "a generic data type in a relation of inheritance, `Box<int>` (D6, T19)")] // the field of the type a called function returns, at that function
     public void What_the_emitter_does_not_lay_out_is_not_supported_at_its_line(string text, int line, string message)
     {

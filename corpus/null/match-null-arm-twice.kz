@@ -1,0 +1,12 @@
+// expect: error unreachable-arm at 7
+// rules: N1
+
+void Show(string s) {
+    match s {
+        null => print("none")
+        null => print("again")
+        string t => print(t.Bytes.Count)
+    }
+}
+
+Show("ab")

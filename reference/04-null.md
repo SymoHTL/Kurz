@@ -2,17 +2,26 @@
 
 ### N1 (decided, §4) `T?`
 
-`null` exists. `T?` is short for `T | null`: a value of that type is a `T` or `null`.
+`null` exists. `T?` is short for `T | null`: a value of that type is a `T` or `null`. Every type has
+its nullable form, a union's and a function type's among them: `(int | string)?` is
+`int | string | null`, and `((int) => int)?` holds a function value or `null`, as Rust's `Option` takes
+every type and a C# delegate is nullable (§4, the owner, 2026-10-30, "Nullable form, as Option").
 
 An arm of a `match` may name `null`, which matches the `null` of a `T?` value, as C#'s `case null`
-and Rust's `None =>` do, and a `match` over a `T?` covers `null` by that arm or by `else` (O8,
-C9; §4, the owner, 2026-10-30, "Allow, as C#"). An arm that no `null` reaches, one of a type, one
+and Rust's `None =>` do (C9; §4, the owner, 2026-10-30, "Allow, as C#"), and a `match` over a `T?`
+covers `null` by that arm or by `else` (O8). An arm that no `null` reaches, one of a type, one
 of a literal, or an `else` after the `null` arm, knows the variable or the path of fields the
 `match` tests not null, as C#'s analysis reads a pattern (N3). *(assumed, §4: the coverage of
-`null` by the arm or by `else`, and the arm no `null` reaches knowing the subject not null)* An arm
-after `else`, a `null` arm among them, is `syntax` (C9). *(proposed: that a `null` arm over a subject that is not nullable is
-`type-mismatch`, as `null` is where a type that takes none is required (N6), and that a second
-`null` arm is `unreachable-arm`, as a second arm of one literal is (C4); the answer named neither)*
+`null` by the arm or by `else`, and the arm no `null` reaches knowing the subject not null, readings
+of the answer, which named the arm itself)* A `null` arm over a subject whose type has no `null`, a
+`string` or a union without `null`, builds as an arm no value reaches, with no diagnostic, and covers
+nothing, as C# compiles `case null` on a `string` (§4, the owner, 2026-10-30, "Allow, as C#", a
+second answer, against `type-mismatch`, as Rust refuses `None =>` on an `i32`, and against
+`unreachable-arm`); over a subject of a type parameter, which a nullable type can fill (N11), it is
+`type-mismatch`, as `null` where a `T` is required is (N6), and whether it builds stands open (§14).
+An arm after `else`, a `null` arm among them, is `syntax` (C9). A second `null` arm is
+`unreachable-arm`, as a second arm of one literal is (C4), over a `T?` and over a subject with no `null`
+alike. *(assumed, §4: the second `null` arm, which the answers named not)*
 
 Case: [null/coalesce.kz](../corpus/null/coalesce.kz)
 ```kurz
@@ -45,6 +54,32 @@ void Show(int id) {
 
 Show(1)
 Show(2)
+```
+
+Case: [null/match-null-arm-not-nullable.kz](../corpus/null/match-null-arm-not-nullable.kz)
+```kurz
+void Show(string s) {
+    match s {
+        null => print("none")
+        string t => print(t.Bytes.Count)
+    }
+}
+
+Show("ab")
+Show("abc")
+```
+
+Case: [null/match-null-arm-twice.kz](../corpus/null/match-null-arm-twice.kz)
+```kurz
+void Show(string s) {
+    match s {
+        null => print("none")
+        null => print("again")
+        string t => print(t.Bytes.Count)
+    }
+}
+
+Show("ab")
 ```
 
 ### N2 (decided, §4) No use without a check
@@ -315,9 +350,8 @@ if other != null {
 
 Case: [memory/c-function-type-nullable.kz](../corpus/memory/c-function-type-nullable.kz)
 ```kurz
-// the nullable form of a C function type holds `null` where C may give none (R17), a map's value is
-// read as one (M9), and a call through it is read where a test knows it not null, as any nullable
-// value is (N3)
+// the nullable form of a C function type holds `null` where C may give none (R17), and a call through
+// it is read where a test knows it not null, as any nullable value is (N3)
 extern "C" long Twice(long x) {
     return x * 2
 }
@@ -325,16 +359,9 @@ extern "C" long Twice(long x) {
 (extern "C" (long) => long)? none = null
 print(none == null)
 (extern "C" (long) => long)? f = Twice
-mut table = Map<string, extern "C" (long) => long>()
-table["twice"] = Twice
-g = table["twice"]
 raw {
     if f != null {
         print(f(4))
-    }
-
-    if g != null {
-        print(g(5))
     }
 }
 ```
