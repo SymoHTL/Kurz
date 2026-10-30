@@ -588,6 +588,8 @@ def cases_in(base):
             studied({"go": lang("answered: \"Pick\". Before the answers: OPEN.")}), "finding 1 is answered and cites no section of the record"),
         "research: an UNKNOWN mechanism of Goose that cites no section of the record": (
             studied({"goose": goose("UNKNOWN for saving as bytes.")}), "G1 is UNKNOWN and cites no section of the record"),
+        "research: an answered mechanism of Goose that cites no section of the record": (
+            studied({"goose": goose("answered: \"Pick\". Before the answers: ADOPTABLE.")}), "G1 is answered and cites no section of the record"),
         "research: an AVOIDED or NOT APPLICABLE finding needs no section": (
             studied({"go": lang("AVOIDED. Kurz has no channels.", "NOT APPLICABLE. Kurz has no atom.")}), None),
         "research: an ALREADY, ADOPTABLE or CONFLICTS mechanism of Goose needs no section, and CONFLICT reads as CONFLICTS": (

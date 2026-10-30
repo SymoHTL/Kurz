@@ -288,6 +288,8 @@ Gate: review rule "rules for sessions".
   (CI), the pre-push hook and the write-time hook for the paths; a pick made in code is review
   rule "compiler". A write through a shell command, and a hook cut off at its timeout, pass the
   write-time hook: HAZARD (#4).
+- **The big design choices are asked before anything is derived from them.** The same incident;
+  the procedure is the skill `design-round`. `judgment step`
 - **A change to the record names the research finding it meets, or says it meets none.** The research
   entries (`knowledge/what-developers-dislike-in-*.md`, `knowledge/what-goose-does-for-speed.md`) hold
   what developers dislike in C#, Rust, Go and Elixir, and the mechanisms of Goose's speed, each
@@ -298,8 +300,6 @@ Gate: review rule "rules for sessions".
   `knowledge` for each verdict's citations, a section the record has, and at least one for a finding
   that Kurz repeats or leaves open, or that an answer settled; what the cited section says on the
   finding, and whether a change that says it meets none does meet one, are a `judgment step`.
-- **The big design choices are asked before anything is derived from them.** The same incident;
-  the procedure is the skill `design-round`. `judgment step`
 - **A design round is numbered questions**, each with its options, what every option costs and a
   stated lean; the owner answers by number. A wish that cannot hold is contradicted in the reply,
   not recorded as decided. `judgment step`

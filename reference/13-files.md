@@ -243,7 +243,8 @@ missing, with the permissions 0777 less the `umask`, `void | IoError`, and succe
 directory exists; `Directory.List(path)` is the names of the directory's entries, without `.` and
 `..`, in the order the system gives them, or an `IoError`: each name that is UTF-8 as a string, and
 each that is not as a case that carries its bytes, so that one such name hides no other entry (§12,
-the owner, 2026-10-30), the name and the form of that case standing open (§14); and `Directory.Delete(path)`
+the owner, 2026-10-30), the name and the form of that case standing open (§14), and a path, a `string`, naming no such entry to
+open, rename or delete it *(assumed, §12)*; and `Directory.Delete(path)`
 deletes an empty directory, `void | IoError`. *(assumed, §12: the permissions, the order and the
 entries left out)*
 
@@ -302,7 +303,8 @@ the last address tried, and the string a connection's error names)*
 A read, a write and `TcpStream.Connect` on a socket wait at most 5 seconds by default, as long as a
 call of an actor waits (§6), and the time can be set for each socket, as Rust's `set_read_timeout`
 and `set_write_timeout` set `SO_RCVTIMEO` and `SO_SNDTIMEO` (§12, the owner, 2026-10-30, against a
-timeout as an argument with no default and against a default in the HTTP server alone).
+timeout as an argument with no default and against a default in the HTTP server alone). *(assumed, §12:
+the bound of `TcpStream.Connect` for the whole call, every address it tries among it)*
 `l.Accept()` waits without a bound by default, as Rust's `TcpListener::accept` waits, and a bound
 can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", against the default
 of 5 seconds on `Accept` too). What a call gives when its time runs out, the member that sets the
@@ -412,6 +414,8 @@ is the compile error `files-not-allowed` or `network-not-allowed` at the call. F
 path that calls no such function itself, the error stands at its call that leads on toward the
 function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
 error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
-itself needs neither. *(assumed, §13: `Directory` among the file functions)*
+itself needs neither. *(assumed, §13: `Directory` among the file functions; a call through an interface on the path as a call of
+every implementer the program has, and a call of a function value as a call of every function whose value
+the program takes)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
 
 No case: a case is a program and no package, and the program needs no grant.
