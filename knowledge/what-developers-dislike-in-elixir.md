@@ -78,7 +78,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 10. Let it crash: a lasting fault restarts in a loop, and the limit takes the tree down
 
 - Evidence: Supervisor (https://elixir.hexdocs.pm/Supervisor.html): "`:max_restarts` - the maximum number of restarts allowed in a time frame. Defaults to `3`." and "`:max_seconds` - the time frame in which `:max_restarts` applies. Defaults to `5`." Supervisor Behaviour, OTP design principles (https://www.erlang.org/doc/system/sup_princ.html): "If more than `MaxR` number of restarts occur in the last `MaxT` seconds, the supervisor terminates all the child processes and then itself." Of the supervisor above it, the page says: "It either restarts the terminated supervisor or terminates itself."
-- Kurz: answered: "Growing pause" and "No limit, as Akka", section 6 of the record: a lasting fault restarts about every 30 s without end and takes no tree down, and a limit holds where `max N in` is written. Before the answers: REPEATED.
+- Kurz: answered: "Growing pause" and "No limit, as Akka", section 6 of the record: a lasting fault restarts about every 30 s without end and takes no tree down, and a limit holds where `max N in` is written; a `retry` of a message that crashes its callee every time restarts that callee up to the `retry`'s count, a cost the owner took ("Keep, name the costs", section 6). Before the answers: REPEATED.
 
 ## 11. Hot code upgrades are too complex to use
 

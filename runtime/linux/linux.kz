@@ -2001,7 +2001,8 @@ pub long ListDirectory(byte* path, mut List<string> names) {
 // in its order until one binds or connects, the failure of the last being the call's, as Rust's
 // `each_addr` tries them. Beside the system's numbers negated, a call fails with -4097 for an address
 // that is no host and port, or a name that gives no address, `InvalidInput` to the caller, as Rust gives
-// it, and with -4098 for a lookup that fails with no error of the system, `NotFound` (S9).
+// it, with -4098 for a lookup that fails with no error of the system, `NotFound`, and with -4099 for one
+// that fails with `EAI_AGAIN` or `EAI_FAIL`, `Other` (S9).
 
 // The page of each thread that holds a call's address and what the calls of the system take by address,
 // mapped at its first use: a literal address at its byte 0, with room for one of IPv6, 28 bytes; the
@@ -2205,11 +2206,14 @@ long EachAddress(byte* text, bool listening) {
             result = Attempt(held, length, listening)
         } else {
             // the hints of `struct addrinfo`: `ai_socktype` at its byte 8 `SOCK_STREAM`, the family any,
-            // as Rust's `LookupHost` asks; a failure other than `EAI_SYSTEM` (-11) names no error number
+            // as Rust's `LookupHost` asks; a failure other than `EAI_SYSTEM` (-11) names no error number,
+            // and `EAI_AGAIN` (-3) and `EAI_FAIL` (-4), a temporary failure and one of the name server, are `Other`
             *Ptr<int>(held + 72) = 1
             int looked = getaddrinfo(text, null, Ptr<void>(held + 64), Ptr<void>(held + 112))
             if looked == -11 {
                 result = -long(*__errno_location())
+            } else if looked == -3 || looked == -4 {
+                result = -4099
             } else if looked != 0 {
                 result = -4098
             } else {

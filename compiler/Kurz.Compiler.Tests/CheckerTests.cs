@@ -2087,6 +2087,21 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_null_arm_over_a_subject_with_no_null_is_an_arm_no_value_reaches()
+    {
+        // N1 (section 4, the owner, 2026-10-30, "Allow, as C#"): a `null` arm over a `string` or over a union without `null` builds with no
+        // diagnostic, as C# compiles `case null` on a `string`; it covers nothing (O8), and a second one is `unreachable-arm`, as on a `T?` (C4)
+        Clean("void Show(string s) {\n    match s {\n        null => print(0)\n        string t => print(t.Bytes.Count)\n    }\n}\n\nShow(\"ab\")");
+        Clean("int | string x = 1\nprint(match x {\n    null => 0\n    int i => i\n    string s => s.Bytes.Count\n})");
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 2)], Errors("void Show(string s) {\n    match s {\n        null => print(0)\n    }\n}\n\nShow(\"ab\")"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 4)], Errors("void Show(string s) {\n    match s {\n        null => print(0)\n        null => print(1)\n        string t => print(t.Bytes.Count)\n    }\n}\n\nShow(\"ab\")"));
+
+        // a subject of a type parameter, which a nullable type can fill (N11), is no subject the answer named: its `null` arm stays
+        // `type-mismatch`, as `null` where a `T` is required is (N6), and the case stands open (section 14)
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("void Show<T>(T x) {\n    match x {\n        null => print(0)\n        else => print(1)\n    }\n}\n\nShow(1)"));
+    }
+
+    [Fact]
     public void An_arm_no_null_reaches_knows_the_subject_not_null()
     {
         // N3 as C# reads a pattern: a type's arm, a literal's and an `else` after the `null` arm know the subject's variable not null,

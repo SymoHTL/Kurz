@@ -1,0 +1,14 @@
+// expect: output
+// | 2
+// | 3
+// rules: N1
+
+void Show(string s) {
+    match s {
+        null => print("none")
+        string t => print(t.Bytes.Count)
+    }
+}
+
+Show("ab")
+Show("abc")
