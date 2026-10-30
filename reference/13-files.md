@@ -298,12 +298,14 @@ grammar of the port and of a literal, the NUL byte, the errors of an address, `I
 lookup that succeeds with no address, the error of the system `EAI_SYSTEM` passes on, the error of
 the last address tried, and the string a connection's error names)*
 
-A read, a write, `l.Accept()` and `TcpStream.Connect` on a socket wait at most 5 seconds by default,
-as long as a call of an actor waits (§6), and the time can be set for each socket, as Rust's
-`set_read_timeout` and `set_write_timeout` set `SO_RCVTIMEO` and `SO_SNDTIMEO` (§12, the owner,
-2026-10-30, against a timeout as an argument with no default and against a default in the HTTP server
-alone). What a call gives when its time runs out, the member that sets the time and how the bound
-holds for an actor's socket stand open (§14).
+A read, a write and `TcpStream.Connect` on a socket wait at most 5 seconds by default, as long as a
+call of an actor waits (§6), and the time can be set for each socket, as Rust's `set_read_timeout`
+and `set_write_timeout` set `SO_RCVTIMEO` and `SO_SNDTIMEO` (§12, the owner, 2026-10-30, against a
+timeout as an argument with no default and against a default in the HTTP server alone).
+`l.Accept()` waits without a bound by default, as Rust's `TcpListener::accept` waits, and a bound
+can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", against the default
+of 5 seconds on `Accept` too). What a call gives when its time runs out, the member that sets the
+time and how the bound holds for an actor's socket stand open (§14).
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
