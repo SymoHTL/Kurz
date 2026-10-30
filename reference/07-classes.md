@@ -54,18 +54,6 @@ A class with `mut` fields compares by identity. A class without them compares by
 by the equality Kurz gives its type, a `double` or `float` with NaN equal to NaN as under D3 and K5. Across
 inheritance (K6, K10) K13 holds.
 
-Case: [classes/equals-member.kz](../corpus/classes/equals-member.kz)
-```kurz
-class User(int Id, mut int Hits) {
-    pub bool Equals(User other) => Id == other.Id
-}
-
-a = User(1, 0)
-b = User(1, 0)
-print(a == b)
-print(a.Equals(b))
-```
-
 Case: [classes/equality-identity.kz](../corpus/classes/equality-identity.kz)
 ```kurz
 class Counter(mut int Count)
@@ -176,8 +164,6 @@ class Vec(int X) {
 
 print(Vec(1).X)
 ```
-
-Case: [classes/equals-member.kz](../corpus/classes/equals-member.kz)
 
 Case: [classes/equals-method.kz](../corpus/classes/equals-method.kz)
 ```kurz
