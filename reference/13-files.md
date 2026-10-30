@@ -275,8 +275,8 @@ as Rust reads a `u16`, a `+` and zeros in front taken. A literal is what `inet_p
 inside `[` and `]` with a scope id in digits after a `%` and a port of digits alone, as Rust's parse of
 a socket address reads one, and any other host, `[::1]` before the port `+0` among them, is looked up
 as it is written. An address that holds a NUL byte is `InvalidInput`, as a path is (S1). A listener
-takes every interface where its address is a wildcard, `0.0.0.0`, `[::]` or a name that resolves to
-either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
+takes every interface where its address is a wildcard, `0.0.0.0`, `[::]`, which takes IPv4 too on
+Linux's dual stack, on by default, or a name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
 and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
 its address and passes `listen` a backlog of 128. An address without a `:`, a port that is not a
 number from 0 to 65535 and a name that gives no address are `InvalidInput`, and a lookup that fails is

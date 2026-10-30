@@ -479,6 +479,29 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_listener_on_the_wildcard_of_ipv6_takes_a_connection_of_ipv4_where_the_dual_stack_is_on()
+    {
+        // `[::]` binds every interface of IPv6, and Linux's dual stack, on where `net.ipv6.bindv6only` is 0, its default, gives such a socket the
+        // connections of IPv4 too, as Rust's listener gets them, since neither sets `IPV6_V6ONLY` (S9); with the stack off the connection is
+        // refused, and without IPv6 the socket is not made
+        const string text = """
+            match TcpListener.Bind("[::]:0") {
+                TcpListener l => {
+                    match TcpStream.Connect("127.0.0.1:{l.Port}") {
+                        TcpStream => print("connected")
+                        IoError e => print("{e.Kind} {e.Code}")
+                    }
+                }
+                IoError e => print("{e.Kind} {e.Code}")
+            }
+
+            """;
+        var expected = !File.Exists("/proc/net/if_inet6") ? "Other 97"
+            : File.ReadAllText("/proc/sys/net/ipv6/bindv6only").Trim() == "0" ? "connected" : "ConnectionRefused 111";
+        Ran(text, "socket-dual-stack", [expected]);
+    }
+
+    [Fact]
     public void A_literal_of_ipv6_takes_a_scope_id_and_one_whose_port_has_a_sign_is_looked_up_as_rust_looks_it_up()
     {
         // Rust's parse of a socket address reads `[host%scope]:port`, a `u32` after the `%` and digits alone in the port; where it fails,
