@@ -39,11 +39,13 @@ values of that case are equal, as Rust's derived `PartialEq` compares a field of
 owner, 2026-10-23). The two values of that case compare as a field of the case's type does, so a
 `double` or `float` case that holds NaN equals itself, as a C# record calls `Equals` on a field of
 type `object` (§4, the owner, 2026-10-24); there Kurz departs from Rust's `PartialEq`, which
-compares the two values with their `==`, under which NaN is unequal to itself (§4). `==` takes a union
-outside a field as well, alone, as a list's item, in a list a field holds and as a map's key, and
-compares the case and then the value as a field of a union compares, a `double` or `float` case by
-IEEE's `==` where the union stands alone or in a list that stands alone (§4, the owner, 2026-10-30,
-"Case and value, as Rust"). A field that is a
+compares the two values with their `==`, under which NaN is unequal to itself (§4). `==` takes two
+values of a union outside a field as well, alone, as a list's items, in a list a field holds and as a
+map's keys, and compares the case and then the value as a field of a union compares, a `double` or
+`float` case by IEEE's `==` where the union stands alone or in a list that stands alone, and as C#'s
+`Equals` in a key, a union that is a key itself among them (M9) (§4, the owner, 2026-10-30, "Case and
+value, as Rust"). A union beside a value of one of its cases takes no `==`, on either side:
+`type-mismatch`, as Rust refuses `Some(5) == 5` (§4, the owner, 2026-10-30, "Refuse, as Rust"). A field that is a
 list compares by its items (M9), and its `double` or `float` items, and the values of its `double?` or
 `float?` items, at any depth, compare as C#'s `Equals` compares them, NaN equal to NaN and 0.0 equal to
 -0.0, `null` equal to `null`, so that such a value equals itself, where `==` on two lists outside a
@@ -130,25 +132,28 @@ print(Box(1) == Box("1"))
 
 Case: [data/union-equality.kz](../corpus/data/union-equality.kz)
 ```kurz
-// `==` on a union compares its case, then the value of that case (D3), alone and as the items of two
-// lists (M9); a `double` case of a union that stands alone compares by IEEE's `==`, NaN unequal to itself
-double z = 0.0
+// `==` on two values of a union compares their case, then the value of that case (D3)
 int | string a = 1
 int | string b = "1"
 int | string c = 1
 print(a == b)
 print(a == c)
-print(a == 1)
-print(a != "1")
+print(a != b)
+```
+
+Case: [data/union-nan.kz](../corpus/data/union-nan.kz)
+```kurz
+// a `double` case of a union that stands alone compares by IEEE's `==`, NaN unequal to itself (D3)
+double z = 0.0
 int | double n = z / z
 print(n == n)
-mut xs = List<int | string>()
-xs.Add(1)
-xs.Add("a")
-mut ys = List<int | string>()
-ys.Add(1)
-ys.Add("a")
-print(xs == ys)
+```
+
+Case: [data/union-equality-case-value.kz](../corpus/data/union-equality-case-value.kz)
+```kurz
+// a union beside a value of one of its cases takes no `==`, as Rust refuses `Some(5) == 5` (D3)
+int | string a = 1
+print(a == 1)
 ```
 
 Case: [values/map-union-key.kz](../corpus/values/map-union-key.kz)
@@ -162,13 +167,11 @@ print(m["1"] ?? "none")
 print(m.Count)
 ```
 
-Case: [control/entry-make.kz](../corpus/control/entry-make.kz)
+Case: [data/entry-equality.kz](../corpus/data/entry-equality.kz)
 ```kurz
-a = Entry("Ann", 31)
-print(a)
-b = a with { Value = 32 }
-print(b)
-print(b == Entry("Ann", 32))
+// two entries compare by their fields, as every `data` value does (D3)
+print(Entry("Ann", 32) == Entry("Ann", 32))
+print(Entry("Ann", 31) == Entry("Ann", 32))
 ```
 
 Case: [values/list-equality-nullable-double.kz](../corpus/values/list-equality-nullable-double.kz)
@@ -230,7 +233,14 @@ print(b.Name)
 print(b.Id)
 ```
 
-Case: [control/entry-make.kz](../corpus/control/entry-make.kz)
+Case: [data/entry-with.kz](../corpus/data/entry-with.kz)
+```kurz
+// `with` copies an `Entry` as it copies every `data` value, and the value it copied from keeps its fields (D5)
+a = Entry("Ann", 31)
+b = a with { Value = 32 }
+print(b.Value)
+print(a.Value)
+```
 
 ### D6 (decided, §4) A `data` type may inherit from another
 

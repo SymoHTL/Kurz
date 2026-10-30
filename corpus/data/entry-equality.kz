@@ -1,0 +1,8 @@
+// expect: output
+// | true
+// | false
+// rules: D3
+
+// two entries compare by their fields, as every `data` value does (D3)
+print(Entry("Ann", 32) == Entry("Ann", 32))
+print(Entry("Ann", 31) == Entry("Ann", 32))

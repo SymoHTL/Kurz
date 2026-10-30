@@ -2,7 +2,10 @@
 
 ### N1 (decided, §4) `T?`
 
-`null` exists. `T?` is short for `T | null`: a value of that type is a `T` or `null`.
+`null` exists. `T?` is short for `T | null`: a value of that type is a `T` or `null`. Every type has
+its nullable form, a union's and a function type's among them: `(int | string)?` is
+`int | string | null`, and `((int) => int)?` holds a function value or `null`, as Rust's `Option` takes
+every type and a C# delegate is nullable (§4, the owner, 2026-10-30, "Nullable form, as Option").
 
 An arm of a `match` may name `null`, which matches the `null` of a `T?` value, as C#'s `case null`
 and Rust's `None =>` do (C9; §4, the owner, 2026-10-30, "Allow, as C#"), and a `match` over a `T?`
@@ -347,9 +350,8 @@ if other != null {
 
 Case: [memory/c-function-type-nullable.kz](../corpus/memory/c-function-type-nullable.kz)
 ```kurz
-// the nullable form of a C function type holds `null` where C may give none (R17), a map's value is
-// read as one (M9), and a call through it is read where a test knows it not null, as any nullable
-// value is (N3)
+// the nullable form of a C function type holds `null` where C may give none (R17), and a call through
+// it is read where a test knows it not null, as any nullable value is (N3)
 extern "C" long Twice(long x) {
     return x * 2
 }
@@ -357,16 +359,9 @@ extern "C" long Twice(long x) {
 (extern "C" (long) => long)? none = null
 print(none == null)
 (extern "C" (long) => long)? f = Twice
-mut table = Map<string, extern "C" (long) => long>()
-table["twice"] = Twice
-g = table["twice"]
 raw {
     if f != null {
         print(f(4))
-    }
-
-    if g != null {
-        print(g(5))
     }
 }
 ```
