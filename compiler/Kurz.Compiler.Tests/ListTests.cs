@@ -291,17 +291,29 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // strings in variables, fields, a `with`, a path assignment, an arm's name while the arm changes the subject's variable, a
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
-    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block, and
-    // an interpolation of one hole beside a call that changes the place the hole read
+    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block,
+    // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
+    // nullable variable known not null, an `Add` through the place of one, the item `?[` reads, a list without items in a nullable
+    // variable, a `match` with a `null` arm on one whose arm changes it, and a nullable parameter read in the arm of its case and after
+    // a `match` whose `null` arm leaves
     private const string Strings = """
         data Person(string Name, int Age)
         data Tag(string Label)
         data Leaf
         data Node(string Label, Node | Leaf Next)
+        data Contact(string? Email)
 
         string Same(string s) => s
 
         string Made(int n) => "n{n}"
+
+        string Shown(string? s) {
+            match s {
+                null => return "none"
+                string inner => print(s)
+            }
+            return s
+        }
 
         string Raw(int n) {
             mut string s = ""
@@ -417,6 +429,44 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             string inner => print(inner)
             InvalidUtf8 bad => print(bad.At)
         }
+        mut string? maybe = Made(29)
+        fallback = maybe ?? "none"
+        maybe = null
+        print(fallback)
+        print(maybe ?? Made(30))
+        mut Contact? holder = Contact(Made(31))
+        email = holder?.Email ?? "none"
+        holder = null
+        print(email)
+        print(holder?.Email ?? "none")
+        maybe = Made(32)
+        if maybe != null {
+            known = maybe
+            maybe = null
+            print(known)
+        }
+        mut List<string>? items = List<string>()
+        items.Add(Made(33))
+        print(items)
+        mut List<string>? labels = List<string>()
+        labels.Add(Made(36))
+        first = labels?[0] ?? "none"
+        labels = null
+        print(first)
+        print(labels?[0] ?? "none")
+        mut List<string>? empty = List<string>()
+        print(empty == null)
+        maybe = Made(34)
+        match maybe {
+            null => print("none")
+            string present => {
+                maybe = null
+                print(present)
+            }
+        }
+        print(Shown(Made(35)))
+        print(Shown(null))
+        print(Contact(null))
         raw {
             room = Bytes.Allocate(4)
             room[0] = 104
@@ -457,6 +507,20 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[n26]", // a part holds its items' blocks
         "50", // a byte read in place
         "<n28>", // a string of bytes in a function, through the success of its union
+        "n29", // the value `??` gives, which the variable's next value leaves whole
+        "n30", // the right side of `??`, made where the left is null
+        "n31", // the member `?.` reads, which the variable's next value leaves whole
+        "none",
+        "n32", // a read of a variable known not null, the string of its case
+        "[n33]", // an `Add` through the place of a list in a nullable variable
+        "n36", // the item `?[` reads, which the variable's next value leaves whole
+        "none",
+        "false", // a list without items, the address 0, beside the `null` of a nullable list, the address 1
+        "n34", // the name of a `null` arm's `match` on a variable known not null, which the arm's assignment leaves whole
+        "n35", // a parameter read in the arm of its case
+        "n35", // and after a `match` whose `null` arm leaves
+        "none",
+        "Contact { Email = null }",
         "hi", // a list that took over the room `Bytes.Allocate` gave
         "105",
     ];

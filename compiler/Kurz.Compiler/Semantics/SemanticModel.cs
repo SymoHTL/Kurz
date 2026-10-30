@@ -156,6 +156,7 @@ public sealed class SemanticModel
     private readonly Dictionary<FunctionDeclaration, FunctionSymbol> functions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>The type of an expression, and its value where it is a constant; for a call that stands as a value, its success (O2).</summary>
     public Typed TypeOf(Expression expression) => types.TryGetValue(expression, out var t) ? t : throw Missing("expression", expression.Line);
@@ -215,6 +216,12 @@ public sealed class SemanticModel
 
     public DataSymbol DataTypeOf(TypeDeclaration declaration) => dataTypes.TryGetValue(declaration, out var d) ? d : throw Missing($"type `{declaration.Name}`", declaration.Line);
 
+    /// <summary>
+    /// Whether the member is read in a chain of <c>?.</c> (N5): it is read only where the chain did not stop, from the value of the type
+    /// the type of its target makes nullable, and <paramref name="member"/> is its own type, which <see cref="TypeOf"/> gives nullable.
+    /// </summary>
+    public bool IsChainMember(MemberAccess access, out KurzType member) => chainMembers.TryGetValue(access, out member!);
+
     internal void RecordType(Expression expression, Typed typed) => types[expression] = typed;
 
     internal void RecordName(NameExpression name, VariableSymbol variable) => names[name] = variable;
@@ -238,6 +245,8 @@ public sealed class SemanticModel
     internal void RecordCFunction(ExternFunction declaration, FunctionSymbol symbol) => cFunctions[declaration] = symbol;
 
     internal void RecordDataType(TypeDeclaration declaration, DataSymbol symbol) => dataTypes[declaration] = symbol;
+
+    internal void RecordChainMember(MemberAccess access, KurzType member) => chainMembers[access] = member;
 
     private static InvalidOperationException Missing(string what, int line) =>
         new($"the checker did not read the {what} at line {line}: the model is read for a program the checker read without an error and without `not supported`");

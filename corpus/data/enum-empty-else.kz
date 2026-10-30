@@ -1,0 +1,12 @@
+// expect: error unreachable-arm at 8
+// rules: D12
+
+enum Never {}
+
+void Show(Never n) {
+    match n {
+        else => print(1)
+    }
+}
+
+print("declared")

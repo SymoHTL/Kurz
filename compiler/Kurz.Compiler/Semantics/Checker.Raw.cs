@@ -485,7 +485,7 @@ public sealed partial class Checker
         return new Typed(shape == "difference" ? Types.Long : pointer);
     }
 
-    /// <summary>R10: a comparison with <c>null</c>, which a pointer compares with outside a <c>raw</c> block; null where the other side is no pointer, for chapter 4's <c>null</c> to take.</summary>
+    /// <summary>R10: a comparison with <c>null</c>, which a pointer compares with outside a <c>raw</c> block, and N3: a nullable value; null where neither side is the literal, for the operators' own rules to judge.</summary>
     private Typed? CompareWithNull(BinaryExpression b)
     {
         var leftNull = Unwrap(b.Left) is NullLiteral;
@@ -495,20 +495,7 @@ public sealed partial class Checker
             return null;
         }
 
-        var other = CheckExpression(leftNull ? b.Right : b.Left, null);
-        if (other.IsError)
-        {
-            return new Typed(Types.Bool);
-        }
-
-        if (other.Type is PointerType)
-        {
-            RecordThrough(leftNull ? b.Left : b.Right, new Typed(other.Type, new NullConstant())); // R10: the `null` of the other side's pointer type
-            return new Typed(Types.Bool);
-        }
-
-        NotSupported((leftNull ? b.Left : b.Right).Line, "null (N1)");
-        return new Typed(Types.Bool);
+        return CompareNullable(b, leftNull ? b.Right : b.Left, leftNull ? b.Left : b.Right);
     }
 
     /// <summary>R10: <c>*p = v</c>, <c>p[i] = v</c> and <c>(*p).Next = v</c> write through a pointer, inside a <c>raw</c> block; no variable is assigned, so none needs <c>mut</c>. An assignment into an element of a list is not read (M9).</summary>

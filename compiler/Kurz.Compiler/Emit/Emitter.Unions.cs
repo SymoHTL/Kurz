@@ -12,24 +12,44 @@ public sealed partial class Emitter
 
     // ---- unions (D9) -----------------------------------------------------------------------------
 
-    /// <summary>The tag of a union value: the number of its case's type in the program.</summary>
-    private string Tag(string union, UnionType type) => fn.Value($"extractvalue {Ir(type)} {union}, 0");
+    /// <summary>The tag of a union value: the number of its case's type in the program, which a union with a niche makes from its address (<see cref="Layout.Niche"/>).</summary>
+    private string Tag(string union, UnionType type)
+    {
+        if (layout.Niche(type) is not { } niche)
+        {
+            return fn.Value($"extractvalue {Ir(type)} {union}, 0");
+        }
+
+        var bits = Number(layout.TagBits(type));
+        var isNull = fn.Value($"icmp eq ptr {union}, {niche}");
+        return fn.Value($"select i1 {isNull}, i{bits} {Number(layout.Number(Types.Null))}, i{bits} {Number(layout.Number(Types.NonNull(type)!))}");
+    }
 
     private string IsCase(string tag, UnionType type, KurzType c) =>
         fn.Value($"icmp eq i{Number(layout.TagBits(type))} {tag}, {Number(layout.Number(c))}");
 
-    /// <summary>The value of a union's case, read from its room as the case's type.</summary>
+    /// <summary>The value of a union's case, read from its room as the case's type; of a union with a niche, its address, and of its <c>null</c>, no value.</summary>
     private string Payload(string union, UnionType type, KurzType c)
     {
+        if (layout.Niche(type) is not null)
+        {
+            return c is NullType ? "zeroinitializer" : union;
+        }
+
         var slot = fn.Alloca(Ir(type), "union");
         fn.Emit($"store {Ir(type)} {union}, ptr {slot}");
         var room = fn.Value($"getelementptr {Ir(type)}, ptr {slot}, i32 0, i32 1");
         return fn.Value($"load {Ir(c)}, ptr {room}");
     }
 
-    /// <summary>A union value of the case <paramref name="c"/>: the number of the case's type as its tag, and the value in its room.</summary>
+    /// <summary>A union value of the case <paramref name="c"/>: the number of the case's type as its tag, and the value in its room; of a union with a niche, the value's address, or the niche for its <c>null</c>.</summary>
     private string MakeUnion(UnionType type, KurzType c, string? value)
     {
+        if (layout.Niche(type) is { } niche)
+        {
+            return c is NullType ? niche : value ?? throw new InvalidOperationException($"the case `{c}` without a value");
+        }
+
         var slot = fn.Alloca(Ir(type), "union");
         fn.Emit($"store i{Number(layout.TagBits(type))} {Number(layout.Number(c))}, ptr {slot}");
         if (c is not VoidType)

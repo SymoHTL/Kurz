@@ -1,6 +1,21 @@
-// expect: error redeclared at 4
+// expect: output
+// | From
+// | 3
+// | from
+// | invalid
 // rules: D20
 
-enum Plan { Free, From }
+enum Plan { Free = 1, From = 2, Number = 3 }
 
-print(Plan.Free)
+void Show(int n) {
+    match Plan.From(n) {
+        Plan.From => print("from")
+        Plan p => print(p)
+        Invalid => print("invalid")
+    }
+}
+
+print(Plan.From)
+print(Plan.Number.Number)
+Show(2)
+Show(7)

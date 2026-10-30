@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 7
+// rules: N5
+
+data User(string Name)
+
+u = User("Ann")
+print(u?.Name)
