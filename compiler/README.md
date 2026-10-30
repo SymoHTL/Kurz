@@ -355,8 +355,8 @@ which moves the pages to other addresses where the ones after them are taken and
 interrupted it, reading `/dev/urandom` where the system refuses `getrandom` (`ENOSYS`, `EPERM`), from then on, or its
 pool is not ready (`EAGAIN`), and false where Rust's standard library panics (below), on Windows
 over `kernel32`, `Start` setting the guarantee of the main thread's stack (below), `Release` calling `VirtualFree` and `Resize`
-giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` over `bcrypt`, calling `BCryptGenRandom` with
-the system's preferred generator, and false where it fails. The
+giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` calling `ProcessPrng` of
+`bcryptprimitives.dll`, and false where the library or the call is missing (below). The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -564,7 +564,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   D5), their text,
   `[key: value, ...]` in the order of the map's slots and `[]` without entries (A6, M10), and maps of
   every key the checker takes and every value the emitter lays out, in variables, parameters, fields,
-  unions, lists and maps. A map is the address of a block, null for a map without entries: the count
+  unions, lists and maps. A map is the address of a block, null for a map that never took one (`Clear`
+  and a `Remove` of the last entry leave an empty map that holds its block): the count
   of the values that hold it, 8 bytes, the count of its entries and the number of its slots, a power
   of two from 8, 4 bytes each, the two keys of its hash, 8 bytes each, and the number of slots a key
   can still take before the block grows, 4 bytes, padded to 48 bytes, then a control byte for
@@ -607,16 +608,24 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   pool is not ready, `EAGAIN`; the two flags and the descriptor are plain `static mut`s where Rust
   keeps `AtomicBool`s and a `OnceLock`, Kurz having no atomic form, and the runtime runs one thread.
   Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
-  a file that ends first, and where `BCryptGenRandom` fails on Windows, `Random` gives false and the
-  first write into the thread's first map ends the program with `random-failed` before it takes a
-  block (M9; the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path").
+  a file that ends first, `Random` gives false and the first write into the thread's first map ends
+  the program with `random-failed` before it takes a block (M9; the owner, 2026-10-30, "End with an
+  error, as Rust" and "Rust's full path"). The Windows runtime's `Random` calls `ProcessPrng` of
+  `bcryptprimitives.dll`, as Rust 1.82's `library/std/src/sys/pal/windows/rand.rs` does, a call
+  Microsoft documents as always returning `TRUE` (M9; the owner, 2026-10-30, "ProcessPrng, as Rust
+  1.82"); the library names no import library, so the runtime loads it by `LoadLibraryExA` from the
+  system's directory alone (`LOAD_LIBRARY_SEARCH_SYSTEM32`, 2048) and finds the call by
+  `GetProcAddress`, as Go's runtime loads it, and gives false, so `random-failed`, where either is
+  missing, on a system older than Windows 10, Rust's floor (section 4, an assumption there). The result of `GetProcAddress` is a
+  nullable C function type, `(extern "C" (byte*, ulong) => int)?`, whose `null` is the address 0
+  (R17), called once a test knows it not null (N3).
   `ListTests` holds the end with the host's `Random` edited to give false, and on Linux the keys
   read from `/dev/urandom` where each `getrandom` is a system call the kernel refuses with `ENOSYS`,
   with a file that is not there as its control, which ends with `random-failed`. Held only by
   reading: `GRND_INSECURE` and the turn to `GRND_NONBLOCK`, `EPERM`, `EAGAIN`, `EINTR`, the
   descriptor kept open and read again, the other errors of `getrandom` and a read of the file that
-  fails, which no test makes the system give, and on Windows the call of `BCryptGenRandom` and its
-  check of the status. A
+  fails, which no test makes the system give, and on Windows a library or a call the runtime does not
+  find. A
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
@@ -1096,12 +1105,13 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
 (chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable union,
-function type, C function type or `void`, and a nullable case of a written union, which N1 does not
+function type or `void`, and a nullable case of a written union, which N1 does not
 name (N1, D9), `?.` or `?[` to a member or an item of a type no `?` makes nullable, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
 a part after `?[` and an assignment through it, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
-emitter does not read through a chain (N5, M9), and an assignment into a path
-through a nullable variable or field known not null, which the emitter does not write through (N3, M4), a `mut`
+emitter does not read through a chain (N5, M9), and an assignment of a field through a nullable
+variable or field known not null, `o.I.X = 1`, which the emitter does not write through, where an
+index written through a narrowed map or list is read (N3, M4), a `mut`
 method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
@@ -1126,13 +1136,12 @@ type in C's layout (R16, R17); the text of a raw pointer, of a C function value 
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
-file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, of a type
-parameter, and of a union of two types beside `null`, which `==` takes in a field alone and refuses
-outside one (`type-mismatch`), and a key that holds one of them as the value of its nullable type, as a
-list's item at any depth or in a field of a `data` key, but for a `data` key's own field of such a union,
-`null` among its cases or not, which is read, where a list of such a union in a field is not (M9); `==` on
-two lists, or on a `data` value, that hold a value of a type parameter or a pointer, at any depth (D3,
-M9); a map whose values have a nullable type N1 does not read; an assignment into a map or a list that
+file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
+a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item
+at any depth or in a field of a `data` key (M9); `==` on two lists, or on a `data` value, that hold a
+value of a type parameter or a pointer, at any depth (D3, M9), and `==` on a base whose derived type is
+generic, whose fields of a type parameter it does not read, and such a base as a key, where a generic
+`data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values have a nullable type N1 does not read; an assignment into a map or a list that
 is no variable, or into a path through an entry or an item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's
@@ -1158,8 +1167,10 @@ round can ask about it by the rule's id.
   value of `void` among them, is `type-mismatch`, and so is a list of one and a nullable type of one,
   since section 4 takes any type `==` compares; `==` between two maps is `type-mismatch` (T18, D3). `==` on two lists takes two
   lists of one type, `List<int>` beside `List<long>` being `type-mismatch` as Rust's `Vec<i32>` beside
-  `Vec<i64>` is, and items of a union of two types beside `null`, or of a nullable type of a type `==`
-  does not take, are `type-mismatch`, as `==` on such a union outside a field is; a `data` value compares a list in a field by its items (D3).
+  `Vec<i64>` is, and items of a nullable type of a type `==` does not take, or of a union with a case
+  `==` does not take, are `type-mismatch`; a union compares by its case, then that case's value, alone,
+  as a list's item and as a key, as Rust's derived `PartialEq` compares an enum (section 4, the owner,
+  2026-10-30, "Case and value, as Rust"; D3); a `data` value compares a list in a field by its items (D3).
   `map[key] = value` and `list[i] = value` are assignments into a path (M4) and stand on a `mut`
   variable or parameter, with M4's order, the value before the key or the index; an index of a type
   other than an integer is `type-mismatch` (T2). Two names in a `for` loop over a list or a range are

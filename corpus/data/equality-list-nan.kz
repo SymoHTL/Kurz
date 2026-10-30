@@ -1,7 +1,7 @@
 // expect: output
 // | true
 // | false
-// rules: D3
+// rules: D3, M9
 
 data Samples(List<double> Xs)
 

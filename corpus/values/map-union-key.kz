@@ -1,0 +1,13 @@
+// expect: output
+// | one
+// | text
+// | 2
+// rules: M9, D3
+
+// a union is a key, which compares by its case, then its value (D3): `1` and `"1"` are two keys
+mut m = Map<int | string, string>()
+m[1] = "one"
+m["1"] = "text"
+print(m[1] ?? "none")
+print(m["1"] ?? "none")
+print(m.Count)

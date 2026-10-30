@@ -322,6 +322,18 @@ ages["Ann"] = 31
 print(ages)
 ```
 
+Case: [values/map-key-kept.kz](../corpus/values/map-key-kept.kz)
+```kurz
+// 0.0 and -0.0 are one key (M9): the write under 0.0 finds the entry of -0.0, takes the new value and
+// keeps the entry's own key
+double z = 0.0
+mut names = Map<double, string>()
+names[-z] = "minus zero"
+names[z] = "zero"
+print(names.Count)
+print(names)
+```
+
 ### A7 (decided, §8) A value that holds an instance without a text
 
 A3 and A4 make the text of a `data` value and of a list out of the texts of what they hold, and gives

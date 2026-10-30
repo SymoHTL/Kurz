@@ -86,8 +86,9 @@ public sealed partial class Checker
                     {
                         variable.Read = true;
                         model.RecordName(n, variable);
-                        model.RecordType(n, new Typed(variable.Type));
-                        return CallValue(variable.Type, c);
+                        var value = Narrowed(n, new Typed(variable.Type)); // N3: a nullable C function known not null (R17)
+                        model.RecordType(n, value);
+                        return CallValue(value.Type, c);
                     }
 
                     if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
@@ -683,14 +684,15 @@ public sealed partial class Checker
     /// <summary>
     /// M9: the type of a map the checker reads. A key is a value of a type that compares by content (section 4, the owner, 2026-10-30,
     /// "Any type with =="): a string, a number, a <c>char</c>, a <c>bool</c>, a time, an enum, a <c>data</c> value of such fields, a
-    /// field of a union of them among them (D3), and a list of such items; a <c>double</c> or a <c>float</c>, alone or in a field,
+    /// union of them, alone, in a field or as an item, by its case and its value (D3; section 4, the owner, 2026-10-30, "Case and value,
+    /// as Rust"), and a list of such items; a <c>double</c> or a <c>float</c>, alone or in a field,
     /// compares as C#'s <c>double.Equals</c> does in a <c>Dictionary</c> (section 4, the owner, 2026-10-30, "As C#"), and so do the
     /// items of a list of them in a key (section 4, the owner, 2026-10-30, "Equals inside data/keys"). A key of a nullable type of such a
     /// type compares as <c>==</c> compares two nullable values, <c>null</c> equal to <c>null</c> alone (N10), a <c>double?</c> or a
     /// <c>float?</c> one's value as a <c>double</c> key's (section 4, the owner, 2026-10-30, "As plain double"; for the other types an
     /// assumption there). A map, a function value, a file and a socket take no <c>==</c>, and nor does a <c>data</c> value that holds one
     /// of them, so they are no key (<c>type-mismatch</c>, T18; section 4, the owner, 2026-10-30, "type-mismatch"); the rest are <c>not
-    /// supported</c>: a <c>decimal</c>, a pointer, a type parameter and a union of two types beside <c>null</c>. A value is any type whose
+    /// supported</c>: a <c>decimal</c>, a pointer and a type parameter. A value is any type whose
     /// nullable type the checker reads (N1, N11), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30,
     /// "Flatten, as C#").
     /// </summary>
@@ -717,9 +719,13 @@ public sealed partial class Checker
 
     /// <summary>
     /// M9: why a value of the type is no key of a map, null where it is one: <c>Mismatch</c> for a type that takes no <c>==</c>, else a
-    /// key the checker does not read. <paramref name="seen"/> holds the data types on the way, whose fields are read at the first meeting.
+    /// key the checker does not read. A union, <c>null</c> among its cases or not, is a key where each of its cases is one, and compares
+    /// by its case and its value (D3; section 4, the owner, 2026-10-30, "Case and value, as Rust"). A field of a map or a function value
+    /// is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "type-mismatch"), and so is one of a file or a socket (section 4, the
+    /// owner, 2026-10-30, "Handle ==": "type-mismatch"). <paramref name="seen"/> holds the data types on the way, each with its type
+    /// arguments, whose fields are read at the first meeting (<see cref="Met"/>).
     /// </summary>
-    private (bool Mismatch, string Why)? KeyOf(KurzType type, HashSet<DataSymbol> seen)
+    private (bool Mismatch, string Why)? KeyOf(KurzType type, List<DataType> seen)
     {
         switch (type)
         {
@@ -733,20 +739,20 @@ public sealed partial class Checker
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or HandleType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
-            case UnionType u when Types.NonNull(u) is { } held:
-                return KeyOf(held, seen); // N10: `null` equals `null` alone, and two values compare as their type's keys do
+            case UnionType u:
+                return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
                 return KeyOf(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case DataType d:
                 {
-                    if (!seen.Add(d.Symbol))
+                    if (Met(seen, d))
                     {
                         return null; // its fields are read where the data type was met first
                     }
 
                     foreach (var field in d.Symbol.Fields)
                     {
-                        if (FieldKeyOf(SubstituteData(d, field.Type), seen) is { } why)
+                        if (KeyOf(SubstituteData(d, field.Type), seen) is { } why)
                         {
                             return why with { Why = $"its field `{field.Name}`: {why.Why}" };
                         }
@@ -769,15 +775,19 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// M9 with D3: why a field of a <c>data</c> key is no key, null where it is one: a key's type, or a union of them, <c>null</c> among its
-    /// cases, which compares by its case and its value. A field of a map or a function value is <c>type-mismatch</c> (section 4, the owner,
-    /// 2026-10-30, "type-mismatch"), and so is one of a file or a socket (section 4, the owner, 2026-10-30, "Handle ==": "type-mismatch").
+    /// Whether a walk over types met the data type already, with the same type arguments; else it is met from now on. A generic data type
+    /// is met once for each of its instances, so that <c>Box&lt;int&gt;</c> does not stand for <c>Box&lt;Map&lt;int, int&gt;&gt;</c>.
     /// </summary>
-    private (bool Mismatch, string Why)? FieldKeyOf(KurzType type, HashSet<DataSymbol> seen) => type switch
+    private static bool Met(List<DataType> seen, DataType d)
     {
-        UnionType u => u.Cases.Where(c => c is not NullType).Select(c => FieldKeyOf(c, seen)).FirstOrDefault(w => w is not null),
-        _ => KeyOf(type, seen),
-    };
+        if (seen.Any(s => Types.Same(s, d)))
+        {
+            return true;
+        }
+
+        seen.Add(d);
+        return false;
+    }
 
     /// <summary>
     /// D3 with M9: why <c>==</c> does not take a <c>data</c> value whose field, at any depth, is of the type, null where it does: a field
@@ -785,9 +795,9 @@ public sealed partial class Checker
     /// owner, 2026-10-30, "By items, as Rust"), a <c>double</c> or a <c>float</c> item as C#'s <c>Equals</c> compares it (section 4, the
     /// owner, 2026-10-30, "Equals inside data/keys"). A map, a function value, a file or a socket there is <c>type-mismatch</c> (section 4,
     /// the owner, 2026-10-30, "type-mismatch" twice); a pointer and a type parameter are <c>not supported</c>. <paramref name="seen"/> holds
-    /// the data types on the way.
+    /// the data types on the way, each with its type arguments (<see cref="Met"/>).
     /// </summary>
-    private (bool Mismatch, string Why)? HeldEquality(KurzType type, HashSet<DataSymbol> seen)
+    private (bool Mismatch, string Why)? HeldEquality(KurzType type, List<DataType> seen)
     {
         switch (type)
         {
@@ -805,7 +815,7 @@ public sealed partial class Checker
                 return u.Cases.Select(c => HeldEquality(c, seen)).FirstOrDefault(w => w is not null);
             case DataType d:
                 {
-                    if (!seen.Add(d.Symbol))
+                    if (Met(seen, d))
                     {
                         return null; // its fields are read where the data type was met first
                     }
@@ -839,7 +849,9 @@ public sealed partial class Checker
     /// <c>==</c>, as Rust's <c>Vec</c> compares (section 4, the owner, 2026-10-30, "By items, as Rust"). Items of a type <c>==</c> does
     /// not take are <c>type-mismatch</c>; a nullable item compares as <c>==</c> compares two nullable values, <c>null</c> equal to
     /// <c>null</c> alone (N10), a <c>double?</c> or a <c>float?</c> one's value by IEEE's <c>==</c> (section 4, the owner, 2026-10-30,
-    /// "As plain double"; for the other types an assumption there).
+    /// "As plain double"; for the other types an assumption there), and an item of a union by its case and its value, where each of its
+    /// cases takes <c>==</c> (section 4, the owner, 2026-10-30, "Case and value, as Rust"). It is also why <c>==</c> does not take two
+    /// values of a union.
     /// </summary>
     private (bool Mismatch, string Why)? ItemEquality(KurzType item)
     {
@@ -853,11 +865,11 @@ public sealed partial class Checker
                 return ItemEquality(l.Element) is { } inner ? inner with { Why = $"its items: {inner.Why}" } : null;
             case DataType:
                 return HeldEquality(item, []);
-            case UnionType u when Types.NonNull(u) is { } held:
-                return ItemEquality(held); // N10: `null` equals `null` alone, and two values compare as their type's items do
+            case UnionType u:
+                return u.Cases.Where(c => c is not NullType).Select(ItemEquality).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case UnionType or FunctionType or CFunctionType or HandleType or VoidType:
+            case FunctionType or CFunctionType or HandleType or VoidType:
                 return (true, $"`==` takes no `{item}`");
             default:
                 return (false, $"`==` on a `{item}` is not read");
@@ -1063,7 +1075,7 @@ public sealed partial class Checker
             return CheckFileMethod(handle, m, c); // S3 to S5, S9
         }
 
-        var member = MemberOf(target.Type, m.Member, m.Line);
+        var member = Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3: a nullable C function known not null (R17)
         if (member.IsError)
         {
             CheckArgumentsLoosely(c);

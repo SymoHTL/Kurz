@@ -38,7 +38,11 @@ values of that case are equal, as Rust's derived `PartialEq` compares a field of
 owner, 2026-10-23). The two values of that case compare as a field of the case's type does, so a
 `double` or `float` case that holds NaN equals itself, as a C# record calls `Equals` on a field of
 type `object` (§4, the owner, 2026-10-24); there Kurz departs from Rust's `PartialEq`, which
-compares the two values with their `==`, under which NaN is unequal to itself (§4). A field that is a
+compares the two values with their `==`, under which NaN is unequal to itself (§4). `==` takes a union
+outside a field as well, alone, as a list's item, in a list a field holds and as a map's key, and
+compares the case and then the value as a field of a union compares, a `double` or `float` case by
+IEEE's `==` where the union stands alone or in a list that stands alone (§4, the owner, 2026-10-30,
+"Case and value, as Rust"). A field that is a
 list compares by its items (M9), and its `double` or `float` items, and the values of its `double?` or
 `float?` items, at any depth, compare as C#'s `Equals` compares them, NaN equal to NaN and 0.0 equal to
 -0.0, `null` equal to `null`, so that such a value equals itself, where `==` on two lists outside a
@@ -123,6 +127,68 @@ print(Box(1) == Box(2))
 print(Box(1) == Box("1"))
 ```
 
+Case: [data/union-equality.kz](../corpus/data/union-equality.kz)
+```kurz
+// `==` on a union compares its case, then the value of that case (D3), alone and as the items of two
+// lists (M9); a `double` case of a union that stands alone compares by IEEE's `==`, NaN unequal to itself
+double z = 0.0
+int | string a = 1
+int | string b = "1"
+int | string c = 1
+print(a == b)
+print(a == c)
+print(a == 1)
+print(a != "1")
+int | double n = z / z
+print(n == n)
+mut xs = List<int | string>()
+xs.Add(1)
+xs.Add("a")
+mut ys = List<int | string>()
+ys.Add(1)
+ys.Add("a")
+print(xs == ys)
+```
+
+Case: [values/map-union-key.kz](../corpus/values/map-union-key.kz)
+```kurz
+// a union is a key, which compares by its case, then its value (D3): `1` and `"1"` are two keys
+mut m = Map<int | string, string>()
+m[1] = "one"
+m["1"] = "text"
+print(m[1] ?? "none")
+print(m["1"] ?? "none")
+print(m.Count)
+```
+
+Case: [control/entry-make.kz](../corpus/control/entry-make.kz)
+```kurz
+a = Entry("Ann", 31)
+print(a)
+b = a with { Value = 32 }
+print(b)
+print(b == Entry("Ann", 32))
+```
+
+Case: [values/list-equality-nullable-double.kz](../corpus/values/list-equality-nullable-double.kz)
+```kurz
+data Samples(List<double?> Xs)
+
+double z = 0.0
+mut xs = List<double?>()
+xs.Add(z / z)
+xs.Add(null)
+print(xs == xs)
+print(Samples(xs) == Samples(xs))
+mut ys = List<double?>()
+ys.Add(null)
+ys.Add(-z)
+mut zs = List<double?>()
+zs.Add(null)
+zs.Add(z)
+print(ys == zs)
+```
+
 ### D4 (decided, §4) Immutable
 
 A field of a `data` value that is held in an immutable variable cannot be assigned: the compile
@@ -162,6 +228,8 @@ print(a.Name)
 print(b.Name)
 print(b.Id)
 ```
+
+Case: [control/entry-make.kz](../corpus/control/entry-make.kz)
 
 ### D6 (decided, §4) A `data` type may inherit from another
 

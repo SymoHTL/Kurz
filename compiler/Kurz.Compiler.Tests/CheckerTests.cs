@@ -2131,7 +2131,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("m = Map()\nprint(m)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("m = Map<string, int>(1)\nprint(m)"));
         Assert.Equal([(ErrorIds.NoText, 4)], Errors("data Rule(() => int Step)\n\nm = Map<string, Rule>()\nprint(m)")); // A7: the text of its values
-        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("a = Map<string, int>()\nb = Map<string, int>()\nprint(a == b)")); // T18, D3: as two lists
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("a = Map<string, int>()\nb = Map<string, int>()\nprint(a == b)")); // T18, M9: a map takes no `==`
         Assert.Equal([(ErrorIds.StaticState, 1)], Errors("thread static mut Map<string, int> m = Map<string, int>()\nprint(1)", grants: "raw")); // F12
     }
 
@@ -2143,6 +2143,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors("int Fill(mut Map<string, int> m) {\n    m[\"a\"] = 1\n    return 1\n}\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, Fill(mut ages)))"));
         Clean("int Fill(mut Map<string, int> m) {\n    m[\"a\"] = 1\n    return 1\n}\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, 0) + Fill(mut ages))"); // the call around the read has ended
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int Fill(mut Map<int, int> t) {\n    t[1] = 1\n    return 1\n}\n\nmut ages = Map<int, int>()\nprint(ages[Fill(mut ages)] ?? 0)")); // a read whose key changes the map
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int Fill(mut Map<int, int> t) {\n    t[1] = 1\n    return 1\n}\n\nmut ages = Map<int, int>()\nprint(ages.ContainsKey(Fill(mut ages)))")); // a lookup whose key changes the map
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 2)], Errors("mut ages = Map<int, int>()\nprint(ages[ages.Remove(1) ?? 0] ?? 0)")); // a read whose key removes an entry
     }
 
     [Fact]
@@ -2161,7 +2163,6 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("m = Map<Map<int, int>, int>()\nprint(m)")); // `==` between two maps
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("m = Map<List<Map<int, int>>, int>()\nprint(m)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("m = Map<() => int, int>()\nprint(m)"));
-        Assert.Equal("a map's key is compared with `==`, which `Map<int, int>` does not take: `==` between two `Map<int, int>` is `type-mismatch` (M9, T18)", Check("m = Map<Map<int, int>, int>()\nprint(m)").Diagnostics.Items.Single().Message);
     }
 
     [Fact]
@@ -2256,7 +2257,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = List<int>()\nprint(xs < xs)")); // no order
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = List<Map<int, int>>()\nprint(xs == xs)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = List<() => int>()\nprint(xs == xs)"));
-        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = List<int | string>()\nprint(xs == xs)"));
+        Clean("xs = List<int | string>()\nprint(xs == xs)"); // items of a union by their case and their value (section 4, "Case and value, as Rust")
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = List<int | () => int>()\nprint(xs == xs)")); // a case `==` does not take
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("List<int> Grown(mut List<int> t) {\n    t.Add(9)\n    return t\n}\n\nmut xs = List<int>()\nprint(xs == Grown(mut xs))")); // the record's `xs == F(mut xs)`
     }
 
@@ -2280,6 +2282,26 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data H(TcpListener? L)\n\nvoid Same(H a, H b) {\n    print(a == b)\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data H(File F)\n\nm = Map<H, int>()\nprint(m)")); // no key
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data H(TcpListener? L)\n\nm = Map<List<H>, int>()\nprint(m)"));
+
+        // each instance of a generic data type is read with its own type arguments: `Box<int>`, read first, does not stand for
+        // `Box<Map<int, int>>` or `Box<() => int>`
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data Box<T>(T V)\ndata K(Box<int> A, Box<Map<int, int>> B)\n\nm = Map<K, int>()\nprint(m)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data Box<T>(T V)\ndata P(Box<int> A, Box<() => int> B)\n\nvoid Same(P a, P b) {\n    print(a == b)\n}\n\nprint(1)"));
+        Clean("data Box<T>(T V)\ndata K(Box<int> A, Box<string> B)\n\nm = Map<K, int>()\nprint(m)"); // both instances are keys
+    }
+
+    [Fact]
+    public void A_union_compares_by_its_case_and_its_value()
+    {
+        // section 4, the owner, 2026-10-30, "Case and value, as Rust": `==` on two values of a union, or on a union and a value of one of
+        // its cases, compares the case, then the value, alone, as an item and in a field; a union of cases `==` takes is a key, and one with
+        // a case `==` does not take is `type-mismatch`, as a value and as a key
+        Clean("int | string a = 1\nint | string b = \"1\"\nprint(a == b)\nprint(a != 1)");
+        Clean("m = Map<int | string, int>()\nprint(m)");
+        Clean("m = Map<List<int | string>, int>()\nprint(m)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | () => int a = 1\nprint(a == a)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("m = Map<int | Map<int, int>, int>()\nprint(m)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("int | string a = 1\nbool b = true\nprint(a == b)")); // a `bool` is no case of the union
     }
 
     [Fact]
@@ -2405,13 +2427,14 @@ public sealed class CheckerTests
     [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: `?.` (N5)")]
     [InlineData("int? | string x = 1\nprint(x)", "1: a nullable case of a union, `int?` (N1, D9)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
-    [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
+    [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment of a field through a nullable variable or field (N3, M4)")]
     [InlineData("Map<string, int>? m = null\nprint(m?[\"a\"] ?? -1)", "2: `?[` on a map (N5, M9)")]
     [InlineData("m = Map<decimal?, int>()\nprint(m)", "1: a map with keys of type `decimal?`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
     [InlineData("void F<T>(T x) {\n    xs = List<T?>()\n    print(xs == xs)\n}\n\nF(1)", "3: `==` on a `List<T?>`: its items: `==` on a `T` is not read (D3, M9)")]
     [InlineData("m = Map<decimal, int>()\nprint(m)", "1: a map with keys of type `decimal`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
     [InlineData("void F<T>(T x) {\n    m = Map<T, int>()\n    print(m)\n}\n\nF(1)", "2: a map with keys of type `T`: a `T` is no key the checker reads (M9)")]
-    [InlineData("m = Map<int | string, int>()\nprint(m)", "1: a map with keys of type `int | string`: a `int | string` is no key the checker reads (M9)")]
+    [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nvoid Same(Base a, Base b) {\n    print(a == b)\n}\n\nprint(1)", "5: `==` on a `Base`: its derived type `Derived`: its field `V`: `==` on a `T` is not read (D3, M9)")]
+    [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nmut m = Map<Base, int>()\nprint(m.Count)", "4: a map with keys of type `Base`: its field `V`: a `T` is no key the checker reads (M9)")]
     [InlineData("m = Map<string, () => int>()\nprint(1)", "1: a map with values of type `() => int` (M9, N1)")]
     [InlineData("m = Map<string, int | string>()\nprint(1)", "1: a map with values of type `int | string` (M9, N1)")]
     [InlineData("data Box(Map<string, int> M)\n\nmut b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a map that is no variable, or into a path through an entry (M4, M9)")]

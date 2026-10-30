@@ -66,7 +66,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 9. `==` and `Equals` give two answers
 
 - Evidence: "C# Equality comparisons - C#" (https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/expressions/equality): "Type authors can change those defaults, but that mental model prevents subtle bugs where two objects that look identical aren't considered equal, or where a mutation through one variable silently changes what another variable sees." The same page: "When variables are typed as an interface, `==` checks whether the interface variables refer to the same object. A call to `Equals` still runs the underlying object's implementation."
-- Kurz: answered: "Error on Equals", section 4 of the record. Before the answers: REPEATED.
+- Kurz: answered: "Error on Equals", section 4 of the record. A `double` or a `float` in a map's key, or as an item of a list a `data` value or a key holds, compares as C#'s `Equals` does, NaN equal to NaN, while `==` on two lists that stand alone compares their items by IEEE's `==`: a second equality beside `==`, which the owner chose with that cost named ("As C#" and "Equals inside data/keys", section 4 of the record). Before the answers: REPEATED.
 
 ## 10. A mutable key gets lost in a hash table
 

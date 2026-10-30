@@ -8,6 +8,8 @@ extern "C" in "kernel32" {
     void* VirtualAlloc(void* address, ulong size, uint type, uint protection)
     int VirtualFree(void* address, ulong size, uint type)
     int SetThreadStackGuarantee(uint* size)
+    void* LoadLibraryExA(byte* name, void* file, uint options)
+    (extern "C" (byte*, ulong) => int)? GetProcAddress(void* module, byte* name)
 }
 
 // The start of the process: Windows raises no signal at a write to a closed pipe, whose `WriteFile`
@@ -55,25 +57,36 @@ pub long Write(int fd, byte* bytes, long count) {
     return long(written)
 }
 
-// The system's generator of random bytes.
-extern "C" in "bcrypt" {
-    int BCryptGenRandom(void* algorithm, byte* bytes, uint count, uint options)
-}
-
-// `count` bytes of the system's randomness at `bytes`, from `BCryptGenRandom` with the system's
-// preferred generator (`BCRYPT_USE_SYSTEM_PREFERRED_RNG` is 2), as Rust's standard library took the
-// keys of a map's hash on Windows from its release 1.53 to 1.77: true where the call succeeded (an
-// `NTSTATUS` of 0 or above), and false where it failed, the bytes left as they are, which the caller
-// ends the program for (M9). Rust's release 1.77 then called `RtlGenRandom` and panicked with
-// "fallback RNG broken" where that failed too; its release 1.82 calls `ProcessPrng`, documented as
-// always succeeding. A count above what a `uint` holds is no count a map asks for.
+// `count` bytes of the system's randomness at `bytes`, from `ProcessPrng` of `bcryptprimitives.dll`,
+// as Rust's standard library takes the keys of a map's hash on Windows (`hashmap_random_keys` in
+// `library/std/src/sys/pal/windows/rand.rs`, checked at the tag 1.82.0), and, as Rust does, without
+// reading its result, which the system documents as always `TRUE` (M9; design record, section 4, the
+// owner, 2026-10-30, "ProcessPrng, as Rust 1.82"). The system gives no import library for that DLL
+// (Microsoft's page of `ProcessPrng` names the DLL and no library, checked 2026-10-30), so the
+// function is found by its name, at each call, in the DLL loaded from the system's directory alone
+// (`LOAD_LIBRARY_SEARCH_SYSTEM32` is 2048), as Go's runtime finds it (`runtime/os_windows.go`, checked
+// at the tag go1.23.0), so that no file of that name beside the program is loaded in its place; a map
+// asks for the keys once on each thread. Where the system, older than Windows 10, has no such function, the
+// result is false, which the caller ends the program for, where a Rust program, which imports it, does
+// not start.
 pub bool Random(byte* bytes, long count) {
-    mut int status = 0
+    string library = "bcryptprimitives.dll\0"
+    string name = "ProcessPrng\0"
     raw {
-        status = BCryptGenRandom(null, bytes, uint(count), 2)
+        void* module = LoadLibraryExA(library.Pointer, null, 2048)
+        if module == null {
+            return false
+        }
+
+        (extern "C" (byte*, ulong) => int)? prng = GetProcAddress(module, name.Pointer)
+        if prng == null {
+            return false
+        }
+
+        prng(bytes, ulong(count))
     }
 
-    return status >= 0
+    return true
 }
 
 // The end of the process with the exit code, at once (design record, section 6). The code is 0 or
