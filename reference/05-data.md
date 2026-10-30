@@ -1038,7 +1038,7 @@ Case: [data/enum-number-real.kz](../corpus/data/enum-number-real.kz)
 ```kurz
 enum Plan { Free = 1, Pro = 1.5 }
 
-print(Plan.Pro)
+print(Plan.Free)
 ```
 
 Case: [data/enum-number-long.kz](../corpus/data/enum-number-long.kz)

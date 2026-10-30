@@ -539,9 +539,10 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A function of the module the emitted code calls for a type, emitted once: <paramref name="body"/> fills it with its arguments
-    /// as <c>%a0</c>, <c>%a1</c> and so on, while the function being emitted waits.
+    /// as <c>%a0</c>, <c>%a1</c> and so on, while the function being emitted waits; <paramref name="attributes"/> are its own function
+    /// attributes.
     /// </summary>
-    private string Helper(string key, string result, IReadOnlyList<string> parameters, Action body)
+    private string Helper(string key, string result, IReadOnlyList<string> parameters, Action body, params string[] attributes)
     {
         var name = $"@\"{key}\"";
         if (!helpers.Add(name))
@@ -551,7 +552,7 @@ public sealed partial class Emitter
 
         var saved = fn;
         var (savedRegions, savedScopes) = (regions, scopes);
-        fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})");
+        fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})", attributes);
         (regions, scopes) = ([], []); // a helper makes no temporary and has no variable
         try
         {

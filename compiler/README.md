@@ -319,16 +319,27 @@ returns null and leaves the end of the process to a caller, which its documentat
 call `handle_alloc_error`. The entry gives a block of one of fifteen size classes, the powers of two
 from 16 to 262144 bytes: the block of its class freed last, else one carved from the thread's
 memory, which it takes from the system's `Memory` a mebibyte at a time; an allocation of more than
-262144 bytes takes memory of its own from `Memory`. It gives null where the system refuses. `std/`'s
+262144 bytes takes the smallest such block the thread keeps that holds it and takes no more than twice
+its bytes, the headers counted, given out whole, as glibc's `malloc` takes the smallest free chunk that
+holds a large request, else memory of its own from `Memory`, each with a header of 16 bytes in front
+that names the bytes the system gave it (record, section 2: the owner, 2026-10-30, "Keep them, as
+glibc" and "Only if at least half used"). It gives null where the system refuses. `std/`'s
 `Free` takes a block back with the size it was asked for, as Rust's `GlobalAlloc::dealloc` takes
 the layout a block was allocated with: a block of a size class to the front of its class's free
-blocks, where the next request of the class takes it, and a larger one to the system through the
-target's `Release`; the mebibytes a thread carved from stay its own. A target's directory gives
-`Start`, `Write`, `Exit`, `Memory`, `Release`, `Random`, `Trace` and `Crashing`: on Linux over the C library,
+blocks, where a request of the class takes it first, and a larger one to the front of the blocks the
+thread keeps where they take no more than 32 mebibytes with it, else to the system through the
+target's `Release`; the mebibytes a thread carved from and the blocks it keeps stay its own. `Reallocate` grows a block with
+its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes stays where it is where its
+header names room enough, as a kept block given out whole can, else grows through the target's
+`Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
+with its bytes copied and the old one freed. A target's directory gives
+`Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Random`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
-`Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap` and `Random` calling
-`getrandom`, again where a signal interrupted it, on Windows over `kernel32`, `Release` calling `VirtualFree`,
-and `Random` over `bcrypt`, calling `BCryptGenRandom` with the system's preferred generator. The
+`Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap`, `Resize` calling `mremap`,
+which moves the pages to other addresses where the ones after them are taken and copies none, and `Random` calling
+`getrandom`, again where a signal interrupted it, on Windows over `kernel32`, `Release` calling `VirtualFree` and `Resize`
+giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` over `bcrypt`, calling `BCryptGenRandom` with
+the system's preferred generator. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -489,8 +500,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   found known not null is the value of the case `T`, and `&x`, `Add` and `Clear` on such a variable
   reach the place of that value in the variable's room, the variable's own place where the address
   is the value (N3, R10); `x == null` and `x != null` compare the tag, or the address with the `null`
-  of its type (N3); `==` and `!=` with a nullable side are `false` for one `null` and `true` for two,
-  and compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
+  of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
+  reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
   `?.` and `?[` reads each member and item only where the value before it is not null, the index of
   `?[` among it, each a value of its own that takes a count of what it read (N4, N5); a `T?` of a
   type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
@@ -648,8 +659,11 @@ the count of its items and the count it has room for, 4 bytes each, and from its
 items, each laid out as its type is (`std/std.kz`). A copy of a list copies the address and raises
 the count. An `Add` writes in place where one value holds the block and it has room, grows the
 block where it has none, as Rust's `Vec` grows, to twice its room, at least 8 items of a byte, 4 of
-up to a kibibyte and 1 of more, and where other values hold the block it copies the items into a
-block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). An argument that
+up to a kibibyte and 1 of more, by `Reallocate`, as Rust's `Vec` grows its buffer by `realloc`, and where other values hold the block it copies the items into a
+block of its own first (M3; section 3, the owner, 2026-10-24, "Full counting now"). The write in place
+is all the helper of an `Add` holds, which the optimiser inlines where the `Add` stands; the growth and
+the copy are a helper of their own, which it never inlines, as Rust's `Vec::push` calls a grow it does
+not inline (`EmitterTests`). An argument that
 changes the list through a `mut` parameter is `changed-while-held` (M7), so the order in which an `Add`
 reads its argument and its list is not seen. What `Add`'s argument made besides its item, the
 environment of a lambda it gave to a call among them, is let go of before the list is read, so that
@@ -705,14 +719,24 @@ inaccessible, under which the values' programs and twenty rounds of the same pro
 same lines, and so do the strings' program and twenty rounds of strings through every way out of a block,
 and the maps' program and twenty rounds of maps, and the programs of a map's members, loops, entries kept
 past a `Clear`, keys, `double` keys, nullable keys and nullable values and of writes into a list's items and `==` on two
-lists, each read beside the change it can meet (section 4, the owner, 2026-10-30); maps made and dropped through every way out of a block, removed, cleared,
+lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
+since a kept block stays readable, so that a write into one freed under it ends the process; maps made and dropped through every way out of a block, removed, cleared,
 walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
 of three inputs against vectors from outside this repository; two runs of one program that print a
 map of 20 entries in two orders; the bytes of a map's first block the system refuses;
 the target's own `Release`, after
-which a write into a freed block of more than 262144 bytes ends the process, and under which lists
+which a write into a freed block of 32 mebibytes, more than a thread keeps, ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
-the same lists all kept do not, and so for strings of 524288 bytes; strings of 1024 bytes made and dropped
+the same lists all kept do not, and so for strings of 524288 bytes; the same lists of 70000 items within
+the sixteen pieces, each round after the first taking the block the thread kept, and the same lists all
+kept not; five freed blocks of 8 mebibytes, of which the thread keeps the four within 32 mebibytes, a
+write into the fourth after its `Free` ending nothing and one into the fifth ending the process; a kept
+block of 32 mebibytes not given to a request of less than half its bytes, whose block its `Free` gives
+back to the system, so that a write into it after the `Free` ends the process, and given to one of half,
+whose `Free` keeps it, so that the same write ends nothing; two lists of blocks of 16
+and 32 mebibytes, the second grown from 16, within the same 64 on Linux, where it grows in place, and
+not on Windows, where its old and new block are held at once, and the first one item longer not on
+either; strings of 1024 bytes made and dropped
 for 3000 rounds within the sixteen pieces, and five of them kept each round not; the count
 `string.Allocate` asks past its limit, lowered in the runtime's text, and the bytes of a string's
 block the system refuses; the number of `allocation-failed` past the limit, with the limit
@@ -746,7 +770,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 298 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 38 the
+full and the emitter does not emit, 3 of the 300 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 38 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -972,7 +996,7 @@ brace. Each is pinned as it is, so that a fix shows.
 The checker (`Semantics/`) takes a tree the parser read without an error and checks it against
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
-generic data type as a base), 4 (null: N1 to N8, and N9's paths none, since they run through a
+generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths none, since they run through a
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
 M9 for lists and maps), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files and sockets: S1 to S11; S12's grants are a
@@ -1026,11 +1050,11 @@ error of their own, a name no declaration has among them, is reported beside the
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
 (chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable union,
 function type, C function type or `void`, and a nullable case of a written union, which N1 does not
-name (N1, D9), `?.` to a member of a type no `?` makes nullable, which section 4 does not say (N5),
+name (N1, D9), `?.` or `?[` to a member or an item of a type no `?` makes nullable, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
 a part after `?[` and an assignment through it, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
 emitter does not read through a chain (N5, M9), and an assignment into a path
-through a nullable field known not null, which the emitter does not write through (N3, M4), a `mut`
+through a nullable variable or field known not null, which the emitter does not write through (N3, M4), a `mut`
 method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
@@ -1261,14 +1285,15 @@ round can ask about it by the rule's id.
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
   ways meet, at the end of an `if`, after the arms of a `match` or an `else` and at the head of a
-  loop, a path is known not null where every way that reaches the point keeps it. A loop's body is
-  read again from what a round leaves, its diagnostics dropped, until a reading keeps what it began
-  with; after the loop holds what a false condition shows, joined with what holds at each `break`,
-  and `while true` leaves by its `break`s alone. A declaration of a value that is not null narrows
-  its variable, as C# reads `string? s = "a"`. Where the record says an assignment narrows "up to
-  the end of the block that holds the assignment", the join that the same sentence names keeps it
-  after that block where every way in keeps it: `if f == null { f = "x" }` narrows `f` after the
-  `if`. What the left side of `&&` or `||` shows holds past the right side only where the right
+  loop, a path is known not null where every way that reaches the point keeps it. A loop's condition
+  and body are read again from what a round leaves, what the condition's own `mut` arguments end
+  among it, their diagnostics dropped, until a reading keeps what it began with; after the loop
+  holds what a false condition shows, joined with what holds at each `break`, a `for` leaves with
+  what its head holds as well, since it can run no round, and `while true` leaves by its `break`s
+  alone. A declaration of a value that is not null narrows its variable, as C# reads
+  `string? s = "a"`. An assignment's narrowing lasts past the block that holds it where every way
+  that reaches the join keeps it: `if f == null { f = "x" }` narrows `f` after the `if` (section 4,
+  the owner, 2026-10-30, "Yes, as C#"). What the left side of `&&` or `||` shows holds past the right side only where the right
   side did not change it: `e != null && Cleared(mut e)` shows nothing of `e`, since the `mut`
   argument ends the narrowing as an assignment does (N7). An arm of a `match` that no `null`
   reaches, a type's, a literal's or an `else` after the `null` arm, knows the subject's variable or
@@ -1278,11 +1303,14 @@ round can ask about it by the rule's id.
   narrowing. Section 4's "a call of a `mut` method on a value that a narrowed path runs through" is
   read as a path through the value to a field of it, and a list has no field; the value itself has
   its type, not the nullable one, inside the method, which cannot make it null.
-- N3: a test, a `match` with a `null` arm, `??` and `?.` read a variable or a path of fields known
-  not null as the nullable type it has, so that a second test, a `null` arm and `u?.Name` after
-  `if u != null` read as C# reads them.
+- N3: `== null`, `!= null`, a `match` with a `null` arm, `??`, `?.` and `?[` read a variable or a
+  path of fields known not null as the nullable type it has, so that a second test, a `null` arm and
+  `u?.Name` after `if u != null` read as C# reads them; any other operand of them keeps what it
+  changed, so that `Take(mut x) ?? d` ends what was known of `x` (N7). An `==` beside a value reads
+  the variable as N10 says.
 - N2: an operand of any operator but `==` and `!=`, which N10 lifts, is `nullable-unchecked`, and
-  the error's line below it says how to check (section 4); so are a condition, the list of a `for`, the list of an index, a member read
+  the error's line below it says how to check (section 4); so are a condition, the list of a `for`, the list of an index or a part, an
+  index of a list or of `?[`, a member read
   through the value, the value `with` copies, and a value where the type it makes nullable is
   required, which takes `nullable-unchecked` in place of `type-mismatch` there. A variable passed as
   `mut` is read as its own type (N7), so that a `string?` given to a `mut string` is `type-mismatch`
@@ -1297,12 +1325,16 @@ round can ask about it by the rule's id.
 - N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with, and
   that one's own type where it is nullable, never a `T??`; a member after them in the chain reads
   the member or the item before as its own type, so that a nullable one there is
-  `nullable-unchecked`, and a parenthesis ends the chain. After `?[` holds what held before its
-  index, since the index runs only where the list is not null.
-- N10 with N3: a nullable side of `==` beside a value whose type is not nullable, read as the checker
+  `nullable-unchecked`, whatever a test showed of that member's path, which C# narrows: after
+  `if u?.Email != null`, `u?.Email.Bytes` is `nullable-unchecked` and `u.Email.Bytes` reads as the
+  test showed; a parenthesis ends the chain. After `?[` holds what held before its index, since the
+  index runs only where the list is not null, and an index that changes the list is
+  `changed-while-held` (M7), since the list is read before it.
+- N10 with N3: a nullable side of `==`, on either side, beside a value whose type is not nullable, read as the checker
   typed it, so that a variable known not null counts as such a value, is known not null where the
   test holds; beside another nullable value it is not, as C#'s analysis reads both.
-- N1 with O8: `null` is a literal pattern of a `match`, which covers the case `null`.
+- N1 with C9 and O8: an arm may name `null`, which covers the case `null` (section 4, the owner,
+  2026-10-30, "Allow, as C#").
 - R7 with E1: every `raw` block in a package without the grant is `raw-not-allowed`, one inside
   another among them, since each is a block the grant would allow; its body is checked as one with
   the grant is, so a read through a pointer there raises nothing more.

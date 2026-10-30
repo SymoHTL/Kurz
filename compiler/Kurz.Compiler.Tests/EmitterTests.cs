@@ -220,6 +220,43 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_push_of_a_list_widens_its_count_without_a_sign()
+    {
+        // std's ListPush reads the count as a `uint`, so that the item's offset is no sign extension and a loop of `Add`s reads the count
+        // the `Add` before stored by a plain load
+        var program = Compile("mut b = Bytes()\nb.Add(1)\nprint(b.Count)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        var start = program.Ir.IndexOf("define internal ptr @\"std.ListPush.", StringComparison.Ordinal);
+        Assert.True(start >= 0, "no ListPush in the IR");
+        var body = program.Ir[start..program.Ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+        Assert.Contains("zext i32 %", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("sext i32 %", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_helper_of_Add_holds_the_push_and_calls_the_making_of_room_out_of_line()
+    {
+        // the push is small enough for the optimiser to inline at every `Add`, as Rust's `Vec::push`; the copy, the growth and the
+        // refused block stay in a helper it never inlines
+        var ir = Compile("mut xs = List<int>()\nxs.Add(1)\nxs.Add(2)\nprint(xs)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program!.Ir;
+        string Body(string name)
+        {
+            var start = ir.IndexOf($"define internal void @\"{name}\"(", StringComparison.Ordinal);
+            Assert.True(start >= 0, $"no {name} in the IR");
+            return ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+        }
+
+        var add = Body("add.List<int>");
+        Assert.Contains("call void @\"reserve.List<int>\"(ptr %a0)", add, StringComparison.Ordinal);
+        Assert.DoesNotContain("ListGrow", add, StringComparison.Ordinal);
+        Assert.DoesNotContain("ListCopy", add, StringComparison.Ordinal);
+        var reserve = Body("reserve.List<int>");
+        Assert.Contains(" noinline cold ", reserve.Split('\n')[0], StringComparison.Ordinal);
+        Assert.Contains("ListGrow", reserve, StringComparison.Ordinal);
+        Assert.Contains("ListCopy", reserve, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_construct_of_the_runtime_the_emitter_does_not_lay_out_is_the_compilers_defect_and_names_its_file()
     {
         var target = Builder.HostTarget!.Value;

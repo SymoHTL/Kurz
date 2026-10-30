@@ -149,8 +149,10 @@ ignoring an error of that close. `f.Close()` closes it before that and returns `
 the error the system gives a descriptor that is not open, `Other` with the number 9, with the path
 the file was opened with, since a close stores -1 in the file's descriptor before the system closes
 it, so that no call that starts after that store passes the system a number it may have given
-another file, while a call through another holder that read the descriptor before the store can
-still reach one. A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's
+another file. A call through another holder that read the descriptor before the store, or that
+waits in the system with it, can still reach such a number, and so read or write a file its holder
+never opened: the record names that hazard in the cost of the answer and keeps what bounds it open
+(§12, §14). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's
 error, the -1 stored at the close, the close that ignores its error, and no text)*
 
 Case: [system/close-twice.kz](../corpus/system/close-twice.kz)
@@ -282,14 +284,18 @@ takes every interface where its address is a wildcard, `0.0.0.0`, `[::]`, which 
 Linux's dual stack, on by default, since the runtime sets no `IPV6_V6ONLY`, as Rust sets none, or a
 name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
 and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
-its address and passes `listen` a backlog of 128. An address without a `:`, a port that is not a
-number from 0 to 65535 and a name that gives no address are `InvalidInput`, and a lookup that fails is
-`NotFound`, each with the number 0, but for the error of the system a lookup names. The error of a
-connection that `Accept` gave names the string its listener's `Bind` was given, `127.0.0.1:0` where
-the system picked the port, and one that `Connect` made the string it was given. The kind of a
-lookup that fails is decided (§12, the owner, 2026-10-30). *(assumed, §12: the reuse of the address,
-the 128, the type of `Port`, the grammar of the port and of a literal, the NUL byte, the errors of an
-address, the error of the last address tried, and the string a connection's error names)*
+its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
+what `getaddrinfo` returns: an address without a `:`, a port that is not a number from 0 to 65535
+and a name whose lookup succeeds with no address of the family asked for are `InvalidInput`, as Rust
+gives them, and a lookup that `getaddrinfo` fails, with `EAI_NONAME` or any other of its errors, is
+`NotFound`, each with the number 0, but for `EAI_SYSTEM`, with which the lookup passes on the error
+of the system. The error of a connection that `Accept` gave names the string its listener's `Bind`
+was given, `127.0.0.1:0` where the system picked the port, and one that `Connect` made the string it
+was given. The kind of a lookup that `getaddrinfo` fails is decided (§12, the owner, 2026-10-30,
+"NotFound, as C#"). *(assumed, §12: the reuse of the address, the 128, the type of `Port`, the
+grammar of the port and of a literal, the NUL byte, the errors of an address, `InvalidInput` for a
+lookup that succeeds with no address, the error of the system `EAI_SYSTEM` passes on, the error of
+the last address tried, and the string a connection's error names)*
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
@@ -380,8 +386,8 @@ the system completes without the accept.
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
 none of these calls. A build for any other target whose runtime lacks them says `not supported` at the
-call as well, as the record says of every function a target's runtime lacks (§2, §12, the owner,
-2026-10-30).
+call as well, as the record says of a call of the program that reaches a function a target's runtime
+lacks (§2, §12, the owner, 2026-10-30).
 
 No case: a case does not name its target (record, section 14).
 

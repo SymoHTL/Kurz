@@ -1134,7 +1134,7 @@ public sealed partial class Checker
             return; // reported where the receiver was read
         }
 
-        if (ThroughNullable(variable, members, "a `mut` method on a path through a nullable field (N3, M5)"))
+        if (ThroughNullable(variable, members, "a `mut` method on a path through a nullable variable or field (N3, M5)"))
         {
             return;
         }
@@ -1884,7 +1884,7 @@ public sealed partial class Checker
             return;
         }
 
-        if (ThroughNullable(variable, members, "a path through a nullable field passed as `mut` (N3, M7)"))
+        if (ThroughNullable(variable, members, "a path through a nullable variable or field passed as `mut` (N3, M7)"))
         {
             return;
         }

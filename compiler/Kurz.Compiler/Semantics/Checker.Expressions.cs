@@ -675,6 +675,12 @@ public sealed partial class Checker
         var target = CheckExpression(i.Target, null);
         if (i.Index is RangeExpression range)
         {
+            if (Unchecked(target, i.Line, "sliced"))
+            {
+                CheckLoosely(range);
+                return Typed.Error;
+            }
+
             return CheckPart(i, target, range);
         }
 
@@ -687,6 +693,11 @@ public sealed partial class Checker
         if (target.Type is PointerType)
         {
             return CheckPointerIndex(i, target, index); // R10
+        }
+
+        if (target.Type is ListType && Unchecked(index, i.Line, "used as an index"))
+        {
+            return Typed.Error;
         }
 
         if (target.Type is ListType && !index.IsError && !Types.IsInteger(index.Type))
@@ -950,7 +961,7 @@ public sealed partial class Checker
         if (b.Operator is TokenKind.EqualEqual or TokenKind.NotEqual && !left.IsError && !right.IsError && (Types.NonNull(left.Type) is not null || Types.NonNull(right.Type) is not null))
         {
             // section 4, the owner, 2026-10-30, "Lift == and !=": `null` equals `null` alone, and two values compare as their types do (N10)
-            return Comparison(b, new Typed(Types.NonNull(left.Type) ?? left.Type), new Typed(Types.NonNull(right.Type) ?? right.Type));
+            return Comparison(b, left with { Type = Types.NonNull(left.Type) ?? left.Type }, right with { Type = Types.NonNull(right.Type) ?? right.Type });
         }
 
         if (left.IsError || right.IsError || Unchecked(left, b.Line, $"under `{Operator(b.Operator)}`") || Unchecked(right, b.Line, $"under `{Operator(b.Operator)}`"))

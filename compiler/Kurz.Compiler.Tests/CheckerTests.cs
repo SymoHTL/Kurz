@@ -1938,6 +1938,15 @@ public sealed class CheckerTests
         Clean(Email + "mut e = Email(1)\nwhile true {\n    if e != null {\n        break\n    }\n    e = Email(1)\n}\nprint(e.Bytes.Count)");
         Clean(Email + "mut e = Email(1)\nwhile e == null {\n    e = Email(1)\n}\nprint(e.Bytes.Count)");
         Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + "mut e = Email(1)\nwhile e == null {\n    if Email(2) == null {\n        break\n    }\n    e = Email(1)\n}\nprint(e.Bytes.Count)"));
+
+        // the condition is read again with what its own `mut` argument ended, which every round after the first starts with
+        const string Refill = "bool Refill(mut string? t) {\n    t = null\n    return true\n}\n\nmut string? s = \"abc\"\nmut n = 0\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Refill + "while s.Bytes.Count > 0 && Refill(mut s) && n < 3 {\n    n = n + 1\n}\nprint(n)"));
+        Clean(Refill + "while s != null && s.Bytes.Count > 0 && Refill(mut s) && n < 3 {\n    n = n + 1\n}\nprint(n)");
+
+        // a `for` can run no round, so after it holds what its head holds, joined with each `break`
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors("mut xs = List<int>()\nmut string? y = null\nfor x in xs {\n    y = \"a\"\n    break\n}\nprint(y.Bytes.Count)"));
+        Clean("mut xs = List<int>()\nmut string? y = \"b\"\nfor x in xs {\n    y = \"a\"\n    break\n}\nprint(y.Bytes.Count)");
     }
 
     [Fact]
@@ -1956,6 +1965,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + Cleared + "mut e = Email(1)\nwhile e != null && Cleared(mut e) {\n    print(e.Bytes.Count)\n}"));
         Clean(Email + Cleared + "mut e = Email(1)\nif Cleared(mut e) && e != null {\n    print(e.Bytes.Count)\n}");
         Clean(Email + Cleared + "mut e = Email(1)\nif e != null && Cleared(mut e) && e != null {\n    print(e.Bytes.Count)\n}");
+
+        // a `mut` argument inside an operand of `??` or of a test ends it too: only a plain read there runs nothing that could change it
+        const string Take = "string? Take(mut string? s) {\n    s = null\n    return null\n}\n\nmut string? x = \"abc\"\nif x != null {\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Take + "    print(Take(mut x) ?? \"d\")\n    print(x.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Take + "    print(Take(mut x) == null)\n    print(x.Bytes.Count)\n}"));
+        Clean(Take + "    print(Take(mut x) ?? \"d\")\n    if x != null {\n        print(x.Bytes.Count)\n    }\n}");
 
         // a `mut` method or a `mut` argument on a path through a nullable variable or field not known not null (M5, M7)
         const string Box = "data Box(int N, List<int> Items)\n\nBox? Find() => null\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut b = Find()\n";
@@ -1980,6 +1995,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors(Find + "print((Find(1)?.Name).Bytes.Count)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(Find + "print(Find(1)?.Name ?? 1)"));
         Clean(Find + "u = Find(1)\nif u != null {\n    print(u?.Name ?? u.Name)\n}");
+
+        // a member after `?.` reads the member before as its own type, whatever a test showed of that member's path, which C# narrows
+        // (compiler/README.md); the path itself reads as the test showed
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(Find + "u = Find(1)\nif u?.Email != null {\n    print(u?.Email.Bytes.Count)\n}"));
+        Clean(Find + "u = Find(1)\nif u?.Email != null {\n    print(u.Email.Bytes.Count)\n}");
     }
 
     [Theory]
@@ -2006,6 +2026,20 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(Lists + "print(Numbers()?[\"a\"])"));
         Assert.Equal([(ErrorIds.StringIndex, 2)], Errors("string? s = \"a\"\nprint(s?[0])"));
         Clean(Lists + "xs = Numbers()\nif xs != null {\n    print(xs?[0] ?? xs[0])\n}");
+
+        // the list is read before its index runs and held without a count, so an index that changes it is refused (M7)
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Pop(mut List<string>? xs) {\n    xs = null\n    return 0\n}\n\nmut List<string>? names = List<string>()\nnames.Add(\"a\")\nprint(names?[Pop(mut names)])"));
+    }
+
+    [Fact]
+    public void A_part_of_a_nullable_list_and_a_nullable_index_are_nullable_unchecked()
+    {
+        // N2: a part of a nullable list, a nullable index of a list and the nullable index of `?[`, as an index of a nullable list is
+        const string Lists = "int? Find(int id) => null\nList<int>? Numbers() => null\n\nxs = List<int>()\nn = Find(1)\nys = Numbers()\nprint(xs.Count)\nprint(n)\nprint(ys)\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Lists + "print(ys[0..<1])"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Lists + "print(xs[n])"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Lists + "print(ys?[n])"));
+        Clean(Lists + "if n != null && ys != null {\n    print(ys[0..<1])\n    print(xs[n])\n    print(ys?[n])\n}");
     }
 
     [Fact]
@@ -2019,6 +2053,7 @@ public sealed class CheckerTests
         Clean(Email + "print(Email(1) == \"a\")\nprint(Email(1) != Email(2))");
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Find + "print(Find(1) == \"a\")"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 3)], Errors(Find + "print(Find(1) < 1)"));
+        Clean("byte? Small() => null\nuint? Big() => null\n\nprint(Small() == 200)\nprint(Big() != 5)\nprint(5 == Big())"); // a literal takes the type of the nullable side's value
         Clean(Email + "e = Email(1)\nif e == \"a\" {\n    print(e.Bytes.Count)\n}");
         Clean(Email + "e = Email(1)\nif e != \"a\" {\n    print(0)\n} else {\n    print(e.Bytes.Count)\n}");
         Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Email + "e = Email(1)\nif e == Email(2) {\n    print(e.Bytes.Count)\n}"));
@@ -2038,7 +2073,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_match_on_a_nullable_value_takes_a_null_arm_for_its_null()
     {
-        // N1, O8: `null` is a literal pattern, which covers the case `null`
+        // N1, C9, O8 (section 4, the owner, 2026-10-30, "Allow, as C#"): an arm may name `null`, which covers the case `null`
         Clean(Email + "match Email(1) {\n    null => print(0)\n    string s => print(s.Bytes.Count)\n}");
         Assert.Equal([(ErrorIds.MatchNotExhaustive, 8)], Errors(Email + "match Email(1) {\n    string s => print(s.Bytes.Count)\n}"));
 
@@ -2360,11 +2395,12 @@ public sealed class CheckerTests
     [InlineData("data User(List<int> Items)\n\nUser? Find() => null\n\nprint(Find()?.Items[0])", "5: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0][1])", "3: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0..<1])", "3: a part after `?[` (N5, M9)")]
+    [InlineData("List<int | string>? Find() => null\n\nprint(Find()?[0])", "3: `?[` to a `int | string`, which no `?` makes nullable (N1, N5)")]
     [InlineData("mut List<int>? xs = null\nxs?[0] = 1", "2: an assignment through `?[` (N5)")]
     [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: `?.` (N5)")]
     [InlineData("int? | string x = 1\nprint(x)", "1: a nullable case of a union, `int?` (N1, D9)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
-    [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
+    [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("Map<string, int>? m = null\nprint(m?[\"a\"] ?? -1)", "2: `?[` on a map (N5, M9)")]
     [InlineData("m = Map<decimal?, int>()\nprint(m)", "1: a map with keys of type `decimal?`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
     [InlineData("void F<T>(T x) {\n    xs = List<T?>()\n    print(xs == xs)\n}\n\nF(1)", "3: `==` on a `List<T?>`: its items: `==` on a `T` is not read (D3, M9)")]
@@ -2374,9 +2410,9 @@ public sealed class CheckerTests
     [InlineData("m = Map<string, () => int>()\nprint(1)", "1: a map with values of type `() => int` (M9, N1)")]
     [InlineData("m = Map<string, int | string>()\nprint(1)", "1: a map with values of type `int | string` (M9, N1)")]
     [InlineData("data Box(Map<string, int> M)\n\nmut b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a map that is no variable, or into a path through an entry (M4, M9)")]
-    [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable field (N3, M5)")]
-    [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable field (N3, M5)")]
-    [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable field passed as `mut` (N3, M7)")]
+    [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable variable or field (N3, M5)")]
+    [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable variable or field (N3, M5)")]
+    [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
     [InlineData("print(string(1))", "1: a conversion to `string` (A5 to A7)")]
