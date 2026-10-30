@@ -37,10 +37,13 @@ public sealed partial class Checker
         var allEnd = true;
         var start = frame.Known; // N3: each arm starts with what held after the subject, and after the match holds what every arm that completes keeps
         var reaching = new List<ImmutableHashSet<NullPath>>();
+        var subjectPath = Types.NonNull(subjectType) is not null ? PathOf(subject) : null; // N3: a nullable variable or path of fields the arms test
+        var nullNamed = false;
         foreach (var arm in arms)
         {
             PushScope();
             frame.Known = start;
+            KurzType? patternType = null;
             switch (arm.Pattern)
             {
                 case ElsePattern:
@@ -55,6 +58,7 @@ public sealed partial class Checker
                     {
                         // a subject the checker could not type: the arms name cases of a type it does not know, so nothing is resolved
                         var type = known ? Resolve(tp.Type) : Types.Error;
+                        patternType = type;
                         model.RecordPattern(tp, type);
                         if (known && !Types.IsError(type))
                         {
@@ -133,6 +137,21 @@ public sealed partial class Checker
                     throw new InvalidOperationException(arm.Pattern.GetType().Name);
             }
 
+            // N3, as C# reads a pattern: in an arm no `null` reaches, a type's, a literal's or an `else` after the `null` arm, the subject's
+            // path is known not null
+            var namesNull = arm.Pattern is ValuePattern { Value: var named } && Unwrap(named) is NullLiteral;
+            var notNull = arm.Pattern switch
+            {
+                ElsePattern => nullNamed,
+                TypePattern => patternType is { } t && !Types.IsError(t) && t is not NullType && Types.NonNull(t) is null,
+                _ => !namesNull,
+            };
+            if (subjectPath is { } path && notNull)
+            {
+                frame.Known = frame.Known.Add(path);
+            }
+
+            nullNamed |= namesNull;
             if (isExpression)
             {
                 switch (arm.Body)

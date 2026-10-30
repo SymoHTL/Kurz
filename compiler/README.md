@@ -1167,7 +1167,10 @@ round can ask about it by the rule's id.
   after that block where every way in keeps it: `if f == null { f = "x" }` narrows `f` after the
   `if`. What the left side of `&&` or `||` shows holds past the right side only where the right
   side did not change it: `e != null && Cleared(mut e)` shows nothing of `e`, since the `mut`
-  argument ends the narrowing as an assignment does (N7).
+  argument ends the narrowing as an assignment does (N7). An arm of a `match` that no `null`
+  reaches, a type's, a literal's or an `else` after the `null` arm, knows the subject's variable or
+  path of fields not null, as C# reads a pattern, so that after a `match` whose `null` arm leaves
+  the variable is known not null.
 - N3 with N7 and M7: a `mut` method the checker reads, `Add` and `Clear` of a list, ends no
   narrowing. Section 4's "a call of a `mut` method on a value that a narrowed path runs through" is
   read as a path through the value to a field of it, and a list has no field; the value itself has

@@ -1987,6 +1987,22 @@ public sealed class CheckerTests
         Clean("mut string? d = \"x\"\nprint(match d {\n    null => 0\n    string s => s.Bytes.Count\n})");
     }
 
+    [Fact]
+    public void An_arm_no_null_reaches_knows_the_subject_not_null()
+    {
+        // N3 as C# reads a pattern: a type's arm, a literal's and an `else` after the `null` arm know the subject's variable not null,
+        // and after the `match` holds what every arm that completes keeps
+        Clean(Email + "e = Email(1)\nmatch e {\n    null => print(0)\n    string s => print(e.Bytes.Count)\n}");
+        Clean(Email + "e = Email(1)\nmatch e {\n    null => print(0)\n    else => print(e.Bytes.Count)\n}");
+        Clean(Email + "void Show(string? e) {\n    match e {\n        null => return\n        string s => print(s)\n    }\n    print(e.Bytes.Count)\n}\n\nShow(Email(1))");
+
+        // the `null` arm, an `else` no `null` arm comes before, the code after a `null` arm that completes, and an arm that changes it
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Email + "e = Email(1)\nmatch e {\n    null => print(e.Bytes.Count)\n    string s => print(s)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Email + "e = Email(1)\nmatch e {\n    string s => print(s)\n    else => print(e.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Email + "e = Email(1)\nmatch e {\n    null => print(0)\n    string s => print(s)\n}\nprint(e.Bytes.Count)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Email + "mut e = Email(1)\nmatch e {\n    null => print(0)\n    string s => {\n        e = Email(2)\n        print(e.Bytes.Count)\n    }\n}"));
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
