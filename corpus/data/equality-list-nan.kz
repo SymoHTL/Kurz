@@ -1,0 +1,15 @@
+// expect: output
+// | true
+// | false
+// rules: D3
+
+data Samples(List<double> Xs)
+
+double z = 0.0
+nan = z / z
+mut xs = List<double>()
+xs.Add(nan)
+mut ys = List<double>()
+ys.Add(nan)
+print(Samples(xs) == Samples(ys))
+print(xs == ys)

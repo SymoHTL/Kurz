@@ -204,6 +204,22 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_lookup_of_a_map_reads_the_control_bytes_of_a_group_as_one_word()
+    {
+        // the control bytes of Rust's `HashMap` (hashbrown's SwissTable, its generic groups of 8): the helper loads the group's word,
+        // marks the bytes equal to the hash's control byte and takes the first mark by counting trailing zeros
+        var program = Compile("mut m = Map<long, long>()\nm[1] = 2\nprint(m[1] ?? 0)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        var start = program.Ir.IndexOf("define internal ptr @\"find.", StringComparison.Ordinal);
+        Assert.True(start >= 0, "no find helper in the IR");
+        var body = program.Ir[start..program.Ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+        Assert.Contains(", 72340172838076673", body, StringComparison.Ordinal); // the hash's control byte in each of the 8 bytes
+        Assert.Contains(", -9187201950435737472", body, StringComparison.Ordinal); // the high bit of each byte
+        Assert.Contains("call i64 @llvm.cttz.i64(", body, StringComparison.Ordinal);
+        Assert.Contains("@\"std.MapControl.", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_push_of_a_list_widens_its_count_without_a_sign()
     {
         // std's ListPush reads the count as a `uint`, so that the item's offset is no sign extension and a loop of `Add`s reads the count

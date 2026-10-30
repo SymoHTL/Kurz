@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 7
+// rules: D3
+
+data Box(Map<string, int> Counts)
+
+b = Box(Map<string, int>())
+print(b == b)

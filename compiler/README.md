@@ -333,12 +333,16 @@ its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes stays
 header names room enough, as a kept block given out whole can, else grows through the target's
 `Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
 with its bytes copied and the old one freed. A target's directory gives
-`Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Trace` and `Crashing`: on Linux over the C library,
+`Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Random`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
-`Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap` and `Resize` calling `mremap`,
-which moves the pages to other addresses where the ones after them are taken and copies none, on Windows over
-`kernel32`, `Start` setting the guarantee of the main thread's stack (below), `Release` calling `VirtualFree` and `Resize`
-giving null, as a region `VirtualAlloc` reserved cannot grow. The
+`Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap`, `Resize` calling `mremap`,
+which moves the pages to other addresses where the ones after them are taken and copies none, and `Random` calling
+`getrandom` with `GRND_INSECURE`, or with `GRND_NONBLOCK` where the kernel refuses that flag, again where a signal
+interrupted it, reading `/dev/urandom` where the system refuses `getrandom` (`ENOSYS`, `EPERM`), from then on, or its
+pool is not ready (`EAGAIN`), and false where Rust's standard library panics (below), on Windows
+over `kernel32`, `Start` setting the guarantee of the main thread's stack (below), `Release` calling `VirtualFree` and `Resize`
+giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` over `bcrypt`, calling `BCryptGenRandom` with
+the system's preferred generator, and false where it fails. The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
@@ -366,7 +370,8 @@ error of the system, where Rust gives `Uncategorized`. `Listen` sets `SO_REUSEAD
 with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
 socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
-`BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9).
+`BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
+block of a map, its growth and the hash of its keys (M9, below).
 
 The text of a `float` and of a `double` is computed in `common/` from the value's bits, which the
 emitted code passes as a `uint` and a `ulong`: the fewest digits that read back as the same value,
@@ -417,9 +422,12 @@ to `Print`, which raises `print-failed` there where the system refuses the write
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
-size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). Both
-end with the exit code 1. `EmitterTests` pins both, the first in a test and in a release
-build, the second with a runtime whose `Memory` refuses every request.
+size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). A
+thread's first map on a system that gives no randomness for the keys of its hash ends the process with
+`error: random-failed` and no place (M9; the owner, 2026-10-30, "End with an error, as Rust"). Each
+ends with the exit code 1. `EmitterTests` pins the first two, the first in a test and in a release
+build, the second with a runtime whose `Memory` refuses every request, and `ListTests` the third,
+with a runtime whose `Random` reports a failure.
 
 ## What the emitter emits
 
@@ -505,7 +513,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
-  which raises `index-out-of-range` for an index below 0 or at `Count` or beyond (T14), `list[a..<b]` and
+  which raises `index-out-of-range` for an index below 0 or at `Count` or beyond (T14), `list[i] = value`
+  on a `mut` variable or parameter, which runs the value, then the index, raises `index-out-of-range`
+  there, copies a block another value holds first and lets go of the item it writes over (section 4, the
+  owner, 2026-10-30, "As C# and Rust"; M9, M4, M3), `==` and `!=` on two lists of one type, by their
+  counts and their items in order, each pair by `==`, a `double` or a `float` item by IEEE's `==`, so
+  that NaN is unequal to NaN there and in the lists among the items, as Rust's `Vec` compares (section
+  4, the owner, 2026-10-30, "By items, as Rust"), an item of a nullable type as `==` compares two
+  nullable values, `null` equal to `null` alone (N10), a `double?` or a `float?` one's value by IEEE's
+  `==` (section 4, the owner, 2026-10-30, "As plain double"; for the other nullable types an assumption
+  there), while a list in a `data` value that `==` compares or in a key compares such items and values as
+  C#'s `Equals`, NaN equal to NaN (section 4, the owner, 2026-10-30, "Equals inside data/keys", "As plain
+  double"; D3), `list[a..<b]` and
   `list[a..b]`, a new list of a copy of those items, which raises `reversed-range-at-run-time` for ends in the
   wrong order and then `index-out-of-range` for a start below 0 or an end past the count (section 4, the owner,
   2026-10-29, "A List<T>, a value"), `Where`, which calls its test once for each item, in
@@ -515,6 +534,77 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
   program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
   lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
+- maps (M9): `Map<K, V>()`, which takes no block, `map[key]`, a value of its own of the type `V?`, and of
+  the type `V` where `V` is nullable (section 4, the owner, 2026-10-30, "Flatten, as C#"), null for a
+  missing key, `map[key] = value`, which runs the value before the key (M4) and over a key
+  the map holds writes the value, letting go of the one before and of the key given, `Count`,
+  `ContainsKey(key)`, `Remove(key)`, which takes the entry out, lets go of its key and gives its value,
+  moved out of the block, and `Clear()`, which lets go of every entry and keeps the slots, or of the block
+  where another value holds it (section 4, the owner, 2026-10-30, "C# names, Rust's Remove"), `for e in
+  map` and `for key, value in map`, which hold the block the map had when the loop started and borrow
+  each key and value from it, in the order of its slots (section 4, the owner, 2026-10-30, "Key and
+  Value, as C#"; C6, M10), `e` a value of the built-in `data` type `Entry<K, V>` of the two, laid out
+  as every `data` value of its fields is, borrowed as an item of a list is, with its text and its
+  `==` (section 4, the owner, 2026-10-30, "A value, as C#"; D3, A3), and made by `Entry(key, value)`
+  and copied by `with` as every `data` value (section 4, the owner, 2026-10-30, "Both, as a data type";
+  D5), their text,
+  `[key: value, ...]` in the order of the map's slots and `[]` without entries (A6, M10), and maps of
+  every key the checker takes and every value the emitter lays out, in variables, parameters, fields,
+  unions, lists and maps. A map is the address of a block, null for a map without entries: the count
+  of the values that hold it, 8 bytes, the count of its entries and the number of its slots, a power
+  of two from 8, 4 bytes each, the two keys of its hash, 8 bytes each, and the number of slots a key
+  can still take before the block grows, 4 bytes, padded to 48 bytes, then a control byte for
+  each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
+  key and the value, laid out as a `data` value of the three. A key's hash is SipHash-1-3 of its
+  bytes, a string's UTF-8 bytes and any other key widened to 64 bits, a time's 16 bytes, a `double`'s
+  8 bytes and a `float`'s widened to a `double`, with every NaN as the one NaN of the bits
+  `0x7FF8000000000000` and -0.0 as 0.0, as .NET's `double.GetHashCode` folds them, since such a key
+  compares as C#'s `double.Equals`, NaN equal to NaN and -0.0 to 0.0 (section 4, the owner, 2026-10-30,
+  "As C#"; D3), the hash Rust's `HashMap` takes by default; a key that is a list, a `data` value or a union, of every type
+  the checker takes as a key (section 4, the owner, 2026-10-30, "Any type with =="), is hashed by
+  SipHash-1-3 over 64-bit words, each item's own hash for a list, a union's tag and its case's hash, the
+  `null` of a nullable key, a union of its type and `null`, by its tag alone, a `data` type laid out as a
+  block its type's number and each field's hash, as Rust's derived `Hash`
+  feeds each field to one hasher, and compared by `==` (D3), lists by their counts and items, their
+  `double` and `float` items, and the values of their `double?` and `float?` items, as C#'s `Equals`
+  compares them and hashed as a `double` key is (section 4, the owner, 2026-10-30, "Equals inside
+  data/keys", "As plain double").
+  The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
+  no entry since the block was made or cleared, 128 for one whose entry was removed, else 7 bits of its
+  entry's hash, bits 56 to 62; a lookup reads the control bytes of a group of 8 slots as one word and
+  compares the key only where a byte matches, as `hashbrown`'s generic groups do, from the group the
+  hash's low bits give, then each group one group further on than the stride before, and ends at a group
+  with a slot of 255; a key added takes the first slot of 255 or 128 in its probe. `Remove` marks its
+  slot 255 where the slot's group of 8 still holds a 255, which ends every probe that reaches the group,
+  else 128, which a probe passes, as `hashbrown`'s `erase` does; `Clear` marks every slot 255. A map
+  grows to twice its slots where an entry would fill more than seven eighths of them, the slots marked
+  128 counted, `hashbrown`'s load factor, and is built again at its size, without those slots, where its
+  entries fill at most half of them, as `hashbrown`'s `reserve_rehash` does; a write, a `Remove` and a
+  `Clear` of a map another value holds copy the block first, or for `Clear` let go of it (M3), as a
+  list's `Add` and `Clear` do. The keys of the hash come from the system's `Random` for each thread, at its
+  first map, and each new map takes the first key plus one, as Rust's `RandomState` takes them, so
+  that the order of a map's entries differs between runs (M10) and a block takes its keys with it;
+  the Linux runtime's `Random` takes them as Rust's standard library takes the seed of a `HashMap`
+  (`library/std/src/sys/pal/unix/rand.rs`, checked at the tag 1.82.0): `getrandom` with
+  `GRND_INSECURE`, `GRND_NONBLOCK` for the rest of the process where the kernel refuses that flag with
+  `EINVAL`, the call made again for the bytes left and where `EINTR` interrupted it, and
+  `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
+  `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
+  pool is not ready, `EAGAIN`; the two flags and the descriptor are plain `static mut`s where Rust
+  keeps `AtomicBool`s and a `OnceLock`, Kurz having no atomic form, and the runtime runs one thread.
+  Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
+  a file that ends first, and where `BCryptGenRandom` fails on Windows, `Random` gives false and the
+  first write into the thread's first map ends the program with `random-failed` before it takes a
+  block (M9; the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path").
+  `ListTests` holds the end with the host's `Random` edited to give false, and on Linux the keys
+  read from `/dev/urandom` where each `getrandom` is a system call the kernel refuses with `ENOSYS`,
+  with a file that is not there as its control, which ends with `random-failed`. Held only by
+  reading: `GRND_INSECURE` and the turn to `GRND_NONBLOCK`, `EPERM`, `EAGAIN`, `EINTR`, the
+  descriptor kept open and read again, the other errors of `getrandom` and a read of the file that
+  fails, which no test makes the system give, and on Windows the call of `BCryptGenRandom` and its
+  check of the status. A
+  block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
+  asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
   and `TcpStream`, each of a file's and a stream's `Read`, `Write` and `Close` and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
@@ -649,8 +739,16 @@ through every way out of a block, the body of a `void` function and a lambda's e
 them, for 3000 rounds ends, and the same lists all kept do not; an allocator that makes every freed block
 inaccessible, under which the values' programs and twenty rounds of the same program print the
 same lines, and so do the strings' program and twenty rounds of strings through every way out of a block,
-and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
-since a kept block stays readable, so that a write into one freed under it ends the process;
+and the maps' program and twenty rounds of maps, and the programs of a map's members, loops, entries kept
+past a `Clear`, keys, `double` keys, nullable keys and nullable values and of writes into a list's items and `==` on two
+lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
+since a kept block stays readable, so that a write into one freed under it ends the process; maps made and dropped through every way out of a block, removed, cleared,
+walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
+of three inputs against vectors from outside this repository; two runs of one program that print a
+map of 20 entries in two orders; the bytes of a map's first block the system refuses; `random-failed`
+at a map's first write where the target's `Random` reports a failure, and a program without a map that
+runs there; on Linux a map whose keys come from `/dev/urandom` where the system refuses `getrandom`
+with `ENOSYS`, and `random-failed` where that file is not there either;
 the target's own `Release`, after
 which a write into a freed block of 32 mebibytes, more than a thread keeps, ends the process, and under which lists
 of 70000 items made and dropped for 200 rounds stay within 64 mebibytes of the system's memory, and
@@ -670,7 +768,8 @@ block the system refuses; the number of `allocation-failed` past the limit, with
 lowered in the library's text, for items of 1, 8 and 16 bytes, a padded `data` value, a list and a
 value of a block type, and for a growth the system refuses, and for an environment; the order of
 the calls of `Where`'s test; the release of such an environment before the `Add` in the IR;
-`index-out-of-range` for an index below 0, at `Count` and beyond; a part of a list outside it or with
+`index-out-of-range` for an index below 0, at `Count` and beyond, read and written, the write's value
+made before the index is read, and for a write into a list without items; a part of a list outside it or with
 its ends reversed, and parts at both ends with ends of `uint` and of `long`; `string.FromUtf8` and
 `string.FromUtf8Lossy` over 23 sequences, which give what Rust 1.82's `str::from_utf8` and
 `String::from_utf8_lossy` gave for them on 2026-10-29, under both allocators; a list that takes over
@@ -685,18 +784,18 @@ A program that uses one of these gets one `not supported` at the construct's lin
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
-(M7), a `naked` function (R12), inline assembly (R11), an assignment into an index (M9), an `Add` or a `Clear` on a list in
-a field (M5), `==` on a value that holds a list (D3), `s.Chars` as a list (T15), a call on a file or a socket in a build for
+(M7), a `naked` function (R12), inline assembly (R11), an `Add` or a `Clear` on a list in
+a field and a `Remove` or a `Clear` on a map in a field (M5), `s.Chars` as a list (T15), a call on a file or a socket in a build for
 Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
-The reference counting of section 3 is emitted for lists, strings, the environments of lambdas and
+The reference counting of section 3 is emitted for lists, strings, maps, the environments of lambdas and
 the values that hold them (above) and for nothing else: memory a value of a block type takes is never
 given back, the lists and strings it holds among it (above), so a program that makes such values
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 285 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 39 the
+full and the emitter does not emit, 3 of the 299 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 37 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -709,7 +808,7 @@ with the system's own room, as Rust's released library does (section 2);
 reads the guarantee in force on Windows and on Linux compiles the program alone.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
-(section 6), but `allocation-failed`, which writes no place and no trace (O11): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
+(section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
 `_Unwind_Backtrace` of `libgcc_s`, the shared library a program links for it, reads the executable's
 own file, `/proc/self/exe`, through three pages it maps from the system, and takes a frame's name from
 `.symtab`, its line from `.debug_line` and, in a release build built with `--lines`, the calls
@@ -930,10 +1029,10 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths none, since they run through a
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
-M9 for lists), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+M9 for lists and maps), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files and sockets: S1 to S11; S12's grants are a
 package's, and the checker reads a program), and the rules of `print` and of a value's text that
-these chapters reach: A1 to A4, A8, A10 for a type parameter, A11, A12 and A14. A program's
+these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
 grant other than these two is none R7 and R16 name, and the checker refuses it as its caller's
@@ -984,7 +1083,8 @@ which is the complete one: a `class`, an `interface` or a `flags` type and a val
 function type, C function type or `void`, and a nullable case of a written union, which N1 does not
 name (N1, D9), `?.` or `?[` to a member or an item of a type no `?` makes nullable, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
-a part after `?[` and an assignment through it, which section 4 does not name (N5), and an assignment into a path
+a part after `?[` and an assignment through it, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
+emitter does not read through a chain (N5, M9), and an assignment into a path
 through a nullable variable or field known not null, which the emitter does not write through (N3, M4), a `mut`
 method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
@@ -1010,7 +1110,14 @@ type in C's layout (R16, R17); the text of a raw pointer, of a C function value 
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
-file; `Map` (M8, M9, M10), an assignment into an index or into a path through one, a `mut` method
+file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, of a type
+parameter, and of a union of two types beside `null`, which `==` takes in a field alone and refuses
+outside one (`type-mismatch`), and a key that holds one of them as the value of its nullable type, as a
+list's item at any depth or in a field of a `data` key, but for a `data` key's own field of such a union,
+`null` among its cases or not, which is read, where a list of such a union in a field is not (M9); `==` on
+two lists, or on a `data` value, that hold a value of a type parameter or a pointer, at any depth (D3,
+M9); a map whose values have a nullable type N1 does not read; an assignment into a map or a list that
+is no variable, or into a path through an entry or an item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's
 name (D16), and `equal by` (K8); among the bases of a `data` type a class, an interface or a
@@ -1022,7 +1129,7 @@ rule gives a meaning (below); a conversion to `string`, `bool` or `char` (A5 to 
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
-lists the rule ids whose cases the checker may say `not supported` to, and five cases by name that
+lists the rule ids whose cases the checker may say `not supported` to, and four cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the
 checker reads in full is held to its header whatever it cites.
 
@@ -1030,6 +1137,20 @@ checker reads in full is held to its header whatever it cites.
 
 Each is the checker's reading, not a decision, pinned by a test in `CheckerTests.cs`; a design
 round can ask about it by the rule's id.
+
+- M9 with N1, M4 and A6: a map's key of a type `==` does not take, a map, a function, a handle or a
+  value of `void` among them, is `type-mismatch`, and so is a list of one and a nullable type of one,
+  since section 4 takes any type `==` compares; `==` between two maps is `type-mismatch` (T18, D3). `==` on two lists takes two
+  lists of one type, `List<int>` beside `List<long>` being `type-mismatch` as Rust's `Vec<i32>` beside
+  `Vec<i64>` is, and items of a union of two types beside `null`, or of a nullable type of a type `==`
+  does not take, are `type-mismatch`, as `==` on such a union outside a field is; a `data` value compares a list in a field by its items (D3).
+  `map[key] = value` and `list[i] = value` are assignments into a path (M4) and stand on a `mut`
+  variable or parameter, with M4's order, the value before the key or the index; an index of a type
+  other than an integer is `type-mismatch` (T2). Two names in a `for` loop over a list or a range are
+  `type-mismatch` at the collection (C6, a proposal). A read of a map in the key of its own `Remove` is a
+  value of its own and holds nothing of the map, so whether `Add`'s exception holds for another `mut`
+  method, which the record leaves open (section 14), does not arise for a map's methods. A map that
+  holds a value without a text is `no-text` (A7).
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
   checker can tell among them (D13's `match` on flags, O10's call). The checker reads these shapes
@@ -1179,8 +1300,8 @@ round can ask about it by the rule's id.
   ("confirmed"), at any depth: a type met again on the way, `Q<() => int>` through the field `N` of a
   `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
-  itself with other arguments, `P<List<T>>` in a `P<T>`. A map and a class, which section 4 assumes
-  can hold one, the checker says `not supported` to (M9, chapter 7) before the walk asks, and a
+  itself with other arguments, `P<List<T>>` in a `P<T>`. A map can when its value can, and a class, which section 4 assumes
+  can hold one, the checker says `not supported` to (chapter 7) before the walk asks, and a
   nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter

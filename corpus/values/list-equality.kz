@@ -1,0 +1,17 @@
+// expect: output
+// | true
+// | false
+// | false
+// rules: M9
+
+mut xs = List<int>()
+xs.Add(1)
+mut ys = List<int>()
+ys.Add(1)
+print(xs == ys)
+ys.Add(2)
+print(xs == ys)
+double z = 0.0
+mut ds = List<double>()
+ds.Add(z / z)
+print(ds == ds)

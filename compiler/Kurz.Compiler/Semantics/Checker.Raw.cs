@@ -163,7 +163,7 @@ public sealed partial class Checker
     {
         PrimitiveType { Kind: Primitive.String } => Holding.Counted,
         PrimitiveType => Holding.Nothing,
-        ListType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
+        ListType or MapType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
         UnionType u => Worst(u.Cases.Select(c => Holds(c, seen))),
         DataType d => seen.Contains(d.Symbol) ? Holding.Counted : HoldsFields(d, seen),
         TypeParameterType => Holding.Unknown,
@@ -254,6 +254,7 @@ public sealed partial class Checker
     {
         PointerType p => pointers.Contains(p) || HoldsPointer(p.Pointee, pointers),
         ListType l => HoldsPointer(l.Element, pointers),
+        MapType m => HoldsPointer(m.Value, pointers),
         UnionType u => u.Cases.Any(c => HoldsPointer(c, pointers)),
         FunctionType f => f.Parameters.Append(f.Result).Any(t => HoldsPointer(t, pointers)),
         CFunctionType f => f.Parameters.Append(f.Result).Any(t => HoldsPointer(t, pointers)),
@@ -270,6 +271,8 @@ public sealed partial class Checker
                 return true;
             case ListType l:
                 return HoldsRaw(l.Element, seen);
+            case MapType m:
+                return HoldsRaw(m.Value, seen);
             case UnionType u:
                 return u.Cases.Any(c => HoldsRaw(c, seen));
             case DataType d when !seen.Contains(d.Symbol):
@@ -518,6 +521,52 @@ public sealed partial class Checker
                 return;
             }
 
+            if (target.Type is MapType map)
+            {
+                foreach (var d in captured)
+                {
+                    Add(d);
+                }
+
+                CheckMapWrite(a, index, map, members);
+                return;
+            }
+
+            if (Types.NonNull(target.Type) is MapType)
+            {
+                foreach (var d in captured)
+                {
+                    Add(d);
+                }
+
+                Report(ErrorIds.NullableUnchecked, a.Line, $"an entry is written into a `{target.Type}` without a check (N2)");
+                CheckLoosely(index.Index, a.Value);
+                return;
+            }
+
+            if (target.Type is ListType list)
+            {
+                foreach (var d in captured)
+                {
+                    Add(d);
+                }
+
+                CheckListWrite(a, index, list, members);
+                return;
+            }
+
+            if (Types.NonNull(target.Type) is ListType)
+            {
+                foreach (var d in captured)
+                {
+                    Add(d);
+                }
+
+                Report(ErrorIds.NullableUnchecked, a.Line, $"an item is written into a `{target.Type}` without a check (N2)");
+                CheckLoosely(index.Index, a.Value);
+                return;
+            }
+
             if (target.Type is not PointerType)
             {
                 NotSupported(a.Line, "an assignment into an index (M9)");
@@ -586,6 +635,93 @@ public sealed partial class Checker
         else if (!Types.Assignable(value.Type, current))
         {
             Report(Types.MismatchId(value.Type, current), a.Value.Line, $"a `{value.Type}` where a `{current}` is required (T1)");
+        }
+    }
+
+    /// <summary>
+    /// M9, M4: <c>map[key] = value</c> sets the key's entry, an assignment into a path that starts at a <c>mut</c> variable; a map
+    /// reached through a field, an item or a call, and a path that goes on after the key, are not read.
+    /// </summary>
+    private void CheckMapWrite(Assignment a, IndexExpression index, MapType map, List<MemberAccess> members)
+    {
+        if (!WrittenVariable(a, index, members, "an assignment into a map that is no variable, or into a path through an entry (M4, M9)"))
+        {
+            return;
+        }
+
+        CheckKey(index.Index, map);
+        CheckWrittenValue(a, index, map.Value);
+    }
+
+    /// <summary>
+    /// M9, M4: <c>xs[i] = value</c> writes the item at the position <c>i</c> of a list that a <c>mut</c> variable or parameter holds,
+    /// as C# and Rust write one (section 4, the owner, 2026-10-30, "As C# and Rust"); a list reached through a field, an item or a call,
+    /// and a path that goes on after the item, are not read.
+    /// </summary>
+    private void CheckListWrite(Assignment a, IndexExpression index, ListType list, List<MemberAccess> members)
+    {
+        if (!WrittenVariable(a, index, members, "an assignment into a list that is no variable, or into a path through an item (M4, M9)"))
+        {
+            return;
+        }
+
+        var position = CheckExpression(index.Index, Types.Int);
+        if (!position.IsError && !Types.IsInteger(position.Type))
+        {
+            Report(ErrorIds.TypeMismatch, index.Line, $"an index is an integer, not a `{position.Type}` (M9, T2)");
+        }
+
+        CheckWrittenValue(a, index, list.Element);
+    }
+
+    /// <summary>
+    /// M4: whether the collection an index assigns into is a variable, a <c>mut</c> one or a <c>mut</c> parameter where the checker
+    /// takes the write, which an arm's statement makes a change of M7; anything else is <c>not supported</c> with <paramref name="unread"/>.
+    /// </summary>
+    private bool WrittenVariable(Assignment a, IndexExpression index, List<MemberAccess> members, string unread)
+    {
+        if (members.Count > 0 || Unwrap(index.Target) is not NameExpression name || !model.IsVariable(name))
+        {
+            NotSupported(a.Line, unread);
+            CheckLoosely(index.Index, a.Value);
+            return false;
+        }
+
+        var (variable, captured) = Lookup(name.Name);
+        if (captured)
+        {
+            Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{name.Name}` and cannot change it (F11)");
+        }
+        else if (!variable!.Mut)
+        {
+            Report(ErrorIds.AssignImmutable, a.Line, $"`{name.Name}` was declared without `mut`: nothing reachable through it changes (D4, M4)");
+        }
+        else
+        {
+            changes[a] = new Change(variable, name.Name, a.Line, $"an assignment changes `{name.Name}`"); // M7, in an arm inside an expression
+        }
+
+        variable!.Changed = true;
+        return true;
+    }
+
+    /// <summary>The value an assignment into an index writes, of the type of the entry's value or of the list's items.</summary>
+    private void CheckWrittenValue(Assignment a, IndexExpression index, KurzType type)
+    {
+        model.RecordType(index, new Typed(type));
+        var value = CheckExpression(a.Value, type, keepCases: type is UnionType);
+        if (value.IsError)
+        {
+            return;
+        }
+
+        if (Types.IsVoid(value.Type))
+        {
+            Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
+        }
+        else if (!Types.Assignable(value.Type, type))
+        {
+            Report(Types.MismatchId(value.Type, type), a.Value.Line, $"a `{value.Type}` where a `{type}` is required (T1)");
         }
     }
 

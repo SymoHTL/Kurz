@@ -1,0 +1,17 @@
+// expect: output
+// | 1
+// | 2
+// | 3
+// | 3
+// rules: M9
+
+double z = 0.0
+nan = z / z
+mut counts = Map<double?, int>()
+counts[nan] = 1
+counts[null] = 2
+counts[-z] = 3
+print(counts[nan] ?? 0)
+print(counts[null] ?? 0)
+print(counts[z] ?? 0)
+print(counts.Count)

@@ -583,9 +583,10 @@ There is one family of collections, and every value can cross between actors.
 
 No case: actors are outside this reference; that collections are values is shown under M3.
 
-### M9 (assumed, §4, §5, §12) The collections the corpus uses
+### M9 (decided, §4, §5, §12) The collections the corpus uses
 
-`List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method; `Clear()` empties a list and
+`List<T>()` makes an empty list; `Add(item)` appends and is a `mut` method *(assumed, §4: `List<T>()`,
+`Add`, `Count` and an index counted from 0, the members the record's samples use)*; `Clear()` empties a list and
 keeps its room, a `mut` method too, and a list that shares its block with another value lets go of it
 (M3; §12, the owner, 2026-10-29); `Count` is the number
 of items, an `int`, and a list holds at most as many items as the largest `int`, an `Add` that
@@ -602,9 +603,37 @@ and `xs[a..b]` are a new list of the items from position `a` to `b`, the second 
 items copied (M3); a start below 0 or an end past the count raises `index-out-of-range`, and a range
 whose end lies below its start is `reversed-range` or `reversed-range-at-run-time`, as C8 says of a
 range (§4, the owner, 2026-10-29). `Map<K, V>()` makes an empty map; `map[key] = value` sets an entry, as
-an assignment into a path (M4); `map[key]` is the value or `null`. The names are the ones the
-record's samples use, and `Clear` is the one section 12 gives. The naming of the standard library is open
-beyond the calls on files and sockets (record, sections 12 and 14).
+an assignment into a path (M4); `map[key]` is the value or `null` *(assumed, §4: the three the samples
+use)*. A map's key is a value of any type
+`==` compares, a list by its items and a `data` value by its fields, hashed over the same items and
+fields; a map as a key is `type-mismatch`, since `==` takes no map, and so is a `data` value that holds
+a map, a function value, a file or a socket (D3), and a `double` or a `float` key, alone, as a field of a
+`data` key or as an item of a list in a key, at any depth, compares as C#'s `double.Equals` in a
+`Dictionary`: NaN finds NaN, and 0.0 and -0.0 are one key, hashed alike. A key of a nullable type, with
+`null` among its keys, compares as `==` compares two nullable values (N10), `null` equal to `null` alone
+and two values as their type compares as a key *(assumed, §4: for the nullable types beside `double?` and
+`float?`)*, and a `double?` or a `float?` key compares its value as a `double` key does. `xs == ys` on two
+lists of one type is `true` where their counts are equal and their items are equal in order, each pair by
+`==`, so that NaN is unequal to NaN there, also in the lists among the items, and `!=` is its negation;
+lists of items `==` does not take are `type-mismatch`. Items of a nullable type compare as `==` compares
+two nullable values (N10) *(assumed, §4: for the nullable types beside `double?` and `float?`)*, and the
+values of `double?` and `float?` items by IEEE's `==`, as Rust's `Vec<Option<f64>>` compares. A list held
+in a `data` value under `==` compares its `double` and `float` items, and the values of its `double?` and
+`float?` items, as C#'s `Equals` does (D3), and so does a list in a key. A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10), taken at a thread's first map as Rust's standard library takes them: on Linux from `getrandom` with `GRND_INSECURE`, or `GRND_NONBLOCK` where the kernel refuses that flag, and from `/dev/urandom` where the system refuses `getrandom` or its pool is not ready, on Windows from `BCryptGenRandom`; where none of them gives the bytes, where Rust panics, the program ends there with `random-failed` (§4, the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path"), whose line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (O11) *(assumed, §4: the id, the name the question gave as an example, and the shape of its line)*. `Count` is
+the number of a map's entries, an `int`; `ContainsKey(key)` is a `bool`; `Remove(key)`, a `mut` method,
+takes the key's entry out of the map and gives its value, or `null` where there is none, of the type
+`map[key]` has, and copies a map another value holds first (M3); `Clear()`, a `mut` method, removes every
+entry, and a map that shares its block with another value lets go of it (M3). A map's value may be of a
+nullable type: `map[key]` and `Remove(key)` on a `Map<K, V?>` are a `V?`, a missing entry and an entry
+that holds `null` alike. `list[i] = value` writes the item at position `i` of a list reached through a
+`mut` variable or a `mut` parameter, as an assignment into a path (M4): the value first, then the
+position; an `i` below 0 or at `Count` or beyond raises `index-out-of-range` (T14), and a list that
+shares its block with another value is copied first (M3). (§4, the owner, 2026-10-30: the keys, the
+hash, the members, the nullable value, the write of an item, `==` on two lists and the keys and items of
+`double?` and `float?`.) The names are the ones the record's
+samples use, `Clear` is the one section 12 gives, and a map's members are the ones section 4 gives. The
+naming of the standard library is open beyond the calls on files and sockets and a map's members (record,
+sections 12 and 14).
 
 Case: [values/list.kz](../corpus/values/list.kz)
 ```kurz
@@ -706,12 +735,163 @@ print(xs.Count)
 print(ys.Count)
 ```
 
+Case: [values/map-members.kz](../corpus/values/map-members.kz)
+```kurz
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+ages["Bea"] = 27
+print(ages.Count)
+print(ages.ContainsKey("Ann"))
+print(ages.Remove("Ann") ?? 0)
+print(ages.Remove("Ann") ?? 0)
+print(ages.Count)
+print(ages.ContainsKey("Ann"))
+copy = ages
+ages.Clear()
+print(ages.Count)
+print(copy.Count + 1)
+```
+
+Case: [values/map-keys.kz](../corpus/values/map-keys.kz)
+```kurz
+data Point(int X, int Y)
+
+mut names = Map<Point, string>()
+names[Point(1, 0)] = "east"
+print(names[Point(1, 0)] ?? "none")
+mut sums = Map<List<int>, int>()
+mut key = List<int>()
+key.Add(1)
+key.Add(2)
+sums[key] = 3
+mut same = List<int>()
+same.Add(1)
+same.Add(2)
+print(sums[same] ?? 0)
+print(names[Point(0, 1)] ?? "none")
+```
+
+Case: [values/map-key-map.kz](../corpus/values/map-key-map.kz)
+```kurz
+seen = Map<Map<string, int>, bool>()
+print(seen.Count)
+```
+
+Case: [values/map-nullable-value.kz](../corpus/values/map-nullable-value.kz)
+```kurz
+mut scores = Map<string, int?>()
+scores["Ann"] = null
+scores["Bea"] = 2
+print(scores["Ann"] ?? -1)
+print(scores["Cid"] ?? -1)
+print(scores.ContainsKey("Ann"))
+print(scores.Remove("Bea") ?? 0)
+```
+
+Case: [values/map-key-double.kz](../corpus/values/map-key-double.kz)
+```kurz
+double z = 0.0
+nan = z / z
+mut names = Map<double, string>()
+names[nan] = "nan"
+names[z] = "zero"
+names[-z] = "minus zero"
+print(names.Count)
+print(names[nan] ?? "none")
+print(names[z] ?? "none")
+```
+
+Case: [values/map-key-list-double.kz](../corpus/values/map-key-list-double.kz)
+```kurz
+double z = 0.0
+nan = z / z
+mut xs = List<double>()
+xs.Add(nan)
+xs.Add(z)
+mut ys = List<double>()
+ys.Add(nan)
+ys.Add(-z)
+mut seen = Map<List<double>, string>()
+seen[xs] = "found"
+print(seen[ys] ?? "none")
+seen[ys] = "again"
+print(seen.Count)
+```
+
+Case: [values/map-key-nullable-double.kz](../corpus/values/map-key-nullable-double.kz)
+```kurz
+double z = 0.0
+nan = z / z
+mut counts = Map<double?, int>()
+counts[nan] = 1
+counts[null] = 2
+counts[-z] = 3
+print(counts[nan] ?? 0)
+print(counts[null] ?? 0)
+print(counts[z] ?? 0)
+print(counts.Count)
+```
+
+Case: [values/list-equality.kz](../corpus/values/list-equality.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+mut ys = List<int>()
+ys.Add(1)
+print(xs == ys)
+ys.Add(2)
+print(xs == ys)
+double z = 0.0
+mut ds = List<double>()
+ds.Add(z / z)
+print(ds == ds)
+```
+
+Case: [values/list-equality-nullable-double.kz](../corpus/values/list-equality-nullable-double.kz)
+```kurz
+data Samples(List<double?> Xs)
+
+double z = 0.0
+mut xs = List<double?>()
+xs.Add(z / z)
+xs.Add(null)
+print(xs == xs)
+print(Samples(xs) == Samples(xs))
+mut ys = List<double?>()
+ys.Add(null)
+ys.Add(-z)
+mut zs = List<double?>()
+zs.Add(null)
+zs.Add(z)
+print(ys == zs)
+```
+
+Case: [values/list-write.kz](../corpus/values/list-write.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(4)
+xs.Add(5)
+ys = xs
+xs[1] = 9
+print(xs)
+print(ys)
+```
+
+Case: [values/list-write-out-of-range.kz](../corpus/values/list-write-out-of-range.kz)
+```kurz
+mut xs = List<int>()
+xs.Add(1)
+xs[1] = 2
+print(xs)
+```
+
 ### M10 (decided, §4) The order of a map's entries
 
 A map has no order a program may rely on. A `for` loop over it (C6) and its text (A6) yield the
 entries in the order of the map's storage, which can differ between runs and versions, as the
 documentation of C#'s `Dictionary` leaves its order undefined. Two runs of one program can print
-the same map differently.
+the same map differently, and do as a rule, since the hash of a map's keys takes keys drawn from the
+system's randomness, as Rust's `HashMap` takes them (§4, the owner, 2026-10-30).
 
 No case: no order can be expected, so a case can show a map of one entry only, which the case of
 A6 does.

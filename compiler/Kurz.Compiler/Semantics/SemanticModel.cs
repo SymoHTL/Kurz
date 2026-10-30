@@ -23,6 +23,9 @@ public enum CallKind
     /// <summary><c>List&lt;T&gt;()</c> (M9).</summary>
     ListNew,
 
+    /// <summary><c>Map&lt;K, V&gt;()</c> (M9).</summary>
+    MapNew,
+
     /// <summary>A data value made by the type's name (D2); <see cref="CallInfo.Data"/> is the type.</summary>
     DataNew,
 
@@ -58,6 +61,15 @@ public enum CallKind
 
     /// <summary>A list's <c>Clear</c> (M9).</summary>
     ListClear,
+
+    /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>
+    MapContainsKey,
+
+    /// <summary>A map's <c>Remove(key)</c> (M9), the value of the key's entry, moved out, or <c>null</c>.</summary>
+    MapRemove,
+
+    /// <summary>A map's <c>Clear</c> (M9).</summary>
+    MapClear,
 
     /// <summary><c>File.Open(path)</c> (S2), a file opened to read or the case <c>IoError</c> (S1).</summary>
     FileOpen,
