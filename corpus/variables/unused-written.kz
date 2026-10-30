@@ -1,4 +1,5 @@
-// expect: error unused-variable at 4
+// expect: error unused-variable at 5
+// build: release
 // rules: V6
 
 mut x = 1

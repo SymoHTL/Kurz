@@ -126,6 +126,7 @@ arm after an arm with the same literal is `unreachable-arm` as well, as C# repor
 earlier one handles; an arm that names a type that is no case of the union and derived from none,
 `string s` in a `match` over `Yes | No`, is `type-mismatch` (T1) at the arm, as C# refuses a pattern
 of a type the value cannot have (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
+A value whose type is a type parameter is C10's.
 
 Case: [control/match-unreachable-literal.kz](../corpus/control/match-unreachable-literal.kz)
 ```kurz
@@ -434,3 +435,18 @@ match n {
     0 => print("zero")
 }
 ```
+
+### C10 (decided, §4) `match` on a value of a type parameter
+
+Inside a generic function (T19), a `match` on a value whose type is a type parameter has arms that
+name types, `int i`, as C#'s `x is int i` tests such a value: each copy of the function, one for
+each list of type arguments, resolves the arms for its type argument, and nothing is paid at run
+time (§4, the owner, 2026-10-30, "Allowed, as C#", against the refusal, as Rust has no
+specialization and Go no type switch on a type parameter, at the cost of an interface method for a
+fast path; the cost is behaviour for each type that the signature does not show). Such an arm is
+no `type-mismatch` (C4). *(assumed, §4: that in a copy whose type argument an arm does not name, the
+arm is no error and does not run)* Whether such a `match` has to end in `else` (O8) is open (record,
+section 14).
+
+No case: the compiler reports such an arm as `type-mismatch` under C4, and a case of the corpus
+holds the compiler to its header.

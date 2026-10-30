@@ -13,7 +13,7 @@ expects it.
 
 | id | rules | meaning |
 |---|---|---|
-| `unused-variable` | V5, V6 | a variable that is never read; a parameter and a loop variable are no variables for this (V13) |
+| `unused-variable` | V5, V6 | a variable that is never read, in a release build, where a test build warns (V5); a parameter and a loop variable are no variables for this (V13) |
 | `assign-immutable` | V7, V8, D4, K1, F8, K14 | an assignment to a variable or a parameter that is not `mut`, into a path that starts at one (M4: for a `data` value the variable at the root decides, so `root.Left = x` through a `mut` variable is allowed), or to a field of a class instance that is not `mut`; inside a constructor a field without `mut` is assigned once (K14), and a second time is this error |
 | `redeclared` | V9, F16, R16, T15, D18, D20 | a declaration, in any of its forms, of a name that is already visible, or inside a top-level function of the name of a variable at the outermost level of the top-level code; a C declaration of a name that another function of the package, a type or another C declaration has, at the second of the two (R16); a file's own `InvalidUtf8` (T15) or `Invalid` (D18); a value of an `enum` whose name an earlier value has, or named `Number` or `From` (D20) |
 | `argument-mismatch` | D11, F13 | a call with an argument whose name no parameter has, two arguments for one parameter, or none for a parameter without a default; a call of a name that has more than one function and fits none of them, at the call (F13) |
@@ -54,6 +54,8 @@ expects it.
 | `ambiguous-call` | F13 | a call that fits more than one function, none of them exactly |
 | `cannot-infer` | T27, F7 | a call of a generic function whose type arguments are neither written nor inferable from its arguments, two instances of different classes with one base in one parameter's positions included |
 | `equal-by-unknown` | K15 | an `equal by` clause that names something that is not a field of the class |
+| `equals-method` | K5 | a method named `Equals` or `GetHashCode` on a class, at the method; the message points to `equal by` (K8) |
+| `mutable-key` | K12 | a class whose `equal by` clause names a `mut` field, as the key type of a `Map`, at the line that writes that type |
 | `base-field-clash` | K16, K17 | a parameter with a base field's name and another type, in the explicit form (K17) or the short one (K16), or with its name and type while the base receives something else |
 | `no-text` | A4, A7, A10, S5 | the text of an instance of a class that neither declares nor inherits a `Text()` (A9), of a value that holds one, of a union with such a case or with a success without a value (A7), of a value whose interface or type parameter declares none, or of a `File`, a `TcpListener` or a `TcpStream` (S5, §12, assumed) |
 | `block-indentation` | L13 | a line of a `"""` block that is indented less than the closing line |
