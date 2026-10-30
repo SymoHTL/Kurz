@@ -11,8 +11,10 @@ bytes is hashed first. A `string` is hashed through `s.Bytes`. The code of the f
 standard library (§12, the owner, 2026-10-30, "In Kurz, as RustCrypto"; 2026-10-31, "`Sha256.Hash(b)`"
 and "`Bytes`, CRC32 a `uint`"). They need no grant and build for every target, Windows among them; their
 parameters are named `bytes`, `key` and `message`; and a block the system refuses for a digest or a
-state ends the process with `allocation-failed`, as a list's does (M9). *(assumed, §12: no grant, every
-target, the `string` through `s.Bytes`, the names of the parameters and the refused block)*
+state ends the process with `allocation-failed`, as a list's does (M9). Every file sees the names
+`Sha256`, `Md5`, `Crc32`, `Hmac`, `Hex` and `FixedTime`, and a file's own declaration of one, a type, a
+function or a variable, is `redeclared` (V9). *(assumed, §12: no grant, every target, the `string`
+through `s.Bytes`, the names of the parameters, the refused block and the six names)*
 
 Case: [hashing/sha256.kz](../corpus/hashing/sha256.kz)
 ```kurz
@@ -74,6 +76,14 @@ print(Hex.Encode(Hmac.Sha256(key, Repeated(205, 50))))
 print(Hex.Encode(Hmac.Sha256(Repeated(12, 20), "Test With Truncation".Bytes)[0..<16]))
 print(Hex.Encode(Hmac.Sha256(Repeated(170, 131), "Test Using Larger Than Block-Size Key - Hash Key First".Bytes)))
 print(Hex.Encode(Hmac.Sha256(Repeated(170, 131), "This is a test using a larger than block-size key and a larger than block-size data. The key needs to be hashed before being used by the HMAC algorithm.".Bytes)))
+```
+
+Case: [hashing/name-redeclared.kz](../corpus/hashing/name-redeclared.kz)
+```kurz
+// the hexadecimal digits of a number, under a name every file sees
+data Hex(int Digits)
+
+print(1)
 ```
 
 ### H2 (decided, §12) `Hex.Encode`
