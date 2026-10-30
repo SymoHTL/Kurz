@@ -80,7 +80,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Go Developer Survey 2024 H2 Results (https://go.dev/blog/survey2024-h2-results): teams report "identifying resource usage inefficiencies in a running Go program (57%)" (finding 2). A Guide to the Go Garbage Collector (https://go.dev/doc/gc-guide): "Furthermore, in some applications, these transient peaks can be rare and hard to predict, leading to occasional, unavoidable, and potentially costly out-of-memory conditions." proposal: arena: new package providing memory arenas (https://github.com/golang/go/issues/51317): open, 396 thumbs-up.
 - Since: `GOMEMLIMIT` in Go 1.19. Go 1.26 (https://go.dev/doc/go1.26): "The Green Tea garbage collector, previously available as an experiment in Go 1.25, is now enabled by default after incorporating feedback."
-- Kurz: AVOIDED. Section 3 says: "No lifetimes, no borrow annotations, no global garbage collector." It adds: "Each actor has its own heap." A dead actor's heap is freed whole.
+- Kurz: REPEATED in part: the sweep of an actor's heap paces itself as Go's collector does, "Live size x2, as Go", with the factor a setting of the deployment, a knob as `GOGC` is (section 13 of the record). Section 3 says: "No lifetimes, no borrow annotations, no global garbage collector." It adds: "Each actor has its own heap." A dead actor's heap is freed whole.
 
 ## 11. Zero values stand in for "absent": nil maps, unset fields, pointers as options
 
@@ -97,7 +97,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 13. Blocking bugs and channel deadlocks
 
 - Evidence: Understanding Real-World Concurrency Bugs in Go, a peer-reviewed study (ASPLOS 2019) (https://songlh.github.io/paper/go-study.pdf): "We analyzed 171 concurrency bugs in total, with more than half of them caused by non-traditional, Go-specific problems." The same paper: "Overall, we found that there are around 42% blocking bugs caused by errors in protecting shared memory, and 58% are caused by errors in message passing." And: "The built-in deadlock detector can only detect two blocking bugs, BoltDB#392 and BoltDB#240, and fail in all other cases".
-- Kurz: AVOIDED. Kurz has no channels.
+- Kurz: AVOIDED for channels, which Kurz does not have. The blocking bugs the study counts in message passing meet the three layers of section 6 on deadlocks: a compile error for a loop of waiting calls between actor types, detection at run time at every wait, and a timeout on every call; across machines a crossing of chains falls to the timeout.
 
 ## 14. No immutability
 
@@ -113,7 +113,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 16. Network timeouts default to none
 
 - Evidence: net/http source (https://github.com/golang/go/blob/master/src/net/http/client.go): "A Timeout of zero means no timeout." gosec, third party (https://github.com/securego/gosec): "G112 — Detect `ReadHeaderTimeout` not configured as a potential risk" and "G114 — Use of `net/http` serve function that has no support for setting timeouts".
-- Kurz: answered: "5 s default, settable" for a read, a write and `Connect`, and "Accept waits, as Rust", section 12 of the record. Before the answers: REPEATED.
+- Kurz: answered: "5 s default, settable" for a read, a write and `Connect`, and "Accept waits, as Rust", section 12 of the record; how the bound holds for an actor's socket, which runs without blocking under `epoll`, stands open (section 14). Before the answers: REPEATED.
 
 ## 17. Errors lose where they came from
 
@@ -160,4 +160,4 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: The Go Programming Language Specification (https://go.dev/ref/spec#Defer_statements): "Instead, deferred functions are invoked immediately before the surrounding function returns, in the reverse order they were deferred." The Go toolchain made this mistake itself: "cmd/covdata: too many open files due to `defer f.Close()` in for loop" (https://github.com/golang/go/issues/68468), with backports to Go 1.21 and 1.22.
 - Since: nothing in the language. The third-party staticcheck rule SA9001 flags it: "Defers in range loops may not run when you expect them to".
-- Kurz: AVOIDED. Kurz has no `defer`.
+- Kurz: AVOIDED. Kurz has no `defer`: a file or a socket closes when the last value that holds it lets go of it ("At the last count, as Rust Drop", section 12 of the record), which a value made in a loop's body does at the end of that body, as its count drops at the end of its scope (section 4).

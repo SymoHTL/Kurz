@@ -11,7 +11,7 @@ Read on 2026-10-30. Every fact about Goose comes from the page named beside it, 
 quoted; the names resolve under "Sources" at the end. Nothing was built, run or measured for this
 note. A figure computed for this note from published numbers says so.
 
-Verdicts: ALREADY (Kurz has it), ADOPTABLE (put to the owner as a question), CONFLICTS (with a
+Verdicts: ALREADY (Kurz has it), ADOPTABLE (a question for the owner; the item says whether it was asked), CONFLICTS (with a
 decision of the record), UNKNOWN. An answered question names the owner's choice and the section of
 the record whose trace holds each option with its cost. Before a design change, name the mechanism
 or the finding it meets (knowledge/diagram-design-change-playbook.md, B4).
@@ -148,7 +148,7 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
   offset."; "Saving it is a single write, and loading it is a single read followed by a verification
   pass that rejects malformed or hostile data." (front page); "With self-relative links and index
   slots it is 1.5x behind the Rust and C++ arenas." (results). Kurz: ALREADY as indices (section 3),
-  with the arena whose handles carry a generation (section 3, 2026-10-30); saving as bytes UNKNOWN.
+  with the arena whose handles carry a generation (section 3, 2026-10-30); saving as bytes UNKNOWN, open (section 14).
 - G6, compact scalars. "packed structs (no padding), u8/u16/ varint array length fields, u8 enum
   tags, varint payload fields" (design); "Dropping #pragma pack(1) where the layout is already
   gap-free: no difference on either backend." (results). Kurz: ALREADY for enums; varint CONFLICTS
@@ -200,9 +200,10 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
   aliasing information." and "Rust gives LLVM noalias on &mut" (design); "Under clang, the same form
   is 1.10x faster than Rust (256 against 282 ms)." (results). Kurz: ADOPTABLE, Q7, not asked.
 - W2, copies with no move. "By-value semantics with no move operation (4.1, TODO 3) mean that idioms
-  a Rust programmer would express as a cheap move are an O(size) copy in Goose." W3: lifetimes that
-  are not nested "must go through reusable pools" (design). Kurz: ALREADY avoided (copy on write,
-  counts free in any order).
+  a Rust programmer would express as a cheap move are an O(size) copy in Goose." (design). Kurz:
+  ALREADY avoided (copy on write).
+- W3, pools for lifetimes that are not nested. Lifetimes that are not nested "must go through
+  reusable pools" (design). Kurz: ALREADY avoided (counts free in any order).
 
 ## The questions and the answers
 

@@ -71,7 +71,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 10. A mutable key gets lost in a hash table
 
 - Evidence: "Object.GetHashCode Method" (https://learn.microsoft.com/en-us/dotnet/api/system.object.gethashcode): "Otherwise, you might think that the mutable object is lost in the hash table."
-- Kurz: answered: "Error at the Map key", section 4 of the record. Before the answers: REPEATED.
+- Kurz: answered: "Error at the Map key", section 4 of the record, for a class that is itself the key type; whether the error reaches a key type that holds such a class, or one that a type parameter stands for, stands open (section 14). Before the answers: REPEATED.
 
 ## 11. A method on a struct changes a copy
 
