@@ -1845,10 +1845,10 @@ public sealed partial class Checker
 
             if (Types.NonNull(current) is not null)
             {
-                // N2, N3: a path through a nullable field; one known not null is not written through, which the emitter does not do
+                // N2, N3: a path through a nullable variable or field; one known not null is not written through, which the emitter does not do
                 if (through is { } known && frame.Known.Contains(known))
                 {
-                    NotSupported(m.Line, "an assignment into a path through a nullable field (N3, M4)");
+                    NotSupported(m.Line, "an assignment into a path through a nullable variable or field (N3, M4)");
                 }
                 else
                 {

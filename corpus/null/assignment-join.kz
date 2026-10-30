@@ -1,0 +1,22 @@
+// expect: output
+// | 1
+// | 13
+// rules: N7
+
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+void Show(int id) {
+    mut f = Email(id)
+    if f == null {
+        f = "x"
+    }
+    print(f.Bytes.Count)
+}
+
+Show(2)
+Show(1)

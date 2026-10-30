@@ -105,7 +105,8 @@ public sealed partial class Emitter
     /// <summary>
     /// N5: <c>xs?[i]</c>, a value of its own that the caller makes a temporary of: <c>null</c> where the list is null, which stops the
     /// rest of the chain, and otherwise its item at the index, counted once more, made a value of the chain's nullable type; the index
-    /// runs only where the list is not null, as C#'s <c>?[]</c> runs it.
+    /// runs only where the list is not null, as C#'s <c>?[]</c> runs it. The list is read without a count of its own past the index:
+    /// an index that changes it, <c>names?[Pop(mut names)]</c>, is the checker's <c>changed-while-held</c> (M7).
     /// </summary>
     private string EmitConditionalIndex(IndexExpression i, UnionType result)
     {
