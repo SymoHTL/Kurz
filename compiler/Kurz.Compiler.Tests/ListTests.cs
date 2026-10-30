@@ -591,6 +591,1001 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(total)
         """;
 
+    // maps (M9): a read that is a value of its own, a write over a key, a copy written to (M3), a value read from the map it is
+    // written into, a key the map keeps after its variable changes, a `mut` parameter, a missing key, growth, a map in a data value
+    // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, keys of each kind the checker takes, a map in a
+    // union, a block replaced by growth under a `mut` parameter and under a lambda that read it, strings equal by their bytes with
+    // and without a block, and the texts
+    private const string Maps = """
+        data Box(string Name, Map<string, string> Tags)
+
+        enum Plan { Free, Pro }
+
+        T Id<T>(T x) => x
+
+        string Made(int n) => "made {n}"
+
+        int Total(Map<int, int> m, int n) {
+            mut total = 0
+            for i in 0..<n {
+                total = total + (m[i] ?? 0)
+            }
+            return total
+        }
+
+        void Fill(mut Map<string, string> m, string k) {
+            m[k] = "{k}!"
+        }
+
+        data NotFound
+        data Holder(Map<string, string> M, int N)
+
+        Map<string, int> | NotFound Lookup(int n) {
+            if n == 0 {
+                return NotFound
+            }
+            mut m = Map<string, int>()
+            m["n"] = n
+            return m
+        }
+
+        void Grow(mut Map<int, string> m, int n) {
+            for i in 0..<n {
+                m[i] = "v{i}"
+            }
+        }
+
+        Map<string, int> Plus(Map<string, int> m) {
+            mut copied = m
+            copied["z"] = 26
+            return copied
+        }
+
+        string Joined(string x, string y) => "{x}{y}"
+
+        mut names = Map<string, string>()
+        for i in 0..<20 {
+            names[Made(i)] = Made(i + 100)
+        }
+        kept = names[Made(3)] ?? "none"
+        names[Made(3)] = "over"
+        print(kept)
+        print(names[Made(3)] ?? "none")
+        copy = names
+        names[Made(4)] = "changed"
+        print(copy[Made(4)] ?? "none")
+        print(names[Made(4)] ?? "none")
+        names[Made(5)] = names[Made(6)] ?? "none"
+        print(names[Made(5)] ?? "none")
+        mut key = Made(7)
+        names[key] = "by key"
+        key = "other"
+        print(names[Made(7)] ?? "none")
+        Fill(mut names, Made(8))
+        print(names[Made(8)] ?? "none")
+        print(names["missing"] ?? "none")
+        mut squares = Map<int, int>()
+        for i in 0..<100 {
+            squares[i] = i * i
+        }
+        print(Total(squares, 100))
+        mut tags = Map<string, string>()
+        tags[Made(1)] = Made(2)
+        b = Box("box", tags)
+        tags[Made(1)] = "blue"
+        c = b with { Name = "other" }
+        print(b.Tags[Made(1)] ?? "none")
+        print(c)
+        mut lists = Map<string, List<string>>()
+        mut xs = List<string>()
+        xs.Add(Made(9))
+        lists["a"] = xs
+        xs.Add(Made(10))
+        print(lists["a"] ?? List<string>())
+        mut maps = List<Map<string, string>>()
+        maps.Add(tags)
+        tags[Made(1)] = "green"
+        print(maps[0][Made(1)] ?? "none")
+        mut nested = Map<string, Map<string, string>>()
+        nested["in"] = tags
+        tags = Map<string, string>()
+        print(nested["in"] ?? Map<string, string>())
+        f = () => names[Made(0)] ?? "none"
+        names[Made(0)] = "after"
+        print(f())
+        mut wide = Map<long, string>()
+        int minus = -1
+        wide[minus] = "minus one"
+        print(wide[-1] ?? "none")
+        mut small = Map<byte, int>()
+        small[200] = 7
+        print(small[200] ?? 0)
+        mut big = Map<ulong, int>()
+        big[18446744073709551615UL] = 8
+        print(big[18446744073709551615UL] ?? 0)
+        print(big[0] ?? 0)
+        mut answers = Map<bool, string>()
+        answers[true] = "yes"
+        answers[false] = "no"
+        print(answers[true] ?? "none")
+        print(answers[false] ?? "none")
+        mut chars = Map<char, int>()
+        chars['ü'] = 9
+        print(chars['ü'] ?? 0)
+        print(chars['u'] ?? 0)
+        empty = Map<string, int>()
+        print(empty)
+        mut one = Map<int, string>()
+        one[1] = "a"
+        one[1] = "b"
+        print(one)
+
+        // a value read and written back to its own key
+        mut words = Map<string, string>()
+        words["a"] = "x"
+        words["a"] = Joined(words["a"] ?? "", "y")
+        print(words["a"] ?? "none")
+
+        // a map in a union
+        match Lookup(3) {
+            NotFound => print("none")
+            Map<string, int> found => print(found["n"] ?? -1)
+        }
+        match Lookup(0) {
+            NotFound => print("none")
+            Map<string, int> found => print(found["n"] ?? -1)
+        }
+
+        // a mut parameter whose block the callee replaces by growth
+        mut grown = Map<int, string>()
+        grown[0] = "first"
+        Grow(mut grown, 50)
+        print(grown[49] ?? "none")
+        print(grown[0] ?? "none")
+
+        // a lambda keeps the block it captured while the variable grows
+        mut seen = Map<int, string>()
+        seen[1] = "one"
+        look = () => seen[1] ?? "gone"
+        Grow(mut seen, 40)
+        print(look())
+        print(seen[1] ?? "none")
+
+        // a copy made inside a function, the parameter untouched
+        base = Map<string, int>()
+        more = Plus(base)
+        print(base)
+        print(more)
+
+        // keys equal by their bytes, from a literal and from a join; the empty string
+        mut keys = Map<string, int>()
+        keys["ab"] = 1
+        print(keys[Joined("a", "b")] ?? 0)
+        keys[Joined("c", "d")] = 2
+        print(keys["cd"] ?? 0)
+        keys[""] = 3
+        print(keys[""] ?? 0)
+        keys[Joined("a", "b")] = 4
+        print(keys["ab"] ?? 0)
+
+        // narrow and wide integer keys of both signs, and a char beyond 16 bits
+        mut shorts = Map<short, int>()
+        short neg = -5
+        shorts[neg] = 5
+        print(shorts[-5] ?? 0)
+        mut uints = Map<uint, int>()
+        uints[4294967295U] = 7
+        print(uints[4294967295U] ?? 0)
+        mut emoji = Map<char, string>()
+        emoji['😀'] = "smile"
+        print(emoji['😀'] ?? "none")
+
+        // a map of maps written through a copy of the inner map
+        mut outer = Map<string, Map<string, int>>()
+        mut inner = Map<string, int>()
+        inner["x"] = 1
+        outer["a"] = inner
+        mut changed = outer["a"] ?? Map<string, int>()
+        changed["x"] = 2
+        outer["a"] = changed
+        print(inner["x"] ?? 0)
+        print((outer["a"] ?? Map<string, int>())["x"] ?? 0)
+
+        // a map in a data value, and `with`
+        h = Holder(words, 1)
+        words["a"] = "changed"
+        h2 = h with { N = 2 }
+        print(h2.M["a"] ?? "none")
+
+        // texts
+        mut listed = Map<int, List<int>>()
+        mut items = List<int>()
+        items.Add(1)
+        items.Add(2)
+        listed[7] = items
+        print(listed)
+        mut deep = Map<int, Map<int, int>>()
+        mut single = Map<int, int>()
+        single[1] = 2
+        deep[3] = single
+        print(deep)
+
+        // a write into a nullable map known not null reaches the map in the union's room
+        mut Map<string, int>? maybe = Map<string, int>()
+        if maybe != null {
+            maybe["a"] = 1
+            print(maybe["a"] ?? 0)
+        }
+        print(maybe)
+
+        // a map through a generic function, a map of enum values, `Where` over maps, and a read of a call's map
+        same = Id(words)
+        words["a"] = "again"
+        print(same["a"] ?? "none")
+        mut plans = Map<string, Plan>()
+        plans["ann"] = Plan.Pro
+        print(plans)
+        mut every = List<Map<string, int>>()
+        every.Add(Plus(base))
+        every.Add(Map<string, int>())
+        print(every.Where(x => (x["z"] ?? 0) > 0))
+        print(Plus(base)["z"] ?? 0)
+        """;
+
+    private static readonly string[] MapsPrint =
+    [
+        "made 103",
+        "over",
+        "made 104", // the copy keeps what it had (M3)
+        "changed",
+        "made 106",
+        "by key",
+        "made 8!",
+        "none",
+        "328350", // 100 entries, which grow the map from 8 slots to 128
+        "made 2",
+        "Box { Name = other, Tags = [made 1: made 2] }",
+        "[made 9]",
+        "blue",
+        "[made 1: green]",
+        "made 100", // the lambda's copy of `names` (F15)
+        "minus one", // an `int` key widened to the `long` of the map (T8)
+        "7",
+        "8",
+        "0",
+        "yes",
+        "no",
+        "9",
+        "0",
+        "[]",
+        "[1: b]", // a write over a key keeps one entry
+        "xy", // a value read from its own key and written back to it
+        "3", // a map in a union
+        "none",
+        "v49", // a `mut` parameter whose block the callee replaced as it grew
+        "v0",
+        "one", // a lambda keeps the block it read while the variable grows
+        "v1",
+        "[]", // a copy written to inside a function, the argument as it was
+        "[z: 26]",
+        "1", // keys equal by their bytes, a literal's and a joined string's, whose count carries the mark of a block
+        "2",
+        "3", // the empty string
+        "4",
+        "5", // a negative `short`, widened with its sign
+        "7",
+        "smile", // a `char` beyond 16 bits
+        "1", // a map of maps written through a copy of its entry
+        "2",
+        "xy", // a map in a data value and in `with`
+        "[7: [1, 2]]",
+        "[3: [1: 2]]",
+        "1", // a write into a nullable map known not null
+        "[a: 1]",
+        "changed", // a map through a generic function
+        "[ann: Pro]",
+        "[[z: 26]]",
+        "26",
+    ];
+
+    // a map's members, its loops, its keys and its nullable values (M9, C6, M10; section 4, the owner, 2026-10-30): `Count`,
+    // `ContainsKey`, `Remove` of an entry whose value a variable holds and of one a copy holds, a `Remove` whose result nothing holds,
+    // removals and writes over many rounds, whose slots are taken again, `Clear` of a block the map alone holds and of one a copy
+    // holds, loops with one name and two, a `break` and a `continue`, a write, a `Remove` and a `Clear` inside a loop over the same map,
+    // the names read after them, and keys of enums, `data` values, lists, a type that holds itself and a time; the texts print one entry,
+    // since the order of several differs between runs (M10)
+    private const string MapMembers = """
+        data P(int X, string Name)
+        data Tag(string? Note, List<int> Ids)
+        data Tree(int V, List<Tree> Kids)
+        enum Tier { Free, Pro }
+        data Pt(double X)
+        data Samples(List<double> Xs)
+        data Maybes(List<double?> Xs)
+
+        void ShowEntry(Entry<string, List<int>> entry) {
+            print(entry.Value.Count)
+        }
+
+        T? ValueAt<T>(Map<string, T> src, string k) => src[k]
+
+        int Twice<T>(T x) {
+            mut tm = Map<string, T>()
+            tm["a"] = x
+            tm["b"] = x
+            tm.Remove("a")
+            return tm.Count
+        }
+
+        string Made(int n) => "made {n}"
+
+        int Sum(Map<int, int> sm) {
+            mut acc = 0
+            for a, b in sm {
+                acc = acc + a * 1000 + b
+            }
+            return acc
+        }
+
+        mut m = Map<string, string>()
+        print(m.Count)
+        print(m.ContainsKey("a"))
+        print(m.Remove("a") ?? "none")
+        for i in 0..<20 {
+            m[Made(i)] = Made(i + 100)
+        }
+        print(m.Count)
+        print(m.ContainsKey(Made(3)))
+        held = m[Made(3)] ?? "none"
+        removed = m.Remove(Made(3)) ?? "none"
+        print(m.Count)
+        print(m.ContainsKey(Made(3)))
+        print(m[Made(3)] ?? "none")
+        print(m.Remove(Made(3)) ?? "none")
+        m[Made(3)] = "back"
+        print(m[Made(3)] ?? "none")
+        print(m.Count)
+
+        // a `Remove` from a map a copy holds: the copy keeps its entry (M3)
+        copy = m
+        m.Remove(Made(4))
+        print(copy[Made(4)] ?? "none")
+        print(m[Made(4)] ?? "none")
+        print(copy.Count)
+        print(m.Count)
+        m.Clear()
+        print(removed)
+        print(held)
+        made = Made(5)
+        m[made] = made
+        print(m.Remove(m[made] ?? "") ?? "none")
+        print(m.Count)
+
+        // removals and writes, round after round
+        mut ints = Map<int, int>()
+        for round in 0..<50 {
+            for i in 0..<100 {
+                ints[i] = round
+            }
+            for i in 0..<100 {
+                if i % 3 != 0 {
+                    ints.Remove(i)
+                }
+            }
+        }
+        print(ints.Count)
+        mut found = 0
+        for i in 0..<100 {
+            if ints.ContainsKey(i) {
+                found = found + 1
+            }
+        }
+        print(found)
+        print(ints[99] ?? -1)
+        print(ints[98] ?? -1)
+        mut left = 0
+        for k, v in ints {
+            left = left + 1 + v - 49
+        }
+        print(left)
+
+        // `Clear` of a block a copy holds and of one the map alone holds
+        mut c = Map<string, List<int>>()
+        mut l = List<int>()
+        l.Add(1)
+        c["a"] = l
+        c["b"] = l
+        other = c
+        c.Clear()
+        print(c.Count)
+        print(other.Count)
+        c["x"] = l
+        print(c)
+        mut own = Map<int, string>()
+        own[1] = Made(1)
+        own.Clear()
+        print(own)
+        own[2] = Made(2)
+        print(own)
+        mut none = Map<int, int>()
+        none.Clear()
+        print(none.Count)
+
+        // loops, with one name and with two
+        mut sums = Map<int, int>()
+        for i in 0..<10 {
+            sums[i] = i * 2
+        }
+        print(Sum(sums))
+        mut total = 0
+        for e in sums {
+            total = total + e.Key + e.Value
+        }
+        print(total)
+        for k, v in Map<int, int>() {
+            print("never")
+        }
+        mut seen = 0
+        for k, v in sums {
+            if k == 3 {
+                continue
+            }
+            if k == 100 {
+                break
+            }
+            seen = seen + 1
+        }
+        print(seen)
+
+        // the loop walks the map as it was when it started (C6): a `Remove`, a write and a `Clear` inside it
+        mut walked = 0
+        for k, v in sums {
+            sums.Remove(k)
+            sums[k + 100] = v
+            walked = walked + 1
+        }
+        print(walked)
+        print(sums.Count)
+        print(sums.ContainsKey(105))
+        mut cleared = 0
+        for e in sums {
+            sums.Clear()
+            cleared = cleared + e.Key + e.Value
+        }
+        print(cleared)
+        print(sums.Count)
+        mut words = Map<string, string>()
+        for i in 0..<10 {
+            words[Made(i)] = Made(i * 2)
+        }
+        mut bytes = 0
+        for k, v in words {
+            words.Remove(k)
+            words.Clear()
+            bytes = bytes + k.Bytes.Count + v.Bytes.Count
+        }
+        print(bytes)
+
+        // keys: an enum, `data` values equal by content, lists equal by their items, a type that holds itself, a time
+        mut tiers = Map<Tier, int>()
+        tiers[Tier.Pro] = 2
+        tiers[Tier.Free] = 1
+        print(tiers[Tier.Pro] ?? 0)
+        mut points = Map<P, string>()
+        points[P(1, Made(1))] = "one"
+        points[P(2, "b")] = "two"
+        print(points[P(1, "made 1")] ?? "none")
+        print(points[P(1, "made 2")] ?? "none")
+        points[P(1, Made(1))] = "uno"
+        print(points.Count)
+        print(points[P(1, "made 1")] ?? "none")
+        mut lists = Map<List<int>, int>()
+        mut k1 = List<int>()
+        k1.Add(1)
+        k1.Add(2)
+        lists[k1] = 12
+        mut k2 = List<int>()
+        k2.Add(1)
+        k2.Add(2)
+        print(lists[k2] ?? 0)
+        k2.Add(3)
+        print(lists[k2] ?? 0)
+        print(lists[k2[0..<2]] ?? 0)
+        lists[List<int>()] = 5
+        print(lists[List<int>()] ?? 0)
+        k1.Add(9)
+        print(lists[k1] ?? 0)
+        mut tags = Map<Tag, int>()
+        tags[Tag(null, k1)] = 1
+        tags[Tag("n", k1)] = 2
+        print(tags[Tag(null, k1)] ?? 0)
+        print(tags[Tag("n", k1)] ?? 0)
+        print(tags[Tag("m", k1)] ?? 0)
+        mut trees = Map<Tree, int>()
+        mut kids = List<Tree>()
+        kids.Add(Tree(2, List<Tree>()))
+        trees[Tree(1, kids)] = 7
+        print(trees[Tree(1, kids)] ?? 0)
+        print(trees[Tree(1, List<Tree>())] ?? 0)
+        mut times = Map<duration, int>()
+        times[90min] = 1
+        print(times[90min] ?? 0)
+
+        // nullable values: a missing entry and a null one read alike
+        mut maybe = Map<string, int?>()
+        maybe["a"] = null
+        maybe["b"] = 2
+        print(maybe.ContainsKey("a"))
+        print(maybe["a"] ?? -1)
+        print(maybe["c"] ?? -1)
+        print(maybe["b"] ?? -1)
+        print(maybe.Remove("b") ?? -1)
+        print(maybe.Remove("a") ?? -1)
+        print(maybe.Count)
+        mut notes = Map<int, string?>()
+        notes[1] = Made(1)
+        notes[2] = null
+        print(notes[1] ?? "null")
+        print(notes[2] ?? "null")
+        print(notes.Remove(1) ?? "null")
+        print(notes)
+
+        // `double` and `float` keys, alone and in a field, as C#'s `double.Equals`: NaN finds NaN, a NaN of other bits among them, and
+        // -0.0 finds 0.0
+        double z = 0.0
+        nan = z / z
+        mut reals = Map<double, string>()
+        reals[nan] = "nan"
+        reals[z] = "zero"
+        reals[-z] = "minus zero"
+        print(reals.Count)
+        print(reals[nan] ?? "none")
+        print(reals[-nan] ?? "none")
+        print(reals[z] ?? "none")
+        print(reals.ContainsKey(-z))
+        mut floats = Map<float, int>()
+        floats[float(nan)] = 1
+        floats[float(-z)] = 2
+        print(floats[float(z)] ?? 0)
+        print(floats[float(nan)] ?? 0)
+        mut pts = Map<Pt, int>()
+        pts[Pt(nan)] = 1
+        pts[Pt(-z)] = 2
+        print(pts[Pt(nan)] ?? 0)
+        print(pts[Pt(z)] ?? 0)
+        print(pts.Count)
+
+        // a list of `double` or `float` items in a key and in a `data` value, as C#'s `Equals`: NaN equal to NaN, a NaN of other bits
+        // among them, and -0.0 to 0.0, so the key is found again and the value equals itself, while two lists alone compare by IEEE's
+        // `==` (section 4, the owner, 2026-10-30, "Equals inside data/keys")
+        mut ws = List<double>()
+        ws.Add(nan)
+        ws.Add(z)
+        mut vs = List<double>()
+        vs.Add(-nan)
+        vs.Add(-z)
+        mut byList = Map<List<double>, string>()
+        byList[ws] = "found"
+        print(byList[vs] ?? "none")
+        mut bySamples = Map<Samples, int>()
+        bySamples[Samples(ws)] = 1
+        bySamples[Samples(vs)] = 2
+        print(bySamples.Count)
+        print(Samples(ws) == Samples(vs))
+        print(ws == vs)
+        mut fls = List<float>()
+        fls.Add(float(nan))
+        mut flls = List<List<float>>()
+        flls.Add(fls)
+        mut byLists = Map<List<List<float>>, int>()
+        byLists[flls] = 3
+        print(byLists[flls] ?? 0)
+
+        // keys of a nullable type, `null` among them, and lists of nullable items: `null` equal to `null` alone (N10), a `double?` key's
+        // value and a `double?` item's in a `data` value as C#'s `Equals`, NaN equal to NaN and -0.0 to 0.0, and two lists alone by IEEE's
+        // `==` (section 4, the owner, 2026-10-30, "As plain double"; for the other types an assumption there)
+        mut byMaybe = Map<int?, string>()
+        byMaybe[null] = Made(0)
+        byMaybe[1] = "one"
+        int? noKey = null
+        print(byMaybe[noKey] ?? "missing")
+        print(byMaybe[1] ?? "missing")
+        print(byMaybe[2] ?? "missing")
+        print(byMaybe.Count)
+        print(byMaybe.Remove(1) ?? "missing")
+        print(byMaybe)
+        mut byNote = Map<string?, int>()
+        byNote[Made(1)] = 1
+        byNote[null] = 2
+        print(byNote[Made(1)] ?? 0)
+        print(byNote[null] ?? 0)
+        mut byReal = Map<double?, int>()
+        byReal[nan] = 1
+        byReal[null] = 2
+        byReal[-z] = 3
+        print(byReal[-nan] ?? 0)
+        print(byReal[null] ?? 0)
+        print(byReal[z] ?? 0)
+        print(byReal.Count)
+        mut maybes = List<double?>()
+        maybes.Add(nan)
+        maybes.Add(null)
+        print(maybes == maybes)
+        print(Maybes(maybes) == Maybes(maybes))
+        mut nulls = List<double?>()
+        nulls.Add(null)
+        nulls.Add(-z)
+        mut zeros = List<double?>()
+        zeros.Add(null)
+        zeros.Add(z)
+        print(nulls == zeros)
+
+        // the entry, a value of `Entry<K, V>`: kept in a list, read in a lambda, passed and compared, past a `Clear` of the map
+        mut book = Map<string, List<int>>()
+        mut pages = List<int>()
+        pages.Add(1)
+        book[Made(7)] = pages
+        mut kept = List<Entry<string, List<int>>>()
+        for e in book {
+            kept.Add(e)
+            book.Clear()
+            kept.Add(Entry(e.Key, e.Value))
+            kept.Add(e with { Value = List<int>() })
+            f = () => e.Key
+            print(f())
+            ShowEntry(e)
+            print(e == e)
+        }
+        print(kept)
+        print(book.Count)
+
+        // an entry a program makes and copies (section 4, the owner, 2026-10-30, "Both, as a data type")
+        pair = Entry(Made(1), 2)
+        print(pair)
+        print(pair == Entry("made 1", 2))
+        print(pair with { Value = 3 })
+
+        // values of a type parameter, `T?` of a nullable `T` being `T` (N11)
+        mut ages = Map<string, int?>()
+        ages["a"] = null
+        ages["b"] = 2
+        print(ValueAt(ages, "a") ?? -1)
+        print(ValueAt(ages, "b") ?? -1)
+        print(ValueAt(ages, "c") ?? -1)
+        mut names = Map<string, string>()
+        names["x"] = Made(9)
+        print(ValueAt(names, "x") ?? "none")
+        print(Twice(Made(8)))
+        print(Twice(List<int>()))
+        """;
+
+    private static readonly string[] MapMembersPrint =
+    [
+        "0", // a map without a block
+        "false",
+        "none",
+        "20",
+        "true",
+        "19", // a `Remove`
+        "false",
+        "none",
+        "none", // a second `Remove` of the key
+        "back",
+        "20",
+        "made 104", // a copy keeps the entry a `Remove` took out of the map (M3)
+        "none",
+        "20",
+        "19",
+        "made 103", // the value `Remove` gave, after a `Clear` of the map
+        "made 103", // the value a read gave
+        "made 5", // a `Remove` whose key is a value read from the map, the key's block and the value's one block
+        "0",
+        "34", // the multiples of 3 below 100
+        "34",
+        "49",
+        "-1",
+        "34", // a loop over the entries the removals left, past the slots they marked
+        "0", // a `Clear` of a block a copy holds
+        "2",
+        "[x: [1]]",
+        "[]", // a `Clear` of a block the map alone holds
+        "[2: made 2]",
+        "0",
+        "45090", // a loop with two names
+        "135", // a loop with one
+        "9", // a `continue`
+        "10", // a loop that removes and writes the map it walks
+        "10",
+        "true",
+        "1135", // a loop that clears the map it walks, the keys from 100 to 109 and the values from 0 to 18
+        "0",
+        "125", // the names read after a `Remove` and a `Clear` of the map the loop walks
+        "2", // an enum key
+        "one", // `data` keys equal by content, a joined string's and a literal's
+        "none",
+        "2",
+        "uno",
+        "12", // list keys equal by their items
+        "0",
+        "12", // a part of a list
+        "5", // a list without items
+        "0", // the map's key is a value of its own (M3)
+        "1", // a `data` key with a nullable field and a list
+        "2",
+        "0",
+        "7", // a key of a type that holds itself through a list
+        "0",
+        "1", // a `duration` key
+        "true", // a null entry
+        "-1",
+        "-1",
+        "2",
+        "2",
+        "-1",
+        "0",
+        "made 1",
+        "null",
+        "made 1",
+        "[2: null]",
+        "2", // `double` keys: NaN, and 0.0 written over by -0.0
+        "nan",
+        "nan",
+        "minus zero",
+        "true",
+        "2", // `float` keys
+        "1",
+        "1", // a `data` key with a `double` field
+        "2",
+        "2",
+        "found", // a list key with a NaN and -0.0 among its items
+        "1", // a `data` key that holds such a list
+        "true",
+        "false", // the two lists alone, by IEEE's `==`
+        "3", // a list of lists of `float` items as a key
+        "made 0", // an `int?` key: `null` finds `null`
+        "one",
+        "missing",
+        "2",
+        "one",
+        "[null: made 0]",
+        "1", // a `string?` key
+        "2",
+        "1", // a `double?` key: NaN finds NaN, `null` finds `null`, 0.0 finds -0.0
+        "2",
+        "3",
+        "3",
+        "false", // a `List<double?>` alone, by IEEE's `==`
+        "true", // the same list in a `data` value, as C#'s `Equals`
+        "true", // `null` equal to `null`, -0.0 to 0.0
+        "made 7", // the entry read in a lambda, passed and compared, after a `Clear` of the map
+        "1",
+        "true",
+        "[Entry { Key = made 7, Value = [1] }, Entry { Key = made 7, Value = [1] }, Entry { Key = made 7, Value = [] }]", // one made, one copied
+        "0",
+        "Entry { Key = made 1, Value = 2 }",
+        "true",
+        "Entry { Key = made 1, Value = 3 }",
+        "-1", // values of a type parameter
+        "2",
+        "-1",
+        "made 9",
+        "1",
+        "1",
+    ];
+
+    // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
+    // the list it is written into, over another item and over itself, a value that changes the list through a `mut` argument before the
+    // write (M4), a `mut` parameter, an index of a narrow type, a list of lists, a list known not null, and a value made before the index
+    // (M4); then `==` on two lists, which reads both while a call can change one (M7)
+    private const string ListWrites = """
+        string Made(int n) => "made {n}"
+
+        int Swap(mut List<int> t) {
+            t = List<int>()
+            t.Add(5)
+            return 7
+        }
+
+        void SetAll(mut List<string> t, string s) {
+            for i in 0..<t.Count {
+                t[i] = s
+            }
+        }
+
+        List<int> Grown(mut List<int> t) {
+            t.Add(9)
+            return t
+        }
+
+        int Shown(string what, int n) {
+            print("{what} {n}")
+            return n
+        }
+
+        mut xs = List<int>()
+        xs.Add(1)
+        xs.Add(2)
+        xs.Add(3)
+        ys = xs
+        xs[0] = 10
+        print(xs)
+        print(ys)
+        xs[2] = xs[0] + xs[1]
+        print(xs)
+        mut ss = List<string>()
+        ss.Add(Made(1))
+        ss.Add(Made(2))
+        ss[0] = ss[1]
+        ss[1] = ss[1]
+        print(ss)
+        mut ls = List<List<string>>()
+        ls.Add(ss)
+        ls.Add(List<string>())
+        ls[1] = ls[0]
+        ls[0] = ls[0]
+        ss[0] = "changed"
+        print(ls)
+        xs[0] = Swap(mut xs)
+        print(xs)
+        SetAll(mut ss, Made(9))
+        print(ss)
+        byte b = 1
+        xs.Add(8)
+        xs[b] = 9
+        print(xs)
+        mut List<string>? maybe = List<string>()
+        if maybe != null {
+            maybe.Add("a")
+            maybe[0] = Made(3)
+        }
+        print(maybe)
+        xs[Shown("index", 0)] = Shown("value", 4)
+        print(xs)
+
+        // `==` on two lists, by their counts and items, `double` items by IEEE's `==` (section 4, the owner, 2026-10-30, "By items, as Rust")
+        print(xs == ys)
+        mut same = List<int>()
+        same.Add(4)
+        same.Add(9)
+        print(xs == same)
+        print(xs != same)
+        print(ls[0] == ls[1])
+        double z = 0.0
+        nan = z / z
+        mut ds = List<double>()
+        ds.Add(nan)
+        print(ds == ds)
+        mut zs = List<double>()
+        zs.Add(z)
+        mut ns = List<double>()
+        ns.Add(-z)
+        print(zs == ns)
+        print(Grown(mut same) == same)
+        print(List<List<int>>() == List<List<int>>())
+        mut dds = List<List<double>>()
+        dds.Add(ds)
+        print(dds == dds)
+        """;
+
+    private static readonly string[] ListWritesPrint =
+    [
+        "[10, 2, 3]",
+        "[1, 2, 3]", // the copy keeps its items (M3)
+        "[10, 2, 12]",
+        "[made 2, made 2]", // an item written over another and over itself
+        "[[made 2, made 2], [made 2, made 2]]",
+        "[7]", // the value first: `Swap` gave the variable a new list, and the write wrote it (M4)
+        "[made 9, made 9]",
+        "[7, 9]",
+        "[made 3]",
+        "value 4", // the value first, then the index (M4)
+        "index 0",
+        "[4, 9]",
+        "false", // `==` on two lists
+        "true",
+        "false",
+        "true",
+        "false", // NaN unequal to NaN, as Rust's `Vec<f64>`
+        "true", // -0.0 equal to 0.0
+        "true", // a list a call changed, compared with the result the call gave
+        "true",
+        "false", // NaN unequal to NaN in the lists among the items too
+    ];
+
+    // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
+    // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
+    // of maps whose entry is written over, a map of strings whose value and key a write over a key lets go of, and entries kept, made
+    // and copied
+    private const string MapRounds = """
+        data Pair(Map<int, int> A, int B)
+
+        Map<int, int> Make(int n) {
+            mut m = Map<int, int>()
+            for i in 0..<n {
+                m[i] = i
+            }
+            return m
+        }
+
+        int Seven(Map<int, int> m) => m[7] ?? 0
+
+        int Early(int n) {
+            m = Make(n)
+            if n > 0 {
+                return Seven(m)
+            }
+            return 0
+        }
+
+        void Drop(int n) => Make(n)
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(1000)
+            mut b = a
+            b[7] = 8
+            p = Pair(Make(1000), 1)
+            q = p with { B = 2 }
+            for x in 0..<3 {
+                c = Make(1000)
+                if x == Seven(c) - 6 {
+                    break
+                }
+            }
+            for j in 0..<3 {
+                c = Make(1000)
+                if j == 1 {
+                    continue
+                }
+                total = total + Seven(c)
+            }
+            Make(1000)
+            Drop(1000)
+            l = Make(1000)
+            h = () => Seven(l)
+            mut ms = List<Map<int, int>>()
+            ms.Add(Make(1000))
+            mut nested = Map<int, Map<int, int>>()
+            nested[0] = Make(1000)
+            nested[0] = Make(10)
+            mut words = Map<string, string>()
+            words["{round}"] = "{round}"
+            words["a"] = "b"
+            words["a"] = "{round}"
+            mut held = Map<string, Map<int, int>>()
+            held["{round}"] = Make(100)
+            held["b"] = Make(100)
+            kept = held
+            out = held.Remove("{round}") ?? Map<int, int>()
+            held.Remove("b")
+            for k, v in kept {
+                held[k] = v
+            }
+            mut ents = List<Entry<string, Map<int, int>>>()
+            for e in kept {
+                total = total + e.Value.Count - 100
+                ents.Add(e)
+                ents.Add(Entry(e.Key, Make(10)))
+                ents.Add(e with { Key = "{round} {e.Key}" })
+            }
+            other = held
+            held.Clear()
+            held["c"] = Make(100)
+            held.Clear()
+            mut ls = List<Map<int, int>>()
+            ls.Add(Make(10))
+            ls.Add(Make(10))
+            ls[0] = ls[1]
+            ls[1] = Make(100)
+            total = total + Early(1000) + Seven(q.A) + Seven(b) - Seven(a) + h() + Seven(ms[0]) + Seven(nested[0] ?? Map<int, int>()) + (words["a"] ?? "").Bytes.Count - (words["{round}"] ?? "").Bytes.Count - 36
+            total = total + Seven(out) + Seven(ls[1]) - 14 + other.Count + kept.Count - 4 + ents.Count - 6
+        }
+        print(round)
+        print(total)
+        """;
+
     private static Compilation Compile(string text, CheckedRuntime runtime, params string[] grants) =>
         Builder.Compile(SourceText.FromString("program.kz", text), grants, runtime, testBuild: true);
 
@@ -750,6 +1745,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Values, toolchain.Runtime, "list-values"), 0, ValuesPrint, "");
         Ran(BuildAndRun(Sharing, toolchain.Runtime, "list-sharing"), 0, SharingPrint, "");
         Ran(BuildAndRun(Strings, toolchain.Runtime, "string-values", "raw"), 0, StringsPrint, "");
+        Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
+        Ran(BuildAndRun(MapMembers, toolchain.Runtime, "map-members"), 0, MapMembersPrint, "");
+        Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
     }
 
     [Fact]
@@ -759,9 +1757,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Values, fenced, "list-values-fenced"), 0, ValuesPrint, "");
         Ran(BuildAndRun(Sharing, fenced, "list-sharing-fenced"), 0, SharingPrint, "");
         Ran(BuildAndRun(Strings, fenced, "string-values-fenced", "raw"), 0, StringsPrint, "");
+        Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
+        Ran(BuildAndRun(MapMembers, fenced, "map-members-fenced"), 0, MapMembersPrint, "");
+        Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
+        Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -781,6 +1783,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         Ran(BuildAndRun(Rounds, Budget(), "list-rounds"), 0, ["3000", "12003000"], "");
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
+        Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -793,6 +1796,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var kept = BuildAndRun(strings, Budget(), "string-rounds-held");
         Assert.Equal(1, kept.Code);
         Assert.StartsWith("error: allocation-failed (", kept.Error, StringComparison.Ordinal);
+
+        // and a map of 1000 entries held each round, a block of 32800 bytes in the size class of 65536: 196 megabytes
+        const string maps = "Map<int, int> Make(int n) {\n    mut m = Map<int, int>()\n    for i in 0..<n {\n        m[i] = i\n    }\n    return m\n}\n\nmut all = List<Map<int, int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    all.Add(Make(1000))\n}\nprint(all.Count)\n";
+        var full = BuildAndRun(maps, Budget(), "map-rounds-held");
+        Assert.Equal(1, full.Code);
+        Assert.StartsWith("error: allocation-failed (", full.Error, StringComparison.Ordinal);
     }
 
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
@@ -932,6 +1941,25 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
+    [InlineData("-1", "minus")]
+    [InlineData("2", "count")]
+    [InlineData("100000", "far")]
+    [InlineData("-2147483648", "smallest")]
+    public void A_write_at_an_index_below_0_or_at_Count_or_beyond_raises_index_out_of_range_at_its_line(string index, string name)
+    {
+        // T14, M9 (section 4, the owner, 2026-10-30, "As C# and Rust"): the write before it is the positive control, and the value is
+        // made before the index is read (M4), so its `print` runs
+        var text = $"int Seven() {{\n    print(7)\n    return 7\n}}\n\nmut xs = List<int>()\nxs.Add(4)\nxs.Add(5)\nxs[1] = 6\nprint(xs[1])\nxs[{index}] = Seven()\nprint(xs)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-write-" + name), 1, ["6", "7"], "error: index-out-of-range at program.kz:11\n");
+    }
+
+    [Fact]
+    public void A_write_into_a_list_without_items_raises_index_out_of_range()
+    {
+        Ran(BuildAndRun("mut xs = List<string>()\nxs[0] = \"a\"\nprint(xs)\n", toolchain.Runtime, "list-write-empty"), 1, [], "error: index-out-of-range at program.kz:2\n");
+    }
+
+    [Theory]
     [InlineData("-1", "1", false, "index-out-of-range", "minus")]
     [InlineData("0", "4", false, "index-out-of-range", "past")]
     [InlineData("0", "3", true, "index-out-of-range", "past-last")]
@@ -1038,10 +2066,109 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, toolchain.Runtime, "list-granted"), 0, ["1"], ""); // the positive control
     }
 
+    [Fact]
+    public void A_map_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
+    {
+        // the first block of a `Map<long, long>`: 48 bytes of counts and keys, 16 of the control bytes of its 8 slots, padded, and 8
+        // entries of a hash, a key and a value
+        const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-refused"), 1, [], "error: allocation-failed (256 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "map-granted"), 0, ["1"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_first_map_on_a_system_that_gives_no_randomness_ends_the_program_with_random_failed()
+    {
+        // M9 (the owner, 2026-10-30, "End with an error, as Rust"): the target's `Random` reports that it filled no bytes, as a
+        // Linux whose `getrandom` and `/dev/urandom` both fail or a failing `BCryptGenRandom` would, and the first map ends the program before its block
+        var refused = Edited((TargetFile, "pub bool Random(byte* bytes, long count) {", """
+            pub bool Random(byte* bytes, long count) {
+                return false
+            }
+
+            bool Given(byte* bytes, long count) {
+            """));
+        const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
+        Ran(BuildAndRun(text, refused, "map-no-random"), 1, [], "error: random-failed\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "map-random"), 0, ["1"], ""); // the positive control
+        Ran(BuildAndRun("print(1)\n", refused, "no-map-no-random"), 0, ["1"], ""); // a program without a map asks for no randomness
+    }
+
+    [Fact]
+    public void On_linux_a_first_map_where_the_system_refuses_getrandom_takes_its_keys_from_dev_urandom()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // Windows' `Random` calls `BCryptGenRandom` alone, with no file to fall back to
+        }
+
+        // M9 (the owner, 2026-10-30, "Rust's full path"): each `getrandom` of the runtime is a system call of a number the kernel does
+        // not have, 100000, which it refuses with ENOSYS (seen on x86_64), as a kernel before 3.17 refuses `getrandom`; the keys come
+        // from `/dev/urandom`
+        (string Path, string Old, string New)[] enosys =
+        [
+            (TargetFile, "    long getrandom(byte* bytes, long count, uint options)\n", "    long getrandom(byte* bytes, long count, uint options)\n    long syscall(long number, ...)\n"),
+            (TargetFile, "getrandom(bytes, count, 4)", "syscall(100000, bytes, count, 4)"),
+            (TargetFile, "getrandom(bytes, count, 1)", "syscall(100000, bytes, count, 1)"),
+        ];
+        const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
+        Ran(BuildAndRun(text, Edited(enosys), "map-urandom"), 0, ["1"], "");
+
+        // the control: the same runtime with a file that is not there in the place of `/dev/urandom` ends where Rust panics
+        Ran(BuildAndRun(text, Edited([.. enosys, (TargetFile, @"""/dev/urandom\0""", @"""/dev/no-urandom\0""")]), "map-no-urandom"), 1, [], "error: random-failed\n");
+    }
+
+    [Fact]
+    public void A_map_finds_each_key_it_holds_and_no_other_through_its_growth()
+    {
+        // 20000 entries grow the block from 8 slots to 32768, through groups of 8 control bytes and probes past full groups; half the
+        // keys asked for are missing, and each probe for one ends at a group with a slot without an entry
+        const string text = "mut m = Map<int, int>()\nfor i in 0..<20000 {\n    m[i * 2] = i\n}\nmut long found = 0\nmut missing = 0\nfor i in 0..<40000 {\n    v = m[i] ?? -1\n    if v < 0 {\n        missing = missing + 1\n    } else {\n        found = found + long(v)\n    }\n}\nprint(found)\nprint(missing)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "map-many"), 0, ["199990000", "20000"], "");
+        Ran(BuildAndRun(text, Fenced, "map-many-fenced"), 0, ["199990000", "20000"], "");
+    }
+
+    [Fact]
+    public void A_slot_holds_an_entry_by_its_control_byte_not_by_the_bytes_a_block_held_before()
+    {
+        // a new block's slots are as the allocator gave them, as hashbrown leaves its buckets: the second map takes the block the
+        // first gave back, whose slots still hold its five entries, and holds the one entry written into it
+        const string text = "void Fill() {\n    mut m = Map<int, int>()\n    for i in 0..<5 {\n        m[i] = i + 10\n    }\n}\n\nFill()\nmut n = Map<int, int>()\nn[7] = 1\nprint(n)\nprint(n[3] ?? -1)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "map-used-block"), 0, ["[7: 1]", "-1"], "");
+
+        // the positive control: a new block that keeps the control bytes the first map left in it holds the first map's entries too
+        var stale = BuildAndRun(text, Edited(("std/std.kz", "                p[48 + i] = 255\n", "")), "map-used-block-stale");
+        Assert.False(stale.Output.SequenceEqual(["[7: 1]", "-1"]), string.Join(" | ", stale.Output));
+    }
+
+    [Fact]
+    public void A_key_is_hashed_by_SipHash_1_3_under_keys_the_system_gives_each_process()
+    {
+        // the hash Rust's `HashMap` takes by default: the two vectors under keys of 0 are CPython's `siphash13` of the same bytes, the
+        // third is under the reference implementation's keys, from the same code in Python, which gives the reference's SipHash-2-4
+        // vectors with two and four rounds
+        const string start = "pub void Start() {\n    sys.Start()\n";
+        const string hash = "    byte* p = Allocate(15)\n    raw {\n        p[0] = 97\n        p[1] = 98\n        p[2] = 99\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 3))\n    WriteError(\"\\n\")\n    raw {\n        for i in 0..<15 {\n            p[i] = byte(i)\n        }\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 15))\n    WriteError(\"\\n\")\n    WriteNumber(std.SipHash13(506097522914230528UL, 1084818905618843912UL, p, 15))\n    WriteError(\"\\n\")\n";
+        var runtime = Edited(("std/std.kz", "\nulong SipHash13(", "\npub ulong SipHash13("), ("runtime/common/runtime.kz", start, start + hash));
+        Ran(BuildAndRun("print(1)\n", runtime, "map-siphash"), 0, ["1"], "13851880170939887858\n17514137373579004394\n15213397504630561110\n");
+
+        // the keys differ between two runs of one program, so the order of a map's 20 entries does too (M10), as in Rust
+        const string text = "mut m = Map<int, int>()\nfor i in 0..<20 {\n    m[i] = i\n}\nprint(m)\n";
+        var compilation = Compile(text, toolchain.Runtime);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var program = toolchain.Build(compilation.Program, "map-order");
+        var first = Toolchain.Run(program);
+        var second = Toolchain.Run(program);
+        Assert.Equal((0, ""), (first.Code, first.Error));
+        Assert.Equal((0, ""), (second.Code, second.Error));
+        Assert.NotEqual(first.Output, second.Output);
+        Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first.Output).Trim('[', ']').Split(", ").Order());
+    }
+
     [Theory]
-    [InlineData("mut xs = List<int>()\nxs.Add(1)\nxs[0] = 2\n", 3, "an assignment into an index (M9)", null)]
     [InlineData("data Box(List<int> Items)\n\nmut b = Box(List<int>())\nb.Items.Add(1)\n", 4, "an `Add` on a list in a field (M5)", null)]
-    [InlineData("data Box(List<int> Items)\n\na = Box(List<int>())\nb = Box(List<int>())\nprint(a == b)\n", 5, "`==` on a `List<int>`", null)] // D3 compares the fields
+    [InlineData("data Box(Map<int, int> Items)\n\nmut b = Box(Map<int, int>())\nb.Items.Clear()\n", 4, "a `Clear` on a map in a field (M5)", null)]
+    [InlineData("data Box(Map<int, int> Items)\n\nmut b = Box(Map<int, int>())\nprint(b.Items.Remove(1) ?? 0)\n", 4, "a `Remove` on a map in a field (M5)", null)]
     [InlineData("s = \"ab\"\nprint(s.Chars[0])\n", 2, "`s.Chars` as a list (T15)", null)]
     [InlineData("data Box(List<int> Items)\n\nvoid Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nmut b = Box(List<int>())\nFill(mut b.Items)\n", 8, "a `mut` parameter given anything but a variable (M7)", null)]
     public void What_the_emitter_does_not_lay_out_of_a_list_is_not_supported_at_its_line(string text, int line, string message, string? grant)

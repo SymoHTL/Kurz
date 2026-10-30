@@ -1,0 +1,21 @@
+// expect: output
+// | false
+// | true
+// | true
+// rules: M9
+
+data Samples(List<double?> Xs)
+
+double z = 0.0
+mut xs = List<double?>()
+xs.Add(z / z)
+xs.Add(null)
+print(xs == xs)
+print(Samples(xs) == Samples(xs))
+mut ys = List<double?>()
+ys.Add(null)
+ys.Add(-z)
+mut zs = List<double?>()
+zs.Add(null)
+zs.Add(z)
+print(ys == zs)

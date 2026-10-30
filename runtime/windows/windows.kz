@@ -7,11 +7,19 @@ extern "C" in "kernel32" {
     void ExitProcess(uint code)
     void* VirtualAlloc(void* address, ulong size, uint type, uint protection)
     int VirtualFree(void* address, ulong size, uint type)
+    int SetThreadStackGuarantee(uint* size)
 }
 
 // The start of the process: Windows raises no signal at a write to a closed pipe, whose `WriteFile`
-// returns the error itself.
+// returns the error itself. The main thread's stack takes a guarantee of 0x5000 bytes, the room the
+// system keeps on it for the handling of its overflow, as Rust's standard library sets it at its start
+// (design record, section 2); where the system refuses it the program carries on with the system's own
+// room, as Rust's released library does.
 pub void Start() {
+    mut uint room = 20480
+    raw {
+        SetThreadStackGuarantee(&room)
+    }
 }
 
 // `count` bytes from `bytes` written to standard output (`fd` 1) or standard error (`fd` 2) in one
@@ -45,6 +53,27 @@ pub long Write(int fd, byte* bytes, long count) {
     }
 
     return long(written)
+}
+
+// The system's generator of random bytes.
+extern "C" in "bcrypt" {
+    int BCryptGenRandom(void* algorithm, byte* bytes, uint count, uint options)
+}
+
+// `count` bytes of the system's randomness at `bytes`, from `BCryptGenRandom` with the system's
+// preferred generator (`BCRYPT_USE_SYSTEM_PREFERRED_RNG` is 2), as Rust's standard library took the
+// keys of a map's hash on Windows from its release 1.53 to 1.77: true where the call succeeded (an
+// `NTSTATUS` of 0 or above), and false where it failed, the bytes left as they are, which the caller
+// ends the program for (M9). Rust's release 1.77 then called `RtlGenRandom` and panicked with
+// "fallback RNG broken" where that failed too; its release 1.82 calls `ProcessPrng`, documented as
+// always succeeding. A count above what a `uint` holds is no count a map asks for.
+pub bool Random(byte* bytes, long count) {
+    mut int status = 0
+    raw {
+        status = BCryptGenRandom(null, bytes, uint(count), 2)
+    }
+
+    return status >= 0
 }
 
 // The end of the process with the exit code, at once (design record, section 6). The code is 0 or

@@ -165,8 +165,11 @@ public sealed record IfStatement(int Line, Expression Condition, Block Then, Sta
 /// <summary><c>while condition { }</c> (C5).</summary>
 public sealed record WhileStatement(int Line, Expression Condition, Block Body) : Statement(Line);
 
-/// <summary><c>for name in collection { }</c> (C6, C8).</summary>
-public sealed record ForInStatement(int Line, string Variable, int VariableLine, Expression Collection, Block Body) : Statement(Line);
+/// <summary><c>for name in collection { }</c> (C6, C8), and <c>for key, value in map { }</c>, whose second name is <paramref name="Second"/> (C6).</summary>
+public sealed record ForInStatement(int Line, string Variable, int VariableLine, Expression Collection, Block Body, LoopName? Second = null) : Statement(Line);
+
+/// <summary>The second name of <c>for key, value in map { }</c>, which takes an entry's value (C6).</summary>
+public sealed record LoopName(int Line, string Name) : Node(Line);
 
 /// <summary><c>match value { }</c> as a statement (C4, C9).</summary>
 public sealed record MatchStatement(int Line, Expression Subject, IReadOnlyList<MatchArm> Arms) : Statement(Line);
