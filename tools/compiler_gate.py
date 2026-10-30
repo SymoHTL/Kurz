@@ -26,7 +26,7 @@ does where it refused the clang it found or found none, did not start or ran out
 with 0 and wrote no line that names a clang release in the command's form. The summary line is the one the test runner prints,
 `Passed! - Failed: 0, Passed: N, Skipped: 0, Total: N`, one per test project, and the counts are
 summed over them. The output of a red run is printed into a log that takes every character
-(knowledge/a-windows-log-takes-the-consoles-code-page.md)."""
+(knowledge/a-windows-log-takes-the-ansi-code-page.md)."""
 import io
 import os
 import re
@@ -136,22 +136,22 @@ def judge(code, output, floor=FLOOR):
 
 
 def readable_log():
-    # a log redirected to a file takes the console's code page on Windows, and xunit marks a difference with an arrow
+    # a log redirected to a pipe or a file takes the ANSI code page on Windows, and xunit marks a difference with an arrow
     # that cp1252 lacks: the print of a red run's output ended the gate before it named the failing test
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
-def main():
+def main(root=kit.ROOT, run=subprocess.run):
     readable_log()
-    errors = config_errors(kit.ROOT)
+    errors = config_errors(root)
     if errors:
         for e in errors:
             print("ERROR:", e)
         print(f"compiler tests: 0 passed, {len(errors)} errors")
         return 1
     try:
-        code, output = run_tests()
+        code, output = run_tests(run=run)
     except kit.Refused as e:  # a run out of time (kit.Unanswered) as much as a command that cannot start
         print(f"ERROR: {e}")
         print("compiler tests: 0 passed, 1 errors")
@@ -160,7 +160,7 @@ def main():
     if errors:
         print(output[-6000:])
     try:
-        version_code, version_output, version_error = run_version()
+        version_code, version_output, version_error = run_version(run=run)
         print("kurz --version:")
         print((version_output + version_error).rstrip())
         errors += judge_version(version_code, version_output, version_error)
@@ -278,6 +278,25 @@ def self_test():
         cases.append(("an empty source mapping is red", any("maps no package" in e for e in errors), errors))
         errors = config("<configuration>\n")
         cases.append(("a config that is not XML is red", any("well-formed" in e for e in errors), errors))
+        config(CONFIG_TEXT)
+
+        def red_run(command, **kwargs):
+            if command is COMMAND:
+                return subprocess.CompletedProcess(command, 1, "Assert.Equal() Failure: Collections differ\n           ↓ (pos 0)\n" + RED, "")
+            return subprocess.CompletedProcess(command, 0, VERSION_OUTPUT, "")
+
+        saved = sys.stdout
+        sys.stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")  # the job's stdout on Windows: a pipe, in the ANSI code page
+        try:
+            code = main(root=root, run=red_run)
+            sys.stdout.flush()
+            said = sys.stdout.buffer.getvalue().decode("utf-8")
+        except UnicodeError as e:
+            code, said = None, f"the print raised {e}"
+        finally:
+            sys.stdout = saved
+        cases.append(("the gate's own run prints a red run's output into a cp1252 log, and names its failing tests after it",
+                      code == 1 and "↓ (pos 0)" in said and "ERROR: 5 tests failed" in said, said[-300:]))
     return kit.report(cases)
 
 
