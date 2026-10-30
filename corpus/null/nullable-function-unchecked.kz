@@ -1,0 +1,13 @@
+// expect: error nullable-unchecked at 13
+// rules: N2
+
+// a call of a nullable function value without a check uses it where a function value is needed (N2)
+((int) => int)? Pick(bool twice) {
+    if twice {
+        return x => x * 2
+    }
+    return null
+}
+
+f = Pick(true)
+print(f(4))

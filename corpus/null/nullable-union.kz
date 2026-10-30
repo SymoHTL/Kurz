@@ -1,0 +1,41 @@
+// expect: output
+// | 7
+// | text
+// | none
+// | 8
+// | true
+// | false
+// rules: N1, N3
+
+// `(int | string)?` is `int | string | null` (N1): a `match` takes its `null` in an arm, and a test leaves the union, whose `match`
+// needs no `null` arm (N3)
+(int | string)? Find(int id) {
+    if id == 1 {
+        return 7
+    }
+    if id == 2 {
+        return "text"
+    }
+    return null
+}
+
+void Show(int id) {
+    match Find(id) {
+        null => print("none")
+        int n => print(n)
+        string s => print(s)
+    }
+}
+
+Show(1)
+Show(2)
+Show(3)
+x = Find(1)
+if x != null {
+    match x {
+        int n => print(n + 1)
+        string s => print(s)
+    }
+}
+print(Find(3) == null)
+print(Find(2) == null)

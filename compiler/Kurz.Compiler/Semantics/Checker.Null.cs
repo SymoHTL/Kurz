@@ -39,8 +39,9 @@ public sealed partial class Checker
     /// <summary>
     /// N1: <c>T?</c>, the union <c>T | null</c>. A type parameter's <c>T?</c> is the type that fills it where that type is nullable
     /// already, <c>T??</c> being <c>T?</c> (section 4, the owner, 2026-10-30, "Flatten, as C#"), which <see cref="Types.Substitute"/>
-    /// makes. What a <c>?</c> makes nullable that is a union, a nullable type among them (<c>T??</c>), a function type, a pointer, which
-    /// <c>null</c> is a value of already (R10), a C function type and <c>void</c> are <c>not supported</c>: section 4 says nothing of them.
+    /// makes. A union and a function type have their nullable form, <c>(int | string)?</c> being <c>int | string | null</c> (section 4,
+    /// the owner, 2026-10-30, "Nullable form, as Option"). A pointer, which <c>null</c> is a value of already (R10), and <c>void</c> are
+    /// <c>not supported</c>: section 4 says nothing of them.
     /// </summary>
     private KurzType ResolveNullable(NullableType n)
     {
@@ -60,7 +61,7 @@ public sealed partial class Checker
     }
 
     /// <summary>N1: whether the checker reads <paramref name="inner"/> made nullable, which <see cref="ResolveNullable"/> names; a map's read takes the same (M9).</summary>
-    private static bool CanBeNullable(KurzType inner) => inner is not (UnionType or FunctionType or PointerType or VoidType);
+    private static bool CanBeNullable(KurzType inner) => inner is not (PointerType or VoidType);
 
     /// <summary>
     /// The path an expression reads, where it is a variable that is no state outside a function (R13, which another function changes),
@@ -378,7 +379,8 @@ public sealed partial class Checker
     /// chain did not stop, as in C#: the chain's value is the nullable type of the member read, or the member's own type where that is
     /// nullable. A member after it in the chain is read from the member before as that member's own type, so a nullable one there is
     /// N2's, unless the member's path is known not null (N3), which it is then read as. <c>?.</c> on a value that is not nullable is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "Error, as Rust"), and
-    /// to a member whose type no <c>?</c> makes nullable (a union, a function, a pointer) <c>not supported</c> (section 4 says nothing of it).
+    /// to a member whose type no <c>?</c> makes nullable (a pointer, a C function type, <c>void</c>) <c>not supported</c> (section 4 says nothing
+    /// of it); a union's and a function type's nullable form is N1's (section 4, the owner, 2026-10-30, "Nullable form, as Option").
     /// </summary>
     private Typed CheckChainMember(MemberAccess m)
     {
@@ -419,7 +421,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (Types.NonNull(member.Type) is null && member.Type is UnionType or FunctionType or PointerType or CFunctionType or VoidType)
+        if (Types.NonNull(member.Type) is null && member.Type is PointerType or CFunctionType or VoidType)
         {
             NotSupported(m.Line, $"`?.` to a `{member.Type}`, which no `?` makes nullable (N1, N5)");
             return Typed.Error;
@@ -487,7 +489,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (Types.NonNull(list.Element) is null && list.Element is UnionType or FunctionType or PointerType or CFunctionType or VoidType)
+        if (Types.NonNull(list.Element) is null && list.Element is PointerType or CFunctionType or VoidType)
         {
             NotSupported(i.Line, $"`?[` to a `{list.Element}`, which no `?` makes nullable (N1, N5)");
             return Typed.Error;

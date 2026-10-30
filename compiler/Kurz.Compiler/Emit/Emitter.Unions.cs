@@ -1,5 +1,6 @@
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
+using FunctionType = Kurz.Compiler.Semantics.FunctionType;
 using PointerType = Kurz.Compiler.Semantics.PointerType;
 using UnionType = Kurz.Compiler.Semantics.UnionType;
 using VoidType = Kurz.Compiler.Semantics.VoidType;
@@ -22,7 +23,9 @@ public sealed partial class Emitter
         }
 
         var bits = Number(layout.TagBits(type));
-        var isNull = fn.Value($"icmp eq ptr {union}, {niche}");
+        var isNull = Types.NonNull(type) is FunctionType
+            ? fn.Value($"icmp eq ptr {fn.Value($"extractvalue %kz.fn {union}, 0")}, null") // N1: no code is the function value's `null`
+            : fn.Value($"icmp eq ptr {union}, {niche}");
         return fn.Value($"select i1 {isNull}, i{bits} {Number(layout.Number(Types.Null))}, i{bits} {Number(layout.Number(Types.NonNull(type)!))}");
     }
 

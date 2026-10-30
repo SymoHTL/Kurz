@@ -46,6 +46,7 @@ internal static class Lower
         EnumType e => $"i{EnumBits(e.Symbol).ToString(CultureInfo.InvariantCulture)}",
         PointerType or CFunctionType or ListType or MapType or HandleType => "ptr",
         UnionType u when Types.NonNull(u) is CFunctionType => "ptr", // R17: its `null` is the address 0 (Layout.Niche)
+        UnionType u when Types.NonNull(u) is FunctionType => "%kz.fn", // N1: its `null` is the pair of no code and no environment (Layout.Niche)
         FunctionType => "%kz.fn",
         TypeParameterType t => throw new InvalidOperationException($"the type parameter `{t}` was not substituted"),
         _ => throw new NotSupportedException(Refusal(type)),

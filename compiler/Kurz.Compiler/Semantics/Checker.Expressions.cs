@@ -101,7 +101,8 @@ public sealed partial class Checker
                 CheckLambda(l, null, atUnreadType: true);
                 return Typed.Error;
             case LambdaExpression l:
-                return CheckLambda(l, expected as FunctionType);
+                // a lambda where a nullable function type is required takes the types of that function type (N1)
+                return CheckLambda(l, (expected is null ? null : Types.NonNull(expected) ?? expected) as FunctionType);
             case MatchExpression m:
                 return new Typed(CheckMatch(m.Subject, m.Arms, isExpression: true, expected, m.Line).Type);
             case WithExpression w:

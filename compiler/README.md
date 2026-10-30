@@ -518,7 +518,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of no size, `{}` in the IR, whose value is `zeroinitializer` and whose text is `null` (A4), and a
   `T?` of a list or of a data type laid out as a block is the address alone, its `null` an address no
   value of `T` has, 1 for a list, whose value without items is the address 0, and 0 for a block
-  (section 4, the owner, 2026-10-30, "Rust's niche"); a read of a variable or a field the checker
+  (section 4, the owner, 2026-10-30, "Rust's niche"), a `T?` of a function type the function value's
+  pair, its `null` the pair whose code address is 0, as Rust lays out `Option<fn()>`, and a `T?` of a
+  union that union with `null` among its cases, each case's tag the number of its type, so that the
+  two share their room where their tags have one width (section 4, the owner, 2026-10-30, "Nullable
+  form, as Option"); a read of a variable or a field the checker
   found known not null is the value of the case `T`, and `&x` on such a variable, and a `mut` member of
   a list or a map on such a variable or on such a field at the end of a path, reach the place of that
   value in the variable's or the field's room, the place itself where the address is the value (N3,
@@ -1118,10 +1122,9 @@ dropped, so that the variables it uses count as used, but for the operand of `*`
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
-(chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable union or
-function type, which N1 names (the owner, 2026-10-30, "Nullable form, as Option") and the checker
-does not read, and a nullable `void` and a nullable case of a written union, which N1 does not
-name (N1, D9), `?.` or `?[` to a member or an item of a type no `?` makes nullable, which section 4 does not say (N5),
+(chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable `void` and a
+nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` to a member or an
+item of a pointer, a C function type or `void`, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
 a part after `?[` and an assignment through it, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
 emitter does not read through a chain (N5, M9), and an assignment of a field through a nullable
@@ -1156,7 +1159,7 @@ a type parameter, and a key that holds one of them as the value of its nullable 
 at any depth or in a field of a `data` key (M9); `==` on two lists, or on a `data` value, that hold a
 value of a type parameter or a pointer, at any depth (D3, M9), and `==` on a base whose derived type is
 generic, whose fields of a type parameter it does not read, and such a base as a key, where a generic
-`data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values have a nullable type the checker does not read, a union's or a function type's (N1); an assignment into a map or a list
+`data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values are pointers or of `void`, which have no nullable type the checker reads (N1, R10); an assignment into a map or a list
 reached through an item or a call, or into a path that goes on after the key or the item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's

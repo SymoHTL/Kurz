@@ -526,8 +526,8 @@ public sealed partial class Emitter
         fn.Emit($"store i1 {fn.Value($"and i1 {leftNull}, {rightNull}")}, ptr {slot}");
         fn.Branch(done);
         fn.Block(values);
-        var l = Types.NonNull(leftType) is { } li ? (Payload(left, (UnionType)leftType, li), li) : (left, leftType);
-        var r = Types.NonNull(rightType) is { } ri ? (Payload(right, (UnionType)rightType, ri), ri) : (right, rightType);
+        var l = Types.NonNull(leftType) is { } li ? (WithoutNull(left, (UnionType)leftType), li) : (left, leftType);
+        var r = Types.NonNull(rightType) is { } ri ? (WithoutNull(right, (UnionType)rightType), ri) : (right, rightType);
         fn.Emit($"store i1 {Compare(TokenKind.EqualEqual, l.Item1, l.Item2, r.Item1, r.Item2, b.Line)}, ptr {slot}");
         fn.Branch(done);
         fn.Block(done);

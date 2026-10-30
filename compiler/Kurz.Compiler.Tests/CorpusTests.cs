@@ -61,7 +61,6 @@ public sealed class CorpusTests
         ["types/generic-cannot-infer-classes.kz"] = "classes (chapter 7)",
         ["values/mut-method-through-field.kz"] = "a class (chapter 7)",
         ["values/text-more.kz"] = "a flags type (D13)",
-        ["values/map-union-value.kz"] = "a map whose values are of a union, whose nullable form the checker does not read (N1, M9)",
     };
 
     private static bool IsNotSupported(Diagnostic d) => d.Kind == DiagnosticKind.NotSupported;

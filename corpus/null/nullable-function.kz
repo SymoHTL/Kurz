@@ -1,0 +1,21 @@
+// expect: output
+// | 8
+// | true
+// | 5
+// rules: N1, N3, N4
+
+// `((int) => int)?` holds a function value or `null` (N1): a call after a test (N3), and `??` with a lambda for its `null` (N4)
+((int) => int)? Pick(bool twice) {
+    if twice {
+        return x => x * 2
+    }
+    return null
+}
+
+f = Pick(true)
+if f != null {
+    print(f(4))
+}
+print(Pick(false) == null)
+g = Pick(false) ?? (x => x + 1)
+print(g(4))

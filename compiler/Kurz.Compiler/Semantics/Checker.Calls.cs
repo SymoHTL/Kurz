@@ -264,11 +264,18 @@ public sealed partial class Checker
         return true;
     }
 
-    /// <summary>F11: a call of a function value, by position.</summary>
+    /// <summary>F11: a call of a function value, by position; of a nullable one, N2's error, as a member read from it is.</summary>
     private Typed CallValue(KurzType type, CallExpression c)
     {
         if (Types.IsError(type))
         {
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (Types.NonNull(type) is FunctionType or CFunctionType)
+        {
+            Report(ErrorIds.NullableUnchecked, c.Line, $"a `{type}` is called without a check (N2)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -733,8 +740,8 @@ public sealed partial class Checker
     /// assumption there). A map, a function value, a file and a socket take no <c>==</c>, and nor does a <c>data</c> value that holds one
     /// of them, so they are no key (<c>type-mismatch</c>, T18; section 4, the owner, 2026-10-30, "type-mismatch"); the rest are <c>not
     /// supported</c>: a <c>decimal</c>, a pointer and a type parameter. A value is any type whose
-    /// nullable type the checker reads (N1, N11), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30,
-    /// "Flatten, as C#").
+    /// nullable type the checker reads (N1, N11), a union and a function type among them (section 4, the owner, 2026-10-30, "Nullable
+    /// form, as Option"), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30, "Flatten, as C#").
     /// </summary>
     private KurzType MapOf(KurzType key, KurzType value, int line)
     {
@@ -1759,7 +1766,7 @@ public sealed partial class Checker
             var type = Types.Substitute(slot.Type, candidate.Map);
             if (pre.Lambda is not null)
             {
-                if (!Types.IsError(type) && (type is not FunctionType f || f.Parameters.Count != pre.Lambda.Parameters.Count))
+                if (!Types.IsError(type) && ((Types.NonNull(type) ?? type) is not FunctionType f || f.Parameters.Count != pre.Lambda.Parameters.Count))
                 {
                     candidate.Misfit ??= (i, type);
                 }

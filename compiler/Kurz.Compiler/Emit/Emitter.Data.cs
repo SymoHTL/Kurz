@@ -264,7 +264,7 @@ public sealed partial class Emitter
         }
 
         var (path, stored, copied) = WritablePath((NameExpression)target, members);
-        var (place, type) = NarrowedPlace(path, stored, TypeOf(receiver));
+        var (place, type) = NarrowedPlace(path, stored, TypeOf(receiver), receiver.Line);
         if (copied)
         {
             Retain(fn.Value($"load {Ir(type)}, ptr {place}"), type);
