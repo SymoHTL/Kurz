@@ -2491,6 +2491,71 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 4)], Errors("data Pocket(List<int>? Items)\n\nmut p = Pocket(List<int>())\np.Items[0] = 1")); // and not known
     }
 
+    // ---- list literals (M11) -------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("xs = [1, 2]\nprint(xs)", "List<int>")]
+    [InlineData("xs = [1, 2L]\nprint(xs)", "List<long>")]
+    [InlineData("xs = [1.5, 2]\nprint(xs)", "List<double>")]
+    [InlineData("xs = [\"a\", \"b{1}\"]\nprint(xs)", "List<string>")]
+    [InlineData("xs = [[1], [2, 3]]\nprint(xs)", "List<List<int>>")]
+    [InlineData("xs = [[1], []]\nprint(xs)", "List<List<int>>")]
+    [InlineData("n = 5L\nxs = [n, 1]\nprint(xs)", "List<long>")]
+    [InlineData("Bytes xs = [1, 255]\nprint(xs)", "Bytes")]
+    [InlineData("List<int>? xs = [1]\nprint(xs)", "List<int>?")]
+    [InlineData("List<int?> xs = [1, null]\nprint(xs)", "List<int?>")]
+    [InlineData("List<int | string> xs = [1, \"a\"]\nprint(xs)", "List<int | string>")]
+    public void A_list_literal_takes_the_list_type_where_one_stands_and_else_its_items_type(string program, string type)
+    {
+        // M11: the type where one stands (section 4, the owner, 2026-10-30, "[1, 2, 3], as C#"), and where none stands the type its
+        // items give, as T27 infers a type parameter ("From its items"): a literal takes what the others fix, literals alone the type a
+        // constant of them has, and an inner `[]` the type its sibling gives
+        Assert.Equal(type, TypeOf(program, "xs"));
+    }
+
+    [Theory]
+    [InlineData("x = []\nprint(x)", ErrorIds.CannotInfer, 1)]
+    [InlineData("x = [1, \"a\"]\nprint(x)", ErrorIds.CannotInfer, 1)]
+    [InlineData("x = [1, null]\nprint(x)", ErrorIds.TypeMismatch, 1)]
+    [InlineData("Bytes b = [1, 300]\nprint(b)", ErrorIds.ConstantOverflow, 1)]
+    [InlineData("List<int> xs = [1,\n    \"a\"]\nprint(xs)", ErrorIds.TypeMismatch, 2)]
+    [InlineData("n = 5L\nList<int> xs = [n]\nprint(xs)", ErrorIds.NarrowingConversion, 2)]
+    [InlineData("int x = [1]\nprint(x)", ErrorIds.TypeMismatch, 1)]
+    [InlineData("xs = [1]\n[2]\nprint(xs)", ErrorIds.Syntax, 2)]
+    [InlineData("void Fill(mut List<int> v) {\n    v.Add(1)\n}\n\nFill(mut [1])", ErrorIds.MutAtCall, 5)]
+    public void A_list_literal_that_no_type_reaches_or_whose_items_do_not_fit_is_an_error(string program, string id, int line)
+    {
+        // M11 with T27 (`cannot-infer`), N6 (`null` with no nullable type to take), L17 (an item literal that does not fit), T1 and T7
+        // (an item of another type), F5 (a value on its own is no statement) and M7 (a literal is no variable after `mut`)
+        Assert.Equal([(id, line)], Errors(program));
+    }
+
+    [Fact]
+    public void A_list_literal_argument_takes_its_parameter_s_type()
+    {
+        // M11: `Take([1, 2])` (the owner, 2026-10-30, "[1, 2, 3], as C#"): the literal is read under its parameter's type, as a number
+        // literal is (L17), takes what the other arguments fix and fixes what they leave open (T27), and picks among functions of one
+        // name by its items (F13, F14)
+        Clean("int Count(Bytes b) => b.Count\nprint(Count([1, 2, 255]))");
+        Clean("T First<T>(List<T> items) => items[0]\nprint(First([1, 2]))");
+        Clean("T Pick<T>(T a, T c) => a\nBytes bytes = [1]\nprint(Pick(bytes, [2, 255]))\nprint(Pick([4], bytes))");
+        Clean("int Apply(List<(int) => int> fs) => fs[0](2)\nprint(Apply([x => x + 1]))");
+        Clean("void Show(List<int> v) {\n    print(1)\n}\n\nvoid Show(List<string> v) {\n    print(2)\n}\n\nShow([\"a\"])\nShow([1])");
+        Assert.Equal([(ErrorIds.CannotInfer, 2)], Errors("T Pick<T>(T a, T c) => a\nprint(Pick([1], [2L]))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 1), (ErrorIds.CannotInfer, 1)], Errors("x = [[], []]\nprint(x)")); // each `[]` its own, and none for the list around them (E1)
+        Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("int Count(Bytes b) => b.Count\nprint(Count([1, 256]))"));
+    }
+
+    [Fact]
+    public void A_list_literal_holds_nothing_of_an_item_while_an_item_after_it_changes_its_variable()
+    {
+        // M11 with M7: the list counts each item as it is made, as `Add` counts its item, so the `mut` call of an item after it meets nothing
+        // the literal holds; a call around the literal holds its own arguments while the literal's items run
+        const string grow = "List<int> Grow(mut List<int> list) {\n    list.Add(2)\n    return list\n}\n\n";
+        Clean(grow + "mut xs = [1]\nprint([xs, Grow(mut xs), xs])");
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors(grow + "int G(List<int> a, List<List<int>> b) => a.Count + b.Count\nmut xs = [1]\nprint(G(xs, [Grow(mut xs)]))"));
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]

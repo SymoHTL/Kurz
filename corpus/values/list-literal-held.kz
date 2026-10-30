@@ -1,0 +1,11 @@
+// expect: output
+// | [[1], [1, 2]]
+// rules: M11, M7
+
+List<int> Grow(mut List<int> list) {
+    list.Add(2)
+    return list
+}
+
+mut xs = [1]
+print([xs, Grow(mut xs)])

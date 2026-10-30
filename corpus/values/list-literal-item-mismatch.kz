@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 5
+// rules: M11, T1
+
+List<int> xs = [
+    1, "a",
+]
+print(xs.Count)

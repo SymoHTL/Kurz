@@ -88,6 +88,9 @@ public sealed record Argument(int Line, string? Name, bool Mut, Expression Value
 /// <summary>A call, a construction (D2) or a conversion (T10); type arguments where the call writes them (T19).</summary>
 public sealed record CallExpression(int Line, Expression Callee, IReadOnlyList<TypeSyntax> TypeArguments, IReadOnlyList<Argument> Arguments) : Expression(Line);
 
+/// <summary><c>[1, 2, 3]</c> and <c>[]</c>: a list written by its items (M11); the line is the opening bracket's.</summary>
+public sealed record ListLiteral(int Line, IReadOnlyList<Expression> Items) : Expression(Line);
+
 /// <summary><c>list[i]</c> or <c>map[key]</c> (M9), and <c>list?[i]</c> (N5); the line is the bracket's.</summary>
 public sealed record IndexExpression(int Line, Expression Target, Expression Index, bool Conditional = false) : Expression(Line);
 
