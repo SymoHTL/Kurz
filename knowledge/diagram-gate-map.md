@@ -99,7 +99,7 @@ flowchart TD
         pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, red on
         output, an exit code or an error line other than the header's, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        than 235 cases run on Linux or 221 on Windows, and on Linux on a crash whose trace is empty, holds a line that
+        than 241 cases run on Linux or 227 on Windows, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start
         at the error line's place; TraceTests, red on a trace
         other than the one each Linux program pins: its frames, names and lines, the cut and its count, the
