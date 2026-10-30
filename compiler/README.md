@@ -689,7 +689,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 278 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 41 the
+full and the emitter does not emit, 3 of the 278 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 39 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -1015,7 +1015,7 @@ rule gives a meaning (below); a conversion to `string`, `bool` or `char` (A5 to 
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
-lists the rule ids whose cases the checker may say `not supported` to, and five cases by name that
+lists the rule ids whose cases the checker may say `not supported` to, and four cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the
 checker reads in full is held to its header whatever it cites.
 
@@ -1023,6 +1023,14 @@ checker reads in full is held to its header whatever it cites.
 
 Each is the checker's reading, not a decision, pinned by a test in `CheckerTests.cs`; a design
 round can ask about it by the rule's id.
+
+- M9 with N1, M4 and A6: a map's keys are strings, integers, `char` and `bool`, whose equality and
+  hash the compiler gives, and its values the types whose nullable type N1 reads, since `map[key]`
+  is that type; any other map is `not supported`, the record naming neither the types a key takes nor
+  the read of a nullable value. `map[key] = value` is an assignment into a path (M4) and stands on a
+  `mut` variable or parameter, with M4's order, the value before the key. `==` between two maps is
+  `type-mismatch`, as between two lists (T18, D3), and a map that holds a value without a text is
+  `no-text` (A7).
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
   checker can tell among them (D13's `match` on flags, O10's call). The checker reads these shapes
