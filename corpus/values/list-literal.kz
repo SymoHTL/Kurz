@@ -8,7 +8,7 @@
 // | [1, 2]
 // | 2
 // | 2
-// rules: M11
+// rules: M11, L4
 
 int Sum(List<int> numbers) {
     mut total = 0

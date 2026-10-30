@@ -60,7 +60,7 @@ line break inside the braces of an `enum`, `flags` or `with` body and inside the
 arguments or type parameters does not end the statement, as one inside parentheses does not; a line
 break after the `:` of a base list continues the declaration; a line that ends in the `|` of a type or
 in `..` or `..<` continues on the next; and a trailing comma is accepted in an `enum` or `flags` body
-and refused in the braces of `with`, where it is `syntax` (E4). A line that starts with `.` directly
+and between the brackets of a list (M11), and refused in the braces of `with`, where it is `syntax` (E4). A line that starts with `.` directly
 followed by a digit starts a statement with a fraction literal (L11) and continues nothing (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
 Case: [source/with-trailing-comma.kz](../corpus/source/with-trailing-comma.kz)
@@ -106,6 +106,39 @@ print(Add(
     total,
     total
 ))
+```
+
+Case: [values/list-literal.kz](../corpus/values/list-literal.kz)
+```kurz
+int Sum(List<int> numbers) {
+    mut total = 0
+    for x in numbers {
+        total = total + x
+    }
+
+    return total
+}
+
+List<int> xs = [1, 2, 3]
+print(xs)
+ys = [4, 5]
+print(ys.Count)
+print(Sum([1, 2]))
+Bytes b = [104, 105]
+print(string.FromUtf8Lossy(b))
+nested = [[1], [2, 3]]
+print(nested)
+List<string> none = []
+print(none.Count)
+lines = [
+    1,
+    2,
+]
+print(lines)
+List<int | string> mixed = [1, "a"]
+print(mixed.Count)
+List<int?> maybe = [1, null]
+print(maybe.Count)
 ```
 
 ### L5 (decided, §8) No `;`

@@ -2292,6 +2292,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_list_literal_whose_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
+    {
+        // M11, M9: the one block of a literal of three `long` items, 16 bytes of counts and room for the three
+        const string text = "List<long> xs = [1, 2, 3]\nprint(xs)\n";
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "literal-refused"), 1, [], "error: allocation-failed (40 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "literal-granted"), 0, ["[1, 2, 3]"], ""); // the positive control
+    }
+
+    [Fact]
     public void A_map_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
         // the first block of a `Map<long, long>`: 48 bytes of counts and keys, 16 of the control bytes of its 8 slots, padded, and 8
