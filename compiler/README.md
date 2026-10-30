@@ -497,8 +497,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   found known not null is the value of the case `T`, and `&x`, `Add` and `Clear` on such a variable
   reach the place of that value in the variable's room, the variable's own place where the address
   is the value (N3, R10); `x == null` and `x != null` compare the tag, or the address with the `null`
-  of its type (N3); `==` and `!=` with a nullable side are `false` for one `null` and `true` for two,
-  and compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
+  of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
+  reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
   `?.` and `?[` reads each member and item only where the value before it is not null, the index of
   `?[` among it, each a value of its own that takes a count of what it read (N4, N5); a `T?` of a
   type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
@@ -695,7 +695,7 @@ given back, the lists and strings it holds among it (above), so a program that m
 without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
 none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
 before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 284 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 40 the
+full and the emitter does not emit, 3 of the 286 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 40 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
@@ -921,7 +921,7 @@ brace. Each is pinned as it is, so that a fix shows.
 The checker (`Semantics/`) takes a tree the parser read without an error and checks it against
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
-generic data type as a base), 4 (null: N1 to N8, and N9's paths none, since they run through a
+generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths none, since they run through a
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7, and
 M9 for lists), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files and sockets: S1 to S11; S12's grants are a
@@ -975,10 +975,10 @@ error of their own, a name no declaration has among them, is reported beside the
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
 (chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable union,
 function type, C function type or `void`, and a nullable case of a written union, which N1 does not
-name (N1, D9), `?.` to a member of a type no `?` makes nullable, which section 4 does not say (N5),
+name (N1, D9), `?.` or `?[` to a member or an item of a type no `?` makes nullable, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
 a part after `?[` and an assignment through it, which section 4 does not name (N5), and an assignment into a path
-through a nullable field known not null, which the emitter does not write through (N3, M4), a `mut`
+through a nullable variable or field known not null, which the emitter does not write through (N3, M4), a `mut`
 method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
@@ -1188,14 +1188,15 @@ round can ask about it by the rule's id.
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
   ways meet, at the end of an `if`, after the arms of a `match` or an `else` and at the head of a
-  loop, a path is known not null where every way that reaches the point keeps it. A loop's body is
-  read again from what a round leaves, its diagnostics dropped, until a reading keeps what it began
-  with; after the loop holds what a false condition shows, joined with what holds at each `break`,
-  and `while true` leaves by its `break`s alone. A declaration of a value that is not null narrows
-  its variable, as C# reads `string? s = "a"`. Where the record says an assignment narrows "up to
-  the end of the block that holds the assignment", the join that the same sentence names keeps it
-  after that block where every way in keeps it: `if f == null { f = "x" }` narrows `f` after the
-  `if`. What the left side of `&&` or `||` shows holds past the right side only where the right
+  loop, a path is known not null where every way that reaches the point keeps it. A loop's condition
+  and body are read again from what a round leaves, what the condition's own `mut` arguments end
+  among it, their diagnostics dropped, until a reading keeps what it began with; after the loop
+  holds what a false condition shows, joined with what holds at each `break`, a `for` leaves with
+  what its head holds as well, since it can run no round, and `while true` leaves by its `break`s
+  alone. A declaration of a value that is not null narrows its variable, as C# reads
+  `string? s = "a"`. An assignment's narrowing lasts past the block that holds it where every way
+  that reaches the join keeps it: `if f == null { f = "x" }` narrows `f` after the `if` (section 4,
+  the owner, 2026-10-30, "Yes, as C#"). What the left side of `&&` or `||` shows holds past the right side only where the right
   side did not change it: `e != null && Cleared(mut e)` shows nothing of `e`, since the `mut`
   argument ends the narrowing as an assignment does (N7). An arm of a `match` that no `null`
   reaches, a type's, a literal's or an `else` after the `null` arm, knows the subject's variable or
@@ -1205,11 +1206,14 @@ round can ask about it by the rule's id.
   narrowing. Section 4's "a call of a `mut` method on a value that a narrowed path runs through" is
   read as a path through the value to a field of it, and a list has no field; the value itself has
   its type, not the nullable one, inside the method, which cannot make it null.
-- N3: a test, a `match` with a `null` arm, `??` and `?.` read a variable or a path of fields known
-  not null as the nullable type it has, so that a second test, a `null` arm and `u?.Name` after
-  `if u != null` read as C# reads them.
+- N3: `== null`, `!= null`, a `match` with a `null` arm, `??`, `?.` and `?[` read a variable or a
+  path of fields known not null as the nullable type it has, so that a second test, a `null` arm and
+  `u?.Name` after `if u != null` read as C# reads them; any other operand of them keeps what it
+  changed, so that `Take(mut x) ?? d` ends what was known of `x` (N7). An `==` beside a value reads
+  the variable as N10 says.
 - N2: an operand of any operator but `==` and `!=`, which N10 lifts, is `nullable-unchecked`, and
-  the error's line below it says how to check (section 4); so are a condition, the list of a `for`, the list of an index, a member read
+  the error's line below it says how to check (section 4); so are a condition, the list of a `for`, the list of an index or a part, an
+  index of a list or of `?[`, a member read
   through the value, the value `with` copies, and a value where the type it makes nullable is
   required, which takes `nullable-unchecked` in place of `type-mismatch` there. A variable passed as
   `mut` is read as its own type (N7), so that a `string?` given to a `mut string` is `type-mismatch`
@@ -1224,12 +1228,16 @@ round can ask about it by the rule's id.
 - N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with, and
   that one's own type where it is nullable, never a `T??`; a member after them in the chain reads
   the member or the item before as its own type, so that a nullable one there is
-  `nullable-unchecked`, and a parenthesis ends the chain. After `?[` holds what held before its
-  index, since the index runs only where the list is not null.
-- N10 with N3: a nullable side of `==` beside a value whose type is not nullable, read as the checker
+  `nullable-unchecked`, whatever a test showed of that member's path, which C# narrows: after
+  `if u?.Email != null`, `u?.Email.Bytes` is `nullable-unchecked` and `u.Email.Bytes` reads as the
+  test showed; a parenthesis ends the chain. After `?[` holds what held before its index, since the
+  index runs only where the list is not null, and an index that changes the list is
+  `changed-while-held` (M7), since the list is read before it.
+- N10 with N3: a nullable side of `==`, on either side, beside a value whose type is not nullable, read as the checker
   typed it, so that a variable known not null counts as such a value, is known not null where the
   test holds; beside another nullable value it is not, as C#'s analysis reads both.
-- N1 with O8: `null` is a literal pattern of a `match`, which covers the case `null`.
+- N1 with C9 and O8: an arm may name `null`, which covers the case `null` (section 4, the owner,
+  2026-10-30, "Allow, as C#").
 - R7 with E1: every `raw` block in a package without the grant is `raw-not-allowed`, one inside
   another among them, since each is a block the grant would allow; its body is checked as one with
   the grant is, so a read through a pointer there raises nothing more.

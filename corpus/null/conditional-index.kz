@@ -1,7 +1,7 @@
 // expect: output
+// | index 1
 // | 2
-// | -1
-// | -1
+// | null
 // rules: N5
 
 List<int>? Scores(bool some) {
@@ -14,6 +14,10 @@ List<int>? Scores(bool some) {
     return null
 }
 
-print(Scores(true)?[1] ?? -1)
-print(Scores(false)?[1] ?? -1)
-print(Scores(false)?[5] ?? -1)
+int At(int i) {
+    print("index {i}")
+    return i
+}
+
+print(Scores(true)?[At(1)])
+print(Scores(false)?[At(1)])
