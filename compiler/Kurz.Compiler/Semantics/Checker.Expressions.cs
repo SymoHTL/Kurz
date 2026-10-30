@@ -405,6 +405,13 @@ public sealed partial class Checker
     private Typed CheckName(NameExpression n, KurzType? expected = null)
     {
         var (variable, _) = Lookup(n.Name);
+        if (variable is { Type: EntryType })
+        {
+            variable.Read = true;
+            NotSupported(n.Line, $"the entry `{n.Name}` of a map as a value of its own, which C6 reads through `Key` and `Value` alone (C6)");
+            return Typed.Error;
+        }
+
         if (variable is not null)
         {
             variable.Read = true;
@@ -514,8 +521,33 @@ public sealed partial class Checker
             }
         }
 
+        if (Unwrap(m.Target) is NameExpression name && Lookup(name.Name) is ({ Type: EntryType entry } variable, var captured))
+        {
+            return EntryMember(m, name, variable, entry, captured);
+        }
+
         var target = CheckExpression(m.Target, null);
         return Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3
+    }
+
+    /// <summary>
+    /// C6: <c>e.Key</c> and <c>e.Value</c> of the entry <c>for e in map</c> names (section 4, the owner, 2026-10-30, "Key and Value, as
+    /// C#"), read from the map the loop holds; a lambda that reads the entry is not read, since what the entry is as a value of its own,
+    /// which a lambda's environment would hold, no answer gives.
+    /// </summary>
+    private Typed EntryMember(MemberAccess m, NameExpression name, VariableSymbol variable, EntryType entry, bool captured)
+    {
+        variable.Read = true;
+        if (captured)
+        {
+            NotSupported(m.Line, "an entry of a map read in a lambda (C6, F15)");
+            return Typed.Error;
+        }
+
+        model.RecordName(name, variable);
+        model.RecordType(name, new Typed(entry));
+        model.RecordType(m.Target, new Typed(entry));
+        return MemberOf(entry, m.Member, m.Line);
     }
 
     /// <summary>D12: <c>Plan.Free</c>, a value of the enum, a constant (section 4); <c>From</c> is called (D18), and any other name is no value of it (V10).</summary>
@@ -592,6 +624,10 @@ public sealed partial class Checker
                 }
 
                 break;
+            case MapType when member == "Count":
+                return new Typed(Types.Int); // M9: the count of its entries, as C#'s `Dictionary.Count` (section 4, the owner, 2026-10-30)
+            case EntryType entry when member is "Key" or "Value":
+                return new Typed(member == "Key" ? entry.Key : entry.Value); // C6, as C#'s `KeyValuePair` (section 4, the owner, 2026-10-30)
             case DataType d:
                 {
                     var field = d.Symbol.Field(member);
@@ -673,7 +709,7 @@ public sealed partial class Checker
 
         if (target.Type is MapType map)
         {
-            return CheckMapRead(i, target, map);
+            return CheckMapRead(i, map);
         }
 
         var index = CheckExpression(i.Index, target.Type is PointerType ? null : Types.Int); // R10: an offset is an `int` or a `long`, so a literal takes the type L10 gives it
@@ -707,16 +743,25 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>M9: <c>map[key]</c>, the value of the key's entry or <c>null</c>, of the nullable type of the map's values (N1).</summary>
-    private Typed CheckMapRead(IndexExpression i, Typed target, MapType map)
+    /// <summary>
+    /// M9: <c>map[key]</c>, the value of the key's entry or <c>null</c>, of the nullable type of the map's values (N1), which is the
+    /// values' own type where they are nullable, so that a missing entry and a <c>null</c> one read alike (section 4, the owner,
+    /// 2026-10-30, "Flatten, as C#").
+    /// </summary>
+    private Typed CheckMapRead(IndexExpression i, MapType map)
     {
-        var key = CheckExpression(i.Index, map.Key);
+        CheckKey(i.Index, map);
+        return new Typed(Types.Flattened(map.Value));
+    }
+
+    /// <summary>M9: a key of the map, given to an index, to <c>ContainsKey</c> or to <c>Remove</c>.</summary>
+    private void CheckKey(Expression index, MapType map)
+    {
+        var key = CheckExpression(index, map.Key);
         if (!key.IsError && !Types.Assignable(key.Type, map.Key))
         {
-            Report(Types.MismatchId(key.Type, map.Key), i.Index.Line, $"a `{key.Type}` where a key of `{target.Type}`, a `{map.Key}`, is required (M9, T1)");
+            Report(Types.MismatchId(key.Type, map.Key), index.Line, $"a `{key.Type}` where a key of `{map}`, a `{map.Key}`, is required (M9, T1)");
         }
-
-        return new Typed(Types.Nullable(map.Value));
     }
 
     /// <summary>

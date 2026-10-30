@@ -108,6 +108,19 @@ public sealed record MapType(KurzType Key, KurzType Value) : KurzType
     public override int GetHashCode() => HashCode.Combine(nameof(MapType), Key, Value);
 }
 
+/// <summary>
+/// The entry that <c>for e in map</c> names (C6), read through its <c>Key</c> and its <c>Value</c> alone: what an entry is as a value of
+/// its own, its type's name and its text, no answer gives.
+/// </summary>
+public sealed record EntryType(KurzType Key, KurzType Value) : KurzType
+{
+    public override string Text => $"entry of Map<{Key.Text}, {Value.Text}>";
+
+    public bool Equals(EntryType? other) => other is not null && Types.Same(Key, other.Key) && Types.Same(Value, other.Value);
+
+    public override int GetHashCode() => HashCode.Combine(nameof(EntryType), Key, Value);
+}
+
 /// <summary>A <c>data</c> type (D1), with its type arguments where it is generic (T19).</summary>
 public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArguments) : KurzType
 {
@@ -254,6 +267,9 @@ public static class Types
 
     /// <summary>N1: <c>T?</c>, the union <c>T | null</c>.</summary>
     public static UnionType Nullable(KurzType inner) => new([inner, Null]);
+
+    /// <summary>N1: <c>T?</c> of a <c>T</c> that may be nullable itself, which is then <c>T</c> (section 4, the owner, 2026-10-30, "Flatten, as C#").</summary>
+    public static UnionType Flattened(KurzType inner) => inner is UnionType u && NonNull(u) is not null ? u : Nullable(inner);
 
     public static bool IsInteger(KurzType type) => type is PrimitiveType { Kind: <= Primitive.ULong };
 

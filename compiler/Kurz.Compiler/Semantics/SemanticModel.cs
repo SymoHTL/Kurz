@@ -62,6 +62,15 @@ public enum CallKind
     /// <summary>A list's <c>Clear</c> (M9).</summary>
     ListClear,
 
+    /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>
+    MapContainsKey,
+
+    /// <summary>A map's <c>Remove(key)</c> (M9), the value of the key's entry, moved out, or <c>null</c>.</summary>
+    MapRemove,
+
+    /// <summary>A map's <c>Clear</c> (M9).</summary>
+    MapClear,
+
     /// <summary><c>File.Open(path)</c> (S2), a file opened to read or the case <c>IoError</c> (S1).</summary>
     FileOpen,
 

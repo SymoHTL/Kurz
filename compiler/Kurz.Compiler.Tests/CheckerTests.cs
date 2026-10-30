@@ -2046,6 +2046,106 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int Fill(mut Map<int, int> t) {\n    t[1] = 1\n    return 1\n}\n\nmut ages = Map<int, int>()\nprint(ages[Fill(mut ages)] ?? 0)")); // a read whose key changes the map
     }
 
+    [Fact]
+    public void A_map_s_key_is_any_type_that_compares_by_content()
+    {
+        // M9: a key is a value of a type `==` compares by content (section 4, the owner, 2026-10-30, "Any type with =="): an enum, a time,
+        // a `data` value of such fields, a field of a union of them among them (D3), a list of such items, a type that holds itself
+        // through a list; a map, a function value and a file take no `==` (T18), so they are no key
+        Clean("enum Tier { Free, Pro }\n\nmut m = Map<Tier, int>()\nm[Tier.Pro] = 1\nprint(m[Tier.Pro] ?? 0)");
+        Clean("data P(int X, string Name)\n\nmut m = Map<P, int>()\nm[P(1, \"a\")] = 1\nprint(m[P(1, \"a\")] ?? 0)");
+        Clean("mut m = Map<List<string>, int>()\nmut k = List<string>()\nk.Add(\"a\")\nm[k] = 1\nprint(m[k] ?? 0)");
+        Clean("data Tag(string? Note, List<int> Ids)\n\nm = Map<Tag, int>()\nprint(m)"); // a nullable field and a list field
+        Clean("data Tree(int V, List<Tree> Kids)\n\nm = Map<Tree, int>()\nprint(m)");
+        Clean("m = Map<duration, int>()\nprint(m)");
+        Clean("data Pair<T>(T A, T B)\n\nm = Map<Pair<int>, int>()\nprint(m)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("m = Map<Map<int, int>, int>()\nprint(m)")); // `==` between two maps
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("m = Map<List<Map<int, int>>, int>()\nprint(m)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("m = Map<() => int, int>()\nprint(m)"));
+        Assert.Equal("a map's key is compared with `==`, which `Map<int, int>` does not take: `==` between two `Map<int, int>` is `type-mismatch` (M9, T18)", Check("m = Map<Map<int, int>, int>()\nprint(m)").Diagnostics.Items.Single().Message);
+    }
+
+    [Fact]
+    public void A_map_of_nullable_values_reads_a_missing_entry_and_a_null_one_alike()
+    {
+        // M9 with N1: `T?` of a nullable `T` is `T` (section 4, the owner, 2026-10-30, "Flatten, as C#"), so `m[k]` and `Remove` give `int?`
+        Assert.Equal("int?", TypeOf("m = Map<string, int?>()\nn = m[\"a\"]\nprint(n)", "n"));
+        Assert.Equal("string?", TypeOf("mut m = Map<int, string?>()\nn = m.Remove(1)\nprint(n)", "n"));
+        Clean("mut m = Map<string, int?>()\nm[\"a\"] = null\nm[\"b\"] = 2\nprint(m[\"a\"] ?? 0)");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 2)], Errors("m = Map<string, int?>()\nprint(m[\"a\"] + 1)"));
+    }
+
+    [Fact]
+    public void A_map_has_Count_ContainsKey_Remove_and_Clear()
+    {
+        // M9: C#'s names and Rust's `Remove` (section 4, the owner, 2026-10-30, "C# names, Rust's Remove"); `Remove` and `Clear` change
+        // the map (M5), `ContainsKey` and `Count` read it
+        Assert.Equal("int", TypeOf("m = Map<string, int>()\nn = m.Count\nprint(n)", "n"));
+        Assert.Equal("bool", TypeOf("m = Map<string, int>()\nb = m.ContainsKey(\"a\")\nprint(b)", "b"));
+        Assert.Equal("int?", TypeOf("mut m = Map<string, int>()\nn = m.Remove(\"a\")\nprint(n)", "n"));
+        Clean("mut m = Map<string, int>()\nm.Remove(\"a\")\nm.Clear()\nprint(m)");
+        Clean("void Empty(mut Map<int, int> t) {\n    t.Clear()\n}\n\nmut m = Map<int, int>()\nEmpty(mut m)\nprint(m)");
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("m = Map<string, int>()\nm.Remove(\"a\")\nprint(m)"));
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("m = Map<string, int>()\nm.Clear()\nprint(m)"));
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("void F(Map<int, int> m) {\n    m.Clear()\n}\n\nF(Map<int, int>())"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("m = Map<string, int>()\nprint(m.ContainsKey(1))")); // T1: a key
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut m = Map<string, int>()\nm.Remove(1)\nprint(m)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut m = Map<string, int>()\nm.Remove()\nprint(m)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut m = Map<string, int>()\nm.Clear(1)\nprint(m)"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 2)], Errors("mut m = Map<string, int>()\nf = () => m.Clear()\nf()\nprint(m)")); // F11
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("m = Map<string, int>()\nprint(m.Length)")); // V10
+        Assert.Equal([(ErrorIds.NullableUnchecked, 2)], Errors("Map<string, int>? m = null\nprint(m.Count)")); // N2
+    }
+
+    [Fact]
+    public void A_mut_method_of_a_map_changes_what_a_call_still_holds()
+    {
+        // M7: `Remove` and `Clear` change the map they are called on, in an arm's statement and against a `mut` argument of the same call;
+        // a read of the map in `Remove`'s own key is a value of its own (M9), which holds nothing of the map, so whether `Add`'s exception
+        // holds for another method, which section 14 leaves open, does not arise for it
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, Find(2) else {\n    NotFound => {\n        ages.Remove(\"a\")\n        5\n    }\n}))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, Find(2) else {\n    NotFound => {\n        ages.Clear()\n        5\n    }\n}))"));
+        Clean("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, 0) + (Find(2) else {\n    NotFound => {\n        ages.Clear()\n        5\n    }\n}))"); // the call around the read has ended
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("string Key(mut Map<string, int> m) {\n    m[\"b\"] = 1\n    return \"a\"\n}\n\nmut ages = Map<string, int>()\nprint(ages.Remove(Key(mut ages)) ?? 0)"));        Clean("mut names = Map<string, string>()\nnames[\"a\"] = \"b\"\nprint(names.Remove(names[\"a\"] ?? \"\") ?? \"\")"); // a read of the receiver in its own argument
+    }
+
+    [Fact]
+    public void A_loop_over_a_map_names_its_entry_or_its_key_and_value()
+    {
+        // C6: `for e in map` gives `e.Key` and `e.Value`, `for k, v in map` names both under any two names (section 4, the owner,
+        // 2026-10-30, "Key and Value, as C#"); two names walk nothing but a map
+        Clean("m = Map<string, int>()\nfor e in m {\n    string k = e.Key\n    int v = e.Value\n    print(k)\n    print(v)\n}");
+        Clean("m = Map<string, List<int>>()\nfor name, items in m {\n    string k = name\n    List<int> v = items\n    print(k)\n    print(v)\n}");
+        Clean("mut m = Map<string, int>()\nfor k, v in m {\n    m.Remove(k)\n    m[k] = v + 1\n}\nprint(m)"); // the loop walks the map as it was (C6)
+        Clean("m = Map<string, int>()\nfor k, v in m {\n    f = () => v + 1\n    print(f())\n}"); // a name of its own, which a lambda reads (F15)
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = List<int>()\nfor a, b in xs {\n    print(a)\n}"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("for a, b in 1..3 {\n    print(a)\n}"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("m = Map<string, int>()\nfor e in m {\n    print(e.Name)\n}")); // V10
+        Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("m = Map<string, int>()\nfor k, v in m {\n    v = 1\n}"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("m = Map<string, int>()\nfor k, k in m {\n    print(k)\n}")); // V9
+    }
+
+    [Fact]
+    public void An_item_of_a_mut_list_is_written_through_its_index()
+    {
+        // M9, M4: `xs[i] = v` on a `mut` variable or parameter (section 4, the owner, 2026-10-30, "As C# and Rust"), the value first, so a
+        // `mut` argument in the value changes the list before the write (M4); an arm's write changes what a call holds (M7)
+        Clean("mut xs = List<int>()\nxs.Add(1)\nxs[0] = 2\nprint(xs)");
+        Clean("void Set(mut List<string> ys) {\n    ys[0] = \"b\"\n}\n\nmut xs = List<string>()\nxs.Add(\"a\")\nSet(mut xs)\nprint(xs)");
+        Clean("mut xs = List<long>()\nxs.Add(1)\nbyte i = 0\nxs[i] = 2\nprint(xs)"); // an index of any integer type, a value that widens (T8)
+        Clean("int Grow(mut List<int> ys) {\n    ys.Add(5)\n    return 7\n}\n\nmut xs = List<int>()\nxs.Add(1)\nxs[0] = Grow(mut xs)\nprint(xs)");
+        Clean("mut xs = List<List<int>>()\nxs.Add(List<int>())\nxs.Add(List<int>())\nxs[0] = xs[1]\nprint(xs)");
+        Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("xs = List<int>()\nprint(xs)\nxs[0] = 1"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 2)], Errors("void Set(List<int> xs) {\n    xs[0] = 1\n}\n\nSet(List<int>())"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = List<int>()\nxs[0] = \"a\""));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = List<int>()\nxs[\"a\"] = 1")); // T2: an index
+        Assert.Equal([(ErrorIds.NullableUnchecked, 2)], Errors("mut List<int>? xs = null\nxs[0] = 1\nprint(xs)")); // N2
+        Assert.Equal([(ErrorIds.NullableUnchecked, 2)], Errors("mut m = Map<string, List<int>>()\nm[\"a\"][0] = 1"));
+        Clean("mut List<int>? xs = List<int>()\nif xs != null {\n    xs[0] = 1\n}\nprint(xs)"); // N3: known not null
+        Assert.Equal([(ErrorIds.CaptureAssign, 2)], Errors("mut xs = List<int>()\nf = (int x) => { xs[0] = x }\nf(1)\nprint(xs)")); // F11
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Size(List<int> ys, int n) => n\n\nmut xs = List<int>()\nprint(Size(xs, Find(2) else {\n    NotFound => {\n        xs[0] = 1\n        5\n    }\n}))"));
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
@@ -2061,20 +2161,27 @@ public sealed class CheckerTests
     [InlineData("T? Id<T>(T x) => x\n\nprint(1)", "1: a nullable `T` (N1)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
-    [InlineData("mut m = Map<double, int>()\nm[1.5] = 1", "1: a map with keys of type `double` (M9)")]
-    [InlineData("data P(int X)\n\nm = Map<P, int>()\nprint(m)", "3: a map with keys of type `P` (M9)")]
-    [InlineData("m = Map<string, int?>()\nprint(m)", "1: a map with values of type `int?` (M9, N1)")]
+    [InlineData("mut m = Map<double, int>()\nm[1.5] = 1", "1: a map with keys of type `double`: whether a `double` is a key is not decided (M9)")]
+    [InlineData("m = Map<float, int>()\nprint(m)", "1: a map with keys of type `float`: whether a `float` is a key is not decided (M9)")]
+    [InlineData("data P(int X, double Y)\n\nm = Map<P, int>()\nprint(m)", "3: a map with keys of type `P`: its field `Y`: whether a `double` is a key is not decided (M9)")]
+    [InlineData("m = Map<List<double>, int>()\nprint(m)", "1: a map with keys of type `List<double>`: its items: whether a `double` is a key is not decided (M9)")]
+    [InlineData("m = Map<int?, string>()\nprint(m)", "1: a map with keys of type `int?`: a nullable key compares by the lifted `==` (N1) (M9)")]
+    [InlineData("m = Map<decimal, int>()\nprint(m)", "1: a map with keys of type `decimal`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
+    [InlineData("data Box(Map<string, int> M)\n\nm = Map<Box, int>()\nprint(m)", "3: a map with keys of type `Box`: its field `M`: `==` between two `Map<string, int>` is `type-mismatch` (M9)")]
+    [InlineData("void F<T>(T x) {\n    m = Map<T, int>()\n    print(m)\n}\n\nF(1)", "2: a map with keys of type `T`: a `T` is no key the checker reads (M9)")]
+    [InlineData("m = Map<int | string, int>()\nprint(m)", "1: a map with keys of type `int | string`: a `int | string` is no key the checker reads (M9)")]
     [InlineData("void F<T>(T x) {\n    m = Map<string, T>()\n    print(m)\n}\n\nF(1)", "2: a map with values of type `T` (M9, N1)")]
     [InlineData("m = Map<string, () => int>()\nprint(1)", "1: a map with values of type `() => int` (M9, N1)")]
     [InlineData("m = Map<string, int | string>()\nprint(1)", "1: a map with values of type `int | string` (M9, N1)")]
-    [InlineData("m = Map<string, int>()\nfor e in m {\n    print(e)\n}", "2: a `for` loop over a map, whose entries C6 names by a proposal (C6, M10)")]
+    [InlineData("m = Map<string, int>()\nfor e in m {\n    print(e)\n}", "3: the entry `e` of a map as a value of its own, which C6 reads through `Key` and `Value` alone (C6)")]
+    [InlineData("m = Map<string, int>()\nfor e in m {\n    f = () => e.Value\n    print(f())\n}", "3: an entry of a map read in a lambda (C6, F15)")]
     [InlineData("data Box(Map<string, int> M)\n\nmut b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a map that is no variable, or into a path through an entry (M4, M9)")]
-    [InlineData("mut m = Map<string, List<int>>()\nm[\"a\"][0] = 1", "2: an assignment into an index (M9)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
     [InlineData("print(string(1))", "1: a conversion to `string` (A5 to A7)")]
-    [InlineData("mut xs = List<int>()\nxs[0] = 1", "2: an assignment into an index (M9)")]
-    [InlineData("data P(int X)\n\nmut ps = List<P>()\nps[0].X = 1", "4: an assignment into an index (M9)")]
+    [InlineData("data Box(List<int> Items)\n\nmut b = Box(List<int>())\nb.Items[0] = 1", "4: an assignment into a list that is no variable, or into a path through an item (M4, M9)")]
+    [InlineData("data P(int X)\n\nmut ps = List<P>()\nps[0].X = 1", "4: an assignment into a list that is no variable, or into a path through an item (M4, M9)")]
+    [InlineData("mut grid = List<List<int>>()\ngrid[0][0] = 1", "2: an assignment into a list that is no variable, or into a path through an item (M4, M9)")]
     [InlineData("mut grid = List<List<int>>()\ngrid[0].Add(1)", "2: a `mut` method on an element of a list (M5, M9)")]
     [InlineData("data Shape\n\nint AreaOf<T: Shape>(T item) => 1\n\nprint(AreaOf(5))", "3: the limit of a type parameter (T19)")]
     [InlineData("data Shape\ndata Box<T: Shape>(T Item)\n\nprint(1)", "2: the limit of a type parameter (T19)")]

@@ -285,6 +285,44 @@ public sealed partial class Emitter
                     return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
                 }
 
+            case ListType list:
+                {
+                    // M9: a key of a map compares lists item by item, as it hashes them over their items (section 4, the owner,
+                    // 2026-10-30, "Any type with =="), and so does a field of a `data` value that holds one (D3)
+                    var name = Helper($"equal.{Lower.Mangle(type)}", "i1", ["ptr", "ptr"], () =>
+                    {
+                        var count = ListCount("%a0");
+                        var items = fn.Label("items");
+                        var differ = fn.Label("differ");
+                        fn.CondBranch(fn.Value($"icmp eq i32 {count}, {ListCount("%a1")}"), items, differ);
+                        fn.Block(items);
+                        var first = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a0)");
+                        var second = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a1)");
+                        var counter = fn.Alloca("i32", "item");
+                        fn.Emit($"store i32 0, ptr {counter}");
+                        var check = fn.Label("check");
+                        var item = fn.Label("item");
+                        var same = fn.Label("same");
+                        fn.Block(check);
+                        var i = fn.Value($"load i32, ptr {counter}");
+                        fn.CondBranch(fn.Value($"icmp slt i32 {i}, {count}"), item, same);
+                        fn.Block(item);
+                        var wide = fn.Value($"sext i32 {i} to i64");
+                        var a = fn.Value($"load {Ir(list.Element)}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {first}, i64 {wide}")}");
+                        var b = fn.Value($"load {Ir(list.Element)}, ptr {fn.Value($"getelementptr {Ir(list.Element)}, ptr {second}, i64 {wide}")}");
+                        var more = fn.Label("more");
+                        fn.CondBranch(Equal(a, b, list.Element, line), more, differ);
+                        fn.Block(more);
+                        fn.Emit($"store i32 {fn.Value($"add i32 {i}, 1")}, ptr {counter}");
+                        fn.Branch(check);
+                        fn.Block(same);
+                        fn.Return("i1 true");
+                        fn.Block(differ);
+                        fn.Return("i1 false");
+                    });
+                    return fn.Value($"call i1 {name}(ptr {left}, ptr {right})");
+                }
+
             default:
                 throw Unsupported(line, $"`==` on a `{type}`");
         }

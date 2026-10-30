@@ -694,6 +694,12 @@ public sealed partial class Emitter
             return;
         }
 
+        if (TypeOf(f.Collection) is MapType map)
+        {
+            EmitForInMap(f, map);
+            return;
+        }
+
         if (Unwrap(f.Collection) is not RangeExpression range)
         {
             throw Unsupported(f.Collection.Line, $"a `for` over a `{TypeOf(f.Collection)}` (C6)");
@@ -780,6 +786,9 @@ public sealed partial class Emitter
                 break;
             case IndexExpression i when TypeOf(i.Target) is MapType map:
                 EmitMapWrite(a, i, map);
+                return;
+            case IndexExpression i when TypeOf(i.Target) is ListType list:
+                EmitListWrite(a, i, list);
                 return;
             default:
                 throw Unsupported(a.Line, $"an assignment to {ExpressionName(a.Target)}");

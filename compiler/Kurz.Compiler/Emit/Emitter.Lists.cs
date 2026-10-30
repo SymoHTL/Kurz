@@ -404,6 +404,63 @@ public sealed partial class Emitter
         return fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {position}")}");
     }
 
+    /// <summary>
+    /// M9, M4, T14: <c>xs[i] = value</c> on a <c>mut</c> variable or parameter, as C# and Rust write an item (section 4, the owner,
+    /// 2026-10-30, "As C# and Rust"): the value first, then the position, then the list the variable holds as they left it, as a path
+    /// assignment reads its value first (M4); a position below 0 or at the count or beyond raises <c>index-out-of-range</c> at the line
+    /// (T14), and a block other values hold is copied before the write (M3), as <c>Add</c> copies it. The item takes the value over and
+    /// lets go of the one it held after it holds the new one, so that <c>xs[i] = xs[j]</c> writes an item the list still counts.
+    /// </summary>
+    private void EmitListWrite(Assignment a, IndexExpression index, ListType type)
+    {
+        string value = null!;
+        string position = null!;
+        InRegion(() =>
+        {
+            value = Convert(Owned(a.Value), TypeOf(a.Value), type.Element, a.Value.Line);
+            var indexType = TypeOf(index.Index);
+            position = Resize(EmitExpression(index.Index), indexType, Types.IsSigned(indexType) ? Types.Long : Types.ULong);
+        });
+        var place = NarrowedPlace((NameExpression)Unwrap(index.Target));
+        var count = fn.Value($"zext i32 {ListCount(fn.Value($"load ptr, ptr {place}"))} to i64");
+        var inside = fn.Label("index");
+        var outside = fn.Label("out.of.range");
+        fn.CondBranch(fn.Value($"icmp ult i64 {position}, {count}"), inside, outside); // a negative position reads as a number above every count
+        fn.Block(outside);
+        Raise(ErrorIds.IndexOutOfRange, index.Line);
+        fn.Block(inside);
+        var write = Helper($"write.{Lower.Mangle(type)}", "void", ["ptr", "i64", Ir(type.Element)], () =>
+        {
+            var size = ItemSize(type.Element);
+            var asked = fn.Alloca("i64", "asked");
+            var block = fn.Value("load ptr, ptr %a0");
+            var copy = fn.Label("copy");
+            var own = fn.Label("own");
+            var failed = fn.Label("failed");
+            fn.CondBranch(fn.Value($"call i1 {StdFunction("ListShared")}(ptr {block})"), copy, own);
+            fn.Block(copy);
+            var copied = fn.Value($"call ptr {StdFunction("ListCopy")}(ptr {block}, i64 {size}, ptr {asked})"); // which lowers the old block's count
+            var keep = fn.Label("copied");
+            fn.CondBranch(fn.Value($"icmp eq ptr {copied}, null"), failed, keep);
+            fn.Block(failed);
+            fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {fn.Value($"load i64, ptr {asked}")})");
+            fn.Unreachable();
+            fn.Block(keep);
+            if (Counted(type.Element))
+            {
+                EachItem(copied, type.Element, held => Retain(held, type.Element)); // the copy holds the items' blocks too
+            }
+
+            fn.Emit($"store ptr {copied}, ptr %a0");
+            fn.Branch(own);
+            fn.Block(own);
+            var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {fn.Value("load ptr, ptr %a0")})");
+            Store("%a2", type.Element, fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 %a1"));
+            fn.Return(null);
+        });
+        fn.Emit($"call void {write}(ptr {place}, i64 {position}, {Ir(type.Element)} {value})");
+    }
+
     /// <summary>T15: <c>s.Bytes[i]</c>, the byte at the position of the string's bytes, read in place without a list of them; a position outside them raises <c>index-out-of-range</c> at the line.</summary>
     private string StringByte(IndexExpression index, Expression target)
     {

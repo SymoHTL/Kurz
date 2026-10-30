@@ -681,26 +681,99 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// M9: the type of a map the checker reads, with a key whose equality and hash it gives, a string, an integer, a <c>char</c> or a
-    /// <c>bool</c>, and a value whose nullable type the checker reads (N1), which the read <c>map[key]</c> is; any other is <c>not
-    /// supported</c>, since the record does not say which types a key takes, and what a read of a nullable value or of a type
-    /// parameter, which can stand for one, is waits for section 4.
+    /// M9: the type of a map the checker reads. A key is a value of a type that compares by content (section 4, the owner, 2026-10-30,
+    /// "Any type with =="): a string, an integer, a <c>char</c>, a <c>bool</c>, a time, an enum, a <c>data</c> value of such fields, a
+    /// field of a union of them among them (D3), and a list of such items. A map, a function value and a file or a socket take no
+    /// <c>==</c>, so they are no key (<c>type-mismatch</c>, T18); the rest are <c>not supported</c>: a nullable key, which compares by
+    /// the lifted <c>==</c> of N1, a <c>double</c> or a <c>float</c>, whether a key at all is a fork no answer took, and a
+    /// <c>decimal</c>, a pointer, a type parameter, a value that holds a map or a function value. A value is any type whose nullable
+    /// type the checker reads (N1), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30, "Flatten, as C#").
     /// </summary>
     private KurzType MapOf(KurzType key, KurzType value, int line)
     {
-        if (!(Types.IsInteger(key) || key is PrimitiveType { Kind: Primitive.String or Primitive.Char or Primitive.Bool }))
+        switch (KeyOf(key, []))
         {
-            NotSupported(line, $"a map with keys of type `{key}` (M9)");
-            return Types.Error;
+            case (true, var why):
+                Report(ErrorIds.TypeMismatch, line, $"a map's key is compared with `==`, which `{key}` does not take: {why} (M9, T18)");
+                return Types.Error;
+            case (false, var why):
+                NotSupported(line, $"a map with keys of type `{key}`: {why} (M9)");
+                return Types.Error;
         }
 
-        if (!CanBeNullable(value))
+        if (!CanBeNullable(value) && !(Types.NonNull(value) is { } inner && CanBeNullable(inner)))
         {
             NotSupported(line, $"a map with values of type `{value}` (M9, N1)");
             return Types.Error;
         }
 
         return new MapType(key, value);
+    }
+
+    /// <summary>
+    /// M9: why a value of the type is no key of a map, null where it is one: <c>Mismatch</c> for a type that takes no <c>==</c>, else a
+    /// key the checker does not read. <paramref name="seen"/> holds the data types on the way, whose fields are read at the first meeting.
+    /// </summary>
+    private (bool Mismatch, string Why)? KeyOf(KurzType type, HashSet<DataSymbol> seen)
+    {
+        switch (type)
+        {
+            case ErrorType or EnumType:
+                return null;
+            case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || p.Kind is Primitive.String or Primitive.Char or Primitive.Bool:
+                return null;
+            case PrimitiveType p when Types.IsFloating(p):
+                return (false, $"whether a `{p}` is a key is not decided"); // Rust's `HashMap` takes none, as `f64` has no `Hash`; C#'s `Dictionary` takes one
+            case PrimitiveType p:
+                return (false, $"the hash of a `{p}`, which reads 1.5 and 1.50 as one value, is not built");
+            case MapType m:
+                return (true, $"`==` between two `{m}` is `type-mismatch`");
+            case FunctionType or HandleType or CFunctionType or VoidType:
+                return (true, $"`==` takes no `{type}`");
+            case UnionType u when Types.NonNull(u) is not null:
+                return (false, "a nullable key compares by the lifted `==` (N1)");
+            case ListType l:
+                return KeyOf(l.Element, seen) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
+            case DataType d:
+                {
+                    if (!seen.Add(d.Symbol))
+                    {
+                        return null; // its fields are read where the data type was met first
+                    }
+
+                    foreach (var field in d.Symbol.Fields)
+                    {
+                        if (FieldKeyOf(SubstituteData(d, field.Type), seen) is { } why)
+                        {
+                            return (false, $"its field `{field.Name}`: {why}");
+                        }
+                    }
+
+                    foreach (var derived in dataTypes.Values.Where(x => x.Base == d.Symbol))
+                    {
+                        if (KeyOf(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen) is { } inherited)
+                        {
+                            return inherited;
+                        }
+                    }
+
+                    return null;
+                }
+
+            default:
+                return (false, $"a `{type}` is no key the checker reads");
+        }
+    }
+
+    /// <summary>M9 with D3: why a field of a <c>data</c> key is not read, null where it is: a key's type, or a union of them, <c>null</c> among its cases, which compares by its case and its value.</summary>
+    private string? FieldKeyOf(KurzType type, HashSet<DataSymbol> seen)
+    {
+        if (type is UnionType u)
+        {
+            return u.Cases.Where(c => c is not NullType).Select(c => FieldKeyOf(c, seen)).FirstOrDefault(w => w is not null);
+        }
+
+        return KeyOf(type, seen) is { } why ? why.Why : null;
     }
 
     /// <summary>D2, D7, D11: a data value made by the type's name with the base's fields first.</summary>
@@ -892,6 +965,11 @@ public sealed partial class Checker
             }
         }
 
+        if (target.Type is MapType map && m.Member is "ContainsKey" or "Remove" or "Clear")
+        {
+            return CheckMapMethod(c, m, map);
+        }
+
         if (target.Type is HandleType handle && !(handle.Kind == Handle.TcpListener && m.Member == "Port"))
         {
             return CheckFileMethod(handle, m, c); // S3 to S5, S9
@@ -906,6 +984,34 @@ public sealed partial class Checker
 
         model.RecordType(m, member); // the callee is the field's value (F11)
         return CallValue(member.Type, c);
+    }
+
+    /// <summary>
+    /// M9: a map's members beside <c>Count</c>, with C#'s names and Rust's <c>Remove</c> (section 4, the owner, 2026-10-30, "C# names,
+    /// Rust's Remove"): <c>ContainsKey(key)</c>, a <c>bool</c>; <c>mut Remove(key)</c>, the value of the key's entry, moved out of the
+    /// map, or <c>null</c>, of the type <c>map[key]</c> has; and <c>mut Clear()</c>.
+    /// </summary>
+    private Typed CheckMapMethod(CallExpression c, MemberAccess m, MapType map)
+    {
+        if (RefusesTypeArguments(c, $"`{m.Member}`"))
+        {
+            return Typed.Error;
+        }
+
+        var (kind, slots, result) = m.Member switch
+        {
+            "ContainsKey" => (CallKind.MapContainsKey, (List<Slot>)[new Slot("key", map.Key, false, false, false)], (KurzType)Types.Bool),
+            "Remove" => (CallKind.MapRemove, [new Slot("key", map.Key, false, false, false)], Types.Flattened(map.Value)),
+            _ => (CallKind.MapClear, [], Types.Void),
+        };
+        var candidate = new Candidate { Slots = slots, Result = result };
+        var typed = Record(c, kind, Call([candidate], c, null, out var picked), picked);
+        if (!typed.IsError && kind != CallKind.MapContainsKey)
+        {
+            MutReceiver(c, m.Target, c.Line, $"`{m.Member}` changes the map it is called on"); // after the call's own error nothing more (E1)
+        }
+
+        return typed;
     }
 
     /// <summary>

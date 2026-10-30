@@ -1944,9 +1944,15 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
+    /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
+    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is.
+    /// </summary>
     private void CheckForIn(ForInStatement f)
     {
         KurzType element;
+        KurzType? value = null;
         if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
@@ -1964,26 +1970,33 @@ public sealed partial class Checker
             {
                 ListType l => l.Element,
                 ErrorType or VoidType => Types.Error,
-                MapType => Unread(f.Collection.Line),
+                MapType m when f.Second is null => new EntryType(m.Key, m.Value),
+                MapType m => m.Key,
                 _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
                 _ => Report(f.Collection.Line, t.Type),
             };
+            value = t.Type is MapType map ? map.Value : null;
+        }
+
+        if (f.Second is not null && value is null && !Types.IsError(element))
+        {
+            this.Report(ErrorIds.TypeMismatch, f.Collection.Line, $"two names walk the entries of a map, not a `{model.TypeOf(f.Collection).Type}` (C6)");
+            element = Types.Error;
         }
 
         PushScope();
         DeclareChecked(f.Variable, element, false, VariableKind.Loop, f.VariableLine, f);
+        if (f.Second is not null)
+        {
+            DeclareChecked(f.Second.Name, value ?? Types.Error, false, VariableKind.Loop, f.Second.Line, f.Second);
+        }
+
         CheckLoop(null, f.Body);
         PopScope();
 
         KurzType Report(int line, KurzType type)
         {
-            this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list or a range, not a `{type}` (C6, C8)");
-            return Types.Error;
-        }
-
-        KurzType Unread(int line)
-        {
-            NotSupported(line, "a `for` loop over a map, whose entries C6 names by a proposal (C6, M10)");
+            this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not a `{type}` (C6, C8)");
             return Types.Error;
         }
     }

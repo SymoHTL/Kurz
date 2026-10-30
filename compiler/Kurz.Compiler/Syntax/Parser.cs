@@ -1021,13 +1021,20 @@ public sealed class Parser
         }
 
         var variable = ExpectName("the loop variable");
+        LoopName? second = null;
+        if (Match(TokenKind.Comma))
+        {
+            var value = ExpectName("the loop variable"); // C6: `for key, value in map`, an entry's key and its value under two names
+            second = new LoopName(value.Line, value.Text);
+        }
+
         if (!MatchKeyword("in"))
         {
             throw Fail("`in`");
         }
 
         var collection = ParseExpression();
-        return new ForInStatement(keyword.Line, variable.Text, variable.Line, collection, ParseBlockAfter(tokens[index - 1].Line, "`for`"));
+        return new ForInStatement(keyword.Line, variable.Text, variable.Line, collection, ParseBlockAfter(tokens[index - 1].Line, "`for`"), second);
     }
 
     private MatchStatement ParseMatchStatement()
