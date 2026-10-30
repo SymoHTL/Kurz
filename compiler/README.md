@@ -1175,8 +1175,10 @@ round can ask about it by the rule's id.
 - N2: an operand of any operator is `nullable-unchecked`, `==` and `!=` with a value of the type it
   makes nullable among them, as Rust compares an `Option<i32>` with an `i32` nowhere, where C# lifts
   `x == 1` on an `int?`; so are a condition, the list of a `for`, the list of an index, a member read
-  through the value, and a value where the type it makes nullable is required, which takes
-  `nullable-unchecked` in place of `type-mismatch` there.
+  through the value, the value `with` copies, and a value where the type it makes nullable is
+  required, which takes `nullable-unchecked` in place of `type-mismatch` there. A variable passed as
+  `mut` is read as its own type (N7), so that a `string?` given to a `mut string` is `type-mismatch`
+  with M7's text: no check makes it a variable of the parameter's type.
 - N6 with N1: `null` where nothing gives it a nullable type or a pointer, in a variable declared
   without a type or as the argument of a type parameter, is `type-mismatch`, and so are `null`
   compared with a value that is never null, and `<`, `<=`, `>` and `>=` with `null`. A `null`

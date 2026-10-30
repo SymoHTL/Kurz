@@ -1457,7 +1457,7 @@ public sealed partial class Checker
         {
             foreach (var a in w.Assignments)
             {
-                CheckExpression(a.Value, null);
+                CheckExpression(a.Value, Untyped(a.Value));
             }
 
             return Typed.Error;
@@ -1465,10 +1465,14 @@ public sealed partial class Checker
 
         if (target.Type is not DataType d)
         {
-            Report(ErrorIds.TypeMismatch, w.Line, $"`with` copies a data value, not a `{target.Type}` (D5)");
+            if (!Unchecked(target, w.Line, "copied by `with`"))
+            {
+                Report(ErrorIds.TypeMismatch, w.Line, $"`with` copies a data value, not a `{target.Type}` (D5)");
+            }
+
             foreach (var a in w.Assignments)
             {
-                CheckExpression(a.Value, null);
+                CheckExpression(a.Value, Untyped(a.Value));
             }
 
             return Typed.Error;
@@ -1480,7 +1484,7 @@ public sealed partial class Checker
             if (field is null)
             {
                 Report(ErrorIds.UnknownName, a.Line, $"`{d.Symbol.Name}` has no field `{a.Field}` (D5)");
-                CheckExpression(a.Value, null);
+                CheckExpression(a.Value, Untyped(a.Value));
                 continue;
             }
 

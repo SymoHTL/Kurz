@@ -1423,8 +1423,9 @@ public sealed partial class Checker
 
         var (index, parameter) = bound.Misfit!.Value;
         var pre = pres[index];
-        if (pre.Lambda is null && bound.Slots[bound.Binding[index]].Mut && Types.Assignable(pre.Typed.Type, parameter))
+        if (pre.Lambda is null && bound.Slots[bound.Binding[index]].Mut && Types.Assignable(Types.NonNull(pre.Typed.Type) ?? pre.Typed.Type, parameter))
         {
+            // a nullable variable among them, which no check makes a variable of the parameter's type (N7)
             Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"a `{pre.Typed.Type}` passed as `mut` where a `mut {parameter}` is required: a `mut` parameter takes a variable of its own type, since the callee writes a `{parameter}` back into it (M7, T1)");
             return;
         }

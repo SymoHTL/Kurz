@@ -1896,11 +1896,13 @@ public sealed class CheckerTests
     [InlineData("print(b.Items[0])")]
     [InlineData("print(b.Items.Count)")]
     [InlineData("print(b.Name.Bytes.Count)")]
+    [InlineData("print(Maybe() with { Name = null })")]
     public void A_nullable_value_where_its_type_is_needed_without_a_check_is_nullable_unchecked(string statement)
     {
-        // N2: an operator's operand, a value of the type it makes nullable, a condition, a loop's list, an index's list and a member's value
-        const string Program = "data Box(List<int>? Items, bool? Flag, string? Name)\n\nint? Find(int id) {\n    return null\n}\n\nn = Find(1)\nb = Box(null, null, null)\nprint(n)\nprint(b)\n";
-        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Program + statement));
+        // N2: an operator's operand, a value of the type it makes nullable, a condition, a loop's list, an index's list, a member's
+        // value and the value `with` copies
+        const string Program = "data Box(List<int>? Items, bool? Flag, string? Name)\n\nint? Find(int id) {\n    return null\n}\n\nBox? Maybe() => null\n\nn = Find(1)\nb = Box(null, null, null)\nprint(n)\nprint(b)\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Program + statement));
     }
 
     [Fact]
@@ -1944,6 +1946,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Email + "mut e = Email(1)\nif e != null {\n    e = Email(2)\n    print(e.Bytes.Count)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Email + Reset + "mut e = Email(1)\nif e != null {\n    Reset(mut e)\n    print(e.Bytes.Count)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors("data User(string? Email)\n\nmut u = User(\"a\")\nif u.Email != null {\n    u = User(null)\n    print(u.Email.Bytes.Count)\n}"));
+
+        // a variable passed as `mut` is read as its own type, which a `mut` parameter of the type it makes nullable does not take (M7)
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Set(mut string s) {\n    s = \"b\"\n}\n\nmut string? e = \"a\"\nSet(mut e)"));
     }
 
     [Fact]
