@@ -386,7 +386,10 @@ A package that calls the file functions of this chapter, `File` and `Directory`,
 and one that calls its socket functions `allow network`. Every package on the path of calls from the
 program's code to such a function needs the grant, so that no package borrows a grant through
 another that has it (§13, the owner, 2026-10-30, "Every package on path"). A call without the grant
-is the compile error `files-not-allowed` or `network-not-allowed` at the call. The program itself
-needs neither. *(assumed, §13: `Directory` among the file functions)*
+is the compile error `files-not-allowed` or `network-not-allowed` at the call. For a package on the
+path that calls no such function itself, the error stands at its call that leads on toward the
+function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
+error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
+itself needs neither. *(assumed, §13: `Directory` among the file functions)*
 
 No case: a case is a program and no package, and the program needs no grant.

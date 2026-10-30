@@ -14,7 +14,7 @@ Sources are the Rust project's own surveys and records where they exist. A sourc
 resort" is a widely cited article, tutorial or forum thread outside the project's record. Section
 numbers name sections of `kurz-design.md`; rule ids (M7, O3, T4 ...) name rules of `reference/`.
 
-Summary: 25 findings: 5 avoided, 1 not applicable; 17 answered and recorded; 1 answered in part; 1 answered and not held by the record in this change.
+Summary: 25 findings: 5 avoided, 1 not applicable; 18 answered and recorded; 1 answered and not held by the record in this change.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -91,7 +91,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 13. Cancellation can cut a function at any await
 
 - Evidence: the async status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Cancellation can in principle occur at any point in time, which leads to subtle bugs".
-- Kurz: answered in part: "Deadline on chain ID", section 6 of the record, where an inbox drops a call whose deadline passed; a call whose caller crashed, and a `retry` that runs an effect twice, stay OPEN. Before the answers: OPEN.
+- Kurz: answered: "Deadline on chain ID", "Run it, drop the reply" and "One call id, callee drops", section 6 of the record. Before the answers: OPEN.
 
 ## 14. A library's panic takes down the caller
 
