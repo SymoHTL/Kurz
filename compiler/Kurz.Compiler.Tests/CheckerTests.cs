@@ -2029,16 +2029,18 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("m = Map()\nprint(m)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("m = Map<string, int>(1)\nprint(m)"));
         Assert.Equal([(ErrorIds.NoText, 4)], Errors("data Rule(() => int Step)\n\nm = Map<string, Rule>()\nprint(m)")); // A7: the text of its values
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("a = Map<string, int>()\nb = Map<string, int>()\nprint(a == b)")); // T18, D3: as two lists
         Assert.Equal([(ErrorIds.StaticState, 1)], Errors("thread static mut Map<string, int> m = Map<string, int>()\nprint(1)", grants: "raw")); // F12
     }
 
     [Fact]
     public void A_write_into_a_map_a_call_still_holds_is_changed_while_held()
     {
-        // M7: an arm's assignment and a `mut` argument change the map the call's first argument holds
+        // M7: an arm's assignment and a `mut` argument change the map the call's first argument holds, or the map a read reads
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, Find(2) else {\n    NotFound => {\n        ages[\"a\"] = 1\n        5\n    }\n}))"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors("int Fill(mut Map<string, int> m) {\n    m[\"a\"] = 1\n    return 1\n}\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, Fill(mut ages)))"));
         Clean("int Fill(mut Map<string, int> m) {\n    m[\"a\"] = 1\n    return 1\n}\n\nint Size(Map<string, int> m, int n) => n\n\nmut ages = Map<string, int>()\nprint(Size(ages, 0) + Fill(mut ages))"); // the call around the read has ended
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int Fill(mut Map<int, int> t) {\n    t[1] = 1\n    return 1\n}\n\nmut ages = Map<int, int>()\nprint(ages[Fill(mut ages)] ?? 0)")); // a read whose key changes the map
     }
 
     // ---- what the checker does not read ---------------------------------------------------------------------
