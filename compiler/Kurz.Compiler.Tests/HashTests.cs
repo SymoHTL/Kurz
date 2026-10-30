@@ -94,7 +94,9 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
             .Select(whole => string.Join(
                 ' ',
                 Convert.ToHexStringLower(SHA256.HashData(whole)),
+#pragma warning disable CA5351 // MD5 is what the program under test computes (H1), and .NET's is the digest it is held to; nothing here relies on it for security
                 Convert.ToHexStringLower(MD5.HashData(whole)),
+#pragma warning restore CA5351
                 Crc32(whole).ToString(CultureInfo.InvariantCulture),
                 Convert.ToHexStringLower(HMACSHA256.HashData(key, whole))))
             .Append("0")
@@ -161,7 +163,7 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Theory]
     [InlineData("print(Sha256.Digest(Bytes()))\n", "unknown-name", 1)] // H1: a type and a verb, the verb `Hash`
     [InlineData("print(Hash.Sha256(Bytes()))\n", "unknown-name", 1)]
-    [InlineData("print(Crc32.Hash(\"abc\"))\n", "argument-mismatch", 1)] // H1: a string through `s.Bytes`
+    [InlineData("print(Crc32.Hash(\"abc\"))\n", "type-mismatch", 1)] // H1: a string through `s.Bytes`
     [InlineData("print(Hex.Encode<int>(Bytes()))\n", "syntax", 1)]
     [InlineData("mut h = Sha256.New()\nh.Reset()\n", "unknown-name", 2)] // H3: `Update` and `Finish`
     [InlineData("mut h = Sha256.New()\nprint(h.Count)\n", "unknown-name", 2)]
@@ -178,10 +180,10 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_hasher_is_a_type_a_parameter_a_field_an_item_and_a_case_can_take_and_a_function_can_change_through_mut()
+    public void A_hasher_is_a_type_a_parameter_a_field_an_item_and_a_case_can_take_and_a_function_changes_through_mut()
     {
-        // H3, H6: the type names `Sha256`, `Md5`, `Crc32` and `Hmac` stand where a type is written, and a `mut` parameter changes the caller's
-        // hasher (M7)
+        // H3, H6: the type names `Sha256`, `Md5`, `Crc32` and `Hmac` stand where a type is written, a field's hasher takes `Update` through
+        // its path (M5), and a `mut` parameter changes the caller's hasher (M7), a copy of the field's, which the field's leaves as it was
         const string text = """
             data Holder(Sha256 Hasher, string Name)
 
@@ -191,7 +193,9 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             mut holder = Holder(Sha256.New(), "x")
             holder.Hasher.Update("ab".Bytes)
-            Feed(mut holder.Hasher, "c".Bytes)
+            mut h = holder.Hasher
+            Feed(mut h, "c".Bytes)
+            print(Hex.Encode(h.Finish()))
             print(Hex.Encode(holder.Hasher.Finish()))
             print(holder)
             List<Crc32> all = [Crc32.New()]
@@ -207,6 +211,6 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "hash-holder"));
         Assert.Equal((0, ""), (code, error));
-        Assert.Equal([Convert.ToHexStringLower(SHA256.HashData("abc"u8)), "Holder { Hasher = Sha256, Name = x }", "[Crc32]", "Hmac"], output);
+        Assert.Equal([Convert.ToHexStringLower(SHA256.HashData("abc"u8)), Convert.ToHexStringLower(SHA256.HashData("ab"u8)), "Holder { Hasher = Sha256, Name = x }", "[Crc32]", "Hmac"], output);
     }
 }
