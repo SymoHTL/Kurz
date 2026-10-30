@@ -903,6 +903,7 @@ public sealed class CheckerTests
         Clean("mut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(rows[0])\nprint(rows.Count)");
         Clean("mut xs = List<int>()\nxs.Add(1)\nxs.Add(xs[0])\nxs.Add(xs.Count)\nprint(xs)");
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("List<int> Take(mut List<List<int>> all) {\n    all = List<List<int>>()\n    return List<int>()\n}\n\nmut rows = List<List<int>>()\nrows.Add(List<int>())\nrows.Add(Take(mut rows))\nprint(rows.Count)"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors("data Store(List<int> Names)\n\nint Reset(mut Store t) {\n    t = Store(List<int>())\n    return 0\n}\n\nmut s = Store(List<int>())\ns.Names.Add(Reset(mut s))\nprint(s)")); // a receiver that is a path of fields
 
         // a lambda in that argument that reads the receiver holds it while `Add` changes it, as its value or an arm's (the owner,
         // 2026-10-25, "Refuse, as Rust's borrow"); a copy on a line before passes
@@ -2160,6 +2161,28 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int Fill(mut Map<int, int> t) {\n    t[1] = 1\n    return 1\n}\n\nmut ages = Map<int, int>()\nprint(ages[Fill(mut ages)] ?? 0)")); // a read whose key changes the map
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int Fill(mut Map<int, int> t) {\n    t[1] = 1\n    return 1\n}\n\nmut ages = Map<int, int>()\nprint(ages.ContainsKey(Fill(mut ages)))")); // a lookup whose key changes the map
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 2)], Errors("mut ages = Map<int, int>()\nprint(ages[ages.Remove(1) ?? 0] ?? 0)")); // a read whose key removes an entry
+        var people = "data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ndata People(Map<string, int> Ages, Map<string, int> Ids)\n\nint Size(Map<string, int> m, int n) => n\n\nmut p = People(Map<string, int>(), Map<string, int>())\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors(people + "print(Size(p.Ages, Find(2) else {\n    NotFound => {\n        p.Ages[\"a\"] = 1\n        5\n    }\n}))")); // a write through a path into the map the call holds
+        Clean(people + "print(Size(p.Ids, Find(2) else {\n    NotFound => {\n        p.Ages[\"a\"] = 1\n        5\n    }\n}))"); // two fields of one variable are two values
+    }
+
+    [Fact]
+    public void A_map_in_a_field_takes_an_entry_through_a_path_from_a_mut_variable()
+    {
+        // M4, M9: a path of data fields from a `mut` variable reaches the map it writes into, as a `mut` method reaches a list (M5), and
+        // changes the variable; no member but a field is a map, and nothing reachable through a variable declared without `mut` changes
+        const string box = "data Box(Map<string, int> M, int N)\ndata Outer(Box B)\n\n";
+        Clean(box + "mut b = Box(Map<string, int>(), 0)\nb.M[\"a\"] = 1\nprint(b)");
+        Clean(box + "mut o = Outer(Box(Map<string, int>(), 0))\no.B.M[\"a\"] = 1\nprint(o)");
+        Clean(box + "void Put(mut Box x) {\n    x.M[\"a\"] = 1\n}\n\nmut b = Box(Map<string, int>(), 0)\nPut(mut b)\nprint(b)");
+        Clean(box + "int Reset(mut Box x) {\n    x = Box(Map<string, int>(), 1)\n    return 2\n}\n\nmut b = Box(Map<string, int>(), 0)\nb.M[\"a\"] = Reset(mut b)\nprint(b)"); // M4: the value is made before the write
+        Assert.Equal([(ErrorIds.AssignImmutable, 5)], Errors(box + "b = Box(Map<string, int>(), 0)\nb.M[\"a\"] = 1"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 5)], Errors(box + "mut b = Box(Map<string, int>(), 0)\nf = (int x) => { b.M[\"a\"] = x }\nf(1)\nprint(b)")); // F11
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(box + "mut b = Box(Map<string, int>(), 0)\nb.M[1] = 1")); // T1: a key
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(box + "mut b = Box(Map<string, int>(), 0)\nb.M[\"a\"] = \"b\"")); // a value
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(box + "Box? Find() => null\n\nmut b = Find()\nb.M[\"a\"] = 1")); // N2, where the path is read, and nothing more
+        Clean("data Pocket(Map<string, int>? M)\n\nmut p = Pocket(Map<string, int>())\nif p.M != null {\n    p.M[\"a\"] = 1\n}\nprint(p)"); // N3: the last field known not null
+        Assert.Equal([(ErrorIds.NullableUnchecked, 4)], Errors("data Pocket(Map<string, int>? M)\n\nmut p = Pocket(Map<string, int>())\np.M[\"a\"] = 1")); // and not known
     }
 
     [Fact]
@@ -2432,6 +2455,23 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Size(List<int> ys, int n) => n\n\nmut xs = List<int>()\nprint(Size(xs, Find(2) else {\n    NotFound => {\n        xs[0] = 1\n        5\n    }\n}))"));
     }
 
+    [Fact]
+    public void An_item_of_a_list_in_a_field_is_written_through_a_path_from_a_mut_variable()
+    {
+        // M4, M9: a path of data fields from a `mut` variable reaches the list whose item it writes, as it reaches a map's entry, and
+        // changes the variable; a member that is no field is not assigned through, as in a path assignment
+        const string box = "data Box(List<int> Items, int N)\ndata Outer(Box B)\n\n";
+        Clean(box + "mut b = Box(List<int>(), 0)\nb.Items.Add(1)\nb.Items[0] = 2\nprint(b)");
+        Clean(box + "mut o = Outer(Box(List<int>(), 0))\no.B.Items.Add(1)\no.B.Items[0] = 2\nprint(o)");
+        Clean(box + "void Set(mut Box x) {\n    x.Items[0] = 1\n}\n\nmut b = Box(List<int>(), 0)\nb.Items.Add(0)\nSet(mut b)\nprint(b)");
+        Assert.Equal([(ErrorIds.AssignImmutable, 5)], Errors(box + "b = Box(List<int>(), 0)\nb.Items[0] = 1"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 5)], Errors(box + "mut b = Box(List<int>(), 0)\nf = (int x) => { b.Items[0] = x }\nf(1)\nprint(b)")); // F11
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(box + "mut b = Box(List<int>(), 0)\nb.Items[0] = \"a\""));
+        Assert.Equal([(ErrorIds.AssignImmutable, 2)], Errors("mut s = \"ab\"\ns.Bytes[0] = 65\nprint(s)")); // T15: `Bytes` is no field
+        Clean("data Pocket(List<int>? Items)\n\nmut p = Pocket(List<int>())\nif p.Items != null {\n    p.Items[0] = 1\n}\nprint(p)"); // N3: the last field known not null
+        Assert.Equal([(ErrorIds.NullableUnchecked, 4)], Errors("data Pocket(List<int>? Items)\n\nmut p = Pocket(List<int>())\np.Items[0] = 1")); // and not known
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
@@ -2458,16 +2498,21 @@ public sealed class CheckerTests
     [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nmut m = Map<Base, int>()\nprint(m.Count)", "4: a map with keys of type `Base`: its derived type `Derived`: its field `V`: a `T` is no key the checker reads (M9)")]
     [InlineData("m = Map<string, () => int>()\nprint(1)", "1: a map with values of type `() => int` (M9, N1)")]
     [InlineData("m = Map<string, int | string>()\nprint(1)", "1: a map with values of type `int | string` (M9, N1)")]
-    [InlineData("data Box(Map<string, int> M)\n\nmut b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a map that is no variable, or into a path through an entry (M4, M9)")]
+    [InlineData("data Box(Map<string, int> M)\n\nmut bs = List<Box>()\nbs[0].M[\"a\"] = 1", "4: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]
+    [InlineData("Map<string, int> Make() => Map<string, int>()\n\nMake()[\"a\"] = 1", "3: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]
+    [InlineData("data P(int X)\n\nmut m = Map<string, P>()\nm[\"a\"].X = 1", "4: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]
+    [InlineData("data Box(Map<string, int> M)\n\nmut Box? b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a path through a nullable field (N3, M4)")]
+    [InlineData("data In(Map<string, int> M)\ndata Out(In? I)\n\nmut o = Out(In(Map<string, int>()))\nif o.I != null {\n    o.I.M[\"a\"] = 1\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
     [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable variable or field (N3, M5)")]
     [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable variable or field (N3, M5)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
     [InlineData("print(string(1))", "1: a conversion to `string` (A5 to A7)")]
-    [InlineData("data Box(List<int> Items)\n\nmut b = Box(List<int>())\nb.Items[0] = 1", "4: an assignment into a list that is no variable, or into a path through an item (M4, M9)")]
-    [InlineData("data P(int X)\n\nmut ps = List<P>()\nps[0].X = 1", "4: an assignment into a list that is no variable, or into a path through an item (M4, M9)")]
-    [InlineData("mut grid = List<List<int>>()\ngrid[0][0] = 1", "2: an assignment into a list that is no variable, or into a path through an item (M4, M9)")]
+    [InlineData("data Box(List<int> Items)\n\nmut bs = List<Box>()\nbs[0].Items[0] = 1", "4: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]
+    [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items[0] = 1\n}", "6: an assignment into a path through a nullable field (N3, M4)")]
+    [InlineData("data P(int X)\n\nmut ps = List<P>()\nps[0].X = 1", "4: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]
+    [InlineData("mut grid = List<List<int>>()\ngrid[0][0] = 1", "2: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]
     [InlineData("mut grid = List<List<int>>()\ngrid[0].Add(1)", "2: a `mut` method on an element of a list (M5, M9)")]
     [InlineData("data Shape\n\nint AreaOf<T: Shape>(T item) => 1\n\nprint(AreaOf(5))", "3: the limit of a type parameter (T19)")]
     [InlineData("data Shape\ndata Box<T: Shape>(T Item)\n\nprint(1)", "2: the limit of a type parameter (T19)")]

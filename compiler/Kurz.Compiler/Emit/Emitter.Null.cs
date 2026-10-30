@@ -17,14 +17,13 @@ public sealed partial class Emitter
         !Types.Same(stored, type) && stored is UnionType union && Types.NonNull(union) is { } inner ? Payload(value, union, inner) : value;
 
     /// <summary>N3: the place of a variable as the type the checker read at <paramref name="n"/>: where the variable is nullable and the read is not, the room of its case, which is the place itself where the union has a niche.</summary>
-    private string NarrowedPlace(NameExpression n)
-    {
-        var place = Place(Model.VariableOf(n), n.Line);
-        var stored = Sub(Model.VariableOf(n).Type);
-        return !Types.Same(stored, TypeOf(n)) && stored is UnionType union && Types.NonNull(union) is not null && layout.Niche(union) is null
-            ? fn.Value($"getelementptr {Ir(union)}, ptr {place}, i32 0, i32 1")
-            : place;
-    }
+    private string NarrowedPlace(NameExpression n) => NarrowedPlace(Place(Model.VariableOf(n), n.Line), Sub(Model.VariableOf(n).Type), TypeOf(n)).Place;
+
+    /// <summary>N3: a place of the type <paramref name="stored"/> read as <paramref name="type"/>, and the type it holds: where the place is nullable and the read is not, the room of its case, which is the place itself where the union has a niche, and that case.</summary>
+    private (string Place, KurzType Type) NarrowedPlace(string place, KurzType stored, KurzType type) =>
+        !Types.Same(stored, type) && stored is UnionType union && Types.NonNull(union) is { } inner
+            ? (layout.Niche(union) is null ? fn.Value($"getelementptr {Ir(union)}, ptr {place}, i32 0, i32 1") : place, inner)
+            : (place, stored);
 
     /// <summary>A value made where it is read, for a place that holds it: counted once more, since what it was read from keeps its own count.</summary>
     private string Retained(string value, KurzType type)
