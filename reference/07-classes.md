@@ -120,8 +120,9 @@ declarations with `==`, `!=` and the comparisons excluded; the cost is that a ve
 `equals-method`, whose message points to the `equal by` clause (K8), and `==` stays K4's and this
 rule's (§4, the owner, 2026-10-30, against `==` only where content equality is declared and identity
 in a form of its own, as Rust has them, and against such a method as an ordinary member that changes
-nothing about `==`; the cost is two names no method of a class can take). *(assumed, §4: the id, and
-its line, the method's)* `a + b` on two instances is `type-mismatch` (T1), the error of an
+nothing about `==`; the cost is two names no method of a class can take). The id and its line, the
+method's, are the owner's too (§4, 2026-10-30, "Accept both"). `a + b` on two instances is
+`type-mismatch` (T1), the error of an
 arithmetic operator on operands it has no meaning for (the owner, 2026-10-10, confirming the reading
 proposed after the review of round 13). A `double` or `float` among the named fields compares as a field of a
 `data` value does (D3), NaN equal to NaN (the owner, 2026-10-10); under K4's content equality it
@@ -523,7 +524,8 @@ keys such a map by a copy of the field (§4, the owner, 2026-10-30, against no `
 clause, against a check of each key's hash in test builds, and against the clause as it stood, under
 which the entry is lost with no report). That answer, which set aside refusing a `mut` field in the
 clause, confirms the reading of the owner's answer on `mut` fields that the record marked as
-assumed. *(assumed, §4: the id, and its line, the one that writes the key type)* Whether the error
+assumed. The id and its line, the one that writes the key type, are the owner's too (§4, 2026-10-30,
+"Accept both"). Whether the error
 reaches a key type that holds such a class, or one that a type parameter stands for, stands open
 (§14).
 

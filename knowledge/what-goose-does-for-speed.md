@@ -142,7 +142,8 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
 - G4, enums in two sizes. "Variable-mode ADTs store each value at the size of its own variant
   rather than that of the largest variant." (front page); "records is 2.02-2.26x faster than Rust on
   3.98x less memory: a variable-mode enum stores each record at the size of its own payload,
-  including inline text." (summary). Kurz: answered with G3 (Q3).
+  including inline text." (summary). Kurz: answered with G3: "Packed list in std", section 13 of
+  the record (Q3).
 - G5, narrow links. "A relative reference stores a typed, checked link as a 1, 2 or 4-byte
   offset."; "Saving it is a single write, and loading it is a single read followed by a verification
   pass that rejects malformed or hostile data." (front page); "With self-relative links and index

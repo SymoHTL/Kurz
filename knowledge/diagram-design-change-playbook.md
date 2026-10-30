@@ -26,7 +26,10 @@ flowchart TD
         B3["a wish that cannot hold is contradicted in the reply, not recorded.
         Judgment step"]
         B4["read the change against the research entries on C#, Rust, Go, Elixir and Goose
-        and name the finding it meets, or say it meets none. Judgment step"]
+        and name the finding it meets in the description, or say it meets none.
+        Gate: review rule design record for the name; knowledge for the section each finding's
+        verdict cites, which exists, and is there for a repeated, open or answered finding;
+        that the change meets no other finding, and what the cited section says: judgment step"]
     end
     subgraph D["While writing"]
         D1["decided, assumed or open: each statement carries exactly one status.
