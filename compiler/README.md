@@ -85,7 +85,7 @@ builds the program with the runtime of this machine's target, or with `--fenced`
 allocator that makes every block it frees inaccessible (`ListTests.Fenced`, the one definition of
 that edit), runs it as the suites run a program, and prints what it wrote, what it wrote on its
 error stream and `exit <code>`; its own exit code is 0 where the program ran, 1 where the program
-has errors, which it prints, and 2 for an argument it does not read
+has errors, which it prints, and 2 for an argument it does not read or a file it does not find
 (`knowledge/a-probe-under-the-fence-is-a-command.md`). The test host runs the suites through an
 entry of its own, so the assembly's entry (`Probe.cs`) is the command's alone.
 

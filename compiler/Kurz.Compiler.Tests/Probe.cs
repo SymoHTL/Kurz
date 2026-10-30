@@ -8,7 +8,8 @@ namespace Kurz.Compiler.Tests;
 /// builds it with the runtime of this machine's target, or with <c>--fenced</c> under the allocator that makes every freed block
 /// inaccessible (<see cref="ListTests.Fenced"/>, the suite's own), runs it as the suite runs a program, and prints what it wrote,
 /// what it wrote on its error stream and its exit code. Its own exit code is 0 where the program was built and ran, whatever the
-/// program's, 1 where the program has errors, which it prints, and 2 for a command line it does not read. The test host runs the
+/// program's, 1 where the program has errors, which it prints, and 2 for a command line it does not read or a file it does not
+/// find. The test host runs the
 /// suite through an entry of its own, so this entry is the assembly's for <c>dotnet</c> alone.
 /// </summary>
 public static class Probe
@@ -46,6 +47,12 @@ public static class Probe
         if (path is null)
         {
             output.WriteLine("usage: Kurz.Compiler.Tests <file> [--fenced] [--grant <name>]...");
+            return 2;
+        }
+
+        if (!File.Exists(path))
+        {
+            output.WriteLine($"probe: `{path}` is no file");
             return 2;
         }
 

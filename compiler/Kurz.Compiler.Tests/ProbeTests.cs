@@ -53,6 +53,9 @@ public sealed class ProbeTests : IDisposable
         Assert.Equal(2, Probe.Run(["--budget"], output));
         Assert.Contains("`--budget`", output.ToString(), StringComparison.Ordinal);
         Assert.Equal(2, Probe.Run([], new StringWriter()));
+        var missing = new StringWriter();
+        Assert.Equal(2, Probe.Run(["no-such-program.kz"], missing));
+        Assert.Contains("`no-such-program.kz` is no file", missing.ToString(), StringComparison.Ordinal);
     }
 
     public void Dispose()
