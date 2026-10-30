@@ -15,7 +15,7 @@ names no complaint about the C# language by topic, and no other survey read give
 Overflow survey was not read. So the order below rests on how much space the language team's own
 pages give a pitfall, not on survey numbers, and no finding carries a survey figure.
 
-Summary: 23 findings: 11 avoided; 9 answered and recorded; 3 answered and not held by the record in this change.
+Summary: 23 findings: 11 avoided; 12 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -66,12 +66,12 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 9. `==` and `Equals` give two answers
 
 - Evidence: "C# Equality comparisons - C#" (https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/expressions/equality): "Type authors can change those defaults, but that mental model prevents subtle bugs where two objects that look identical aren't considered equal, or where a mutation through one variable silently changes what another variable sees." The same page: "When variables are typed as an interface, `==` checks whether the interface variables refer to the same object. A call to `Equals` still runs the underlying object's implementation."
-- Kurz: answered by the owner on 2026-10-30, `Error on Equals`; the record does not hold it in this change. Before the answers: REPEATED.
+- Kurz: answered: "Error on Equals", section 4 of the record. Before the answers: REPEATED.
 
 ## 10. A mutable key gets lost in a hash table
 
 - Evidence: "Object.GetHashCode Method" (https://learn.microsoft.com/en-us/dotnet/api/system.object.gethashcode): "Otherwise, you might think that the mutable object is lost in the hash table."
-- Kurz: answered by the owner on 2026-10-30, `Error at the Map key`; the record does not hold it in this change. Before the answers: REPEATED.
+- Kurz: answered: "Error at the Map key", section 4 of the record. Before the answers: REPEATED.
 
 ## 11. A method on a struct changes a copy
 
@@ -106,7 +106,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 17. String comparison depends on the machine's culture
 
 - Evidence: "Best Practices for Comparing Strings in .NET" (https://learn.microsoft.com/en-us/dotnet/standard/base-types/best-practices-strings): "Some overloads with default parameters (those that search for a Char in the string instance) perform an ordinal comparison, whereas others (those that search for a string in the string instance) are culture-sensitive. It's difficult to remember which method uses which default value, and easy to confuse the overloads." and "The canonical example is the Turkish-I problem."
-- Kurz: answered by the owner on 2026-10-30, `Ordinal core`; the record does not hold it in this change. Before the answers: OPEN.
+- Kurz: answered: "Ordinal core", section 4 of the record. Before the answers: OPEN.
 
 ## 18. Integer overflow is silent by default
 

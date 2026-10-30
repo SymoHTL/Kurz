@@ -14,7 +14,7 @@ Sources are the Rust project's own surveys and records where they exist. A sourc
 resort" is a widely cited article, tutorial or forum thread outside the project's record. Section
 numbers name sections of `kurz-design.md`; rule ids (M7, O3, T4 ...) name rules of `reference/`.
 
-Summary: 25 findings: 5 avoided, 1 not applicable; 18 answered and recorded; 1 answered and not held by the record in this change.
+Summary: 25 findings: 5 avoided, 1 not applicable; 19 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -101,7 +101,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 15. Too many string types
 
 - Evidence: Storing UTF-8 Encoded Text with Strings, the Rust book (https://doc.rust-lang.org/book/ch08-02-strings.html): "New Rustaceans commonly get stuck on strings for a combination of three reasons: Rust's propensity for exposing possible errors, strings being a more complicated data structure than many programmers give them credit for, and UTF-8."
-- Kurz: answered by the owner on 2026-10-30, `Edge cases only`; the record does not hold it in this change. Before the answers: OPEN.
+- Kurz: answered: "Edge cases only", section 12 of the record. Before the answers: OPEN.
 
 ## 16. Binaries are large
 

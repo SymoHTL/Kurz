@@ -19,9 +19,8 @@ abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotA
 `Unsupported`, `TimedOut`, `BrokenPipe`, `AddressInUse`, `AddressNotAvailable`, `NetworkDown`,
 `NetworkUnreachable`, `HostUnreachable`, `ConnectionRefused`, `ConnectionReset`,
 `ConnectionAborted` and `NotConnected`; beside them `WriteZero` and `InvalidData`, which no number gives,
-and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput`, a name of
-a directory's entry that is not UTF-8 `InvalidData`, and a write of which the system takes no byte
-`WriteZero`, each with the number 0, which every error that is not the system's has. A call that
+and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput` and a write
+of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has. A call that
 names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
 list, the words, the number 0, the text without a path and the first path)*
 
@@ -240,7 +239,9 @@ Move() else {
 `Directory.Create(path)` creates the directory at `path` and every directory above it that is
 missing, with the permissions 0777 less the `umask`, `void | IoError`, and succeeds where the
 directory exists; `Directory.List(path)` is the names of the directory's entries, without `.` and
-`..`, in the order the system gives them, `List<string> | IoError`; and `Directory.Delete(path)`
+`..`, in the order the system gives them, or an `IoError`: each name that is UTF-8 as a string, and
+each that is not as a case that carries its bytes, so that one such name hides no other entry (§12,
+the owner, 2026-10-30), the name and the form of that case standing open (§14); and `Directory.Delete(path)`
 deletes an empty directory, `void | IoError`. *(assumed, §12: the permissions, the order and the
 entries left out)*
 
@@ -290,6 +291,13 @@ the system picked the port, and one that `Connect` made the string it was given.
 lookup that fails is decided (§12, the owner, 2026-10-30). *(assumed, §12: the reuse of the address,
 the 128, the type of `Port`, the grammar of the port and of a literal, the NUL byte, the errors of an
 address, the error of the last address tried, and the string a connection's error names)*
+
+A read, a write, `l.Accept()` and `TcpStream.Connect` on a socket wait at most 5 seconds by default,
+as long as a call of an actor waits (§6), and the time can be set for each socket, as Rust's
+`set_read_timeout` and `set_write_timeout` set `SO_RCVTIMEO` and `SO_SNDTIMEO` (§12, the owner,
+2026-10-30, against a timeout as an argument with no default and against a default in the HTTP server
+alone). What a call gives when its time runs out, the member that sets the time and how the bound
+holds for an actor's socket stand open (§14).
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz

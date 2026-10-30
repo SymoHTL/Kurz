@@ -19,7 +19,7 @@ survey, nor a study, nor the Go project's own record. The language reference
 covers only the sequential core, and the compiler builds no actor. So the verdicts on concurrency
 (findings 9, 13, 15 and 18) rest on section 6 of the design record alone.
 
-Summary: 25 findings: 16 avoided; 7 answered and recorded; 2 answered and not held by the record in this change.
+Summary: 25 findings: 16 avoided; 9 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -113,7 +113,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 16. Network timeouts default to none
 
 - Evidence: net/http source (https://github.com/golang/go/blob/master/src/net/http/client.go): "A Timeout of zero means no timeout." gosec, third party (https://github.com/securego/gosec): "G112 — Detect `ReadHeaderTimeout` not configured as a potential risk" and "G114 — Use of `net/http` serve function that has no support for setting timeouts".
-- Kurz: answered by the owner on 2026-10-30, `5 s default, settable`; the record does not hold it in this change. Before the answers: REPEATED.
+- Kurz: answered: "5 s default, settable", section 12 of the record. Before the answers: REPEATED.
 
 ## 17. Errors lose where they came from
 
@@ -144,7 +144,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 22. Unused variables and imports are compile errors
 
 - Evidence: the Go FAQ (https://go.dev/doc/faq#unused_variables_and_imports): "For these reasons, Go refuses to compile programs with unused variables or imports, trading short-term convenience for long-term build speed and program clarity." It also says: "Some have asked for a compiler option to turn those checks off or at least reduce them to warnings."
-- Kurz: answered by the owner on 2026-10-30, `Warn in test, error release`; the record does not hold it in this change. Before the answers: REPEATED.
+- Kurz: answered: "Warn in test, error release", section 8 of the record. Before the answers: REPEATED.
 
 ## 23. Interfaces are satisfied implicitly
 

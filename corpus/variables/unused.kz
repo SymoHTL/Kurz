@@ -1,4 +1,5 @@
-// expect: error unused-variable at 5
+// expect: error unused-variable at 6
+// build: release
 // rules: V5
 
 x = 1
