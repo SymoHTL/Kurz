@@ -44,7 +44,9 @@ print(low)
 
 ### T4 (decided, §4) Overflow wraps in a release build
 
-Integer arithmetic that leaves the range of its type wraps around silently.
+Integer arithmetic that leaves the range of its type wraps around silently. A project keeps T5's
+checks in its release build by a setting in its `project.kz` (§4, the owner, 2026-10-30, "Project
+setting"); a case of the corpus has no `project.kz` and takes the default.
 
 Case: [types/overflow-release.kz](../corpus/types/overflow-release.kz)
 ```kurz
@@ -959,6 +961,19 @@ c = 'ab'
 print(c)
 ```
 
+### T32 (decided, §4) Comparing strings
+
+`==` and `<` on two strings compare them by their code points, ordinal, as Rust compares two `str`
+values; in UTF-8 that is the order of their bytes. A change of case and the reading of a number from
+a string take no culture, and a sort for a reader's culture is a library's, which takes the culture
+as an argument (§4, the owner, 2026-10-30, against the culture of the machine, as C#'s
+`string.Compare` takes it, and against no `<` on strings). *(assumed, §4: that `!=`, `<=`, `>` and
+`>=` follow `==` and `<`)*
+
+No case: the compiler's checker, which reads this chapter, reports `<` on two strings as
+`type-mismatch` (T18), so a case that prints its result fails the compiler's test of the corpus, and
+a case that expects that error states the opposite of this rule.
+
 ### T17 (decided, §4) Generics
 
 Generic types are written as in C#: `List<int>`, `Map<int, User>`.
@@ -1085,7 +1100,7 @@ print(Pick(small, i))
 
 ### T18 (assumed, §4) Operators
 
-`+ - * / %` on numbers, `== != < <= > >=` for comparison, and `&& || !` on `bool`, with the
+`+ - * / %` on numbers, `== != < <= > >=` for comparison, on two strings as T32 says, and `&& || !` on `bool`, with the
 meaning and the precedence they have in C#. Integer division drops the fraction, toward zero. An
 operand narrower than `int` is promoted to `int` first, as C# does (T28).
 

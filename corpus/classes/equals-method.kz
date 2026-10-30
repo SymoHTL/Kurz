@@ -1,0 +1,8 @@
+// expect: error equals-method at 5
+// rules: K5
+
+class User(int Id) {
+    pub bool Equals(User other) => Id == other.Id
+}
+
+print(User(1) == User(1))

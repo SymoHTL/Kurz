@@ -57,6 +57,13 @@ sections:
       - A reference to a section number that this batch shows to be wrong - the batch renumbers or removes the section and still names the old number.
       - A question left under "Open" that the same batch decides elsewhere, or one decided twice with different answers.
       - A wish recorded as decided although it cannot hold - a guarantee no system can give.
+      - >-
+        A statement of the record that this batch decides, changes, marks assumed or moves to "Open", with the
+        reference rules that follow it, while the description neither names the research finding it meets (the
+        entry, knowledge/what-developers-dislike-in-<language>.md with the finding's number or
+        knowledge/what-goose-does-for-speed.md with the mechanism's id) nor says that it meets none: node B4 of
+        knowledge/diagram-design-change-playbook.md, so that a choice of the record is read against the mistakes
+        C#, Rust, Go and Elixir made and against what Goose does for speed.
 
   - name: reference
     files: ["reference/*"]
