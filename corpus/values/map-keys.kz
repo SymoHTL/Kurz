@@ -1,0 +1,21 @@
+// expect: output
+// | east
+// | 3
+// | none
+// rules: M9
+
+data Point(int X, int Y)
+
+mut names = Map<Point, string>()
+names[Point(1, 0)] = "east"
+print(names[Point(1, 0)] ?? "none")
+mut sums = Map<List<int>, int>()
+mut key = List<int>()
+key.Add(1)
+key.Add(2)
+sums[key] = 3
+mut same = List<int>()
+same.Add(1)
+same.Add(2)
+print(sums[same] ?? 0)
+print(names[Point(0, 1)] ?? "none")

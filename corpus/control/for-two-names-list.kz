@@ -1,0 +1,8 @@
+// expect: error type-mismatch at 6
+// rules: C6
+
+mut xs = List<int>()
+xs.Add(4)
+for i, x in xs {
+    print(x)
+}

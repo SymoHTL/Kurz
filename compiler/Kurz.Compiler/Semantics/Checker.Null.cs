@@ -45,17 +45,22 @@ public sealed partial class Checker
     private KurzType ResolveNullable(NullableType n)
     {
         var inner = Resolve(n.Inner);
-        switch (inner)
+        if (inner is ErrorType)
         {
-            case ErrorType:
-                return Types.Error;
-            case UnionType or FunctionType or PointerType or CFunctionType or VoidType:
-                NotSupported(n.Line, $"a nullable `{inner}` (N1)");
-                return Types.Error;
-            default:
-                return Types.Nullable(inner);
+            return Types.Error;
         }
+
+        if (!CanBeNullable(inner))
+        {
+            NotSupported(n.Line, $"a nullable `{inner}` (N1)");
+            return Types.Error;
+        }
+
+        return Types.Nullable(inner);
     }
+
+    /// <summary>N1: whether the checker reads <paramref name="inner"/> made nullable, which <see cref="ResolveNullable"/> names; a map's read takes the same (M9).</summary>
+    private static bool CanBeNullable(KurzType inner) => inner is not (UnionType or FunctionType or PointerType or CFunctionType or VoidType);
 
     /// <summary>
     /// The path an expression reads, where it is a variable that is no state outside a function (R13, which another function changes),
@@ -426,7 +431,7 @@ public sealed partial class Checker
     /// C#'s <c>?[]</c> (section 4, the owner, 2026-10-30, "Add, as C#"): the type of the item made nullable, or the item's own where it is
     /// nullable. The index runs only where the list is not null, so only what held before it is known after. On a value that is not
     /// nullable it is <c>type-mismatch</c>, as <c>?.</c> is (section 4, an assumption there); a part, <c>xs?[a..b]</c>, is
-    /// <c>not supported</c> (section 4 names the item).
+    /// <c>not supported</c> (section 4 names the item), and so is <c>m?[key]</c> on a nullable map.
     /// </summary>
     private Typed CheckConditionalIndex(IndexExpression i)
     {
@@ -434,6 +439,13 @@ public sealed partial class Checker
         if (i.Index is RangeExpression)
         {
             NotSupported(i.Line, "a part after `?[` (N5, M9)");
+            CheckLoosely(i.Index);
+            return Typed.Error;
+        }
+
+        if (Types.NonNull(target.Type) is MapType)
+        {
+            NotSupported(i.Line, "`?[` on a map (N5, M9)"); // a map's entry by `?[`, which the emitter does not lay out
             CheckLoosely(i.Index);
             return Typed.Error;
         }

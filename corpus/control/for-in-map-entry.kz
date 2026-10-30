@@ -1,0 +1,13 @@
+// expect: output
+// | Entry { Key = Ann, Value = 31 }
+// | Ann
+// rules: C6
+
+string Name(Entry<string, int> entry) => entry.Key
+
+mut ages = Map<string, int>()
+ages["Ann"] = 31
+for e in ages {
+    print(e)
+    print(Name(e))
+}

@@ -93,6 +93,24 @@ public sealed class ParserTests
         Assert.Equal(tree, Tree(program));
     }
 
+    [Theory]
+    [InlineData("for k, v in ages {\n    print(k)\n}", "(for k, v in ages {(call print k)})")]
+    [InlineData("for e in ages {\n    print(e.Key)\n}", "(for e in ages {(call print (. e Key))})")]
+    public void A_loop_over_a_map_takes_one_name_or_two(string program, string tree)
+    {
+        // C6: `for e in map` and `for key, value in map`, the second under any name (section 4, the owner, 2026-10-30, "Key and Value, as C#")
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("for k, 1 in ages {\n}", "syntax")]
+    [InlineData("for k, v, w in ages {\n}", "syntax")]
+    [InlineData("for k, in ages {\n}", "reserved-word syntax")] // L12: `in` stands where the second name is declared
+    public void A_loop_takes_at_most_two_names(string program, string ids)
+    {
+        Assert.Equal(ids.Split(' ').Select(id => (id, 1)).ToList(), Errors(program).ToList());
+    }
+
     [Fact]
     public void If_else_if_and_else_follow_the_closing_brace()
     {

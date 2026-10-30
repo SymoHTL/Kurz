@@ -1,0 +1,12 @@
+// expect: output
+// | [4, 9]
+// | [4, 5]
+// rules: M9
+
+mut xs = List<int>()
+xs.Add(4)
+xs.Add(5)
+ys = xs
+xs[1] = 9
+print(xs)
+print(ys)
