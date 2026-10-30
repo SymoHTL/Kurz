@@ -221,6 +221,7 @@ User? Find(int id) {
 u = Find(1)
 if u?.Email != null {
     print(u.Name)
+    print(u?.Email.Bytes.Count ?? 0)
 }
 if !(u == null) {
     print(u.Name)

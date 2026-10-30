@@ -1235,9 +1235,10 @@ round can ask about it by the rule's id.
 - N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with, and
   that one's own type where it is nullable, never a `T??`; a member after them in the chain reads
   the member or the item before as its own type, so that a nullable one there is
-  `nullable-unchecked`, whatever a test showed of that member's path, which C# narrows: after
-  `if u?.Email != null`, `u?.Email.Bytes` is `nullable-unchecked` and `u.Email.Bytes` reads as the
-  test showed; a parenthesis ends the chain. After `?[` holds what held before its index, since the
+  `nullable-unchecked`, unless a test showed that member's path not null (N3), as C#'s analysis
+  narrows it: after `if u?.Email != null`, `u?.Email.Bytes` and `u.Email.Bytes` both read `Email`
+  as a `string`, while `Find(1)?.Email.Bytes`, whose path is no variable's, stays
+  `nullable-unchecked`; a parenthesis ends the chain. After `?[` holds what held before its index, since the
   index runs only where the list is not null, and an index that changes the list is
   `changed-while-held` (M7), since the list is read before it.
 - N10 with N3: a nullable side of `==`, on either side, beside a value whose type is not nullable, read as the checker
