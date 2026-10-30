@@ -1,0 +1,10 @@
+// expect: output
+// | 32
+// | 31
+// rules: D5
+
+// `with` copies an `Entry` as it copies every `data` value, and the value it copied from keeps its fields (D5)
+a = Entry("Ann", 31)
+b = a with { Value = 32 }
+print(b.Value)
+print(a.Value)

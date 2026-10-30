@@ -1,0 +1,16 @@
+// expect: output
+// | false
+// | true
+// allow: raw native
+// rules: M9
+
+// a map's value of a C function type is read as that type's nullable form (M9): the function where the key has an entry, `null`
+// where it has none
+extern "C" long Twice(long x) {
+    return x * 2
+}
+
+mut table = Map<string, extern "C" (long) => long>()
+table["twice"] = Twice
+print(table["twice"] == null)
+print(table["thrice"] == null)

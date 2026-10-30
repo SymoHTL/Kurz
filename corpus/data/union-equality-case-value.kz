@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 6
+// rules: D3
+
+// a union beside a value of one of its cases takes no `==`, as Rust refuses `Some(5) == 5` (D3)
+int | string a = 1
+print(a == 1)

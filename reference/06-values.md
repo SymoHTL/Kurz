@@ -611,12 +611,13 @@ a map, a function value, a file or a socket (D3), and a `double` or a `float` ke
 `data` key or as an item of a list in a key, at any depth, compares as C#'s `double.Equals` in a
 `Dictionary`: NaN finds NaN, and 0.0 and -0.0 are one key, hashed alike, as .NET 10's
 `double.GetHashCode` hashes them (§4). A union is a key by its case and its value (D3; §4, the owner,
-2026-10-30, "Case and value, as Rust"). A class instance is a key as K12 says: `mutable-key` where its
+2026-10-30, "Case and value, as Rust"), its `double` or `float` case compared as a `double` key is, as
+C#'s `Equals` (§4). A class instance is a key as K12 says: `mutable-key` where its
 `equal by` names a `mut` field (§4). A write under a key equal to an entry's key that prints otherwise,
 0.0 where the entry's key is -0.0, takes the new value and keeps the entry's own key, as C#'s
-`Dictionary` and Rust's `HashMap::insert` keep it *(assumed, §4)*. The record gives `map[key]` and
-`Remove(key)` no type where `V` has no nullable form (N1), a union or a function type that is no C function type (R17), and the compiler
-says `not supported` to such a map. A key of a nullable type, with
+`Dictionary` and Rust's `HashMap::insert` keep it *(assumed, §4)*. Every `V` has its nullable form, a
+union's and a function type's among them (N1), so `map[key]` and `Remove(key)` give `V?` for every `V`
+(§4, the owner, 2026-10-30, "Nullable form, as Option"). A key of a nullable type, with
 `null` among its keys, compares as `==` compares two nullable values (N10), `null` equal to `null` alone
 and two values as their type compares as a key *(assumed, §4: for the nullable types beside `double?` and
 `float?`)*, and a `double?` or a `float?` key compares its value as a `double` key does. `xs == ys` on two
@@ -627,7 +628,7 @@ two nullable values (N10) *(assumed, §4: for the nullable types beside `double?
 values of `double?` and `float?` items by IEEE's `==`, as Rust's `Vec<Option<f64>>` compares. A list held
 in a `data` value under `==` compares its `double` and `float` items, and the values of its `double?` and
 `float?` items, as C#'s `Equals` does (D3), and so does a list in a key. A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10), taken when a thread's first map takes its first block, at that map's first write *(assumed, §4: the
-moment)*, from the sources Rust's standard library takes them from: on Linux from `getrandom` with `GRND_INSECURE`, or `GRND_NONBLOCK` where the kernel refuses that flag, and from `/dev/urandom` where the system refuses `getrandom` or its pool is not ready, and on Windows from `ProcessPrng`, as Rust 1.82 takes them there, which does not fail (§4, the owner, 2026-10-30, "ProcessPrng, as Rust 1.82"; `random-failed` where its library or the call is missing, on a system older than Windows 10, Rust's floor, assumed there); on Linux, where none of them gives the bytes, where Rust panics, the program ends there with `random-failed` (§4, the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path"), whose line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (O11) *(assumed, §4: the id, the name the question gave as an example, and the shape of its line)*. `Count` is
+moment)*, from the sources Rust's standard library takes them from: on Linux from `getrandom` with `GRND_INSECURE`, or `GRND_NONBLOCK` where the kernel refuses that flag, and from `/dev/urandom` where the system refuses `getrandom` or its pool is not ready, and on Windows from `ProcessPrng`, as Rust 1.82 takes them there, which does not fail (§4, the owner, 2026-10-30, "ProcessPrng, as Rust 1.82"; `random-failed` where its library or the call is missing, on a system older than Windows 8 or Windows Server 2008 R2, the floor Microsoft's page of the call names, assumed there); on Linux, where none of them gives the bytes, where Rust panics, the program ends there with `random-failed` (§4, the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path"), whose line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (O11) *(assumed, §4: the id, the name the question gave as an example, and the shape of its line)*. `Count` is
 the number of a map's entries, an `int`; `ContainsKey(key)` is a `bool`; `Remove(key)`, a `mut` method,
 takes the key's entry out of the map and gives its value, or `null` where there is none, of the type
 `map[key]` has, and copies a map another value holds first (M3); `Clear()`, a `mut` method, removes every
@@ -893,27 +894,53 @@ xs[1] = 2
 print(xs)
 ```
 
-Case: [data/union-equality.kz](../corpus/data/union-equality.kz)
+Case: [values/list-union-equality.kz](../corpus/values/list-union-equality.kz)
 ```kurz
-// `==` on a union compares its case, then the value of that case (D3), alone and as the items of two
-// lists (M9); a `double` case of a union that stands alone compares by IEEE's `==`, NaN unequal to itself
-double z = 0.0
-int | string a = 1
-int | string b = "1"
-int | string c = 1
-print(a == b)
-print(a == c)
-print(a == 1)
-print(a != "1")
-int | double n = z / z
-print(n == n)
+// two lists of union items compare by their counts and their items, each pair by its case, then its value (M9)
 mut xs = List<int | string>()
 xs.Add(1)
 xs.Add("a")
 mut ys = List<int | string>()
 ys.Add(1)
 ys.Add("a")
+mut zs = List<int | string>()
+zs.Add(1)
+zs.Add(1)
 print(xs == ys)
+print(xs == zs)
+```
+
+Case: [values/map-union-key-nan.kz](../corpus/values/map-union-key-nan.kz)
+```kurz
+// a `double` case of a union that is a map's key compares as a `double` key does, as C#'s `Equals`: NaN finds its entry, and 0.0
+// and -0.0 are one key (M9)
+double z = 0.0
+mut m = Map<int | double, int>()
+int | double k = z / z
+m[k] = 1
+print(m[k] ?? 0)
+int | double p = 0.0
+int | double q = -0.0
+m[p] = 2
+print(m[q] ?? 0)
+print(m.Count)
+```
+
+Case: [values/map-union-value.kz](../corpus/values/map-union-value.kz)
+```kurz
+// a map's value of a union is read as the union's nullable form: the value where the key has an entry, `null` where it has none (M9)
+mut m = Map<string, int | string>()
+m["a"] = 1
+match m["a"] {
+    null => print("none")
+    int n => print(n)
+    string s => print(s)
+}
+match m["b"] {
+    null => print("none")
+    int n => print(n)
+    string s => print(s)
+}
 ```
 
 Case: [values/map-union-key.kz](../corpus/values/map-union-key.kz)
@@ -939,30 +966,18 @@ print(names.Count)
 print(names)
 ```
 
-Case: [memory/c-function-type-nullable.kz](../corpus/memory/c-function-type-nullable.kz)
+Case: [memory/c-function-type-map-value.kz](../corpus/memory/c-function-type-map-value.kz)
 ```kurz
-// the nullable form of a C function type holds `null` where C may give none (R17), a map's value is
-// read as one (M9), and a call through it is read where a test knows it not null, as any nullable
-// value is (N3)
+// a map's value of a C function type is read as that type's nullable form (M9): the function where the key has an entry, `null`
+// where it has none
 extern "C" long Twice(long x) {
     return x * 2
 }
 
-(extern "C" (long) => long)? none = null
-print(none == null)
-(extern "C" (long) => long)? f = Twice
 mut table = Map<string, extern "C" (long) => long>()
 table["twice"] = Twice
-g = table["twice"]
-raw {
-    if f != null {
-        print(f(4))
-    }
-
-    if g != null {
-        print(g(5))
-    }
-}
+print(table["twice"] == null)
+print(table["thrice"] == null)
 ```
 
 Case: [data/equality-list-nan.kz](../corpus/data/equality-list-nan.kz)
