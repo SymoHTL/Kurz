@@ -1,0 +1,18 @@
+// expect: output
+// | 1
+// | none
+// rules: M9
+
+// a map's value of a union is read as the union's nullable form: the value where the key has an entry, `null` where it has none (M9)
+mut m = Map<string, int | string>()
+m["a"] = 1
+match m["a"] {
+    null => print("none")
+    int n => print(n)
+    string s => print(s)
+}
+match m["b"] {
+    null => print("none")
+    int n => print(n)
+    string s => print(s)
+}

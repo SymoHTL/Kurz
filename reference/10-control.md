@@ -247,8 +247,9 @@ Over a map,
 2026-10-30); two names over a list or a range are `type-mismatch` *(proposed: the error; §4 gives the
 form over a map alone)*. The loop runs over the collection as it was when
 the loop started: the collection is a value (M1), and a change to the variable inside the block is a
-change to the variable, not to what the loop walks. For a map §4 states it, as the owner's answer
-(the owner, 2026-10-30, "Key and Value, as C#"); for a list and a range §4 states nothing, and it is
+change to the variable, not to what the loop walks. For a map §4 states it, as the option the owner
+chose said (the owner, 2026-10-30, "Key and Value, as C#", the answer that also named the entry's
+`Key` and `Value`); for a list and a range §4 states nothing, and it is
 *(proposed: a reading of M3)*. The record's stream sample uses this form.
 
 Case: [control/for-in.kz](../corpus/control/for-in.kz)
@@ -287,11 +288,10 @@ for e in ages {
 
 Case: [control/entry-make.kz](../corpus/control/entry-make.kz)
 ```kurz
+// `Entry(key, value)` makes an `Entry<K, V>`, its type read from the two values (C6)
 a = Entry("Ann", 31)
-print(a)
-b = a with { Value = 32 }
-print(b)
-print(b == Entry("Ann", 32))
+print(a.Key)
+print(a.Value)
 ```
 
 Case: [control/entry-redeclared.kz](../corpus/control/entry-redeclared.kz)

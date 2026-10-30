@@ -1,0 +1,8 @@
+// expect: output
+// | false
+// rules: D3
+
+// a `double` case of a union that stands alone compares by IEEE's `==`, NaN unequal to itself (D3)
+double z = 0.0
+int | double n = z / z
+print(n == n)

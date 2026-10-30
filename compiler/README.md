@@ -616,7 +616,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   1.82"); the library names no import library, so the runtime loads it by `LoadLibraryExA` from the
   system's directory alone (`LOAD_LIBRARY_SEARCH_SYSTEM32`, 2048) and finds the call by
   `GetProcAddress`, as Go's runtime loads it, and gives false, so `random-failed`, where either is
-  missing, on a system older than Windows 10, Rust's floor (section 4, an assumption there). The result of `GetProcAddress` is a
+  missing, on a system older than Windows 8 or Windows Server 2008 R2, the floor Microsoft's page of
+  the call names (section 4, an assumption there). The result of `GetProcAddress` is a
   nullable C function type, `(extern "C" (byte*, ulong) => int)?`, whose `null` is the address 0
   (R17), called once a test knows it not null (N3).
   `ListTests` holds the end with the host's `Random` edited to give false, and on Linux the keys
@@ -1104,8 +1105,9 @@ dropped, so that the variables it uses count as used, but for the operand of `*`
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: a `class`, an `interface` or a `flags` type and a value of one
-(chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable union,
-function type or `void`, and a nullable case of a written union, which N1 does not
+(chapter 7, D13, D17, D19, and the A-rules of their text); of chapter 4, a nullable union or
+function type, which N1 names (the owner, 2026-10-30, "Nullable form, as Option") and the checker
+does not read, and a nullable `void` and a nullable case of a written union, which N1 does not
 name (N1, D9), `?.` or `?[` to a member or an item of a type no `?` makes nullable, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
 a part after `?[` and an assignment through it, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
@@ -1141,7 +1143,7 @@ a type parameter, and a key that holds one of them as the value of its nullable 
 at any depth or in a field of a `data` key (M9); `==` on two lists, or on a `data` value, that hold a
 value of a type parameter or a pointer, at any depth (D3, M9), and `==` on a base whose derived type is
 generic, whose fields of a type parameter it does not read, and such a base as a key, where a generic
-`data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values have a nullable type N1 does not read; an assignment into a map or a list that
+`data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values have a nullable type the checker does not read, a union's or a function type's (N1); an assignment into a map or a list that
 is no variable, or into a path through an entry or an item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's
@@ -1170,7 +1172,9 @@ round can ask about it by the rule's id.
   `Vec<i64>` is, and items of a nullable type of a type `==` does not take, or of a union with a case
   `==` does not take, are `type-mismatch`; a union compares by its case, then that case's value, alone,
   as a list's item and as a key, as Rust's derived `PartialEq` compares an enum (section 4, the owner,
-  2026-10-30, "Case and value, as Rust"; D3); a `data` value compares a list in a field by its items (D3).
+  2026-10-30, "Case and value, as Rust"; D3), and a union beside a value of one of its cases, on either
+  side, is `type-mismatch`, as Rust refuses `Some(5) == 5` (section 4, the owner, 2026-10-30, "Refuse,
+  as Rust"; D3); a `data` value compares a list in a field by its items (D3).
   `map[key] = value` and `list[i] = value` are assignments into a path (M4) and stand on a `mut`
   variable or parameter, with M4's order, the value before the key or the index; an index of a type
   other than an integer is `type-mismatch` (T2). Two names in a `for` loop over a list or a range are

@@ -66,7 +66,8 @@ pub long Write(int fd, byte* bytes, long count) {
 // function is found by its name, at each call, in the DLL loaded from the system's directory alone
 // (`LOAD_LIBRARY_SEARCH_SYSTEM32` is 2048), as Go's runtime finds it (`runtime/os_windows.go`, checked
 // at the tag go1.23.0), so that no file of that name beside the program is loaded in its place; a map
-// asks for the keys once on each thread. Where the system, older than Windows 10, has no such function, the
+// asks for the keys once on each thread. Where the system, older than Windows 8 or Windows Server 2008 R2, the floor
+// Microsoft's page of the function names, has no such function, the
 // result is false, which the caller ends the program for, where a Rust program, which imports it, does
 // not start.
 pub bool Random(byte* bytes, long count) {

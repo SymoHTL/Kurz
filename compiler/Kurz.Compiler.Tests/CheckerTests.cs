@@ -2293,10 +2293,16 @@ public sealed class CheckerTests
     [Fact]
     public void A_union_compares_by_its_case_and_its_value()
     {
-        // section 4, the owner, 2026-10-30, "Case and value, as Rust": `==` on two values of a union, or on a union and a value of one of
-        // its cases, compares the case, then the value, alone, as an item and in a field; a union of cases `==` takes is a key, and one with
-        // a case `==` does not take is `type-mismatch`, as a value and as a key
-        Clean("int | string a = 1\nint | string b = \"1\"\nprint(a == b)\nprint(a != 1)");
+        // section 4, the owner, 2026-10-30, "Case and value, as Rust": `==` on two values of a union compares the case, then the value,
+        // alone, as an item and in a field; a union of cases `==` takes is a key, and one with a case `==` does not take is `type-mismatch`,
+        // as a value and as a key; a union beside a value of one of its cases is `type-mismatch` on either side, as Rust refuses
+        // `Some(5) == 5` (section 4, the owner, 2026-10-30, "Refuse, as Rust")
+        Clean("int | string a = 1\nint | string b = \"1\"\nprint(a == b)\nprint(a != b)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | string a = 1\nprint(a == 1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | string a = 1\nprint(\"1\" != a)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | long a = 1\nprint(a == 1)")); // no widening of the literal into a case (T8)
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("List<int> l = List<int>()\nList<int> | Map<int, int> u = l\nprint(l == u)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("List<int> l = List<int>()\nList<int> | Map<int, int> u = l\nprint(u == l)"));
         Clean("m = Map<int | string, int>()\nprint(m)");
         Clean("m = Map<List<int | string>, int>()\nprint(m)");
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("int | () => int a = 1\nprint(a == a)"));
@@ -2434,7 +2440,7 @@ public sealed class CheckerTests
     [InlineData("m = Map<decimal, int>()\nprint(m)", "1: a map with keys of type `decimal`: the hash of a `decimal`, which reads 1.5 and 1.50 as one value, is not built (M9)")]
     [InlineData("void F<T>(T x) {\n    m = Map<T, int>()\n    print(m)\n}\n\nF(1)", "2: a map with keys of type `T`: a `T` is no key the checker reads (M9)")]
     [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nvoid Same(Base a, Base b) {\n    print(a == b)\n}\n\nprint(1)", "5: `==` on a `Base`: its derived type `Derived`: its field `V`: `==` on a `T` is not read (D3, M9)")]
-    [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nmut m = Map<Base, int>()\nprint(m.Count)", "4: a map with keys of type `Base`: its field `V`: a `T` is no key the checker reads (M9)")]
+    [InlineData("data Base\ndata Derived<T>(T V) : Base\n\nmut m = Map<Base, int>()\nprint(m.Count)", "4: a map with keys of type `Base`: its derived type `Derived`: its field `V`: a `T` is no key the checker reads (M9)")]
     [InlineData("m = Map<string, () => int>()\nprint(1)", "1: a map with values of type `() => int` (M9, N1)")]
     [InlineData("m = Map<string, int | string>()\nprint(1)", "1: a map with values of type `int | string` (M9, N1)")]
     [InlineData("data Box(Map<string, int> M)\n\nmut b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a map that is no variable, or into a path through an entry (M4, M9)")]
