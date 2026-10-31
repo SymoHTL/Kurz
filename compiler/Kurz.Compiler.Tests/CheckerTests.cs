@@ -2863,7 +2863,12 @@ public sealed class CheckerTests
                 + "  `List<string> Split(string separator)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `string` is required: a value of another type (T1)\n"
                 + "  `List<string> Split(char separator)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `char` is required: a value of another type (T1)",
             Assert.Single(diagnostics.Items).Message);
-        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim(5))"));
+        (diagnostics, _) = Check("s = \"ab\"\nprint(s.Trim(5))");
+        Assert.Equal(
+            "the call fits none of the forms of `Trim` (F13):\n"
+                + "  `string Trim()`: the call passes 1 arguments to 0 parameters (D11)\n"
+                + "  `string Trim(char trimChar)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `char` is required: a value of another type (T1)",
+            Assert.Single(diagnostics.Items).Message);
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim('a', 'b'))"));
 
         // X5's three forms of `Replace` give no `string` `old` a `char` `new`, as C#'s give none; the ASCII trims and the changes of
@@ -2902,6 +2907,12 @@ public sealed class CheckerTests
         // M7: an argument that changes the string a member holds, or a string an argument before it holds
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("string G(mut string t) {\n    t = \"c\"\n    return \"a\"\n}\n\nmut s = \"ab\"\nprint(s.Replace(G(mut s), \"x\"))"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("string G(mut string t) {\n    t = \"c\"\n    return \"a\"\n}\n\ns = \"ab\"\nmut o = \"a\"\nprint(s.Replace(o, G(mut o)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("string G(mut string t) {\n    t = \"c\"\n    return \",\"\n}\n\nmut s = \"a,b\"\nprint(s.Split(G(mut s)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("char H(mut string t) {\n    t = \"c\"\n    return 'a'\n}\n\nmut s = \"aba\"\nprint(s.Trim(H(mut s)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("char H(mut string t) {\n    t = \"c\"\n    return 'a'\n}\n\nmut s = \"aba\"\nprint(s.TrimStart(H(mut s)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("char H(mut string t) {\n    t = \"c\"\n    return 'a'\n}\n\nmut s = \"aba\"\nprint(s.TrimEnd(H(mut s)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("List<string> F(mut string t) {\n    t = \"c\"\n    return [\"a\", \"b\"]\n}\n\nmut o = \",\"\nprint(string.Join(o, F(mut o)))"));
+        Assert.Empty(Errors("List<string> F(mut List<string> t) {\n    t.Add(\"c\")\n    return t\n}\n\nmut xs = [\"a\"]\nprint(string.Join(\",\", F(mut xs)))\nprint(xs)"));
 
         // the parameters take C#'s names
         Assert.Empty(Errors("s = \"a,b\"\nprint(s.Split(separator: \",\"))\nprint(s.Replace(newValue: \"c\", oldValue: \"a\"))\nprint(s.Trim(trimChar: 'a'))\nprint(string.Join(values: [1], separator: \"-\"))\nprint(s.Replace(newChar: 'b', oldChar: 'a'))\nprint(s.TrimEnd(trimChar: 'b'))\nprint(string.Join(separator: ',', values: [1]))"));

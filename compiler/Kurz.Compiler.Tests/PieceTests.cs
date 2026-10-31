@@ -7,12 +7,14 @@ namespace Kurz.Compiler.Tests;
 
 /// <summary>
 /// The decisions on the trims, the splits, the replaces, the joins and the ASCII changes of case of a string (X3 to X6) that no corpus case
-/// pins: 2000 strings of up to 40 letters out of fourteen, among them whitespace of one, two and three bytes, the
-/// vertical tab, which the ASCII forms keep, and letters of two bytes, which the program and this class generate alike, give the bytes
-/// .NET's members of the same strings give, through each member and each form; and the same under the allocator that makes every block
-/// it frees inaccessible, for the first 500 of the strings. Each kind of result is taken at least 100 times: a trim that takes from both ends, a Unicode trim that takes
-/// more than the ASCII one, a trim of a `char` from the start and from the end, a split into three pieces or more, a replace that
-/// changes the string, a replace of a `char` by a `char` that changes it and a change of case that changes it.
+/// pins: 2000 strings of up to 40 letters out of twenty-six, among them every code point of Unicode's White_Space that is not ASCII, of two
+/// and three bytes, but those inside U+2000 to U+200A, a range the alphabet holds at both ends and in the middle, the form feed, the
+/// carriage return and the vertical tab, which the ASCII forms keep, three code points that are no whitespace beside them, U+001F, U+200B
+/// and U+180E, and letters of two bytes, which the program and this class generate alike, give the bytes .NET's members of the same strings
+/// give, through each member and each form; and the same under the allocator that makes every block it frees inaccessible, for the first
+/// 500 of the strings. Each kind of result is taken at least 100 times: a trim that takes from both ends, a Unicode trim that takes more
+/// than the ASCII one, a trim of a `char` from the start and from the end, a split into three pieces or more, a replace that changes the
+/// string, a replace of a `char` by a `char` that changes it and a change of case that changes it.
 /// </summary>
 public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -25,7 +27,7 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// </summary>
     private const int FencedCount = 500;
 
-    private static readonly string[] Alphabet = ["a", "b", "ä", " ", "\t", "x", "\u00A0", "\u3000", "\n", "\u000B", "B", "\u2028", "\u0085", "Ä"];
+    private static readonly string[] Alphabet = ["a", "b", "ä", " ", "\t", "x", "\u00A0", "\u3000", "\n", "\u000B", "B", "\u2028", "\u0085", "Ä", "\u1680", "\u2000", "\u2005", "\u200A", "\u2029", "\u202F", "\u205F", "\u000C", "\u000D", "\u001F", "\u200B", "\u180E"];
 
     private const string Program = """
         string Make(List<string> pool, int length, ulong start, int letters) {
@@ -41,7 +43,7 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return text
         }
 
-        alphabet = ["a", "b", "ä", " ", "\t", "x", "\u00A0", "\u3000", "\n", "\u000B", "B", "\u2028", "\u0085", "Ä"]
+        alphabet = ["a", "b", "ä", " ", "\t", "x", "\u00A0", "\u3000", "\n", "\u000B", "B", "\u2028", "\u0085", "Ä", "\u1680", "\u2000", "\u2005", "\u200A", "\u2029", "\u202F", "\u205F", "\u000C", "\u000D", "\u001F", "\u200B", "\u180E"]
         bar = "|"
         swap = "<>"
         none = ""
@@ -49,7 +51,7 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
         mut n = 0
         while n < 2000 {
             seed = seed *% 2862933555777941757UL +% 3037000493UL
-            int letters = 2 + int((seed >> 10) % 13UL)
+            int letters = 2 + int((seed >> 10) % 25UL)
             hay = Make(alphabet, int((seed >> 40) % 41UL), seed, letters)
             pin = Make(alphabet, int((seed >> 20) % 4UL), seed ^ 77UL, letters)
             print("{hay.Trim().Bytes} {hay.TrimStart().Bytes} {hay.TrimEnd().Bytes} {hay.TrimAscii().Bytes} {hay.TrimStartAscii().Bytes} {hay.TrimEndAscii().Bytes} {hay.Trim('x').Bytes} {hay.Trim('ä').Bytes} {hay.TrimStart('x').Bytes} {hay.TrimEnd('ä').Bytes}")
@@ -92,7 +94,7 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
         for (var n = 0; n < Count; n++)
         {
             seed = unchecked((seed * 2862933555777941757UL) + 3037000493UL);
-            var letters = 2 + (int)((seed >> 10) % 13UL);
+            var letters = 2 + (int)((seed >> 10) % 25UL);
             var hay = Make((int)((seed >> 40) % 41UL), seed, letters);
             var pin = Make((int)((seed >> 20) % 4UL), seed ^ 77UL, letters);
 

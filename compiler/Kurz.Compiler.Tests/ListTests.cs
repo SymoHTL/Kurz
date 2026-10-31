@@ -2167,6 +2167,22 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         """));
 
     /// <summary>
+    /// The runtime of this machine's target whose system gives the pieces of a mebibyte the allocator carves its blocks of up to 262144
+    /// bytes from, and refuses every other request: a block of its own, which a larger request takes, is refused.
+    /// </summary>
+    private static CheckedRuntime PiecesOnly() => Edited((TargetFile, "pub byte* Memory(long bytes) {", """
+        pub byte* Memory(long bytes) {
+            if bytes != 1048576 {
+                return null
+            }
+
+            return Granted(bytes)
+        }
+
+        byte* Granted(long bytes) {
+        """));
+
+    /// <summary>
     /// The runtime of this machine's target whose system refuses a request that would take what it gave and was not given back past
     /// 64 mebibytes; its own `Memory`, `Release` and `Resize` run behind the count, a `Resize` counted by what it adds, with the edits
     /// <paramref name="more"/> beside them.
@@ -2453,6 +2469,48 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, Edited(("runtime/common/runtime.kz", "    if size > 2147483647 {\n        AllocationFailed(size)", "    if size > 3 {\n        AllocationFailed(size)")), "string-limit", "raw"), 1, ["true"], "error: allocation-failed (4 bytes)\n");
         Ran(BuildAndRun(text, toolchain.Runtime, "string-below-limit", "raw"), 0, ["true", "true"], ""); // the positive control
         Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "string-refused", "raw"), 1, [], "error: allocation-failed (19 bytes)\n");
+    }
+
+    [Fact]
+    public void A_string_member_whose_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
+    {
+        // M9, X3, X5: a literal's `Split` asks for the block of its list, 16 bytes of counts and two pieces of 16; `Replace` and a
+        // change of case ask for the block of their result, 16 bytes of counts and its bytes
+        var none = EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value);
+        Ran(BuildAndRun("print(\"a,b\".Split(\",\"))\n", none, "split-refused"), 1, [], "error: allocation-failed (48 bytes)\n");
+        Ran(BuildAndRun("print(\"abc\".Replace(\"b\", \"xy\"))\n", none, "replace-refused"), 1, [], "error: allocation-failed (20 bytes)\n");
+        Ran(BuildAndRun("print(\"abc\".ToUpperAscii())\n", none, "upper-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        Ran(BuildAndRun("print(\"ABC\".ToLowerAscii())\n", none, "lower-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        const string granted = "print(\"a,b\".Split(\",\"))\nprint(\"abc\".Replace(\"b\", \"xy\"))\nprint(\"abc\".ToUpperAscii())\nprint(\"ABC\".ToLowerAscii())\n";
+        Ran(BuildAndRun(granted, toolchain.Runtime, "string-members-granted"), 0, ["[a, b]", "axyc", "ABC", "abc"], ""); // the positive control
+
+        // X6: the list `Join` reads takes a block, so this system gives the pieces small blocks are carved from and refuses a block of
+        // its own; a result of 262145 bytes asks for one, 16 bytes of counts and its bytes
+        const string join = "mut s = \"ab\"\nmut i = 0\nwhile i < 16 {\n    s = \"{s}{s}\"\n    i = i + 1\n}\n\nt = string.Join(\",\", [s, s])\nprint(t.Bytes.Count)\n";
+        Ran(BuildAndRun(join, PiecesOnly(), "join-refused"), 1, [], "error: allocation-failed (262161 bytes)\n");
+        Ran(BuildAndRun(join, toolchain.Runtime, "join-granted"), 0, ["262145"], ""); // the positive control
+
+        // X5: the second of two pieces copied out of a string's block refused, `StringOf` refusing 2 bytes or more in the library's
+        // text: the piece made before it and the list are given back, in the fenced runtime, and the run ends with the piece's bytes
+        const string piece = "x = \"a\"\nprint(\"{x},bb\".Split(\",\"))\n";
+        Ran(BuildAndRun(piece, Edited([.. Fence, ("std/std.kz", "    byte* text = StringBlock(count)\n", "    mut byte* text = null\n    if count < 2 {\n        text = StringBlock(count)\n    }\n\n")]), "split-piece-refused"), 1, [], "error: allocation-failed (18 bytes)\n");
+        Ran(BuildAndRun(piece, Fenced, "split-piece-granted"), 0, ["[a, bb]"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_Split_Replace_or_Join_past_the_limit_reports_the_bytes_it_counted()
+    {
+        // M9, T15: the limit of the largest `int` lowered to 3 in the library's text, `Replace`'s and `Join`'s on the bytes of the
+        // result, so that results of 4 and 5 bytes ask past it, and `ListAllocate`'s on the items, so that a `Split` into 4 pieces asks
+        // past it with 4 pieces of 16 bytes; a change of case keeps the string's length, which a string holds below the limit
+        const string replace = "print(\"abc\".Replace(\"b\", \"xy\"))\n";
+        const string join = "print(string.Join(\",\", [\"ab\", \"cd\"]))\n";
+        const string split = "print(\"a,b,c,d\".Split(\",\"))\n";
+        const string limit = "if size > 2147483647 {\n        asked = size\n        return null\n    }\n\n    if size == 0 {\n        ";
+        Ran(BuildAndRun(replace, Edited(("std/std.kz", limit + "made = 0", limit.Replace("2147483647", "3") + "made = 0")), "replace-limit"), 1, [], "error: allocation-failed (4 bytes)\n");
+        Ran(BuildAndRun(join, Edited(("std/std.kz", limit + "return null", limit.Replace("2147483647", "3") + "return null")), "join-limit"), 1, [], "error: allocation-failed (5 bytes)\n");
+        Ran(BuildAndRun(split, Edited(("std/std.kz", "if count > 2147483647 {\n        asked = count * item", "if count > 3 {\n        asked = count * item")), "split-limit"), 1, [], "error: allocation-failed (64 bytes)\n");
+        Ran(BuildAndRun(replace + join + split, toolchain.Runtime, "split-replace-join-below-limit"), 0, ["axyc", "ab,cd", "[a, b, c, d]"], ""); // the positive control
     }
 
     [Theory]
