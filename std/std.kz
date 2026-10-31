@@ -1076,7 +1076,7 @@ long TwoWay(byte* hay, long n, byte* needle, long m) {
 }
 
 // The trimming, the splitting, the replacing, the joining and the change of ASCII case of a string (X3,
-// X4, X5, X6), over its bytes, as Rust's `str` methods work on its. A trim gives the positions of the
+// X4, X5, X6), over its bytes, as Rust's `str` methods work on a string's bytes. A trim gives the positions of the
 // part it keeps, of which the emitted code makes a string: the string itself where it keeps every byte,
 // the bytes in place where the string holds no block, a literal, whose bytes are never freed, else a
 // copy (`StringOf`). The others give the bytes of a new string's block, or the block of a list of
@@ -1308,7 +1308,7 @@ pub byte* Split(byte* bytes, long n, bool block, byte* separator, long m, mut lo
 // it is, for an empty `old` (the owner, 2026-10-31, "No piece, no change") and for one found nowhere, and 0
 // for an empty result, each with null. More bytes than the largest `int` give null with `asked` set to
 // their count, as a string past it does (T15); a block the system refuses gives null with `asked` set to
-// the bytes asked for.
+// the bytes asked for. A caller reads `asked` first: where it is set, `made` is -1 and means nothing.
 pub byte* Replace(byte* bytes, long n, byte* old, long m, byte* replacement, long k, mut long made, mut long asked) {
     made = -1
     mut long count = 0
@@ -1766,7 +1766,7 @@ bool NumberWhite(int b) {
 // whitespace around it, a leading `+` or `-`, and one decimal digit or more. `most` is the largest value
 // of the type and `least` the magnitude of its smallest, 0 for an unsigned type, so that `-0` reads as 0
 // and `-1` lies below the range. -1 with the number in `magnitude`, or -2 with its magnitude there where
-// it is below 0; else the index of the failure's `ParseKind`: 0, `Empty`, where the bytes hold nothing
+// a leading `-` was read, `"-0"` among them, whose magnitude is 0; else the index of the failure's `ParseKind`: 0, `Empty`, where the bytes hold nothing
 // but whitespace; 1, `InvalidDigit`, where a byte stands that the form does not take, or no digit,
 // which is read before the range, as C#'s `Parse` reads the whole string before it reports an overflow;
 // 2, `TooLarge`, and 3, `TooSmall`, where the number lies past the largest or below the smallest value.
@@ -2319,7 +2319,7 @@ int Lemire(long q, ulong w, ulong* fives, bool single, mut ulong f) {
         m = m >> (-power + 1)
         m = m + (m & 1UL)
         m = m >> 1
-        f = m
+        f = m & ((1UL << explicit) - 1UL)
         if m >= 1UL << explicit {
             return 1
         }
@@ -2646,7 +2646,7 @@ int NewDigits(byte* d, int n, int shift) {
     return added
 }
 
-// The decimal digit at `at` of the digits of 5^1 to 5^61, one after another.
+// The decimal digit at `at` of the digits `FiveDigits` holds, one after another.
 int FiveDigit(int at) => int((FiveDigits(at / 16) >> ((15 - at % 16) * 4)) & 15UL)
 
 // Rust's `Decimal::right_shift`: the decimal over 2^`shift`, `shift` from 1 to 60, from its first digit to its
@@ -2921,7 +2921,9 @@ pub int ParseDecimal(byte* text, long count, mut ulong low, mut ulong high) {
 
 // For a left shift by `shift` bits, 1 to 60, the count of digits it adds, or one more than it adds
 // where the digits of the number lie below those of 5^shift, in bits 11 up, and where the digits of
-// 5^shift start in FiveDigit's sequence, in bits 0 to 10, as Rust's `number_of_digits_decimal_left_shift`.
+// 5^shift start in the sequence of `FiveDigits`, in bits 0 to 10, as Rust's `number_of_digits_decimal_left_shift`.
+// A shift of 60 reads the start of entry 61 as the end of its digits, Rust's 0x051C, 1308; the count of 19 in
+// bits 11 up of entry 61 belongs to 5^61, which no shift reads.
 int ShiftDigits(int shift) => match shift {
     0 => 0
     1 => 2048
@@ -2989,7 +2991,9 @@ int ShiftDigits(int shift) => match shift {
 }
 
 // The decimal digits of 5^1 to 5^61 one after another, 1351 of them, sixteen to a word, one to
-// four bits, the first in the highest four: the hexadecimal digits of each word are the decimal ones.
+// four bits, the first in the highest four: the hexadecimal digits of each word are the decimal ones. A
+// left shift reads the 1308 digits of 5^1 to 5^60, as Rust's `TABLE_POW5` holds them; the 43 of 5^61
+// after them are read by no shift.
 ulong FiveDigits(int word) => match word {
     0 => 0x5251256253125156
     1 => 0x2578125390625195

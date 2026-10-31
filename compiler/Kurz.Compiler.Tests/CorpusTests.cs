@@ -59,6 +59,7 @@ public sealed class CorpusTests
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
         ["classes/print-without-text.kz"] = "a class (chapter 7)",
+        ["strings/join-no-text.kz"] = "a class (chapter 7)",
         ["types/generic-cannot-infer-classes.kz"] = "classes (chapter 7)",
         ["values/mut-method-through-field.kz"] = "a class (chapter 7)",
         ["values/text-more.kz"] = "a flags type (D13)",

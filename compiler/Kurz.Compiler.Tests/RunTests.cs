@@ -233,6 +233,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
         else if (header.ErrorId == ErrorIds.NotCharBoundary)
         {
+            // the error lines alone: the trace was split off above and is held below
             Assert.Matches($"^{Regex.Escape(line)}:\nbyte [0-9]+ is inside a code point\n$", error);
         }
         else
