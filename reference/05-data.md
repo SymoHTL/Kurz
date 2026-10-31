@@ -40,12 +40,16 @@ owner, 2026-10-23). The two values of that case compare as a field of the case's
 `double` or `float` case that holds NaN equals itself, as a C# record calls `Equals` on a field of
 type `object` (§4, the owner, 2026-10-24); there Kurz departs from Rust's `PartialEq`, which
 compares the two values with their `==`, under which NaN is unequal to itself (§4). `==` takes two
-values of a union outside a field as well, alone, as a list's items, in a list a field holds and as a
+values of one union type outside a field as well, the same first case and the same set of the others
+(O1) *(assumed, §4: one type, as Rust compares two values of one enum, and `!=` as the negation of `==`
+here, in the refusal below too)*, alone, as a list's items, in a list a field holds and as a
 map's keys, and compares the case and then the value as a field of a union compares, a `double` or
 `float` case by IEEE's `==` where the union stands alone or in a list that stands alone, and as C#'s
 `Equals` in a key, a union that is a key itself among them (M9) (§4, the owner, 2026-10-30, "Case and
-value, as Rust"). A union beside a value of one of its cases takes no `==`, on either side:
-`type-mismatch`, as Rust refuses `Some(5) == 5` (§4, the owner, 2026-10-30, "Refuse, as Rust"). A field that is a
+value, as Rust") *(assumed, §4: a union key's case read as a key under "Equals inside data/keys")*. A
+union with no `null` case beside a value of one of its cases takes no `==` and no `!=`, on either side:
+`type-mismatch`, as Rust refuses `Some(5) == 5` (§4, the owner, 2026-10-30, "Refuse, as Rust"); a side
+whose type is nullable is lifted first (N10). A field that is a
 list compares by its items (M9), and its `double` or `float` items, and the values of its `double?` or
 `float?` items, at any depth, compare as C#'s `Equals` compares them, NaN equal to NaN and 0.0 equal to
 -0.0, `null` equal to `null`, so that such a value equals itself, where `==` on two lists outside a
