@@ -367,9 +367,13 @@ public sealed class CommandTests : IDisposable
         Assert.Equal((0, "[x]\n", ""), KurzWithPlaces("exec", "--lines", "print(args)", "--", "x"));
 
         // S13: the program's name is the executable in the command's place, as `cargo run` gives its program the path in `target`
-        var (named, name, _) = KurzWithPlaces("exec", "print(Environment.Args()[0])");
-        Assert.Equal(0, named);
-        Assert.Matches($@"^{Regex.Escape(Path.Combine(root, "cache", "kurz"))}/place-[0-9a-f]+/program\n$", name);
+        var named = Path.Combine(root, "named.kz");
+        File.WriteAllText(named, "print(Environment.Args()[0])\n");
+        foreach (var (code, name, error) in new[] { KurzWithPlaces("run", named), KurzWithPlaces("exec", "print(Environment.Args()[0])") })
+        {
+            Assert.Equal((0, ""), (code, error));
+            Assert.Matches($@"^{Regex.Escape(Path.Combine(root, "cache", "kurz"))}/place-[0-9a-f]+/program\n$", name);
+        }
     }
 
     [Fact]

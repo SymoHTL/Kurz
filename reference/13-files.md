@@ -480,7 +480,13 @@ int Count(List<string> args) {
     return args.Count
 }
 
+int Local() {
+    List<string> args = ["a", "b"]
+    return args.Count
+}
+
 print(Count(args))
+print(Local())
 ```
 
 Case: [system/args-in-function.kz](../corpus/system/args-in-function.kz)
@@ -528,7 +534,7 @@ text of an `EnvError` (A3) is the words of its kind in lower case, a colon and t
 `not present: HOME`; a name that is empty or holds `=` or a NUL byte is `NotPresent`. A file's own
 type or variable named `EnvError`, `EnvKind` or `Environment` is `redeclared` (V9). A package that
 reads a variable needs `allow env` (S12). *(assumed, §12: the name `Variable`, the type, its text and
-the names that are `NotPresent`)*
+the names that are `NotPresent`, a file's own `EnvError`, `EnvKind` and `Environment`)*
 
 Case: [system/environment-missing.kz](../corpus/system/environment-missing.kz)
 ```kurz
