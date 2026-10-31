@@ -1258,6 +1258,65 @@ public sealed partial class Checker
                         return result;
                     }
 
+                case "Sort" or "SortUnstable":
+                    {
+                        if (RefusesTypeArguments(c, $"`{m.Member}`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var candidate = new Candidate { Slots = [], Result = Types.Void };
+                        var result = Record(c, m.Member == "Sort" ? CallKind.ListSort : CallKind.ListSortUnstable, Call([candidate], c, null, out var picked), picked);
+                        if (!result.IsError && Orders(list.Element, c.Line, $"`{m.Member}` orders the items of {Types.A(list)}"))
+                        {
+                            MutReceiver(c, m.Target, c.Line, $"`{m.Member}` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
+                        return result;
+                    }
+
+                case "SortBy":
+                    {
+                        if (RefusesTypeArguments(c, "`SortBy`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        // X8: the key is what a function of an item gives, as C#'s `OrderBy` infers its `TKey` from its `keySelector`: a
+                        // lambda takes the item type for a parameter it does not type (F11) and its result from its body, which T27's
+                        // inference, from the arguments alone, does not reach; any other argument is a function value of one item
+                        if (c.Arguments.Count != 1 || (c.Arguments[0].Name is { } named && named != "keySelector")
+                            || (Unwrap(c.Arguments[0].Value) is LambdaExpression { Parameters.Count: not 1 }))
+                        {
+                            Report(ErrorIds.ArgumentMismatch, c.Line, $"`SortBy` takes one argument, `keySelector`, a function of one item, {Types.A(list.Element)} (X8, D11, F11)");
+                            CheckArgumentsLoosely(c);
+                            return Typed.Error;
+                        }
+
+                        var argument = c.Arguments[0].Value;
+                        var key = CheckExpression(argument, null, given: [list.Element]);
+                        if (key.IsError)
+                        {
+                            return Typed.Error;
+                        }
+
+                        if (key.Type is not FunctionType f || f.Parameters.Count != 1 || !Types.Same(f.Parameters[0], list.Element) || Types.IsVoid(f.Result))
+                        {
+                            Report(ErrorIds.TypeMismatch, argument.Line, $"`SortBy` takes a function of {Types.A(list.Element)} that gives a key, where {Types.A(key.Type)} stands (X8, F11)");
+                            return Typed.Error;
+                        }
+
+                        if (!Orders(f.Result, c.Line, $"`SortBy` orders the items of {Types.A(list)} by a key of {Types.A(f.Result)}"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var keySelector = new Candidate { Slots = [new Slot("keySelector", f, false, false, false)], Binding = [0], Result = Types.Void };
+                        Record(c, CallKind.ListSortBy, new Typed(Types.Void), keySelector);
+                        MutReceiver(c, m.Target, c.Line, "`SortBy` changes the list it is called on");
+                        return new Typed(Types.Void);
+                    }
+
                 case "Add":
                     {
                         if (RefusesTypeArguments(c, "`Add`"))
@@ -1454,7 +1513,6 @@ public sealed partial class Checker
     private static string? UnreadMember(KurzType type, string member) => (type, member) switch
     {
         (PrimitiveType { Kind: Primitive.String }, "ToLower" or "ToUpper") => $"a string's `{member}` (X3)",
-        (ListType, "Sort" or "SortBy" or "SortUnstable") => $"a list's `{member}` (X8)",
         _ => null,
     };
 
@@ -1490,6 +1548,36 @@ public sealed partial class Checker
     /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
     /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7).
     /// </summary>
+    /// <summary>
+    /// X8: whether a sort orders values of <paramref name="type"/>, the items of a list or the keys of <c>SortBy</c>: a type <c>&lt;</c>
+    /// orders, a number, a <c>char</c>, a <c>string</c>, a time and an enum that numbers its values (T18, T32, D18), and one of them that
+    /// may be <c>null</c>, which sorts before every value (section 12, the owner, 2026-10-31, "Null first, as C#/Rust"); an enum that numbers
+    /// none is <c>enum-number</c>, as <c>&lt;</c> on it is (D20; the owner, 2026-10-31, "enum-number"), and any other type
+    /// <c>type-mismatch</c> (T18). Reports the error and gives false where the type is not ordered.
+    /// </summary>
+    private bool Orders(KurzType type, int line, string what)
+    {
+        var value = Types.NonNull(type) ?? type;
+        if (Types.IsError(value) || (value is EnumType { Symbol.Refused: true }))
+        {
+            return false; // its own error stands (E1)
+        }
+
+        if (value is EnumType e && !e.Symbol.Numbered)
+        {
+            Report(ErrorIds.EnumNumber, line, $"{what} by their numbers, and `{e}` numbers none of its values (X8, D20)");
+            return false;
+        }
+
+        if (Types.IsNumber(value) || Types.IsTime(value) || value is EnumType or PrimitiveType { Kind: Primitive.Char or Primitive.String })
+        {
+            return true;
+        }
+
+        Report(ErrorIds.TypeMismatch, line, $"{what} by `<`, which does not order {Types.A(value)} (X8, T18)");
+        return false;
+    }
+
     private void MutReceiver(CallExpression call, Expression receiver, int line, string what)
     {
         var members = new List<MemberAccess>();

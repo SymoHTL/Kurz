@@ -1,0 +1,6 @@
+// expect: error argument-mismatch at 5
+// rules: X8
+
+mut xs = [3, 1, 2]
+xs.SortBy(x => x, x => -x)
+print(xs)

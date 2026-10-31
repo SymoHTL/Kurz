@@ -12,9 +12,10 @@ public sealed partial class Checker
     /// The type of an expression, and its value where it is a constant. <paramref name="expected"/>
     /// is the type written or expected around it, which reaches its literals (L10, L17); with
     /// <paramref name="keepCases"/> a call keeps every case of its result instead of being
-    /// unwrapped (O4).
+    /// unwrapped (O4); <paramref name="given"/> are the types a call passes the parameters of a lambda it takes, whose result the
+    /// lambda's body gives (X8's <c>SortBy</c>).
     /// </summary>
-    private Typed CheckExpression(Expression expression, KurzType? expected, bool keepCases = false)
+    private Typed CheckExpression(Expression expression, KurzType? expected, bool keepCases = false, IReadOnlyList<KurzType>? given = null)
     {
         if (expressionDepth > 0)
         {
@@ -22,7 +23,7 @@ public sealed partial class Checker
         }
 
         expressionDepth++;
-        var typed = CheckExpressionCore(expression, expected, keepCases);
+        var typed = CheckExpressionCore(expression, expected, keepCases, given);
         expressionDepth--;
         model.RecordType(expression, typed); // the last reading stands: a call's literal argument is read a second time, against the parameter of the function picked
         if (expressionDepth == 0)
@@ -33,7 +34,7 @@ public sealed partial class Checker
         return typed;
     }
 
-    private Typed CheckExpressionCore(Expression expression, KurzType? expected, bool keepCases)
+    private Typed CheckExpressionCore(Expression expression, KurzType? expected, bool keepCases, IReadOnlyList<KurzType>? given)
     {
         switch (expression)
         {
@@ -102,7 +103,7 @@ public sealed partial class Checker
                 return Typed.Error;
             case LambdaExpression l:
                 // a lambda where a nullable function type is required takes the types of that function type (N1)
-                return CheckLambda(l, (expected is null ? null : Types.NonNull(expected) ?? expected) as FunctionType);
+                return CheckLambda(l, (expected is null ? null : Types.NonNull(expected) ?? expected) as FunctionType, given: given);
             case MatchExpression m:
                 return new Typed(CheckMatch(m.Subject, m.Arms, isExpression: true, expected, m.Line).Type);
             case WithExpression w:
@@ -110,7 +111,7 @@ public sealed partial class Checker
             case ElseExpression e:
                 return CheckElse(e, isStatement: false, expected);
             case ParenthesizedExpression p:
-                return CheckExpression(p.Inner, expected, keepCases);
+                return CheckExpression(p.Inner, expected, keepCases, given);
             default:
                 throw new InvalidOperationException(expression.GetType().Name);
         }
@@ -1437,8 +1438,11 @@ public sealed partial class Checker
 
     // ---- lambdas and with --------------------------------------------------------------------------
 
-    /// <summary>F7, F11, F15: a lambda under the function type expected of it, or with its own type where its parameters are typed.</summary>
-    private Typed CheckLambda(LambdaExpression l, FunctionType? expected, bool atUnreadType = false)
+    /// <summary>
+    /// F7, F11, F15: a lambda under the function type expected of it, or with its own type where its parameters are typed, or are
+    /// <paramref name="given"/>, the types a call passes them, whose result the lambda's body gives (X8's <c>SortBy</c>).
+    /// </summary>
+    private Typed CheckLambda(LambdaExpression l, FunctionType? expected, bool atUnreadType = false, IReadOnlyList<KurzType>? given = null)
     {
         // after an error on the parameters the body is still read, with them error-typed, so that its own defects and the variables it reads count (E1)
         var parameterTypes = new List<KurzType>();
@@ -1450,9 +1454,9 @@ public sealed partial class Checker
             expected = null;
         }
 
-        if (expected is not null)
+        if (expected is not null || given is not null)
         {
-            foreach (var (p, type) in l.Parameters.Zip(expected.Parameters))
+            foreach (var (p, type) in l.Parameters.Zip(expected?.Parameters ?? given!))
             {
                 if (p.Type is null)
                 {
@@ -1463,7 +1467,7 @@ public sealed partial class Checker
                 var written = Resolve(p.Type);
                 if (!Types.IsError(written) && !Types.Same(written, type))
                 {
-                    Report(ErrorIds.TypeMismatch, p.Line, $"the parameter `{p.Name}` is {Types.A(written)} where `{expected}` passes {Types.A(type)} (F11)");
+                    Report(ErrorIds.TypeMismatch, p.Line, $"the parameter `{p.Name}` is {Types.A(written)} where {(expected is null ? "the call" : $"`{expected}`")} passes {Types.A(type)} (F11)");
                     written = Types.Error; // and the lambda with it, so that the call reports nothing more about it (E1)
                 }
 

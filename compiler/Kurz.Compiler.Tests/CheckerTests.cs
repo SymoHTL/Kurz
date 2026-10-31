@@ -2943,14 +2943,48 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_sort_takes_a_mut_list_whose_items_or_keys_less_orders()
+    {
+        // X8: items and keys `<` orders, a nullable one among them, null first; the key's type comes from the lambda's body, as C#'s
+        // `OrderBy` infers its `TKey` from its `keySelector`, and a function value stands for the key too
+        Assert.Empty(Errors("mut xs = [3, 1]\nxs.Sort()\nxs.SortUnstable()\nprint(xs)"));
+        Assert.Empty(Errors("mut List<int?> xs = [3, null]\nxs.Sort()\nprint(xs)"));
+        Assert.Empty(Errors("enum Level { High = 2, Low = 1 }\nmut xs = [Level.High, Level.Low]\nxs.Sort()\nprint(xs)"));
+        Assert.Empty(Errors("mut xs = [\"b\", \"a\"]\nxs.SortBy(s => s.Bytes.Count)\nxs.SortBy(keySelector: s => s)\nxs.SortBy((string s) => double(s.Bytes.Count) / 2.0)\nprint(xs)"));
+        Assert.Empty(Errors("key = (string s) => s.Bytes.Count\nmut xs = [\"b\"]\nxs.SortBy(key)\nprint(xs)"));
+
+        // T18 and D20: items or keys `<` does not order, and the values of an enum that numbers none, as `<` on two of them is
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [true]\nxs.Sort()"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [[1]]\nxs.SortUnstable()"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(x => x == 1)"));
+        Assert.Equal([(ErrorIds.EnumNumber, 3)], Errors("enum Plan { Free, Pro }\nmut xs = [1]\nxs.SortBy(x => Plan.Free)"));
+
+        // the key: one argument, `keySelector`, a function of one item that gives a value
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy()"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(x => x, x => -x)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(key: x => x)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy((a, b) => a)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.Sort(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy((string s) => 1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(x => print(x))"));
+
+        // M5: the list changes, so the variable that holds it is `mut`; M7: a key that reads the list is in use while the sort changes
+        // it; F11: a key that changes the list changes a capture, beside reading it
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("xs = [1]\nxs.SortUnstable()"));
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("xs = [1]\nxs.SortBy(x => x)"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 2)], Errors("mut xs = [1]\nxs.SortBy(x => xs.Count - x)"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 2), (ErrorIds.CaptureAssign, 3)], Errors("mut xs = [1]\nxs.SortBy(x => {\n    xs.Add(1)\n    return x\n})"));
+    }
+
+    [Fact]
     public void The_members_of_strings_and_lists_and_the_parses_of_chapter_15_the_checker_does_not_read_are_not_supported_and_a_member_no_rule_names_is_unknown()
     {
-        // X3's change of case by Unicode's mapping, X8, and X7's `Parse` of a floating-point type and of `decimal`: each call is `not supported` with its rule, and no error stands
+        // X3's change of case by Unicode's mapping and X7's `Parse` of a floating-point type and of `decimal`: each call is `not supported` with its rule, and no error stands
         // beside it (E1); the arguments are read, so the variables they use count as used
         var members = new (string Receiver, string Member, string Rule)[]
         {
             ("s", "ToLower", "X3"), ("s", "ToUpper", "X3"),
-            ("xs", "Sort", "X8"), ("xs", "SortBy", "X8"), ("xs", "SortUnstable", "X8"),
         };
         foreach (var (receiver, member, rule) in members)
         {
