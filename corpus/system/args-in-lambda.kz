@@ -1,0 +1,6 @@
+// expect: output
+// | 0
+// rules: S13
+
+(() => int) count = () => args.Count
+print(count())

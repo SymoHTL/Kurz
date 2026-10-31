@@ -683,7 +683,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   created again and one under a file; the text of an error without a path; and the refusal for Windows;
 - the command line, the environment and the clock (S13 to S15), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
-  statement where the top-level code names `args`, and `Environment.Args()` the list from the first
+  statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
   on at its call; a number other than 0 calls `InvalidArgument` for `args` and raises
   `invalid-argument` at the call for `Environment.Args()`. `Environment.Variable` copies its name as
   `CPath` does, a name with a NUL byte giving `NotPresent` without a call, and makes the value or the

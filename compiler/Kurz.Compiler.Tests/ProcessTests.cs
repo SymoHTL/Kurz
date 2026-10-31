@@ -140,6 +140,35 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void Two_reads_of_the_clock_keep_their_order_and_a_file_just_written_has_a_time_of_this_minute()
+    {
+        // S15 gives no order where the system's clock is set back, so the corpus cases print none: this test assumes that nothing sets
+        // the clock of this machine back while it runs, that the file system's time agrees with the clock, and a run under a minute
+        const string text = """
+            void | IoError Times() {
+                first = timestamp.Now
+                second = timestamp.Now
+                print(second >= first)
+                File.WriteAll("stamped.txt", "x".Bytes)
+                written = File.Modified("stamped.txt")
+                print(written <= timestamp.Now)
+                print(timestamp.Now - written < 1min)
+                File.Delete("stamped.txt")
+            }
+
+            Times() else {
+                IoError e => print(e)
+            }
+
+            """;
+        if (Ran(text, "clock-order", "") is { } read)
+        {
+            Assert.Equal((0, ""), (read.Code, read.Error));
+            Assert.Equal(["true", "true", "true"], read.Output);
+        }
+    }
+
+    [Fact]
     public void The_time_of_a_file_or_a_directory_is_its_last_write_to_the_nanosecond_and_one_a_timestamp_does_not_hold_is_invalid_data()
     {
         // the edges of the 64 bits (T24) after 1970 on the build's file system and before it in the memory of /dev/shm, a tmpfs, whose
@@ -193,6 +222,7 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((line, Emitter.ProcessNotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.StartsWith($"program.kz:{line}: not supported: a read of the command line, the environment or the clock", diagnostic.At("program.kz"), StringComparison.Ordinal);
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 
@@ -204,6 +234,7 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((2, Emitter.NotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.StartsWith("program.kz:2: not supported: a call on a file", diagnostic.At("program.kz"), StringComparison.Ordinal);
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 }

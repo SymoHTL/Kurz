@@ -1,0 +1,9 @@
+// expect: output
+// | 2
+// | 1
+// rules: S13
+
+mut all = Environment.Args()
+all.Add("x")
+print(all.Count)
+print(Environment.Args().Count)

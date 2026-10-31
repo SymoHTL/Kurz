@@ -365,6 +365,11 @@ public sealed class CommandTests : IDisposable
         Assert.Equal((0, "[]\n1\n", ""), KurzWithPlaces("run", "--release", source, "--"));
         Assert.Equal((0, "[]\n1\n", ""), KurzWithPlaces("run", source)); // the positive control of the split: no `--`, no word
         Assert.Equal((0, "[x]\n", ""), KurzWithPlaces("exec", "--lines", "print(args)", "--", "x"));
+
+        // S13: the program's name is the executable in the command's place, as `cargo run` gives its program the path in `target`
+        var (named, name, _) = KurzWithPlaces("exec", "print(Environment.Args()[0])");
+        Assert.Equal(0, named);
+        Assert.Matches($@"^{Regex.Escape(Path.Combine(root, "cache", "kurz"))}/place-[0-9a-f]+/program\n$", name);
     }
 
     [Fact]
