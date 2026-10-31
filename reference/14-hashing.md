@@ -214,3 +214,30 @@ a = Sha256.New()
 b = Sha256.New()
 print(a == b)
 ```
+
+### H7 (decided, §12) `Hex.Decode`
+
+`Hex.Decode(s)` reads the hexadecimal digits of a string back into its bytes and gives
+`Bytes | HexError` (O1). `data HexError(HexKind Kind, int At)` with `enum HexKind { OddLength, InvalidDigit }`
+holds none of the input: `At` is the position of the first character that is not a digit, counted in
+bytes (X2), and the text of the error is the words of its kind in lower case and its position,
+`invalid digit at 3` (§12, the owner, 2026-10-31, "Without input"). The digits are read in upper and
+lower case, with no `0x` and no whitespace, as the `hex` crate's `decode`; a string of an odd length is
+`OddLength`, with `At` its length; and `HexError` and `HexKind` are types every file sees, as
+`ParseError` is (X7) *(assumed, §12: the digits read and the two names, defaults of the question; the
+odd length, not put to the owner)*.
+
+Case: [hashing/hex-decode.kz](../corpus/hashing/hex-decode.kz)
+```kurz
+void Show(Bytes | HexError result) {
+    match result {
+        Bytes b => print(b)
+        HexError e => print(e)
+    }
+}
+
+Show(Hex.Decode("0001abFF"))
+Show(Hex.Decode("abc"))
+Show(Hex.Decode("0xff"))
+Show(Hex.Decode(""))
+```

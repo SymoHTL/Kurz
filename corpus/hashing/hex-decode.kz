@@ -1,0 +1,18 @@
+// expect: output
+// | [0, 1, 171, 255]
+// | odd length at 3
+// | invalid digit at 1
+// | []
+// rules: H7
+
+void Show(Bytes | HexError result) {
+    match result {
+        Bytes b => print(b)
+        HexError e => print(e)
+    }
+}
+
+Show(Hex.Decode("0001abFF"))
+Show(Hex.Decode("abc"))
+Show(Hex.Decode("0xff"))
+Show(Hex.Decode(""))

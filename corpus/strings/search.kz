@@ -1,0 +1,22 @@
+// expect: output
+// | true
+// | false
+// | true
+// | true
+// | 5
+// | 6
+// | null
+// | 0
+// | true
+// rules: X1
+
+s = "hä, wörld"
+print(s.Contains("wö"))
+print(s.Contains('x'))
+print(s.StartsWith("hä"))
+print(s.EndsWith('d'))
+print(s.IndexOf("wö"))
+print(s.IndexOf('ö'))
+print(s.IndexOf("x"))
+print(s.IndexOf(""))
+print("".EndsWith(""))

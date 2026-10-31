@@ -1,0 +1,15 @@
+// expect: output
+// | STRASSE
+// | σας
+// | true
+// | false
+// | HTTP/1.1 äB
+// | Äb
+// rules: X3
+
+print("straße".ToUpper())
+print("ΣΑΣ".ToLower())
+print("\u212A".ToLower() == "k")
+print("\u212A".ToLowerAscii() == "k")
+print("http/1.1 äb".ToUpperAscii())
+print("ÄB".ToLowerAscii())

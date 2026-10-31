@@ -1,0 +1,6 @@
+// expect: error no-text at 6
+// rules: X6
+
+class Counter(mut int Count)
+
+print(string.Join(", ", [Counter(0)]))
