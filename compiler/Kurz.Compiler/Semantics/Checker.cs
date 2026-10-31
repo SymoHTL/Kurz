@@ -540,9 +540,17 @@ public sealed partial class Checker
                     continue;
                 }
 
-                if (!Types.Assignable(typed.Type, Types.Int) || typed.Constant is not IntegerConstant number)
+                if (!Types.Assignable(typed.Type, Types.Int))
                 {
-                    ReportMismatch(typed.Type, Types.Int, value.Number.Line, $"the number of `{value.Name}` is a `{typed.Type}` where an `int` is required", "D20");
+                    ReportMismatch(typed.Type, Types.Int, value.Number.Line, $"the number of `{value.Name}` is {Types.A(typed.Type)} where an `int` is required", "D20");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                if (typed.Constant is not IntegerConstant number)
+                {
+                    // a constant of a type an `int` holds is an integer wherever T6 folds it: no program reaches this
+                    Report(ErrorIds.EnumNumber, value.Number.Line, $"the number of `{value.Name}` is a constant expression of type `int`: a literal, or literals that T6 folds (D20)");
                     symbol.Refused = true;
                     continue;
                 }
@@ -1152,7 +1160,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(t.Type, type))
         {
-            ReportMismatch(t.Type, type, value.Line, $"the default is a `{t.Type}` where a `{type}` is required");
+            ReportMismatch(t.Type, type, value.Line, $"the default is {Types.A(t.Type)} where {Types.A(type)} is required");
         }
     }
 
@@ -1220,7 +1228,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(typed.Type, returnType))
         {
-            ReportMismatch(typed.Type, returnType, body.Line, $"the body is a `{typed.Type}` where the result is a `{returnType}`", "F2"); // E1: at the value's line, as for every value that does not fit
+            ReportMismatch(typed.Type, returnType, body.Line, $"the body is {Types.A(typed.Type)} where the result is {Types.A(returnType)}", "F2"); // E1: at the value's line, as for every value that does not fit
         }
     }
 
@@ -1302,8 +1310,8 @@ public sealed partial class Checker
         functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
 
     /// <summary>
-    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c> (M9), the types of
-    /// files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), and the hashes' (H1 to H4).
+    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
+    /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), and the hashes' (H1 to H4).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name);
@@ -1316,10 +1324,11 @@ public sealed partial class Checker
     /// (T15), <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18), and <c>IoError</c> with its <c>IoKind</c>, the
     /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux, beside them
     /// <c>WriteZero</c> and <c>InvalidData</c>, which no number gives, and <c>Other</c> for a number none of them has, the number 0
-    /// where the error is not the system's (S1; section 12, the owner, 2026-10-29, "One union, as Rust"), <c>EnvError</c> with its <c>EnvKind</c>, the case of a read of a variable of the environment that
-    /// gave no string, in the form of <c>IoError</c> (S14; section 12, the owner, 2026-10-30, "An outcome, as Rust"), and <c>Entry</c>, the
-    /// entry of a loop over a map, a value as C#'s <c>KeyValuePair</c> is one (C6;
-    /// section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies by <c>with</c> as every data type
+    /// where the error is not the system's (S1; section 12, the owner, 2026-10-29, "One union, as Rust"), <c>EnvError</c> with its
+    /// <c>EnvKind</c>, the case of a read of a variable of the environment that gave no string, in the form of <c>IoError</c> (S14;
+    /// section 12, the owner, 2026-10-30, "An outcome, as Rust"), and <c>Entry</c>, the entry of a loop over a map, a value as C#'s
+    /// <c>KeyValuePair</c> is one (C6; section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies
+    /// by <c>with</c> as every data type
     /// (section 4, the owner, 2026-10-30, "Both, as a data type").
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
@@ -1686,7 +1695,7 @@ public sealed partial class Checker
         }
         else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Bool } && !Unchecked(t, condition.Line, "as a condition"))
         {
-            Report(ErrorIds.TypeMismatch, condition.Line, $"a condition is a `bool`, not a `{t.Type}` (C3)");
+            Report(ErrorIds.TypeMismatch, condition.Line, $"a condition is a `bool`, not {Types.A(t.Type)} (C3)");
         }
     }
 
@@ -1736,7 +1745,7 @@ public sealed partial class Checker
         }
         else if (declared is not null && !Types.Assignable(t.Type, declared))
         {
-            ReportMismatch(t.Type, declared, v.Value.Line, $"a `{t.Type}` where a `{declared}` is required");
+            ReportMismatch(t.Type, declared, v.Value.Line, $"{Types.A(t.Type)} where {Types.A(declared)} is required");
         }
 
         Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
@@ -1779,7 +1788,7 @@ public sealed partial class Checker
             }
             else if (!Types.Assignable(value.Type, variable.Type))
             {
-                ReportMismatch(value.Type, variable.Type, a.Value.Line, $"a `{value.Type}` where a `{variable.Type}` is required");
+                ReportMismatch(value.Type, variable.Type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(variable.Type)} is required");
             }
 
             variable.Changed = true;
@@ -1920,7 +1929,7 @@ public sealed partial class Checker
                 }
                 else
                 {
-                    Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is written through a `{current}` without a check (N2)");
+                    Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is written through {Types.A(current)} without a check (N2)");
                 }
 
                 current = Types.Error;
@@ -1967,7 +1976,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, current))
         {
-            ReportMismatch(value.Type, current, a.Value.Line, $"a `{value.Type}` where a `{current}` is required");
+            ReportMismatch(value.Type, current, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(current)} is required");
         }
 
         Assigned(through, current, value); // N7, N9: a path of `data` fields is narrowed by its assignment as a variable is
@@ -2046,7 +2055,7 @@ public sealed partial class Checker
 
         if (f.Second is not null && value is null && !Types.IsError(element))
         {
-            this.Report(ErrorIds.TypeMismatch, f.Collection.Line, $"two names walk the entries of a map, not a `{model.TypeOf(f.Collection).Type}` (C6)");
+            this.Report(ErrorIds.TypeMismatch, f.Collection.Line, $"two names walk the entries of a map, not {Types.A(model.TypeOf(f.Collection).Type)} (C6)");
             element = Types.Error;
         }
 
@@ -2062,7 +2071,7 @@ public sealed partial class Checker
 
         KurzType Report(int line, KurzType type)
         {
-            this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not a `{type}` (C6, C8)");
+            this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not {Types.A(type)} (C6, C8)");
             return Types.Error;
         }
     }
@@ -2125,7 +2134,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, expected))
         {
-            ReportMismatch(value.Type, expected, r.Value.Line, $"a `{value.Type}` is returned where the result is a `{expected}`", "F3"); // E1: at the value's line, as for every value that does not fit
+            ReportMismatch(value.Type, expected, r.Value.Line, $"{Types.A(value.Type)} is returned where the result is {Types.A(expected)}", "F3"); // E1: at the value's line, as for every value that does not fit
         }
     }
 

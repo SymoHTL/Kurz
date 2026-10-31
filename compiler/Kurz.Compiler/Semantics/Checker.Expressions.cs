@@ -59,7 +59,7 @@ public sealed partial class Checker
                 // N6: `null` is a value of nullable types and of pointers only, and has no type of its own that a value without one could take
                 Report(ErrorIds.TypeMismatch, n.Line, expected is null
                     ? "`null` has no type of its own: a nullable type takes it, `string? name = null` (N6)"
-                    : $"`null` where a `{expected}` is required: `null` is a value of nullable types and pointers only (N6, N1)");
+                    : $"`null` where {Types.A(expected)} is required: `null` is a value of nullable types and pointers only (N6, N1)");
                 return Typed.Error;
             case NameExpression n:
                 return CheckName(n, expected);
@@ -97,7 +97,7 @@ public sealed partial class Checker
                 return Typed.Error;
             case LambdaExpression l when expected is CFunctionType:
                 // R17: a lambda takes Kurz's calling convention and captures, so it is no value of a C function type; its body is checked as any lambda's
-                Report(ErrorIds.TypeMismatch, l.Line, $"a lambda where a `{expected}` is required: a value of a C function type is the name of a function of the C calling convention (R17, T1)");
+                Report(ErrorIds.TypeMismatch, l.Line, $"a lambda where {Types.A(expected)} is required: a value of a C function type is the name of a function of the C calling convention (R17, T1)");
                 CheckLambda(l, null, atUnreadType: true);
                 return Typed.Error;
             case LambdaExpression l:
@@ -179,7 +179,7 @@ public sealed partial class Checker
             {
                 if (!Types.Fits(value, target))
                 {
-                    Report(ErrorIds.ConstantOverflow, line, $"{value} does not fit a `{target}` (L10, T6)");
+                    Report(ErrorIds.ConstantOverflow, line, $"{value} does not fit {Types.A(target)} (L10, T6)");
                     return Typed.Error;
                 }
 
@@ -314,7 +314,7 @@ public sealed partial class Checker
         {
             if (!Types.Fits(value, target))
             {
-                Report(ErrorIds.ConstantOverflow, line, $"the duration does not fit a `{target}` (T6, T29)");
+                Report(ErrorIds.ConstantOverflow, line, $"the duration does not fit {Types.A(target)} (T6, T29)");
                 return Typed.Error;
             }
 
@@ -350,7 +350,7 @@ public sealed partial class Checker
                 }
                 else if (!HasText(t.Type))
                 {
-                    Report(ErrorIds.NoText, hole.Expression.Line, $"a `{t.Type}` has no text to put into a string (A4, A7, A10)");
+                    Report(ErrorIds.NoText, hole.Expression.Line, $"{Types.A(t.Type)} has no text to put into a string (A4, A7, A10)");
                 }
                 else if (HoldsRaw(t.Type, []))
                 {
@@ -443,14 +443,14 @@ public sealed partial class Checker
                 return new Typed(new DataType(data, []), new UnitConstant()); // D8: the bare name is the one value
             }
 
-            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here (D2)");
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here (D2; E4)");
             return Typed.Error;
         }
 
         if (enums.ContainsKey(n.Name))
         {
             var example = enums[n.Name].Values is [var first, ..] ? $"`{n.Name}.{first}`" : "as its name, a dot and a value's name";
-            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here: a value of it is written {example} (D12)");
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here: a value of it is written {example} (D12; E4)");
             return Typed.Error;
         }
 
@@ -473,7 +473,7 @@ public sealed partial class Checker
 
         if (expected is CFunctionType && functions.ContainsKey(n.Name))
         {
-            Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` takes Kurz's calling convention, and a `{expected}` is required: a value of a C function type is the name of a function of the C calling convention (R17, T1)");
+            Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` takes Kurz's calling convention, and {Types.A(expected)} is required: a value of a C function type is the name of a function of the C calling convention (R17, T1)");
             return Typed.Error;
         }
 
@@ -485,7 +485,7 @@ public sealed partial class Checker
 
         if (Types.ByName.ContainsKey(n.Name) || n.Name is "List" or "Map" or "Bytes")
         {
-            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here (T10)");
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here (T10; E4)");
             return Typed.Error;
         }
 
@@ -656,10 +656,10 @@ public sealed partial class Checker
             case HandleType { Kind: Handle.TcpListener } when member == "Port":
                 return new Typed(Types.Int); // S9
             case UnionType when Types.NonNull(type) is not null:
-                Report(ErrorIds.NullableUnchecked, line, $"`{member}` is read from a `{type}` without a check (N2)");
+                Report(ErrorIds.NullableUnchecked, line, $"`{member}` is read from {Types.A(type)} without a check (N2)");
                 return Typed.Error;
             case UnionType:
-                Report(ErrorIds.TypeMismatch, line, $"a `{type}` is one of its cases only after a `match` (D9)");
+                Report(ErrorIds.TypeMismatch, line, $"{Types.A(type)} is one of its cases only after a `match` (D9)");
                 return Typed.Error;
             case TypeParameterType { Symbol.HasLimit: true }:
                 NotSupported(line, "a member of a type parameter with a limit (T19)");
@@ -668,7 +668,7 @@ public sealed partial class Checker
                 break;
         }
 
-        Report(ErrorIds.UnknownName, line, $"a `{type}` has no member `{member}` (V10)");
+        Report(ErrorIds.UnknownName, line, $"{Types.A(type)} has no member `{member}` (V10)");
         return Typed.Error;
     }
 
@@ -731,7 +731,7 @@ public sealed partial class Checker
 
         if (target.Type is ListType && !index.IsError && !Types.IsInteger(index.Type))
         {
-            Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not a `{index.Type}` (M9, T2)");
+            Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not {Types.A(index.Type)} (M9, T2)");
         }
 
         if (Unchecked(target, i.Line, "indexed"))
@@ -749,7 +749,7 @@ public sealed partial class Checker
             case ListType l:
                 return new Typed(l.Element);
             default:
-                Report(ErrorIds.TypeMismatch, i.Line, $"a `{target.Type}` is not indexed (M9)");
+                Report(ErrorIds.TypeMismatch, i.Line, $"{Types.A(target.Type)} is not indexed (M9)");
                 return Typed.Error;
         }
     }
@@ -771,7 +771,7 @@ public sealed partial class Checker
         var key = CheckExpression(index, map.Key);
         if (!key.IsError && !Types.Assignable(key.Type, map.Key))
         {
-            ReportMismatch(key.Type, map.Key, index.Line, $"a `{key.Type}` where a key of `{map}`, a `{map.Key}`, is required", "M9");
+            ReportMismatch(key.Type, map.Key, index.Line, $"{Types.A(key.Type)} where a key of `{map}`, {Types.A(map.Key)}, is required", "M9");
         }
     }
 
@@ -793,7 +793,7 @@ public sealed partial class Checker
             case ListType l:
                 return new Typed(l); // an end that is no integer was reported by the range, and the part is still a list (E1)
             default:
-                Report(ErrorIds.TypeMismatch, i.Line, $"a part is taken of a list, not of a `{target.Type}` (M9)");
+                Report(ErrorIds.TypeMismatch, i.Line, $"a part is taken of a list, not of {Types.A(target.Type)} (M9)");
                 return Typed.Error;
         }
     }
@@ -844,7 +844,7 @@ public sealed partial class Checker
                 {
                     // T9 and T23 judge two operands; whether `-` on one `uint` or `ulong` value is an error or wraps no rule says. `-5U` and
                     // `uint u = -1` are no such value: the `-` belongs to the literal (L17)
-                    NotSupported(u.Line, $"`-` on a `{operand.Type}`, which no rule gives a meaning");
+                    NotSupported(u.Line, $"`-` on {Types.A(operand.Type)}, which no rule gives a meaning");
                     return Typed.Error;
                 }
 
@@ -1019,7 +1019,7 @@ public sealed partial class Checker
                     var common = Types.CommonWrapping((PrimitiveType)left.Type, (PrimitiveType)right.Type);
                     if (common is null)
                     {
-                        Report(ErrorIds.SignMix, b.Line, $"`{op}` between a `{left.Type}` and a `{right.Type}` mixes the signedness (T9, T28)");
+                        Report(ErrorIds.SignMix, b.Line, $"`{op}` between {Types.A(left.Type)} and {Types.A(right.Type)} mixes the signedness (T9, T28)");
                         return Typed.Error;
                     }
 
@@ -1067,7 +1067,7 @@ public sealed partial class Checker
                     var common = Types.CommonInteger((PrimitiveType)left.Type, (PrimitiveType)right.Type);
                     if (common is null)
                     {
-                        Report(ErrorIds.SignMix, b.Line, $"`{op}` between a `{left.Type}` and a `{right.Type}` mixes the signedness (T9)");
+                        Report(ErrorIds.SignMix, b.Line, $"`{op}` between {Types.A(left.Type)} and {Types.A(right.Type)} mixes the signedness (T9)");
                         return Typed.Error;
                     }
 
@@ -1128,7 +1128,7 @@ public sealed partial class Checker
                 type = Types.CommonInteger(l, r);
                 if (type is null)
                 {
-                    Report(ErrorIds.SignMix, b.Line, $"`{op}` between a `{l}` and a `{r}` mixes the signedness (T9)");
+                    Report(ErrorIds.SignMix, b.Line, $"`{op}` between {Types.A(l)} and {Types.A(r)} mixes the signedness (T9)");
                     return Typed.Error;
                 }
             }
@@ -1136,7 +1136,7 @@ public sealed partial class Checker
             {
                 if (Types.IsFloating(l) || Types.IsFloating(r))
                 {
-                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `decimal` beside a `{(Types.IsFloating(l) ? l : r)}` (T18, T23)");
+                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `decimal` beside {Types.A((Types.IsFloating(l) ? l : r))} (T18, T23)");
                     return Typed.Error;
                 }
 
@@ -1308,7 +1308,7 @@ public sealed partial class Checker
             {
                 if (Types.CommonInteger(l, r) is null)
                 {
-                    Report(ErrorIds.SignMix, b.Line, $"`{op}` between a `{l}` and a `{r}` mixes the signedness (T9)");
+                    Report(ErrorIds.SignMix, b.Line, $"`{op}` between {Types.A(l)} and {Types.A(r)} mixes the signedness (T9)");
                     return new Typed(Types.Bool);
                 }
 
@@ -1367,7 +1367,7 @@ public sealed partial class Checker
                     Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} (T18, D3, M9)");
                     return new Typed(Types.Bool);
                 case (false, var why):
-                    NotSupported(b.Line, $"`{op}` on a `{left.Type}`: {why} (D3, M9)");
+                    NotSupported(b.Line, $"`{op}` on {Types.A(left.Type)}: {why} (D3, M9)");
                     return new Typed(Types.Bool);
             }
         }
@@ -1423,7 +1423,7 @@ public sealed partial class Checker
         var type = Types.CommonInteger((PrimitiveType)start.Type, (PrimitiveType)end.Type);
         if (type is null)
         {
-            Report(ErrorIds.SignMix, r.Line, $"the ends of a range, a `{start.Type}` and a `{end.Type}`, mix the signedness (C8, T9)");
+            Report(ErrorIds.SignMix, r.Line, $"the ends of a range, {Types.A(start.Type)} and {Types.A(end.Type)}, mix the signedness (C8, T9)");
             return Types.Error;
         }
 
@@ -1463,7 +1463,7 @@ public sealed partial class Checker
                 var written = Resolve(p.Type);
                 if (!Types.IsError(written) && !Types.Same(written, type))
                 {
-                    Report(ErrorIds.TypeMismatch, p.Line, $"the parameter `{p.Name}` is a `{written}` where `{expected}` passes a `{type}` (F11)");
+                    Report(ErrorIds.TypeMismatch, p.Line, $"the parameter `{p.Name}` is {Types.A(written)} where `{expected}` passes {Types.A(type)} (F11)");
                     written = Types.Error; // and the lambda with it, so that the call reports nothing more about it (E1)
                 }
 
@@ -1525,11 +1525,11 @@ public sealed partial class Checker
                     var body = CheckExpression(l.ExpressionBody, result, keepCases: result is UnionType);
                     if (Types.IsVoid(body.Type))
                     {
-                        Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires a `{result}` (F11, T1)");
+                        Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)} (F11, T1)");
                     }
                     else if (!body.IsError && !Types.IsError(result) && !Types.Assignable(body.Type, result))
                     {
-                        ReportMismatch(body.Type, result, l.Line, $"the lambda's result is a `{body.Type}` where `{expected}` requires a `{result}`", "F11");
+                        ReportMismatch(body.Type, result, l.Line, $"the lambda's result is {Types.A(body.Type)} where `{expected}` requires {Types.A(result)}", "F11");
                     }
                 }
             }
@@ -1575,7 +1575,7 @@ public sealed partial class Checker
         {
             if (!Unchecked(target, w.Line, "copied by `with`"))
             {
-                Report(ErrorIds.TypeMismatch, w.Line, $"`with` copies a data value, not a `{target.Type}` (D5)");
+                Report(ErrorIds.TypeMismatch, w.Line, $"`with` copies a data value, not {Types.A(target.Type)} (D5)");
             }
 
             foreach (var a in w.Assignments)
@@ -1600,7 +1600,7 @@ public sealed partial class Checker
             var value = CheckExpression(a.Value, type);
             if (!value.IsError && !Types.IsError(type) && !Types.Assignable(value.Type, type))
             {
-                ReportMismatch(value.Type, type, a.Line, $"a `{value.Type}` where the field `{a.Field}` is a `{type}`", "D5");
+                ReportMismatch(value.Type, type, a.Line, $"{Types.A(value.Type)} where the field `{a.Field}` is {Types.A(type)}", "D5");
             }
         }
 

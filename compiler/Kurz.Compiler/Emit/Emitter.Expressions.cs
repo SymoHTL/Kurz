@@ -349,7 +349,7 @@ public sealed partial class Emitter
                 {
                     if (!Types.IsNumber(type))
                     {
-                        throw Unsupported(b.Line, $"`{op}` on a `{type}`");
+                        throw Unsupported(b.Line, $"`{op}` on {Types.A(type)}");
                     }
 
                     var l = Convert(EmitExpression(b.Left), leftType, type, b.Line);
@@ -559,7 +559,7 @@ public sealed partial class Emitter
 
         if (Types.IsInteger(leftType) && Types.IsInteger(rightType))
         {
-            var common = Types.CommonInteger((PrimitiveType)leftType, (PrimitiveType)rightType) ?? throw Unsupported(line, $"a comparison of a `{leftType}` and a `{rightType}`");
+            var common = Types.CommonInteger((PrimitiveType)leftType, (PrimitiveType)rightType) ?? throw Unsupported(line, $"a comparison of {Types.A(leftType)} and {Types.A(rightType)}");
             var l = Convert(left, leftType, common, line);
             var r = Convert(right, rightType, common, line);
             return fn.Value($"icmp {Condition(op, Types.IsSigned(common))} {Ir(common)} {l}, {r}");
@@ -594,7 +594,7 @@ public sealed partial class Emitter
 
         if (op is not (TokenKind.EqualEqual or TokenKind.NotEqual))
         {
-            throw Unsupported(line, $"`{op}` on a `{leftType}`");
+            throw Unsupported(line, $"`{op}` on {Types.A(leftType)}");
         }
 
         // the two sides as the type the other stands in: a derived value beside its base compares as the base, and is never equal to one (D15)
@@ -677,7 +677,7 @@ public sealed partial class Emitter
             return MakeUnion(union, c, Convert(value, from, c, line));
         }
 
-        throw Unsupported(line, $"a `{from}` where a `{to}` is required");
+        throw Unsupported(line, $"{Types.A(from)} where {Types.A(to)} is required");
     }
 
     /// <summary>The bits of an integer in another width: extended by its own sign, or cut.</summary>
@@ -803,7 +803,7 @@ public sealed partial class Emitter
             case MapType map:
                 return MapText(value, map, line);
             default:
-                throw Unsupported(line, $"the text of a `{type}`");
+                throw Unsupported(line, $"the text of {Types.A(type)}");
         }
     }
 }

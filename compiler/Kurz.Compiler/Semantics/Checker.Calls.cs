@@ -283,7 +283,7 @@ public sealed partial class Checker
 
         if (Types.NonNull(type) is FunctionType or CFunctionType)
         {
-            Report(ErrorIds.NullableUnchecked, c.Line, $"a `{type}` is called without a check (N2)");
+            Report(ErrorIds.NullableUnchecked, c.Line, $"{Types.A(type)} is called without a check (N2)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -291,7 +291,7 @@ public sealed partial class Checker
         if (type is CFunctionType cf)
         {
             RequireRaw(c.Line, "a call through a value of a C function type", "R17");
-            if (RefusesTypeArguments(c, $"a `{type}`"))
+            if (RefusesTypeArguments(c, $"{Types.A(type)}"))
             {
                 return Typed.Error;
             }
@@ -302,12 +302,12 @@ public sealed partial class Checker
 
         if (type is not FunctionType f)
         {
-            Report(ErrorIds.TypeMismatch, c.Line, $"a `{type}` is no function and cannot be called (F11)");
+            Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(type)} is no function and cannot be called (F11)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
 
-        if (RefusesTypeArguments(c, $"a `{type}`"))
+        if (RefusesTypeArguments(c, $"{Types.A(type)}"))
         {
             return Typed.Error;
         }
@@ -346,7 +346,7 @@ public sealed partial class Checker
         }
         else if (!t.IsError && !HasText(t.Type))
         {
-            Report(ErrorIds.NoText, c.Line, $"a `{t.Type}` has no text to print (A4, A7, A10)");
+            Report(ErrorIds.NoText, c.Line, $"{Types.A(t.Type)} has no text to print (A4, A7, A10)");
         }
         else if (HoldsRaw(t.Type, []))
         {
@@ -362,7 +362,7 @@ public sealed partial class Checker
     {
         if (!Types.IsNumber(target) && !Types.IsTime(target))
         {
-            NotSupported(c.Line, $"a conversion to `{target}`, which is no number type and no time type (T10, T29)");
+            NotSupported(c.Line, $"a conversion to `{target}`, a type that is neither a number type nor a time type (T10, T29)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -428,13 +428,13 @@ public sealed partial class Checker
         {
             if (Types.IsDuration(source.Type) != Types.IsDuration(target))
             {
-                Report(ErrorIds.TypeMismatch, c.Line, $"a `{source.Type}` is no `{target}` (T13)");
+                Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is no `{target}` (T13)");
                 return Typed.Error;
             }
 
             if (source.Constant is IntegerConstant k && !Types.Fits(k.Value, target))
             {
-                Report(ErrorIds.ConstantOverflow, c.Line, $"the constant does not fit a `{target}` (T6, T29)");
+                Report(ErrorIds.ConstantOverflow, c.Line, $"the constant does not fit {Types.A(target)} (T6, T29)");
                 return Typed.Error;
             }
 
@@ -446,7 +446,7 @@ public sealed partial class Checker
             return new Typed(Types.Long); // R14: the address a pointer holds
         }
 
-        Report(ErrorIds.TypeMismatch, c.Line, $"a `{source.Type}` is not converted to a `{target}` (T10, T13)");
+        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, T13)");
         return Typed.Error;
     }
 
@@ -459,7 +459,7 @@ public sealed partial class Checker
                 {
                     if (!Types.Fits(k.Value, target))
                     {
-                        Report(ErrorIds.ConstantOverflow, line, $"{k.Value} does not fit a `{target}` (T6)");
+                        Report(ErrorIds.ConstantOverflow, line, $"{k.Value} does not fit {Types.A(target)} (T6)");
                         return Typed.Error;
                     }
 
@@ -490,7 +490,7 @@ public sealed partial class Checker
                     var truncated = new BigInteger(Math.Truncate(r.Value));
                     if (!Types.Fits(truncated, target))
                     {
-                        Report(ErrorIds.ConstantOverflow, line, $"{truncated} does not fit a `{target}` (T6)");
+                        Report(ErrorIds.ConstantOverflow, line, $"{truncated} does not fit {Types.A(target)} (T6)");
                         return Typed.Error;
                     }
 
@@ -517,7 +517,7 @@ public sealed partial class Checker
                     var truncated = new BigInteger(decimal.Truncate(m.Value));
                     if (!Types.Fits(truncated, target))
                     {
-                        Report(ErrorIds.ConstantOverflow, line, $"{truncated} does not fit a `{target}` (T6)");
+                        Report(ErrorIds.ConstantOverflow, line, $"{truncated} does not fit {Types.A(target)} (T6)");
                         return Typed.Error;
                     }
 
@@ -657,17 +657,18 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        var element = Resolve(c.TypeArguments[0]);
+        if (Types.IsError(element))
+        {
+            CheckArgumentsLoosely(c);
+            return Typed.Error; // a type it cannot find comes first, as rustc's E0412 and C#'s CS0246, and nothing more (E1)
+        }
+
         if (c.Arguments.Count != 0)
         {
             Report(ErrorIds.ArgumentMismatch, c.Line, "`List<T>()` takes no arguments (M9)");
             CheckArgumentsLoosely(c);
             return Typed.Error; // after the call's own error nothing more (E1)
-        }
-
-        var element = Resolve(c.TypeArguments[0]);
-        if (Types.IsError(element))
-        {
-            return Typed.Error;
         }
 
         var list = new ListType(element);
@@ -719,16 +720,22 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        var key = Resolve(c.TypeArguments[0]);
+        var value = Resolve(c.TypeArguments[1]);
+        if (Types.IsError(key) || Types.IsError(value))
+        {
+            CheckArgumentsLoosely(c);
+            return Typed.Error; // a type it cannot find comes first, as for `List<T>()` above, and nothing more (E1)
+        }
+
         if (c.Arguments.Count != 0)
         {
             Report(ErrorIds.ArgumentMismatch, c.Line, "`Map<K, V>()` takes no arguments (M9)");
             CheckArgumentsLoosely(c);
-            return Typed.Error; // after the call's own error nothing more (E1)
+            return Typed.Error; // after the call's own error nothing more (E1), a key no map takes among it
         }
 
-        var key = Resolve(c.TypeArguments[0]);
-        var value = Resolve(c.TypeArguments[1]);
-        var map = Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, c.Line);
+        var map = MapOf(key, value, c.Line);
         if (Types.IsError(map))
         {
             return Typed.Error;
@@ -792,7 +799,7 @@ public sealed partial class Checker
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || Types.IsFloating(p) || p.Kind is Primitive.String or Primitive.Char or Primitive.Bool:
                 return null;
             case PrimitiveType p:
-                return (false, $"the hash of a `{p}`, which reads 1.5 and 1.50 as one value, is not built");
+                return (false, $"the hash of {Types.A(p)}, which reads 1.5 and 1.50 as one value, is not built");
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or HandleType or HasherType or CFunctionType or VoidType:
@@ -836,7 +843,7 @@ public sealed partial class Checker
                 }
 
             default:
-                return (false, $"a `{type}` is no key the checker reads");
+                return (false, $"{Types.A(type)} is no key the checker reads");
         }
     }
 
@@ -940,7 +947,7 @@ public sealed partial class Checker
                 }
 
             default:
-                return (false, $"`==` on a `{type}` is not read");
+                return (false, $"`==` on {Types.A(type)} is not read");
         }
     }
 
@@ -972,7 +979,7 @@ public sealed partial class Checker
             case FunctionType or CFunctionType or HandleType or HasherType or VoidType:
                 return (true, $"`==` takes no `{item}`");
             default:
-                return (false, $"`==` on a `{item}` is not read");
+                return (false, $"`==` on {Types.A(item)} is not read");
         }
     }
 
@@ -1927,17 +1934,17 @@ public sealed partial class Checker
         if (pre.Lambda is null && bound.Slots[bound.Binding[index]].Mut && Types.Assignable(Types.NonNull(pre.Typed.Type) ?? pre.Typed.Type, parameter))
         {
             // a nullable variable among them, which no check makes a variable of the parameter's type (N7)
-            Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"a `{pre.Typed.Type}` passed as `mut` where a `mut {parameter}` is required: a `mut` parameter takes a variable of its own type, since the callee writes a `{parameter}` back into it (M7, T1)");
+            Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"{Types.A(pre.Typed.Type)} passed as `mut` where a `mut {parameter}` is required: a `mut` parameter takes a variable of its own type, since the callee writes {Types.A(parameter)} back into it (M7, T1)");
             return;
         }
 
         if (pre.Lambda is not null)
         {
-            Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"a lambda where a `{parameter}` is required (T1)");
+            Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"a lambda where {Types.A(parameter)} is required (T1)");
             return;
         }
 
-        ReportMismatch(pre.Typed.Type, parameter, pre.Argument.Line, $"a `{pre.Typed.Type}` where a `{parameter}` is required");
+        ReportMismatch(pre.Typed.Type, parameter, pre.Argument.Line, $"{Types.A(pre.Typed.Type)} where {Types.A(parameter)} is required");
     }
 
     /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>, each default after its parameter (<c>int b = 0</c>).</summary>
@@ -1985,12 +1992,12 @@ public sealed partial class Checker
         var pre = pres[index];
         if (pre.Lambda is not null)
         {
-            return $"argument {index + 1}, a lambda, does not fit a `{parameter}` (F11)";
+            return $"argument {index + 1}, a lambda, does not fit {Types.A(parameter)} (F11)";
         }
 
         if (candidate.Slots[candidate.Binding[index]].Mut && Types.Assignable(pre.Typed.Type, parameter))
         {
-            return $"argument {index + 1}, a `{pre.Typed.Type}`, is no variable of the type `{parameter}` that a `mut` parameter writes back into (M7)";
+            return $"argument {index + 1}, {Types.A(pre.Typed.Type)}, is no variable of the type `{parameter}` that a `mut` parameter writes back into (M7)";
         }
 
         var why = Types.MismatchId(pre.Typed.Type, parameter) switch
@@ -2000,7 +2007,7 @@ public sealed partial class Checker
             ErrorIds.NullableUnchecked => "a nullable value without a check",
             _ => "a value of another type",
         };
-        return $"argument {index + 1} is a `{pre.Typed.Type}`{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where a `{parameter}` is required: {why} ({Types.MismatchRule(pre.Typed.Type, parameter)})";
+        return $"argument {index + 1} is {Types.A(pre.Typed.Type)}{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where {Types.A(parameter)} is required: {why} ({Types.MismatchRule(pre.Typed.Type, parameter)})";
     }
 
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7).</summary>
@@ -2023,7 +2030,7 @@ public sealed partial class Checker
                 var typed = CheckExpression(pre.Lambda, type);
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
-                    Report(ErrorIds.TypeMismatch, a.Line, $"a `{typed.Type}` where a `{type}` is required (F11, T1)");
+                    Report(ErrorIds.TypeMismatch, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required (F11, T1)");
                 }
             }
             else if (pre.BySlot)
@@ -2033,7 +2040,7 @@ public sealed partial class Checker
                 var typed = CheckExpression(a.Value, Unwrap(a.Value) is NullLiteral && Types.IsError(type) && !Types.IsError(slot.Type) ? null : type);
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
-                    ReportMismatch(typed.Type, type, a.Line, $"a `{typed.Type}` where a `{type}` is required");
+                    ReportMismatch(typed.Type, type, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required");
                 }
             }
             else if (pre.ListLiteral && pre.Typed.IsError && Types.IsError(type))
@@ -2048,7 +2055,7 @@ public sealed partial class Checker
                 var typed = CheckExpression(a.Value, type);
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
-                    ReportMismatch(typed.Type, type, a.Line, $"a `{typed.Type}` where a `{type}` is required");
+                    ReportMismatch(typed.Type, type, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required");
                 }
             }
             else

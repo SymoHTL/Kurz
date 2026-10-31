@@ -84,7 +84,7 @@ public sealed partial class Checker
         };
         if (method is not { } f)
         {
-            Report(ErrorIds.UnknownName, m.Line, $"a `{hasher}` has no member `{m.Member}` (H3, V10)");
+            Report(ErrorIds.UnknownName, m.Line, $"{Types.A(hasher)} has no member `{m.Member}` (H3, V10)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }

@@ -128,7 +128,7 @@ public sealed partial class Checker
 
                         if (!cases.Any(c => IsCaseOf(value.Type, c)))
                         {
-                            Report(ErrorIds.TypeMismatch, arm.Line, $"a `{value.Type}` is no value of `{subjectType}` (C9, T1)");
+                            Report(ErrorIds.TypeMismatch, arm.Line, $"{Types.A(value.Type)} is no value of `{subjectType}` (C9, T1)");
                             armWrong = true;
                         }
                         else if (covered.Any(c => IsCaseOf(value.Type, c)))
@@ -273,7 +273,7 @@ public sealed partial class Checker
             {
                 if (!Types.Assignable(type, expected))
                 {
-                    ReportMismatch(type, expected, armLine, $"the arm is a `{type}` where a `{expected}` is required", "C9");
+                    ReportMismatch(type, expected, armLine, $"the arm is {Types.A(type)} where {Types.A(expected)} is required", "C9");
                 }
             }
 
@@ -285,7 +285,7 @@ public sealed partial class Checker
         {
             if (!Types.Same(type, first))
             {
-                Report(ErrorIds.TypeMismatch, armLine, $"the arm is a `{type}` where the arms above are `{first}`: the arms of a `match` used as a value have one type (C9)");
+                Report(ErrorIds.TypeMismatch, armLine, $"the arm is {Types.A(type)} where the arms above are `{first}`: the arms of a `match` used as a value have one type (C9)");
                 return Types.Error;
             }
         }
@@ -463,7 +463,7 @@ public sealed partial class Checker
                     }
                     else if (!t.IsError && !Types.IsError(success) && !Types.Assignable(t.Type, success))
                     {
-                        ReportMismatch(t.Type, success, es.Line, $"the arm recovers with a `{t.Type}` where the success is a `{success}`", "O5");
+                        ReportMismatch(t.Type, success, es.Line, $"the arm recovers with {Types.A(t.Type)} where the success is {Types.A(success)}", "O5");
                     }
 
                     break;

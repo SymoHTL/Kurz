@@ -194,8 +194,8 @@ changes in the same pull request.
   convention test reads the compiler's sources,
   `CheckerTests.The_checker_and_the_emitter_read_a_null_arm_through_one_test` (gate
   `compiler-tests`), red where a line that tests a `null` arm against a subject's cases does not
-  go through `Types.NullArmReachesNothing`; the other convention is over the tools themselves:
-  every decision tool has a self-test and a recorded red proof.
+  go through `Types.NullArmReachesNothing`. Beside it stands a convention over the tools, not over
+  product code: every decision tool has a self-test and a recorded red proof.
 - **A scheduled job that asserts the merge settings.** The assertion runs with every gates run
   instead. The bypass list and the auto-merge switch need a token the job does not have; the job
   prints NOT CHECKED for both and the gate ends PARTLY, as "Gates" above describes. A local run

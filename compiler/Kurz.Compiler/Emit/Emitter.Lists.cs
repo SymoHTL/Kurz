@@ -342,7 +342,7 @@ public sealed partial class Emitter
                 });
                 break;
             default:
-                throw new InvalidOperationException($"a `{type}` holds no list");
+                throw new InvalidOperationException($"{Types.A(type)} holds no list");
         }
     }
 

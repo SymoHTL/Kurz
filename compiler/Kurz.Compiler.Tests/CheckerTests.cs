@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using Kurz.Compiler.Text;
@@ -1772,7 +1773,7 @@ public sealed class CheckerTests
         Clean("extern \"C\" {\n    int abs(int n)\n}\n\nextern \"C\" (int) => int f = abs\nraw {\n    print(f(-3))\n}", grants: "raw native");
         Clean("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nvoid Run(extern \"C\" (long) => long f) {\n}\n\nRun(Twice)", grants: "native");
         Assert.Equal([(ErrorIds.RawRequired, 6)], Errors("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\nextern \"C\" (long) => long f = Twice\nprint(f(4))", grants: "native"));
-        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\n(extern \"C\" (long) => long)? Pick() => Twice\n\nf = Pick()\nraw {\n    print(f(4))\n}", grants: "raw native")); // N2: its nullable form is called after a check
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("extern \"C\" long Twice(long x) {\n    return x * 2\n}\n\n(extern \"C\" (long) => long)? Pick() => Twice\n\nf = Pick()\nraw {\n    print(f(4))\n}", grants: "raw native")); // N2: its nullable form is called with no check (R17)
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("void Run(extern \"C\" (long) => long f) {\n}\n\nRun((long x) => x * 2)", grants: "native"));
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("long Twice(long x) => x * 2\n\nvoid Run(extern \"C\" (long) => long f) {\n}\n\nRun(Twice)", grants: "native"));
         Assert.Equal(["1: a data type in C's layout, `extern \"C\" data` (R17)"], NotSupported("extern \"C\" data Point(int X, int Y)\nprint(Point(1, 2).X)", grants: "native"));
@@ -2240,7 +2241,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("m = Map()\nprint(m)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("m = Map<string, int>(1)\nprint(m)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("m = Map<Map<int, int>, int>(1)\nprint(m)")); // E1: no key error after the call's own
-        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("xs = List<Nope>(1)\nprint(xs)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("xs = List<Nope>(1)\nprint(xs)")); // a type it cannot find comes first, and nothing more (E1)
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("m = Map<Nope, int>(1)\nprint(m)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(nope?[0..<1])")); // a part after `?[` on a target that failed: its error alone (E1)
         Assert.Equal([(ErrorIds.NoText, 4)], Errors("data Rule(() => int Step)\n\nm = Map<string, Rule>()\nprint(m)")); // A7: the text of its values
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("a = Map<string, int>()\nb = Map<string, int>()\nprint(a == b)")); // T18, M9: a map takes no `==`
         Assert.Equal([(ErrorIds.StaticState, 1)], Errors("thread static mut Map<string, int> m = Map<string, int>()\nprint(1)", grants: "raw")); // F12
@@ -2668,28 +2671,66 @@ public sealed class CheckerTests
     }
 
     // E2 leaves a message free: it cites N2 for a nullable value a check would make fit, T7 for a narrowing of an integer and T29 of a
-    // time, T23 for the other signedness and T1 for the rest, after the rule of the place where the place has one
+    // time, T23 for the other signedness and T1 for the rest, after the rule of the place where the place has one; a row holds the
+    // citations, the part the compiler decides, and leaves the wording free
     [Theory]
-    [InlineData("string? Find() => null\n\nstring s = Find()\nprint(s)", "a `string?` where a `string` is required (N2)")]
-    [InlineData("long l = 1\nint i = l\nprint(i)", "a `long` where a `int` is required (T7)")]
-    [InlineData("longduration l = 1s\nduration d = l\nprint(d)", "a `longduration` where a `duration` is required (T29)")]
-    [InlineData("int i = 1\nuint u = i\nprint(u)", "a `int` where a `uint` is required (T23)")]
-    [InlineData("int i = \"a\"\nprint(i)", "a `string` where a `int` is required (T1)")]
-    [InlineData("string? Find() => null\n\nstring Name() => Find()\n\nprint(Name())", "the body is a `string?` where the result is a `string` (F2, N2)")]
+    [InlineData("string? Find() => null\n\nstring s = Find()\nprint(s)", "(N2)")]
+    [InlineData("long l = 1\nint i = l\nprint(i)", "(T7)")]
+    [InlineData("longduration l = 1s\nduration d = l\nprint(d)", "(T29)")]
+    [InlineData("int i = 1\nuint u = i\nprint(u)", "(T23)")]
+    [InlineData("int i = \"a\"\nprint(i)", "(T1)")]
+    [InlineData("string? Find() => null\n\nstring Name() => Find()\n\nprint(Name())", "(F2, N2)")]
     [InlineData(
         "string? Find() => null\n\nvoid Show(string s) {\n    print(s)\n}\n\nvoid Show(bool b) {\n    print(b)\n}\n\nShow(Find())",
-        "the call fits none of the functions named `Show` (F13):\n  `void Show(string s)` at line 3: argument 1 is a `string?` where a `string` is required: a nullable value without a check (N2)\n  `void Show(bool b)` at line 7: argument 1 is a `string?` where a `bool` is required: a value of another type (T1)")]
-    public void A_value_that_does_not_fit_cites_the_rule_that_gives_its_id(string program, string message) =>
-        Assert.Equal(message, Assert.Single(Check(program).Diagnostics.Items).Message);
+        "(F13)", "`void Show(string s)` at line 3: argument 1 is a `string?` where a `string` is required: a nullable value without a check (N2)",
+        "`void Show(bool b)` at line 7: argument 1 is a `string?` where a `bool` is required: a value of another type (T1)")]
+    public void A_value_that_does_not_fit_cites_the_rule_that_gives_its_id(string program, params string[] cited)
+    {
+        var message = Assert.Single(Check(program).Diagnostics.Items).Message;
+        Assert.All(cited, c => Assert.Contains(c, message, StringComparison.Ordinal));
+        Assert.Equal(cited.Length, Regex.Count(message, @"\(([A-Z]\d+)(, [A-Z]\d+)*\)")); // and no rule beside them
+    }
 
-    // D12: a value of the enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not
+    // a type's name with its article: "an" before a vowel letter, "a" before a `u` (Types.A)
+    [Fact]
+    public void A_text_writes_a_type_s_name_with_its_article()
+    {
+        Assert.Contains("a `long` where an `int` is required", Assert.Single(Check("long l = 1\nint i = l\nprint(i)").Diagnostics.Items).Message, StringComparison.Ordinal);
+        Assert.Contains("an `int` where a `uint` is required", Assert.Single(Check("int i = 1\nuint u = i\nprint(u)").Diagnostics.Items).Message, StringComparison.Ordinal);
+        Assert.Contains("an `Item` where an `int` is required", Assert.Single(Check("data Item(int N)\n\nint i = Item(1)\nprint(i)").Diagnostics.Items).Message, StringComparison.Ordinal);
+    }
+
+    // each letter `Types.A` reads: the vowels but `u`, small and capital, take "an"; `u`, the other letters and an empty name "a"
     [Theory]
-    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan)", "`Plan` is a type, and no value stands here: a value of it is written `Plan.Free` (D12)")]
-    [InlineData(
-        "int Count() => args.Count\n\nprint(Count())",
-        "`args` is seen by the top-level code alone: a function takes it as a parameter, or reads `Environment.Args()`, the list with the program's name first (S13, V10)")]
-    public void The_text_of_an_enum_s_name_or_of_args_where_neither_stands_shows_what_does(string program, string message) =>
-        Assert.Equal(message, Assert.Single(Check(program).Diagnostics.Items).Message);
+    [InlineData("int", "an `int`")]
+    [InlineData("apple", "an `apple`")]
+    [InlineData("elem", "an `elem`")]
+    [InlineData("object", "an `object`")]
+    [InlineData("IoError", "an `IoError`")]
+    [InlineData("Array", "an `Array`")]
+    [InlineData("Entry", "an `Entry`")]
+    [InlineData("Order", "an `Order`")]
+    [InlineData("uint", "a `uint`")]
+    [InlineData("User", "a `User`")]
+    [InlineData("string", "a `string`")]
+    [InlineData("", "a ``")]
+    public void The_article_is_an_before_a_vowel_letter_but_u(string name, string written) =>
+        Assert.Equal(written, Types.A(name));
+
+    // a type's name where a value stands cites the rule of the type, D2, D12 or T10, and E4 for its `syntax` id; D12: a value of the
+    // enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not; a row holds the
+    // citations and leaves the wording free (E2)
+    [Theory]
+    [InlineData("data User(string Name)\n\nprint(User)", "`User`", "(D2; E4)")]
+    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan)", "`Plan.Free`", "(D12; E4)")]
+    [InlineData("print(List)", "`List`", "(T10; E4)")]
+    [InlineData("int Count() => args.Count\n\nprint(Count())", "`Environment.Args()`", "(S13, V10)")]
+    public void The_text_of_a_type_s_name_or_of_args_where_no_value_of_it_stands_cites_its_rules(string program, string shown, string cited)
+    {
+        var message = Assert.Single(Check(program).Diagnostics.Items).Message;
+        Assert.Contains(shown, message, StringComparison.Ordinal);
+        Assert.EndsWith(cited, message, StringComparison.Ordinal);
+    }
 
     // ---- what the checker does not read ---------------------------------------------------------------------
 
@@ -2723,7 +2764,7 @@ public sealed class CheckerTests
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
-    [InlineData("print(string(1))", "1: a conversion to `string`, which is no number type and no time type (T10, T29)")]
+    [InlineData("print(string(1))", "1: a conversion to `string`, a type that is neither a number type nor a time type (T10, T29)")]
     [InlineData("data Box(List<int> Items)\n\nmut bs = List<Box>()\nbs[0].Items[0] = 1", "4: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]
     [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items[0] = 1\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data P(int X)\n\nmut ps = List<P>()\nps[0].X = 1", "4: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]
