@@ -557,11 +557,14 @@ public static class Types
         return ErrorIds.TypeMismatch;
     }
 
-    /// <summary>The rule a message of the id <see cref="MismatchId"/> gives cites: N2, T7, T23 or T1, as its summary names them.</summary>
+    /// <summary>
+    /// The rule a message of the id <see cref="MismatchId"/> gives cites, as its summary names them: N2, T7 for an integer type and T29
+    /// for a time type, T23 or T1.
+    /// </summary>
     public static string MismatchRule(KurzType from, KurzType to) => MismatchId(from, to) switch
     {
         ErrorIds.NullableUnchecked => "N2",
-        ErrorIds.NarrowingConversion => "T7",
+        ErrorIds.NarrowingConversion => IsInteger(from) ? "T7" : "T29",
         ErrorIds.SignMix => "T23",
         _ => "T1",
     };

@@ -222,7 +222,7 @@ command then removes the place, its other files first and the lock file last, an
 program's exit code, on Linux 128 and the signal's number where a signal ended the program, 130 for
 Ctrl-C. At its start, before the build, it removes every place whose lock it can take and whose lock
 file holds the mark and nothing else, a place a run cut short left, and leaves a place whose lock
-file is missing or holds anything else alone. A removal that fails is passed over without a word
+file is missing or holds anything else alone, and a link among the places, which it never follows. A removal that fails is passed over without a word
 (the owner, 2026-10-29, "Silent"). A program refused, or a source not read, makes no place and ends
 the command with 1, as do the failures of `build` above that a run shares and these, in the owner's
 words (the owner, 2026-10-29, "Keep these words"), the first on Linux and the second on Windows:

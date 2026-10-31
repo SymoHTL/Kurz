@@ -2667,33 +2667,29 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 20)], Errors(Size.Replace("            return 0\n        }", "            5\n        }", StringComparison.Ordinal)));
     }
 
-    [Fact]
-    public void A_value_that_does_not_fit_cites_the_rule_that_gives_its_id()
-    {
-        // E2 leaves a message free: it cites N2 for a nullable value a check would make fit, T7 for a narrowing, T23 for the other
-        // signedness and T1 for the rest, after the rule of the place where the place has one
-        static string Message(string program) => Assert.Single(Check(program).Diagnostics.Items).Message;
-        Assert.Equal("a `string?` where a `string` is required (N2)", Message("string? Find() => null\n\nstring s = Find()\nprint(s)"));
-        Assert.Equal("a `long` where a `int` is required (T7)", Message("long l = 1\nint i = l\nprint(i)"));
-        Assert.Equal("a `int` where a `uint` is required (T23)", Message("int i = 1\nuint u = i\nprint(u)"));
-        Assert.Equal("a `string` where a `int` is required (T1)", Message("int i = \"a\"\nprint(i)"));
-        Assert.Equal("the body is a `string?` where the result is a `string` (F2, N2)", Message("string? Find() => null\n\nstring Name() => Find()\n\nprint(Name())"));
-        Assert.Contains(
-            "argument 1 is a `string?` where a `string` is required: a nullable value without a check (N2)",
-            Message("string? Find() => null\n\nvoid Show(string s) {\n    print(s)\n}\n\nvoid Show(bool b) {\n    print(b)\n}\n\nShow(Find())"),
-            StringComparison.Ordinal);
-    }
+    // E2 leaves a message free: it cites N2 for a nullable value a check would make fit, T7 for a narrowing of an integer and T29 of a
+    // time, T23 for the other signedness and T1 for the rest, after the rule of the place where the place has one
+    [Theory]
+    [InlineData("string? Find() => null\n\nstring s = Find()\nprint(s)", "a `string?` where a `string` is required (N2)")]
+    [InlineData("long l = 1\nint i = l\nprint(i)", "a `long` where a `int` is required (T7)")]
+    [InlineData("longduration l = 1s\nduration d = l\nprint(d)", "a `longduration` where a `duration` is required (T29)")]
+    [InlineData("int i = 1\nuint u = i\nprint(u)", "a `int` where a `uint` is required (T23)")]
+    [InlineData("int i = \"a\"\nprint(i)", "a `string` where a `int` is required (T1)")]
+    [InlineData("string? Find() => null\n\nstring Name() => Find()\n\nprint(Name())", "the body is a `string?` where the result is a `string` (F2, N2)")]
+    [InlineData(
+        "string? Find() => null\n\nvoid Show(string s) {\n    print(s)\n}\n\nvoid Show(bool b) {\n    print(b)\n}\n\nShow(Find())",
+        "the call fits none of the functions named `Show` (F13):\n  `void Show(string s)` at line 3: argument 1 is a `string?` where a `string` is required: a nullable value without a check (N2)\n  `void Show(bool b)` at line 7: argument 1 is a `string?` where a `bool` is required: a value of another type (T1)")]
+    public void A_value_that_does_not_fit_cites_the_rule_that_gives_its_id(string program, string message) =>
+        Assert.Equal(message, Assert.Single(Check(program).Diagnostics.Items).Message);
 
-    [Fact]
-    public void The_text_of_an_enum_s_name_or_of_args_where_neither_stands_shows_what_does()
-    {
-        // D12: a value of the enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not
-        static string Message(string program) => Assert.Single(Check(program).Diagnostics.Items).Message;
-        Assert.Equal("`Plan` is a type, and no value stands here: a value of it is written `Plan.Free` (D12)", Message("enum Plan { Free, Pro }\n\nprint(Plan)"));
-        Assert.Equal(
-            "`args` is seen by the top-level code alone: a function takes it as a parameter, or reads `Environment.Args()`, the list with the program's name first (S13, V10)",
-            Message("int Count() => args.Count\n\nprint(Count())"));
-    }
+    // D12: a value of the enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not
+    [Theory]
+    [InlineData("enum Plan { Free, Pro }\n\nprint(Plan)", "`Plan` is a type, and no value stands here: a value of it is written `Plan.Free` (D12)")]
+    [InlineData(
+        "int Count() => args.Count\n\nprint(Count())",
+        "`args` is seen by the top-level code alone: a function takes it as a parameter, or reads `Environment.Args()`, the list with the program's name first (S13, V10)")]
+    public void The_text_of_an_enum_s_name_or_of_args_where_neither_stands_shows_what_does(string program, string message) =>
+        Assert.Equal(message, Assert.Single(Check(program).Diagnostics.Items).Message);
 
     // ---- what the checker does not read ---------------------------------------------------------------------
 
