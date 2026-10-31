@@ -1,0 +1,11 @@
+diff --git a/a.md b/a.md
+index 94c99a3..e95b1bb 100644
+--- a/a.md
++++ b/a.md
+@@ -2 +2 @@ line 1
+-line 2
++line 2, changed
+@@ -4 +4,2 @@ line 3
+-line 4
++line 4, changed
++line 4b, added

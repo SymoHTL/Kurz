@@ -93,6 +93,11 @@ The CLI's answers are kept as the CLI printed them, on one line.)
                         without a quoted side, a deleted file with a quoted path
   line-break-path-diff.txt
                         the same, for one added file whose name holds a line break
+  long-line-diff.txt    git diff, with the options the reviewer passes, of `kurz-design.md` between
+                        0f524ba and its parent (2026-10-31): one bullet of 10591 characters that
+                        became one of 11972, whose last sentences changed
+  no-context-diff.txt   git diff with --unified=0 in a scratch repository (2026-10-31): two hunks
+                        that end in a change, one of them with two added lines
   gh-rate-limit-refusal.txt
                         what the gh CLI printed when the forge refused a comment for its secondary
                         rate limit: one line from the log of the first review of pull request 8
