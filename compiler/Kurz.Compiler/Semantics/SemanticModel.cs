@@ -130,6 +130,33 @@ public enum CallKind
 
     /// <summary><c>Environment.Variable(name)</c> (S14).</summary>
     EnvironmentVariable,
+
+    /// <summary><c>Sha256.Hash(bytes)</c>, <c>Md5.Hash(bytes)</c> or <c>Crc32.Hash(bytes)</c> (H1); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
+    Hash,
+
+    /// <summary><c>Hmac.Sha256(key, message)</c> (H1).</summary>
+    HmacHash,
+
+    /// <summary><c>Hex.Encode(bytes)</c> (H2).</summary>
+    HexEncode,
+
+    /// <summary><c>Sha256.New()</c>, <c>Md5.New()</c> or <c>Crc32.New()</c> (H3); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
+    HasherNew,
+
+    /// <summary><c>Hmac.NewSha256(key)</c> (H3).</summary>
+    HmacNew,
+
+    /// <summary>A hasher's <c>Update(bytes)</c> (H3); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
+    HasherUpdate,
+
+    /// <summary>A hasher's <c>Finish()</c> (H3); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
+    HasherFinish,
+
+    /// <summary><c>Hmac.VerifySha256(key, message, tag)</c> (H4).</summary>
+    HmacVerify,
+
+    /// <summary><c>FixedTime.Equal(a, b)</c> (H4).</summary>
+    FixedTimeEqual,
 }
 
 /// <summary>

@@ -1,0 +1,20 @@
+// expect: output
+// | ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+// | a52d159f262b2c6ddb724a61840befc36eb30c88877a4030b65cbe86298449c9
+// | Sha256
+// | Crc32 Hmac
+// | [Md5]
+// rules: H6
+
+mut h = Sha256.New()
+h.Update("ab".Bytes)
+mut other = h
+h.Update("c".Bytes)
+other.Update("d".Bytes)
+print(Hex.Encode(h.Finish()))
+print(Hex.Encode(other.Finish()))
+print(h)
+c = Crc32.New()
+m = Hmac.NewSha256("key".Bytes)
+print("{c} {m}")
+print([Md5.New()])

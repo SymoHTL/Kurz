@@ -1,0 +1,10 @@
+// expect: output
+// | 00010f10abff
+// | true
+// | [0, 1, 15, 16, 171, 255]
+// rules: H2
+
+Bytes b = [0, 1, 15, 16, 171, 255]
+print(Hex.Encode(b))
+print(Hex.Encode(Bytes()) == "")
+print(b)

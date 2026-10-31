@@ -1,0 +1,10 @@
+// expect: output
+// | 3421780262
+// | 0
+// | 1095738169
+// rules: H1
+
+print(Crc32.Hash("123456789".Bytes))
+print(Crc32.Hash(Bytes()))
+uint check = Crc32.Hash("The quick brown fox jumps over the lazy dog".Bytes)
+print(check)

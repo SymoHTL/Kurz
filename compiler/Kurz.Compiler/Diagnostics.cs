@@ -6,12 +6,14 @@ namespace Kurz.Compiler;
 /// names and the table keeps out: the id and the line are what a corpus case pins (E1, E2), and the
 /// message is free. <see cref="DiagnosticKind.NotSupported"/> names a construct the reference
 /// states and this compiler does not implement: it carries no id, so it can never pass for an error
-/// a case expects; a corpus case that gets one fails its theory, and nothing produces the kind.
+/// a case expects; a corpus case that gets one fails its theory, and nothing produces the kind. A <see cref="DiagnosticKind.Warning"/>
+/// is a lint with its id, <c>md5-insecure</c> (H5), which builds the program (design record, section 12, "Warning, build goes on").
 /// </summary>
 public enum DiagnosticKind
 {
     Error,
     NotSupported,
+    Warning,
 }
 
 public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string Message)
@@ -25,7 +27,15 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
     public static Diagnostic NotSupported(int line, string construct) =>
         new(DiagnosticKind.NotSupported, "", line, construct);
 
+    public static Diagnostic Warning(string id, int line, string message)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        return new Diagnostic(DiagnosticKind.Warning, id, line, message);
+    }
+
     public bool IsError => Kind == DiagnosticKind.Error;
+
+    public bool IsNotSupported => Kind == DiagnosticKind.NotSupported;
 
     /// <summary>
     /// What to do about the error, the line below it, or null: <c>nullable-unchecked</c> says how to check (section 4, the owner,
@@ -36,13 +46,23 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
 
     /// <summary>
     /// The diagnostic as the command writes it, the file's name and the line in front: <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> (design
-    /// record, section 2), or <c>hello.kz:3: not supported: &lt;text&gt;</c>, with its <see cref="Help"/> on the line below.
+    /// record, section 2), <c>hello.kz:3: warning: &lt;id&gt;: &lt;text&gt;</c> (H5), or <c>hello.kz:3: not supported: &lt;text&gt;</c>, with
+    /// its <see cref="Help"/> on the line below.
     /// </summary>
-    public string At(string file) => (IsError ? $"{file}:{Line}: {Id}: {Message}" : $"{file}:{Line}: not supported: {Message}") + (Help is { } help ? $"\n  help: {help}" : string.Empty);
+    public string At(string file) => Kind switch
+    {
+        DiagnosticKind.Error => $"{file}:{Line}: {Id}: {Message}",
+        DiagnosticKind.Warning => $"{file}:{Line}: warning: {Id}: {Message}",
+        _ => $"{file}:{Line}: not supported: {Message}",
+    } + (Help is { } help ? $"\n  help: {help}" : string.Empty);
 
-    /// <summary>The diagnostic as one line: <c>4: error syntax: ...</c>, or <c>4: not supported: ...</c>.</summary>
-    public override string ToString() =>
-        IsError ? $"{Line}: error {Id}: {Message}" : $"{Line}: not supported: {Message}";
+    /// <summary>The diagnostic as one line: <c>4: error syntax: ...</c>, <c>4: warning md5-insecure: ...</c>, or <c>4: not supported: ...</c>.</summary>
+    public override string ToString() => Kind switch
+    {
+        DiagnosticKind.Error => $"{Line}: error {Id}: {Message}",
+        DiagnosticKind.Warning => $"{Line}: warning {Id}: {Message}",
+        _ => $"{Line}: not supported: {Message}",
+    };
 }
 
 /// <summary>The diagnostics of one compilation, in the order they were found; <see cref="Sorted"/> orders them by line.</summary>
@@ -54,7 +74,7 @@ public sealed class DiagnosticBag
 
     public bool HasErrors => items.Any(d => d.IsError);
 
-    public bool HasNotSupported => items.Any(d => !d.IsError);
+    public bool HasNotSupported => items.Any(d => d.IsNotSupported);
 
     public void Add(Diagnostic diagnostic) => items.Add(diagnostic);
 
@@ -146,4 +166,10 @@ public static class ErrorIds
     public const string IndexOutOfRange = "index-out-of-range";
     public const string ReversedRangeAtRunTime = "reversed-range-at-run-time";
     public const string StackOverflow = "stack-overflow";
+}
+
+/// <summary>The ids of the lints, which warn and build the program (H5): no case expects one, and the error table keeps them out.</summary>
+public static class LintIds
+{
+    public const string Md5Insecure = "md5-insecure";
 }

@@ -45,6 +45,8 @@ public sealed partial class Emitter
                 or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept => EmitFileCall(c, info),
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
+            CallKind.Hash or CallKind.HmacHash or CallKind.HexEncode or CallKind.HasherNew or CallKind.HmacNew or CallKind.HasherUpdate or CallKind.HasherFinish
+                or CallKind.HmacVerify or CallKind.FixedTimeEqual => EmitHashCall(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),
         };
         if (result is UnionType union && !Types.Same(TypeOf(c), union))

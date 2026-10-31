@@ -145,6 +145,24 @@ public sealed record HandleType(Handle Kind) : KurzType
     public override string Text => Kind.ToString();
 }
 
+/// <summary>The hashers of the standard library, each a name every file sees (H3).</summary>
+public enum Hasher
+{
+    Sha256,
+    Md5,
+    Crc32,
+    Hmac,
+}
+
+/// <summary>
+/// A hasher (H3): the state of a hash over a message taken in pieces, a value that a copy goes on from where it stood, as a list's
+/// copy does, laid out as a list of bytes (design record, section 12, "Yes, as Rust"). Its text is the name of its type (H6).
+/// </summary>
+public sealed record HasherType(Hasher Kind) : KurzType
+{
+    public override string Text => Kind.ToString();
+}
+
 /// <summary>
 /// A union (D9). The cases are flat and distinct, in the order written; the first is the success
 /// case of a result (O1). Two unions are one type when they have the same first case and the same
@@ -363,6 +381,7 @@ public static class Types
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
+            (HasherType x, HasherType y) => x.Kind == y.Kind,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
             (FunctionType x, FunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (PointerType x, PointerType y) => Same(x.Pointee, y.Pointee),

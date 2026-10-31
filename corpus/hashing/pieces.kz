@@ -1,0 +1,33 @@
+// expect: output
+// | d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592
+// | d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592
+// | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+// | 1095738169
+// | 0
+// | f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8
+// | f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8
+// | 9e107d9d372bb6826bd81d3542a419d6
+// rules: H3
+
+Bytes message = "The quick brown fox jumps over the lazy dog".Bytes
+mut h = Sha256.New()
+h.Update(message[0..<10])
+h.Update(Bytes())
+h.Update(message[10..<message.Count])
+print(Hex.Encode(h.Finish()))
+print(Hex.Encode(Sha256.Hash(message)))
+print(Hex.Encode(h.Finish()))
+mut c = Crc32.New()
+c.Update(message[0..<3])
+c.Update(message[3..<message.Count])
+print(c.Finish())
+print(c.Finish())
+mut m = Hmac.NewSha256("key".Bytes)
+m.Update(message[0..<20])
+m.Update(message[20..<message.Count])
+print(Hex.Encode(m.Finish()))
+m.Update(message)
+print(Hex.Encode(m.Finish()))
+mut d = Md5.New()
+d.Update(message)
+print(Hex.Encode(d.Finish()))
