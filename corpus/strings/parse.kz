@@ -5,7 +5,7 @@
 // | invalid digit
 // | too large
 // | too small
-// | InvalidDigit
+// | TooSmall
 // | 1.5
 // | Infinity
 // rules: X7

@@ -223,7 +223,8 @@ holds none of the input: `At` is the position of the first character that is not
 bytes (X2), and the text of the error is the words of its kind in lower case and its position,
 `invalid digit at 3` (§12, the owner, 2026-10-31, "Without input"). The digits are read in upper and
 lower case, with no `0x` and no whitespace, as the `hex` crate's `decode`; a string of an odd length is
-`OddLength`, with `At` its length; and `HexError` and `HexKind` are types every file sees, as
+`OddLength`, with `At` its length, the length being read before the digits, so that `"0xf"` is
+`odd length at 3`; and `HexError` and `HexKind` are types every file sees, as
 `ParseError` is (X7), so that a file's own declaration of one is `redeclared` (V9) *(assumed, §12: the digits read and the two names, defaults of the question; the
 odd length, not put to the owner)*.
 
@@ -239,6 +240,8 @@ void Show(Bytes | HexError result) {
 Show(Hex.Decode("0001abFF"))
 Show(Hex.Decode("abc"))
 Show(Hex.Decode("0xff"))
+// an odd length and a character that is no digit: the length is read first
+Show(Hex.Decode("0xf"))
 Show(Hex.Decode(""))
 ```
 

@@ -1,0 +1,54 @@
+// expect: output
+// | 7
+// | invalid digit
+// | empty
+// | 0
+// | 1000.5
+// | -Infinity
+// | 0.5
+// | 2.50
+// | invalid digit
+// | invalid digit
+// | too large
+// | too small
+// rules: X7
+
+void Show(long | ParseError result) {
+    match result {
+        long n => print(n)
+        ParseError e => print(e)
+    }
+}
+
+void ShowDouble(double | ParseError result) {
+    match result {
+        double d => print(d)
+        ParseError e => print(e)
+    }
+}
+
+void ShowDecimal(decimal | ParseError result) {
+    match result {
+        decimal m => print(m)
+        ParseError e => print(e)
+    }
+}
+
+// whitespace around the number, and no separator in an integer
+Show(long.Parse(" 7\t"))
+Show(long.Parse("1,000"))
+Show(long.Parse("  "))
+match byte.Parse("-0") {
+    byte b => print(b)
+    ParseError e => print(e)
+}
+// a separator of thousands, the words of an infinity in any case, and a point at the start
+ShowDouble(double.Parse(" 1,000.5 "))
+ShowDouble(double.Parse("-infinity"))
+ShowDouble(double.Parse(".5"))
+// a `decimal` keeps its scale, and reads no sign after its digits and no exponent
+ShowDecimal(decimal.Parse("+2.50"))
+ShowDecimal(decimal.Parse("5-"))
+ShowDecimal(decimal.Parse("1e5"))
+ShowDecimal(decimal.Parse("79228162514264337593543950336"))
+ShowDecimal(decimal.Parse("-79228162514264337593543950336"))
