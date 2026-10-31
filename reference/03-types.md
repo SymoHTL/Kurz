@@ -1173,6 +1173,9 @@ byte small = 1
 r6 = Pair(small, [2])
 List<byte> y6 = r6
 print(y6)
+r7 = Pair(1L, [])
+List<long> y7 = r7
+print(y7)
 ```
 
 Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)

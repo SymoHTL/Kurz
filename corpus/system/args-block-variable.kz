@@ -1,0 +1,7 @@
+// expect: error redeclared at 5
+// rules: S13
+
+if true {
+    List<string> args = ["a"]
+    print(args.Count)
+}
