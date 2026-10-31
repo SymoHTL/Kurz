@@ -16,9 +16,10 @@ namespace Kurz.Compiler.Tests;
 /// opened close-on-exec (S2, S8); a directory that exists is created again without an error, and one under a file is not (S8); the text
 /// of an error without a path (S1); a socket is opened close-on-exec, a listener reuses its address, an address is read at its last
 /// colon, a literal of IPv6 binds where the machine has its loopback, and a connection <c>Accept</c> gave names its listener's address
-/// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c> is the kind <c>Other</c>, through a runtime whose lookup gives
-/// that result, while the error of the system a lookup names is held by no test, since nothing makes <c>getaddrinfo</c> fail so on
-/// demand; and a build for Windows says <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
+/// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c>, or with <c>EAI_SYSTEM</c> while <c>errno</c> holds 0, is the kind
+/// <c>Other</c>, through a runtime whose lookup gives that result, while the error of a number the system puts in <c>errno</c> at a
+/// lookup is held by no test, since nothing makes <c>getaddrinfo</c> fail so on demand; and a build for Windows says
+/// <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
 /// the runtime of this machine and under the fenced allocator of <see cref="ListTests.Fenced"/>, where no other runtime is named; on
 /// Windows each is held to the build's refusal instead.
 /// </summary>
@@ -467,6 +468,13 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var failing = ListTests.Edited(("runtime/linux/linux.kz", lookup, $"int looked = {result}"));
             Ran(failed, $"socket-lookup-{name}", ["Other 0"], runtimes: [failing]);
         }
+
+        // a lookup that fails with `EAI_SYSTEM` (-11) while `errno` holds 0: the error of the number 0, `Other`, as S9 gives such a
+        // lookup the number in `errno` and S1 gives `Other` to a number of no kind, where the 0 was read as a descriptor, the bind's
+        // check of it closing standard input and the connection made on it
+        var system = ListTests.Edited(("runtime/linux/linux.kz", lookup, "*__errno_location() = 0\n            int looked = -11"));
+        const string both = failed + "match TcpStream.Connect(\"name.invalid:80\") {\n    TcpStream => print(\"connected\")\n    IoError e => print(\"{e.Kind} {e.Code}\")\n}\n";
+        Ran(both, "socket-lookup-system", ["Other 0", "Other 0"], runtimes: [system]);
     }
 
     /// <summary>
