@@ -172,7 +172,7 @@ public sealed partial class Checker
                 {
                     case ExpressionStatement es:
                         {
-                            var t = CheckExpression(es.Expression, expected, keepCases: expected is UnionType);
+                            var t = CheckExpression(es.Expression, expected, keepCases: Types.KeepsCases(expected));
                             if (Types.IsVoid(t.Type))
                             {
                                 Report(ErrorIds.Syntax, es.Line, "a call with a `void` success used as a value (O10)");
@@ -456,7 +456,7 @@ public sealed partial class Checker
         {
             case ExpressionStatement es when !Types.IsVoid(success):
                 {
-                    var t = CheckExpression(es.Expression, success, keepCases: success is UnionType);
+                    var t = CheckExpression(es.Expression, success, keepCases: Types.KeepsCases(success));
                     if (Types.IsVoid(t.Type) && !Types.IsError(success)) // after a call that did not type, the success may be `void`, and the arm a statement (O10, E1)
                     {
                         Report(ErrorIds.Syntax, es.Line, "a call with a `void` success used as a value (O10)");

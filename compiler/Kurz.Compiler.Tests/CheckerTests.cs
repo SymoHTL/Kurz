@@ -1144,6 +1144,55 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(find + "int | NotFound result = Find(1)\nmatch result {\n    int n => print(n)\n    NotFound => print(\"none\")\n}"));
         Clean(find + "int | NotFound | Rejected result = Find(1)\nmatch result {\n    int n => print(n)\n    NotFound => print(\"none\")\n    Rejected => print(\"invalid\")\n}");
         Assert.Equal([(ErrorIds.UnlistedCase, 14)], Errors(find + "long result = Find(1)\nprint(result)"));
+
+        // a `T?` of the success is a type the success converts to, and no list of cases (N8): the call unwraps there, and its other cases
+        // leave the function, at the top level `unlisted-case` (O9)
+        Assert.Equal("int?", TypeOf(find + "int | NotFound | Rejected Twice(int id) {\n    int? value = Find(id)\n    print(value)\n    return 2\n}\n\nx = Twice(1) else {\n    else => 0\n}\nprint(x)\nint? y = 1\nprint(y)", "y"));
+        Clean(find + "int | NotFound | Rejected Twice(int id) {\n    int? value = Find(id)\n    print(value)\n    return 2\n}\n\nx = Twice(1) else {\n    else => 0\n}\nprint(x)");
+        Assert.Equal([(ErrorIds.UnlistedCase, 14)], Errors(find + "int? result = Find(1)\nprint(result)"));
+        Clean(find + "(int | NotFound | Rejected)? result = Find(1)\nprint(result)");
+    }
+
+    [Fact]
+    public void A_parameter_of_a_written_union_keeps_every_case_of_a_call_passed_to_it()
+    {
+        // O4 (the owner, 2026-10-31, "Keep, like a variable"): a parameter, a field and a list's item type keep the cases where they name
+        // them all; a parameter that names some is type-mismatch, as a variable is; a parameter of the success, of a type it converts to
+        // and of a type parameter the call infers takes the success (O2), and a call inside an expression is unwrapped first
+        var find = "data NotFound\ndata Rejected\n\nint | NotFound | Rejected Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    if id == 2 {\n        return Rejected\n    }\n    return NotFound\n}\n\n";
+        var show = "void Show(int | NotFound | Rejected v) {\n    print(v)\n}\n\n";
+        Clean(find + show + "Show(Find(1))\nShow(v: Find(2))\nShow((Find(3)))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 18)], Errors(find + "void Show(int | NotFound v) {\n    print(v)\n}\n\nShow(Find(1))"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 18)], Errors(find + "void Show(int v) {\n    print(v)\n}\n\nShow(Find(1))"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 18)], Errors(find + "void Show(int? v) {\n    print(v)\n}\n\nShow(Find(1))"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 18)], Errors(find + show + "Show(Find(1) + 1)"));
+        Clean(find + "void Show(int v) {\n    print(v)\n}\n\nint | NotFound | Rejected Twice(int id) {\n    Show(Find(id))\n    return 2\n}\n\nx = Twice(1) else {\n    else => 0\n}\nprint(x)");
+
+        // F13 with O4 (the owner, 2026-10-31, "The union one"): the function whose parameter keeps the cases fits the whole result exactly,
+        // and wins over the one of the success; with no union among them the success's exact fit wins, as before
+        Clean(find + show + "void Show(int v) {\n    print(v)\n}\n\nShow(Find(1))");
+        Assert.Equal([(ErrorIds.UnlistedCase, 22)], Errors(find + "void Show(int v) {\n    print(v)\n}\n\nvoid Show(long v) {\n    print(v)\n}\n\nShow(Find(1))"));
+
+        // E1: a call that fits no function, or more than one with none of them exactly, reports that error alone, and no case of a call
+        // among its arguments is passed on beside it, since no parameter decided whether it keeps them
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 22)], Errors(find + "void Show(string v) {\n    print(v)\n}\n\nvoid Show(bool v) {\n    print(v)\n}\n\nShow(Find(1))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 18)], Errors(find + "void Show(string v) {\n    print(v)\n}\n\nShow(Find(1))"));
+        Assert.Equal([(ErrorIds.AmbiguousCall, 22)], Errors(find + "void Show(long v) {\n    print(v)\n}\n\nvoid Show(double v) {\n    print(v)\n}\n\nShow(Find(1))"));
+
+        // T27 with O4 (the owner, 2026-10-31, "Unwrap: T = int"): a type parameter the call infers takes the success, so the subject is an
+        // `int` whose `else` arm nothing reaches; one a type argument writes as a union keeps the cases
+        var same = "T Same<T>(T x) => x\n\n";
+        Assert.Equal([(ErrorIds.UnlistedCase, 16), (ErrorIds.UnreachableArm, 18)], Errors(find + same + "match Same(Find(1)) {\n    int n => print(n)\n    else => print(\"none\")\n}"));
+        Clean(find + same + "match Same<int | NotFound | Rejected>(Find(1)) {\n    int n => print(n)\n    else => print(\"none\")\n}");
+
+        // a field, a list's items, a list's `Add`, a lambda's parameter and a function value's (the owner, 2026-10-31, "Keep, as any
+        // parameter" and "Keep, as the item type"); a list literal with no list type around it infers its item type, the success
+        Clean(find + "data Box(int | NotFound | Rejected Value)\n\nb = Box(Find(1))\nprint(b)");
+        Clean(find + "List<int | NotFound | Rejected> xs = [Find(1), Find(2)]\nprint(xs)");
+        Assert.Equal([(ErrorIds.UnlistedCase, 14)], Errors(find + "xs = [Find(1)]\nprint(xs)"));
+        Clean(find + "mut List<int | NotFound | Rejected> xs = []\nxs.Add(Find(1))\nprint(xs)");
+        Clean(find + "(int | NotFound | Rejected) => void f = v => print(v)\nf(Find(1))");
+        Clean(find + "void Run((int | NotFound | Rejected) => void f) {\n    f(Find(1))\n}\n\nRun(v => print(v))");
     }
 
     [Fact]
