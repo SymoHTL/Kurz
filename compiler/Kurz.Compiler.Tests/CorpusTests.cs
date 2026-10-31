@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Corpus;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
@@ -173,7 +174,7 @@ public sealed class CorpusTests
         Assert.Equal(errors.Count + unsupported.Count + lints.Count, diagnostics.Items.Count); // the three kinds, and no fourth one that the floors would count as read in full
         var lines = File.ReadAllLines(Path.Combine(Root, "corpus", relativePath));
         Assert.All(lints, l => Assert.True(
-            l.Id == "md5-insecure" && lines[l.Line - 1].Contains("Md5.", StringComparison.Ordinal),
+            l.Id == "md5-insecure" && Regex.IsMatch(lines[l.Line - 1], @"(?<![\w.])Md5\.(Hash|New)\("),
             $"{relativePath}: `{l}` is no `md5-insecure` on a line that calls a function of `Md5` (H5)"));
         if (unsupported.Count > 0)
         {

@@ -55,20 +55,20 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
 
         Assert.NotEmpty(trace);
         var cut = Cut().IsMatch(trace[^1]);
-        var frames = trace.Take(cut ? trace.Count - 1 : trace.Count).Select(l => Frame().Match(l)).ToList();
-        Assert.All(frames, m => Assert.True(m.Success && m.Groups["place"].Success == lines, $"not a frame {(lines ? "with" : "without")} a line: {m.Value}"));
+        var frames = trace.Take(cut ? trace.Count - 1 : trace.Count).Select(l => (Line: l, Match: Frame().Match(l))).ToList();
+        Assert.All(frames, f => Assert.True(f.Match.Success && f.Match.Groups["place"].Success == lines, $"not a frame {(lines ? "with" : "without")} a line: {f.Line}"));
         if (cut)
         {
             Assert.Equal(100, frames.Count);
         }
         else
         {
-            Assert.Equal("main", frames[^1].Groups["name"].Value);
+            Assert.Equal("main", frames[^1].Match.Groups["name"].Value);
         }
 
         if (lines)
         {
-            Assert.Equal(place, frames[0].Groups["place"].Value);
+            Assert.Equal(place, frames[0].Match.Groups["place"].Value);
         }
     }
 

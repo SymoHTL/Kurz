@@ -40,7 +40,7 @@ public sealed partial class Emitter
 
         if (inner is UnionType cases)
         {
-            return Ir(union) == Ir(cases) ? (place, inner) : throw Unsupported(line, $"the place of a `{union}` read as a `{cases}`, whose tags differ in width");
+            return Ir(union) == Ir(cases) ? (place, inner) : throw Unsupported(line, $"the place of a `{union}` read as a `{cases}`, whose tags differ in width (N3, R10)");
         }
 
         return (fn.Value($"getelementptr {Ir(union)}, ptr {place}, i32 0, i32 1"), inner);

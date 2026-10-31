@@ -415,7 +415,12 @@ public sealed class CommandTests : IDisposable
         var expected = OperatingSystem.IsWindows()
             ? "error: no directory for the command's places\n  note: Windows names no LocalAppData folder for this user\n  help: run the command as a user with a profile\n"
             : "error: no directory for the command's places\n  note: XDG_CACHE_HOME is not set to an absolute path, and no home directory is found in HOME or the user database\n  help: set HOME, or XDG_CACHE_HOME to an absolute path\n";
-        Assert.Equal((1, "", expected), RunWithPlaces(Builder.HostTarget, () => null, Found().Find, "exec", "print(1)"));
+        var source = Path.Combine(root, "hello.kz");
+        File.WriteAllText(source, "print(1)\n");
+        foreach (var arguments in new[] { new[] { "run", source }, ["exec", "print(1)"] })
+        {
+            Assert.Equal((1, "", expected), RunWithPlaces(Builder.HostTarget, () => null, Found().Find, arguments));
+        }
     }
 
     [Fact]
@@ -549,7 +554,17 @@ public sealed class CommandTests : IDisposable
         {
             foreach (var task in Directory.EnumerateDirectories($"/proc/{command}/task"))
             {
-                foreach (var child in File.ReadAllText(Path.Combine(task, "children")).Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                string children;
+                try
+                {
+                    children = File.ReadAllText(Path.Combine(task, "children"));
+                }
+                catch (IOException)
+                {
+                    continue; // a thread of the command that ended between the listing and the read
+                }
+
+                foreach (var child in children.Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 {
                     try
                     {

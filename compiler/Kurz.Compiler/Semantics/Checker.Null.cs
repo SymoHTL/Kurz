@@ -20,13 +20,13 @@ internal sealed class LoopExits
 }
 
 /// <summary>
-/// Chapter 4: <c>T?</c>, <c>null</c>, <c>??</c>, <c>?.</c> and the flow of the code that makes a nullable variable or path of
-/// <c>data</c> fields a value of the type it makes nullable (N1 to N8). What the code shows is kept as the set of paths known not null
-/// where the checker reads (<see cref="Frame.Known"/>): a test adds its paths to the branch it guards, an assignment of a value whose
-/// type has no <c>null</c> adds its target, any other assignment and a <c>mut</c> argument take away what runs through their target,
-/// and where branches or the rounds of a loop meet only what every path that reaches the point keeps is kept, the join C#'s nullable
-/// analysis makes (section 4, an assumption there). A path through a class instance or a <c>weak</c> reference (N9) is not read: the
-/// checker reads neither.
+/// Chapter 4: <c>T?</c>, <c>null</c>, <c>??</c>, <c>?.</c>, <c>?[</c>, <c>==</c> with a nullable side and the flow of the code that
+/// makes a nullable variable or path of <c>data</c> fields a value of the type it makes nullable (N1 to N8, N10). What the code shows
+/// is kept as the set of paths known not null where the checker reads (<see cref="Frame.Known"/>): a test adds its paths to the branch
+/// it guards, an assignment of a value whose type has no <c>null</c> adds its target, any other assignment and a <c>mut</c> argument
+/// take away what runs through their target, and where branches or the rounds of a loop meet only what every path that reaches the
+/// point keeps is kept, the join C#'s nullable analysis makes (section 4, an assumption there). A path through a class instance or a
+/// <c>weak</c> reference (N9) is not read: the checker reads neither.
 /// </summary>
 public sealed partial class Checker
 {
@@ -81,11 +81,11 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>N3: the paths that are not null where the value of <paramref name="e"/> is not: its own, and each value a member of it was read from, so that a test of <c>a?.b != null</c> shows <c>a</c> too.</summary>
+    /// <summary>N3: the paths that are not null where the value of <paramref name="e"/> is not: its own, and each value a member of it was read from or a <c>?[</c> indexed, so that a test of <c>a?.b != null</c> or of <c>xs?[0] != null</c> shows <c>a</c> or <c>xs</c> too, as C# reads them.</summary>
     private ImmutableHashSet<NullPath> NonNullPaths(Expression e)
     {
         var paths = ImmutableHashSet<NullPath>.Empty;
-        for (var x = Unwrap(e); x is not null; x = x is MemberAccess m ? Unwrap(m.Target) : null)
+        for (var x = Unwrap(e); x is not null; x = x switch { MemberAccess m => Unwrap(m.Target), IndexExpression { Conditional: true } i => Unwrap(i.Target), _ => null })
         {
             if (PathOf(x) is { } path)
             {
@@ -234,7 +234,7 @@ public sealed partial class Checker
         if (PathOf(e) is { } path && Unwrap(e) is NameExpression or MemberAccess { Conditional: false })
         {
             frame.Known = frame.Known.Remove(path); // a variable or a path of fields, which runs nothing that could change what is known
-            var read =CheckExpression(e, null, keepCases);
+            var read = CheckExpression(e, null, keepCases);
             frame.Known = known;
             return read;
         }
@@ -269,6 +269,10 @@ public sealed partial class Checker
         return new Typed(Types.Bool);
     }
 
+    /// <summary>N5: <c>?[</c> on a value that is not nullable.</summary>
+    private void NotNullable(IndexExpression i, Typed target) =>
+        Report(ErrorIds.TypeMismatch, i.Line, $"`?[` needs a nullable left side; `{target.Type}` is not one (N5)");
+
     /// <summary>N3: a read of a variable or a field of a nullable type, as the type it makes nullable where its path is known not null.</summary>
     private Typed Narrowed(Expression read, Typed typed) =>
         Types.NonNull(typed.Type) is { } inner && PathOf(read) is { } path && frame.Known.Contains(path) ? new Typed(inner) : typed;
@@ -278,8 +282,8 @@ public sealed partial class Checker
     /// what a round leaves nullable at the end of its body or at a <c>continue</c>, the join C# makes where the paths around a loop meet
     /// (section 4, an assumption there). Where a reading ends with less known than it began with, it is read again from that, its
     /// diagnostics dropped, until a reading keeps what it began with; that reading's diagnostics are the loop's. After the loop holds
-    /// what the head and a false condition show, joined with what held at each <c>break</c>; a <c>for</c> (C8), which has no condition and
-    /// can run no round, leaves with what the head holds as well.
+    /// what the condition leaves where it is false, joined with what held at each <c>break</c>, and a <c>while true</c> what held at its
+    /// <c>break</c>s alone; a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
     /// </summary>
     private void CheckLoop(Expression? condition, Block body)
     {
@@ -365,9 +369,15 @@ public sealed partial class Checker
             return new Typed(left.Type);
         }
 
-        Report(Types.IsVoid(right.Type) ? ErrorIds.Syntax : Types.MismatchId(right.Type, inner), b.Right.Line, Types.IsVoid(right.Type)
-            ? "a call with a `void` success used as a value (O10)"
-            : $"a `{right.Type}` on the right of `??` where a `{inner}` is required (N4, T1)");
+        if (Types.IsVoid(right.Type))
+        {
+            Report(ErrorIds.Syntax, b.Right.Line, "a call with a `void` success used as a value (O10)");
+        }
+        else
+        {
+            ReportMismatch(right.Type, inner, b.Right.Line, $"a `{right.Type}` on the right of `??` where a `{inner}` is required", "N4");
+        }
+
         return Typed.Error;
     }
 
@@ -436,15 +446,23 @@ public sealed partial class Checker
     /// N5: <c>xs?[i]</c> is null where <c>xs</c> is and its item at <c>i</c> otherwise, and the rest of the chain is skipped with it, as
     /// C#'s <c>?[]</c> (section 4, the owner, 2026-10-30, "Add, as C#"): the type of the item made nullable, or the item's own where it is
     /// nullable. The index runs only where the list is not null, so only what held before it is known after. On a value that is not
-    /// nullable it is <c>type-mismatch</c>, as <c>?.</c> is (section 4, an assumption there); a part, <c>xs?[a..b]</c>, is
-    /// <c>not supported</c> (section 4 names the item), and so is <c>m?[key]</c> on a nullable map.
+    /// nullable it is <c>type-mismatch</c>, as <c>?.</c> is (section 4, an assumption there), with a part in it as well; a part,
+    /// <c>xs?[a..b]</c>, on a nullable list is <c>not supported</c> (section 4 names the item), and so is <c>m?[key]</c> on a nullable map.
     /// </summary>
     private Typed CheckConditionalIndex(IndexExpression i)
     {
         var target = CheckNullable(i.Target);
         if (i.Index is RangeExpression)
         {
-            NotSupported(i.Line, "a part after `?[` (N5, M9)");
+            if (!target.IsError && Types.NonNull(target.Type) is null)
+            {
+                NotNullable(i, target);
+            }
+            else
+            {
+                NotSupported(i.Line, "a part after `?[` (N5, M9)");
+            }
+
             CheckLoosely(i.Index);
             return Typed.Error;
         }
@@ -466,7 +484,7 @@ public sealed partial class Checker
 
         if (Types.NonNull(target.Type) is not { } inner)
         {
-            Report(ErrorIds.TypeMismatch, i.Line, $"`?[` needs a nullable left side; `{target.Type}` is not one (N5)");
+            NotNullable(i, target);
             return Typed.Error;
         }
 

@@ -100,7 +100,7 @@ public sealed class Toolchain : IDisposable
 /// case the checker reads and the emitter does not lay out is in <see cref="NotEmitted"/>, with the construct the emitter names; and a
 /// case it lays out whose expectation needs what the build does not hold is in <see cref="NotRun"/>, with why, and is built and not run.
 /// Neither list holds a stale entry. A case is built with the grants of its <c>allow:</c> line, and as its <c>build:</c> line says, else
-/// as the test build, the default. A floor holds the count of cases run. Every case runs a second time under an allocator that makes
+/// as the test build, the default. A floor holds the count of cases run. Every case that is run runs a second time under an allocator that makes
 /// every block it frees inaccessible (<see cref="ListTests.Fenced"/>), so that a block the counting frees while a value still holds
 /// it ends that run with the system's signal.
 /// </summary>

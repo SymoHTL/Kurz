@@ -626,7 +626,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // maps (M9): a read that is a value of its own, a write over a key, a copy written to (M3), a value read from the map it is
     // written into, a key the map keeps after its variable changes, a `mut` parameter, a missing key, growth, a map in a data value
-    // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, keys of each kind the checker takes, a map in a
+    // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, integer, `bool`, `char` and `string` keys (the
+    // other kinds in `MapMembers`), a map in a
     // union, a block replaced by growth under a `mut` parameter and under a lambda that read it, strings equal by their bytes with
     // and without a block, and the texts
     private const string Maps = """
@@ -1300,8 +1301,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(Twice(Made(8)))
         print(Twice(List<int>()))
 
-        // values of a union and function values, read and removed, each kept past a write over its key and a `Clear` (N1; section 4,
-        // the owner, 2026-10-30, "Nullable form, as Option")
+        // values of a union and function values: `taken` and `f` read and kept past a write over their key and a `Clear`, `gone` and
+        // `g` removed after that write and kept past the `Clear` (N1; section 4, the owner, 2026-10-30, "Nullable form, as Option")
         mut mixed = Map<string, int | string>()
         mixed["n"] = 5
         mixed["s"] = Made(6)
@@ -2032,7 +2033,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(1, kept.Code);
         Assert.StartsWith("error: allocation-failed (", kept.Error, StringComparison.Ordinal);
 
-        // and a map of 1000 entries held each round, a block of 32800 bytes in the size class of 65536: 196 megabytes
+        // and a map of 1000 entries held each round, a block of 34864 bytes, 2048 slots, in the size class of 65536: 196 megabytes
         const string maps = "Map<int, int> Make(int n) {\n    mut m = Map<int, int>()\n    for i in 0..<n {\n        m[i] = i\n    }\n    return m\n}\n\nmut all = List<Map<int, int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    all.Add(Make(1000))\n}\nprint(all.Count)\n";
         var full = BuildAndRun(maps, Budget(), "map-rounds-held");
         Assert.Equal(1, full.Code);

@@ -145,7 +145,7 @@ public sealed record HandleType(Handle Kind) : KurzType
     public override string Text => Kind.ToString();
 }
 
-/// <summary>The hashers of the standard library, each a name every file sees (H3).</summary>
+/// <summary>The hashers of the standard library, each a name every file sees (H1, H3).</summary>
 public enum Hasher
 {
     Sha256,
@@ -155,8 +155,9 @@ public enum Hasher
 }
 
 /// <summary>
-/// A hasher (H3): the state of a hash over a message taken in pieces, a value that a copy goes on from where it stood, as a list's
-/// copy does, laid out as a list of bytes (design record, section 12, "Yes, as Rust"). Its text is the name of its type (H6).
+/// A hasher (H3): the state of a hash over a message taken in pieces (design record, section 12, the owner, 2026-10-31, "Yes, as
+/// Rust"), a value that a copy goes on from where it stood, as a list's copy does (H6, assumed), laid out as a list of bytes (the
+/// emitter's choice). Its text is the name of its type (H6).
 /// </summary>
 public sealed record HasherType(Hasher Kind) : KurzType
 {
@@ -555,6 +556,15 @@ public static class Types
 
         return ErrorIds.TypeMismatch;
     }
+
+    /// <summary>The rule a message of the id <see cref="MismatchId"/> gives cites: N2, T7, T23 or T1, as its summary names them.</summary>
+    public static string MismatchRule(KurzType from, KurzType to) => MismatchId(from, to) switch
+    {
+        ErrorIds.NullableUnchecked => "N2",
+        ErrorIds.NarrowingConversion => "T7",
+        ErrorIds.SignMix => "T23",
+        _ => "T1",
+    };
 
     /// <summary>
     /// The common type of two integer operands under <c>+ - * / %</c>, the comparisons and
