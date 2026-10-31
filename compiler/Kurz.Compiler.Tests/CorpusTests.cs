@@ -45,7 +45,7 @@ public sealed class CorpusTests
     /// (D13, D17, D19), the body of a data type (D16),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
     /// (M6), collections between actors (M8), the texts of class instances and sets of flags (A5, A7, A9,
-    /// A10, A13, A15), the grants of files and sockets (S12), the members of strings and lists but their searches, trims, <c>Substring</c>, <c>Split</c>, <c>Replace</c>, change of ASCII case, <c>AddRange</c>, <c>Reverse</c> and the sorts and <c>string.Join</c> (X3). A
+    /// A10, A13, A15), the grants of files and sockets (S12), the members of strings and lists but their searches, trims, <c>Substring</c>, <c>Split</c>, <c>Replace</c>, <c>AddRange</c>, <c>Reverse</c> and the sorts and <c>string.Join</c>, and the change of case (X3), of which the checker reads the ASCII forms alone, while X3's case calls <c>ToLower</c> and <c>ToUpper</c> too. A
     /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header.
     /// </summary>
     private static bool OutsideTheChecker(string rule) =>
@@ -59,6 +59,7 @@ public sealed class CorpusTests
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
         ["classes/print-without-text.kz"] = "a class (chapter 7)",
+        ["strings/join-no-text.kz"] = "a class (chapter 7)",
         ["types/generic-cannot-infer-classes.kz"] = "classes (chapter 7)",
         ["values/mut-method-through-field.kz"] = "a class (chapter 7)",
         ["values/text-more.kz"] = "a flags type (D13)",

@@ -498,12 +498,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   which take Unicode's White_Space,
   ASCII's five whitespace characters or the `char`'s UTF-8 bytes from the ends, through the standard library's
   `TrimStart`, `TrimEnd`, `RunStart` and `RunEnd`, as Rust's `trim`, `trim_ascii` and `trim_matches` (X4);
-  `s.Split(separator)`, a new list of the pieces, and `s.Replace(old, new)`, a new string, of a `string` or a `char`
-  for `old` and, where `old` is a `char`, for `new` too, each of which counts
+  `s.Split(separator)`, a new list of the pieces, and `s.Replace(oldValue, newValue)`, a new string, of a `string`
+  by a `string`, a `char` by a `string` or a `char` by a `char`, each of which counts
   what it makes before it asks for a block, as Rust's `split` and `replace` (X5); `string.Join(separator,
-  items)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
+  values)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6); and
-  `s.ToLowerAscii()` and `s.ToUpperAscii()`, which change `A` to `Z` or `a` to `z` alone, as Rust's
+  `s.ToLowerAscii()` and `s.ToUpperAscii()`, which change the letters `A` to `Z` or `a` to `z` and no other byte, as Rust's
   `to_ascii_lowercase` (X3); `s.Substring(startIndex, length)`, whose cut the standard library's `SubstringCut` reads,
   `index-out-of-range` where it reaches outside the string, read first, and else `not-char-boundary` where its start or
   then its end falls on a byte of the form 10xxxxxx, the runtime's `NotCharBoundary` writing the position on the line
@@ -515,7 +515,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   digits scanned once, then Clinger's fast path, Eisel-Lemire's with the 128-bit powers of five the emitter computes
   as fast_float's table holds them and writes into the program once, `parse.fives`, and the slow path over at most 768
   digits in a buffer the emitter's helper `parse.double` or `parse.float` takes on the stack, the result the nearest
-  value, ties to the even one, with .NET's forms (X7); `decimal.Parse(s)`,
+  value, ties to the even one, with .NET's forms but a NUL after the number, which is `invalid digit`, as Rust reads
+  it (X7); `decimal.Parse(s)`,
   which `ParseDecimal` reads as .NET's `NumberToDecimal` reads the digits, rounding half to even at the cut with every
   digit after it counted and holding the range after the rounding (X7); and `Hex.Decode(s)`, the bytes of
   a new list the standard library's `HexDecode` makes, or the case `HexError` at the length where it is odd, read
@@ -523,8 +524,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   string and a cut of `Substring` is the string itself, held once more
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
-  or a change of case that changes nothing gives the string itself, held once more; `PieceTests` holds each
-  of these members to what .NET's members of the same strings give, and `ParseTests` each integer type's `Parse`,
+  or a change of case that changes nothing gives the string itself, held once more; `PieceTests` holds the
+  trims, `Split`, `Replace`, `string.Join` and the ASCII changes of case (X3 to X6) to what .NET's members of the same
+  strings give where the rules read as they do, and to the rules written out where they do not: the ASCII trims, over
+  the five whitespace characters of X4, the ASCII changes of case, over the letters `A` to `Z` and `a` to `z`, and an
+  empty separator or pattern, which gives the string as it is (X5); and `ParseTests` each integer type's `Parse`,
   `Hex.Decode` and the cuts that stand to .NET's `Parse`, `Convert.FromHexString` and cut of the UTF-8 bytes,
   each over 2000 generated strings, the first 500 of them under the allocator that makes every freed block
   inaccessible as well, and the `Parse` of `double`, `float` and `decimal` to .NET's over generated forms, the words,
@@ -1199,7 +1203,7 @@ generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths non
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1, X3's ASCII forms, X4 to X6 and X9), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1, X2, X3's ASCII forms and X4 to X10), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
@@ -1297,8 +1301,8 @@ unread; the limit of a type parameter and a member of a type parameter with one 
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29); `this` (K7);
-the members of a string and of a list that chapter 15 names but those of X1, X2, X3's ASCII forms, X4, X5,
-X8 and X9, which are `ToLower` and `ToUpper` (X3);
+the members of a string and of a list that chapter 15 names but those of X1, X2, X3's ASCII forms and X4 to
+X9, which are `ToLower` and `ToUpper` (X3);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory

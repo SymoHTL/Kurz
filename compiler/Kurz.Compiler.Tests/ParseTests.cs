@@ -362,12 +362,13 @@ public sealed class ParseTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// X7: <c>double.Parse</c>, <c>float.Parse</c> and <c>decimal.Parse</c> give what .NET's <c>Parse</c> of the type gives
     /// (<see cref="Floating"/>) for 1500 strings of the pieces of a number's forms and of other bytes, each read by all three, 120 of
-    /// the words <c>Infinity</c> and <c>NaN</c> in their cases with a sign and without, 100 strings of whitespace alone, 400 texts of random <c>double</c> values as .NET
-    /// writes them to round-trip, with separators of thousands and to 30 digits, 300 exact halfway points between two neighbouring
+    /// the words <c>Infinity</c> and <c>NaN</c> in their cases with a sign and without, 100 strings of whitespace alone, 400 random <c>double</c> values, each finite one as .NET
+    /// writes it to round-trip and once more with separators of thousands or to 30 digits, 300 exact halfway points between two neighbouring
     /// <c>double</c> values and as many between two <c>float</c> values, a tenth of each below the smallest normal value and a tenth at the
-    /// largest exponent, with the numbers a digit above and below each, which Eisel-Lemire and the slow path round to the even one, 200 strings of 19 to 800 digits, which take the slow path, and 1200 <c>decimal</c> strings
-    /// of up to 39 digits before the point and 34 after it, at the largest <c>decimal</c> and past it, with the tails that round half to
-    /// even. Each kind of result is taken at least 100 times, and the first 600 lines are run again under the allocator that makes every
+    /// largest exponent, with the numbers a digit above and below each, which Eisel-Lemire and the slow path round to the even one, the slow path reached by those points, 200 strings of 19 to 800 random
+    /// digits, most of which Eisel-Lemire settles from their first 19 digits, and 1200 <c>decimal</c> strings of up to 39 digits before the
+    /// point, three zeros before them in a fifth of them, and up to 34 after it, at the largest <c>decimal</c> and past it, a third of them
+    /// with one of the tails that round half to even, of up to 24 digits, after their places. Each kind of result is taken at least 100 times, and the first 600 lines are run again under the allocator that makes every
     /// block it frees inaccessible.
     /// </summary>
     [Fact]
@@ -534,6 +535,39 @@ public sealed class ParseTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal((0xEEF453D6923BD65AUL, 0x113FAA2906A13B3FUL), (fives[0], fives[1]));
         Assert.Equal((0x8000000000000000UL, 0UL), (fives[2 * 342], fives[(2 * 342) + 1]));
         Assert.Equal((0x8E679C2F5E44FF8FUL, 0x570F09EAA7EA7648UL), (fives[2 * 650], fives[(2 * 650) + 1]));
+    }
+
+    /// <summary>
+    /// X7: a program that declares functions of the names of the parse's helpers in the standard library, <c>Product</c>, <c>Slow</c> and
+    /// <c>Shift</c>, calls its own, in a test build and in a release build, while its parse of the halfway point 1 + 2^-53, which
+    /// Eisel-Lemire leaves to the slow path, calls the library's and ties to the even <c>double</c>.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_program_that_declares_the_names_of_the_parses_helpers_calls_its_own(bool testBuild)
+    {
+        const string program = """
+            int Product(int a, int b) => a * b + 1
+
+            int Slow(int a) => a - 1
+
+            int Shift(int n) => n * 3
+
+            print(Product(2, 3))
+            print(Slow(5))
+            print(Shift(4))
+            match double.Parse("1.00000000000000011102230246251565404236316680908203125") {
+                double d => print(d)
+                ParseError e => print(e)
+            }
+
+            """;
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", program), [], toolchain.Runtime, testBuild);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, testBuild ? "helper-names" : "helper-names-release"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(["7", "4", "12", "1"], output);
     }
 
     /// <summary>

@@ -23,7 +23,7 @@ public sealed class SortTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>The rounds the run under the allocator that makes every freed block inaccessible takes, which keeps the pages of every block it frees (<see cref="ParseTests"/>).</summary>
     private const int FencedRounds = 50;
 
-    /// <summary>The items below which the emitter's sorts take insertion alone, its <c>ShortRun</c>.</summary>
+    /// <summary>The most items for which the emitter's sorts take insertion alone, its <c>ShortRun</c>.</summary>
     private const int ShortRun = 20;
 
     private static readonly double[] Pool = [double.NaN, -0.0, 0.0, 1.5, -2.25, 3.0, 0.1];
@@ -236,7 +236,7 @@ public sealed class SortTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var strings = Text(ss.OrderBy(s => s, Utf8), s => s);
             expected.Add((strings, false));
             expected.Add((strings, false)); // equal strings are alike
-            equalStrings += ss.Count > ShortRun && ss.Distinct(StringComparer.Ordinal).Count() < ss.Count && ss.Any(s => s.Length > 1) ? 1 : 0;
+            equalStrings += ss.Count > ShortRun && ss.Where(s => new StringInfo(s).LengthInTextElements > 1).GroupBy(s => s, StringComparer.Ordinal).Any(g => g.Count() > 1) ? 1 : 0;
 
             state = seed ^ 13UL;
             var ns = new List<int?>();
@@ -272,7 +272,7 @@ public sealed class SortTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(pastRun >= 200, $"only {pastRun} lists of `int` are longer than {ShortRun} items");
         Assert.True(pastPasses >= 100, $"only {pastPasses} lists of `int` are longer than {8 * ShortRun} items");
         Assert.True(zeros >= 100, $"only {zeros} lists of `double` hold NaN and a `0` before a `-0`");
-        Assert.True(equalStrings >= 100, $"only {equalStrings} lists of strings hold equal items");
+        Assert.True(equalStrings >= 100, $"only {equalStrings} lists of strings hold equal items of more than one letter");
         Assert.True(nulls >= 100, $"only {nulls} lists of `int?` hold a `null` after their first item");
         foreach (var (runtime, suffix, rounds) in new[] { (toolchain.Runtime, "", Rounds), (ListTests.Fenced, "-fenced", FencedRounds) })
         {
