@@ -541,8 +541,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `T?` of a list or of a data type laid out as a block is the address alone, its `null` an address no
   value of `T` has, 1 for a list, whose value without items is the address 0, and 0 for a block
   (section 4, the owner, 2026-10-30, "Rust's niche"), a `T?` of a function type the function value's
-  pair, its `null` the pair whose code address is 0, as Rust lays out `Option<fn()>`, and a `T?` of a
-  union that union with `null` among its cases, each case's tag the number of its type, so that the
+  pair, its `null` the pair whose code address is 0, as Rust lays out `Option<fn()>` (section 4,
+  assumed: that address as the niche, as Rust's), and a `T?` of a union that union with `null` among its cases, each case's tag the number of its type, so that the
   two share their room where their tags have one width (section 4, the owner, 2026-10-30, "Nullable
   form, as Option"); a read of a variable or a field the checker
   found known not null is the value of the case `T`, and `&x` on such a variable, and a `mut` member of
