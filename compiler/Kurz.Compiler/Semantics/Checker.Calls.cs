@@ -1278,7 +1278,9 @@ public sealed partial class Checker
 
                         // X8: the key is what a function of an item gives, as C#'s `OrderBy` infers its `TKey` from its `keySelector`: a
                         // lambda takes the item type for a parameter it does not type (F11) and its result from its body, which T27's
-                        // inference, from the arguments alone, does not reach; any other argument is a function value of one item
+                        // inference, from the arguments alone, does not reach; any other argument is a function value of one item. A
+                        // form of the call that fits none is `argument-mismatch`, and a key of another type `type-mismatch` (section 12,
+                        // the owner, 2026-10-31, "As the checker does")
                         if (c.Arguments.Count != 1 || (c.Arguments[0].Name is { } named && named != "keySelector")
                             || (Unwrap(c.Arguments[0].Value) is LambdaExpression { Parameters.Count: not 1 }))
                         {
@@ -1411,9 +1413,9 @@ public sealed partial class Checker
     /// or with a <c>char trimChar</c>, two forms, and the ASCII forms; <c>Split</c>, a <c>List&lt;string&gt;</c>, of a <c>string</c> or
     /// of a <c>char</c>, and <c>Replace</c>, a <c>string</c>, of two strings, of a <c>char</c> by a string or of a <c>char</c> by a
     /// <c>char</c>, three forms (X5); <c>ToLower()</c>, <c>ToUpper()</c>, <c>ToLowerAscii()</c> and <c>ToUpperAscii()</c> (X3); and <c>Substring(startIndex, length)</c>, a
-    /// <c>string</c> of two <c>int</c>s, the form the record names (X2). A member of two forms takes a literal argument at its own type (F14) and
-    /// gives a call that fits neither <c>argument-mismatch</c> with a line for each form (F13), as X1's searches do; the parameters
-    /// take C#'s names.
+    /// <c>string</c> of two <c>int</c>s, the form the record names (X2). A member of two forms or three takes a literal argument at its own type (F14)
+    /// and gives a call that fits none of them <c>argument-mismatch</c> with a line for each form (F13), as X1's searches do; the
+    /// parameters take C#'s names (section 12, the owner, 2026-10-31, "C#'s names").
     /// </summary>
     private Typed CheckStringMember(CallExpression c, MemberAccess m)
     {
@@ -1525,10 +1527,6 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
-    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7).
-    /// </summary>
-    /// <summary>
     /// X8: whether a sort orders values of <paramref name="type"/>, the items of a list or the keys of <c>SortBy</c>: a type <c>&lt;</c>
     /// orders, a number, a <c>char</c>, a <c>string</c>, a time and an enum that numbers its values (T18, T32, D18), and one of them that
     /// may be <c>null</c>, which sorts before every value (section 12, the owner, 2026-10-31, "Null first, as C#/Rust"); an enum that numbers
@@ -1558,6 +1556,10 @@ public sealed partial class Checker
         return false;
     }
 
+    /// <summary>
+    /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
+    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7).
+    /// </summary>
     private void MutReceiver(CallExpression call, Expression receiver, int line, string what)
     {
         var members = new List<MemberAccess>();
@@ -1908,7 +1910,7 @@ public sealed partial class Checker
 
                 if (i >= candidate.Slots.Count)
                 {
-                    candidate.BindingError = $"the call passes {pres.Count} arguments to {candidate.Slots.Count} parameters (D11)";
+                    candidate.BindingError = $"the call passes {Types.Count(pres.Count, "argument")} to {Types.Count(candidate.Slots.Count, "parameter")} (D11)";
                     return;
                 }
 

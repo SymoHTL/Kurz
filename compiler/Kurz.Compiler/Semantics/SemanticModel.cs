@@ -74,7 +74,7 @@ public enum CallKind
     /// <summary>A list's <c>Reverse()</c> (X9).</summary>
     ListReverse,
 
-    /// <summary>A list's <c>Sort()</c>, in place and stable, or <c>SortUnstable()</c> (X8).</summary>
+    /// <summary>A list's <c>Sort()</c>, in place and stable (X8).</summary>
     ListSort,
 
     /// <summary>A list's <c>SortUnstable()</c> (X8).</summary>
@@ -86,13 +86,13 @@ public enum CallKind
     /// <summary>A string's <c>Contains</c>, <c>StartsWith</c>, <c>EndsWith</c> or <c>IndexOf</c>, of a <c>string</c> or of a <c>char</c>, which the argument's type names (X1).</summary>
     StringSearch,
 
-    /// <summary>A string's <c>Trim</c>, <c>TrimStart</c>, <c>TrimEnd</c>, <c>TrimAscii</c>, <c>TrimStartAscii</c> or <c>TrimEndAscii</c>, or <c>Trim(c)</c> of a <c>char</c> (X4).</summary>
+    /// <summary>A string's <c>Trim</c>, <c>TrimStart</c>, <c>TrimEnd</c>, <c>TrimAscii</c>, <c>TrimStartAscii</c> or <c>TrimEndAscii</c>, or <c>Trim(c)</c>, <c>TrimStart(c)</c> or <c>TrimEnd(c)</c> of a <c>char</c> (X4).</summary>
     StringTrim,
 
     /// <summary>A string's <c>Split(separator)</c>, of a <c>string</c> or of a <c>char</c>, which the argument's type names (X5).</summary>
     StringSplit,
 
-    /// <summary>A string's <c>Replace(old, new)</c>, the first of a <c>string</c> or of a <c>char</c>, which its type names (X5).</summary>
+    /// <summary>A string's <c>Replace</c> of a <c>string</c> by a <c>string</c>, of a <c>char</c> by a <c>string</c> or of a <c>char</c> by a <c>char</c>, which the arguments' types name (X5).</summary>
     StringReplace,
 
     /// <summary>A string's <c>ToLower</c>, <c>ToUpper</c>, <c>ToLowerAscii</c> or <c>ToUpperAscii</c> (X3).</summary>
@@ -104,7 +104,7 @@ public enum CallKind
     /// <summary><c>long.Parse(s)</c>, or the same call on another integer type, the number or the case <c>ParseError</c> (X7).</summary>
     Parse,
 
-    /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text (X6).</summary>
+    /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text, with a <c>string</c> or a <c>char</c> separator, which the argument's type names (X6).</summary>
     StringJoin,
 
     /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>

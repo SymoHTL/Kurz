@@ -15,6 +15,9 @@
 // | -Infinity
 // | 16777216
 // | Infinity
+// | 1.0000001
+// | 1
+// | 1.0000000000000002
 // rules: X7
 
 void ShowDouble(string s) {
@@ -50,6 +53,16 @@ ShowDouble("2.4703282292062327e-324")
 ShowDouble("2.4703282292062328e-324")
 ShowDouble("9007199254740993")
 ShowDouble("-1e999")
-// a `float` is rounded once, from the digits
+// a `float` is rounded once, from the digits: the last number stands just above a halfway point of two `float` values,
+// and its nearest `double` is that point
 ShowFloat("16777217")
 ShowFloat("3.4028236e38")
+ShowFloat("1.00000005960464477539062501")
+// the halfway point 1 + 2^-53 ties to the even `double`, and a digit that is not 0 past the 768th rounds it up
+mut digits = "1.00000000000000011102230246251565404236316680908203125"
+ShowDouble(digits)
+for i in 0..<746 {
+    digits = "{digits}0"
+}
+
+ShowDouble("{digits}1")

@@ -1,0 +1,5 @@
+// expect: error cannot-infer at 5
+// rules: X6
+
+// `[]` gives `T` nothing, and no list type stands where it does
+print(string.Join(",", []))

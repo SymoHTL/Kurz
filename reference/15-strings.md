@@ -82,8 +82,8 @@ print(s.Substring(2, 5))
 
 `s.ToLower()` and `s.ToUpper()` change case by Unicode's full mapping, under which the length can
 change: `"ß".ToUpper()` is `"SS"`, and a capital sigma at the end of a word lowers to the final form,
-as Rust's `to_lowercase` and `to_uppercase`. `s.ToLowerAscii()` and `s.ToUpperAscii()` change `A` to
-`Z` alone, as Rust's `to_ascii_lowercase` (§12, the owner, 2026-10-31, "Rust full + ASCII"). Under the
+as Rust's `to_lowercase` and `to_uppercase`. `s.ToLowerAscii()` and `s.ToUpperAscii()` change the
+letters `A` to `Z` and `a` to `z` alone, as Rust's `to_ascii_lowercase` (§12, the owner, 2026-10-31, "Rust full + ASCII"). Under the
 Unicode form the Kelvin sign U+212A lowers to `k`; under the ASCII form it stays. A change of case
 takes no culture (§4). The mapping is that of the Unicode Character Database of the version Rust's
 stable release pins, 17.0.0, in tables generated from the database's files (§12, the owner,
@@ -120,7 +120,22 @@ feed and the carriage return, as Rust's `is_ascii_whitespace`, and `s.Trim(c)` w
 character from both ends, as C#'s `Trim(char)` *(assumed, §12: the names `TrimStartAscii` and
 `TrimEndAscii`, the five characters and the `char` form)*. `s.TrimStart(c)` and `s.TrimEnd(c)` take
 the `char` from the start or the end, as C#'s `TrimStart(char)` and `TrimEnd(char)` (§12, the owner,
-2026-10-31, "TrimStart(c), TrimEnd(c)").
+2026-10-31, "TrimStart(c), TrimEnd(c)"). A trim of a `char` takes every repeat of it at its end, as C#'s
+does, so that `"xxaxx".TrimStart('x')` is `axx` and a string of that `char` alone gives `""`
+*(assumed, §12)*. The forms,
+with C#'s names for their parameters (§12, the owner, 2026-10-31, "C#'s names"):
+
+```text
+string Trim()
+string TrimStart()
+string TrimEnd()
+string TrimAscii()
+string TrimStartAscii()
+string TrimEndAscii()
+string Trim(char trimChar)
+string TrimStart(char trimChar)
+string TrimEnd(char trimChar)
+```
 
 Case: [strings/trim.kz](../corpus/strings/trim.kz)
 ```kurz
@@ -132,6 +147,7 @@ print(s.TrimEndAscii() == "\u00A0 a b")
 print("xxaxx".Trim('x'))
 print("xxaxx".TrimStart('x'))
 print("xxaxx".TrimEnd('x'))
+print("xxx".Trim('x') == "")
 ```
 
 A call of `Trim`, `TrimStart` or `TrimEnd` that fits neither form, with no argument or a `char`, `s.Trim(5)` among them, is `argument-mismatch`, with a line for each form (F13).
@@ -145,14 +161,26 @@ print(s.Trim(5))
 ### X5 (decided, §12) Splitting and replacing
 
 `s.Split(separator)` gives a `List<string>` of the pieces between the separators, each a new string,
-an empty piece kept, as C#'s `Split` and Rust's `split`; `s.Replace(old, new)` replaces each `old`
-from the left, none overlapping the one before. The separator, and `old`, is a `string` or a `char`
-*(assumed, §12: the list of new strings, the empty piece and the `char` form, defaults of the
-question; the order of the replace, not put to the owner)*. `s.Split("")` gives the whole string as
-its one piece, and `s.Replace("", x)` gives the string as it is (§12, the owner, 2026-10-31, "No
-piece, no change"). `new` is a `char` where `old` is one, `s.Replace('-', '+')`, as C#'s
-`Replace(char, char)` (§12, the owner, 2026-10-31, "Replace(char, char)"), so that `Replace` has three
-forms, and none takes a `string` `old` with a `char` `new`, as none of C#'s does.
+an empty piece kept, as C#'s `Split` and Rust's `split`; `s.Replace(oldValue, newValue)` replaces each
+`oldValue` from the left, none overlapping the one before. The separator, and the value replaced, is a
+`string` or a `char` *(assumed, §12: the list of new strings, the empty piece and the `char` form,
+defaults of the question; the order of the replace, not put to the owner)*. `s.Split("")` gives the
+whole string as its one piece, and `s.Replace("", x)` gives the string as it is (§12, the owner,
+2026-10-31, "No piece, no change"). A `char` is replaced by a `char` too, `s.Replace('-', '+')`, as
+C#'s `Replace(char, char)` (§12, the owner, 2026-10-31, "Replace(char, char)"), so that `Replace` has
+three forms: a `string` by a `string`, a `char` by a `string` and a `char` by a `char`; a `string` by a
+`char` is none of them, since the record names no such form. A block of `Split` or `Replace` the
+system refuses, and a result of more bytes than the largest `int`, raise `allocation-failed`, as every
+block of a string does (T15, M9). The forms, with C#'s names for their parameters (§12, the owner,
+2026-10-31, "C#'s names"):
+
+```text
+List<string> Split(string separator)
+List<string> Split(char separator)
+string Replace(string oldValue, string newValue)
+string Replace(char oldChar, string newValue)
+string Replace(char oldChar, char newChar)
+```
 
 Case: [strings/split-replace.kz](../corpus/strings/split-replace.kz)
 ```kurz
@@ -173,14 +201,30 @@ s = "a,b"
 print(s.Split(5))
 ```
 
+Case: [strings/replace-string-with-char.kz](../corpus/strings/replace-string-with-char.kz)
+```kurz
+// `Replace` takes a `string` by a `string`, a `char` by a `string` or a `char` by a `char`, and no `string` by a `char`
+s = "a-b"
+print(s.Replace("-", '+'))
+```
+
 ### X6 (decided, §12) Joining
 
-`string.Join(separator, items)` takes a list of any item type and writes the text of each item (A4)
+`string.Join(separator, values)` takes a list of any item type and writes the text of each item (A4)
 with the separator between two items, as C#'s `Join` calls `ToString`; an item type that has no text
 is `no-text` (§12, the owner, 2026-10-31, "Any list"). The separator is a `string` or a `char`, as
 C#'s `Join(char, ...)` (§12, the owner, 2026-10-31, "Join(char, items)"). A call that fits neither
 form, a separator of another type, or values that are no list, from which neither form reads an
-item type (T27), is `argument-mismatch`, with a line for each form (F13).
+item type (T27), is `argument-mismatch`, with a line for each form (F13). An empty list literal,
+`string.Join(",", [])`, gives `T` nothing, and no list type stands where it does, so it is
+`cannot-infer`, as `x = []` is (M11). A block of `Join` the system refuses, and a result of more bytes
+than the largest `int`, raise `allocation-failed`, as every block of a string does (T15, M9). The forms,
+with C#'s names for their parameters (§12, the owner, 2026-10-31, "C#'s names"):
+
+```text
+string Join<T>(string separator, List<T> values)
+string Join<T>(char separator, List<T> values)
+```
 
 Case: [strings/join.kz](../corpus/strings/join.kz)
 ```kurz
@@ -204,6 +248,18 @@ Case: [strings/join-of-a-number.kz](../corpus/strings/join-of-a-number.kz)
 print(string.Join(", ", 5))
 ```
 
+Case: [strings/join-separator-of-a-number.kz](../corpus/strings/join-separator-of-a-number.kz)
+```kurz
+// the separator is a `string` or a `char`, so `5` fits neither form
+print(string.Join(5, ["a"]))
+```
+
+Case: [strings/join-empty-literal.kz](../corpus/strings/join-empty-literal.kz)
+```kurz
+// `[]` gives `T` nothing, and no list type stands where it does
+print(string.Join(",", []))
+```
+
 ### X7 (decided, §12) Reading a number
 
 `long.Parse(s)`, and the same call on each number type, gives the number or a `ParseError`:
@@ -223,7 +279,9 @@ holds a byte the form does not take is `InvalidDigit` though its digits run past
 string read before the range, as C#'s `Parse` reads it, so that `long.Parse("99999999999999999999x")`
 is `InvalidDigit` (§12, the owner, 2026-10-31, "InvalidDigit, as C#"). Whitespace is the tab, the line
 feed, the vertical tab, the form feed, the carriage return and the space, and a string of whitespace
-alone is `Empty`, and a sign with no digits, `"+"` or `"-"`, is `InvalidDigit`;
+alone is `Empty`, and a sign with no digits, `"+"` or `"-"`, is `InvalidDigit`; whitespace stands
+before the sign and after the digits alone, so that `"- 5"` is `InvalidDigit`, as C#'s Integer style
+reads it;
 `,` stands among the digits before the point, its
 groups not checked, so that `"1,2,3"` reads as 123; `Infinity`, `-Infinity` and `NaN` are read in any
 case; a number may start or end with its point; a sign before the digits of an unsigned type reads as
@@ -235,19 +293,26 @@ build's product pass, not put to the owner as questions, and the two names, a de
 A `decimal` zero read with a sign keeps it, so that `print(decimal.Parse("-0.00"))` shows `-0.00`, as
 C#'s `decimal.Parse` keeps the sign in the value's bits (§12, the owner, 2026-10-31, "-0.00, keep the
 sign"). A `double` is the one nearest the number its digits write, ties to the even one, and a `float`
-is rounded once, from the digits, as Rust's `parse` and C#'s `Parse` since .NET Core 3.0 read them:
-Clinger's fast path where the digits and the power of ten are exact in a `double`, Eisel-Lemire's with
-a table of the 128-bit powers of five from 5^-342 to 5^308, and for the strings the two cannot settle
-a slow path over at most 768 of the digits on the stack, so that a parse asks the allocator for
-nothing. The forms are .NET's: a `,` only after the first digit, as many as stand, so that `",5"` is
+is rounded once, from the digits, as Rust's `parse` and C#'s `Parse` since .NET Core 3.0 read them,
+by Rust's mechanism: Clinger's fast path where the digits and the power of ten are exact in the type,
+at most 53 bits and 10^22 for a `double` and 24 bits and 10^10 for a `float`, Eisel-Lemire's with a
+table of the 128-bit powers of five from 5^-342 to 5^308, and for the strings the two cannot settle a
+slow path over at most 768 of the digits on the stack, so that a parse asks the allocator for nothing;
+the digits past the 768th count as a remainder that is not 0 where one of them is not, so that a number
+at a halfway point with such a digit rounds up. The forms are .NET's: a `,` only after the first digit, as many as stand, so that `",5"` is
 `InvalidDigit` and `"1,,2"` reads as 12; a sign before `Infinity` and `NaN`, and no `Inf`; a point
 with a digit beside it and an exponent with a digit after its sign, so that `"."` and `"1e"` are
-`InvalidDigit`; no hexadecimal form and no `_` between digits. A number past the largest `double` or
-`float` is an infinity and one below the smallest a zero, each with the sign, so that `"-1e-999"`
-reads as `-0`, and `"NaN"` and `"-NaN"` read as the same NaN. A `decimal` keeps the digits that fit in
-its 96 bits at a scale of at most 28, rounds half to even at the cut, every digit after it counted, and
-is held to its range after the rounding, so that `"7922816251426433759354395033.55"` reads as
-7922816251426433759354395034 and `"79228162514264337593543950335.5"` is `TooLarge`; a zero keeps its
+`InvalidDigit`; no hexadecimal form and no `_` between digits. A `decimal` reads none of the words,
+which are named for `double` and `float` alone, so that `decimal.Parse("NaN")` is `InvalidDigit`, as its
+exponent and a sign after its digits are. A number at or past the halfway point above the largest
+finite `double` or `float` is an infinity and one at or below half the smallest positive one a zero,
+each with the sign, so that `"-1e-999"` reads as `-0`, and `"NaN"` and `"-NaN"` read as the same NaN. A `decimal` keeps the digits that fit in
+its 96 bits at a scale of at most 28 and rounds half to even at the cut, every digit after it counted; a
+carry of the rounding past 96 bits drops the last digit kept and lowers the scale by one, as .NET's
+`NumberToDecimal` does, so that `"7922816251426433759354395033.55"` reads as
+7922816251426433759354395034, and at a scale of 0 puts the number past the range. The number is held to
+its range after the rounding, so that `"79228162514264337593543950335.5"` is `TooLarge` and
+`"-79228162514264337593543950335.5"` is `TooSmall`; a zero keeps its
 scale, at most 28 *(assumed, §12: the defaults of the build's product pass, not put to the owner)*. A NUL
 after the number is `InvalidDigit` for every number type, as Rust's `parse` reads it, where .NET's
 `Parse` skips NUL characters after the digits, so that `"5\0"` is `InvalidDigit` (§12, the owner,
@@ -318,10 +383,11 @@ match byte.Parse("-0") {
 ShowDouble(" 1,000.5 ")
 ShowDouble("-infinity")
 ShowDouble(".5")
-// a `decimal` keeps its scale, and reads no sign after its digits and no exponent
+// a `decimal` keeps its scale, and reads no sign after its digits, no exponent and no word
 ShowDecimal("+2.50")
 ShowDecimal("5-")
 ShowDecimal("1e5")
+ShowDecimal("NaN")
 ShowDecimal("79228162514264337593543950336")
 ShowDecimal("-79228162514264337593543950336")
 ```
@@ -388,6 +454,11 @@ match int.Parse("5\0") {
     int n => print(n)
     ParseError e => print(e)
 }
+// whitespace stands before the sign and after the digits alone
+match int.Parse("- 5") {
+    int n => print(n)
+    ParseError e => print(e)
+}
 ```
 
 Case: [strings/parse-floating.kz](../corpus/strings/parse-floating.kz)
@@ -425,9 +496,19 @@ ShowDouble("2.4703282292062327e-324")
 ShowDouble("2.4703282292062328e-324")
 ShowDouble("9007199254740993")
 ShowDouble("-1e999")
-// a `float` is rounded once, from the digits
+// a `float` is rounded once, from the digits: the last number stands just above a halfway point of two `float` values,
+// and its nearest `double` is that point
 ShowFloat("16777217")
 ShowFloat("3.4028236e38")
+ShowFloat("1.00000005960464477539062501")
+// the halfway point 1 + 2^-53 ties to the even `double`, and a digit that is not 0 past the 768th rounds it up
+mut digits = "1.00000000000000011102230246251565404236316680908203125"
+ShowDouble(digits)
+for i in 0..<746 {
+    digits = "{digits}0"
+}
+
+ShowDouble("{digits}1")
 ```
 
 Case: [strings/parse-decimal.kz](../corpus/strings/parse-decimal.kz)
@@ -463,7 +544,8 @@ print(1)
 
 ### X8 (decided, §12) Sorting a list
 
-`xs.Sort()` sorts a list in place and stable, for the item types `<` orders; `xs.SortBy(x => key)`
+`xs.Sort()` sorts a list in place and stable, for the item types `<` orders and their nullable forms
+(below); `xs.SortBy(x => key)`
 sorts it by a key of such a type; `xs.SortUnstable()` sorts it without the buffer of the stable sort,
 as Rust's `sort`, `sort_by_key` and `sort_unstable`. Each changes the list and takes it through a
 `mut` variable, as `Add` does (M5) (§12, the owner, 2026-10-31, "Same + SortUnstable"). A list of
@@ -474,12 +556,16 @@ list's growth does (M9) *(assumed, §12)*.
 `SortBy` calls its key once for each item and keeps the keys beside the list while it sorts, as C#'s
 `OrderBy` and Rust's `sort_by_cached_key` (§12, the owner, 2026-10-31, "Once per item"), in the order
 of the list, one call for a list of one item and none for an empty one *(assumed, §12)*. The key is the
-argument `keySelector`, the name C#'s `OrderBy` gives it, a lambda or a function value of one item, and
-a `SortBy` with no key, with two, with a key of another name or with a lambda of two parameters is
-`argument-mismatch`, as a call that fits no form is (D11) *(assumed, §12)*. A sort on an
-item type or a key type `<` does not order is `type-mismatch`, as `<` on two values of that type is
-(T18) *(assumed, §12)*, and a sort of the values of an enum that numbers none, as items or as keys, is
-`enum-number`, as `<` on two of them is (D20) (§12, the owner, 2026-10-31, "enum-number"). A list of
+argument `keySelector`, the name C#'s `OrderBy` gives it, a lambda or a function value of one item
+*(assumed, §12)*. A `SortBy` with no key, with two, with a key of another name or with a lambda of
+another count of parameters than one is `argument-mismatch`, as a call that fits no form is (D11), and
+a key that is no function of one item, `xs.SortBy(1)`, a function value of another parameter type or
+count among them, or a function that gives nothing, is `type-mismatch`, as an argument of a type its
+parameter does not take is (F11) (§12, the owner, 2026-10-31, "As the checker does"). A sort of the
+values of an enum that numbers none, as items or as keys, is `enum-number`, as `<` on two of them is
+(D20) (§12, the owner, 2026-10-31, "enum-number"), and a sort on any other item type or key type `<`
+does not order, a nullable form of one it orders aside, is `type-mismatch`, as `<` on two values of that type is
+(T18) *(assumed, §12)*. A list of
 nullable items, and a nullable key, sort with `null` before every value, as C#'s
 `Comparer<T>.Default` and Rust's ordering of `Option`, though `<` takes no nullable operand (§12, the
 owner, 2026-10-31, "Null first, as C#/Rust").

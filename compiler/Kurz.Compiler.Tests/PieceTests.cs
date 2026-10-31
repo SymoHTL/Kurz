@@ -8,8 +8,8 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The decisions on the trims, the splits, the replaces, the joins and the ASCII changes of case of a string (X3 to X6) that no corpus case
 /// pins: 2000 strings of up to 40 letters out of twenty-six, among them every code point of Unicode's White_Space that is not ASCII, of two
-/// and three bytes, but those inside U+2000 to U+200A, a range the alphabet holds at both ends and in the middle, the form feed, the
-/// carriage return and the vertical tab, which the ASCII forms keep, three code points that are no whitespace beside them, U+001F, U+200B
+/// and three bytes, but those inside U+2000 to U+200A, a range the alphabet holds at both ends and in the middle, the form feed and the
+/// carriage return, which the ASCII forms take, and the vertical tab, which they keep, three code points that are no whitespace beside them, U+001F, U+200B
 /// and U+180E, and letters of two bytes, which the program and this class generate alike, give the bytes .NET's members of the same strings
 /// give, through each member and each form; and the same under the allocator that makes every block it frees inaccessible, for the first
 /// 500 of the strings. Each kind of result is taken at least 100 times: a trim that takes from both ends, a Unicode trim that takes more
