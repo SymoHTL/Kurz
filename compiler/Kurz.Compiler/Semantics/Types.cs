@@ -285,6 +285,14 @@ public static class Types
     }
 
     /// <summary>
+    /// O4: whether a call keeps every case of its result where this type is written for its value, a variable's, a parameter's, a
+    /// field's, a list's item type or a result: a union, with or without a <c>null</c> beside its cases; a <c>T?</c> of one type is
+    /// no list of cases (N8), and the call stands for its success there, as for any other type its success converts to. The one
+    /// test of every place that keeps a call's cases.
+    /// </summary>
+    public static bool KeepsCases(KurzType? written) => written is UnionType && (NonNull(written) ?? written) is UnionType;
+
+    /// <summary>
     /// N1: whether a <c>null</c> arm over a subject of these cases is an arm no value reaches: none of them is <c>null</c>, a pointer, which
     /// takes <c>null</c> itself (section 3), or a type parameter, which a nullable type can fill (N11). The one test of the checker, which
     /// reads such an arm with no diagnostic, and of the emitter, which branches past it, so that the two cannot read it apart.

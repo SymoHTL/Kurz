@@ -31,6 +31,9 @@ public sealed partial class Checker
 
         /// <summary>A list literal (M11): its own type, from its items, where the others fix nothing; read again under the parameter's type, as a literal is (L17).</summary>
         public bool ListLiteral { get; init; }
+
+        /// <summary>A call with cases beside its success: its whole result, which a parameter of a written union keeps, where <see cref="Typed"/> is the success every other parameter takes (O4, O2).</summary>
+        public UnionType? Whole { get; init; }
     }
 
     private sealed class Candidate
@@ -47,6 +50,11 @@ public sealed partial class Checker
         public Dictionary<TypeParameterSymbol, KurzType> Map { get; set; } = [];
 
         public bool DefaultUsed { get; set; }
+
+        /// <summary>The arguments whose call keeps every case of its result, as the parameter each lands on is a written union (O4).</summary>
+        public bool[] Keeps { get; set; } = [];
+
+        public bool KeepsAny => Keeps.Contains(true);
 
         public string? BindingError { get; set; }
 
@@ -1741,7 +1749,21 @@ public sealed partial class Checker
 
             MutArgumentRead(a); // N7
             Push();
-            var typed = CheckExpression(a.Value, null);
+            var call = a.Mut ? null : Unwrap(a.Value) as CallExpression;
+            var typed = CheckExpression(a.Value, null, keepCases: call is not null);
+            UnionType? whole = null;
+            if (call is not null && !typed.IsError && typed.Type is UnionType u && Types.NonNull(u) is null)
+            {
+                // O4: the call's whole result, which Commit keeps where the parameter picked is a written union and unwraps elsewhere (O2)
+                whole = u;
+                typed = new Typed(u.Cases[0]);
+                if (Types.IsVoid(typed.Type))
+                {
+                    Unwrapped(a.Value, call, u); // no parameter takes a `void` success, which O10 refuses below
+                    whole = null;
+                }
+            }
+
             var captured = Pop(commit: false);
             if (!typed.IsError && Types.IsVoid(typed.Type))
             {
@@ -1751,7 +1773,7 @@ public sealed partial class Checker
                 typed = Typed.Error;
             }
 
-            pres.Add(new Pre { Argument = a, Typed = typed, Diagnostics = captured, LiteralOnly = IsLiteralOnly(a.Value) });
+            pres.Add(new Pre { Argument = a, Typed = typed, Diagnostics = captured, LiteralOnly = IsLiteralOnly(a.Value), Whole = whole });
         }
 
         foreach (var candidate in candidates)
@@ -1759,6 +1781,13 @@ public sealed partial class Checker
             if (candidate.BindingError is null)
             {
                 Bind(candidate, pres);
+            }
+
+            if (candidate.BindingError is null)
+            {
+                // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
+                // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
+                candidate.Keeps = pres.Select((p, i) => p.Whole is not null && Types.KeepsCases(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map))).ToArray();
             }
 
             if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
@@ -1784,6 +1813,13 @@ public sealed partial class Checker
         else if (fitting.Count > 1 && !open)
         {
             var exact = fitting.Where(x => x.Exact).ToList();
+            if (exact.Count > 1 && exact.Any(x => x.KeepsAny) && !exact.All(x => x.KeepsAny))
+            {
+                // O4 with F13: a function whose parameter keeps a call's cases fits the call's whole result, and wins over one that takes its
+                // success (the owner, 2026-10-31, "The union one")
+                exact = exact.Where(x => x.KeepsAny).ToList();
+            }
+
             if (exact.Count == 1)
             {
                 picked = exact[0];
@@ -1840,6 +1876,17 @@ public sealed partial class Checker
         }
 
         return typed;
+    }
+
+    /// <summary>O4: the type an argument has on the parameter it lands on: a call's whole result where the parameter keeps its cases, its own type elsewhere.</summary>
+    private static KurzType ArgumentType(Candidate candidate, List<Pre> pres, int i) =>
+        pres[i].Whole is { } whole && candidate.Keeps.Length > i && candidate.Keeps[i] ? whole : pres[i].Typed.Type;
+
+    /// <summary>O2, O3, O9: a call an argument read whole stands for its success, and every other case leaves the calling function, as <see cref="CheckCall"/> reads a call no place keeps.</summary>
+    private void Unwrapped(Expression value, CallExpression call, UnionType whole)
+    {
+        Propagate(whole.Cases.Skip(1), call.Line);
+        RecordThrough(value, new Typed(whole.Cases[0]));
     }
 
     /// <summary>D11: arguments without a name fill the parameters in order, arguments by name follow them; what does not fit is <c>argument-mismatch</c>.</summary>
@@ -1927,9 +1974,9 @@ public sealed partial class Checker
             var slot = candidate.Slots[candidate.Binding[i]].Type;
             if (slot is TypeParameterType tp && direct.TryGetValue(tp.Symbol, out var types))
             {
-                types.Add(pre.Typed.Type);
+                types.Add(ArgumentType(candidate, pres, i));
             }
-            else if (!Unify(slot, pre.Typed.Type, map))
+            else if (!Unify(slot, ArgumentType(candidate, pres, i), map))
             {
                 candidate.CannotInfer = true;
                 return;
@@ -2199,12 +2246,13 @@ public sealed partial class Checker
                 continue;
             }
 
-            if (!(slot.Mut ? Types.Same(pre.Typed.Type, type) : Types.Assignable(pre.Typed.Type, type)))
+            var own = ArgumentType(candidate, pres, i);
+            if (!(slot.Mut ? Types.Same(own, type) : Types.Assignable(own, type)))
             {
                 candidate.Misfit ??= (i, type);
             }
 
-            exact &= Types.Same(pre.Typed.Type, type);
+            exact &= Types.Same(own, type);
         }
 
         candidate.Exact = exact;
@@ -2242,10 +2290,11 @@ public sealed partial class Checker
 
         var (index, parameter) = bound.Misfit!.Value;
         var pre = pres[index];
-        if (pre.Lambda is null && bound.Slots[bound.Binding[index]].Mut && Types.Assignable(Types.NonNull(pre.Typed.Type) ?? pre.Typed.Type, parameter))
+        var own = ArgumentType(bound, pres, index);
+        if (pre.Lambda is null && bound.Slots[bound.Binding[index]].Mut && Types.Assignable(Types.NonNull(own) ?? own, parameter))
         {
             // a nullable variable among them, which no check makes a variable of the parameter's type (N7)
-            Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"{Types.A(pre.Typed.Type)} passed as `mut` where a `mut {parameter}` is required: a `mut` parameter takes a variable of its own type, since the callee writes {Types.A(parameter)} back into it (M7, T1)");
+            Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"{Types.A(own)} passed as `mut` where a `mut {parameter}` is required: a `mut` parameter takes a variable of its own type, since the callee writes {Types.A(parameter)} back into it (M7, T1)");
             return;
         }
 
@@ -2255,7 +2304,7 @@ public sealed partial class Checker
             return;
         }
 
-        ReportMismatch(pre.Typed.Type, parameter, pre.Argument.Line, $"{Types.A(pre.Typed.Type)} where {Types.A(parameter)} is required");
+        ReportMismatch(own, parameter, pre.Argument.Line, $"{Types.A(own)} where {Types.A(parameter)} is required");
     }
 
     /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>, each default after its parameter (<c>int b = 0</c>).</summary>
@@ -2306,19 +2355,20 @@ public sealed partial class Checker
             return $"argument {index + 1}, a lambda, does not fit {Types.A(parameter)} (F11)";
         }
 
-        if (candidate.Slots[candidate.Binding[index]].Mut && Types.Assignable(pre.Typed.Type, parameter))
+        var own = ArgumentType(candidate, pres, index);
+        if (candidate.Slots[candidate.Binding[index]].Mut && Types.Assignable(own, parameter))
         {
-            return $"argument {index + 1}, {Types.A(pre.Typed.Type)}, is no variable of the type `{parameter}` that a `mut` parameter writes back into (M7)";
+            return $"argument {index + 1}, {Types.A(own)}, is no variable of the type `{parameter}` that a `mut` parameter writes back into (M7)";
         }
 
-        var why = Types.MismatchId(pre.Typed.Type, parameter) switch
+        var why = Types.MismatchId(own, parameter) switch
         {
             ErrorIds.NarrowingConversion => "a narrowing conversion",
             ErrorIds.SignMix => "a type of the other signedness",
             ErrorIds.NullableUnchecked => "a nullable value without a check",
             _ => "a value of another type",
         };
-        return $"argument {index + 1} is {Types.A(pre.Typed.Type)}{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where {Types.A(parameter)} is required: {why} ({Types.MismatchRule(pre.Typed.Type, parameter)})";
+        return $"argument {index + 1} is {Types.A(own)}{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where {Types.A(parameter)} is required: {why} ({Types.MismatchRule(own, parameter)})";
     }
 
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7).</summary>
@@ -2374,6 +2424,11 @@ public sealed partial class Checker
                 foreach (var d in pre.Diagnostics)
                 {
                     Add(d);
+                }
+
+                if (pre.Whole is { } whole && !candidate.Keeps[i])
+                {
+                    Unwrapped(a.Value, (CallExpression)Unwrap(a.Value), whole); // O2: the parameter takes the success
                 }
             }
 

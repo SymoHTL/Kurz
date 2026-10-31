@@ -325,8 +325,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block,
     // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
     // nullable variable known not null, an `Add` through the place of one, the item `?[` reads, a list without items in a nullable
-    // variable, a `match` with a `null` arm on one whose arm changes it, and a nullable parameter read in the arm of its case and after
-    // a `match` whose `null` arm leaves
+    // variable, a `match` with a `null` arm on one whose arm changes it, a nullable parameter read in the arm of its case and after
+    // a `match` whose `null` arm leaves, and a call's whole result, a string read from a list, on a parameter of a written union (O4),
+    // which the callee adds to a list that outlives the call and the source list's next value
     private const string Strings = """
         data Person(string Name, int Age)
         data Tag(string Label)
@@ -372,6 +373,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         string | InvalidUtf8 Wrapped(Bytes b) {
             inner = string.FromUtf8(b)
             return "<{inner}>"
+        }
+
+        string | Leaf Pick(List<string> xs, int i) {
+            if i < xs.Count {
+                return xs[i]
+            }
+            return Leaf
+        }
+
+        void Kept(string | Leaf x, mut List<string | Leaf> into) {
+            into.Add(x)
+            print(x)
         }
 
         mut first = Made(1)
@@ -507,6 +520,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(made.Pointer[1])
         }
         print(Made(37) < Same(Made(38)))
+        mut pile = List<string | Leaf>()
+        mut sources = List<string>()
+        sources.Add(Made(39))
+        Kept(Pick(sources, 0), mut pile)
+        Kept(Pick(sources, 1), mut pile)
+        sources = List<string>()
+        print(pile)
         """;
 
     private static readonly string[] StringsPrint =
@@ -556,6 +576,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "hi", // a list that took over the room `Bytes.Allocate` gave
         "105",
         "true", // two strings calls made, ordered by their bytes (T32) and let go of after the statement
+        "n39", // a call's whole result on a parameter of a written union (O4), let go of after the call
+        "Leaf",
+        "[n39, Leaf]", // and the count the callee's list took of it, past the source list's next value
     ];
 
     // every way out of a block a string is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a

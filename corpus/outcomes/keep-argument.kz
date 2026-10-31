@@ -1,0 +1,35 @@
+// expect: output
+// | 42
+// | invalid digit
+// | 10
+// | none
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(long | ParseError x) {
+    match x {
+        long n => print(n)
+        ParseError e => print(e)
+    }
+}
+
+void Report(int | NotFound found) {
+    match found {
+        int n => print(n)
+        NotFound => print("none")
+    }
+}
+
+// a parameter whose written type is a union takes the call's cases, as a variable of that type does
+Show(long.Parse("42"))
+Show(long.Parse("4x"))
+Report(found: Find(1))
+Report(Find(2))

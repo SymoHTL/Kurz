@@ -1,0 +1,32 @@
+// expect: output
+// | 10
+// | none
+// | 10
+// | none
+// rules: O4
+
+data NotFound
+
+data Box(int | NotFound Value)
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    match found {
+        int n => print(n)
+        NotFound => print("none")
+    }
+}
+
+// a constructor's parameter is a field of a written union, and the list's written item type is one
+Report(Box(Find(1)).Value)
+Report(Box(Find(2)).Value)
+List<int | NotFound> items = [Find(1), Find(2)]
+for f in items {
+    Report(f)
+}

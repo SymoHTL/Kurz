@@ -622,7 +622,7 @@ public sealed partial class Checker
             current = Types.Error;
         }
 
-        var value = CheckExpression(a.Value, Types.IsError(current) ? null : current, keepCases: current is UnionType);
+        var value = CheckExpression(a.Value, Types.IsError(current) ? null : current, keepCases: Types.KeepsCases(current));
         if (Types.IsError(current) || value.IsError)
         {
             return;
@@ -736,7 +736,7 @@ public sealed partial class Checker
     private void CheckWrittenValue(Assignment a, IndexExpression index, KurzType type)
     {
         model.RecordType(index, new Typed(type));
-        var value = CheckExpression(a.Value, type, keepCases: type is UnionType);
+        var value = CheckExpression(a.Value, type, keepCases: Types.KeepsCases(type));
         if (value.IsError)
         {
             return;
@@ -1727,7 +1727,7 @@ public sealed partial class Checker
         readingConstant = true;
         stateRead = false;
         Push();
-        var value = CheckExpression(v.Value, declared, keepCases: declared is UnionType);
+        var value = CheckExpression(v.Value, declared, keepCases: Types.KeepsCases(declared));
         var captured = Pop(commit: false);
         readingConstant = reading;
         if (stateRead)
