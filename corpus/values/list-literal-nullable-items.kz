@@ -1,0 +1,8 @@
+// expect: output
+// | 2
+// | [1, null]
+// rules: M11, N6
+
+List<int?> maybe = [1, null]
+print(maybe.Count)
+print(maybe)

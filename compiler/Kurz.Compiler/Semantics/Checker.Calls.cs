@@ -745,7 +745,7 @@ public sealed partial class Checker
     /// </summary>
     private KurzType MapOf(KurzType key, KurzType value, int line)
     {
-        switch (KeyOf(key, [], []))
+        switch (KeyOf(key, [], [], []))
         {
             case (true, var why):
                 Report(ErrorIds.TypeMismatch, line, $"a map's key is compared with `==`, which `{key}` does not take: {why} (M9, T18)");
@@ -770,10 +770,10 @@ public sealed partial class Checker
     /// by its case and its value (D3; section 4, the owner, 2026-10-30, "Case and value, as Rust"). A field of a map or a function value
     /// is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "type-mismatch"), and so is one of a file or a socket (section 4, the
     /// owner, 2026-10-30, "Handle ==": "type-mismatch"). <paramref name="seen"/> holds the data types on the way, each with its type
-    /// arguments, whose fields are read at the first meeting (<see cref="Met"/>), and <paramref name="path"/> the data types the walk is
-    /// inside of (<see cref="Inside"/>).
+    /// arguments, whose fields are read at the first meeting (<see cref="Met"/>), <paramref name="path"/> the data types the walk is
+    /// inside of, and <paramref name="cut"/> the ones it stops at (<see cref="Inside"/>).
     /// </summary>
-    private (bool Mismatch, string Why)? KeyOf(KurzType type, List<DataType> seen, HashSet<DataSymbol> path)
+    private (bool Mismatch, string Why)? KeyOf(KurzType type, List<DataType> seen, List<DataSymbol> path, HashSet<DataSymbol> cut)
     {
         switch (type)
         {
@@ -788,21 +788,22 @@ public sealed partial class Checker
             case FunctionType or HandleType or HasherType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
             case UnionType u:
-                return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
+                return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path, cut)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
-                return KeyOf(l.Element, seen, path) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
+                return KeyOf(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case DataType d:
                 {
-                    if (Met(seen, d) || Inside(path, d))
+                    if (Met(seen, d) || cut.Contains(d.Symbol))
                     {
                         return null; // its fields are read where the data type was met first, or it holds a value of its own type
                     }
 
+                    path.Add(d.Symbol);
                     try
                     {
                         foreach (var field in d.Symbol.Fields)
                         {
-                            if (KeyOf(SubstituteData(d, field.Type), seen, path) is { } why)
+                            if (KeyOf(SubstituteData(d, field.Type), seen, path, Inside(cut, path, field.Type)) is { } why)
                             {
                                 return why with { Why = $"its field `{field.Name}`: {why.Why}" };
                             }
@@ -810,7 +811,7 @@ public sealed partial class Checker
 
                         foreach (var derived in dataTypes.Values.Where(x => x.Base == d.Symbol))
                         {
-                            if (KeyOf(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen, path) is { } inherited)
+                            if (KeyOf(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen, path, cut) is { } inherited)
                             {
                                 return inherited with { Why = $"its derived type `{derived.Name}`: {inherited.Why}" };
                             }
@@ -820,7 +821,7 @@ public sealed partial class Checker
                     }
                     finally
                     {
-                        path.Remove(d.Symbol);
+                        path.RemoveAt(path.Count - 1);
                     }
                 }
 
@@ -845,11 +846,28 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// Whether a walk over types is inside the data type already, with other type arguments; else it is inside it from now on, until the
-    /// walk leaves it. A generic data type met inside itself holds a value of its own type, whose instances can grow without end,
-    /// <c>Node&lt;List&lt;T&gt;&gt;</c> in <c>Node&lt;T&gt;</c>; a build refuses such a type (D1, T19), so the walk reads it no deeper.
+    /// The data types a walk over types stops at below a field: those it stops at already, and those the walk is inside of that the
+    /// field's declared type names. A generic data type that names itself through its own fields holds a value of its own type, whose
+    /// instances can grow without end, <c>Node&lt;List&lt;T&gt;&gt;</c> in <c>Node&lt;T&gt;</c>; a build refuses such a type (D1, T19), so
+    /// the walk reads it no deeper. A data type met inside itself through a type argument, the inner <c>Wrap</c> of
+    /// <c>Wrap&lt;Wrap&lt;Map&lt;int, int&gt;&gt;&gt;</c>, holds a part of the outer one's argument and is read, as D3 reads a field at any depth.
     /// </summary>
-    private static bool Inside(HashSet<DataSymbol> path, DataType d) => !path.Add(d.Symbol);
+    private static HashSet<DataSymbol> Inside(HashSet<DataSymbol> cut, List<DataSymbol> path, KurzType declared)
+    {
+        var named = path.Where(s => Names(declared, s)).ToList();
+        return named.Count == 0 ? cut : [.. cut, .. named];
+    }
+
+    /// <summary>Whether a type names the data type, itself or inside its parts.</summary>
+    private static bool Names(KurzType type, DataSymbol data) => type switch
+    {
+        DataType d => ReferenceEquals(d.Symbol, data) || d.TypeArguments.Any(a => Names(a, data)),
+        ListType l => Names(l.Element, data),
+        MapType m => Names(m.Key, data) || Names(m.Value, data),
+        UnionType u => u.Cases.Any(c => Names(c, data)),
+        FunctionType f => f.Parameters.Any(p => Names(p, data)) || Names(f.Result, data),
+        _ => false,
+    };
 
     /// <summary>
     /// D3 with M9: why <c>==</c> does not take a <c>data</c> value whose field, at any depth, is of the type, null where it does: a field
@@ -857,10 +875,10 @@ public sealed partial class Checker
     /// owner, 2026-10-30, "By items, as Rust"), a <c>double</c> or a <c>float</c> item as C#'s <c>Equals</c> compares it (section 4, the
     /// owner, 2026-10-30, "Equals inside data/keys"). A map, a function value, a file or a socket there is <c>type-mismatch</c> (section 4,
     /// the owner, 2026-10-30, "type-mismatch" twice); a pointer and a type parameter are <c>not supported</c>. <paramref name="seen"/> holds
-    /// the data types on the way, each with its type arguments (<see cref="Met"/>), and <paramref name="path"/> the data types the walk is
-    /// inside of (<see cref="Inside"/>).
+    /// the data types on the way, each with its type arguments (<see cref="Met"/>), <paramref name="path"/> the data types the walk is
+    /// inside of, and <paramref name="cut"/> the ones it stops at (<see cref="Inside"/>).
     /// </summary>
-    private (bool Mismatch, string Why)? HeldEquality(KurzType type, List<DataType> seen, HashSet<DataSymbol> path)
+    private (bool Mismatch, string Why)? HeldEquality(KurzType type, List<DataType> seen, List<DataSymbol> path, HashSet<DataSymbol> cut)
     {
         switch (type)
         {
@@ -873,21 +891,22 @@ public sealed partial class Checker
             case FunctionType or CFunctionType or HandleType or HasherType:
                 return (true, $"`==` takes no `{type}`");
             case ListType l:
-                return HeldEquality(l.Element, seen, path) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
+                return HeldEquality(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
-                return u.Cases.Select(c => HeldEquality(c, seen, path)).FirstOrDefault(w => w is not null);
+                return u.Cases.Select(c => HeldEquality(c, seen, path, cut)).FirstOrDefault(w => w is not null);
             case DataType d:
                 {
-                    if (Met(seen, d) || Inside(path, d))
+                    if (Met(seen, d) || cut.Contains(d.Symbol))
                     {
                         return null; // its fields are read where the data type was met first, or it holds a value of its own type
                     }
 
+                    path.Add(d.Symbol);
                     try
                     {
                         foreach (var field in d.Symbol.Fields)
                         {
-                            if (HeldEquality(SubstituteData(d, field.Type), seen, path) is { } why)
+                            if (HeldEquality(SubstituteData(d, field.Type), seen, path, Inside(cut, path, field.Type)) is { } why)
                             {
                                 return why with { Why = $"its field `{field.Name}`: {why.Why}" };
                             }
@@ -895,7 +914,7 @@ public sealed partial class Checker
 
                         foreach (var derived in dataTypes.Values.Where(x => x.Base == d.Symbol))
                         {
-                            if (HeldEquality(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen, path) is { } inherited)
+                            if (HeldEquality(new DataType(derived, derived.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen, path, cut) is { } inherited)
                             {
                                 return inherited with { Why = $"its derived type `{derived.Name}`: {inherited.Why}" };
                             }
@@ -905,7 +924,7 @@ public sealed partial class Checker
                     }
                     finally
                     {
-                        path.Remove(d.Symbol);
+                        path.RemoveAt(path.Count - 1);
                     }
                 }
 
@@ -934,7 +953,7 @@ public sealed partial class Checker
             case ListType l:
                 return ItemEquality(l.Element) is { } inner ? inner with { Why = $"its items: {inner.Why}" } : null;
             case DataType:
-                return HeldEquality(item, [], []);
+                return HeldEquality(item, [], [], []);
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(ItemEquality).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case MapType m:
@@ -1616,7 +1635,8 @@ public sealed partial class Checker
         }
 
         // M11: a list literal takes the type the other arguments fix, and fixes what they leave open by the type its items give it,
-        // the list literals of one position by one type, as the arguments of a position (T27)
+        // the list literals of one position by one type, as the arguments of a position (T27); one of literal items in a `List<T>` gives
+        // them to the literals of `T`, below
         var listed = new Dictionary<TypeParameterSymbol, List<KurzType>>();
         var untypedLists = new HashSet<TypeParameterSymbol>();
         for (var i = 0; i < pres.Count; i++)
@@ -1629,7 +1649,7 @@ public sealed partial class Checker
             }
 
             var found = new Dictionary<TypeParameterSymbol, KurzType>();
-            if (!pres[i].ListLiteral || !Unify(slot, pres[i].Typed.Type, found))
+            if (!pres[i].ListLiteral || LiteralItems(pres[i], slot) is not null || !Unify(slot, pres[i].Typed.Type, found))
             {
                 continue; // a literal that does not fit its parameter is the fit's misfit
             }
@@ -1663,24 +1683,34 @@ public sealed partial class Checker
                 continue;
             }
 
-            // literals alone in its positions: the type a constant expression of them has (L10, L17, T27)
+            // literals alone in its positions, the items of a list literal of literals in a `List<T>` among them: the type a constant
+            // expression of them has, so that `Pair(1L, [1])` is `long` as `Pick(1, 2L)` is (L10, L17, T27, M11)
             KurzType? fixedType = null;
             var untypable = false;
             for (var i = 0; i < pres.Count; i++)
             {
                 var pre = pres[i];
-                if (!pre.LiteralOnly || candidate.Slots[candidate.Binding[i]].Type is not TypeParameterType tp || !ReferenceEquals(tp.Symbol, p))
+                var slot = candidate.Slots[candidate.Binding[i]].Type;
+                KurzType literal;
+                if (LiteralItems(pre, slot) is { } items && ReferenceEquals(items.Parameter, p))
+                {
+                    literal = items.Item;
+                }
+                else if (!pre.LiteralOnly || slot is not TypeParameterType tp || !ReferenceEquals(tp.Symbol, p))
                 {
                     continue;
                 }
-
-                if (pre.Typed.IsError)
+                else if (pre.Typed.IsError)
                 {
                     untypable = true; // its own error stands; no second one for the inference (E1)
                     continue;
                 }
+                else
+                {
+                    literal = pre.Typed.Type;
+                }
 
-                fixedType = fixedType is null ? pre.Typed.Type : LiteralCommon(fixedType, pre.Typed.Type);
+                fixedType = fixedType is null ? literal : LiteralCommon(fixedType, literal);
                 if (fixedType is null)
                 {
                     break;
@@ -1704,6 +1734,16 @@ public sealed partial class Checker
 
         candidate.Map = map;
     }
+
+    /// <summary>
+    /// M11 with T27: a list literal whose items are literals alone, <c>[1, 2]</c>, in a parameter of a list of a type parameter,
+    /// <c>List&lt;T&gt;</c>: the parameter and the type its items give, which count as literal arguments of it; null for any other argument.
+    /// </summary>
+    private static (TypeParameterSymbol Parameter, KurzType Item)? LiteralItems(Pre pre, KurzType slot) =>
+        pre.ListLiteral && !pre.Typed.IsError && pre.Typed.Type is ListType own && slot is ListType { Element: TypeParameterType tp }
+            && Unwrap(pre.Argument.Value) is ListLiteral { Items.Count: > 0 } l && l.Items.All(IsLiteralOnly)
+            ? (tp.Symbol, own.Element)
+            : null;
 
     /// <summary>The type two literal arguments of one type parameter fix together: the type the constant expression of them would have (L10, L17, T18, T23).</summary>
     private static KurzType? LiteralCommon(KurzType a, KurzType b)

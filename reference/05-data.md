@@ -209,6 +209,26 @@ print(xs == ys)
 print(xs == zs)
 ```
 
+Case: [data/equality-nested-generic.kz](../corpus/data/equality-nested-generic.kz)
+```kurz
+data Wrap<T>(T Value)
+
+a = Wrap<Wrap<Map<int, int>>>(Wrap<Map<int, int>>(Map<int, int>()))
+print(a == a)
+```
+
+Case: [data/nested-generic-equal.kz](../corpus/data/nested-generic-equal.kz)
+```kurz
+data Wrap<T>(T Value)
+
+mut m = Map<Wrap<Wrap<int>>, int>()
+k = Wrap<Wrap<int>>(Wrap<int>(4))
+m[k] = 1
+print(m[k] ?? 0)
+print(k == Wrap<Wrap<int>>(Wrap<int>(4)))
+print(k == Wrap<Wrap<int>>(Wrap<int>(5)))
+```
+
 ### D4 (decided, §4) Immutable
 
 A field of a `data` value that is held in an immutable variable cannot be assigned: the compile

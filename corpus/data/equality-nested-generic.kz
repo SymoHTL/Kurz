@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 7
+// rules: D3
+
+data Wrap<T>(T Value)
+
+a = Wrap<Wrap<Map<int, int>>>(Wrap<Map<int, int>>(Map<int, int>()))
+print(a == a)

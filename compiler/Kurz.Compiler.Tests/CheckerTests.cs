@@ -2382,6 +2382,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data Box<T>(T V)\ndata K(Box<int> A, Box<Map<int, int>> B)\n\nm = Map<K, int>()\nprint(m)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data Box<T>(T V)\ndata P(Box<int> A, Box<() => int> B)\n\nvoid Same(P a, P b) {\n    print(a == b)\n}\n\nprint(1)"));
         Clean("data Box<T>(T V)\ndata K(Box<int> A, Box<string> B)\n\nm = Map<K, int>()\nprint(m)"); // both instances are keys
+
+        // and an instance inside one of its own type through a type argument, the inner `Box` of `Box<Box<Map<int, int>>>`, is read too: the
+        // walk ends only at a type whose fields name it, which a build refuses (D1, T19)
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data Box<T>(T V)\n\nm = Map<Box<Box<Map<int, int>>>, int>()\nprint(m)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data Box<T>(T V)\n\nvoid Same(Box<Box<() => int>> a, Box<Box<() => int>> b) {\n    print(a == b)\n}\n\nprint(1)"));
+        Clean("data Box<T>(T V)\n\nm = Map<Box<Box<int>>, int>()\nprint(m)");
     }
 
     [Fact]
@@ -2581,6 +2587,16 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CannotInfer, 2)], Errors("T Pick<T>(T a, T c) => a\nprint(Pick([1], [2L]))"));
         Assert.Equal([(ErrorIds.CannotInfer, 1), (ErrorIds.CannotInfer, 1)], Errors("x = [[], []]\nprint(x)")); // each `[]` its own, and none for the list around them (E1)
         Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("int Count(Bytes b) => b.Count\nprint(Count([1, 256]))"));
+
+        // in a parameter `List<T>` the items of a literal of literals alone count as literal arguments of `T` (T27, section 4, assumed), so
+        // they take the type of `T`'s other literals; an item that is not a literal gives `T` its own type, as any argument does
+        const string pair = "List<T> Pair<T>(T a, List<T> b) => b\nList<T> Both<T>(List<T> a, List<T> b) => b\n\n";
+        Assert.Equal("List<long>", TypeOf(pair + "xs = Pair(1L, [1])\nprint(xs)", "xs"));
+        Assert.Equal("List<long>", TypeOf(pair + "xs = Pair(1, [2L])\nprint(xs)", "xs"));
+        Assert.Equal("List<long>", TypeOf(pair + "xs = Both([1], [2L])\nprint(xs)", "xs"));
+        Assert.Equal("List<int>", TypeOf(pair + "xs = Pair(1, [2, 3])\nprint(xs)", "xs"));
+        Assert.Equal([(ErrorIds.NarrowingConversion, 5)], Errors(pair + "x = 5\nprint(Pair(1L, [x]))"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 5)], Errors(pair + "byte small = 1\nprint(Pair(small, [300]))"));
     }
 
     [Fact]
