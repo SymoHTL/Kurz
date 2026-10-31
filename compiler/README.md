@@ -580,7 +580,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - list literals (M11): `[1, 2, 3]` and `[]`, read as a call of one function `List<T> Of<T>(T a, T b, T c)`, so
   that the list type where one stands, a parameter's among them, reaches the items as a parameter's type
   reaches a call's literals and lambdas, and where none stands the items infer `T` as T27 infers it (section
-  4, the owner, 2026-10-30, "[1, 2, 3], as C#", "From its items"), a comma after the last item accepted
+  4, the owner, 2026-10-30, "[1, 2, 3], as C#", "From its items"), the items of a literal of literals alone in
+  a parameter `List<T>` of a generic call counting as literal arguments of `T`, so that `Pair(1L, [1])` with
+  `Pair<T>(T a, List<T> b)` makes `T` a `long` as `Pick(1, 2L)` does (section 4, assumed), a comma after the last item accepted
   ("Accept, as C# 12 and Rust"); the items run in order, each counted and a temporary of the region
   before the list holds it, and then one block takes all of them, as Rust's `vec!` makes one, a block the
   system refuses ending the program with `allocation-failed` (M9), and `[]` takes no block;
@@ -1241,8 +1243,10 @@ Each is the checker's reading, not a decision, pinned by a test in `CheckerTests
 round can ask about it by the rule's id.
 
 - M9 with N1, M4 and A6: a map's key of a type `==` does not take, a map, a function, a handle or a
-  value of `void` among them, is `type-mismatch`, and so is a list of one and a nullable type of one,
-  since section 4 takes any type `==` compares; `==` between two maps is `type-mismatch` (T18, D3). `==` on two lists takes two
+  value of `void` among them, is `type-mismatch`, and so is a list of one, a nullable type of one and a
+  `data` type that holds one at any depth, through itself as its own type argument too, the inner `Wrap` of
+  `Wrap<Wrap<Map<int, int>>>`, where the walk ends only at a type whose fields name it, which a build refuses
+  (D1, T19), since section 4 takes any type `==` compares; `==` between two maps is `type-mismatch` (T18, D3). `==` on two lists takes two
   lists of one type, `List<int>` beside `List<long>` being `type-mismatch` as Rust's `Vec<i32>` beside
   `Vec<i64>` is, and items of a nullable type of a type `==` does not take, or of a union with a case
   `==` does not take, are `type-mismatch`; a union compares by its case, then that case's value, alone,

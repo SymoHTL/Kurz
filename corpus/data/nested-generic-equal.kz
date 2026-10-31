@@ -1,0 +1,14 @@
+// expect: output
+// | 1
+// | true
+// | false
+// rules: D3, M9
+
+data Wrap<T>(T Value)
+
+mut m = Map<Wrap<Wrap<int>>, int>()
+k = Wrap<Wrap<int>>(Wrap<int>(4))
+m[k] = 1
+print(m[k] ?? 0)
+print(k == Wrap<Wrap<int>>(Wrap<int>(4)))
+print(k == Wrap<Wrap<int>>(Wrap<int>(5)))

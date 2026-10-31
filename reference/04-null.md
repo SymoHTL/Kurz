@@ -562,6 +562,13 @@ x = [1, null]
 print(x.Count)
 ```
 
+Case: [values/list-literal-nullable-items.kz](../corpus/values/list-literal-nullable-items.kz)
+```kurz
+List<int?> maybe = [1, null]
+print(maybe.Count)
+print(maybe)
+```
+
 ### N7 (decided, §4) An assignment to a narrowed variable
 
 An assignment replaces what is known about a variable, as in C#. Assigning a value whose type is

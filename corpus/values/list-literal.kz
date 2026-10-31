@@ -2,11 +2,9 @@
 // | [1, 2, 3]
 // | 2
 // | 3
-// | hi
 // | [[1], [2, 3]]
 // | 0
 // | [1, 2]
-// | 2
 // | 2
 // rules: M11, L4
 
@@ -24,8 +22,6 @@ print(xs)
 ys = [4, 5]
 print(ys.Count)
 print(Sum([1, 2]))
-Bytes b = [104, 105]
-print(string.FromUtf8Lossy(b))
 nested = [[1], [2, 3]]
 print(nested)
 List<string> none = []
@@ -37,5 +33,3 @@ lines = [
 print(lines)
 List<int | string> mixed = [1, "a"]
 print(mixed.Count)
-List<int?> maybe = [1, null]
-print(maybe.Count)

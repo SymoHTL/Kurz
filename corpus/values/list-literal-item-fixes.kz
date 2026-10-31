@@ -1,0 +1,8 @@
+// expect: error narrowing-conversion at 7
+// rules: M11, T27, T7
+
+List<T> Pair<T>(T a, List<T> b) => b
+
+x = 5
+r = Pair(1L, [x])
+print(r)
