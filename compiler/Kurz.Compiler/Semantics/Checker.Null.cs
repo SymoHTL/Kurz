@@ -220,7 +220,7 @@ public sealed partial class Checker
             return false;
         }
 
-        Report(ErrorIds.NullableUnchecked, line, $"a `{value.Type}` {where} without a check (N2)");
+        Report(ErrorIds.NullableUnchecked, line, $"{Types.A(value.Type)} {where} without a check (N2)");
         return true;
     }
 
@@ -265,7 +265,7 @@ public sealed partial class Checker
 
         Report(ErrorIds.TypeMismatch, b.Line, Types.NonNull(typed.Type) is not null
             ? $"`{Operator(b.Operator)}` orders no `null`: a nullable value is tested with `==` and `!=` (N3, T18)"
-            : $"`null` compares with a nullable value or a pointer, not with a `{typed.Type}` (N6, N1)");
+            : $"`null` compares with a nullable value or a pointer, not with {Types.A(typed.Type)} (N6, N1)");
         return new Typed(Types.Bool);
     }
 
@@ -375,7 +375,7 @@ public sealed partial class Checker
         }
         else
         {
-            ReportMismatch(right.Type, inner, b.Right.Line, $"a `{right.Type}` on the right of `??` where a `{inner}` is required", "N4");
+            ReportMismatch(right.Type, inner, b.Right.Line, $"{Types.A(right.Type)} on the right of `??` where {Types.A(inner)} is required", "N4");
         }
 
         return Typed.Error;
@@ -420,7 +420,7 @@ public sealed partial class Checker
             }
             else if (Types.NonNull(from) is not null)
             {
-                Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is read from a `{from}` without a check (N2)");
+                Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is read from {Types.A(from)} without a check (N2)");
                 return Typed.Error;
             }
         }
@@ -433,7 +433,7 @@ public sealed partial class Checker
 
         if (Types.NonNull(member.Type) is null && member.Type is PointerType or CFunctionType or VoidType)
         {
-            NotSupported(m.Line, $"`?.` to a `{member.Type}`, which no `?` makes nullable (N1, N5)");
+            NotSupported(m.Line, $"`?.` to {Types.A(member.Type)}, which no `?` makes nullable (N1, N5)");
             return Typed.Error;
         }
 
@@ -454,7 +454,11 @@ public sealed partial class Checker
         var target = CheckNullable(i.Target);
         if (i.Index is RangeExpression)
         {
-            if (!target.IsError && Types.NonNull(target.Type) is null)
+            if (target.IsError)
+            {
+                // the target's own error, and nothing more (E1)
+            }
+            else if (Types.NonNull(target.Type) is null)
             {
                 NotNullable(i, target);
             }
@@ -492,7 +496,7 @@ public sealed partial class Checker
         {
             Report(inner is PrimitiveType { Kind: Primitive.String } ? ErrorIds.StringIndex : ErrorIds.TypeMismatch, i.Line, inner is PrimitiveType { Kind: Primitive.String }
                 ? "a string is indexed through `.Bytes` or `.Chars` (T15)"
-                : $"a `{inner}` is not indexed (M9)");
+                : $"{Types.A(inner)} is not indexed (M9)");
             return Typed.Error;
         }
 
@@ -503,13 +507,13 @@ public sealed partial class Checker
 
         if (!index.IsError && !Types.IsInteger(index.Type))
         {
-            Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not a `{index.Type}` (M9, T2)");
+            Report(ErrorIds.TypeMismatch, i.Line, $"an index is an integer, not {Types.A(index.Type)} (M9, T2)");
             return Typed.Error;
         }
 
         if (Types.NonNull(list.Element) is null && list.Element is PointerType or CFunctionType or VoidType)
         {
-            NotSupported(i.Line, $"`?[` to a `{list.Element}`, which no `?` makes nullable (N1, N5)");
+            NotSupported(i.Line, $"`?[` to {Types.A(list.Element)}, which no `?` makes nullable (N1, N5)");
             return Typed.Error;
         }
 

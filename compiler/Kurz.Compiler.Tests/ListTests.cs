@@ -627,9 +627,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // maps (M9): a read that is a value of its own, a write over a key, a copy written to (M3), a value read from the map it is
     // written into, a key the map keeps after its variable changes, a `mut` parameter, a missing key, growth, a map in a data value
     // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, integer, `bool`, `char` and `string` keys (the
-    // other kinds in `MapMembers`), a map in a
-    // union, a block replaced by growth under a `mut` parameter and under a lambda that read it, strings equal by their bytes with
-    // and without a block, and the texts
+    // other kinds in `MapMembers`), a map in a union, a block replaced by growth under a `mut` parameter and under a lambda that read
+    // it, strings equal by their bytes with and without a block, and the texts
     private const string Maps = """
         data Box(string Name, Map<string, string> Tags)
 
@@ -1638,6 +1637,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(n.Counts.Remove(n.Name) ?? 0)
         print(n.Counts)
         print(named.Counts)
+        mut built = Node("k{n.Tags.Count}", List<string>(), Map<string, int>(), null)
+        built.Counts[built.Name] = 4
+        other = built
+        print(built.Counts.Remove(built.Name) ?? 0)
+        print(built.Counts)
+        print(other.Counts)
         mut i = 0
         while i < 40 {
             s.Names.Add("n{i}")
@@ -1711,6 +1716,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "3", // a `Remove` whose key is read from the block the path copies, which the other variable keeps
         "[]",
         "[a: 3]",
+        "4", // the same with a key made while the program runs, which holds a block of its own
+        "[]",
+        "[k0: 4]",
         "40", // grown past the first block
         "v39",
         "after",

@@ -385,7 +385,7 @@ public sealed partial class Emitter
                 }
 
             default:
-                throw Unsupported(line, $"`==` on a `{type}`");
+                throw Unsupported(line, $"`==` on {Types.A(type)}");
         }
     }
 
@@ -480,7 +480,7 @@ public sealed partial class Emitter
                     fn.Return($"%kz.str {RecordText(d, Layout.Fields(d).Select((_, i) => fn.Value($"extractvalue {Ir(d)} %a0, {Number(i)}")).ToList(), line)}");
                     break;
                 case UnionType u when u.Cases.Any(c => c is VoidType):
-                    throw new InvalidOperationException($"the text of a `{u}` at line {line}: a success without a value has none, `no-text`, which the checker reports (A7)");
+                    throw new InvalidOperationException($"the text of {Types.A(u)} at line {line}: a success without a value has none, `no-text`, which the checker reports (A7)");
                 case UnionType u:
                     ByCase(Tag("%a0", u), u, u.Cases, c =>
                     {

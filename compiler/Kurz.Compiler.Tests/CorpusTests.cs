@@ -175,7 +175,7 @@ public sealed class CorpusTests
         var lines = File.ReadAllLines(Path.Combine(Root, "corpus", relativePath));
         Assert.All(lints, l => Assert.True(
             l.Id == "md5-insecure" && Regex.IsMatch(lines[l.Line - 1], @"(?<![\w.])Md5\.(Hash|New)\("),
-            $"{relativePath}: `{l}` is no `md5-insecure` on a line that calls a function of `Md5` (H5)"));
+            $"{relativePath}: `{l}` is no `md5-insecure` on a line that calls `Md5.Hash` or `Md5.New` (H5)"));
         if (unsupported.Count > 0)
         {
             Assert.True(header.Rules.Any(OutsideTheChecker) || UnsupportedByConstruct.ContainsKey(relativePath),

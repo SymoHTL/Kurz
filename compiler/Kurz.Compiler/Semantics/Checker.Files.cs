@@ -70,7 +70,7 @@ public sealed partial class Checker
         };
         if (method is not { } f)
         {
-            Report(ErrorIds.UnknownName, m.Line, $"a `{handle}` has no member `{m.Member}` (S3 to S5, S9, V10)");
+            Report(ErrorIds.UnknownName, m.Line, $"{Types.A(handle)} has no member `{m.Member}` (S3 to S5, S9, V10)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }

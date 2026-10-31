@@ -471,7 +471,8 @@ public sealed partial class Emitter
     /// <c>erase</c>). The key is made before the place and takes no count where it is read from a variable, a field or an item: what it
     /// was read from keeps it while the helper runs, since <c>CollectionPlace</c> copies a block on the path only where other values
     /// hold it (M3), and those keep the block the key was read from; <c>ListTests</c> holds <c>n.Counts.Remove(n.Name)</c>, the copy of a
-    /// shared map block with a key read from a field, whose literal holds no block of its own.
+    /// shared map block with a key read from a field, whose literal holds no block of its own, and <c>built.Counts.Remove(built.Name)</c>,
+    /// the same with a key made while the program runs, which holds one.
     /// </summary>
     private string EmitMapRemove(CallExpression c)
     {
@@ -609,7 +610,7 @@ public sealed partial class Emitter
         else if (layout.IsBlock(whole))
         {
             // the built-in `Entry` is declared by no unit, so the layout never makes it a block, whatever its type arguments hold
-            throw new InvalidOperationException($"a `{whole}` laid out as a block (C6)");
+            throw new InvalidOperationException($"{Types.A(whole)} laid out as a block (C6)");
         }
         else
         {

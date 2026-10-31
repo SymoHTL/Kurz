@@ -721,7 +721,7 @@ public sealed partial class Emitter
 
         if (Unwrap(f.Collection) is not RangeExpression range)
         {
-            throw Unsupported(f.Collection.Line, $"a `for` over a `{TypeOf(f.Collection)}` (C6)");
+            throw Unsupported(f.Collection.Line, $"a `for` over {Types.A(TypeOf(f.Collection))} (C6)");
         }
 
         var variable = Model.DeclarationOf(f);

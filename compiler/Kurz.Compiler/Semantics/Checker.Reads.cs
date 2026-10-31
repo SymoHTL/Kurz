@@ -134,7 +134,7 @@ public sealed partial class Checker
             }
             else if (reported.Add(node))
             {
-                Report(ErrorIds.ChangedWhileHeld, change.Line, $"{h.Text} is still in use while {change.Text}, and a `{h.Type}` is not copied: copy it into a variable of its own on a line before (M7)");
+                Report(ErrorIds.ChangedWhileHeld, change.Line, $"{h.Text} is still in use while {change.Text}, and {Types.A(h.Type)} is not copied: copy it into a variable of its own on a line before (M7)");
             }
         }
     }

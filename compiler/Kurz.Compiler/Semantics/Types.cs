@@ -570,6 +570,16 @@ public static class Types
     };
 
     /// <summary>
+    /// A name in code with its article, as a text writes it (E2 leaves the text free): "an `int`" before a vowel letter, "a `uint`"
+    /// before a <c>u</c>, which the names of the built-in types say as a consonant, and "a `string`" before the rest.
+    /// </summary>
+    public static string A(object name)
+    {
+        var text = name.ToString() ?? "";
+        return (text.Length > 0 && text[0] is 'a' or 'e' or 'i' or 'o' or 'A' or 'E' or 'I' or 'O' ? "an `" : "a `") + text + "`";
+    }
+
+    /// <summary>
     /// The common type of two integer operands under <c>+ - * / %</c>, the comparisons and
     /// <c>&amp; | ^</c> (T9, T18, T28): null for <c>sign-mix</c>. T28: two operands narrower than
     /// <c>int</c> are promoted to <c>int</c>, whatever their signedness; a narrow operand beside a

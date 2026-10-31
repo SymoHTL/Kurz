@@ -353,7 +353,7 @@ public sealed partial class Emitter
 
     /// <summary>R14: the bytes a value of a number, <c>bool</c>, <c>char</c>, a string or a pointer takes; the layout of a data value and of a union is the compiler's, which a program does not read.</summary>
     private static string SizeOf(KurzType type, int line) => type is DataType or UnionType
-        ? throw Unsupported(line, $"the size of a `{type}` (R14)")
+        ? throw Unsupported(line, $"the size of {Types.A(type)} (R14)")
         : Number(Lower.Size(type));
 
     /// <summary>R14: <c>Ptr&lt;T&gt;(x)</c> of a pointer is the same address, and of a <c>long</c> the address the number holds.</summary>

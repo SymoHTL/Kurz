@@ -238,6 +238,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
         var (error, trace) = Split(run.Error, "error: divide-by-zero at program.kz:3\n");
         Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
         Assert.Equal(on && OperatingSystem.IsLinux() ? 5 : 0, trace.Count);
+        Assert.All(trace, l => Assert.True(Frame().IsMatch(l) || Cut().IsMatch(l), $"no frame and no cut: {l}"));
     }
 
     [Fact]
