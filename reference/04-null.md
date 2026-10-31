@@ -6,6 +6,9 @@
 its nullable form, a union's and a function type's among them: `(int | string)?` is
 `int | string | null`, and `((int) => int)?` holds a function value or `null`, as Rust's `Option` takes
 every type and a C# delegate is nullable (§4, the owner, 2026-10-30, "Nullable form, as Option").
+`void` and a pointer, which takes `null` itself (R10), have no nullable form, and a build says
+`not supported` to both *(assumed, §4: the two, readings of that answer)*; what a nullable type written as a
+case of a union is, `int? | string`, stands open (§14).
 
 An arm of a `match` may name `null`, which matches the `null` of a `T?` value, as C#'s `case null`
 and Rust's `None =>` do (C9; §4, the owner, 2026-10-30, "Allow, as C#"), and a `match` over a `T?`
