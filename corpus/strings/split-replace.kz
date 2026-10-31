@@ -5,6 +5,7 @@
 // | [a, b]
 // | ba
 // | abc
+// | a+b+c
 // rules: X5
 
 print("a,b,,c".Split(","))
@@ -13,3 +14,4 @@ print("abc".Split("").Count)
 print("a-b".Split('-'))
 print("aaa".Replace("aa", "b"))
 print("abc".Replace("", "x"))
+print("a-b-c".Replace('-', '+'))

@@ -4,6 +4,8 @@
 // | true
 // | true
 // | a
+// | axx
+// | xxa
 // rules: X4
 
 s = "\u00A0 a b\t\n"
@@ -12,3 +14,5 @@ print(s.TrimAscii() == "\u00A0 a b")
 print(s.TrimStart() == "a b\t\n")
 print(s.TrimEndAscii() == "\u00A0 a b")
 print("xxaxx".Trim('x'))
+print("xxaxx".TrimStart('x'))
+print("xxaxx".TrimEnd('x'))

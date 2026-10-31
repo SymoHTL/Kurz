@@ -383,6 +383,17 @@ void Show(void | NotFound v) {
 Show(NotFound)
 ```
 
+`string.Join` writes the text of each item of its list, so a list whose items have none is `no-text`
+there as well (X6).
+
+Case: [strings/join-no-text.kz](../corpus/strings/join-no-text.kz)
+```kurz
+// `Counter` declares no `Text()`, so an instance has no text (A5), and a list of them has none (A7)
+class Counter(mut int Count)
+
+print(string.Join(", ", [Counter(0)]))
+```
+
 ### A8 (assumed, §8) The text of the remaining values
 
 A `float` shows what a `double` shows (A4), in the sense of A11. A `decimal` shows the digits it

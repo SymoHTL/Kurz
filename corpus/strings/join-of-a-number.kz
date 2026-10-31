@@ -1,0 +1,5 @@
+// expect: error argument-mismatch at 5
+// rules: X6
+
+// `5` is no list, so neither form, a `string` or a `char` separator, reads an item type from it
+print(string.Join(", ", 5))

@@ -1579,6 +1579,144 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "false", // a `char` whose four bytes differ from the string's in the last
     ];
 
+    // The trims, splits, replaces, changes of case and joins of X3 to X6 on strings made while the program runs, each source given a
+    // new value after its result is taken, with the result printed after that: a trim that copies, one that keeps the whole string,
+    // which shares it, and one of a literal, which keeps its bytes in place, and a trim of a `char` from the start and from the end; a
+    // split into copies, into the whole string and of a literal, an item of a split read after its list is gone; a replace that finds
+    // nothing, which shares the string, one with arguments made in the call, one into an empty string and one into the variable it
+    // reads, and a replace of a `char` by a `char` of three bytes into the variable it reads and one that finds nothing; a change of
+    // case that changes nothing and one that changes the string; a join of a list in a field of a data value given a new value, of a
+    // list made for the call, of items whose text is made for the join (A4), and with a `char` separator read from a variable and
+    // written in the call
+    private const string Pieces = """
+        data Bag(List<string> Items)
+        data Name(string Value)
+
+        string Made(int n) => "made {n}"
+
+        mut t = "  {Made(1)}\t"
+        a = t.Trim()
+        t = Made(2)
+        print(a)
+        mut w = Made(3)
+        b = w.Trim()
+        w = Made(4)
+        print(b)
+        print("  lit  ".Trim())
+        print("x{Made(5)}xx".Trim('x'))
+        mut q = "\u3000{Made(6)}\u00A0 "
+        print(q.TrimAscii())
+        q = q.Trim()
+        print(q)
+        name = Name("  {Made(7)} ")
+        start = name.Value.TrimStart()
+        end = name.Value.TrimEnd()
+        print("[{start}]")
+        print("[{end}]")
+        mut v = "xx{Made(8)}xx"
+        lead = v.TrimStart('x')
+        tail = v.TrimEnd('x')
+        v = Made(0)
+        print(lead)
+        print(tail)
+
+        mut s = "{Made(1)},{Made(2)},"
+        parts = s.Split(',')
+        s = Made(0)
+        print(parts)
+        print(parts.Count)
+        mut s2 = Made(8)
+        whole = s2.Split(";")
+        s2 = Made(9)
+        print(whole)
+        print("a b".Split(' '))
+        first = "{Made(1)}:{Made(2)}".Split(':')[0]
+        print(first)
+        print("{Made(3)}::".Split("::"))
+
+        mut r = Made(7)
+        same = r.Replace("zz", "y")
+        r = Made(8)
+        print(same)
+        print(r.Replace("made", "M"))
+        print(r.Replace(Made(8), Made(9)))
+        none = ""
+        gone = r.Replace(Made(8), none)
+        print("[{gone}]")
+        print(r.Replace(' ', "_"))
+        r = r.Replace('e', "ee")
+        print(r)
+        r = r.Replace('e', '€')
+        print(r)
+        print(r.Replace('z', 'y'))
+
+        mut u = Made(1)
+        low = u.ToLowerAscii()
+        u = Made(2)
+        print(low)
+        up = low.ToUpperAscii()
+        print(up)
+        print(up.ToLowerAscii())
+
+        mut bag = Bag([Made(1), Made(2)])
+        j = string.Join(", ", bag.Items)
+        bag = Bag([Made(3)])
+        print(j)
+        print(string.Join("-", [1, 2, 3]))
+        print(string.Join(Made(0), bag.Items))
+        words = [Made(4), Made(5)]
+        print(string.Join(Made(0), words))
+        print(string.Join("+", "{Made(1)} {Made(2)}".Split(' ')))
+        print(string.Join("; ", [[1], [2, 3]]))
+        print(string.Join(",", [true, false]))
+        sep = '€'
+        print(string.Join(sep, words))
+        print(string.Join(';', [1, 2]))
+        empty = string.Join(", ", List<string>())
+        print("[{empty}]")
+        """;
+
+    private static readonly string[] PiecesPrint =
+    [
+        "made 1", // a trim that copies, its source given a new value
+        "made 3", // a trim that keeps the whole string shares it
+        "lit", // a literal's bytes in place
+        "made 5",
+        "\u3000made 6\u00A0", // the ASCII form keeps whitespace outside ASCII (X4)
+        "made 6", // into the variable it reads
+        "[made 7 ]",
+        "[  made 7]",
+        "made 8xx", // a `char` from the start
+        "xxmade 8", // from the end
+        "[made 1, made 2, ]", // copies, an empty piece kept
+        "3",
+        "[made 8]", // the whole string, shared
+        "[a, b]",
+        "made 1", // an item read from a list that is gone after the statement
+        "[made 3, ]",
+        "made 7", // a replace that finds nothing shares the string
+        "M 8",
+        "made 9",
+        "[]",
+        "made_8",
+        "madee 8", // into the variable it reads
+        "mad€€ 8", // a `char` of one byte by one of three
+        "mad€€ 8", // a `char` it does not find
+        "made 1", // a change of case that changes nothing shares the string
+        "MADE 1",
+        "made 1",
+        "made 1, made 2", // the field's list, its data value given a new value after the join
+        "1-2-3",
+        "made 3",
+        "made 4made 0made 5",
+        "made+1+made+2",
+        "[1]; [2, 3]",
+        "true,false",
+        "made 4€made 5", // a `char` separator
+        "1;2",
+        "[]",
+    ];
+
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
     // the list it is written into, over another item and over itself, a value that changes the list through a `mut` argument before the
     // write (M4), a `mut` parameter, an index of a narrow type, a list of lists, a list known not null, and a value made before the index
@@ -2029,6 +2167,22 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         """));
 
     /// <summary>
+    /// The runtime of this machine's target whose system gives the pieces of a mebibyte the allocator carves its blocks of up to 262144
+    /// bytes from, and refuses every other request: a block of its own, which a larger request takes, is refused.
+    /// </summary>
+    private static CheckedRuntime PiecesOnly() => Edited((TargetFile, "pub byte* Memory(long bytes) {", """
+        pub byte* Memory(long bytes) {
+            if bytes != 1048576 {
+                return null
+            }
+
+            return Granted(bytes)
+        }
+
+        byte* Granted(long bytes) {
+        """));
+
+    /// <summary>
     /// The runtime of this machine's target whose system refuses a request that would take what it gave and was not given back past
     /// 64 mebibytes; its own `Memory`, `Release` and `Resize` run behind the count, a `Resize` counted by what it adds, with the edits
     /// <paramref name="more"/> beside them.
@@ -2130,6 +2284,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, toolchain.Runtime, "map-members"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, toolchain.Runtime, "list-searches"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
     }
@@ -2144,6 +2299,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, fenced, "map-members-fenced"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, fenced, "list-searches-fenced"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Pieces, fenced, "string-pieces-fenced"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
@@ -2313,6 +2469,48 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, Edited(("runtime/common/runtime.kz", "    if size > 2147483647 {\n        AllocationFailed(size)", "    if size > 3 {\n        AllocationFailed(size)")), "string-limit", "raw"), 1, ["true"], "error: allocation-failed (4 bytes)\n");
         Ran(BuildAndRun(text, toolchain.Runtime, "string-below-limit", "raw"), 0, ["true", "true"], ""); // the positive control
         Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "string-refused", "raw"), 1, [], "error: allocation-failed (19 bytes)\n");
+    }
+
+    [Fact]
+    public void A_string_member_whose_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
+    {
+        // M9, X3, X5: a literal's `Split` asks for the block of its list, 16 bytes of counts and two pieces of 16; `Replace` and a
+        // change of case ask for the block of their result, 16 bytes of counts and its bytes
+        var none = EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value);
+        Ran(BuildAndRun("print(\"a,b\".Split(\",\"))\n", none, "split-refused"), 1, [], "error: allocation-failed (48 bytes)\n");
+        Ran(BuildAndRun("print(\"abc\".Replace(\"b\", \"xy\"))\n", none, "replace-refused"), 1, [], "error: allocation-failed (20 bytes)\n");
+        Ran(BuildAndRun("print(\"abc\".ToUpperAscii())\n", none, "upper-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        Ran(BuildAndRun("print(\"ABC\".ToLowerAscii())\n", none, "lower-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        const string granted = "print(\"a,b\".Split(\",\"))\nprint(\"abc\".Replace(\"b\", \"xy\"))\nprint(\"abc\".ToUpperAscii())\nprint(\"ABC\".ToLowerAscii())\n";
+        Ran(BuildAndRun(granted, toolchain.Runtime, "string-members-granted"), 0, ["[a, b]", "axyc", "ABC", "abc"], ""); // the positive control
+
+        // X6: the list `Join` reads takes a block, so this system gives the pieces small blocks are carved from and refuses a block of
+        // its own; a result of 262145 bytes asks for one, 16 bytes of counts and its bytes
+        const string join = "mut s = \"ab\"\nmut i = 0\nwhile i < 16 {\n    s = \"{s}{s}\"\n    i = i + 1\n}\n\nt = string.Join(\",\", [s, s])\nprint(t.Bytes.Count)\n";
+        Ran(BuildAndRun(join, PiecesOnly(), "join-refused"), 1, [], "error: allocation-failed (262161 bytes)\n");
+        Ran(BuildAndRun(join, toolchain.Runtime, "join-granted"), 0, ["262145"], ""); // the positive control
+
+        // X5: the second of two pieces copied out of a string's block refused, `StringOf` refusing 2 bytes or more in the library's
+        // text: the piece made before it and the list are given back, in the fenced runtime, and the run ends with the piece's bytes
+        const string piece = "x = \"a\"\nprint(\"{x},bb\".Split(\",\"))\n";
+        Ran(BuildAndRun(piece, Edited([.. Fence, ("std/std.kz", "    byte* text = StringBlock(count)\n", "    mut byte* text = null\n    if count < 2 {\n        text = StringBlock(count)\n    }\n\n")]), "split-piece-refused"), 1, [], "error: allocation-failed (18 bytes)\n");
+        Ran(BuildAndRun(piece, Fenced, "split-piece-granted"), 0, ["[a, bb]"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_Split_Replace_or_Join_past_the_limit_reports_the_bytes_it_counted()
+    {
+        // M9, T15: the limit of the largest `int` lowered to 3 in the library's text, `Replace`'s and `Join`'s on the bytes of the
+        // result, so that results of 4 and 5 bytes ask past it, and `ListAllocate`'s on the items, so that a `Split` into 4 pieces asks
+        // past it with 4 pieces of 16 bytes; a change of case keeps the string's length, which a string holds below the limit
+        const string replace = "print(\"abc\".Replace(\"b\", \"xy\"))\n";
+        const string join = "print(string.Join(\",\", [\"ab\", \"cd\"]))\n";
+        const string split = "print(\"a,b,c,d\".Split(\",\"))\n";
+        const string limit = "if size > 2147483647 {\n        asked = size\n        return null\n    }\n\n    if size == 0 {\n        ";
+        Ran(BuildAndRun(replace, Edited(("std/std.kz", limit + "made = 0", limit.Replace("2147483647", "3") + "made = 0")), "replace-limit"), 1, [], "error: allocation-failed (4 bytes)\n");
+        Ran(BuildAndRun(join, Edited(("std/std.kz", limit + "return null", limit.Replace("2147483647", "3") + "return null")), "join-limit"), 1, [], "error: allocation-failed (5 bytes)\n");
+        Ran(BuildAndRun(split, Edited(("std/std.kz", "if count > 2147483647 {\n        asked = count * item", "if count > 3 {\n        asked = count * item")), "split-limit"), 1, [], "error: allocation-failed (64 bytes)\n");
+        Ran(BuildAndRun(replace + join + split, toolchain.Runtime, "split-replace-join-below-limit"), 0, ["axyc", "ab,cd", "[a, b, c, d]"], ""); // the positive control
     }
 
     [Theory]

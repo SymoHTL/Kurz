@@ -105,7 +105,9 @@ and `s.TrimEndAscii()` take ASCII's whitespace alone, as Rust's `trim_ascii` (§
 2026-10-31, "Unicode + TrimAscii"). ASCII's whitespace is the space, the tab, the line feed, the form
 feed and the carriage return, as Rust's `is_ascii_whitespace`, and `s.Trim(c)` with a `char` takes that
 character from both ends, as C#'s `Trim(char)` *(assumed, §12: the names `TrimStartAscii` and
-`TrimEndAscii`, the five characters and the `char` form)*.
+`TrimEndAscii`, the five characters and the `char` form)*. `s.TrimStart(c)` and `s.TrimEnd(c)` take
+the `char` from the start or the end, as C#'s `TrimStart(char)` and `TrimEnd(char)` (§12, the owner,
+2026-10-31, "TrimStart(c), TrimEnd(c)").
 
 Case: [strings/trim.kz](../corpus/strings/trim.kz)
 ```kurz
@@ -115,6 +117,16 @@ print(s.TrimAscii() == "\u00A0 a b")
 print(s.TrimStart() == "a b\t\n")
 print(s.TrimEndAscii() == "\u00A0 a b")
 print("xxaxx".Trim('x'))
+print("xxaxx".TrimStart('x'))
+print("xxaxx".TrimEnd('x'))
+```
+
+A call of `Trim`, `TrimStart` or `TrimEnd` that fits neither form, with no argument or a `char`, `s.Trim(5)` among them, is `argument-mismatch`, with a line for each form (F13).
+
+Case: [strings/trim-of-a-number.kz](../corpus/strings/trim-of-a-number.kz)
+```kurz
+s = " a "
+print(s.Trim(5))
 ```
 
 ### X5 (decided, §12) Splitting and replacing
@@ -125,7 +137,9 @@ from the left, none overlapping the one before. The separator, and `old`, is a `
 *(assumed, §12: the list of new strings, the empty piece and the `char` form, defaults of the
 question; the order of the replace, not put to the owner)*. `s.Split("")` gives the whole string as
 its one piece, and `s.Replace("", x)` gives the string as it is (§12, the owner, 2026-10-31, "No
-piece, no change").
+piece, no change"). `new` is a `char` where `old` is one, `s.Replace('-', '+')`, as C#'s
+`Replace(char, char)` (§12, the owner, 2026-10-31, "Replace(char, char)"), so that `Replace` has three
+forms, and none takes a `string` `old` with a `char` `new`, as none of C#'s does.
 
 Case: [strings/split-replace.kz](../corpus/strings/split-replace.kz)
 ```kurz
@@ -135,26 +149,46 @@ print("abc".Split("").Count)
 print("a-b".Split('-'))
 print("aaa".Replace("aa", "b"))
 print("abc".Replace("", "x"))
+print("a-b-c".Replace('-', '+'))
+```
+
+A call of `Split` that fits neither form, a `string` or a `char`, or of `Replace` that fits none of its three, is `argument-mismatch`, with a line for each form (F13).
+
+Case: [strings/split-of-a-number.kz](../corpus/strings/split-of-a-number.kz)
+```kurz
+s = "a,b"
+print(s.Split(5))
 ```
 
 ### X6 (decided, §12) Joining
 
 `string.Join(separator, items)` takes a list of any item type and writes the text of each item (A4)
 with the separator between two items, as C#'s `Join` calls `ToString`; an item type that has no text
-is `no-text` (§12, the owner, 2026-10-31, "Any list").
+is `no-text` (§12, the owner, 2026-10-31, "Any list"). The separator is a `string` or a `char`, as
+C#'s `Join(char, ...)` (§12, the owner, 2026-10-31, "Join(char, items)"). A call that fits neither
+form, a separator of another type, or values that are no list, from which neither form reads an
+item type (T27), is `argument-mismatch`, with a line for each form (F13).
 
 Case: [strings/join.kz](../corpus/strings/join.kz)
 ```kurz
 print(string.Join(", ", ["a", "b", "c"]))
 print(string.Join("-", [1, 2, 3]))
 print(string.Join(", ", List<string>()) == "")
+print(string.Join('/', ["a", "b"]))
 ```
 
 Case: [strings/join-no-text.kz](../corpus/strings/join-no-text.kz)
 ```kurz
+// `Counter` declares no `Text()`, so an instance has no text (A5), and a list of them has none (A7)
 class Counter(mut int Count)
 
 print(string.Join(", ", [Counter(0)]))
+```
+
+Case: [strings/join-of-a-number.kz](../corpus/strings/join-of-a-number.kz)
+```kurz
+// `5` is no list, so neither form, a `string` or a `char` separator, reads an item type from it
+print(string.Join(", ", 5))
 ```
 
 ### X7 (decided, §12) Reading a number

@@ -1036,7 +1036,7 @@ public sealed partial class Checker
         return new Typed(made);
     }
 
-    /// <summary>M5, M9, T15, S2 to S8, X1, X9: a call of a member: a list's <c>Add</c>, <c>Where</c>, <c>Clear</c>, <c>IndexOf</c>, <c>AddRange</c> and <c>Reverse</c>; a string's searches; a function of <c>File</c> and <c>Directory</c>, and a file's methods; a data value's field of function type.</summary>
+    /// <summary>M5, M9, T15, S2 to S8, X1, X3 to X6, X9: a call of a member: a list's <c>Add</c>, <c>Where</c>, <c>Clear</c>, <c>IndexOf</c>, <c>AddRange</c> and <c>Reverse</c>; a string's searches, trims, <c>Split</c>, <c>Replace</c> and change of ASCII case; <c>string.Join</c>; a function of <c>File</c> and <c>Directory</c>, and a file's methods; a data value's field of function type.</summary>
     private Typed CheckMethodCall(MemberAccess m, CallExpression c)
     {
         if (m.Conditional || InChain(m.Target))
@@ -1086,6 +1086,11 @@ public sealed partial class Checker
             if (n.Name == "Bytes" && m.Member == "Allocate")
             {
                 return CheckListAllocate(c, new ListType(Types.Byte), "Bytes.Allocate"); // R15, as above
+            }
+
+            if (n.Name == "string" && m.Member == "Join")
+            {
+                return CheckStringJoin(c);
             }
 
             if (UnreadFunction(n.Name, m.Member) is { } unreadFunction)
@@ -1147,6 +1152,11 @@ public sealed partial class Checker
         if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Contains" or "StartsWith" or "EndsWith" or "IndexOf")
         {
             return CheckStringSearch(c, m);
+        }
+
+        if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Trim" or "TrimStart" or "TrimEnd" or "TrimAscii" or "TrimStartAscii" or "TrimEndAscii" or "Split" or "Replace" or "ToLowerAscii" or "ToUpperAscii")
+        {
+            return CheckStringMember(c, m);
         }
 
         if (target.Type is ListType list)
@@ -1297,10 +1307,9 @@ public sealed partial class Checker
         return CallValue(member.Type, c);
     }
 
-    /// <summary>X6, X7: <c>string.Join</c> and a number type's <c>Parse</c>, which the checker does not read; else null.</summary>
+    /// <summary>X7: a number type's <c>Parse</c>, which the checker does not read; else null.</summary>
     private static string? UnreadFunction(string type, string member) => (type, member) switch
     {
-        ("string", "Join") => "`string.Join` (X6)",
         (_, "Parse") when Types.ByName.TryGetValue(type, out var number) && Types.IsNumber(number) => $"`{type}.Parse` (X7)",
         _ => null,
     };
@@ -1323,13 +1332,99 @@ public sealed partial class Checker
         return Record(c, CallKind.StringSearch, Call([text, single], c, null, out var picked), picked);
     }
 
-    /// <summary>X2 to X5, X8: the members of a string and of a list that chapter 15 names, which the checker does not read; else null.</summary>
+    /// <summary>
+    /// X3 to X5: a string's trims, a <c>string</c> each (X4): <c>Trim</c>, <c>TrimStart</c> and <c>TrimEnd</c>, each with no argument
+    /// or with a <c>char trimChar</c>, two forms, and the ASCII forms; <c>Split</c>, a <c>List&lt;string&gt;</c>, of a <c>string</c> or
+    /// of a <c>char</c>, and <c>Replace</c>, a <c>string</c>, of two strings, of a <c>char</c> by a string or of a <c>char</c> by a
+    /// <c>char</c>, three forms (X5); and <c>ToLowerAscii()</c> and <c>ToUpperAscii()</c> (X3). A member of two forms takes a literal argument at its own type (F14) and
+    /// gives a call that fits neither <c>argument-mismatch</c> with a line for each form (F13), as X1's searches do; the parameters
+    /// take C#'s names.
+    /// </summary>
+    private Typed CheckStringMember(CallExpression c, MemberAccess m)
+    {
+        if (RefusesTypeArguments(c, $"`{m.Member}`"))
+        {
+            return Typed.Error;
+        }
+
+        static Slot Of(string name, KurzType type) => new(name, type, false, false, false);
+        var pieces = new ListType(Types.String);
+        var (kind, candidates) = m.Member switch
+        {
+            "Trim" or "TrimStart" or "TrimEnd" => (CallKind.StringTrim, new List<Candidate>
+            {
+                new() { Slots = [], Result = Types.String, Form = $"string {m.Member}()" },
+                new() { Slots = [Of("trimChar", Types.Char)], Result = Types.String, Form = $"string {m.Member}(char trimChar)" },
+            }),
+            "Split" => (CallKind.StringSplit, new List<Candidate>
+            {
+                new() { Slots = [Of("separator", Types.String)], Result = pieces, Form = "List<string> Split(string separator)" },
+                new() { Slots = [Of("separator", Types.Char)], Result = pieces, Form = "List<string> Split(char separator)" },
+            }),
+            "Replace" => (CallKind.StringReplace, new List<Candidate>
+            {
+                new() { Slots = [Of("oldValue", Types.String), Of("newValue", Types.String)], Result = Types.String, Form = "string Replace(string oldValue, string newValue)" },
+                new() { Slots = [Of("oldChar", Types.Char), Of("newValue", Types.String)], Result = Types.String, Form = "string Replace(char oldChar, string newValue)" },
+                new() { Slots = [Of("oldChar", Types.Char), Of("newChar", Types.Char)], Result = Types.String, Form = "string Replace(char oldChar, char newChar)" },
+            }),
+            "ToLowerAscii" or "ToUpperAscii" => (CallKind.StringCase, new List<Candidate> { new() { Slots = [], Result = Types.String } }),
+            _ => (CallKind.StringTrim, new List<Candidate> { new() { Slots = [], Result = Types.String } }),
+        };
+        return Record(c, kind, Call(candidates, c, null, out var picked), picked);
+    }
+
+    /// <summary>
+    /// X6: <c>string.Join(separator, values)</c>, a <c>string</c>, of a list of any item type, with a <c>string</c> or a <c>char</c>
+    /// separator: <c>Join&lt;T&gt;(string separator, List&lt;T&gt; values)</c> and <c>Join&lt;T&gt;(char separator, List&lt;T&gt;
+    /// values)</c>, two forms, picked as F13 picks one; an item type that has no text, the text <c>print</c> writes (A4, A7), is
+    /// <c>no-text</c>. The parameters take C#'s names.
+    /// </summary>
+    private Typed CheckStringJoin(CallExpression c)
+    {
+        if (RefusesTypeArguments(c, "`string.Join`"))
+        {
+            return Typed.Error;
+        }
+
+        Candidate Form(KurzType separator)
+        {
+            var parameter = new TypeParameterSymbol("T", c.Line);
+            return new Candidate
+            {
+                Slots = [new Slot("separator", separator, false, false, false), new Slot("values", new ListType(new TypeParameterType(parameter)), false, false, true)],
+                TypeParameters = [parameter],
+                Result = Types.String,
+                Form = $"string Join<T>({separator} separator, List<T> values)",
+            };
+        }
+
+        var typed = Call([Form(Types.String), Form(Types.Char)], c, null, out var picked);
+        if (typed.IsError || picked is null)
+        {
+            return typed;
+        }
+
+        var item = Types.Substitute(new TypeParameterType(picked.TypeParameters[0]), picked.Map);
+        if (!HasText(item))
+        {
+            Report(ErrorIds.NoText, c.Line, $"{Types.A(item)} has no text for `string.Join` to write (X6, A4, A7, A10)");
+            return Typed.Error;
+        }
+
+        if (HoldsRaw(item, []))
+        {
+            NotSupported(c.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
+            return Typed.Error;
+        }
+
+        return Record(c, CallKind.StringJoin, typed, picked);
+    }
+
+    /// <summary>X2, X3's change of case by Unicode's mapping, X8: the members of a string and of a list that chapter 15 names, which the checker does not read; else null.</summary>
     private static string? UnreadMember(KurzType type, string member) => (type, member) switch
     {
         (PrimitiveType { Kind: Primitive.String }, "Substring") => "a string's `Substring` (X2)",
-        (PrimitiveType { Kind: Primitive.String }, "ToLower" or "ToUpper" or "ToLowerAscii" or "ToUpperAscii") => $"a string's `{member}` (X3)",
-        (PrimitiveType { Kind: Primitive.String }, "Trim" or "TrimStart" or "TrimEnd" or "TrimAscii" or "TrimStartAscii" or "TrimEndAscii") => $"a string's `{member}` (X4)",
-        (PrimitiveType { Kind: Primitive.String }, "Split" or "Replace") => $"a string's `{member}` (X5)",
+        (PrimitiveType { Kind: Primitive.String }, "ToLower" or "ToUpper") => $"a string's `{member}` (X3)",
         (ListType, "Sort" or "SortBy" or "SortUnstable") => $"a list's `{member}` (X8)",
         _ => null,
     };

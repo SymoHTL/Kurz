@@ -1013,22 +1013,8 @@ public sealed partial class Emitter
         var member = (MemberAccess)Unwrap(c.Callee);
         var text = EmitExpression(member.Target);
         var argument = c.Arguments[0].Value;
-        var value = EmitExpression(argument);
-        var hay = fn.Value($"extractvalue %kz.str {text}, 0");
-        var n = fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {text}, 1")}, 9223372036854775807"); // without the mark of a block
-        string needle;
-        string m;
-        if (TypeOf(argument) is PrimitiveType { Kind: Primitive.Char })
-        {
-            needle = fn.Alloca("[4 x i8]", "char");
-            m = fn.Value($"call i64 {StdFunction("Utf8")}(i32 {value}, ptr {needle})");
-        }
-        else
-        {
-            needle = fn.Value($"extractvalue %kz.str {value}, 0");
-            m = fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {value}, 1")}, 9223372036854775807");
-        }
-
+        var (needle, m) = Needle(EmitExpression(argument), TypeOf(argument));
+        var (hay, n, _) = StringParts(text);
         if (member.Member is "StartsWith" or "EndsWith")
         {
             var at = member.Member == "StartsWith" ? "0" : fn.Value($"sub i64 {n}, {m}");
@@ -1037,6 +1023,298 @@ public sealed partial class Emitter
 
         var found = fn.Value($"call i64 {StdFunction("Find")}(ptr {hay}, i64 {n}, ptr {needle}, i64 {m})");
         return member.Member == "Contains" ? fn.Value($"icmp sge i64 {found}, 0") : Position(fn.Value($"trunc i64 {found} to i32"));
+    }
+
+    /// <summary>A string's bytes, their count without the mark of a block, and whether it holds a block, the mark (T15).</summary>
+    private (string Bytes, string Count, string Block) StringParts(string text)
+    {
+        var marked = fn.Value($"extractvalue %kz.str {text}, 1");
+        return (fn.Value($"extractvalue %kz.str {text}, 0"), fn.Value($"and i64 {marked}, 9223372036854775807"), fn.Value($"icmp slt i64 {marked}, 0"));
+    }
+
+    /// <summary>The bytes a member of a string looks for and their count: a <c>string</c>'s own, or a <c>char</c>'s UTF-8 bytes, written to a buffer of the function (X1, X4, X5).</summary>
+    private (string Bytes, string Count) Needle(string value, KurzType type)
+    {
+        if (type is PrimitiveType { Kind: Primitive.Char })
+        {
+            var buffer = fn.Alloca("[4 x i8]", "char");
+            return (buffer, fn.Value($"call i64 {StdFunction("Utf8")}(i32 {value}, ptr {buffer})"));
+        }
+
+        var (bytes, count, _) = StringParts(value);
+        return (bytes, count);
+    }
+
+    /// <summary>A string value of the bytes at <paramref name="bytes"/>, with <paramref name="marked"/> their count, marked where they are a block's (T15).</summary>
+    private string MakeString(string bytes, string marked) =>
+        fn.Value($"insertvalue %kz.str {fn.Value($"insertvalue %kz.str undef, ptr {bytes}, 0")}, i64 {marked}, 1");
+
+    /// <summary>
+    /// X4: the part of a string from the position <paramref name="start"/> to <paramref name="end"/>, a string with a count of its own:
+    /// the string itself, held once more, where the part is all of it; the empty string where it is nothing; its bytes in place where the
+    /// string holds no block, a literal, whose bytes are never freed; else a new block with a copy, the standard library's
+    /// <c>StringOf</c>, as Rust's <c>trim</c> gives a slice and Kurz has no view into a block (section 4). A block the system refuses
+    /// ends the process (M9).
+    /// </summary>
+    private string Piece(string text, string start, string end)
+    {
+        var name = Helper("piece.string", "%kz.str", ["%kz.str", "i64", "i64"], () =>
+        {
+            var (bytes, count, block) = StringParts("%a0");
+            var whole = fn.Label("whole");
+            var part = fn.Label("part");
+            fn.CondBranch(fn.Value($"and i1 {fn.Value("icmp eq i64 %a1, 0")}, {fn.Value($"icmp eq i64 %a2, {count}")}"), whole, part);
+            fn.Block(whole);
+            Retain("%a0", Types.String);
+            fn.Return("%kz.str %a0");
+            fn.Block(part);
+            var length = fn.Value("sub i64 %a2, %a1");
+            var from = fn.Value($"getelementptr i8, ptr {bytes}, i64 %a1");
+            var empty = fn.Label("empty");
+            var some = fn.Label("some");
+            fn.CondBranch(fn.Value($"icmp eq i64 {length}, 0"), empty, some);
+            fn.Block(empty);
+            fn.Return($"%kz.str {StringValue(string.Empty)}");
+            fn.Block(some);
+            var copy = fn.Label("copy");
+            var literal = fn.Label("literal");
+            fn.CondBranch(block, copy, literal);
+            fn.Block(literal);
+            fn.Return($"%kz.str {MakeString(from, length)}");
+            fn.Block(copy);
+            var asked = fn.Alloca("i64", "asked");
+            fn.Emit($"store i64 0, ptr {asked}");
+            var made = fn.Value($"call ptr {StdFunction("StringOf")}(ptr {from}, i64 {length}, ptr {asked})");
+            Refused(fn.Value($"icmp eq ptr {made}, null"), asked);
+            fn.Return($"%kz.str {MakeString(made, fn.Value($"or i64 {length}, -9223372036854775808"))}");
+        });
+        return fn.Value($"call %kz.str {name}(%kz.str {text}, i64 {start}, i64 {end})");
+    }
+
+    /// <summary>
+    /// X3, X5, X6: the string a member of a string made through the standard library, with a count of its own: <paramref name="same"/>,
+    /// held once more, where <paramref name="made"/> is -1, the string as it was; the empty string where it is 0; else the new block's
+    /// bytes at <paramref name="bytes"/>, <paramref name="made"/> of them.
+    /// </summary>
+    private string Made(string bytes, string made, string? same)
+    {
+        var result = fn.Alloca("%kz.str", "made");
+        var done = fn.Label("made.done");
+        if (same is not null)
+        {
+            var kept = fn.Label("made.same");
+            var other = fn.Label("made.other");
+            fn.CondBranch(fn.Value($"icmp eq i64 {made}, -1"), kept, other);
+            fn.Block(kept);
+            Retain(same, Types.String);
+            fn.Emit($"store %kz.str {same}, ptr {result}");
+            fn.Branch(done);
+            fn.Block(other);
+        }
+
+        var empty = fn.Label("made.empty");
+        var some = fn.Label("made.some");
+        fn.CondBranch(fn.Value($"icmp eq i64 {made}, 0"), empty, some);
+        fn.Block(empty);
+        fn.Emit($"store %kz.str {StringValue(string.Empty)}, ptr {result}");
+        fn.Branch(done);
+        fn.Block(some);
+        fn.Emit($"store %kz.str {MakeString(bytes, fn.Value($"or i64 {made}, -9223372036854775808"))}, ptr {result}");
+        fn.Branch(done);
+        fn.Block(done);
+        return fn.Value($"load %kz.str, ptr {result}");
+    }
+
+    /// <summary>The arguments of a call in the order they are written, each made once (D11), and the one each slot took.</summary>
+    private Func<int, (string Value, Expression Argument)> WrittenArguments(CallExpression c, CallInfo info)
+    {
+        var values = new List<string>();
+        foreach (var argument in c.Arguments)
+        {
+            values.Add(EmitExpression(argument.Value));
+        }
+
+        return slot =>
+        {
+            var i = info.Binding.ToList().IndexOf(slot);
+            return (values[i], c.Arguments[i].Value);
+        };
+    }
+
+    /// <summary>
+    /// X4: a string's trims, each the part of the string between the positions the standard library gives (<see cref="Piece"/>):
+    /// <c>TrimStart</c> and <c>TrimEnd</c> over Unicode's White_Space, as Rust's <c>trim_start</c> and <c>trim_end</c>, their ASCII
+    /// forms over ASCII's whitespace, as <c>trim_ascii_start</c>, <c>Trim</c> and <c>TrimAscii</c> both ends, and <c>Trim(c)</c>,
+    /// <c>TrimStart(c)</c> and <c>TrimEnd(c)</c> the repeats of a character's UTF-8 bytes at both ends, the start or the end, as
+    /// <c>trim_matches(c)</c>, <c>trim_start_matches(c)</c> and <c>trim_end_matches(c)</c>. The string is held without a count of its
+    /// own while the argument is made: an argument that changes it is the checker's <c>changed-while-held</c> (M7).
+    /// </summary>
+    private string EmitStringTrim(CallExpression c)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var text = EmitExpression(member.Target);
+        var start = "0";
+        string end;
+        if (c.Arguments.Count == 1)
+        {
+            var (run, m) = Needle(EmitExpression(c.Arguments[0].Value), Types.Char);
+            var (bytes, n, _) = StringParts(text);
+            if (member.Member != "TrimEnd")
+            {
+                start = fn.Value($"call i64 {StdFunction("RunStart")}(ptr {bytes}, i64 {n}, ptr {run}, i64 {m})");
+            }
+
+            end = member.Member == "TrimStart" ? n : fn.Value($"call i64 {StdFunction("RunEnd")}(ptr {bytes}, i64 {start}, i64 {n}, ptr {run}, i64 {m})");
+        }
+        else
+        {
+            var (bytes, n, _) = StringParts(text);
+            var ascii = member.Member.EndsWith("Ascii", StringComparison.Ordinal) ? "true" : "false";
+            if (member.Member is not ("TrimEnd" or "TrimEndAscii"))
+            {
+                start = fn.Value($"call i64 {StdFunction("TrimStart")}(ptr {bytes}, i64 {n}, i1 {ascii})");
+            }
+
+            end = member.Member is "TrimStart" or "TrimStartAscii" ? n : fn.Value($"call i64 {StdFunction("TrimEnd")}(ptr {bytes}, i64 {start}, i64 {n}, i1 {ascii})");
+        }
+
+        return Piece(text, start, end);
+    }
+
+    /// <summary>
+    /// X5: <c>s.Split(separator)</c>, of a <c>string</c> or of a <c>char</c>'s UTF-8 bytes, the list of strings the standard library's
+    /// <c>Split</c> makes, with a count of its own. The string is held without a count of its own while the argument is made (M7). A block
+    /// the system refuses ends the process (M9).
+    /// </summary>
+    private string EmitStringSplit(CallExpression c)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var text = EmitExpression(member.Target);
+        var argument = c.Arguments[0].Value;
+        var (separator, m) = Needle(EmitExpression(argument), TypeOf(argument));
+        var (bytes, n, block) = StringParts(text);
+        var asked = fn.Alloca("i64", "asked");
+        fn.Emit($"store i64 0, ptr {asked}");
+        var list = fn.Value($"call ptr {StdFunction("Split")}(ptr {bytes}, i64 {n}, i1 {block}, ptr {separator}, i64 {m}, ptr {asked})");
+        Refused(fn.Value($"icmp eq ptr {list}, null"), asked);
+        return list;
+    }
+
+    /// <summary>
+    /// X5: <c>s.Replace(old, new)</c>, each of a <c>string</c> or of a <c>char</c>'s UTF-8 bytes, the string the standard library's
+    /// <c>Replace</c> makes (<see cref="Made"/>). The string, and <c>old</c>, are held without a count of their own while the arguments
+    /// after them are made (M7). A block the system refuses ends the process (M9).
+    /// </summary>
+    private string EmitStringReplace(CallExpression c, CallInfo info)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var text = EmitExpression(member.Target);
+        var slot = WrittenArguments(c, info);
+        var (oldValue, oldArgument) = slot(0);
+        var (old, m) = Needle(oldValue, TypeOf(oldArgument));
+        var (newValue, newArgument) = slot(1);
+        var (replacement, k) = Needle(newValue, TypeOf(newArgument));
+        var (bytes, n, _) = StringParts(text);
+        var made = fn.Alloca("i64", "made");
+        var asked = fn.Alloca("i64", "asked");
+        fn.Emit($"store i64 0, ptr {asked}");
+        var result = fn.Value($"call ptr {StdFunction("Replace")}(ptr {bytes}, i64 {n}, ptr {old}, i64 {m}, ptr {replacement}, i64 {k}, ptr {made}, ptr {asked})");
+        Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
+        return Made(result, fn.Value($"load i64, ptr {made}"), text);
+    }
+
+    /// <summary>
+    /// X3: <c>s.ToLowerAscii()</c> and <c>s.ToUpperAscii()</c>, the string the standard library's <c>AsciiCase</c> makes, or the string
+    /// itself where no byte changes (<see cref="Made"/>). A block the system refuses ends the process (M9).
+    /// </summary>
+    private string EmitStringCase(CallExpression c)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var text = EmitExpression(member.Target);
+        var (bytes, n, _) = StringParts(text);
+        var asked = fn.Alloca("i64", "asked");
+        fn.Emit($"store i64 0, ptr {asked}");
+        var upper = member.Member == "ToUpperAscii" ? "true" : "false";
+        var result = fn.Value($"call ptr {StdFunction("AsciiCase")}(ptr {bytes}, i64 {n}, i1 {upper}, ptr {asked})");
+        Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
+        return Made(result, fn.Value($"select i1 {fn.Value($"icmp eq ptr {result}, null")}, i64 -1, i64 {n}"), text);
+    }
+
+    /// <summary>
+    /// X6: <c>string.Join(separator, values)</c>, the texts of the items (A4) with the separator, a string or a <c>char</c>'s UTF-8 bytes,
+    /// between two of them, joined by the standard library's <c>Join</c>: a list of strings is its own texts, and the texts of the items of any other type are made into a
+    /// buffer, as a list's text makes them (<see cref="ListText"/>), and let go of after the join. The separator and the list are held
+    /// without a count of their own while the arguments after them are made (M7). A block the system refuses ends the process (M9).
+    /// </summary>
+    private string EmitStringJoin(CallExpression c, CallInfo info)
+    {
+        var slot = WrittenArguments(c, info);
+        var (separatorValue, separatorArgument) = slot(0);
+        var (list, listArgument) = slot(1);
+        var (separator, length) = Needle(separatorValue, TypeOf(separatorArgument));
+        var type = (ListType)TypeOf(listArgument);
+        var name = Helper($"join.{Lower.Mangle(type)}", "%kz.str", ["ptr", "i64", "ptr"], () =>
+        {
+            var count = fn.Value($"sext i32 {ListCount("%a2")} to i64");
+            var (bytes, m) = ("%a0", "%a1");
+            var made = fn.Alloca("i64", "made");
+            var asked = fn.Alloca("i64", "asked");
+            fn.Emit($"store i64 0, ptr {asked}");
+            var texts = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a2)");
+            string? buffer = null;
+            string? size = null;
+            var makes = type.Element is not PrimitiveType { Kind: Primitive.String };
+            if (makes)
+            {
+                // the items' texts, into a buffer laid out as a list of strings is
+                size = fn.Value($"mul i64 {count}, 16");
+                buffer = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {size})");
+                var at = fn.Alloca("i64", "at");
+                fn.Emit($"store i64 0, ptr {at}");
+                EachItem("%a2", type.Element, item =>
+                {
+                    var i = fn.Value($"load i64, ptr {at}");
+                    fn.Emit($"store %kz.str {TextOf(item, type.Element, c.Line)}, ptr {fn.Value($"getelementptr %kz.str, ptr {buffer}, i64 {i}")}");
+                    fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {at}");
+                });
+                texts = buffer;
+            }
+
+            var joined = fn.Value($"call ptr {StdFunction("Join")}(ptr {texts}, i64 {count}, ptr {bytes}, i64 {m}, ptr {made}, ptr {asked})");
+            if (makes)
+            {
+                if (MakesText(type.Element))
+                {
+                    // the items' texts, which the joined text holds no count of
+                    EachText(buffer!, count, text => Release(text, Types.String));
+                }
+
+                fn.Emit($"call void {StdFunction("Free")}(ptr {buffer}, i64 {size})");
+            }
+
+            Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
+            fn.Return($"%kz.str {Made(joined, fn.Value($"load i64, ptr {made}"), null)}");
+        });
+        return fn.Value($"call %kz.str {name}(ptr {separator}, i64 {length}, ptr {list})");
+    }
+
+    /// <summary>For each of the <paramref name="count"/> strings at <paramref name="buffer"/>, laid out as a list of strings is, <paramref name="each"/>.</summary>
+    private void EachText(string buffer, string count, Action<string> each)
+    {
+        var at = fn.Alloca("i64", "text");
+        fn.Emit($"store i64 0, ptr {at}");
+        var check = fn.Label("text.check");
+        var body = fn.Label("text.each");
+        var done = fn.Label("text.done");
+        fn.Branch(check);
+        fn.Block(check);
+        var i = fn.Value($"load i64, ptr {at}");
+        fn.CondBranch(fn.Value($"icmp slt i64 {i}, {count}"), body, done);
+        fn.Block(body);
+        each(fn.Value($"load %kz.str, ptr {fn.Value($"getelementptr %kz.str, ptr {buffer}, i64 {i}")}"));
+        fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {at}");
+        fn.Branch(check);
+        fn.Block(done);
     }
 
     /// <summary>
