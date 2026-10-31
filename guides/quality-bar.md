@@ -132,6 +132,16 @@ What is specific to this repository:
 - **A batch at the pass cap counts as reviewed, and the review says so.** After five passes that
   still found something above low, the review completes: the status reads "NOT converged on N
   files" and a note names them. Their files are not stored, so the next run reads them again.
+- **A long line is sent in parts** (#128). A line over `LONG_LINE` (4000) characters is sent as
+  its first 500 characters and about 1500 on each side of each sentence in which it differs from
+  its pair, the removed line of its run that shares the most text with it, sentence by sentence,
+  and at least half of the shorter line; a
+  context line as its first and its last 500. A run of at least 500 characters left out is a
+  marker that names its length, and the prompt says what a marker is. Only text that is equal in
+  a line and its pair is left out, so a pair that is wrong sends more and hides no change, and an
+  added line with no pair is sent whole. The log line of a run and of `--plan`, the state comment
+  and the audit note say how many characters of how many lines were left out. The cost the owner
+  accepted (#39, comment 6542727045): a finding that needs a far part of a long line is not made.
 - **Passes run in rounds.** Every batch is read once before any is read twice. The first version,
   until 2026-10-02, gave each batch all its passes in turn, which on a large diff spends the budget on the first
   batches and never reads the last ones (`knowledge/what-a-review-pass-costs.md`).

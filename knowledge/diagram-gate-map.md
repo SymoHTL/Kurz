@@ -262,7 +262,8 @@ flowchart TD
         finding it meets nor says it meets none (node B4 of the design playbook; the citations are G3's).
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).
         The reviewer is a model that is given one batch of the diff: it can miss a defect, it cannot
-        see a file outside its batch, and a breach it rates low opens no thread and holds no merge.
+        see a file outside its batch nor the part of a line over 4000 characters that its batch leaves out,
+        and a breach it rates low opens no thread and holds no merge.
         A rule that names a review rule as its gate has this much; the rest of it is a judgment step"]
         R6["what runs: the workflow file, the reviewer and the rules of the default branch; ci-config pins
         that nothing of the pull request is checked out, and that the job skips the Ready event of a head

@@ -77,6 +77,20 @@ def attempt(fn, *args):
         return e
 
 
+def rejoin(sent, text):
+    """(whether `sent` is `text` with runs of it put as markers, the (start, end) of each run left out)."""
+    at, gone = 0, []
+    for i, piece in enumerate(rv.re.split(rv.re.escape(rv.MARKER).replace(rv.re.escape("{}"), r"(\d+)"), sent)):
+        if i % 2:
+            gone.append((at, at + int(piece)))
+            at += int(piece)
+        elif text.startswith(piece, at):
+            at += len(piece)
+        else:
+            return False, gone
+    return at == len(text), gone
+
+
 def finding(file="a.md", line=3, severity="medium", title="t", body="b"):
     return {"file": file, "line": line, "severity": severity, "title": title, "body": body}
 
@@ -344,6 +358,74 @@ def suite(case):
          raises("bad-diff", lambda: rv.parse_diff(unreadable))[0] and len(attempt(rv.parse_diff, unreadable.replace("y.md", "x.md"))) == 1,
          attempt(rv.parse_diff, unreadable))
     case("diff: a path that holds a line break is refused", *raises("bad-diff", lambda: rv.parse_diff(fixture("line-break-path-diff.txt"))))
+    bare = attempt(rv.parse_diff, fixture("no-context-diff.txt"))
+    case("diff: lines keep the order of the diff where a hunk ends in a change", isinstance(bare, list) and bare[0]["numbered"] ==
+         ["@@ -2 +2 @@ line 1", "      - line 2", "    2 + line 2, changed", "@@ -4 +4,2 @@ line 3", "      - line 4", "    4 + line 4, changed",
+          "    5 + line 4b, added"], bare[0]["numbered"] if isinstance(bare, list) and bare else bare)
+
+    # --- a line over LONG_LINE characters, from a real `git diff` of the record: a bullet whose last sentences changed (#128)
+    raw = fixture("long-line-diff.txt")
+    old = next((line[1:] for line in raw.split("\n") if line.startswith("-") and not line.startswith("---")), "")
+    new = next((line[1:] for line in raw.split("\n") if line.startswith("+") and not line.startswith("+++")), "")
+    long_files = attempt(rv.parse_diff, raw)
+    numbered = long_files[0]["numbered"] if isinstance(long_files, list) and long_files else []
+    sent_old = next((line[8:] for line in numbered if line.startswith("      - ")), "")
+    sent_new = next((line[8:] for line in numbered if line[5:8] == " + "), "")
+    (joins_old, gone_old), (joins_new, gone_new) = rejoin(sent_old, old), rejoin(sent_new, new)
+    spans = attempt(rv.changed_spans, old, new)
+    changed = [new[a:b] for a, b in spans[1]] if isinstance(spans, tuple) else []
+    case("long line: the fixture holds a removed and an added line over the bound, which differ in sentences of their own",
+         len(old) > rv.LONG_LINE and len(new) > rv.LONG_LINE and changed and all(changed), (len(old), len(new), [t[:60] for t in changed]))
+    case("long line: a changed line and its removed form are sent in parts that join back into them",
+         joins_old and joins_new and gone_old and gone_new and len(sent_new) < len(new) // 2, (joins_old, joins_new, gone_old, gone_new, len(sent_new)))
+    case("long line: each sentence that changed is sent whole, after the start of the line",
+         changed and all(text in sent_new for text in changed) and sent_new.startswith(new[:rv.EDGE]), [t[:60] for t in changed if t not in sent_new])
+    case("long line: what an added line leaves out stands in the removed line it is paired with, so no change is hidden",
+         gone_new and all(new[a:b] in old for a, b in gone_new), [(a, b) for a, b in gone_new if new[a:b] not in old])
+    counted = long_files[0]["left"] if isinstance(long_files, list) and long_files else long_files
+    case("long line: the parse counts the lines cut and the characters left out", counted == [2, sum(b - a for a, b in gone_old + gone_new)], counted)
+    left = [0, 0]
+    context = attempt(rv.line_parts, new, [], left)
+    case("long line: a context line is sent as its first and its last EDGE characters around a marker",
+         context == new[:rv.EDGE] + rv.MARKER.format(len(new) - 2 * rv.EDGE) + new[-rv.EDGE:] and left == [1, len(new) - 2 * rv.EDGE],
+         (str(context)[:80], left))
+    # edited: the real pair made one context line, as a diff shows a long line that the pull request did not change
+    unchanged = raw.replace("\n-" + old + "\n", "\n").replace("\n+" + new + "\n", "\n " + new + "\n")
+    parsed = attempt(rv.parse_diff, unchanged)
+    sent = next((line[8:] for line in parsed[0]["numbered"] if line.startswith("   76   ")), "") if isinstance(parsed, list) and parsed else ""
+    case("long line: the parse cuts a long context line of a diff", unchanged.count("\n " + new + "\n") == 1 and sent == context, sent[:80])
+    left = [0, 0]
+    case("long line: a line of LONG_LINE characters or fewer is sent whole and counts nothing, a longer one is cut",
+         attempt(rv.line_parts, new[:rv.LONG_LINE], [(0, 1)], left) == new[:rv.LONG_LINE] and left == [0, 0]
+         and attempt(rv.line_parts, new[:rv.LONG_LINE + 1], [], [0, 0]) != new[:rv.LONG_LINE + 1], left)
+    # a span that keeps EDGE + 100 to `end`: the run after the first EDGE characters is 100 long, the last one GAP - 1 or GAP
+    start = rv.EDGE + 100 + rv.AROUND
+    end = start + 1 + rv.AROUND
+    left = [0, 0]
+    under = attempt(rv.line_parts, new[:end + rv.GAP - 1], [(start, start + 1)], left)
+    at_gap = attempt(rv.line_parts, new[:end + rv.GAP], [(start, start + 1)], [0, 0])
+    case("long line: a run under GAP characters is sent, a run of GAP is a marker", end + rv.GAP - 1 > rv.LONG_LINE
+         and under == new[:end + rv.GAP - 1] and left == [0, 0] and at_gap == new[:end] + rv.MARKER.format(rv.GAP), (left, str(at_gap)[-60:]))
+    left = [0, 0]
+    case("long line: an added line with no removed line before it is sent whole",
+         attempt(rv.paired, [], [(76, new)], left) == [f"   76 + {new}"] and left == [0, 0]
+         and attempt(rv.paired, [old], [(76, new)], [0, 0]) != [f"      - {old}", f"   76 + {new}"], left)
+    left = [0, 0]
+    stranger = old[:4500] + old[4500:][::-1]  # shares its first sentences, less than half of the line
+    case("long line: a removed line that shares less than half of the shorter line is no pair, and both are sent whole",
+         attempt(rv.paired, [stranger], [(76, new)], left) == [f"      - {stranger}", f"   76 + {new}"] and left == [0, 0], left)
+    near = old[:8000] + old[8000:][::-1]  # shares its first sentences, more than half, and less than the real removed line
+    best = attempt(rv.paired, [near, old], [(76, new)], [0, 0])
+    case("long line: of two removed lines an added line pairs with the one that shares the most",
+         isinstance(best, list) and len(best) == 3 and best[0] == f"      - {near}" and best[1] != f"      - {old}" and best[2] != f"   76 + {new}",
+         [line[:40] for line in best] if isinstance(best, list) else best)
+    words = attempt(rv.changed_spans, "A b. C d. E f.", "A b. C x. E f.")
+    case("long line: two lines are compared sentence by sentence, so a changed word marks its whole sentence", words == ([(4, 9)], [(4, 9)], 9), words)
+    said = rv.build_prompt([], "t", "b", [], [("a.md", "x")], 1, 1, "s")
+    rules_text = kit.read(os.path.join(kit.ROOT, rv.RULES_PATH))
+    case("long line: the prompt names the marker as the parse writes it, and the prompt and the rules file name the bound",
+         f'"{rv.MARKER.format("N")}" stands for' in said and f"longer than {rv.LONG_LINE} characters" in said
+         and f"A line over {rv.LONG_LINE} characters" in rules_text, said[-900:])
 
     # --- batches
     one = rv.batches(files)
@@ -1431,3 +1513,29 @@ def suite(case):
         code, out = run_review(forge, unused, ["--pr", "1", "--local", "--bootstrap-rules", elsewhere])
     case("run: a bootstrap rules file outside the checkout is refused", code == 1 and "outside this checkout" in out and unused.batches == [],
          (code, out[-200:]))
+
+    # --- a run over the real diff with a long line (#128)
+    count = attempt(rv.left_out, long_files)
+    planned = run_review(MemoryForge(), scripted_model({}), ["--pr", "1", "--plan"], diff=raw)[1]
+    whole = run_review(MemoryForge(), scripted_model({}), ["--pr", "1", "--plan"])[1]
+    case("run: the log line of --plan names what was left out, and says when every line was sent whole",
+         isinstance(count, str) and "characters of 2 lines over" in count and f"; {count}\n" in planned and "; every line sent whole\n" in whole,
+         (count, planned[:400]))
+    sizes = [int(n) for n in rv.re.findall(r"batch \d+/\d+: (\d+) characters", planned)]
+    prompts = []
+
+    def reader(prompt, paths, timeout_s):
+        prompts.append(prompt)
+        return [], 0.25, 0
+    code, out = run_review(MemoryForge(), reader, ["--pr", "1", "--dry-run"], diff=raw)
+    told = {rv.re.search(r"DIFF BATCH (\d+) OF (\d+)", p).groups() for p in prompts}
+    case("run: --plan counts the batches of the cut text, and the run gives the model those batches",
+         0 < sum(sizes) < len(raw) // 2 and code == 0 and f"; {count}\n" in out and told == {(str(i), str(len(sizes))) for i in range(1, len(sizes) + 1)}
+         and any(rv.MARKER.format(b - a) in p for p in prompts for a, b in gone_new) and not any(new in p for p in prompts),
+         (sizes, code, sorted(told), out[-300:]))
+    forge = MemoryForge()
+    code, out = run_review(forge, scripted_model({}), ["--pr", "1", "--local"], diff=raw)
+    audit = next((n["body"] for n in forge.notes if "Off-pipeline review" in n["body"]), "")
+    state = next((n["body"] for n in forge.notes if "Automated review state for" in n["body"]), "")
+    case("run: the audit note and the state comment name what was left out", code == 0 and f"; {count}; " in audit and f"; {count}.\n" in state,
+         (code, audit[:300], state[:200]))
