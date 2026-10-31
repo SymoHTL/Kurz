@@ -343,6 +343,20 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void Two_strings_take_the_order_and_a_string_beside_another_type_a_nullable_string_or_a_changed_operand_do_not()
+    {
+        // T32: two strings in the order of their code points; T18: a string beside another type; N2, N10: a `string?` not checked, and
+        // N3 its narrowed form; M7: an operand a call on the other side changes
+        Clean("bool F(string a, string b) => a < b && a <= b && b > a && b >= a\n\nprint(F(\"a\", \"b\"))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("bool F(string a) => a < 1\n\nprint(F(\"a\"))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("bool F(string a, char c) => a >= c\n\nprint(F(\"a\", 'a'))"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 1)], Errors("bool F(string? a) => a < \"y\"\n\nprint(F(\"x\"))"));
+        Clean("bool F(string? a) {\n    if a != null {\n        return a < \"y\"\n    }\n\n    return false\n}\n\nprint(F(\"x\"))");
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("string Change(mut string t) {\n    t = \"{t}x\"\n    return \"b\"\n}\n\nmut s = \"{1}a\"\nprint(s < Change(mut s))"));
+        Clean("string Change(mut string t) {\n    t = \"{t}x\"\n    return \"b\"\n}\n\nmut s = \"{1}a\"\nb = Change(mut s)\nprint(s < b)");
+    }
+
+    [Fact]
     public void Bit_operators_take_integers_and_a_shift_count_is_masked_in_a_constant()
     {
         // T22, T28: the count is taken modulo the width, 32 for a narrow left operand; two literals fold in the type they take (L17), and a

@@ -506,6 +506,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(string.FromUtf8Lossy(made))
             print(made.Pointer[1])
         }
+        print(Made(37) < Same(Made(38)))
         """;
 
     private static readonly string[] StringsPrint =
@@ -554,6 +555,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "Contact { Email = null }",
         "hi", // a list that took over the room `Bytes.Allocate` gave
         "105",
+        "true", // two strings calls made, ordered by their bytes (T32) and let go of after the statement
     ];
 
     // every way out of a block a string is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
