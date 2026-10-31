@@ -455,7 +455,7 @@ pub byte* ListCopy(byte* block, long item, mut long asked) {
 }
 
 // The address the next item goes to, in a block with room for it, whose count of items it raises by
-// one. The count is read as a `uint`, which it never exceeds, so that the item's offset widens without
+// one. The count, never negative, is read as a `uint`, so that the item's offset widens without
 // a sign: in a loop of `Add`s the count the `Add` before stored is then read back by a plain load, not a
 // sign-extending one (`EmitterTests` pins the widening).
 pub byte* ListPush(byte* block, long item) {
@@ -682,7 +682,7 @@ pub byte* ListString(byte* block) {
 // of its bytes and the count of bytes it has room for, 4 bytes each, and from its 16th byte the bytes.
 // A string value is the address of its bytes and their count, whose highest bit marks a string that
 // holds such a block; a literal and the empty string hold none and are never freed (design record,
-// section 3). A string never changes, so no write copies a block; the emitted code counts the values
+// section 4). A string never changes, so no write copies a block; the emitted code counts the values
 // that hold one, and a list value that holds one copies it before it writes, as for any block other
 // values hold (M3).
 
@@ -753,8 +753,9 @@ pub void StringFree(byte* bytes) {
     Free(bytes - 16, 16 + room)
 }
 
-// The block of a map (M9). A map value is the address of its block, null for a map without entries,
-// which takes no block. A block holds the count of the map values that hold it, 8 bytes, the count of
+// The block of a map (M9). A map value is the address of its block, null for a map that holds none: one
+// that never took one, and one whose `Clear` let go of a block other values held; the `Remove` of its last
+// entry and the `Clear` of a block it alone held keep the block, its count 0. A block holds the count of the map values that hold it, 8 bytes, the count of
 // its entries and the count of slots it has room for, a power of two from 8, 4 bytes each, the two keys
 // of its hash, 8 bytes each, the count of slots without an entry that entries can still take before the
 // block grows, 4 bytes, and 12 bytes unused, from its 48th byte a control byte for each slot, padded to a
@@ -1924,7 +1925,8 @@ void HmacKeyed(byte* s) {
 }
 
 // The tag of the message of the state at `s`, SHA-256 of K0 ^ opad, K0 with every byte xored with 0x5C,
-// and of the inner hash's digest, written at `out`, 32 bytes; the inner hash then starts over on K0.
+// and of the inner hash's digest, written at `out`, 32 bytes; the inner hash then starts over on K0 ^ ipad,
+// as `HmacKeyed` starts it.
 void HmacClose(byte* s, byte* out) {
     byte* outer = s + 680
     byte* pad = s + 720

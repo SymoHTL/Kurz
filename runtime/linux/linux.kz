@@ -113,8 +113,9 @@ pub void Release(byte* p, long bytes) {
 // What `Random` keeps for the process, as Rust's standard library keeps it in two `static` `AtomicBool`s
 // read and written with `Relaxed` order and a `OnceLock<File>`: whether `getrandom` takes the flag
 // `GRND_INSECURE`, whether the system refused `getrandom` itself, and the descriptor of `/dev/urandom`,
-// -1 where it is not open. Kurz has no atomic form, so they are plain `static mut`s, which the one
-// thread the runtime runs reads and writes.
+// -1 where it is not open. Kurz has no atomic form, so they are plain `static mut`s: the runtime starts
+// no thread, and two threads a program starts through C (R16) that ask for random bytes at once, each
+// thread's first map among them, race on them, where Rust's atomics and `OnceLock` do not.
 static mut bool insecureTaken = true
 static mut bool getrandomRefused = false
 static mut int urandom = -1
@@ -318,7 +319,8 @@ thread static mut long linesAttribute = -1
 // section 6), on standard error, from the frame that raised to `main`, innermost first, the runtime's
 // frames left out: `  at <function> in <file>:<n>`, `  at <function>` where the line tables hold no
 // line there, and `  at <unknown> (0x55d2a8c5b2e4)` where the executable's file cannot be read or names
-// no function there; a hundred frames, and a line that counts the rest, `  ... 12 more frames`. The
+// no function there, every frame the unwinder gives written so where the file cannot be read or holds no
+// symbol table, the runtime's and the C library's start below `main` among them; a hundred frames, and a line that counts the rest, `  ... 12 more frames`. The
 // walk, by the platform's unwinder, and the reads of the file run on the stack that raised (the owner,
 // 2026-10-29, "Where it raised, as Rust"), through the two pages, from the system and not from the
 // allocator. `KURZ_TRACE=0` switches it off, and a line whose write fails ends it.
@@ -367,15 +369,22 @@ pub void Crashing() {
 // grow it further. The handler's stack is 64 KiB from the system, with a page below it that faults, so
 // that an overflow of the handler's own stack ends the process. The handler takes `SIGSEGV` (11) and
 // `SIGBUS` (7) on that stack (`SA_ONSTACK`), with the fault's details (`SA_SIGINFO`), and with the
-// signal not blocked while it runs (`SA_NODEFER`), since it never returns through the signal's frame
-// (design record, section 6). Where any of it cannot be had, no handler is installed, and a stack
-// overflow ends the process as the system ends it.
+// signal not blocked while it runs (`SA_NODEFER`), since on a fault in the guard page it ends the
+// process and never returns through the signal's frame, the return that unblocks the signal, so that a
+// fault in its own walk reaches it again (design record, section 6); a fault outside the guard page
+// returns through that frame once the default action is set back. Where any of it cannot be had, no
+// handler is installed and the mapping is given back, and a stack overflow ends the process as the
+// system ends it.
 void Faults() {
     raw {
         // `AT_PAGESZ`
         long size = long(getauxval(6))
+        if size <= 0 {
+            return
+        }
+
         void* got = mmap(null, size + 65536 + size, 3, 34, -1, 0)
-        if long(got) == -1 || size <= 0 {
+        if long(got) == -1 {
             return
         }
 
@@ -383,6 +392,7 @@ void Faults() {
         byte* block = Ptr<byte>(got)
         byte* scratch = block + size + 65536
         if pthread_getattr_np(pthread_self(), Ptr<void>(scratch)) != 0 {
+            munmap(got, size + 65536 + size)
             return
         }
 
@@ -392,6 +402,7 @@ void Faults() {
         pthread_attr_destroy(Ptr<void>(scratch))
         // `PROT_NONE`
         if found != 0 || mprotect(got, size, 0) != 0 {
+            munmap(got, size + 65536 + size)
             return
         }
 
@@ -415,6 +426,8 @@ void Faults() {
         if sigaltstack(Ptr<void>(scratch + 64), null) == 0 {
             sigaction(11, Ptr<void>(scratch + 128), null)
             sigaction(7, Ptr<void>(scratch + 128), null)
+        } else {
+            munmap(got, size + 65536 + size)
         }
     }
 }
@@ -738,7 +751,7 @@ void Frame(long ip, long at) {
             unit = unitLines
             file = Chained(k, 2)
             line = Chained(k, 3)
-            known = file >= 0 && line > 0
+            known = unit >= 0 && file >= 0 && line > 0
             k = k - 1
         }
 
@@ -1103,7 +1116,11 @@ long Inlined(long at) {
                                 unitLow = Address(lowForm, low)
                             }
 
-                            unitLines = lines + linesAttribute
+                            // -1 where the unit names no line tables or the file has none
+                            unitLines = -1
+                            if lines > 0 && linesAttribute >= 0 {
+                                unitLines = lines + linesAttribute
+                            }
                         } else if tag == 29 && depth < 128 && Holds(at) {
                             long* chain = Ptr<long>(page + 4096)
                             chain[depth * 4] = entry
@@ -1172,9 +1189,13 @@ long NameOf(long entry, long unit) {
                 return -1
             }
 
-            // a reference into the unit, or with `DW_FORM_ref_addr` (16) into the section
+            // a reference into the unit, or with `DW_FORM_ref_addr` (16) into the section, read where it falls
+            // in this unit, whose abbreviations and strings the reads take
             if originForm == 16 {
                 at = info + origin
+                if at < unit || at >= unit + 4 + Read(unit, 4) {
+                    return -1
+                }
             } else {
                 at = unit + origin
             }
@@ -1507,19 +1528,20 @@ bool Window(long at) {
     }
 }
 
-// The little-endian number of `size` bytes at `at`; 0 where they cannot be read.
+// The little-endian number of `size` bytes at `at`, read from its first byte up, so that a window that
+// misses moves to `at` and holds the rest; 0 where they cannot be read.
 long Read(long at, long size) {
     raw {
         mut long value = 0
-        mut long i = size - 1
-        while i >= 0 {
+        mut long i = 0
+        while i < size {
             long b = ByteAt(at + i)
             if b < 0 {
                 return 0
             }
 
-            value = (value << 8) | b
-            i = i - 1
+            value = value | (b << int(8 * i))
+            i = i + 1
         }
 
         return value
@@ -1713,7 +1735,8 @@ void HexAddress(long value) {
 // 4096. `ErrorKind` and `ErrorCode` read a failure. A call a signal interrupts (`EINTR`, 4) where it waits
 // on a file is made again, as Rust's standard library makes it again.
 
-// The page of each thread that `stat` fills, mapped at its first use.
+// The page of each thread that `stat` fills, mapped at its first use and never given back, not even when
+// its thread ends.
 thread static mut byte* status = null
 
 // A system call's result: `result` where it is 0 or more, else the error number negated.
@@ -2032,7 +2055,9 @@ pub long ListDirectory(byte* path, mut List<string> names) {
 // `clock_gettime` with `CLOCK_REALTIME` (0), as C#'s `DateTime.UtcNow` reads the system's clock, into the
 // page of the thread that `stat` fills, its `struct timespec` the seconds at byte 0 and the nanoseconds at
 // byte 8: true, or false where the page cannot be mapped. After the year 2262 the time leaves the 64 bits of
-// a `timestamp` (T24).
+// a `timestamp` (T24). The result of `clock_gettime` is not read: with `CLOCK_REALTIME` and a page that is
+// mapped it fails only for a clock the kernel lacks, an address outside the process or a `time_t` of 32
+// bits, none of them on Linux for x86-64, where Rust's `SystemTime::now` panics on a failure.
 pub bool Now(mut long nanoseconds) {
     raw {
         if status == null {
@@ -2123,16 +2148,17 @@ pub int Variable(byte* key, mut string value) {
 // The calls on sockets of a program built for Linux (S9), over TCP, as Rust 1.82's `TcpListener` and
 // `TcpStream` make them on Linux. An address is a host and a port after its last `:`, as Rust's
 // `ToSocketAddrs` reads a `str`: a host that is a literal, of IPv4, or of IPv6 inside `[` and `]`, where a scope
-// id may follow a `%` and the port takes no `+`, is read by `inet_pton` with no lookup, and any other is looked up
-// by `getaddrinfo`, whose addresses are tried
+// id may follow a `%` and the port takes no `+`, is read with no lookup, its address by `inet_pton` and the scope
+// id by `ScopeOf`, and any other is looked up by `getaddrinfo`, whose addresses are tried
 // in its order until one binds or connects, the failure of the last being the call's, as Rust's
 // `each_addr` tries them. Beside the system's numbers negated, a call fails with -4097 for an address
 // that is no host and port, or a name that gives no address, `InvalidInput` to the caller, as Rust gives
-// it, with -4098 for a lookup that fails with no error of the system, `NotFound`, and with -4099 for one
-// that fails with `EAI_AGAIN` or `EAI_FAIL`, `Other` (S9).
+// it, with -4099 for a lookup that fails with `EAI_AGAIN` or `EAI_FAIL`, or with `EAI_SYSTEM` while `errno`
+// holds 0, `Other`, and with -4098 for one that fails with any other error of `getaddrinfo` but `EAI_SYSTEM`,
+// `NotFound` (S9).
 
 // The page of each thread that holds a call's address and what the calls of the system take by address,
-// mapped at its first use: a literal address at its byte 0, with room for one of IPv6, 28 bytes; the
+// mapped at its first use and never given back, not even when its thread ends: a literal address at its byte 0, with room for one of IPv6, 28 bytes; the
 // length `getsockname` takes at 32; the 1 that `setsockopt` sets at 36; the hints for `getaddrinfo` at
 // 64, 48 bytes; and the list it gives at 112.
 thread static mut byte* endpoints = null
@@ -2339,6 +2365,10 @@ long EachAddress(byte* text, bool listening) {
             int looked = getaddrinfo(text, null, Ptr<void>(held + 64), Ptr<void>(held + 112))
             if looked == -11 {
                 result = -long(*__errno_location())
+                // `errno` 0, which Rust's `last_os_error` gives as the os error 0, of no kind: `Other`, the number 0
+                if result == 0 {
+                    result = -4099
+                }
             } else if looked == -3 || looked == -4 {
                 result = -4099
             } else if looked != 0 {
@@ -2411,8 +2441,9 @@ pub long Accept(int fd) {
 // The kind of a failure of the calls above: the kind Rust 1.82's `decode_error_kind` gives the error
 // number on Linux, each abbreviation written out, `AddrInUse` as `AddressInUse`, `Other` for a number
 // it gives no kind, `InvalidData` for a name that is not UTF-8 (S1), `InvalidInput` for an address that
-// is no host and port or gives no address, `NotFound` for a lookup that failed with no error of the system,
-// and `Other` for one that failed with `EAI_AGAIN` or `EAI_FAIL`, -4099, by the arm of a number it gives no kind (S9).
+// is no host and port or gives no address, `NotFound` for a lookup that failed with an error of `getaddrinfo`
+// other than `EAI_SYSTEM`, `EAI_AGAIN` and `EAI_FAIL`, -4098, and `Other` for one that failed with `EAI_AGAIN` or
+// `EAI_FAIL`, or with `EAI_SYSTEM` while `errno` holds 0, -4099, by the arm of a number it gives no kind (S9).
 pub IoKind ErrorKind(long failure) => match -failure {
     1 => IoKind.PermissionDenied
     2 => IoKind.NotFound
