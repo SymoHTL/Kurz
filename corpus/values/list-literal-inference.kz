@@ -5,6 +5,7 @@
 // | [2, 3]
 // | [7]
 // | [2]
+// | []
 // rules: M11, T27
 
 List<T> Pair<T>(T a, List<T> b) => b
@@ -30,3 +31,6 @@ byte small = 1
 r6 = Pair(small, [2])
 List<byte> y6 = r6
 print(y6)
+r7 = Pair(1L, [])
+List<long> y7 = r7
+print(y7)

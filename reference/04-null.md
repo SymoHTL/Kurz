@@ -165,7 +165,7 @@ match m["b"] {
 Case: [values/map-function-value.kz](../corpus/values/map-function-value.kz)
 ```kurz
 // a map's value of a function type is read as that type's nullable form (M9, N1): the function where the key has an entry, `null`
-// where it has none
+// where it has none, and the call after the test reads `f` as the function (N3)
 mut ops = Map<string, (int) => int>()
 ops["double"] = x => x * 2
 f = ops["double"]

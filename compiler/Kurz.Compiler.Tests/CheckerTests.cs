@@ -149,6 +149,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("data List(int X)\n\nprint(1)")); // a type named as a built-in could never be named (M9, T17)
     }
 
+    [Fact]
+    public void Args_given_a_value_among_the_top_level_statements_is_redeclared()
+    {
+        // S13 with V8: the checker's reading of the question S13 and section 14 of the record hold open, `assign-immutable` under V8 the
+        // other; no corpus case stands on it
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("args = [\"a\"]\nprint(args)"));
+    }
+
     // ---- literals and their reach (L10, L11, L14, L17) -------------------------------------------
 
     [Theory]
@@ -2125,8 +2133,8 @@ public sealed class CheckerTests
     public void The_checker_and_the_emitter_read_a_null_arm_through_one_test()
     {
         // N1: the arm no value reaches has one definition, `Types.NullArmReachesNothing`, so that what the checker builds and what the
-        // emitter branches past cannot drift apart: every test of a `null` arm against the subject's cases in the compiler's sources goes
-        // through it
+        // emitter branches past cannot drift apart: a line of the compiler's sources that tests an arm's `NullLiteral` and names the
+        // subject's `cases` calls it, and these are the two such lines; a test of a `null` arm written in another form is not seen here
         var sources = Path.Combine(CorpusTests.Root, "compiler", "Kurz.Compiler");
         var tests = Directory.EnumerateFiles(sources, "*.cs", SearchOption.AllDirectories)
             .SelectMany(f => File.ReadLines(f).Select(line => (File: Path.GetFileName(f), Line: line)))
@@ -2384,10 +2392,16 @@ public sealed class CheckerTests
         Clean("data Box<T>(T V)\ndata K(Box<int> A, Box<string> B)\n\nm = Map<K, int>()\nprint(m)"); // both instances are keys
 
         // and an instance inside one of its own type through a type argument, the inner `Box` of `Box<Box<Map<int, int>>>`, is read too: the
-        // walk ends only at a type whose fields name it, which a build refuses (D1, T19)
+        // walk stops at a data type whose fields name it, a generic one, which the build says `not supported` to whatever its type arguments
+        // (D1, T19, in `DataTests`), or one that is not generic, whose fields the walk read where it met the type first
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data Box<T>(T V)\n\nm = Map<Box<Box<Map<int, int>>>, int>()\nprint(m)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("data Box<T>(T V)\n\nvoid Same(Box<Box<() => int>> a, Box<Box<() => int>> b) {\n    print(a == b)\n}\n\nprint(1)"));
         Clean("data Box<T>(T V)\n\nm = Map<Box<Box<int>>, int>()\nprint(m)");
+
+        // so the walk stops at `Outer`, whose field names it, and reads no `Map` behind it, as a key and under `==`: the build says
+        // `not supported` to `Outer<int>` (D1, T19, in `DataTests`)
+        Clean("data Outer<T>(Outer<Map<int, int>>? O, T V)\n\nm = Map<Outer<int>, int>()\nprint(m)");
+        Clean("data Outer<T>(Outer<Map<int, int>>? O, T V)\n\nvoid Same(Outer<int> a, Outer<int> b) {\n    print(a == b)\n}\n\nprint(1)");
     }
 
     [Fact]

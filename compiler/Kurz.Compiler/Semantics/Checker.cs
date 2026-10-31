@@ -1730,7 +1730,8 @@ public sealed partial class Checker
         var (variable, captured) = Lookup(a.Name);
         if (variable is not null && ReferenceEquals(variable, model.Arguments))
         {
-            // S13: the top-level code's own `args`; the reads after it read the program's arguments (E1)
+            // S13: the top-level code's own `args`; the reads after it read the program's arguments (E1). `redeclared` is one reading of
+            // the question S13 and section 14 of the record hold open, `assign-immutable` under V8 the other, and no corpus case stands on it
             Report(ErrorIds.Redeclared, a.Line, "`args` is the program's arguments, which the top-level code sees (S13, V9)");
             CheckExpression(a.Value, null);
             return;

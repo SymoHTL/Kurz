@@ -909,7 +909,7 @@ print(xs)
 
 Case: [values/list-union-equality.kz](../corpus/values/list-union-equality.kz)
 ```kurz
-// two lists of union items compare by their counts and their items, each pair by its case, then its value (M9)
+// two lists of union items compare by their counts and their items, each pair by its case, then its value (M9, D3)
 mut xs = List<int | string>()
 xs.Add(1)
 xs.Add("a")
@@ -959,7 +959,7 @@ match m["b"] {
 Case: [values/map-function-value.kz](../corpus/values/map-function-value.kz)
 ```kurz
 // a map's value of a function type is read as that type's nullable form (M9, N1): the function where the key has an entry, `null`
-// where it has none
+// where it has none, and the call after the test reads `f` as the function (N3)
 mut ops = Map<string, (int) => int>()
 ops["double"] = x => x * 2
 f = ops["double"]
@@ -1059,7 +1059,8 @@ the list type where one stands, a written type, `List<int> xs = [1, 2, 3]`, or a
 `Take([1, 2])`, and each item is read under its item type as an argument is under its parameter's: a
 literal takes it (L17), so `Bytes b = [1, 300]` is `constant-overflow`, a lambda takes its parameters
 from it (F11), and an item of another type is `type-mismatch` (T1). The list type stands wherever a
-type is expected, as L17 reads it for a number literal: the result of a `return` in a function that
+type is expected, as L17 reads it for a number literal, but for the other operand of `==` (below):
+among them the result of a `return` in a function that
 returns a list, an assignment to a variable of a list type, the right side of `??`, an arm of a `match`
 and the result of a lambda whose type is given *(assumed, §4: the places of L17's expected type)*;
 whether the other operand of `==` gives the literal its type, as it gives one to a number literal (L17),
@@ -1069,11 +1070,12 @@ Where no list type stands, the items give it, as T27 infers a type parameter fro
 (§4, the owner, 2026-10-30, "From its items"): `x = [1, 2]` is a `List<int>` and `[1, 2L]` a
 `List<long>`, while `x = []` and `[1, "a"]` are `cannot-infer`, and `[1, null]` is the `type-mismatch`
 of a `null` that no nullable type takes (N6) *(assumed, §4: as T27 and N6 read `Pick(1, null)`)*. A
-literal of literal items given to a parameter `List<T>` of a generic call gives its items to the
+literal of one or more literal items given to a parameter `List<T>` of a generic call gives its items to the
 literal arguments of `T` (T27), so that with `Pair<T>(T a, List<T> b)` the call `Pair(1L, [1])` makes
 `T` a `long`, and with two parameters `List<T>` the call `Pick([1], [2L])` does, as `Pick(1, 2L)` does
 and as C# 12 infers for a collection expression and Rust for `vec![1]`; a literal with an item that is
-not a literal, `[x]`, gives `T` the type of that item, as any other argument does *(assumed, §4: the
+not a literal, `[x]`, gives `T` the type of that item, as any other argument does, and `[]` gives it
+nothing and takes the list type the other arguments give, `Pair(1L, [])` a `List<long>` *(assumed, §4: the
 items read as arguments of the parameter, "From its items")*.
 
 A comma after the last item is accepted, `[1, 2,]` (§4, the owner, 2026-10-30, "Accept, as C# 12
@@ -1182,6 +1184,9 @@ byte small = 1
 r6 = Pair(small, [2])
 List<byte> y6 = r6
 print(y6)
+r7 = Pair(1L, [])
+List<long> y7 = r7
+print(y7)
 ```
 
 Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)

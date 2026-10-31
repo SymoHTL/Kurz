@@ -202,7 +202,7 @@ print(ys == zs)
 
 Case: [values/list-union-equality.kz](../corpus/values/list-union-equality.kz)
 ```kurz
-// two lists of union items compare by their counts and their items, each pair by its case, then its value (M9)
+// two lists of union items compare by their counts and their items, each pair by its case, then its value (M9, D3)
 mut xs = List<int | string>()
 xs.Add(1)
 xs.Add("a")

@@ -459,8 +459,9 @@ the top-level statements see `args`: in a function it is `unknown-name`, as a to
 (V10), and a function may name a parameter or a variable of its own `args`, while a top-level `args` of
 the program's own, `List<string> args = ["a"]`, is `redeclared` (§12, the owner, 2026-10-30, "Top-level
 code only"). Whether `args = value` among the top-level statements assigns to the program's `args`, a
-variable without `mut`, and is `assign-immutable` (V8), or declares one and is `redeclared`, stands open
-(§14). A lambda written among the top-level statements sees `args`, as it sees a top-level variable it
+variable without `mut`, and is `assign-immutable`, as V8 reads `name = value` where the name is visible
+(§8), or declares one and is `redeclared`, as the program's own `args` above is under "Top-level code
+only" (§12), stands open (§14). A lambda written among the top-level statements sees `args`, as it sees a top-level variable it
 captures (V10), so that within the top-level code `args` is a visible name, and a lambda's parameter or a
 block's variable named `args` there is `redeclared` (V9). `args` is declared without `mut`, so that
 `args.Add("x")` is `mut-required` (M5), and each call of `Environment.Args()` makes a new list.
@@ -470,7 +471,9 @@ An argument that is not UTF-8 ends the process with the run-time error `invalid-
 owner, 2026-10-30, "Refused, as Rust"): `Environment.Args()` raises it at its call, with its place and
 its trace, and `args`, made before the first statement of a top-level code that names it, with no place
 and no trace, as `random-failed`; no `catch` takes the raise (O6). A top-level code names `args` where
-any of its statements does, a lambda's body and a branch that never runs among them. `args` checks the words it holds and
+any of its statements does, a lambda's body and a branch that never runs among them, so that a program whose only `args` stands
+in a lambda never called, or in a branch never taken, ends on an argument that is not UTF-8 it never reads, where Rust's
+`env::args()` panics only during the iteration over its items. `args` checks the words it holds and
 not the program's name, which it does not hold, as C#'s `args`, while `Environment.Args()` checks the
 name too. The program's name is the first argument as the process was started, under `kurz run` and
 `kurz exec` the path of the executable in the command's place, as `cargo run` gives its program the
@@ -524,6 +527,14 @@ Case: [system/args-lambda-parameter.kz](../corpus/system/args-lambda-parameter.k
 ```kurz
 f = (int args) => args + 1
 print(f(1))
+```
+
+Case: [system/args-block-variable.kz](../corpus/system/args-block-variable.kz)
+```kurz
+if true {
+    List<string> args = ["a"]
+    print(args.Count)
+}
 ```
 
 Case: [system/args-in-lambda.kz](../corpus/system/args-in-lambda.kz)
