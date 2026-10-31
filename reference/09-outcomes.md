@@ -264,6 +264,23 @@ success case names them all (the owner, 2026-10-10, confirming the reading propo
 A written type the success case converts to, `long` for an `int` success or `User?` for a `User`
 success, counts as the success case itself: the call unwraps and the value widens as in an assignment
 (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
+A call passed as an argument to a parameter whose written type is a union keeps its cases as such a
+variable keeps them, so that `Show(long.Parse(s))` with `void Show(long | ParseError x)` passes the
+whole union (§5, the owner, 2026-10-31, "Keep, like a variable"); so does a call passed to a
+parameter of a constructor, which a field of a written union holds (§5, the owner, 2026-10-31, "Keep,
+as any parameter"), and an item of a list literal whose written item type is a union (§5, the owner,
+2026-10-31, "Keep, as the item type"). Of two functions of one name, one that takes the union and one
+that takes the success case, such a call runs the one that takes the union, its exact fit (F13) (§5,
+the owner, 2026-10-31, "The union one"). A parameter whose type is a type parameter is no written
+union: the call unwraps, and the type parameter is the success case (§5, the owner, 2026-10-31,
+"Unwrap: T = int"). A parameter whose union names some of the call's cases and not all is
+`type-mismatch`, as for a variable; a parameter of the success case or of a type it converts to
+unwraps the call; a lambda's and a function value's parameter and a named argument follow the same
+rule; and a call inside an expression, `Show(Find(1) + 1)`, unwraps *(assumed, §5: the defaults of the
+change's product pass)*. A parameter whose type is a union by a type argument written at the call,
+`Same<int | NotFound>(Find(1))`, or by the type of the list a method is called on, `xs.Add(Find(1))`
+on a `List<int | NotFound>`, is a written union and keeps the cases *(assumed, §5: a reading of the
+change)*.
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -316,6 +333,132 @@ int | NotFound | Invalid Find(int id) {
 
 int | NotFound result = Find(1)
 match result {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/keep-argument.kz](../corpus/outcomes/keep-argument.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(long | ParseError x) {
+    match x {
+        long n => print(n)
+        ParseError e => print(e)
+    }
+}
+
+void Report(int | NotFound found) {
+    match found {
+        int n => print(n)
+        NotFound => print("none")
+    }
+}
+
+// a parameter whose written type is a union takes the call's cases, as a variable of that type does
+Show(long.Parse("42"))
+Show(long.Parse("4x"))
+Report(found: Find(1))
+Report(Find(2))
+```
+
+Case: [outcomes/keep-argument-overload.kz](../corpus/outcomes/keep-argument-overload.kz)
+```kurz
+void Show(long n) {
+    print("a long: {n}")
+}
+
+void Show(long | ParseError x) {
+    print("the union")
+}
+
+// the union is the call's whole type, so the function that takes it is the exact fit
+Show(long.Parse("1"))
+Show(5L)
+```
+
+Case: [outcomes/keep-field-and-items.kz](../corpus/outcomes/keep-field-and-items.kz)
+```kurz
+data NotFound
+
+data Box(int | NotFound Value)
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    match found {
+        int n => print(n)
+        NotFound => print("none")
+    }
+}
+
+// a constructor's parameter is a field of a written union, and the list's written item type is one
+Report(Box(Find(1)).Value)
+Report(Box(Find(2)).Value)
+List<int | NotFound> items = [Find(1), Find(2)]
+for f in items {
+    Report(f)
+}
+```
+
+Case: [outcomes/keep-argument-partial.kz](../corpus/outcomes/keep-argument-partial.kz)
+```kurz
+data NotFound
+
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    print(found)
+}
+
+// the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+Report(Find(1))
+```
+
+Case: [outcomes/generic-argument-unwraps.kz](../corpus/outcomes/generic-argument-unwraps.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+T Same<T>(T x) => x
+
+// a type parameter is no written union, so the call unwraps: `T` is `int`, and `NotFound` leaves `Doubled`
+int | NotFound Doubled(int id) {
+    return Same(Find(id)) * 2
+}
+
+match Doubled(1) {
+    int n => print(n)
+    NotFound => print("none")
+}
+match Doubled(2) {
     int n => print(n)
     NotFound => print("none")
 }

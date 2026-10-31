@@ -1208,7 +1208,7 @@ public sealed partial class Checker
         {
             // F2 writes the body as `=> expression` and F4 gives a `void` function no value: a value standing there is text no rule
             // gives a meaning, E4's `syntax` (the reading in compiler/README.md); a call or a postfix `else` is what such a body is
-            var t = CheckExpression(body, returnType is UnionType ? returnType : null, keepCases: returnType is UnionType);
+            var t = CheckExpression(body, returnType is UnionType ? returnType : null, keepCases: Types.KeepsCases(returnType));
             if (!Types.IsVoid(t.Type) && !t.IsError && Unwrap(body) is not CallExpression and not ElseExpression && !Types.Assignable(t.Type, returnType))
             {
                 Report(ErrorIds.Syntax, line, "the expression body of a `void` function is a call or a call with `else` (E4, F2, F4)");
@@ -1217,7 +1217,7 @@ public sealed partial class Checker
             return;
         }
 
-        var typed = CheckExpression(body, returnType, keepCases: returnType is UnionType);
+        var typed = CheckExpression(body, returnType, keepCases: Types.KeepsCases(returnType));
         if (typed.IsError || Types.IsError(returnType))
         {
             return;
@@ -1739,11 +1739,11 @@ public sealed partial class Checker
         if (Redeclares(v.Name, v.Line))
         {
             DeclareUnreadable(v.Name, VariableKind.Local, v.Line, v); // bound before the value is read: the uses of a redeclared name, in the value too, carry no further error (E1)
-            CheckExpression(v.Value, declared, keepCases: declared is UnionType);
+            CheckExpression(v.Value, declared, keepCases: Types.KeepsCases(declared));
             return;
         }
 
-        var t = CheckExpression(v.Value, declared, keepCases: declared is UnionType);
+        var t = CheckExpression(v.Value, declared, keepCases: Types.KeepsCases(declared));
         var type = declared ?? t.Type;
         if (Types.IsVoid(t.Type))
         {
@@ -1788,7 +1788,7 @@ public sealed partial class Checker
                 changes[a] = new Change(variable, a.Name, a.Line, $"an assignment changes `{a.Name}`"); // M7, in an arm inside an expression
             }
 
-            var value = CheckExpression(a.Value, variable.Type, keepCases: variable.Type is UnionType);
+            var value = CheckExpression(a.Value, variable.Type, keepCases: Types.KeepsCases(variable.Type));
             if (Types.IsVoid(value.Type))
             {
                 Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
@@ -1971,7 +1971,7 @@ public sealed partial class Checker
             changes[a] = new Change(changed, path, a.Line, $"an assignment changes `{path}`"); // M7, in an arm inside an expression
         }
 
-        var value = CheckExpression(a.Value, Types.IsError(current) ? Untyped(a.Value) : current, keepCases: current is UnionType);
+        var value = CheckExpression(a.Value, Types.IsError(current) ? Untyped(a.Value) : current, keepCases: Types.KeepsCases(current));
         if (last is null || Types.IsError(current) || value.IsError)
         {
             return;
@@ -2129,7 +2129,7 @@ public sealed partial class Checker
             return;
         }
 
-        var value = CheckExpression(r.Value, expected, keepCases: expected is UnionType);
+        var value = CheckExpression(r.Value, expected, keepCases: Types.KeepsCases(expected));
         if (value.IsError || Types.IsError(expected))
         {
             return;
