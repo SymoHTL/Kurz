@@ -615,8 +615,21 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   and a run of other items at each position in turn, as Rust's `windows`; `AddRange(collection)`, which
   reads its argument first and holds it with a count of its own while the list makes room for all of its
   items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block and appends
-  the items as they were (section 12, assumed); and `Reverse()`, which swaps the items in place and copies
-  a block another value holds first (X9, M3);
+  the items as they were (section 12, assumed); `Reverse()`, which swaps the items in place and copies
+  a block another value holds first (X9, M3); and `Sort()`, `SortUnstable()` and `SortBy(keySelector)`
+  (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
+  `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first: `Sort` a merge sort, which keeps
+  equal items in their order, runs of 20 items sorted by insertion and merged in pairs through a buffer of
+  half the items; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
+  median of three, insertion below 21 items and a heapsort past twice the base-2 logarithm of the count
+  in splits; and `SortBy` the key of each item made once, in order, kept with the item's position in a
+  pair, the pairs sorted by the quicksort and the items moved where they say, as Rust's
+  `sort_by_cached_key`; a buffer or a block of pairs the system refuses ends the program with
+  `allocation-failed` (M9); `SortTests` holds `Sort` and `SortUnstable` to .NET's `OrderBy` over 300
+  generated lists of each of five item types, `int`, `byte`, `double`, `string` and `int?`, the unstable
+  sort of `double` items with `-0` read as `0`, and `SortBy` of the `int` lists by an `int`, a `string` and
+  a `double` key, the first 50 under the allocator that makes every freed block inaccessible as well, and the quicksort to a list McIlroy's adversary built against its pivots, which reaches the
+  heapsort;
 - list literals (M11): `[1, 2, 3]` and `[]`, read as a call of one function `List<T> Of<T>(T a, T b, T c)`, so
   that the list type where one stands, a parameter's among them, reaches the items as a parameter's type
   reaches a call's literals and lambdas, and where none stands the items infer `T` as T27 infers it (section
@@ -1274,8 +1287,8 @@ unread; the limit of a type parameter and a member of a type parameter with one 
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29); `this` (K7);
-the members of a string and of a list that chapter 15 names but those of X1, X2, X3's ASCII forms, X4, X5
-and X9, which are `ToLower`, `ToUpper`, `Sort`, `SortBy` and `SortUnstable` (X3, X8), and the `Parse` of
+the members of a string and of a list that chapter 15 names but those of X1, X2, X3's ASCII forms, X4, X5,
+X8 and X9, which are `ToLower` and `ToUpper` (X3), and the `Parse` of
 `float`, `double` and `decimal` (X7);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a

@@ -74,6 +74,15 @@ public enum CallKind
     /// <summary>A list's <c>Reverse()</c> (X9).</summary>
     ListReverse,
 
+    /// <summary>A list's <c>Sort()</c>, in place and stable, or <c>SortUnstable()</c> (X8).</summary>
+    ListSort,
+
+    /// <summary>A list's <c>SortUnstable()</c> (X8).</summary>
+    ListSortUnstable,
+
+    /// <summary>A list's <c>SortBy(keySelector)</c>, by a key made once for each item (X8).</summary>
+    ListSortBy,
+
     /// <summary>A string's <c>Contains</c>, <c>StartsWith</c>, <c>EndsWith</c> or <c>IndexOf</c>, of a <c>string</c> or of a <c>char</c>, which the argument's type names (X1).</summary>
     StringSearch,
 

@@ -376,8 +376,16 @@ A buffer the system refuses, the keys `SortBy` keeps among them, raises `allocat
 list's growth does (M9) *(assumed, §12)*.
 `SortBy` calls its key once for each item and keeps the keys beside the list while it sorts, as C#'s
 `OrderBy` and Rust's `sort_by_cached_key` (§12, the owner, 2026-10-31, "Once per item"), in the order
-of the list *(assumed, §12)*. A sort on an item type or a key type `<` does not order is
-`type-mismatch`, as `<` on two values of that type is (T18) *(assumed, §12)*.
+of the list, one call for a list of one item and none for an empty one *(assumed, §12)*. The key is the
+argument `keySelector`, the name C#'s `OrderBy` gives it, a lambda or a function value of one item, and
+a `SortBy` with no key, with two, with a key of another name or with a lambda of two parameters is
+`argument-mismatch`, as a call that fits no form is (D11) *(assumed, §12)*. A sort on an
+item type or a key type `<` does not order is `type-mismatch`, as `<` on two values of that type is
+(T18) *(assumed, §12)*, and a sort of the values of an enum that numbers none, as items or as keys, is
+`enum-number`, as `<` on two of them is (D20) (§12, the owner, 2026-10-31, "enum-number"). A list of
+nullable items, and a nullable key, sort with `null` before every value, as C#'s
+`Comparer<T>.Default` and Rust's ordering of `Option`, though `<` takes no nullable operand (§12, the
+owner, 2026-10-31, "Null first, as C#/Rust").
 
 Case: [strings/sort.kz](../corpus/strings/sort.kz)
 ```kurz
@@ -423,12 +431,80 @@ int Key(int x) {
 mut xs = [3, 1, 2]
 xs.SortBy(x => Key(x))
 print(xs)
+// a list of one item makes its one key too, and an empty one none
+mut one = [7]
+one.SortBy(x => Key(x))
+print(one)
+mut empty = List<int>()
+empty.SortBy(x => Key(x))
 ```
 
 Case: [strings/sort-of-bools.kz](../corpus/strings/sort-of-bools.kz)
 ```kurz
 mut xs = [true, false]
 xs.Sort()
+print(xs)
+```
+
+Case: [strings/sort-of-enums-without-numbers.kz](../corpus/strings/sort-of-enums-without-numbers.kz)
+```kurz
+enum Plan { Free, Pro }
+mut plans = [Plan.Pro, Plan.Free]
+plans.Sort()
+print(plans)
+```
+
+Case: [strings/sort-of-nullables.kz](../corpus/strings/sort-of-nullables.kz)
+```kurz
+data Person(string Name, int? Age)
+
+// `null` before every value, as C# and Rust order it
+mut List<int?> xs = [3, null, 1, null]
+xs.Sort()
+print(xs)
+mut people = [Person("Ann", 31), Person("Bo", 40), Person("Cy", null)]
+people.SortBy(p => p.Age)
+for p in people {
+    print(p.Name)
+}
+```
+
+Case: [strings/sort-of-ordered-items.kz](../corpus/strings/sort-of-ordered-items.kz)
+```kurz
+enum Level { High = 5, Low = -1, Mid = 0 }
+data Person(string Name, string? Nick)
+
+// an enum that numbers its values sorts by its numbers, not by its places (D18)
+mut levels = [Level.High, Level.Low, Level.Mid]
+levels.Sort()
+print(levels)
+mut letters = ['c', 'A', 'b']
+letters.SortUnstable()
+print(letters)
+mut waits = [1h, 1s, 1min]
+waits.Sort()
+print(waits)
+mut longs = [3000000000L, -1L, 2L]
+longs.Sort()
+print(longs)
+float zero = float(0.0)
+mut floats = [float(2.0), zero / zero, float(-1.5)]
+floats.Sort()
+print(floats)
+mut List<string?> names = ["b", null, "a"]
+names.Sort()
+print(names)
+mut people = [Person("Ann", "z"), Person("Bo", null), Person("Cy", "a")]
+people.SortBy(p => p.Nick)
+for p in people {
+    print(p.Name)
+}
+```
+
+Case: [strings/sort-by-two-keys.kz](../corpus/strings/sort-by-two-keys.kz)
+```kurz
+mut xs = [3, 1, 2]
+xs.SortBy(x => x, x => -x)
 print(xs)
 ```
 

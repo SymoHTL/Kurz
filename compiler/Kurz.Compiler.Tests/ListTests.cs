@@ -1579,6 +1579,64 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "false", // a `char` whose four bytes differ from the string's in the last
     ];
 
+    // The sorts of X8: a list of strings sorted beside a copy, which keeps its order (M3), and one it alone holds, longer than a run,
+    // sorted stable and unstable; `SortBy` with keys the call makes, strings let go of after the sort, with a key that reads a copy of
+    // the list it sorts, which the lambda holds (F11), so that the sort copies its block, and on a list of one item; and a sort through a
+    // field of a data value beside a copy
+    private const string Sorts = """
+        data Bag(List<string> Items)
+
+        string Made(int n) => "made {n}"
+
+        mut words = [Made(3), Made(1), Made(2), Made(1)]
+        held = words
+        words.Sort()
+        print(words)
+        print(held)
+        mut many = List<string>()
+        for i in 0..<45 {
+            many.Add(Made((i * 7) % 45))
+        }
+
+        mut other = many
+        many.Sort()
+        other.SortUnstable()
+        print(many == other)
+        print(many[0])
+        print(many[44])
+        mut keyed = [Made(2), Made(10), Made(1)]
+        keyed.SortBy(x => Made(x.Bytes.Count))
+        print(keyed)
+        mut own = [3, 1, 2]
+        same = own
+        own.SortBy(x => same.Count - x)
+        print(own)
+        print(same)
+        mut one = [Made(9)]
+        one.SortBy(x => x)
+        print(one)
+        mut bag = Bag([Made(2), Made(1)])
+        copy = bag
+        bag.Items.Sort()
+        print(bag.Items)
+        print(copy.Items)
+        """;
+
+    private static readonly string[] SortsPrint =
+    [
+        "[made 1, made 1, made 2, made 3]", // sorted beside a copy, which keeps its order (M3)
+        "[made 3, made 1, made 2, made 1]",
+        "true",
+        "made 0",
+        "made 9",
+        "[made 2, made 1, made 10]", // by keys of 6, 7 and 6 bytes, equal keys in their order
+        "[3, 2, 1]", // by keys of 0, 2 and 1, the block the lambda holds copied first
+        "[3, 1, 2]",
+        "[made 9]",
+        "[made 1, made 2]", // through a field, beside a copy of the data value
+        "[made 2, made 1]",
+    ];
+
     // The trims, splits, replaces, changes of case and joins of X3 to X6 on strings made while the program runs, each source given a
     // new value after its result is taken, with the result printed after that: a trim that copies, one that keeps the whole string,
     // which shares it, and one of a literal, which keeps its bytes in place, and a trim of a `char` from the start and from the end; a
@@ -2315,6 +2373,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, toolchain.Runtime, "map-members"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, toolchain.Runtime, "list-searches"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Sorts, toolchain.Runtime, "list-sorts"), 0, SortsPrint, "");
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
@@ -2330,6 +2389,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, fenced, "map-members-fenced"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, fenced, "list-searches-fenced"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Sorts, fenced, "list-sorts-fenced"), 0, SortsPrint, "");
         Ran(BuildAndRun(Pieces, fenced, "string-pieces-fenced"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
@@ -2539,6 +2599,24 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string decode = "match Hex.Decode(\"00\") {\n    Bytes b => print(b)\n    HexError e => print(e)\n}\n";
         Ran(BuildAndRun(decode, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "decode-refused"), 1, [], "error: allocation-failed (17 bytes)\n");
         Ran(BuildAndRun(decode, toolchain.Runtime, "decode-granted"), 0, ["[0]"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_sort_whose_buffer_or_keys_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
+    {
+        // M9, X8: the runtime's `Allocate` refusing 1000 to 4095 bytes in its text, below the 4096 bytes `print` takes, while the lists'
+        // own blocks do not go through it: a
+        // stable sort of 300 `long` items asks for a buffer of half of them, 150 of 8 bytes, and `SortBy` of 100 items with `long` keys
+        // for the pairs of a key and a position, 100 of 16 bytes; an unstable sort asks for nothing
+        var refusing = Edited(("runtime/common/runtime.kz", "    byte* p = std.Allocate(size)\n", "    mut byte* p = null\n    if size < 1000 || size >= 4096 {\n        p = std.Allocate(size)\n    }\n\n"));
+        const string list = "mut xs = List<long>()\nfor i in 0..<300 {\n    xs.Add(long(299 - i))\n}\n\n";
+        const string sort = list + "xs.Sort()\nprint(xs[0])\n";
+        Ran(BuildAndRun(sort, refusing, "sort-refused"), 1, [], "error: allocation-failed (1200 bytes)\n");
+        Ran(BuildAndRun(sort, toolchain.Runtime, "sort-granted"), 0, ["0"], ""); // the positive control
+        const string keys = list + "mut ys = xs[0..<100]\nys.SortBy(y => y * 2)\nprint(ys[0])\n";
+        Ran(BuildAndRun(keys, refusing, "keys-refused"), 1, [], "error: allocation-failed (1600 bytes)\n");
+        Ran(BuildAndRun(keys, toolchain.Runtime, "keys-granted"), 0, ["200"], "");
+        Ran(BuildAndRun(list + "xs.SortUnstable()\nprint(xs[0])\n", refusing, "unstable-granted"), 0, ["0"], "");
     }
 
     [Fact]
