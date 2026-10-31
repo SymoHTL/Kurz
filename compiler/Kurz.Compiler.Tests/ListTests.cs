@@ -1587,7 +1587,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // reads, and a replace of a `char` by a `char` of three bytes into the variable it reads and one that finds nothing; a change of
     // case that changes nothing and one that changes the string; a join of a list in a field of a data value given a new value, of a
     // list made for the call, of items whose text is made for the join (A4), and with a `char` separator read from a variable and
-    // written in the call
+    // written in the call; and a cut of X2 that copies, one that keeps the whole string, one of a literal, one of nothing and one
+    // through a field, and a parse and a decode (X7, H7) of a variable given a new value after it, of a cut made in the call and of a
+    // field
     private const string Pieces = """
         data Bag(List<string> Items)
         data Name(string Value)
@@ -1674,6 +1676,26 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(string.Join(';', [1, 2]))
         empty = string.Join(", ", List<string>())
         print("[{empty}]")
+
+        mut cut = " {Made(9)}ä"
+        piece = cut.Substring(1, 6)
+        cut = Made(0)
+        print(piece)
+        print(piece.Substring(0, piece.Bytes.Count))
+        print("lit cut".Substring(4, 3))
+        print("[{Made(1).Substring(3, 0)}]")
+        named = Name("{Made(2)}ä")
+        print(named.Value.Substring(5, 3))
+        mut digits = " {40 + 2}\t"
+        long | ParseError number = long.Parse(digits)
+        digits = Made(0)
+        print(number)
+        byte | ParseError half = byte.Parse(Made(1).Substring(5, 1))
+        print(half)
+        Bytes | HexError hexed = Hex.Decode("{Made(1).Substring(5, 1)}f")
+        print(hexed)
+        Bytes | HexError wrong = Hex.Decode(named.Value)
+        print(wrong)
         """;
 
     private static readonly string[] PiecesPrint =
@@ -1715,6 +1737,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "made 4€made 5", // a `char` separator
         "1;2",
         "[]",
+        "made 9", // a cut that copies, its source given a new value
+        "made 9", // the whole string, shared
+        "cut", // a literal's bytes in place
+        "[]",
+        "2ä", // through a field
+        "42", // a parse of a variable given a new value after it
+        "1",
+        "[31]",
+        "invalid digit at 0", // a decode of a field
     ];
 
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
@@ -2495,6 +2526,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string piece = "x = \"a\"\nprint(\"{x},bb\".Split(\",\"))\n";
         Ran(BuildAndRun(piece, Edited([.. Fence, ("std/std.kz", "    byte* text = StringBlock(count)\n", "    mut byte* text = null\n    if count < 2 {\n        text = StringBlock(count)\n    }\n\n")]), "split-piece-refused"), 1, [], "error: allocation-failed (18 bytes)\n");
         Ran(BuildAndRun(piece, Fenced, "split-piece-granted"), 0, ["[a, bb]"], ""); // the positive control
+    }
+
+    [Fact]
+    public void A_cut_or_a_decode_whose_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
+    {
+        // M9, X2: a cut of 2 bytes copied out of a string's block, `StringOf` refusing 2 bytes or more in the library's text, in the
+        // fenced runtime, reports 16 bytes of counts and the cut's; H7: a decode of two digits asks for a list of one byte
+        const string cut = "x = \"a\"\nprint(\"{x}bcd\".Substring(1, 2))\n";
+        Ran(BuildAndRun(cut, Edited([.. Fence, ("std/std.kz", "    byte* text = StringBlock(count)\n", "    mut byte* text = null\n    if count < 2 {\n        text = StringBlock(count)\n    }\n\n")]), "cut-refused"), 1, [], "error: allocation-failed (18 bytes)\n");
+        Ran(BuildAndRun(cut, Fenced, "cut-granted"), 0, ["bc"], ""); // the positive control
+        const string decode = "match Hex.Decode(\"00\") {\n    Bytes b => print(b)\n    HexError e => print(e)\n}\n";
+        Ran(BuildAndRun(decode, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "decode-refused"), 1, [], "error: allocation-failed (17 bytes)\n");
+        Ran(BuildAndRun(decode, toolchain.Runtime, "decode-granted"), 0, ["[0]"], ""); // the positive control
     }
 
     [Fact]

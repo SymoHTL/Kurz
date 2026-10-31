@@ -230,19 +230,21 @@ odd length, not put to the owner)*.
 
 Case: [hashing/hex-decode.kz](../corpus/hashing/hex-decode.kz)
 ```kurz
-void Show(Bytes | HexError result) {
-    match result {
+void Show(string s) {
+    match Hex.Decode(s) {
         Bytes b => print(b)
         HexError e => print(e)
     }
 }
 
-Show(Hex.Decode("0001abFF"))
-Show(Hex.Decode("abc"))
-Show(Hex.Decode("0xff"))
+Show("0001abFF")
+Show("abc")
+Show("0xff")
 // an odd length and a character that is no digit: the length is read first
-Show(Hex.Decode("0xf"))
-Show(Hex.Decode(""))
+Show("0xf")
+Show("")
+// a letter of two bytes is an even length, and its first byte is no digit
+Show("ä")
 ```
 
 Case: [hashing/hex-kind-redeclared.kz](../corpus/hashing/hex-kind-redeclared.kz)

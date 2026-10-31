@@ -10,19 +10,19 @@
 // | Infinity
 // rules: X7
 
-void Show(long | ParseError result) {
-    match result {
+void Show(string s) {
+    match long.Parse(s) {
         long n => print(n)
         ParseError e => print(e)
     }
 }
 
-Show(long.Parse("42"))
-Show(long.Parse("+5"))
-Show(long.Parse(""))
-Show(long.Parse("4x"))
-Show(long.Parse("9223372036854775808"))
-Show(long.Parse("-9223372036854775809"))
+Show("42")
+Show("+5")
+Show("")
+Show("4x")
+Show("9223372036854775808")
+Show("-9223372036854775809")
 match byte.Parse("-1") {
     byte b => print(b)
     ParseError e => print(e.Kind)

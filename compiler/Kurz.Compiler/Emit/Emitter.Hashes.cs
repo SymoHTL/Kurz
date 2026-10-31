@@ -1,5 +1,6 @@
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
+using UnionType = Kurz.Compiler.Semantics.UnionType;
 
 namespace Kurz.Compiler.Emit;
 
@@ -115,5 +116,68 @@ public sealed partial class Emitter
         var digest = fn.Value($"call ptr {StdFunction($"{hasher}Finish")}(ptr {block}, ptr {asked})");
         Refused(fn.Value($"icmp eq ptr {digest}, null"), asked);
         return digest;
+    }
+
+    /// <summary>
+    /// H7: <c>Hex.Decode(s)</c>, the bytes of the string's hexadecimal digits, a new list the standard library's <c>HexDecode</c> makes, or
+    /// the case <c>HexError</c>: <c>OddLength</c> at the string's length where that is odd, read first, else <c>InvalidDigit</c> at the
+    /// first byte that is no digit (section 12, the owner, 2026-10-31, "Without input"). A block the system refuses ends the process with
+    /// <c>allocation-failed</c> (M9). The string is borrowed for the call.
+    /// </summary>
+    private string EmitHexDecode(CallExpression c, CallInfo info)
+    {
+        var text = Arguments(c, info, _ => Types.String, _ => false, _ => null, cConvention: false, owned: false).Single()["%kz.str ".Length..];
+        var union = (UnionType)Sub(info.Result);
+        var error = (DataType)union.Cases[1];
+        var (bytes, count, _) = StringParts(text);
+        var made = fn.Alloca("ptr", "made");
+        var asked = fn.Alloca("i64", "asked");
+        fn.Emit($"store i64 0, ptr {asked}");
+        var at = fn.Value($"call i64 {StdFunction("HexDecode")}(ptr {bytes}, i64 {count}, ptr {made}, ptr {asked})");
+        Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
+        var result = fn.Alloca(Ir(union), "decoded");
+        var done = fn.Label("hex.done");
+        var decoded = fn.Label("hex.bytes");
+        var failed = fn.Label("hex.failed");
+        fn.CondBranch(fn.Value($"icmp slt i64 {at}, 0"), decoded, failed);
+        fn.Block(decoded);
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, union.Cases[0], fn.Value($"load ptr, ptr {made}"))}, ptr {result}");
+        fn.Branch(done);
+        fn.Block(failed);
+        var kind = (EnumType)Layout.Fields(error)[0];
+        var odd = fn.Value($"icmp eq i64 {at}, {count}");
+        var kindValue = fn.Value($"select i1 {odd}, {Ir(kind)} {KindValue(error, "OddLength")}, {Ir(kind)} {KindValue(error, "InvalidDigit")}");
+        var withKind = fn.Value($"insertvalue {Ir(error)} undef, {Ir(kind)} {kindValue}, 0");
+        var failure = fn.Value($"insertvalue {Ir(error)} {withKind}, i32 {fn.Value($"trunc i64 {at} to i32")}, 1"); // T15: a position fits an `int`
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, error, failure)}, ptr {result}");
+        fn.Branch(done);
+        fn.Block(done);
+        return fn.Value($"load {Ir(union)}, ptr {result}");
+    }
+
+    /// <summary>Whether the data type is <c>HexError</c>, which no file can declare beside the one every file sees (H7, V9).</summary>
+    private static bool IsHexError(KurzType type) => type is DataType { Symbol.Name: "HexError" };
+
+    /// <summary>H7: in the helper of the text of a <c>HexError</c> in <c>%a0</c>: the words of its kind in lower case and its position, <c>invalid digit at 3</c>.</summary>
+    private void HexErrorText(DataType error)
+    {
+        var kind = (EnumType)Layout.Fields(error)[0];
+        var value = fn.Value($"extractvalue {Ir(error)} %a0, 0");
+        var at = fn.Value($"sext i32 {fn.Value($"extractvalue {Ir(error)} %a0, 1")} to i64");
+        var values = kind.Symbol.Values;
+        var labels = values.Select(_ => fn.Label("kind")).ToList();
+        var other = fn.Label("other");
+        fn.Terminate($"switch {Ir(kind)} {value}, label %{other} [ {string.Join(" ", values.Select((_, i) => $"{Ir(kind)} {IntegerText(Lower.EnumStored(kind.Symbol, i), kind)}, label %{labels[i]}"))} ]");
+        for (var i = 0; i < values.Count; i++)
+        {
+            fn.Block(labels[i]);
+            var number = fn.Value($"call %kz.str {RuntimeFunction("TextOfLong")}(i64 {at})");
+            var words = fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue(Words(values[i]) + " at ")}, %kz.str {number})");
+            Release(number, Types.String);
+            fn.Return($"%kz.str {words}");
+        }
+
+        fn.Block(other);
+        fn.Unreachable(); // a kind is one of its values (D18)
     }
 }
