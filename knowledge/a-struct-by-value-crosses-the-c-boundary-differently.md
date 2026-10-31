@@ -18,9 +18,10 @@ to be written differently for each platform the compiler targets, and a mismatch
 registers without a diagnostic.
 
 The runtime is Kurz since round 17 (section 2 of the design record), so the boundary of that day
-is gone; the trap stands at every declaration of a C function (R16). The checker lets numbers,
-`bool`, pointers and C function pointers cross to C and nothing else (`Crosses` in
-`compiler/Kurz.Compiler/Semantics/Checker.Raw.cs`): a `data` value, a string or a list in a
-declaration's parameter or result is `native-type`, so no emitted declaration names an aggregate.
+is gone; the trap stands at every declaration of a C function (R16). The checker lets the number
+types but `decimal`, `bool`, pointers and C function pointers cross to C and nothing else
+(`Crosses` in `compiler/Kurz.Compiler/Semantics/Checker.Raw.cs`): a `decimal` there is
+`not supported`, and a `data` value, a string or a list in a declaration's parameter or result is
+`native-type`, so no emitted declaration names an aggregate.
 A rule that lets a `data` type cross by value needs the platform's lowering written for each
 target, or a pointer to a copy, before it is a line of the emitter.
