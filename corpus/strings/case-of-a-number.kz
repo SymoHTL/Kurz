@@ -1,0 +1,5 @@
+// expect: error argument-mismatch at 5
+// rules: X3
+
+s = "Ab"
+print(s.ToLower(1))

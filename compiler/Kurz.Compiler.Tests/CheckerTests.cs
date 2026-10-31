@@ -2849,11 +2849,12 @@ public sealed class CheckerTests
         Assert.Equal("List<string>", TypeOf("s = \"a,b\"\nt = s.Split(',')\nprint(t)", "t"));
         Assert.Equal("string", TypeOf("s = \"ab\"\nt = s.Replace('a', \"c\")\nprint(t)", "t"));
         Assert.Equal("string", TypeOf("s = \"ab\"\nt = s.Replace('a', 'c')\nprint(t)", "t"));
+        Assert.Equal("string", TypeOf("s = \"ab\"\nt = s.ToUpper()\nprint(t)", "t"));
         Assert.Equal("string", TypeOf("s = \"xa\"\nt = s.TrimStart('x')\nprint(t)", "t"));
         Assert.Equal("string", TypeOf("s = \"ax\"\nt = s.TrimEnd('x')\nprint(t)", "t"));
         Assert.Equal("string", TypeOf("t = string.Join(',', [1, 2])\nprint(t)", "t"));
         Assert.Equal("string", TypeOf("t = string.Join(\"-\", [1.5, 2.5])\nprint(t)", "t"));
-        Assert.Empty(Errors("s = \" aB \"\nprint(s.TrimStart())\nprint(s.TrimEnd())\nprint(s.TrimAscii())\nprint(s.TrimStartAscii())\nprint(s.TrimEndAscii())\nprint(s.ToLowerAscii())\nprint(s.ToUpperAscii())\nprint(s.Split(\"a\"))\nprint(s.Replace(\"a\", \"b\"))"));
+        Assert.Empty(Errors("s = \" aB \"\nprint(s.TrimStart())\nprint(s.TrimEnd())\nprint(s.TrimAscii())\nprint(s.TrimStartAscii())\nprint(s.TrimEndAscii())\nprint(s.ToLower())\nprint(s.ToUpper())\nprint(s.ToLowerAscii())\nprint(s.ToUpperAscii())\nprint(s.Split(\"a\"))\nprint(s.Replace(\"a\", \"b\"))"));
         Assert.Empty(Errors("data P(int X)\nint? n = null\nprint(string.Join(\", \", [P(1)]))\nprint(string.Join(\", \", [n]))\nprint(string.Join(\", \", [[\"a\"]]))\nprint(string.Join(\", \", List<string>()))"));
 
         // F13: a call that fits no form of a member of two is `argument-mismatch`, with a line for each form as a declaration would write it
@@ -2885,6 +2886,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.TrimEnd(5))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.TrimStartAscii('a'))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToLowerAscii(1))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToUpper(1))"));
 
         // X6: two forms, `Join<T>(string separator, List<T> values)` and `Join<T>(char separator, List<T> values)`; values that are no
         // list give `T` nothing to infer from in either form (T27), so the call fits neither, `argument-mismatch` (F13), as a separator
@@ -2981,21 +2983,9 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void The_members_of_strings_and_lists_the_checker_does_not_read_are_not_supported_and_a_member_no_rule_names_is_unknown()
+    public void A_member_or_a_function_no_rule_names_is_unknown()
     {
-        // X3's change of case by Unicode's mapping: each call is `not supported` with its rule, and no error stands beside it (E1); the
-        // arguments are read, so the variables they use count as used
-        var members = new (string Receiver, string Member, string Rule)[]
-        {
-            ("s", "ToLower", "X3"), ("s", "ToUpper", "X3"),
-        };
-        foreach (var (receiver, member, rule) in members)
-        {
-            var (start, kind) = receiver == "s" ? ("s = \"ab\"", "a string's") : ("mut xs = [1]", "a list's");
-            Assert.Equal([$"3: {kind} `{member}` ({rule})"], NotSupported($"{start}\na = \"a\"\nprint({receiver}.{member}(a))"));
-        }
-
-        // V10, the positive controls: a member or a function no rule names, and `Parse` on a type that is no number type, stay unknown
+        // V10: a member or a function no rule names, and `Parse` on a type that is no number type
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("s = \"ab\"\nprint(s.Find(\"a\"))"));
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("xs = [1]\nprint(xs.Extend([2]))"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(string.Concat(\"a\"))"));
