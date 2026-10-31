@@ -384,15 +384,7 @@ Show(NotFound)
 ```
 
 `string.Join` writes the text of each item of its list, so a list whose items have none is `no-text`
-there as well (X6).
-
-Case: [strings/join-no-text.kz](../corpus/strings/join-no-text.kz)
-```kurz
-// `Counter` declares no `Text()`, so an instance has no text (A5), and a list of them has none (A7)
-class Counter(mut int Count)
-
-print(string.Join(", ", [Counter(0)]))
-```
+there as well, as X6 says with its case.
 
 ### A8 (assumed, §8) The text of the remaining values
 

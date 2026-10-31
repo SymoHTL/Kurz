@@ -9,6 +9,7 @@
 // | 2.50
 // | invalid digit
 // | invalid digit
+// | invalid digit
 // | too large
 // | too small
 // rules: X7
@@ -46,9 +47,10 @@ match byte.Parse("-0") {
 ShowDouble(" 1,000.5 ")
 ShowDouble("-infinity")
 ShowDouble(".5")
-// a `decimal` keeps its scale, and reads no sign after its digits and no exponent
+// a `decimal` keeps its scale, and reads no sign after its digits, no exponent and no word
 ShowDecimal("+2.50")
 ShowDecimal("5-")
 ShowDecimal("1e5")
+ShowDecimal("NaN")
 ShowDecimal("79228162514264337593543950336")
 ShowDecimal("-79228162514264337593543950336")

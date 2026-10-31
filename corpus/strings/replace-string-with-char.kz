@@ -1,0 +1,6 @@
+// expect: error argument-mismatch at 6
+// rules: X5
+
+// `Replace` takes a `string` by a `string`, a `char` by a `string` or a `char` by a `char`, and no `string` by a `char`
+s = "a-b"
+print(s.Replace("-", '+'))

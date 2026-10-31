@@ -13,6 +13,7 @@
 // | invalid digit
 // | invalid digit
 // | invalid digit
+// | invalid digit
 // rules: X7
 
 // each integer type reads its own range: a number past it is `too large`, below it `too small`
@@ -72,6 +73,11 @@ match long.Parse("+") {
 }
 // a NUL is no whitespace, where .NET's `Parse` takes NUL characters after the digits
 match int.Parse("5\0") {
+    int n => print(n)
+    ParseError e => print(e)
+}
+// whitespace stands before the sign and after the digits alone
+match int.Parse("- 5") {
     int n => print(n)
     ParseError e => print(e)
 }

@@ -2934,13 +2934,15 @@ public sealed class CheckerTests
         (diagnostics, _) = Check("s = \"ab\"\nprint(s.Trim(5))");
         Assert.Equal(
             "the call fits none of the forms of `Trim` (F13):\n"
-                + "  `string Trim()`: the call passes 1 arguments to 0 parameters (D11)\n"
+                + "  `string Trim()`: the call passes 1 argument to 0 parameters (D11)\n"
                 + "  `string Trim(char trimChar)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `char` is required: a value of another type (T1)",
             Assert.Single(diagnostics.Items).Message);
+        (diagnostics, _) = Check("s = \"ab\"\nprint(s.Split(\"a\", \"b\"))");
+        Assert.Contains("the call passes 2 arguments to 1 parameter (D11)", Assert.Single(diagnostics.Items).Message); // each count picks its noun
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim('a', 'b'))"));
 
-        // X5's three forms of `Replace` give no `string` `old` a `char` `new`, as C#'s give none; the ASCII trims and the changes of
-        // case take no argument
+        // X5's three forms of `Replace` give no `string` `old` a `char` `new`, since the record names no such form (section 12); the
+        // ASCII trims and the changes of case take no argument
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Replace(\"a\", 'b'))"));
         (diagnostics, _) = Check("s = \"ab\"\nprint(s.Replace(1, 2))");
         Assert.Equal(
@@ -3017,7 +3019,8 @@ public sealed class CheckerTests
     [Fact]
     public void A_sort_takes_a_mut_list_whose_items_or_keys_less_orders()
     {
-        // X8: items and keys `<` orders, a nullable one among them, null first; the key's type comes from the lambda's body, as C#'s
+        // X8: items and keys `<` orders, and their nullable forms, which X8 sorts null first though `<` takes no nullable operand; the
+        // key's type comes from the lambda's body, as C#'s
         // `OrderBy` infers its `TKey` from its `keySelector`, and a function value stands for the key too
         Assert.Empty(Errors("mut xs = [3, 1]\nxs.Sort()\nxs.SortUnstable()\nprint(xs)"));
         Assert.Empty(Errors("mut List<int?> xs = [3, null]\nxs.Sort()\nprint(xs)"));
@@ -3031,14 +3034,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(x => x == 1)"));
         Assert.Equal([(ErrorIds.EnumNumber, 3)], Errors("enum Plan { Free, Pro }\nmut xs = [1]\nxs.SortBy(x => Plan.Free)"));
 
-        // the key: one argument, `keySelector`, a function of one item that gives a value
+        // the key: one argument, `keySelector`, a function of one item that gives a value (section 12, the owner, 2026-10-31, "As the
+        // checker does"): a form of the call that fits none, a lambda of no parameter or of two among them, is `argument-mismatch`,
+        // and a key of another type, a function value of two parameters, of another parameter type or that gives nothing among them,
+        // `type-mismatch`
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy()"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(x => x, x => -x)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(key: x => x)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy((a, b) => a)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(() => 1)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.Sort(1)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(1)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy((string s) => 1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("key = (int a, int b) => a\nmut xs = [1]\nxs.SortBy(key)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(x => print(x))"));
 
         // M5: the list changes, so the variable that holds it is `mut`; M7: a key that reads the list is in use while the sort changes

@@ -591,6 +591,9 @@ public static class Types
         return (text.Length > 0 && text[0] is 'a' or 'e' or 'i' or 'o' or 'A' or 'E' or 'I' or 'O' ? "an `" : "a `") + text + "`";
     }
 
+    /// <summary>A count with its noun, as a text writes it: "1 argument", "0 parameters".</summary>
+    public static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
+
     /// <summary>
     /// The common type of two integer operands under <c>+ - * / %</c>, the comparisons and
     /// <c>&amp; | ^</c> (T9, T18, T28): null for <c>sign-mix</c>. T28: two operands narrower than
