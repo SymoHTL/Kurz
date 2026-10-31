@@ -1085,6 +1085,13 @@ public sealed partial class Checker
                 return CheckListAllocate(c, new ListType(Types.Byte), "Bytes.Allocate"); // R15, as above
             }
 
+            if (UnreadFunction(n.Name, m.Member) is { } unreadFunction)
+            {
+                NotSupported(m.Line, unreadFunction);
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
             if (n.Name is "File" or "Directory" or "TcpListener" or "TcpStream")
             {
                 return CheckFileFunction(n.Name, m, c); // S2, S6 to S9, S15
@@ -1123,6 +1130,13 @@ public sealed partial class Checker
         var target = CheckExpression(m.Target, null);
         if (target.IsError)
         {
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (UnreadMember(target.Type, m.Member) is { } unreadMember)
+        {
+            NotSupported(m.Line, unreadMember);
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -1207,6 +1221,27 @@ public sealed partial class Checker
         model.RecordType(m, member); // the callee is the field's value (F11)
         return CallValue(member.Type, c);
     }
+
+    /// <summary>X6, X7: <c>string.Join</c> and a number type's <c>Parse</c>, which the checker does not read; else null.</summary>
+    private static string? UnreadFunction(string type, string member) => (type, member) switch
+    {
+        ("string", "Join") => "`string.Join` (X6)",
+        (_, "Parse") when Types.ByName.TryGetValue(type, out var number) && Types.IsNumber(number) => $"`{type}.Parse` (X7)",
+        _ => null,
+    };
+
+    /// <summary>X1 to X5, X8, X9: the members of a string and of a list that chapter 15 names, which the checker does not read; else null.</summary>
+    private static string? UnreadMember(KurzType type, string member) => (type, member) switch
+    {
+        (PrimitiveType { Kind: Primitive.String }, "Contains" or "StartsWith" or "EndsWith" or "IndexOf") => $"a string's `{member}` (X1)",
+        (PrimitiveType { Kind: Primitive.String }, "Substring") => "a string's `Substring` (X2)",
+        (PrimitiveType { Kind: Primitive.String }, "ToLower" or "ToUpper" or "ToLowerAscii" or "ToUpperAscii") => $"a string's `{member}` (X3)",
+        (PrimitiveType { Kind: Primitive.String }, "Trim" or "TrimStart" or "TrimEnd" or "TrimAscii" or "TrimStartAscii" or "TrimEndAscii") => $"a string's `{member}` (X4)",
+        (PrimitiveType { Kind: Primitive.String }, "Split" or "Replace") => $"a string's `{member}` (X5)",
+        (ListType, "Sort" or "SortBy" or "SortUnstable") => $"a list's `{member}` (X8)",
+        (ListType, "IndexOf" or "AddRange" or "Reverse") => $"a list's `{member}` (X9)",
+        _ => null,
+    };
 
     /// <summary>
     /// M9: a map's members beside <c>Count</c>, with C#'s names and Rust's <c>Remove</c> (section 4, the owner, 2026-10-30, "C# names,

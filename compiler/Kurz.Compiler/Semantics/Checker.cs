@@ -222,11 +222,12 @@ public sealed partial class Checker
 
     private void Run(ProgramSyntax program)
     {
-        // T15, D18, S1, C6: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From`
-        // returns besides its value, of the case a call on a file returns where it failed and of the entry of a loop over a map, declared
-        // before the file's own types, so that a declaration of their names is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union,
-        // as Rust" and "Built-in, no fields", and 2026-10-30, "A value, as C#"; section 12, the owner, 2026-10-29, "One union, as Rust"; for
-        // `Entry` an assumption of section 4, C6)
+        // T15, D18, S1, C6, X7, H7: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From`
+        // returns besides its value, of the case a call on a file returns where it failed, of the entry of a loop over a map and of the cases
+        // a number type's `Parse` and `Hex.Decode` return where they read nothing, declared before the file's own types, so that a
+        // declaration of their names is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union, as Rust" and "Built-in, no fields", and
+        // 2026-10-30, "A value, as C#"; section 12, the owner, 2026-10-29, "One union, as Rust", and 2026-10-31, "Without input"; for `Entry`
+        // an assumption of section 4, C6, and for the four names of X7 and H7 an assumption of section 12)
         foreach (var s in BuiltInTypes.Statements)
         {
             DeclareType((TypeDeclaration)s);
@@ -1317,7 +1318,7 @@ public sealed partial class Checker
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name);
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
@@ -1329,7 +1330,9 @@ public sealed partial class Checker
     /// section 12, the owner, 2026-10-30, "An outcome, as Rust"), and <c>Entry</c>, the entry of a loop over a map, a value as C#'s
     /// <c>KeyValuePair</c> is one (C6; section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies
     /// by <c>with</c> as every data type
-    /// (section 4, the owner, 2026-10-30, "Both, as a data type").
+    /// (section 4, the owner, 2026-10-30, "Both, as a data type"), and <c>ParseError</c> with its <c>ParseKind</c>, the case of a number
+    /// type's <c>Parse</c> that is no number (X7), and <c>HexError</c> with its <c>HexKind</c>, the case of <c>Hex.Decode</c> that gives no
+    /// bytes (H7; section 12, the owner, 2026-10-31, "Without input").
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
         SourceText.FromString(
@@ -1348,6 +1351,10 @@ public sealed partial class Checker
             enum EnvKind { NotPresent, NotUnicode }
             data EnvError(EnvKind Kind, string Name)
             data Entry<K, V>(K Key, V Value)
+            enum ParseKind { Empty, InvalidDigit, TooLarge, TooSmall }
+            data ParseError(ParseKind Kind)
+            enum HexKind { OddLength, InvalidDigit }
+            data HexError(HexKind Kind, int At)
             """));
 
     /// <summary>The tree of the built-in types, which reads clean and holds type declarations alone, or the compiler's defect.</summary>

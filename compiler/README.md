@@ -1237,6 +1237,8 @@ unread; the limit of a type parameter and a member of a type parameter with one 
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29); `this` (K7);
+the members of a string and of a list that chapter 15 names, `string.Join` and a number type's `Parse`
+(X1 to X9), and `Hex.Decode` (H7);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory

@@ -1,0 +1,33 @@
+// expect: output
+// | [1, 2, 3]
+// | [Fig, apple, fig, pear]
+// | Bo
+// | Di
+// | Ann
+// | Cy
+// | [1, 2, 3]
+// | [NaN, 0, -0, 1, 2.5]
+// rules: X8
+
+data Person(string Name, int Age)
+
+mut xs = [3, 1, 2]
+xs.Sort()
+print(xs)
+// strings sort ordinal (T32): an upper-case letter before every lower-case one
+mut words = ["pear", "Fig", "apple", "fig"]
+words.Sort()
+print(words)
+mut people = [Person("Ann", 31), Person("Bo", 28), Person("Cy", 31), Person("Di", 28)]
+people.SortBy(p => p.Age)
+for p in people {
+    print(p.Name)
+}
+mut ys = [3, 1, 2]
+ys.SortUnstable()
+print(ys)
+// NaN first, and 0 before -0 as they stood, since the two are equal
+double z = 0.0
+mut ds = [2.5, z / z, 0.0, 1.0, -0.0]
+ds.Sort()
+print(ds)

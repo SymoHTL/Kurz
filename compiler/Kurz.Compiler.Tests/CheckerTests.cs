@@ -494,14 +494,14 @@ public sealed class CheckerTests
     public void A_member_a_type_does_not_have_is_unknown_name_at_the_dot()
     {
         // V10 gives `unknown-name` to a name that is not visible at the place it stands; a member no rule gives the type is such a name (the
-        // reading in the README), and so is a member after the name of a type or a function (`int.Parse`, `print.Count`): the name stands before
+        // reading in the README), and so is a member after the name of a type or a function (`int.TryParse`, `print.Count`): the name stands before
         // a dot, where the parser reads a member access (L12's reading), not where a value stands, so E4's reading for a function's or a type's
         // name as a value does not apply; a member of a union is `type-mismatch`, since a union is one of its cases only after a match (D9), and
         // the last case names a field one case has, so the id comes from D9 and not from a missing member
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("s = \"abc\"\nprint(s.Count)"));
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("xs = List<int>()\nprint(xs.Size)"));
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("data User(int Id)\n\nprint(User(1).Name)"));
-        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(int.Parse(\"1\"))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(int.TryParse(\"1\"))"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(print.Count)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("data NotFound(int Id)\n\nint | NotFound Find(int id) => 10\n\nint | NotFound v = Find(1)\nprint(v.Id)"));
     }
@@ -1838,9 +1838,13 @@ public sealed class CheckerTests
     [Fact]
     public void A_declaration_of_a_built_in_data_type_names_the_rule_that_declares_it()
     {
-        // V9 with D18, T15 and S1: no line of the file declares the type, so the error names the rule that does; the corpus pins the id and
-        // the line (E2), and this the rule the text names
-        foreach (var (text, rule) in new[] { ("data Invalid", "(D18, V9)"), ("data InvalidUtf8(int At)", "(T15, V9)"), ("data IoError(int Code)", "(S1, V9)"), ("enum IoKind { Lost }", "(S1, V9)") })
+        // V9 with D18, T15, S1, X7 and H7: no line of the file declares the type, so the error names the rule that does; the corpus pins the
+        // id and the line (E2), and this the rule the text names
+        foreach (var (text, rule) in new[]
+        {
+            ("data Invalid", "(D18, V9)"), ("data InvalidUtf8(int At)", "(T15, V9)"), ("data IoError(int Code)", "(S1, V9)"), ("enum IoKind { Lost }", "(S1, V9)"),
+            ("data ParseError(int At)", "(X7, V9)"), ("enum ParseKind { Lost }", "(X7, V9)"), ("data HexError(int At)", "(H7, V9)"), ("enum HexKind { Lost }", "(H7, V9)"),
+        })
         {
             var error = Assert.Single(Check(text).Diagnostics.Items);
             Assert.Equal((ErrorIds.Redeclared, 1), (error.Id, error.Line));
@@ -2787,6 +2791,43 @@ public sealed class CheckerTests
         // the helper asserts that no diagnostic is an error: what stands inside the construct is read with its diagnostics dropped, so that
         // the variables it uses count as used and nothing of it is reported (E1)
         Assert.Equal(first, NotSupported(program)[0]);
+    }
+
+    [Fact]
+    public void The_members_of_strings_and_lists_and_the_functions_of_chapter_15_and_H7_are_not_supported_and_a_member_no_rule_names_is_unknown()
+    {
+        // X1 to X9 and H7: each call is `not supported` with its rule, and no error stands beside it (E1); the arguments are read, so the
+        // variables they use count as used
+        var members = new (string Receiver, string Member, string Rule)[]
+        {
+            ("s", "Contains", "X1"), ("s", "StartsWith", "X1"), ("s", "EndsWith", "X1"), ("s", "IndexOf", "X1"), ("s", "Substring", "X2"),
+            ("s", "ToLower", "X3"), ("s", "ToUpper", "X3"), ("s", "ToLowerAscii", "X3"), ("s", "ToUpperAscii", "X3"),
+            ("s", "Trim", "X4"), ("s", "TrimStart", "X4"), ("s", "TrimEnd", "X4"), ("s", "TrimAscii", "X4"), ("s", "TrimStartAscii", "X4"), ("s", "TrimEndAscii", "X4"),
+            ("s", "Split", "X5"), ("s", "Replace", "X5"),
+            ("xs", "Sort", "X8"), ("xs", "SortBy", "X8"), ("xs", "SortUnstable", "X8"), ("xs", "IndexOf", "X9"), ("xs", "AddRange", "X9"), ("xs", "Reverse", "X9"),
+        };
+        foreach (var (receiver, member, rule) in members)
+        {
+            var (start, kind) = receiver == "s" ? ("s = \"ab\"", "a string's") : ("mut xs = [1]", "a list's");
+            Assert.Equal([$"3: {kind} `{member}` ({rule})"], NotSupported($"{start}\na = \"a\"\nprint({receiver}.{member}(a))"));
+        }
+
+        foreach (var (call, construct) in new[]
+        {
+            ("string.Join(\", \", [1])", "`string.Join` (X6)"), ("long.Parse(\"1\")", "`long.Parse` (X7)"), ("byte.Parse(\"1\")", "`byte.Parse` (X7)"),
+            ("double.Parse(\"1\")", "`double.Parse` (X7)"), ("decimal.Parse(\"1\")", "`decimal.Parse` (X7)"), ("Hex.Decode(\"ab\")", "`Hex.Decode` (H7)"),
+        })
+        {
+            Assert.Equal([$"1: {construct}"], NotSupported($"print({call})"));
+        }
+
+        // V10, the positive controls: a member or a function no rule names, and `Parse` on a type that is no number type, stay unknown
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("s = \"ab\"\nprint(s.Find(\"a\"))"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("xs = [1]\nprint(xs.Extend([2]))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(string.Concat(\"a\"))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(bool.Parse(\"true\"))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(Hex.Read(\"ab\"))"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("m = Map<string, int>()\nprint(m.IndexOf(\"a\"))"));
     }
 
     [Fact]

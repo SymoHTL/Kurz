@@ -24,9 +24,17 @@ public sealed partial class Checker
     /// 12, the owner, 2026-10-31, "`Sha256.Hash(b)`"): a digest is <c>Bytes</c> and the CRC a <c>uint</c> ("`Bytes`, CRC32 a `uint`"), a
     /// hasher's <c>New</c> ("Yes, as Rust"), <c>Hex.Encode</c> ("`Hex.Encode(b)`, lower case"), and the check of a tag and the comparison
     /// in fixed time ("Verify + fixed-time equal"). Every call of a function of <c>Md5</c> is the lint <c>md5-insecure</c> (H5).
+    /// <c>Hex.Decode</c> (H7) the checker does not read.
     /// </summary>
     private Typed CheckHashFunction(string type, MemberAccess m, CallExpression c)
     {
+        if (type == "Hex" && m.Member == "Decode")
+        {
+            NotSupported(m.Line, "`Hex.Decode` (H7)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
         var bytes = new ListType(Types.Byte);
         Slot Bytes(string name) => new(name, bytes, false, false, false);
         var hasher = HasherOf(type) is { } h ? new HasherType(h) : null;

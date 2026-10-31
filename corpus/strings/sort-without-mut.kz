@@ -1,0 +1,6 @@
+// expect: error mut-required at 5
+// rules: X8
+
+xs = [3, 1, 2]
+xs.Sort()
+print(xs)

@@ -1,0 +1,7 @@
+// expect: throws index-out-of-range at 7
+// | bc
+// rules: X2
+
+s = "abc"
+print(s.Substring(1, 2))
+print(s.Substring(2, 2))

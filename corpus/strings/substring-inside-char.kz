@@ -1,0 +1,7 @@
+// expect: throws not-char-boundary at 7
+// | h
+// rules: X2
+
+s = "hä"
+print(s.Substring(0, 1))
+print(s.Substring(0, 2))
