@@ -1247,10 +1247,11 @@ round can ask about it by the rule's id.
 
 - M9 with N1, M4 and A6: a map's key of a type `==` does not take, a map, a function, a handle or a
   value of `void` among them, is `type-mismatch`, and so is a list of one, a nullable type of one and a
-  `data` type that holds one at any depth, through itself as its own type argument too, the inner `Wrap` of
+  `data` type that holds one at any depth the walk reaches, through itself as its own type argument too, the inner `Wrap` of
   `Wrap<Wrap<Map<int, int>>>`, since section 4 takes any type `==` compares. The walk stops at a data type
   whose fields name it: a generic one, which the build says `not supported` to whatever its type
-  arguments (`Node<T>?` in `Node<T>`, `Outer<Map<int, int>>?` in `Outer<T>`, D1, T19), or one that is not
+  arguments, so that a key of it, or `==` on it, gets that and no `type-mismatch` (`Node<T>?` in
+  `Node<T>`, `Outer<Map<int, int>>?` in `Outer<T>`, D1, T19), or one that is not
   generic, whose fields the walk read where it met the type first. `==` between two maps is `type-mismatch` (T18, D3). `==` on two lists takes two
   lists of one type, `List<int>` beside `List<long>` being `type-mismatch` as Rust's `Vec<i32>` beside
   `Vec<i64>` is, and items of a nullable type of a type `==` does not take, or of a union with a case
@@ -1344,9 +1345,9 @@ round can ask about it by the rule's id.
 - V9 with A1 and F6: a variable named `print`, or named as a function or a type of the file, is
   `redeclared`, since a function's and a type's name is visible in the whole file and so is
   `print`.
-- S13 with V8: `args = value` among the top-level statements is `redeclared`, with S13's text. It is
-  one reading of the question S13 and section 14 of the record hold open, where V8's reading is
-  `assign-immutable`, and no corpus case stands on it.
+- S13 with V9: `args = value` among the top-level statements is `redeclared`, with a text that cites
+  S13 and V9. It is one reading of the question S13 and section 14 of the record hold open, where V8's
+  reading is `assign-immutable`, and no corpus case stands on it.
 - T27 with M9 and T19: `List()` with no type argument and no argument to infer it from is
   `cannot-infer`, the id T27 gives a type argument nothing fixes, and so is a generic type written
   without its type arguments (`Pair p`): T19 lets a use name them or leave them to be inferred, and

@@ -1075,8 +1075,10 @@ literal arguments of `T` (T27), so that with `Pair<T>(T a, List<T> b)` the call 
 `T` a `long`, and with two parameters `List<T>` the call `Pick([1], [2L])` does, as `Pick(1, 2L)` does
 and as C# 12 infers for a collection expression and Rust for `vec![1]`; a literal with an item that is
 not a literal, `[x]`, gives `T` the type of that item, as any other argument does, and `[]` gives it
-nothing and takes the list type the other arguments give, `Pair(1L, [])` a `List<long>` *(assumed, §4: the
-items read as arguments of the parameter, "From its items")*.
+nothing and takes the list type the other arguments give, `Pair(1L, [])` a `List<long>`, so that where no
+other argument gives `T`, `Take([])` with `Take<T>(List<T> xs)` and `Pick([], [])` are `cannot-infer`, as
+`x = []` is *(assumed, §4: the items read as arguments of the parameter, of which `[]` has none, "From its
+items")*.
 
 A comma after the last item is accepted, `[1, 2,]` (§4, the owner, 2026-10-30, "Accept, as C# 12
 and Rust"); a line break inside the brackets continues the statement (L4), and where no `(` or `[` is
@@ -1187,6 +1189,12 @@ print(y6)
 r7 = Pair(1L, [])
 List<long> y7 = r7
 print(y7)
+```
+
+Case: [values/list-literal-empty-argument.kz](../corpus/values/list-literal-empty-argument.kz)
+```kurz
+int Take<T>(List<T> xs) => xs.Count
+print(Take([]))
 ```
 
 Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)
