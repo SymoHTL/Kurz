@@ -630,7 +630,7 @@ C#'s `Equals` (§4). A class instance is a key as K12 says: `mutable-key` where 
 union's and a function type's among them (N1), so `map[key]` and `Remove(key)` give `V?` for every `V`
 (§4, the owner, 2026-10-30, "Nullable form, as Option"), a `V` that is nullable already giving that type,
 in which a missing entry and an entry that holds `null` read alike and `ContainsKey` alone tells them
-apart, called while the entry stands, before a `Remove` takes it out (N11; §4, the owner, 2026-10-30, "Flatten, as C#"). A key of a nullable type, with
+apart, called before a `Remove(key)`, whose result does not (N11; §4, the owner, 2026-10-30, "Flatten, as C#"). A key of a nullable type, with
 `null` among its keys, compares as `==` compares two nullable values (N10), `null` equal to `null` alone
 and two values as their type compares as a key *(assumed, §4: for the nullable types beside `double?` and
 `float?`)*, and a `double?` or a `float?` key compares its value as a `double` key does. `xs == ys` on two
@@ -1056,7 +1056,7 @@ A6 does.
 `[1, 2, 3]` is a list of the items between the brackets, and `[]` a list without items, as C# 12's
 collection expression writes one (§4, the owner, 2026-10-30, "[1, 2, 3], as C#"). The literal takes
 the list type where one stands, a written type, `List<int> xs = [1, 2, 3]`, or a parameter's,
-`Take([1, 2])`, and each item is read under its item type as an argument is under its parameter's: a
+`Sum([1, 2])` with `int Sum(List<int> numbers)`, and each item is read under its item type as an argument is under its parameter's: a
 literal takes it (L17), so `Bytes b = [1, 300]` is `constant-overflow`, a lambda takes its parameters
 from it (F11), and an item of another type is `type-mismatch` (T1). The list type stands wherever a
 type is expected, as L17 reads it for a number literal, but for the other operand of `==` (below):
@@ -1078,7 +1078,8 @@ not a literal, `[x]`, gives `T` the type of that item, as any other argument doe
 nothing and takes the list type the other arguments give, `Pair(1L, [])` a `List<long>`, so that where no
 other argument gives `T`, `Take([])` with `Take<T>(List<T> xs)` and `Pick([], [])` are `cannot-infer`, as
 `x = []` is *(assumed, §4: the items read as arguments of the parameter, of which `[]` has none, "From its
-items")*.
+items"; one `cannot-infer` at each empty literal, so two on the line of `Pick([], [])`, each literal a
+defect of its own under E1)*.
 
 A comma after the last item is accepted, `[1, 2,]` (§4, the owner, 2026-10-30, "Accept, as C# 12
 and Rust"); a line break inside the brackets continues the statement (L4), and where no `(` or `[` is
