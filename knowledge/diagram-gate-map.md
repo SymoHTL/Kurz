@@ -68,9 +68,11 @@ flowchart TD
         whose digest is stale: a number, the generated date or the TTL edited by hand
         (a recomputed digest passes: HAZARD issue 18); fewer entries than the floor;
         in the research entries, a finding with no verdict, two, or one in no word of its entry,
-        a section of the design record a verdict cites that the record does not have, a repeated,
+        a verdict under no finding, a section of the design record a verdict cites that the record
+        does not have, a range of sections written with a dash, which the lint does not read, a repeated,
         open or answered finding that cites none (not what the section says: a judgment step),
-        an entry with no finding, fewer research entries than their floor"]
+        an entry with no finding, findings with no record, or a record with no section, to look their
+        sections up in, fewer research entries than their floor"]
         G9["reference: a rule without id, status or the record section it cites;
         a decided, assumed or proposed rule with neither a case nor a reason;
         a case on an open rule; a sample that differs from its corpus file;
@@ -113,7 +115,8 @@ flowchart TD
         release build with and without --lines, with KURZ_TRACE=0, inside the runtime, and a fault outside the
         guard page that the system ends, a trace cut where the reader could not map its pages with a count other than one line a frame, and on a count
         past the cut that reads the file at every frame, whose
-        release run with --lines outlasts the 30 seconds of a run; the build command's lines and refusals; and the refused write and the refused allocation,
+        release run with --lines outlasts the 30 seconds of a run (seen 2026-10-29: 288 seconds, the comment in TraceTests);
+        the build command's lines and refusals; and the refused write and the refused allocation,
         each with its error line; DataTests, red on a tag wider or narrower than the largest type number among the
         cases needs, two layouts for one union, a value that does not come back out of a union, a block not copied
         before a write, a path assignment that does not evaluate its value first, a static of a type with a base laid
@@ -148,7 +151,8 @@ flowchart TD
         the largest int of bytes (lowered to 20) that is not read whole or one byte more that is, on a read or a
         write in the wrong direction that is not error 9, on a file or a directory whose mode is not 0666 or 0777
         less the umask, on a descriptor opened without close-on-exec, on a directory
-        created again that fails, on the text of an error without a path, on an address read otherwise than Rust
+        created again that fails, or one created under a file whose error is not NotADirectory, on the text of an
+        error without a path, on an address read otherwise than Rust
         reads it, a scope id and a port with a sign among them, on a bind of IPv6's loopback that does not give
         what the machine's kernel gives, the bound address where it holds `::1` and its error elsewhere, on a listener on IPv6's wildcard that a connection of IPv4 does not
         reach where the kernel's dual stack is on, on a write to a connection whose peer closed it that is not
@@ -211,8 +215,8 @@ flowchart TD
         that links an open issue labelled review-leftovers, the collection ticket; the gate reads that list only
         at the cap, and the resolve command resolves a thread whose replies all move it (self-tests).
         The cap command of tools/pr_gates.py takes that walk: the section as a comment on the ticket, the replies,
-        the resolutions, and a refusal below the cap, of an open finding of another head and of a thread a person
-        wrote in (self-tests).
+        the resolutions, and refuses, before any write, what knowledge/the-walk-at-the-cap-is-a-command.md lists
+        (self-tests).
         The gates job reads that list with issues: read, the one grant of its token beyond the tree and the
         pull request (ci-config pins the grant); a refused read fails the gate closed.
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]

@@ -11,15 +11,15 @@ Sources read on 2026-10-30. Each verdict was read against the design record (`ku
 reference that day, and is written as it stands after the owner's answers of the same day.
 
 How to read the evidence: survey figures are quoted from the Go Developer Survey results on go.dev. Issue
-counts are the thumbs-up reactions on golang/go issues, read through the GitHub API on 2026-10-30; no
-sentence holds them. The Stack Overflow Developer Survey 2025 technology page was checked as well. It
+counts are the thumbs-up reactions on golang/go issues, read through the GitHub API on 2026-10-30 (those of issues 377 and
+34997 on 2026-10-31); no sentence holds them. The Stack Overflow Developer Survey 2025 technology page (https://survey.stackoverflow.co/2025/technology/) was checked as well. It
 reports which languages people use and lists no complaints about Go, so no finding cites it. Two sources are
 peer-reviewed studies of real Go code and are marked so. Sources marked "third party" are neither a
 survey, nor a study, nor the Go project's own record. The language reference
 covers only the sequential core, and the compiler builds no actor. So the verdicts on concurrency
 (findings 9, 13, 15 and 18) rest on section 6 of the design record alone.
 
-Summary: 25 findings: 15 avoided, 1 repeated in part; 9 answered and recorded.
+Summary: 25 findings: 14 avoided, 3 repeated in part; 8 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -48,7 +48,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: proposal: spec: allow type parameters in methods (https://github.com/golang/go/issues/49085): 907 thumbs-up. spec: generic methods for Go (https://github.com/golang/go/issues/77273): 965 thumbs-up. proposal: spec: generics: type switch on parametric types (https://github.com/golang/go/issues/45380): open, 494 thumbs-up.
 - Since: Go 1.27 (https://go.dev/doc/go1.27): "Go 1.27 now supports generic methods: a method declaration may declare its own type parameters." The limit stays for interfaces: "Note that methods of interfaces may not declare type parameters nor can interface methods be implemented by generic methods."
-- Kurz: answered: "Both, as C#", section 4 of the record. Before the answers: OPEN.
+- Kurz: answered: "Both, as C#" and, for a `match` on a type parameter, "Allowed, as C#", section 4 of the record; whether such a `match` must end in an `else` arm stands open (section 14). Before the answers: OPEN.
 
 ## 5. No real enums: `iota` constants
 
@@ -58,7 +58,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 6. Verbose function literals and no string interpolation
 
 - Evidence: proposal: spec: short function literals (https://github.com/golang/go/issues/21498): open, 674 thumbs-up, 988 comments. proposal: Go 2: string interpolation (https://github.com/golang/go/issues/34174): closed, 438 thumbs-up. The 2025 survey lists "general expressivity / verbosity" among the frustrations (finding 3).
-- Kurz: AVOIDED. Section 4 decides "lambdas as in C# (`x => x * 2`)".
+- Kurz: AVOIDED. Section 4 decides "lambdas as in C# (`x => x * 2`)". Section 8: "String interpolation is always on: `"hello {name}"`."
 
 ## 7. Nil pointer dereferences panic at run time
 
@@ -79,14 +79,14 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 10. Garbage-collector tuning and memory limits
 
 - Evidence: Go Developer Survey 2024 H2 Results (https://go.dev/blog/survey2024-h2-results): teams report "identifying resource usage inefficiencies in a running Go program (57%)" (finding 2). A Guide to the Go Garbage Collector (https://go.dev/doc/gc-guide): "Furthermore, in some applications, these transient peaks can be rare and hard to predict, leading to occasional, unavoidable, and potentially costly out-of-memory conditions." proposal: arena: new package providing memory arenas (https://github.com/golang/go/issues/51317): open, 396 thumbs-up.
-- Since: `GOMEMLIMIT` in Go 1.19. Go 1.26 (https://go.dev/doc/go1.26): "The Green Tea garbage collector, previously available as an experiment in Go 1.25, is now enabled by default after incorporating feedback."
+- Since: `GOMEMLIMIT` in Go 1.19 (https://go.dev/doc/go1.19): "The runtime now includes support for a soft memory limit." Go 1.26 (https://go.dev/doc/go1.26): "The Green Tea garbage collector, previously available as an experiment in Go 1.25, is now enabled by default after incorporating feedback."
 - Kurz: REPEATED in part: the sweep of an actor's heap paces itself as Go's collector does, "Live size x2, as Go", with the factor a setting of the deployment, a knob as `GOGC` is (section 13 of the record). Section 3 says: "No lifetimes, no borrow annotations, no global garbage collector." It adds: "Each actor has its own heap." A dead actor's heap is freed whole.
 
 ## 11. Zero values stand in for "absent": nil maps, unset fields, pointers as options
 
 - Evidence: The Go Programming Language Specification (https://go.dev/ref/spec#Map_types): "A nil map is equivalent to an empty map except that no elements may be added." spec: expression to create pointer to simple types (https://github.com/golang/go/issues/45624): 618 thumbs-up. proposal: encoding/json, encoding/xml: support zero values of structs with omitempty (https://github.com/golang/go/issues/11939): 240 thumbs-up.
 - Since: Go 1.24 (https://go.dev/doc/go1.24) added `omitzero`: "In particular, unlike omitempty, omitzero omits zero-valued time.Time values, which is a common source of friction." Go 1.26 (https://go.dev/doc/go1.26) lets `new` take an expression, "particularly useful when working with serialization packages such as encoding/json or protocol buffers that use a pointer to represent an optional value".
-- Kurz: AVOIDED. K14 (decided) sets C#'s rule aside, "under which a constructor assigns any number of times and an unassigned field gets the type's zero value, `default(T)`, which Kurz has nowhere else".
+- Kurz: AVOIDED. K14 (decided) sets C#'s rule aside, "under which a constructor assigns any number of times and an unassigned field gets the type's zero value, `default(T)`, which Kurz has nowhere else"; a value that may be absent is a `T?`, N1 (decided): "`T?` is short for `T | null`".
 
 ## 12. Loop variables captured by closures
 
@@ -97,7 +97,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 13. Blocking bugs and channel deadlocks
 
 - Evidence: Understanding Real-World Concurrency Bugs in Go, a peer-reviewed study (ASPLOS 2019) (https://songlh.github.io/paper/go-study.pdf): "We analyzed 171 concurrency bugs in total, with more than half of them caused by non-traditional, Go-specific problems." The same paper: "Overall, we found that there are around 42% blocking bugs caused by errors in protecting shared memory, and 58% are caused by errors in message passing." And: "The built-in deadlock detector can only detect two blocking bugs, BoltDB#392 and BoltDB#240, and fail in all other cases".
-- Kurz: AVOIDED for channels, which Kurz does not have. The blocking bugs the study counts in message passing meet the three layers of section 6 on deadlocks: a compile error for a loop of waiting calls between actor types, detection at run time at every wait, and a timeout on every call; across machines a crossing of chains falls to the timeout.
+- Kurz: AVOIDED for channels, which Kurz does not have. The blocking bugs the study counts in message passing meet the three layers of section 6 on deadlocks: a compile error for a loop of waiting calls between actor types, detection at run time at every wait, and a timeout on every call. REPEATED in part for a crossing of chains across machines, which falls to the timeout (section 6).
 
 ## 14. No immutability
 
@@ -118,12 +118,12 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 17. Errors lose where they came from
 
 - Evidence: Results from the 2025 Go Developer Survey (https://go.dev/blog/survey2025): the open-text frustrations "largely focused on error handling and reporting patterns" (finding 3), with the answer "Still not sure what is the best way to do error handling." proposal: errors: add (stack)trace at error annotation (https://github.com/golang/go/issues/60873): open, 13 thumbs-up, "If we just `return err` one time we loose the path."
-- Kurz: answered: "Hop lines in test builds", section 5 of the record. Before the answers: OPEN.
+- Kurz: answered for a test build: "Hop lines in test builds", section 5 of the record. REPEATED in part: "a release build keeps none", so there an error's path is lost as in Go (section 5). Before the answers: OPEN.
 
 ## 18. context.Context threaded through every call
 
 - Evidence: Go Concurrency Patterns: Context (https://go.dev/blog/context): "At Google, we require that Go programmers pass a Context parameter as the first argument to every function on the call path between incoming and outgoing requests." proposal: context/v2: update context package (https://github.com/golang/go/issues/28342): open, 50 thumbs-up, "Context values are passed everywhere explicitly, which troubles some people."
-- Kurz: answered: "Deadline on chain ID", section 6 of the record. Before the answers: OPEN.
+- Kurz: answered for the deadline and its cancel: "Deadline on chain ID", section 6 of the record, with no parameter on the path; a value scoped to a request has no form in the record and travels as a parameter. Before the answers: OPEN.
 
 ## 19. A nil interface is not equal to an interface that holds a nil pointer
 
@@ -137,14 +137,14 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 ## 21. Shadowing with `:=`
 
-- Evidence: spec: various changes to := (https://github.com/golang/go/issues/377): open since 2009, 119 comments: "The := in the if statement causes a new err variable that shadows the return parameter."
-- Since: a `shadow` analyzer in golang.org/x/tools, which its own documentation says "generates too many false positives" and is not enabled by default.
+- Evidence: spec: various changes to := (https://github.com/golang/go/issues/377): open since 2009, 36 thumbs-up, 119 comments: "The := in the if statement causes a new err variable that shadows the return parameter."
+- Since: a `shadow` analyzer in golang.org/x/tools, whose documentation (https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/shadow, read on 2026-10-31) says it "generates too many false positives" and is not enabled by default.
 - Kurz: AVOIDED. V8 (decided): "`name = expression` assigns when a variable of that name is visible, and declares one when none is. A variable therefore cannot hide another one".
 
 ## 22. Unused variables and imports are compile errors
 
 - Evidence: the Go FAQ (https://go.dev/doc/faq#unused_variables_and_imports): "For these reasons, Go refuses to compile programs with unused variables or imports, trading short-term convenience for long-term build speed and program clarity." It also says: "Some have asked for a compiler option to turn those checks off or at least reduce them to warnings."
-- Kurz: answered: "Warn in test, error release", section 8 of the record. Before the answers: REPEATED.
+- Kurz: answered for a variable: "Warn in test, error release", section 8 of the record; an unused `use` has no rule in the record (section 8). Before the answers: REPEATED.
 
 ## 23. Interfaces are satisfied implicitly
 
@@ -153,11 +153,11 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 ## 24. The time-format layout `2006-01-02 15:04:05`
 
-- Evidence: the time package source (https://github.com/golang/go/blob/master/src/time/format.go): "It is a regrettable historic error that the date uses the American convention of putting the numerical month before the day." Issues such as "time: Time.Format() should fail when the layout string is unexpected" (https://github.com/golang/go/issues/34997) show the trap, with few votes.
+- Evidence: the time package source (https://github.com/golang/go/blob/master/src/time/format.go): "It is a regrettable historic error that the date uses the American convention of putting the numerical month before the day." Issues such as "time: Time.Format() should fail when the layout string is unexpected" (https://github.com/golang/go/issues/34997) show the trap; it has no thumbs-up.
 - Kurz: answered: "C# patterns + RFCs", section 12 of the record. Before the answers: OPEN.
 
 ## 25. `defer` runs at the end of the function, not of the loop body
 
 - Evidence: The Go Programming Language Specification (https://go.dev/ref/spec#Defer_statements): "Instead, deferred functions are invoked immediately before the surrounding function returns, in the reverse order they were deferred." The Go toolchain made this mistake itself: "cmd/covdata: too many open files due to `defer f.Close()` in for loop" (https://github.com/golang/go/issues/68468), with backports to Go 1.21 and 1.22.
-- Since: nothing in the language. The third-party staticcheck rule SA9001 flags it: "Defers in range loops may not run when you expect them to".
-- Kurz: AVOIDED. Kurz has no `defer`: a file or a socket closes when the last value that holds it lets go of it ("At the last count, as Rust Drop", section 12 of the record), which a value made in a loop's body does at the end of that body, as its count drops at the end of its scope (section 4).
+- Since: nothing in the language. The third-party staticcheck rule SA9001 (https://staticcheck.dev/docs/checks/#SA9001) flags it: "Defers in range loops may not run when you expect them to".
+- Kurz: AVOIDED. Kurz has no `defer`: a file or a socket closes when the last value that holds it lets go of it ("At the last count, as Rust Drop", section 12 of the record), which a value made in a loop's body and kept by nothing outside it does at the end of that body, as its count drops at the end of its scope (section 4).

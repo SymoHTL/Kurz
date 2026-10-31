@@ -12,13 +12,15 @@ cut a function out of the IR from its `define` to `IndexOf("\n}\n", start)`. The
 line with `StringBuilder.AppendLine` (`compiler/Kurz.Compiler/Emit/Ir.cs`), which writes
 `Environment.NewLine`: `\n` on Linux, `\r\n` on Windows. There a function ends in `\r\n}\r\n`, the
 search gave -1, and the range threw `ArgumentOutOfRangeException` ("length ('-13963') must be a
-non-negative value"). The same tests passed on Linux, in every gates run.
+non-negative value"). The same tests passed on Linux, in the `gates` run 41006528153 of the same commit.
 
-The IR is the same program on both: clang reads either line end. What differs is a test's text
+The IR is the same program on both: clang reads either line end: the 2928 tests that passed on
+Windows in that run hold `RunTests`' floor, at least 207 corpus cases that clang built from that IR
+and that ran as their headers say. What differs is a test's text
 search.
 
 **How to apply:** a test that searches the IR for a line end looks for the token with the line end
 before it, `\n}`, which both forms hold, or reads the IR after `ReplaceLineEndings("\n")`; never for
-a `\n` after a token. The two tests look for `\n}` since. `judgment step`: nothing reads a test's
+a `\n` after a token. The two tests look for `\n}` since pull request 89 (33f0c39, 2026-10-30). `judgment step`: nothing reads a test's
 search for this shape, and only the Windows job, which no merge waits for (HAZARD #30), runs it
 where it fails.

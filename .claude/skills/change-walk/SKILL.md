@@ -179,13 +179,15 @@ the head that will be reviewed is a `judgment step`.
       made on, each open finding with its severity, file, line and thread link, the reading, and
       the link of the round's lows on the `review-lows` issue), and the reply each open thread
       gets. `--go` posts the section as a comment on the ticket, replies, resolves and reads the
-      threads back; a walk that stopped is run again. It refuses below the cap, an open finding
-      of another head, and a thread in which a person wrote anything but a move: that thread is
-      read and answered first (`knowledge/the-walk-at-the-cap-is-a-command.md`).
+      threads back; a walk that stopped is run again. It refuses, before any write, what
+      `knowledge/the-walk-at-the-cap-is-a-command.md` lists, among them below the cap, an open
+      finding of another head, a thread in which a person wrote anything but a move (that thread
+      is read and answered first) and, with `--go`, a section with no reading.
    3. Run the failed jobs of the gates again when `pr-findings` read the threads open.
    4. Merge at the head the round at the cap reviewed, over red where it is red (section 4, item 4).
    Gate: `pr-findings` and the merge tool read the move at the cap, and the cap command writes
-   it (`self-tests`); the reading and starting no run are a `judgment step`; the labels a person can change, a second
+   it (`self-tests`), and `--go` refuses a section with no reading (`self-tests`); what the reading
+   says and starting no run are a `judgment step`; the labels a person can change, a second
    issue with the collection label, two runs that start at the same moment and a dry run:
    HAZARD (#41).
 

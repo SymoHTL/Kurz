@@ -1,6 +1,6 @@
 ---
 name: the-walk-at-the-cap-is-a-command
-description: At the review cap, py -3 tools/pr_gates.py cap --pr N --analysis <file> prints the collection ticket's section for the pull request (the head, the day, every open finding with its thread's address, the session's reading, the lows with their addresses) and the reply each open finding thread gets; --go posts the section as a comment on the ticket, replies, resolves and reads the threads back. Sessions took this walk by hand for every pull request at the cap from 2026-10-21 until it became the command (2026-10-29)
+description: At the review cap, py -3 tools/pr_gates.py cap --pr N --analysis <file> prints the collection ticket's section for the pull request (the head, the day, every open finding with its thread's address, the session's reading, the lows with their addresses) and the reply each open finding thread gets; --go posts the section as a comment on the ticket, replies, resolves and reads the threads back, and refuses a section with no reading. Sessions took this walk by hand for every pull request at the cap from 2026-10-21 until it became the command (2026-10-29)
 metadata:
   type: reference
 ---
@@ -16,7 +16,7 @@ the third-time rule makes a tool.
 ## How to apply
 
 1. Read every open thread and write what the code at the reviewed head shows, grouped, in a
-   file. The reading is the session's (`judgment step`).
+   file. What the reading says is the session's (`judgment step`); that there is one, `--go` checks.
 2. `py -3 tools/pr_gates.py cap --pr <N> --analysis <file>`: the plan. It prints the section and
    the reply each open finding thread gets, and writes nothing. It refuses, before any write:
    - below the cap: there a finding is answered by its edit ([[resolve-what-the-edit-answered]]);
@@ -26,13 +26,16 @@ the third-time rule makes a tool.
      cap's approval does not cover;
    - when a person wrote anything but a move in an open thread: read it and answer it first;
    - when the reviewer's notes on the pull request name lows on the head that the comments on
-     the issue they name do not show: the counts must agree.
+     the issue they name do not show: the counts must agree;
+   - when a note of the reviewer names lows and no issue that collects them.
 3. `py -3 tools/pr_gates.py cap --pr <N> --analysis <file> --go` posts the section as a comment on
    the ticket, replies in every open finding thread with the ticket and the section's address,
    resolves them as `resolve` does, a second between writes, and reads the threads back: a
-   finding thread still open is exit 1, named. A walk that stopped is run again: a section on
-   the ticket, as a comment or in the body as the walks by hand wrote it, is not posted twice,
-   and a thread a reply moved gets no second reply.
+   finding thread still open is exit 1, named. With no reading (no `--analysis` file, or a blank
+   one) it refuses before any write, since a posted section is not written again. A walk that
+   stopped is run again, and a write cut off before its answer may have landed: a section on the
+   ticket, as a comment or in the body as the walks by hand wrote it, is not posted twice, and a
+   thread a reply moved gets no second reply.
 4. Run the failed jobs of the gates again when `pr-findings` read the threads open, then merge at
    the reviewed head (the skill `change-walk`, section 4).
 
@@ -46,5 +49,5 @@ the head they were made on and names the issue that collects them; the comment o
 opens with `kit.lows_header` for the pull request and the head, the one definition the reviewer
 writes it with.
 
-Gate: `self-tests` (twenty-six cases of the walk over the captured thread, note and lows comment
+Gate: `self-tests` (twenty-eight cases of the walk over the captured thread, note and lows comment
 of pull request 82, each named by a mutation in `tools/red_proofs.json`).

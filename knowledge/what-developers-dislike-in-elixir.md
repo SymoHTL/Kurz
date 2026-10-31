@@ -14,10 +14,10 @@ How to read the evidence: survey figures come from the community survey State of
 (1018 participants) and from the Stack Overflow Developer Survey 2025; where a figure stands in a table
 or a chart and in no sentence, the quote is the table's text as the page prints it, and says so. Every
 other source is the project's own record (elixir-lang.org, hexdocs, erlang.org), except one research
-paper, marked so. Verdicts on actors, distribution and keywords rest on the design record alone: the reference
+paper, marked so, and the Dashbit post that announced Nx (finding 6). Verdicts on actors, distribution and keywords rest on the design record alone: the reference
 leaves them out, and the compiler builds no actor.
 
-Summary: 24 findings: 5 avoided, 1 not applicable, 2 open, 1 repeated for some sends and answered for the rest; 15 answered and recorded, of which 1 is repeated in part for a call whose caller crashed.
+Summary: 24 findings: 5 avoided, 1 not applicable, 2 open, 1 repeated for some sends and answered for the rest, 4 repeated in part (the hiring pool, a call whose caller crashed, a lasting fault, a large expansion); 11 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -27,7 +27,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 1. A small ecosystem and a small hiring pool
 
 - Evidence: State of Elixir 2025 (https://elixir-hub.com/surveys/2025), question 39, "If your company doesn't use Elixir – what are the main reasons?", 211 answers, as the page's table reads: "Lack of Elixir expertise in team 118 resp. 55.9%" and "Hiring concerns 66 resp. 31.3%"; its summary of question 41: "teams should still expect a narrower talent pool than for mainstream stacks". Question 44, 447 answers: "Adoption, Marketing & Jobs 89 resp. 19.9%" and "Libraries & Ecosystem Maintenance 64 resp. 14.3%", with the summary "There are frequent mentions of 'abandonware' and a lack of mature integrations for standard enterprise services." Stack Overflow Developer Survey 2025 (https://survey.stackoverflow.co/2025/technology/): the chart of languages used, all respondents, labels Elixir "2.7%" (847 respondents in the page's data), while its text reads "... the most admired programming language (72%), followed by Gleam (70%), Elixir (66%) and Zig (64%)."
-- Kurz: answered: "C-ABI + own + bindgen", section 12 of the record. Before the answers: REPEATED.
+- Kurz: answered for the libraries: "C-ABI + own + bindgen", section 12 of the record. REPEATED in part for the hiring pool: a new language starts with none, and section 1 takes the syntax "in the spirit of C#". Before the answers: REPEATED.
 
 ## 2. Editor tooling: an unstable language server, and three of them
 
@@ -44,7 +44,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 4. Dynamic typing: a wrong shape of data fails at run time
 
 - Evidence: State of Elixir 2025, question 26, "What do you expect from the Elixir type system?", 982 answers, the top row of the page's table: "Improvement over existing typing (Dialyzer, etc.) 774 resp. 78.8%"; the summary of question 44: "Users also view the upcoming Type System as a critical necessity for maintaining larger codebases."
-- Since: Elixir v1.20 released: now a gradually typed language (https://elixir-lang.org/blog/2026/06/03/elixir-v1-20-0-released/): the compiler can "perform type inference and gradually type check every Elixir program, without introducing type annotations", and reports "typing violations that are guaranteed to fail at runtime if executed". Type signatures that a developer writes are not part of v1.20.
+- Since: "Elixir v1.20 released: now a gradually typed language", the post of 2026-06-03 (https://elixir-lang.org/blog/2026/06/03/elixir-v1-20-0-released/): the compiler can "perform type inference and gradually type check every Elixir program, without introducing type annotations", and reports "typing violations that are guaranteed to fail at runtime if executed". Type signatures that a developer writes are not part of v1.20.
 - Kurz: AVOIDED. T1 (decided, §4): "Every variable has one type, fixed when it is declared." Section 6: "Calls on an actor look like ordinary method calls. The compiler turns each into a message.", so a message is checked like a call, and section 7's "code versions never mix inside one cluster" keeps both ends of a remote call on one set of types.
 
 ## 5. Few debugging tools, and a live distributed system is hard to inspect
@@ -73,18 +73,18 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: GenServer (https://elixir.hexdocs.pm/GenServer.html), on `call/3`: "The default value is 5000. If no reply is received within the specified time, the function call fails and the caller exits." The same paragraph describes the server in that case as "just late with the reply".
 - Since: the gen_server documentation of Erlang/OTP (https://www.erlang.org/doc/apps/stdlib/gen_server.html) says that since OTP 24 `gen_server:call` uses process aliases, so a late reply no longer reaches the caller; the server still does the work.
-- Kurz: answered for a caller that waits: "Deadline on chain ID", section 6 of the record: an inbox drops a message whose deadline passed. REPEATED in part for a call whose caller crashed: it runs to its end and its reply is dropped ("Run it, drop the reply", section 6), the work nobody waits for that this finding names, which the owner took at that cost, except where the crash ends the callee, an actor the caller spawned by hand, which stops after the message it runs ("After current message", section 6). Before the answers: REPEATED.
+- Kurz: answered for a caller that waits: "Deadline on chain ID", section 6 of the record: an inbox drops a message whose deadline passed. REPEATED in part for a call whose caller crashed: it runs to its end and its reply is dropped ("Run it, drop the reply", section 6), the work nobody waits for that this finding names, which the owner took at that cost, except a call still waiting in the inbox of a callee the crash ends, an actor the caller spawned by hand, which stops after the message it runs and does not run that call ("After current message", section 6). Before the answers: REPEATED.
 
 ## 10. Let it crash: a lasting fault restarts in a loop, and the limit takes the tree down
 
 - Evidence: Supervisor (https://elixir.hexdocs.pm/Supervisor.html): "`:max_restarts` - the maximum number of restarts allowed in a time frame. Defaults to `3`." and "`:max_seconds` - the time frame in which `:max_restarts` applies. Defaults to `5`." Supervisor Behaviour, OTP design principles (https://www.erlang.org/doc/system/sup_princ.html): "If more than `MaxR` number of restarts occur in the last `MaxT` seconds, the supervisor terminates all the child processes and then itself." Of the supervisor above it, the page says: "It either restarts the terminated supervisor or terminates itself."
-- Kurz: answered: "Growing pause" and "No limit, as Akka", section 6 of the record: a lasting fault restarts about every 30 s without end and takes no tree down, and a limit holds where `max N in` is written; a `retry` of a message that crashes its callee every time restarts that callee up to the `retry`'s count, a cost the owner took ("Keep, name the costs", section 6). Before the answers: REPEATED.
+- Kurz: answered for the tree: "Growing pause" and "No limit, as Akka", section 6 of the record: a lasting fault takes no tree down, and a limit holds where `max N in` is written; a `retry` of a message that crashes its callee every time restarts that callee up to the `retry`'s count, a cost the owner took ("Keep, name the costs", section 6). REPEATED in part: a lasting fault restarts about every 30 s without end. Before the answers: REPEATED.
 
 ## 11. Hot code upgrades are too complex to use
 
 - Evidence: Mix release (https://mix.hexdocs.pm/Mix.Tasks.Release.html): "The reason we don't provide hot code upgrades is because they are very complicated to perform in practice, as they require careful coding of your processes and applications as well as extensive testing."
 - Since: releases ship without them, and the same page points to "other techniques that are language agnostic to upgrade their systems, such as Blue/Green deployments".
-- Kurz: answered: "Release matches waits", section 7 of the record. Before the answers: OPEN.
+- Kurz: answered: "Release matches waits", section 7 of the record; how the `upgrade` lines of a durable actor meet its log stands open (section 14). Before the answers: OPEN.
 
 ## 12. Configuration read at compile time instead of at run time
 
@@ -95,7 +95,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 13. Macros: code nobody sees, large expansions, compile-time dependencies
 
 - Evidence: Macro-related anti-patterns (https://elixir.hexdocs.pm/macro-anti-patterns.html): "The use/1 directive allows a module to inject any type of code into another, including propagating dependencies."; "When a macro generates a large amount of code, it impacts how the compiler and/or the runtime work."; and "their indiscriminate use can compromise the evolution of a system, reducing its maintainability."
-- Kurz: answered: "kurz expand + editor", section 9 of the record. Before the answers: OPEN.
+- Kurz: answered for code nobody sees: "kurz expand + editor", section 9 of the record; a change that recompiles what depends on it meets "Recompute what changed", section 2. REPEATED in part: a large expansion has no bound, an answer taken against a compile error past a size the project sets (section 9). Before the answers: OPEN.
 
 ## 14. Strings, charlists and lists of integers
 
@@ -106,7 +106,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 15. Cluster security: one shared cookie, and clear text
 
 - Evidence: Distributed Erlang (https://www.erlang.org/doc/system/distributed.html): "Furthermore, the communication between nodes is by default in clear text." Its warning: starting a distributed node without `-proto_dist inet_tls` exposes it "to attacks that may give the attacker complete access to the node and by extension the cluster."
-- Since: TLS distribution exists as an option (https://www.erlang.org/doc/apps/ssl/ssl_distribution.html); the warning above stands in the current documentation, so the default has not changed.
+- Since: TLS distribution exists as an option (https://www.erlang.org/doc/apps/ssl/ssl_distribution.html); the warning above stands in the documentation read on 2026-10-30, so the default had not changed then.
 - Kurz: answered: "Mutual TLS default", section 7 of the record. Before the answers: OPEN.
 
 ## 16. A full mesh and a global name registry limit how far a cluster grows
@@ -118,7 +118,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 17. Net splits are left to the application
 
 - Evidence: global (https://www.erlang.org/doc/apps/kernel/global.html): "A network of overlapping partitions might cause the internal state of `global` to become inconsistent." and, of its resolver `random_exit_name/3`: "The function randomly selects one of the pids for registration and kills the other one." Mnesia system information (https://www.erlang.org/doc/apps/mnesia/mnesia_chap7.html): "Determining what data to keep after a communication failure is outside the scope of Mnesia." State of Elixir 2025, question 34: "Distributed state (Mnesia / ETS across nodes) 83 resp. 10.1%".
-- Since: since OTP 25, `global` by default cuts overlapping partitions into fully connected ones (same page). The Mnesia page suggests determining "which "island" contains most of the nodes" and "Using option {majority,true} for critical tables"; the repair of data stays with the application.
+- Since: since OTP 25, `global` by default cuts overlapping partitions into fully connected ones (same page). The Mnesia page suggests determining "which 'island' contains most of the nodes" and "Using option {majority,true} for critical tables"; the repair of data stays with the application.
 - Kurz: answered: "Raft membership", "Phi accrual + majority, as Akka" and "Raft: neither side wins", section 7 of the record, and a durable `send` whose second copy is across a split is refused ("Keep 2, name the cost", section 13). Open there (section 14): whether the policy that runs an item on all sides with a `merge` block still has a side to run on, and what a durable `send` refused during a split gives its sender. Before the answers: OPEN.
 
 ## 18. Messages between nodes can be lost
@@ -141,7 +141,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Processes, Erlang efficiency guide: "All data in messages sent between Erlang processes is copied, except for refc binaries and literals on the same Erlang node." Erlang garbage collector (https://www.erlang.org/doc/apps/erts/garbagecollection.html): "the garbage collection algorithm used is proportional to the amount of live data on the heap."
 - Since: BEAM collects by generation, so most collections skip the old heap (same page); the anti-pattern "Sending unnecessary data" (process anti-patterns page) warns against large messages.
-- Kurz: answered: "After a threshold", section 13 of the record. Before the answers: OPEN.
+- Kurz: answered: "After a threshold", section 13 of the record; a message is not copied whole: "a small value is copied into the receiver's heap, a big one is shared by pointer" (section 6). Before the answers: OPEN.
 
 ## 22. Off-heap binaries kept alive by processes that rarely collect
 
