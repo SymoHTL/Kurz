@@ -1581,11 +1581,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // The trims, splits, replaces, changes of case and joins of X3 to X6 on strings made while the program runs, each source given a
     // new value after its result is taken, with the result printed after that: a trim that copies, one that keeps the whole string,
-    // which shares it, and one of a literal, which keeps its bytes in place; a split into copies, into the whole string and of a
-    // literal, an item of a split read after its list is gone; a replace that finds nothing, which shares the string, one with
-    // arguments made in the call, one into an empty string and one into the variable it reads; a change of case that changes nothing
-    // and one that changes the string; a join of a list in a field of a data value given a new value, of a list made for the call, and
-    // of items whose text is made for the join (A4)
+    // which shares it, and one of a literal, which keeps its bytes in place, and a trim of a `char` from the start and from the end; a
+    // split into copies, into the whole string and of a literal, an item of a split read after its list is gone; a replace that finds
+    // nothing, which shares the string, one with arguments made in the call, one into an empty string and one into the variable it
+    // reads, and a replace of a `char` by a `char` of three bytes into the variable it reads and one that finds nothing; a change of
+    // case that changes nothing and one that changes the string; a join of a list in a field of a data value given a new value, of a
+    // list made for the call, of items whose text is made for the join (A4), and with a `char` separator read from a variable and
+    // written in the call
     private const string Pieces = """
         data Bag(List<string> Items)
         data Name(string Value)
@@ -1611,6 +1613,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         end = name.Value.TrimEnd()
         print("[{start}]")
         print("[{end}]")
+        mut v = "xx{Made(8)}xx"
+        lead = v.TrimStart('x')
+        tail = v.TrimEnd('x')
+        v = Made(0)
+        print(lead)
+        print(tail)
 
         mut s = "{Made(1)},{Made(2)},"
         parts = s.Split(',')
@@ -1638,6 +1646,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(r.Replace(' ', "_"))
         r = r.Replace('e', "ee")
         print(r)
+        r = r.Replace('e', '€')
+        print(r)
+        print(r.Replace('z', 'y'))
 
         mut u = Made(1)
         low = u.ToLowerAscii()
@@ -1658,6 +1669,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(string.Join("+", "{Made(1)} {Made(2)}".Split(' ')))
         print(string.Join("; ", [[1], [2, 3]]))
         print(string.Join(",", [true, false]))
+        sep = '€'
+        print(string.Join(sep, words))
+        print(string.Join(';', [1, 2]))
         empty = string.Join(", ", List<string>())
         print("[{empty}]")
         """;
@@ -1672,6 +1686,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "made 6", // into the variable it reads
         "[made 7 ]",
         "[  made 7]",
+        "made 8xx", // a `char` from the start
+        "xxmade 8", // from the end
         "[made 1, made 2, ]", // copies, an empty piece kept
         "3",
         "[made 8]", // the whole string, shared
@@ -1684,6 +1700,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[]",
         "made_8",
         "madee 8", // into the variable it reads
+        "mad€€ 8", // a `char` of one byte by one of three
+        "mad€€ 8", // a `char` it does not find
         "made 1", // a change of case that changes nothing shares the string
         "MADE 1",
         "made 1",
@@ -1694,6 +1712,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "made+1+made+2",
         "[1]; [2, 3]",
         "true,false",
+        "made 4€made 5", // a `char` separator
+        "1;2",
         "[]",
     ];
 

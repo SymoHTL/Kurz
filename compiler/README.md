@@ -494,20 +494,22 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of a `string` or of a `char`, which is searched for as its UTF-8 bytes, over the string's bytes, through
   the standard library's `Find`, a byte at a time for one byte and Crochemore and Perrin's two-way search
   for more, as Rust's `str::find`, and its `BytesAt` for the start and the end (X1);
-  `s.Trim()`, `s.TrimStart()`, `s.TrimEnd()`, their ASCII forms and `s.Trim(c)`, which take Unicode's White_Space,
+  `s.Trim()`, `s.TrimStart()`, `s.TrimEnd()`, their ASCII forms, `s.Trim(c)`, `s.TrimStart(c)` and `s.TrimEnd(c)`,
+  which take Unicode's White_Space,
   ASCII's five whitespace characters or the `char`'s UTF-8 bytes from the ends, through the standard library's
   `TrimStart`, `TrimEnd`, `RunStart` and `RunEnd`, as Rust's `trim`, `trim_ascii` and `trim_matches` (X4);
-  `s.Split(separator)`, a new list of the pieces, and `s.Replace(old, new)`, a new string, each of which counts
+  `s.Split(separator)`, a new list of the pieces, and `s.Replace(old, new)`, a new string, of a `string` or a `char`
+  for `old` and, where `old` is a `char`, for `new` too, each of which counts
   what it makes before it asks for a block, as Rust's `split` and `replace` (X5); `string.Join(separator,
-  items)`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
+  items)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6); and
   `s.ToLowerAscii()` and `s.ToUpperAscii()`, which change `A` to `Z` or `a` to `z` alone, as Rust's
   `to_ascii_lowercase` (X3). A piece of `Split` and a trimmed string is the string itself, held once more
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
   or a change of case that changes nothing gives the string itself, held once more; `PieceTests` holds each
-  of these members to what .NET's members of the same strings give, over 2000 generated strings and under
-  both allocators;
+  of these members to what .NET's members of the same strings give, over 2000 generated strings, the first 500
+  of them under the allocator that makes every freed block inaccessible as well;
 - `enum` (D12, D18, D20): a value is its number, or its place among the values where the declaration
   writes none, in the smallest of `i8`, `i16` and `i32` that holds every one, signed where a number is
   negative, as Rust stores the value of an enum without fields (section 4, an assumption there); `==`
@@ -1299,8 +1301,8 @@ round can ask about it by the rule's id.
   every `mut` method that stores what its argument gave before it changes its receiver takes, `AddRange`
   among them (M7). A map that
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
-  (X6, A7); a `string.Join` of an argument that is no list is `cannot-infer`, since the item type is read from
-  the list (T27).
+  (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
+  separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13).
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
   checker can tell among them (D13's `match` on flags, O10's call). The checker reads these shapes

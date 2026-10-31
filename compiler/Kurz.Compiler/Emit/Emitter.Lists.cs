@@ -1144,9 +1144,10 @@ public sealed partial class Emitter
     /// <summary>
     /// X4: a string's trims, each the part of the string between the positions the standard library gives (<see cref="Piece"/>):
     /// <c>TrimStart</c> and <c>TrimEnd</c> over Unicode's White_Space, as Rust's <c>trim_start</c> and <c>trim_end</c>, their ASCII
-    /// forms over ASCII's whitespace, as <c>trim_ascii_start</c>, <c>Trim</c> and <c>TrimAscii</c> both ends, and <c>Trim(c)</c> the
-    /// repeats of a character's UTF-8 bytes at both ends, as <c>trim_matches(c)</c>. The string is held without a count of its own while
-    /// the argument is made: an argument that changes it is the checker's <c>changed-while-held</c> (M7).
+    /// forms over ASCII's whitespace, as <c>trim_ascii_start</c>, <c>Trim</c> and <c>TrimAscii</c> both ends, and <c>Trim(c)</c>,
+    /// <c>TrimStart(c)</c> and <c>TrimEnd(c)</c> the repeats of a character's UTF-8 bytes at both ends, the start or the end, as
+    /// <c>trim_matches(c)</c>, <c>trim_start_matches(c)</c> and <c>trim_end_matches(c)</c>. The string is held without a count of its
+    /// own while the argument is made: an argument that changes it is the checker's <c>changed-while-held</c> (M7).
     /// </summary>
     private string EmitStringTrim(CallExpression c)
     {
@@ -1158,8 +1159,12 @@ public sealed partial class Emitter
         {
             var (run, m) = Needle(EmitExpression(c.Arguments[0].Value), Types.Char);
             var (bytes, n, _) = StringParts(text);
-            start = fn.Value($"call i64 {StdFunction("RunStart")}(ptr {bytes}, i64 {n}, ptr {run}, i64 {m})");
-            end = fn.Value($"call i64 {StdFunction("RunEnd")}(ptr {bytes}, i64 {start}, i64 {n}, ptr {run}, i64 {m})");
+            if (member.Member != "TrimEnd")
+            {
+                start = fn.Value($"call i64 {StdFunction("RunStart")}(ptr {bytes}, i64 {n}, ptr {run}, i64 {m})");
+            }
+
+            end = member.Member == "TrimStart" ? n : fn.Value($"call i64 {StdFunction("RunEnd")}(ptr {bytes}, i64 {start}, i64 {n}, ptr {run}, i64 {m})");
         }
         else
         {
@@ -1196,7 +1201,7 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// X5: <c>s.Replace(old, new)</c>, the first of a <c>string</c> or of a <c>char</c>'s UTF-8 bytes, the string the standard library's
+    /// X5: <c>s.Replace(old, new)</c>, each of a <c>string</c> or of a <c>char</c>'s UTF-8 bytes, the string the standard library's
     /// <c>Replace</c> makes (<see cref="Made"/>). The string, and <c>old</c>, are held without a count of their own while the arguments
     /// after them are made (M7). A block the system refuses ends the process (M9).
     /// </summary>
@@ -1207,7 +1212,8 @@ public sealed partial class Emitter
         var slot = WrittenArguments(c, info);
         var (oldValue, oldArgument) = slot(0);
         var (old, m) = Needle(oldValue, TypeOf(oldArgument));
-        var (replacement, k, _) = StringParts(slot(1).Value);
+        var (newValue, newArgument) = slot(1);
+        var (replacement, k) = Needle(newValue, TypeOf(newArgument));
         var (bytes, n, _) = StringParts(text);
         var made = fn.Alloca("i64", "made");
         var asked = fn.Alloca("i64", "asked");
@@ -1235,25 +1241,26 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// X6: <c>string.Join(separator, values)</c>, the texts of the items (A4) with the separator between two of them, joined by the
-    /// standard library's <c>Join</c>: a list of strings is its own texts, and the texts of the items of any other type are made into a
+    /// X6: <c>string.Join(separator, values)</c>, the texts of the items (A4) with the separator, a string or a <c>char</c>'s UTF-8 bytes,
+    /// between two of them, joined by the standard library's <c>Join</c>: a list of strings is its own texts, and the texts of the items of any other type are made into a
     /// buffer, as a list's text makes them (<see cref="ListText"/>), and let go of after the join. The separator and the list are held
     /// without a count of their own while the arguments after them are made (M7). A block the system refuses ends the process (M9).
     /// </summary>
     private string EmitStringJoin(CallExpression c, CallInfo info)
     {
         var slot = WrittenArguments(c, info);
-        var separator = slot(0).Value;
+        var (separatorValue, separatorArgument) = slot(0);
         var (list, listArgument) = slot(1);
+        var (separator, length) = Needle(separatorValue, TypeOf(separatorArgument));
         var type = (ListType)TypeOf(listArgument);
-        var name = Helper($"join.{Lower.Mangle(type)}", "%kz.str", ["%kz.str", "ptr"], () =>
+        var name = Helper($"join.{Lower.Mangle(type)}", "%kz.str", ["ptr", "i64", "ptr"], () =>
         {
-            var count = fn.Value($"sext i32 {ListCount("%a1")} to i64");
-            var (bytes, m, _) = StringParts("%a0");
+            var count = fn.Value($"sext i32 {ListCount("%a2")} to i64");
+            var (bytes, m) = ("%a0", "%a1");
             var made = fn.Alloca("i64", "made");
             var asked = fn.Alloca("i64", "asked");
             fn.Emit($"store i64 0, ptr {asked}");
-            var texts = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a1)");
+            var texts = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a2)");
             string? buffer = null;
             string? size = null;
             var makes = type.Element is not PrimitiveType { Kind: Primitive.String };
@@ -1264,7 +1271,7 @@ public sealed partial class Emitter
                 buffer = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {size})");
                 var at = fn.Alloca("i64", "at");
                 fn.Emit($"store i64 0, ptr {at}");
-                EachItem("%a1", type.Element, item =>
+                EachItem("%a2", type.Element, item =>
                 {
                     var i = fn.Value($"load i64, ptr {at}");
                     fn.Emit($"store %kz.str {TextOf(item, type.Element, c.Line)}, ptr {fn.Value($"getelementptr %kz.str, ptr {buffer}, i64 {i}")}");
@@ -1288,7 +1295,7 @@ public sealed partial class Emitter
             Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
             fn.Return($"%kz.str {Made(joined, fn.Value($"load i64, ptr {made}"), null)}");
         });
-        return fn.Value($"call %kz.str {name}(%kz.str {separator}, ptr {list})");
+        return fn.Value($"call %kz.str {name}(ptr {separator}, i64 {length}, ptr {list})");
     }
 
     /// <summary>For each of the <paramref name="count"/> strings at <paramref name="buffer"/>, laid out as a list of strings is, <paramref name="each"/>.</summary>

@@ -1333,10 +1333,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// X3 to X5: a string's trims, a <c>string</c> each (X4): <c>Trim()</c> and <c>Trim(char trimChar)</c>, two forms, and
-    /// <c>TrimStart()</c>, <c>TrimEnd()</c> and their ASCII forms; <c>Split</c>, a <c>List&lt;string&gt;</c>, and <c>Replace</c>, a
-    /// <c>string</c>, each of a <c>string</c> or of a <c>char</c> (X5), whose <c>new</c> is a <c>string</c>, as X5 names no other; and
-    /// <c>ToLowerAscii()</c> and <c>ToUpperAscii()</c> (X3). A member of two forms takes a literal argument at its own type (F14) and
+    /// X3 to X5: a string's trims, a <c>string</c> each (X4): <c>Trim</c>, <c>TrimStart</c> and <c>TrimEnd</c>, each with no argument
+    /// or with a <c>char trimChar</c>, two forms, and the ASCII forms; <c>Split</c>, a <c>List&lt;string&gt;</c>, of a <c>string</c> or
+    /// of a <c>char</c>, and <c>Replace</c>, a <c>string</c>, of two strings, of a <c>char</c> by a string or of a <c>char</c> by a
+    /// <c>char</c>, three forms (X5); and <c>ToLowerAscii()</c> and <c>ToUpperAscii()</c> (X3). A member of two forms takes a literal argument at its own type (F14) and
     /// gives a call that fits neither <c>argument-mismatch</c> with a line for each form (F13), as X1's searches do; the parameters
     /// take C#'s names.
     /// </summary>
@@ -1351,10 +1351,10 @@ public sealed partial class Checker
         var pieces = new ListType(Types.String);
         var (kind, candidates) = m.Member switch
         {
-            "Trim" => (CallKind.StringTrim, new List<Candidate>
+            "Trim" or "TrimStart" or "TrimEnd" => (CallKind.StringTrim, new List<Candidate>
             {
-                new() { Slots = [], Result = Types.String, Form = "string Trim()" },
-                new() { Slots = [Of("trimChar", Types.Char)], Result = Types.String, Form = "string Trim(char trimChar)" },
+                new() { Slots = [], Result = Types.String, Form = $"string {m.Member}()" },
+                new() { Slots = [Of("trimChar", Types.Char)], Result = Types.String, Form = $"string {m.Member}(char trimChar)" },
             }),
             "Split" => (CallKind.StringSplit, new List<Candidate>
             {
@@ -1365,6 +1365,7 @@ public sealed partial class Checker
             {
                 new() { Slots = [Of("oldValue", Types.String), Of("newValue", Types.String)], Result = Types.String, Form = "string Replace(string oldValue, string newValue)" },
                 new() { Slots = [Of("oldChar", Types.Char), Of("newValue", Types.String)], Result = Types.String, Form = "string Replace(char oldChar, string newValue)" },
+                new() { Slots = [Of("oldChar", Types.Char), Of("newChar", Types.Char)], Result = Types.String, Form = "string Replace(char oldChar, char newChar)" },
             }),
             "ToLowerAscii" or "ToUpperAscii" => (CallKind.StringCase, new List<Candidate> { new() { Slots = [], Result = Types.String } }),
             _ => (CallKind.StringTrim, new List<Candidate> { new() { Slots = [], Result = Types.String } }),
@@ -1373,9 +1374,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// X6: <c>string.Join(separator, values)</c>, a <c>string</c>, of a list of any item type: <c>Join&lt;T&gt;(string separator,
-    /// List&lt;T&gt; values)</c>, one form, so that an argument of another type is that argument's own id (T1); an item type that has no
-    /// text, the text <c>print</c> writes (A4, A7), is <c>no-text</c>. The parameters take C#'s names.
+    /// X6: <c>string.Join(separator, values)</c>, a <c>string</c>, of a list of any item type, with a <c>string</c> or a <c>char</c>
+    /// separator: <c>Join&lt;T&gt;(string separator, List&lt;T&gt; values)</c> and <c>Join&lt;T&gt;(char separator, List&lt;T&gt;
+    /// values)</c>, two forms, picked as F13 picks one; an item type that has no text, the text <c>print</c> writes (A4, A7), is
+    /// <c>no-text</c>. The parameters take C#'s names.
     /// </summary>
     private Typed CheckStringJoin(CallExpression c)
     {
@@ -1384,20 +1386,25 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var parameter = new TypeParameterSymbol("T", c.Line);
-        var candidate = new Candidate
+        Candidate Form(KurzType separator)
         {
-            Slots = [new Slot("separator", Types.String, false, false, false), new Slot("values", new ListType(new TypeParameterType(parameter)), false, false, true)],
-            TypeParameters = [parameter],
-            Result = Types.String,
-        };
-        var typed = Call([candidate], c, null, out var picked);
+            var parameter = new TypeParameterSymbol("T", c.Line);
+            return new Candidate
+            {
+                Slots = [new Slot("separator", separator, false, false, false), new Slot("values", new ListType(new TypeParameterType(parameter)), false, false, true)],
+                TypeParameters = [parameter],
+                Result = Types.String,
+                Form = $"string Join<T>({separator} separator, List<T> values)",
+            };
+        }
+
+        var typed = Call([Form(Types.String), Form(Types.Char)], c, null, out var picked);
         if (typed.IsError || picked is null)
         {
             return typed;
         }
 
-        var item = Types.Substitute(new TypeParameterType(parameter), picked.Map);
+        var item = Types.Substitute(new TypeParameterType(picked.TypeParameters[0]), picked.Map);
         if (!HasText(item))
         {
             Report(ErrorIds.NoText, c.Line, $"{Types.A(item)} has no text for `string.Join` to write (X6, A4, A7, A10)");

@@ -2848,6 +2848,10 @@ public sealed class CheckerTests
         Assert.Equal("string", TypeOf("s = \"xax\"\nt = s.Trim('x')\nprint(t)", "t"));
         Assert.Equal("List<string>", TypeOf("s = \"a,b\"\nt = s.Split(',')\nprint(t)", "t"));
         Assert.Equal("string", TypeOf("s = \"ab\"\nt = s.Replace('a', \"c\")\nprint(t)", "t"));
+        Assert.Equal("string", TypeOf("s = \"ab\"\nt = s.Replace('a', 'c')\nprint(t)", "t"));
+        Assert.Equal("string", TypeOf("s = \"xa\"\nt = s.TrimStart('x')\nprint(t)", "t"));
+        Assert.Equal("string", TypeOf("s = \"ax\"\nt = s.TrimEnd('x')\nprint(t)", "t"));
+        Assert.Equal("string", TypeOf("t = string.Join(',', [1, 2])\nprint(t)", "t"));
         Assert.Equal("string", TypeOf("t = string.Join(\"-\", [1.5, 2.5])\nprint(t)", "t"));
         Assert.Empty(Errors("s = \" aB \"\nprint(s.TrimStart())\nprint(s.TrimEnd())\nprint(s.TrimAscii())\nprint(s.TrimStartAscii())\nprint(s.TrimEndAscii())\nprint(s.ToLowerAscii())\nprint(s.ToUpperAscii())\nprint(s.Split(\"a\"))\nprint(s.Replace(\"a\", \"b\"))"));
         Assert.Empty(Errors("data P(int X)\nint? n = null\nprint(string.Join(\", \", [P(1)]))\nprint(string.Join(\", \", [n]))\nprint(string.Join(\", \", [[\"a\"]]))\nprint(string.Join(\", \", List<string>()))"));
@@ -2862,19 +2866,36 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim(5))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim('a', 'b'))"));
 
-        // X5 names `old` alone a `char` form, so `new` is a `string`, and X4 gives the `char` form to `Trim` alone; a `string` fits
-        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Replace('a', 'b'))"));
-        Assert.Empty(Errors("s = \"ab\"\nprint(s.Replace('a', \"b\"))"));
-        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.TrimStart('a'))"));
+        // X5's three forms of `Replace` give no `string` `old` a `char` `new`, as C#'s give none; the ASCII trims and the changes of
+        // case take no argument
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Replace(\"a\", 'b'))"));
+        (diagnostics, _) = Check("s = \"ab\"\nprint(s.Replace(1, 2))");
+        Assert.Equal(
+            "the call fits none of the forms of `Replace` (F13):\n"
+                + "  `string Replace(string oldValue, string newValue)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `string` is required: a value of another type (T1)\n"
+                + "  `string Replace(char oldChar, string newValue)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `char` is required: a value of another type (T1)\n"
+                + "  `string Replace(char oldChar, char newChar)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `char` is required: a value of another type (T1)",
+            Assert.Single(diagnostics.Items).Message);
+        Assert.Empty(Errors("s = \"ab\"\nprint(s.Replace(\"a\", \"b\"))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.TrimEnd(5))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.TrimStartAscii('a'))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToLowerAscii(1))"));
 
-        // X6: one form, `Join<T>(string separator, List<T> values)`, so a separator of another type is its own `type-mismatch` (T1) and
-        // values that are no list give `T` nothing to infer from, `cannot-infer`, as for any generic function (T27); items without a text
+        // X6: two forms, `Join<T>(string separator, List<T> values)` and `Join<T>(char separator, List<T> values)`; values that are no
+        // list give `T` nothing to infer from in either form (T27), so the call fits neither, `argument-mismatch` (F13), as a separator
+        // that is neither a `string` nor a `char`; `[]` fits a form and gives it no item type, `cannot-infer` (M11); items without a text
         // are `no-text` (A4, A7)
-        Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("print(string.Join(\", \", 5))"));
-        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(string.Join(1, [\"a\"]))"));
+        (diagnostics, _) = Check("print(string.Join(\", \", 5))");
+        Assert.Equal(
+            "the call fits none of the forms of `Join` (F13):\n"
+                + "  `string Join<T>(string separator, List<T> values)`: its type arguments are neither written nor inferable from the arguments (T27)\n"
+                + "  `string Join<T>(char separator, List<T> values)`: its type arguments are neither written nor inferable from the arguments (T27)",
+            Assert.Single(diagnostics.Items).Message);
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(string.Join(',', 5))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(string.Join(1, [\"a\"]))"));
         Assert.Equal([(ErrorIds.NoText, 2)], Errors("fs = List<() => int>()\nprint(string.Join(\", \", fs))"));
         Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("print(string.Join(\", \", []))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("print(string.Join(',', []))"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(string.Join<int>(\", \", [1]))"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("s = \"ab\"\nprint(s.Trim<int>())"));
 
@@ -2883,7 +2904,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("string G(mut string t) {\n    t = \"c\"\n    return \"a\"\n}\n\ns = \"ab\"\nmut o = \"a\"\nprint(s.Replace(o, G(mut o)))"));
 
         // the parameters take C#'s names
-        Assert.Empty(Errors("s = \"a,b\"\nprint(s.Split(separator: \",\"))\nprint(s.Replace(newValue: \"c\", oldValue: \"a\"))\nprint(s.Trim(trimChar: 'a'))\nprint(string.Join(values: [1], separator: \"-\"))"));
+        Assert.Empty(Errors("s = \"a,b\"\nprint(s.Split(separator: \",\"))\nprint(s.Replace(newValue: \"c\", oldValue: \"a\"))\nprint(s.Trim(trimChar: 'a'))\nprint(string.Join(values: [1], separator: \"-\"))\nprint(s.Replace(newChar: 'b', oldChar: 'a'))\nprint(s.TrimEnd(trimChar: 'b'))\nprint(string.Join(separator: ',', values: [1]))"));
     }
 
     [Fact]
