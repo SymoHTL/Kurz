@@ -1095,8 +1095,9 @@ expression of them has (L10, L17), so `Pick(1, 2)` infers `int` and `Pick(1, 2.5
 that does not fit the fixed type, `Pick(small, 300)` with a `byte`, is `constant-overflow`, as a literal
 that does not fit the type it takes is wherever it stands (L17); the items of a list literal of literals
 given to a parameter `List<T>` count as literal arguments of `T`, so `Pair(1L, [1])` with
-`Pair<T>(T a, List<T> b)` infers `long` (M11) *(assumed, §4: the items read as arguments of the
-parameter)*; and where one argument's class is the
+`Pair<T>(T a, List<T> b)` infers `long` (M11), while `[]` gives `T` nothing, so `Take([])` with
+`Take<T>(List<T> xs)`, where no other argument gives `T`, is `cannot-infer` *(assumed, §4: the items
+read as arguments of the parameter, of which `[]` has none)*; and where one argument's class is the
 base of the other's, `Pick(Dog(), Animal())`, the parameter takes the base, which every argument has
 (K6) (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
@@ -1176,6 +1177,12 @@ print(y6)
 r7 = Pair(1L, [])
 List<long> y7 = r7
 print(y7)
+```
+
+Case: [values/list-literal-empty-argument.kz](../corpus/values/list-literal-empty-argument.kz)
+```kurz
+int Take<T>(List<T> xs) => xs.Count
+print(Take([]))
 ```
 
 Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)

@@ -395,8 +395,9 @@ public sealed class CommandTests : IDisposable
     [Fact]
     public void A_lint_is_written_as_an_error_is_with_warning_before_its_id_and_the_program_runs()
     {
-        // H5: `app.kz:3: warning: md5-insecure: <text>`, its text whole as `HashTests` holds it, on the command's error stream, in every
-        // build; `Sha256` gets none (the positive control)
+        // H5's form, `<file>:<line>: warning: md5-insecure: <text>`, here at line 2, where `Md5.Hash` stands, on the command's error
+        // stream, in every build, its text whole as `HashTests` holds it, so that the command is seen to write the checker's text and not
+        // its id alone; `Sha256` gets none (the positive control)
         var source = Path.Combine(root, "digest.kz");
         File.WriteAllText(source, "print(Sha256.Hash(Bytes()).Count)\nprint(Md5.Hash(Bytes()).Count)\n");
         foreach (var (run, name) in new[] { (KurzWithPlaces("run", source), source), (KurzWithPlaces("run", "--release", source), source), (KurzWithPlaces("exec", "print(Sha256.Hash(Bytes()).Count)\nprint(Md5.Hash(Bytes()).Count)"), "exec") })

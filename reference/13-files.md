@@ -307,7 +307,7 @@ lookup that succeeds with no address, the error of the system `EAI_SYSTEM` passe
 the last address tried, and the string a connection's error names)*
 
 A read, a write and `TcpStream.Connect` on a socket wait at most 5 seconds by default, as long as a
-call of an actor waits (§6), and the time of a read and a write can be set for each socket, as
+call of an actor waits (§6), the lookup of a name in `Connect` aside, which §14 holds open, and the time of a read and a write can be set for each socket, as
 Rust's `set_read_timeout` and `set_write_timeout` set a time for each socket (§12, the
 owner, 2026-10-30, against a timeout as an argument with no default and against a default in the
 HTTP server alone). `Connect` creates the socket such a setter would set, and another time reaches it
@@ -315,12 +315,13 @@ through a second form that takes the time, `TcpStream.Connect(address, timeout)`
 `TcpStream::connect_timeout` takes it (§12, the owner, 2026-10-30, "Second form, as Rust", against a
 setting `Connect` reads before it creates the socket and against the 5 seconds alone), where Rust's
 takes one address and looks nothing up, and this form takes the name the first form takes, looks it up
-and tries its addresses in turn; the type of the time stands open with the member that sets it, and
+and tries its addresses in turn, as the first form's `address` reads above (§12, the owner, 2026-10-29,
+"Names too, as Rust"); the type of the time stands open with the member that sets it, and
 with them what a time of zero and a negative time do, and how the time meets the lookup (§14). The socket options `SO_RCVTIMEO` and
 `SO_SNDTIMEO`, which Rust's setters set, bound a call on a blocking socket outside an actor alone, and how
 the bound holds for an actor's socket, which runs without blocking, stands open (§14). *(assumed, §12:
-the bound of `TcpStream.Connect` for the whole call, every address it tries among it, the lookup
-aside)*
+the bound of `TcpStream.Connect` over every address it tries, while whether it covers the lookup
+stands open, §14)*
 `l.Accept()` waits without a bound by default, as Rust's `TcpListener::accept` waits, and a bound
 can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", whose option read "No
 default bound on Accept. Read, write and Connect keep 5 s, and a bound can still be set on a
@@ -439,13 +440,15 @@ itself needs neither. A call through an interface on the path counts as a call o
 taken, while an implementer or a function of the program's own code is no path that needs the grant: a
 path from a package's call ends there, and what that code calls is a path from the program's code, so
 that `FileLog.Write -> Store.Save -> File.Write`, with `FileLog` the program's own logger, needs the
-grant of `Store` and not of the package that called the logger (§13, the owner, 2026-10-30, "Program's
+grant of `Store` and not of the package that called the logger, as the cost of the option set aside
+reads it (§13, the owner, 2026-10-30, "Program's
 own don't count"). Where several paths lead through one line, its one
 error names the shortest, two of one length in the order of the source (§13, the owner, 2026-10-30, "The
 shortest"). *(assumed, §13: `Directory` among the file functions; such a call counted where it never reaches
 the function; of two paths of one length, the one that stands first where the two part, the call
 written first in that function, or, at one call through an interface or a function value, the
-implementer whose file comes first in the order of the paths and, in one file, whose line comes first)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
+implementer, or the function the function value holds, whose file comes first in the order of the file
+paths (§4) and, in one file, whose line and then whose column come first)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
 
 No case: a case is a program and no package, and the program needs no grant.
 

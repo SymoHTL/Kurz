@@ -8,7 +8,8 @@ its nullable form, a union's and a function type's among them: `(int | string)?`
 every type and a C# delegate is nullable (§4, the owner, 2026-10-30, "Nullable form, as Option").
 `void` and a pointer, which takes `null` itself (R10), have no nullable form, and a build says
 `not supported` to both *(assumed, §4: the two, readings of that answer)*; what a nullable type written as a
-case of a union is, `int? | string`, stands open (§14).
+case of a union is, `int? | string`, stands open (§14): nested, as Rust's `Result<Option<i32>, String>`,
+flattened to `int | null | string`, or an error; the build says `not supported` to it.
 
 An arm of a `match` may name `null`, which matches the `null` of a `T?` value, as C#'s `case null`
 and Rust's `None =>` do (C9; §4, the owner, 2026-10-30, "Allow, as C#"), and a `match` over a `T?`
@@ -16,15 +17,18 @@ covers `null` by that arm or by `else` (O8). An arm that no `null` reaches, one 
 of a literal, or an `else` after the `null` arm, knows the variable or the path of fields the
 `match` tests not null, as C#'s analysis reads a pattern (N3). *(assumed, §4: the coverage of
 `null` by the arm or by `else`, and the arm no `null` reaches knowing the subject not null, readings
-of the answer, which named the arm itself)* A `null` arm over a subject whose type has no `null`, a
-`string` or a union without `null`, builds as an arm no value reaches, with no diagnostic, and covers
+of the answer, which named the arm itself)* A `null` arm over a subject whose type has no `null` and is
+no number type, a `string` or a union without `null`, builds as an arm no value reaches, with no diagnostic, and covers
 nothing, as C# compiles `case null` on a `string` (§4, the owner, 2026-10-30, "Allow, as C#", a
 second answer, against `type-mismatch`, as Rust refuses `None =>` on an `i32`, and against
 `unreachable-arm`), and so after an arm that covers the subject's type, `string t` over a `string`, where
-C4's `unreachable-arm` for an arm after the arm of its type does not reach it, since `null` is no `string`. Over a subject of a type parameter, which a
+C4's `unreachable-arm` for an arm after the arm of its type does not reach it, since `null` is no `string`
+*(assumed, §4, §5: C4 read beside the answer, which named the arm itself)*. Over a subject of a type parameter, which a
 nullable type can fill (N11), N6 makes it `type-mismatch`, as `null` where a `T` is required is, while §14
 holds whether it builds: as C# builds `case null` on a `T` without a constraint, or `type-mismatch`.
-Whether it builds over a number type, an `int`, whose `case null` C# refuses (CS0037), stands open (§14).
+Whether it builds over a number type, an `int`, whose `case null` C# refuses (CS0037), stands open (§14),
+since the answer's "as C#" and the `i32` of the option it set aside point two ways there: it builds as
+over a `string`, an arm no value reaches, or it is refused, as C# refuses it.
 An arm after `else`, a `null` arm among them, is `syntax` (C9). A second `null` arm is
 `unreachable-arm`, as a second arm of one literal is (C4), over a `T?` and over a subject with no `null`
 alike. *(assumed, §4: the second `null` arm, which the answers named not)*
@@ -778,8 +782,8 @@ print(acc.Email.Bytes.Count)
 
 `==` and `!=` with a nullable value on either side are lifted, as C#'s are: `null` equals `null`
 alone, two values compare as their types do, the `null` taken off each side first (D3, T18), so
-`(int | string)? a == 1` reads an `int | string` beside an `int`, which D3 refuses, and `a == 1` is
-`false` for an `a` that is null. `<`, `<=`, `>` and `>=` with a nullable value stay `nullable-unchecked` (N2). A test
+`(int | string)? a == 1` reads an `int | string` beside an `int`, which D3 refuses, and `b == 1` is
+`false` for an `int? b` that is null. `<`, `<=`, `>` and `>=` with a nullable value stay `nullable-unchecked` (N2). A test
 `a == b` or `b == a`, with a nullable `a` and a `b` whose type is not nullable or that is a
 variable or a path known not null at that point (N3), shows that `a` is not null where it is true,
 and `a != b` or `b != a` where it is false, so `"x" == email` narrows `email` as `email == "x"`
