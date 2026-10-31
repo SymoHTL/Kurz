@@ -137,7 +137,8 @@ def judge(code, output, floor=FLOOR):
 
 def readable_log():
     # a log redirected to a pipe or a file takes the ANSI code page on Windows, and xunit marks a difference with an arrow
-    # that cp1252 lacks: the print of a red run's output ended the gate before it named the failing test
+    # that cp1252 lacks: the print of a red run's output ended the gate before it named the failing test; every stdout
+    # the gate runs with is a TextIOWrapper, which has reconfigure, and a stream without it is a caller's own
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 
@@ -296,7 +297,8 @@ def self_test():
         finally:
             sys.stdout = saved
         cases.append(("the gate's own run prints a red run's output into a cp1252 log, and names its failing tests after it",
-                      code == 1 and "↓ (pos 0)" in said and "ERROR: 5 tests failed" in said, said[-300:]))
+                      code == 1 and "↓ (pos 0)" in said and "ERROR: 5 tests failed" in said
+                      and said.index("↓ (pos 0)") < said.index("ERROR: 5 tests failed"), said[-300:]))
     return kit.report(cases)
 
 

@@ -27,6 +27,5 @@ A test that read the mark of a lock file a `Place` held failed the same way.
   .NET's.
 - A test that reads a file another process holds under an exclusive `flock` reads it outside .NET's
   open, through `cat` on Linux, as `PlaceTests` reads the mark, or after the holder let it go.
-- On Windows, .NET opens through `CreateFile` with the share mode asked for; the trap is Linux's.
 
 The gate is `compiler-tests`: `PlaceTests` holds a place and reads its lock file while it is held.

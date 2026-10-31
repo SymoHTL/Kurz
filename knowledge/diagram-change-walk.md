@@ -79,7 +79,8 @@ flowchart TD
     review-leftovers, as a comment, and every open thread gets a reply that links it and is resolved: write the reading
     of what is open in a file, read the plan of pr_gates.py cap --pr N --analysis FILE, then take it with --go.
     A round at the cap that did not complete: the owner decides (node N). Gate: pr-findings and the merge
-    tool read the move, the cap command writes it (self-tests); the reading in the section: judgment step; the labels a person can change:
+    tool read the move, the cap command writes it and refuses a section with no reading (self-tests); what the reading
+    says: judgment step; the labels a person can change:
     HAZARD issue 41"]
     Q --> J
     I --> J{"gates green and review green on the head,
