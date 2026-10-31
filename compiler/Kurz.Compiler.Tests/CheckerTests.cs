@@ -2111,7 +2111,8 @@ public sealed class CheckerTests
     [Fact]
     public void A_match_on_a_nullable_value_takes_a_null_arm_for_its_null()
     {
-        // N1, C9, O8 (section 4, the owner, 2026-10-30, "Allow, as C#"): an arm may name `null`, which covers the case `null`
+        // N1, C9, O8: an arm may name `null` (section 4, the owner, 2026-10-30, "Allow, as C#"), which covers the case `null` (section 4,
+        // assumed: a reading of the answer, which named the arm itself)
         Clean(Email + "match Email(1) {\n    null => print(0)\n    string s => print(s.Bytes.Count)\n}");
         Assert.Equal([(ErrorIds.MatchNotExhaustive, 8)], Errors(Email + "match Email(1) {\n    string s => print(s.Bytes.Count)\n}"));
 
@@ -2121,10 +2122,32 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void The_checker_and_the_emitter_read_a_null_arm_through_one_test()
+    {
+        // N1: the arm no value reaches has one definition, `Types.NullArmReachesNothing`, so that what the checker builds and what the
+        // emitter branches past cannot drift apart: every test of a `null` arm against the subject's cases in the compiler's sources goes
+        // through it
+        var sources = Path.Combine(CorpusTests.Root, "compiler", "Kurz.Compiler");
+        var tests = Directory.EnumerateFiles(sources, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(f => File.ReadLines(f).Select(line => (File: Path.GetFileName(f), Line: line)))
+            .Where(x => x.Line.Contains("is NullLiteral", StringComparison.Ordinal) && x.Line.Contains("cases", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(["Checker.Match.cs", "Emitter.Unions.cs"], tests.Select(x => x.File).Order(StringComparer.Ordinal));
+        Assert.All(tests, x => Assert.Contains("Types.NullArmReachesNothing(cases)", x.Line, StringComparison.Ordinal));
+
+        Assert.True(Types.NullArmReachesNothing([Types.String]));
+        Assert.True(Types.NullArmReachesNothing([Types.Int, Types.String]));
+        Assert.False(Types.NullArmReachesNothing([Types.String, Types.Null]));
+        Assert.False(Types.NullArmReachesNothing([new Semantics.PointerType(Types.Long)]));
+        Assert.False(Types.NullArmReachesNothing([new Semantics.PointerType(Types.Long), Types.String]));
+    }
+
+    [Fact]
     public void A_null_arm_over_a_subject_with_no_null_is_an_arm_no_value_reaches()
     {
-        // N1 (section 4, the owner, 2026-10-30, "Allow, as C#"): a `null` arm over a `string` or over a union without `null` builds with no
-        // diagnostic, as C# compiles `case null` on a `string`; it covers nothing (O8), and a second one is `unreachable-arm`, as on a `T?` (C4)
+        // N1 (section 4, the owner, 2026-10-30, "Allow, as C#", a second answer): a `null` arm over a `string` or over a union without `null`
+        // builds with no diagnostic, as C# compiles `case null` on a `string`, and covers nothing (O8); a second one is `unreachable-arm`, as
+        // on a `T?` (C4; section 4, assumed: the default the answers' product pass took)
         Clean("void Show(string s) {\n    match s {\n        null => print(0)\n        string t => print(t.Bytes.Count)\n    }\n}\n\nShow(\"ab\")");
         Clean("int | string x = 1\nprint(match x {\n    null => 0\n    int i => i\n    string s => s.Bytes.Count\n})");
         Assert.Equal([(ErrorIds.MatchNotExhaustive, 2)], Errors("void Show(string s) {\n    match s {\n        null => print(0)\n    }\n}\n\nShow(\"ab\")"));

@@ -281,7 +281,7 @@ public sealed partial class Emitter
             fn.CondBranch(fn.Value($"icmp eq ptr {slot}, null"), absent, present);
             fn.Block(present);
             var value = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
-            fn.Return($"{Ir(result)} {AsResult(result, type.Value, Retained(value, type.Value))}");
+            fn.Return($"{Ir(result)} {AsResult(result, type.Value, Retained(value, type.Value), index.Line)}");
             fn.Block(absent);
             fn.Return($"{Ir(result)} {MakeUnion(result, Types.Null, "zeroinitializer")}");
         });
@@ -291,9 +291,10 @@ public sealed partial class Emitter
     /// <summary>
     /// An entry's value as the result of a read or a <c>Remove</c>: a value of the nullable type (<see cref="WithNull"/>), a union's cases
     /// among its cases (section 4, the owner, 2026-10-30, "Nullable form, as Option"), or as it is where the values are nullable (section
-    /// 4, the owner, 2026-10-30, "Flatten, as C#").
+    /// 4, the owner, 2026-10-30, "Flatten, as C#"). <paramref name="line"/> is the line of the read or the <c>Remove</c> that builds the
+    /// helper of its map's type, the first of them, which a <c>not supported</c> of the conversion names.
     /// </summary>
-    private string AsResult(UnionType result, KurzType value, string v) => Types.Same(result, value) ? v : WithNull(result, value, v, 0);
+    private string AsResult(UnionType result, KurzType value, string v, int line) => Types.Same(result, value) ? v : WithNull(result, value, v, line);
 
     /// <summary>
     /// M9, M4: <c>map[key] = value</c> on a <c>mut</c> variable or parameter, or on a path of fields from one: the value first, then
@@ -466,7 +467,10 @@ public sealed partial class Emitter
     /// where the map has no entry of the key, as Rust's <c>HashMap::remove</c> gives <c>Option&lt;V&gt;</c> (section 4, the owner,
     /// 2026-10-30, "C# names, Rust's Remove"). Only a map with the key's entry is written: a block other values hold is copied first
     /// (M3), the entry lets go of its own key, and its slot's control byte becomes 255 or 128 (<c>MapErase</c>, as hashbrown's
-    /// <c>erase</c>).
+    /// <c>erase</c>). The key is made before the place and takes no count where it is read from a variable, a field or an item: what it
+    /// was read from keeps it while the helper runs, since <c>CollectionPlace</c> copies a block on the path only where other values
+    /// hold it (M3), and those keep the block the key was read from; <c>ListTests</c> holds <c>n.Counts.Remove(n.Name)</c> on a block
+    /// another variable holds.
     /// </summary>
     private string EmitMapRemove(CallExpression c)
     {
@@ -499,7 +503,7 @@ public sealed partial class Emitter
             }
 
             fn.Emit($"call void {StdFunction("MapErase")}(ptr {current}, ptr {own}, i64 {EntrySize(type)})");
-            fn.Return($"{Ir(result)} {AsResult(result, type.Value, value)}");
+            fn.Return($"{Ir(result)} {AsResult(result, type.Value, value, c.Line)}");
             fn.Block(absent);
             fn.Return($"{Ir(result)} {MakeUnion(result, Types.Null, "zeroinitializer")}");
         });

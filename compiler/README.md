@@ -547,8 +547,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   form, as Option"); a read of a variable or a field the checker
   found known not null is the value of the case `T`, and `&x` on such a variable, and a `mut` member of
   a list or a map on such a variable or on such a field at the end of a path, reach the place of that
-  value in the variable's or the field's room, the place itself where the address is the value (N3,
-  R10, M5); `x == null` and `x != null` compare the tag, or the address with the `null`
+  value in the variable's or the field's room, the place itself where the address is the value, and of a
+  nullable union the union's own room where its tag and the nullable form's have one width; where they
+  differ, such a place is `not supported`, since the room holds the nullable form's tag (N3, R10, M5);
+  `x == null` and `x != null` compare the tag, or the address with the `null`
   of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
   reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
   `?.` and `?[` reads each member and item only where the value before it is not null, the index of
@@ -1186,9 +1188,10 @@ nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` 
 item of a pointer, a C function type or `void`, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
 a part after `?[` and an assignment through it, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
-emitter does not read through a chain (N5, M9), and an assignment of a field through a nullable
-variable or field known not null, `o.I.X = 1`, which the emitter does not write through, where an
-index written through a narrowed map or list is read (N3, M4), a `mut`
+emitter does not read through a chain (N5, M9), and an assignment of a field, an item or an entry
+through a nullable variable or field known not null, `o.I.X = 1` and `o.I.Items[0] = 1`, which the
+emitter does not write through, where an index written on a narrowed map or list, `o.Items[0] = 1`
+with a nullable field `Items`, is read (N3, M4), a `mut`
 method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
 R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
@@ -1471,12 +1474,15 @@ round can ask about it by the rule's id.
 - N10 with N3: a nullable side of `==`, on either side, beside a value whose type is not nullable, read as the checker
   typed it, so that a variable known not null counts as such a value, is known not null where the
   test holds; beside another nullable value it is not, as C#'s analysis reads both.
-- N1 with C9 and O8: an arm may name `null`, which covers the case `null` (section 4, the owner,
-  2026-10-30, "Allow, as C#"). Over a subject whose type has no `null`, a `string` or a union without
-  `null`, the arm builds with no diagnostic, covers nothing and is emitted as a test that never takes
-  the value, and a second one is `unreachable-arm` (section 4, a second answer "Allow, as C#");
-  over a subject of a type parameter it is `type-mismatch`, as `null` where a `T` is required is
-  (N6), which section 14 holds open.
+- N1 with C9 and O8: an arm may name `null` (section 4, the owner, 2026-10-30, "Allow, as C#"),
+  which covers the case `null` (section 4, assumed: a reading of the answer, which named the arm
+  itself). Over a subject whose type has no `null`, a `string` or a union without `null`, the arm
+  builds with no diagnostic, covers nothing and is emitted as a branch past it (section 4, a second
+  answer "Allow, as C#"), the checker and the emitter reading such an arm through one test,
+  `Types.NullArmReachesNothing`; a second `null` arm is `unreachable-arm` (section 4, assumed: the
+  default the answers' product pass took, since the answers named one arm); over a subject of a type
+  parameter the arm is `type-mismatch`, as `null` where a `T` is required is (N6), which section 14
+  holds open.
 - R7 with E1: every `raw` block in a package without the grant is `raw-not-allowed`, one inside
   another among them, since each is a block the grant would allow; its body is checked as one with
   the grant is, so a read through a pointer there raises nothing more.

@@ -190,8 +190,8 @@ public sealed partial class Emitter
             case ElsePattern:
                 fn.Branch(body);
                 return null;
-            case ValuePattern { Value: var named } when Unwrap(named) is NullLiteral && type is not PointerType && !cases.Any(c => c is NullType):
-                fn.Branch(next); // N1: a `null` arm over a subject whose type has no `null`, which no value reaches
+            case ValuePattern { Value: var named } when Unwrap(named) is NullLiteral && Types.NullArmReachesNothing(cases):
+                fn.Branch(next); // N1: a `null` arm over a subject whose type has no `null`, which no value reaches, by the checker's test
                 return null;
             case ValuePattern vp:
                 {

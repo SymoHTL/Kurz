@@ -284,6 +284,13 @@ public static class Types
     }
 
     /// <summary>
+    /// N1: whether a <c>null</c> arm over a subject of these cases is an arm no value reaches: none of them is <c>null</c>, a pointer, which
+    /// takes <c>null</c> itself (section 3), or a type parameter, which a nullable type can fill (N11). The one test of the checker, which
+    /// reads such an arm with no diagnostic, and of the emitter, which branches past it, so that the two cannot read it apart.
+    /// </summary>
+    public static bool NullArmReachesNothing(IReadOnlyList<KurzType> cases) => !cases.Any(c => c is NullType or PointerType or TypeParameterType);
+
+    /// <summary>
     /// N1: <c>T?</c>, the union <c>T | null</c>, of a union its cases and <c>null</c> (section 4, "Nullable form, as Option"); of a type
     /// that is nullable already, that type (section 4, "Flatten, as C#").
     /// </summary>
