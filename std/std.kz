@@ -1474,6 +1474,265 @@ pub byte* AsciiCase(byte* bytes, long n, bool upper, mut long asked) {
     return text
 }
 
+// `s.ToLower()` and `s.ToUpper()` (X3): the bytes of a new string's block, the `n` bytes at `bytes` with each
+// code point changed by Unicode's full mapping, as Rust's `to_lowercase` and `to_uppercase`, and their number
+// in `made`. `table` is the emitter's table of the direction (`CaseMapped`). The block is sized by a first
+// walk and written by a second, so that a string that grows asks the allocator once. Null where no code point
+// changes, for the string as it is, and null with `asked` set where the system refuses.
+pub byte* UnicodeCase(byte* bytes, long n, bool upper, int* table, mut long made, mut long asked) {
+    mut bool changed = false
+    long length = CaseWalk(bytes, n, upper, table, null, mut changed)
+    if !changed {
+        return null
+    }
+
+    byte* text = StringBlock(length)
+    if text == null {
+        asked = 16 + length
+        return null
+    }
+
+    CaseWalk(bytes, n, upper, table, text, mut changed)
+    StringTakeOver(text, length)
+    made = length
+    return text
+}
+
+// The number of bytes `UnicodeCase` makes of the `n` bytes at `bytes`, written to `out` where it is not null,
+// and `changed` set where a code point changes. A capital sigma lowers to the final form where it ends a word
+// (`CaseFinalSigma`), the one mapping of Unicode's that reads the characters around it and no language.
+long CaseWalk(byte* bytes, long n, bool upper, int* table, byte* out, mut bool changed) {
+    mut long at = 0
+    mut long length = 0
+    while at < n {
+        mut long width = 0
+        int c = CaseCodeAt(bytes, at, mut width)
+        mut int second = 0
+        mut int third = 0
+        mut int first = 963
+        if upper || c != 931 {
+            first = CaseMapped(c, upper, table, mut second, mut third)
+        } else if CaseFinalSigma(bytes, n, at, table) {
+            first = 962
+        }
+
+        if first != c || second != 0 {
+            changed = true
+        }
+
+        length = length + CaseWrite(first, out, length)
+        if second != 0 {
+            length = length + CaseWrite(second, out, length)
+        }
+
+        if third != 0 {
+            length = length + CaseWrite(third, out, length)
+        }
+
+        at = at + width
+    }
+
+    return length
+}
+
+// The code point whose UTF-8 starts at `at` among the bytes at `bytes`, and the number of its bytes in
+// `width`. A string holds valid UTF-8 (T15), so the bytes after the first are there.
+int CaseCodeAt(byte* bytes, long at, mut long width) {
+    mut int c = 0
+    raw {
+        int b = int(bytes[at])
+        if b < 128 {
+            c = b
+            width = 1
+        } else if b < 224 {
+            c = ((b & 31) << 6) | (int(bytes[at + 1]) & 63)
+            width = 2
+        } else if b < 240 {
+            c = ((b & 15) << 12) | ((int(bytes[at + 1]) & 63) << 6) | (int(bytes[at + 2]) & 63)
+            width = 3
+        } else {
+            c = ((b & 7) << 18) | ((int(bytes[at + 1]) & 63) << 12) | ((int(bytes[at + 2]) & 63) << 6) | (int(bytes[at + 3]) & 63)
+            width = 4
+        }
+    }
+
+    return c
+}
+
+// The number of bytes of the code point `c` in UTF-8, written to `out` from `at` where `out` is not null.
+long CaseWrite(int c, byte* out, long at) {
+    mut long width = 4
+    if c < 128 {
+        width = 1
+    } else if c < 2048 {
+        width = 2
+    } else if c < 65536 {
+        width = 3
+    }
+
+    if out != null {
+        raw {
+            if width == 1 {
+                out[at] = byte(c)
+            } else if width == 2 {
+                out[at] = byte(192 | (c >> 6))
+                out[at + 1] = byte(128 | (c & 63))
+            } else if width == 3 {
+                out[at] = byte(224 | (c >> 12))
+                out[at + 1] = byte(128 | ((c >> 6) & 63))
+                out[at + 2] = byte(128 | (c & 63))
+            } else {
+                out[at] = byte(240 | (c >> 18))
+                out[at + 1] = byte(128 | ((c >> 12) & 63))
+                out[at + 2] = byte(128 | ((c >> 6) & 63))
+                out[at + 3] = byte(128 | (c & 63))
+            }
+        }
+    }
+
+    return width
+}
+
+// The first code point Unicode's full mapping of one direction gives `c`, and the second and the third in
+// `second` and `third`, 0 where there are none, as Rust's `conversions::to_lower` and `to_upper` look them up:
+// ASCII by its letters; above it, the run of `table` that holds `c`, found by a binary search, where `c` is a
+// code point of the run's step, else the mapping to several code points, found by a second search, else `c`
+// itself. `table` holds four counts, of the runs, of those mappings and of the ranges of Cased and
+// Case_Ignorable, then the runs, four numbers each (the first and the last code point, the step, 1 or 2, and
+// the delta), the mappings, four each (the code point and the code points it gives, 0 after the last), and the
+// ranges, two each (`CaseIn`).
+int CaseMapped(int c, bool upper, int* table, mut int second, mut int third) {
+    if c < 128 {
+        if upper && c >= 97 && c <= 122 {
+            return c - 32
+        }
+
+        if !upper && c >= 65 && c <= 90 {
+            return c + 32
+        }
+
+        return c
+    }
+
+    mut int result = c
+    raw {
+        long runs = long(table[0])
+        mut long low = 0
+        mut long high = runs
+        mut bool found = false
+        while low < high {
+            long middle = (low + high) / 2
+            long run = 4 + 4 * middle
+            if c < table[run] {
+                high = middle
+            } else if c > table[run + 1] {
+                low = middle + 1
+            } else {
+                if table[run + 2] == 1 || (c - table[run]) % 2 == 0 {
+                    result = c + table[run + 3]
+                    found = true
+                }
+
+                break
+            }
+        }
+
+        if !found {
+            long multis = 4 + 4 * runs
+            low = 0
+            high = long(table[1])
+            while low < high {
+                long middle = (low + high) / 2
+                long entry = multis + 4 * middle
+                if c < table[entry] {
+                    high = middle
+                } else if c > table[entry] {
+                    low = middle + 1
+                } else {
+                    result = table[entry + 1]
+                    second = table[entry + 2]
+                    third = table[entry + 3]
+                    break
+                }
+            }
+        }
+    }
+
+    return result
+}
+
+// Whether `c` is in a property of `table` (`CaseMapped`): the ranges of Cased where `ignorable` is false, of
+// Case_Ignorable where it is set, found by a binary search.
+bool CaseIn(int c, int* table, bool ignorable) {
+    mut bool found = false
+    raw {
+        mut long start = 4 + 4 * long(table[0]) + 4 * long(table[1])
+        mut long high = long(table[2])
+        if ignorable {
+            start = start + 2 * high
+            high = long(table[3])
+        }
+
+        mut long low = 0
+        while low < high {
+            long middle = (low + high) / 2
+            long range = start + 2 * middle
+            if c < table[range] {
+                high = middle
+            } else if c > table[range + 1] {
+                low = middle + 1
+            } else {
+                found = true
+                break
+            }
+        }
+    }
+
+    return found
+}
+
+// Whether the capital sigma whose two bytes start at `at` among the `n` bytes at `bytes` ends a word, as
+// Rust's `map_uppercase_sigma` reads Unicode's Final_Sigma: past the case-ignorable characters, a cased one
+// before it and none after it.
+bool CaseFinalSigma(byte* bytes, long n, long at, int* table) {
+    mut long end = at
+    mut bool before = false
+    while end > 0 {
+        mut long start = end - 1
+        raw {
+            while start > 0 && (int(bytes[start]) & 192) == 128 {
+                start = start - 1
+            }
+        }
+
+        mut long width = 0
+        int c = CaseCodeAt(bytes, start, mut width)
+        if !CaseIn(c, table, true) {
+            before = CaseIn(c, table, false)
+            break
+        }
+
+        end = start
+    }
+
+    if !before {
+        return false
+    }
+
+    mut long next = at + 2
+    while next < n {
+        mut long width = 0
+        int c = CaseCodeAt(bytes, next, mut width)
+        if !CaseIn(c, table, true) {
+            return !CaseIn(c, table, false)
+        }
+
+        next = next + width
+    }
+
+    return true
+}
+
 // Where `s.Substring(startIndex, length)` cannot cut the string whose bytes are at `bytes`, `count` of
 // them (X2): -2 where the part reaches outside the string, a `startIndex` or a `length` below 0 among
 // them, which is read first; else the position, the start before the end, that falls inside a code

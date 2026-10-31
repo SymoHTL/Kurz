@@ -502,7 +502,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   by a `string`, a `char` by a `string` or a `char` by a `char`, each of which counts
   what it makes before it asks for a block, as Rust's `split` and `replace` (X5); `string.Join(separator,
   values)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
-  the text of every other item (A4), made into a buffer it gives back after the join (X6); and
+  the text of every other item (A4), made into a buffer it gives back after the join (X6);
+  `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
+  library's `UnicodeCase`, a first walk that counts the bytes and a second that writes them, with the table of the
+  direction the emitter writes into the program once, `case.lower` or `case.upper`, from `Emit/CaseTables.cs`, which
+  `tools/unicode_tables.py` generates from the Unicode Character Database of the version Rust's stable pins and the
+  gate `unicode-tables` holds to that database: the runs of code points with one delta and a step of 1 or 2, found by
+  a binary search, the mappings to two or three code points, and for lowering the ranges of Cased and
+  Case_Ignorable, which a capital sigma reads for Final_Sigma, as Rust's `to_lowercase` and `to_uppercase` (X3); and
   `s.ToLowerAscii()` and `s.ToUpperAscii()`, which change the letters `A` to `Z` or `a` to `z` and no other byte, as Rust's
   `to_ascii_lowercase` (X3); `s.Substring(startIndex, length)`, whose cut the standard library's `SubstringCut` reads,
   `index-out-of-range` where it reaches outside the string, read first, and else `not-char-boundary` where its start or
@@ -524,7 +531,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   string and a cut of `Substring` is the string itself, held once more
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
-  or a change of case that changes nothing gives the string itself, held once more; `PieceTests` holds the
+  or a change of case that changes nothing gives the string itself, held once more; `CaseTests` holds `ToLower` and
+  `ToUpper` of every code point of the first two planes to `CaseTables`, read without the standard library's search,
+  and the final sigma and the mappings to several code points to fixed lines; `PieceTests` holds the
   trims, `Split`, `Replace`, `string.Join` and the ASCII changes of case (X3 to X6) to what .NET's members of the same
   strings give where the rules read as they do, and to the rules written out where they do not: the ASCII trims, over
   the five whitespace characters of X4, the ASCII changes of case, over the letters `A` to `Z` and `a` to `z`, and an
@@ -1203,7 +1212,7 @@ generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths non
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1, X2, X3's ASCII forms and X4 to X10), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
@@ -1301,12 +1310,10 @@ unread; the limit of a type parameter and a member of a type parameter with one 
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29); `this` (K7);
-the members of a string and of a list that chapter 15 names but those of X1, X2, X3's ASCII forms and X4 to
-X9, which are `ToLower` and `ToUpper` (X3);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
-lists the rule ids whose cases the checker may say `not supported` to, and four cases by name that
+lists the rule ids whose cases the checker may say `not supported` to, and five cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the
 checker reads in full is held to its header whatever it cites.
 

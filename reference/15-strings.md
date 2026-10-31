@@ -85,16 +85,29 @@ change: `"ß".ToUpper()` is `"SS"`, and a capital sigma at the end of a word low
 as Rust's `to_lowercase` and `to_uppercase`. `s.ToLowerAscii()` and `s.ToUpperAscii()` change the
 letters `A` to `Z` and `a` to `z` alone, as Rust's `to_ascii_lowercase` (§12, the owner, 2026-10-31, "Rust full + ASCII"). Under the
 Unicode form the Kelvin sign U+212A lowers to `k`; under the ASCII form it stays. A change of case
-takes no culture (§4).
+takes no culture (§4). The mapping is that of the Unicode Character Database of the version Rust's
+stable release pins, 17.0.0, in tables generated from the database's files (§12, the owner,
+2026-10-31, "Rust's pin" and "Generated, as Rust"). A capital sigma lowers to `ς` where a cased
+character stands before it and none after it, past the case-ignorable characters on either side, as
+Unicode's Final_Sigma and Rust's `to_lowercase` read it, so that `"ὈΔΥΣΣΕΎΣ".ToLower()` is
+`"ὀδυσσεύς"`; the mappings that hold for one language are left out; and `s.ToLower(1)` is
+`argument-mismatch` *(assumed, §12: the defaults of the build's product pass, not put to the owner)*.
 
 Case: [strings/case.kz](../corpus/strings/case.kz)
 ```kurz
 print("straße".ToUpper())
 print("ΣΑΣ".ToLower())
+print("ὈΔΥΣΣΕΎΣ".ToLower())
 print("\u212A".ToLower() == "k")
 print("\u212A".ToLowerAscii() == "k")
 print("http/1.1 äb".ToUpperAscii())
 print("ÄB".ToLowerAscii())
+```
+
+Case: [strings/case-of-a-number.kz](../corpus/strings/case-of-a-number.kz)
+```kurz
+s = "Ab"
+print(s.ToLower(1))
 ```
 
 ### X4 (decided, §12) Trimming

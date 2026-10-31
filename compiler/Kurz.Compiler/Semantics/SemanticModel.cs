@@ -95,7 +95,7 @@ public enum CallKind
     /// <summary>A string's <c>Replace</c> of a <c>string</c> by a <c>string</c>, of a <c>char</c> by a <c>string</c> or of a <c>char</c> by a <c>char</c>, which the arguments' types name (X5).</summary>
     StringReplace,
 
-    /// <summary>A string's <c>ToLowerAscii</c> or <c>ToUpperAscii</c> (X3).</summary>
+    /// <summary>A string's <c>ToLower</c>, <c>ToUpper</c>, <c>ToLowerAscii</c> or <c>ToUpperAscii</c> (X3).</summary>
     StringCase,
 
     /// <summary>A string's <c>Substring(startIndex, length)</c> (X2).</summary>

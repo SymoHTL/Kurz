@@ -1667,7 +1667,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // split into copies, into the whole string and of a literal, an item of a split read after its list is gone; a replace that finds
     // nothing, which shares the string, one with arguments made in the call, one into an empty string and one into the variable it
     // reads, and a replace of a `char` by a `char` of three bytes into the variable it reads and one that finds nothing; a change of
-    // case that changes nothing and one that changes the string; a join of a list in a field of a data value given a new value, of a
+    // case that changes nothing and one that changes the string, by ASCII's letters and by Unicode's mapping, which grows it; a join of a list in a field of a data value given a new value, of a
     // list made for the call, of items whose text is made for the join (A4), and with a `char` separator read from a variable and
     // written in the call; and a cut of X2 that copies, one that keeps the whole string, one of a literal, one of nothing and one
     // through a field, and a parse and a decode (X7, H7) of a variable given a new value after it, of a cut made in the call and of a
@@ -1748,6 +1748,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         up = low.ToUpperAscii()
         print(up)
         print(up.ToLowerAscii())
+
+        mut greek = "ŉΣ{Made(3)}xΣ"
+        lowered = greek.ToLower()
+        greek = Made(4)
+        print(lowered)
+        raised = lowered.ToUpper()
+        print(raised)
+        print(raised.ToUpper())
 
         mut bag = Bag([Made(1), Made(2)])
         j = string.Join(", ", bag.Items)
@@ -1832,6 +1840,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "made 1", // a change of case that changes nothing shares the string
         "MADE 1",
         "made 1",
+        "ŉσmade 3xς", // a change of case by Unicode's mapping, its source given a new value, a sigma that ends a word lowered to `ς`
+        "ʼNΣMADE 3XΣ", // a string that grows, `ŉ` raised to two code points
+        "ʼNΣMADE 3XΣ", // one that changes nothing shares the string
         "made 1, made 2", // the field's list, its data value given a new value after the join
         "1-2-3",
         "made 3",
@@ -2617,14 +2628,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_string_member_whose_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
         // M9, X3, X5: a literal's `Split` asks for the block of its list, 16 bytes of counts and two pieces of 16; `Replace` and a
-        // change of case ask for the block of their result, 16 bytes of counts and its bytes
+        // change of case ask for the block of their result, 16 bytes of counts and its bytes, the 7 of `STRASSE` for the 7 of `straße`
         var none = EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value);
         Ran(BuildAndRun("print(\"a,b\".Split(\",\"))\n", none, "split-refused"), 1, [], "error: allocation-failed (48 bytes)\n");
         Ran(BuildAndRun("print(\"abc\".Replace(\"b\", \"xy\"))\n", none, "replace-refused"), 1, [], "error: allocation-failed (20 bytes)\n");
         Ran(BuildAndRun("print(\"abc\".ToUpperAscii())\n", none, "upper-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
         Ran(BuildAndRun("print(\"ABC\".ToLowerAscii())\n", none, "lower-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
-        const string granted = "print(\"a,b\".Split(\",\"))\nprint(\"abc\".Replace(\"b\", \"xy\"))\nprint(\"abc\".ToUpperAscii())\nprint(\"ABC\".ToLowerAscii())\n";
-        Ran(BuildAndRun(granted, toolchain.Runtime, "string-members-granted"), 0, ["[a, b]", "axyc", "ABC", "abc"], ""); // the positive control
+        Ran(BuildAndRun("print(\"straße\".ToUpper())\n", none, "unicode-upper-refused"), 1, [], "error: allocation-failed (23 bytes)\n");
+        const string granted = "print(\"a,b\".Split(\",\"))\nprint(\"abc\".Replace(\"b\", \"xy\"))\nprint(\"abc\".ToUpperAscii())\nprint(\"ABC\".ToLowerAscii())\nprint(\"straße\".ToUpper())\n";
+        Ran(BuildAndRun(granted, toolchain.Runtime, "string-members-granted"), 0, ["[a, b]", "axyc", "ABC", "abc", "STRASSE"], ""); // the positive control
 
         // X6: the list `Join` reads takes a block, so this system gives the pieces small blocks are carved from and refuses a block of
         // its own; a result of 262145 bytes asks for one, 16 bytes of counts and its bytes
