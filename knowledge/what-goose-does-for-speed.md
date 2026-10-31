@@ -11,7 +11,7 @@ Read on 2026-10-30. Every fact about Goose comes from the page named beside it, 
 quoted; the names resolve under "Sources" at the end. Nothing was built, run or measured for this
 note. A figure computed for this note from published numbers says so.
 
-Verdicts: ALREADY (Kurz has it), ADOPTABLE (a question for the owner; the item says whether it was asked), CONFLICTS (with a
+Verdicts: ALREADY (Kurz has it; for a weakness W<n>, Kurz already avoids it), ADOPTABLE (a question for the owner; the item says whether it was asked), CONFLICTS (with a
 decision of the record), UNKNOWN. An answered question names the owner's choice and the section of
 the record whose trace holds each option with its cost. Before a design change, name the mechanism
 or the finding it meets (knowledge/diagram-design-change-playbook.md, B4).
@@ -84,14 +84,16 @@ or the finding it meets (knowledge/diagram-design-change-playbook.md, B4).
   "Differences under ~10% are within measurement noise."; "The allocator-heavy rows are the least
   reproducible in the suite, and they are the ones the headline ratio rests on."; "This CPU has a
   very large L3, so small and medium can sit entirely in cache." (results)
-- Other suites, ported by the project: plb2 `matmul`, 2.42x Rust: "plb2 builds C and Rust for the
+- Other suites, ported by the project: plb2 `matmul`, 2.42 in the table's column "Rust / Goose" (read 2026-10-31): "plb2 builds C and Rust for the
   baseline x86-64 instruction set, and that is what gives Goose's `simd` its lead on `matmul`. Built
   for this CPU (`-march=native`, `-C target-cpu=native`), C runs `matmul` in 0.211 s, level with
-  Goose, and Rust in 0.324 s." (plb2). `loops`, 3.12x Rust: "Goose computes a libdivide-style magic
+  Goose, and Rust in 0.324 s." (plb2). `loops`, 3.12 in the column "vs Rust" (read 2026-10-31): "Goose computes a libdivide-style magic
   number for the divisor before the loop and turns each `%` into a multiplication, a shift and a
-  subtraction; C, C++ and Rust leave a `div` instruction in the loop." `levenshtein`, 1.32x Rust:
+  subtraction; C, C++ and Rust leave a `div` instruction in the loop." `levenshtein`, 1.32 in the same column:
   "Goose's optimizer regroups integer min and max chains so that the operand carried from the
-  previous iteration is combined last" (four-program suite). PLB `binarytrees`, up to 15x Rust: "The
+  previous iteration is combined last" (four-program suite). PLB `binarytrees`, 15.04 at input 18 and 6.56 at input 15 in the column of "the fastest other
+  language's time divided by Goose's", where the only other time in those rows is Rust's, C/C++
+  having none (read 2026-10-31): "The
   allocation-heavy problems (binarytrees, merkletrees) say as much about Windows' heap as about
   Rust" (PLB). The five-test suite (five-test suite) is ported too.
 - Third party: LangArena, 50 tasks in 27 languages: "Goose: added (goose ea1f368, Clang/GCC
@@ -106,7 +108,7 @@ or the finding it meets (knowledge/diagram-design-change-playbook.md, B4).
   what I get on my M1 if I ask the LLM to write more performant (still safe) solutions to a couple
   benchmarks", with Goose at 0.54x on `records` and 0.75x on `graph`, unverified (HN 2).
 - Verdict of the research: Goose is faster on pointer-rich, allocation-rich and variable-size data,
-  and level elsewhere. "It is not evidence that a random Rust service, command-line tool, or web
+  and level or behind elsewhere (lru 0.81 and scene 0.82 under MSVC, calc 0.89 under clang). "It is not evidence that a random Rust service, command-line tool, or web
   backend becomes faster when rewritten in Goose." (dev.to)
 
 ## Where the speed comes from, and where Kurz stands
@@ -210,7 +212,7 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
 
 Q1, Q3, Q4 and Q5 are answered above (G1, G3, G8, G14); Q4 against the research's lean, LLVM alone
 with `raw`. Q2, Q6 and Q7 were not asked: compiler and std internals with no change a program sees.
-For Q2, as built "a `List<int>` with room for 1024 items asks for 4112 bytes and gets 8192"
+For Q2, at 633d378 a `List<int>` with room for 1024 items asks for 4112 bytes and gets 8192
 (computed for this note from `compiler/README.md` and `std/std.kz`); for Q7, a wrong `noalias` mark
 is a silent miscompile.
 

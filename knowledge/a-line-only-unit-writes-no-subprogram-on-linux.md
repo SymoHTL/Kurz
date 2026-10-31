@@ -1,6 +1,6 @@
 ---
 name: a-line-only-unit-writes-no-subprogram-on-linux
-description: on Linux, LLVM writes the subprogram of a unit of line tables alone (clang's -gline-tables-only form, as the emitter writes it) into DWARF only where a call was inlined into the function, so an unoptimised build has no subprogram entry and a function's name comes from the symbol table alone (probed 2026-10-29, clang 23.1.4, GNU readelf 2.42)
+description: on Linux, LLVM writes the subprogram of a unit of line tables alone (clang's -gline-tables-only form, as the emitter writes it) into DWARF only for a function that holds an inlined call and, as an abstract entry, for one that was inlined, so an unoptimised build has no subprogram entry and a function's name comes from the symbol table alone (probed 2026-10-29, clang 23.1.4, GNU readelf 2.42)
 metadata:
   type: reference
 ---

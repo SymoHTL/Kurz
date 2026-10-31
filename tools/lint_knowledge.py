@@ -22,20 +22,22 @@ conflict markers are the tree gate's job (tools/tree_gate.py), for the whole tre
 The research entries, knowledge/what-developers-dislike-in-*.md (LANGUAGE) and the Goose entry (GOOSE), against
 which node B4 of the design playbook reads a change to the record, fail on: a finding with no verdict or with two;
 a verdict in none of the words of its entry; a `- Kurz:` verdict under no finding; a section of the record that a
-verdict cites (`§4`, `section 12`, `sections 12 and 10`) and that is no heading `## <n>. ` of kurz-design.md, whose
-Open list is one of them; a finding whose verdict says Kurz repeats it or leaves it open, or that an answer of the
-owner settled, and that cites no section at all; an entry in which no finding is read; findings with no record, or
-a record with no section, to look their sections up in; and, in the real tree, fewer than RESEARCH_FLOOR research
-entries. A finding of a language entry is a heading `## <n>. ` with one bullet `- Kurz: <verdict>`, the verdict
-starting with AVOIDED, NOT APPLICABLE, REPEATED, OPEN or `answered`, of which REPEATED, OPEN and `answered` must
-cite. A finding of the Goose entry is a bullet `- G<n>, ` or `- W<n>, `, its verdict the text after `Kurz:`, holding
-one or more of ALREADY, ADOPTABLE, CONFLICTS (or CONFLICT), UNKNOWN and `answered`. That entry records mechanisms
-of speed, not mistakes: UNKNOWN leaves one open and `answered` was settled, and both must cite; ADOPTABLE is a gain
-Kurz could take (the entry says why Q2, Q6 and Q7 were not asked) and CONFLICTS one a decision of the record sets
-aside, and neither must. What the check sees is the citation and that the section exists, not what the section
-says: whether it holds a statement on the finding, and whether a change to the record names the finding it meets,
-are the review rule "design record" and node B4. A finding written in another shape is not read; the floors say
-when an entry, or the store, yields none.
+verdict cites (`§4`, `section 12`, `sections 12 and 10`, `sections 1 to 3`, which cites each from the first to the
+last) and that is no heading `## <n>. ` of kurz-design.md, whose Open list is one of them; a range of sections
+written with a dash (`§4-6`), which the lint does not read; a finding whose verdict says Kurz repeats it or leaves
+it open, or that an answer of the owner settled, and that cites no section at all; an entry in which no finding is
+read; findings with no record, or a record with no section, to look their sections up in; and, in the real tree,
+fewer than RESEARCH_FLOOR research entries. A finding of a language entry is a heading `## <n>. ` with one bullet
+`- Kurz: <verdict>`, the verdict starting with AVOIDED, NOT APPLICABLE, REPEATED, OPEN or `answered`, of which
+REPEATED, OPEN and `answered` must cite. A finding of the Goose entry is a bullet `- G<n>, ` or `- W<n>, `, its
+verdicts the texts after each `Kurz:`, holding one or more of ALREADY, ADOPTABLE, CONFLICTS (or CONFLICT), UNKNOWN
+and `answered` (before a colon or ` with `, the forms the entry writes it in, so that "not answered" in prose is no
+verdict). That entry records mechanisms of speed, not mistakes: UNKNOWN leaves one open and `answered` was settled,
+and both must cite; ADOPTABLE is a gain Kurz could take (the entry says why Q2, Q6 and Q7 were not asked) and
+CONFLICTS one a decision of the record sets aside, and neither must. What the check sees is the citation and that
+the section exists, not what the section says: whether it holds a statement on the finding, and whether a change to
+the record names the finding it meets, are the review rule "design record" and node B4. A finding written in
+another shape is not read; the floors say when an entry, or the store, yields none.
 `--self-test` plants one case per rule, plus precision cases that must stay clean."""
 import datetime
 import hashlib
@@ -86,13 +88,15 @@ SECTION = re.compile(r"^## (\d+)\. ", re.M)  # a section of the record
 # record, and neither is a date after a comma (`section 3, 2026-10-30`).
 NUMBER = r"\d+(?!\d|-|\.\d)"
 CITE = re.compile(r"§[ \t]?(" + NUMBER + r")|\b[Ss]ections?\s+(" + NUMBER + r"(?:(?:,\s*|\s+(?:and|or|to)\s+)" + NUMBER + r")*)")
+# A range written with a dash (`§4-6`, `sections 4-5`), of which NUMBER reads nothing, so that a date is no section.
+RANGE = re.compile(r"(?:§[ \t]?|\b[Ss]ections?\s+)\d+[ \t]*[-–][ \t]*\d+(?![\d-])")
 BULLET = r".*(?:\n(?!- |#|[ \t]*$).*)*"  # the rest of a bullet: its line and the lines that continue it
 VERDICT = re.compile(r"^- Kurz:[ \t]*(" + BULLET + ")", re.M)  # the verdict of a language entry's finding
 MECHANISM = re.compile(r"^- ([GW]\d+), (" + BULLET + ")", re.M)  # a finding of the Goose entry
 # Per kind of research entry: the words of its verdicts, and those that must cite a section of the record.
 VERDICTS = {
     "language": (re.compile(r"^(AVOIDED|NOT APPLICABLE|REPEATED|OPEN|answered)\b"), {"REPEATED", "OPEN", "answered"}),
-    "goose": (re.compile(r"\b(ALREADY|ADOPTABLE|CONFLICTS?|UNKNOWN|answered)\b"), {"UNKNOWN", "answered"}),
+    "goose": (re.compile(r"\b(ALREADY|ADOPTABLE|CONFLICTS?|UNKNOWN|answered(?=:| with ))\b"), {"UNKNOWN", "answered"}),
 }
 
 
@@ -197,9 +201,9 @@ def generated(rel, body, fm):
 def findings(rel, body):
     """(findings, errors) of one research entry, each finding as (label, the texts of its verdicts): in a language
     entry a heading `## <n>. ` and the bullets `- Kurz:` under it, in the Goose entry a bullet `- G<n>, ` or
-    `- W<n>, ` and its text after `Kurz:`. A bullet runs over the lines that continue it."""
+    `- W<n>, ` and its texts after each `Kurz:`. A bullet runs over the lines that continue it."""
     if rel == GOOSE:
-        return [(name, [text.split("Kurz:", 1)[1]] if "Kurz:" in text else []) for name, text in MECHANISM.findall(body)], []
+        return [(name, text.split("Kurz:")[1:]) for name, text in MECHANISM.findall(body)], []
     found, errors = [], []
     for part in re.split(r"(?m)^(?=## )", body):
         head = re.match(r"## (\d+)\. ", part)
@@ -239,7 +243,10 @@ def research(root, files, whole):
             if not said:
                 errors.append(f"{rel}: {label}: a verdict in none of the words the lint reads ({words.pattern}): {verdict[:60]}")
                 continue
-            cited = {int(n) for m in CITE.finditer(verdict) for n in re.findall(r"\d+", m.group(1) or m.group(2))}
+            cited = {n for m in CITE.finditer(verdict) for a, b in re.findall(r"(\d+)(?:\s+to\s+(\d+))?", m.group(1) or m.group(2))
+                     for n in range(int(a), int(b or a) + 1)}
+            if RANGE.search(verdict):
+                errors.append(f"{rel}: {label} cites a range of sections, which the lint does not read: name each section")
             errors += [f"{rel}: {label} cites section {n} of the record, which {RECORD} does not have" for n in sorted(cited - sections)]
             if said & held and not cited:
                 errors.append(f"{rel}: {label} is {', '.join(sorted(said & held))} and cites no section of the record: name "
@@ -368,7 +375,7 @@ def cases_in(base):
         f"- G{n}, a mechanism. \"a quote\" (front page). Kurz:\n  {v}\n" for n, v in enumerate(verdicts, 1))
     language = k + "what-developers-dislike-in-"
 
-    def studied(entries, with_record=True):
+    def studied(entries, with_record=True, record=record):
         """A tree with research entries by name (`go` is the language entry on Go, `goose` the Goose entry) and,
         unless told otherwise, the record they cite."""
         named = {(GOOSE if name == "goose" else f"{language}{name}.md"): body for name, body in entries.items()}
@@ -598,6 +605,8 @@ def cases_in(base):
         "research: a finding with no verdict": (
             studied({"go": ok(8) + "\n## 1. A trap\n\n- Evidence: \"a quote\"\n"}), "finding 1 has 0 verdicts"),
         "research: a finding with two verdicts": (studied({"go": lang("AVOIDED.\n- Kurz: OPEN, §3.")}), "finding 1 has 2 verdicts"),
+        "research: a Goose mechanism with two Kurz: verdicts": (
+            studied({"goose": goose("ALREADY. Kurz: UNKNOWN, §1.")}), "G1 has 2 verdicts"),
         "research: a Goose mechanism with no verdict": (
             studied({"goose": ok(9) + "\n- G1, a mechanism. \"a quote\" (front page).\n"}), "G1 has 0 verdicts"),
         "research: a Goose bullet's evidence before Kurz: is not its verdict": (
@@ -611,6 +620,15 @@ def cases_in(base):
         "research: an entry with no finding": (studied({"go": ok(8)}), "no finding read"),
         "research: findings and no record to look their sections up in": (
             studied({"go": lang("AVOIDED. §1.")}, with_record=False), "kurz-design.md is missing or has no section"),
+        "research: a record with no section `## <n>. `": (
+            studied({"go": lang("AVOIDED. §1.")}, record="# Design\n\nno sections\n"), "kurz-design.md is missing or has no section"),
+        "research: a range of sections written with a dash, which the lint does not read": (
+            studied({"go": lang("AVOIDED, §1-9.")}), "finding 1 cites a range of sections"),
+        "research: sections 1 to 3 cite the section between them": (
+            studied({"go": lang("AVOIDED, sections 1 to 3.")}, record="# Design\n\n## 1. Goals\n\n## 3. Open\n"),
+            "finding 1 cites section 2 of the record"),
+        "research: answered in the prose of a Goose verdict is no verdict word": (
+            studied({"goose": goose("ADOPTABLE; Q7 was not asked, so not answered.")}), None),
         "research: a decimal of Goose's spec is no section of the record": (
             studied({"goose": goose("ALREADY, as spec §10.5 and §1.2 say.")}), None),
         "research: a date after a section is no section of the record": (

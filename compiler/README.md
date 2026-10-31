@@ -747,7 +747,8 @@ Max<int>, std path"): `main` for the top-level code, `Max<int>` for an instance,
 lambda, and the line of each statement and each expression on the instructions emitted for it. On
 Linux they are DWARF in the executable, on Windows CodeView in the PDB the linker writes beside it,
 for which clang gets `-g`. On Linux LLVM writes the subprogram of a line-only unit into DWARF only
-where a call was inlined into the function, which an unoptimised build never does
+for a function that holds an inlined call and, as an abstract entry, for one that was inlined, and
+an unoptimised build inlines nothing
 ([a line-only unit writes no subprogram on Linux](../knowledge/a-line-only-unit-writes-no-subprogram-on-linux.md)),
 so there the executable's symbols name a function, each carrying the name a trace shows between
 the prefix of its code and the numbers that keep it unique (`f.Down.1`, `f.Max<int>.8`,

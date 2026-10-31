@@ -414,7 +414,8 @@ Gate: review rule "rules for sessions".
   Gate: `self-tests` (the count, the label before
   the first pass, the end at the cap and its status; the move to the collection ticket in
   `pr-findings`, in the resolve command, in the cap command and in the merge tool, whose wiring of it is
-  `merge_pr.held_by`); the reading the section carries and starting no run at the cap are a `judgment step`; a
+  `merge_pr.held_by`; a section posted with no reading, which the cap command refuses); what the reading says and
+  starting no run at the cap are a `judgment step`; a
   label taken off or put on by hand, a second open issue that carries the label, two runs of one
   pull request that start at the same moment, and a dry run, which puts on no label: HAZARD (#41).
   The gates job lists the ticket with `issues: read`, which `ci-config` pins.

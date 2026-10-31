@@ -14,7 +14,7 @@ Sources are the Rust project's own surveys and records where they exist. A sourc
 resort" is a widely cited article, tutorial or forum thread outside the project's record. Section
 numbers name sections of `kurz-design.md`; rule ids (M7, O3, T4 ...) name rules of `reference/`.
 
-Summary: 25 findings: 3 avoided, 1 repeated, 1 repeated in part, 1 not applicable; 19 answered and recorded.
+Summary: 25 findings: 2 avoided, 1 repeated, 2 repeated in part, 1 not applicable; 19 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -24,7 +24,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 1. Builds are slow, above all the rebuild after a small change
 
 - Evidence: 2024 State of Rust Survey Results (https://blog.rust-lang.org/2025/02/13/2024-State-Of-Rust-Survey-results/): "Perhaps unsurprisingly, slow compilation was at the top of the list, as it seems to be a perennial concern of Rust users."; Rust compiler performance survey 2025 results (https://blog.rust-lang.org/2025/09/10/rust-compiler-performance-survey-2025-results/): "Around 45% respondents who answered that they are no longer using Rust said that at least one of the reasons why they stopped were long compile times." and "the fact that 55% of respondents have to wait more than ten seconds for a rebuild is far from ideal."; 2025 State of Rust Survey Results (https://blog.rust-lang.org/2026/03/02/2025-State-Of-Rust-Survey-results/): "resource usage (slow compile times and storage usage) is still up there."
-- Since: Announcing Rust 1.90.0 (https://blog.rust-lang.org/2025/09/18/Rust-1.90.0/): "LLD is now the default linker on x86_64-unknown-linux-gnu". The performance survey names the parallel front end and the Cranelift backend as goals; neither is stable.
+- Since: Announcing Rust 1.90.0 (https://blog.rust-lang.org/2025/09/18/Rust-1.90.0/): "LLD is now the default linker on x86_64-unknown-linux-gnu". The performance survey: "Our goal for the future is to finally stabilize long-standing initiatives that could improve build performance a lot, such as the Cranelift codegen backend or the parallel compiler frontend."
 - Kurz: answered: "Recompute what changed", section 2 of the record. Before the answers: REPEATED.
 
 ## 2. The borrow checker and lifetimes are hard to learn
@@ -34,19 +34,19 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 ## 3. Fear that the language keeps growing more complex
 
-- Evidence: 2025 State of Rust Survey Results (https://blog.rust-lang.org/2026/03/02/2025-State-Of-Rust-Survey-results/): "But at the same time concerns persist about the language becoming more and more complex." The 2024 results list the same worry among the top answers.
+- Evidence: 2025 State of Rust Survey Results (https://blog.rust-lang.org/2026/03/02/2025-State-Of-Rust-Survey-results/): "But at the same time concerns persist about the language becoming more and more complex." The 2024 results: "one of the top answers remained the worry that Rust will become too complex."
 - Kurz: answered: "Printed counts", section 1 of the record. Before the answers: OPEN.
 
 ## 4. Async splits functions into two colours
 
 - Evidence: 2024 State of Rust Survey Results (https://blog.rust-lang.org/2025/02/13/2024-State-Of-Rust-Survey-results/): "We have seen mentions of struggles with async programming (an all-time favourite), debuggability of errors (which people generally love, but they are not perfect for everyone) or Rust tooling being slow or resource intensive (rust-analyzer and rustfmt)."; the async vision document's status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Mixing sync and async code is tricky and it's not always obvious how to do it".
 - Since: Announcing Rust 1.75.0 (https://blog.rust-lang.org/2023/12/28/Rust-1.75.0/): "Rust 1.75 supports use of async fn and -> impl Trait in traits."; the 2025 results name "the very popular let chains and async closures features, which were stabilized last year".
-- Kurz: REPEATED in part: no `async` is written. Section 6: "There is no `async`/`await`. Every call looks synchronous; the runtime parks the actor while it waits." The colour does not vanish, it moves into the compiler: a function that can wait becomes a state machine (section 6, assumed), and a function that takes the C calling convention may not wait: "a wait for a reply inside it, or inside a function it calls that can wait, which section 6 makes a state machine, is a compile error" (section 2, decided).
+- Kurz: REPEATED in part: the colour moves into the compiler, where a function that takes the C calling convention may not wait (section 2); no `async` is written. Section 6: "There is no `async`/`await`. Every call looks synchronous; the runtime parks the actor while it waits." The colour does not vanish: a function that can wait becomes a state machine (section 6, assumed), and a function that takes the C calling convention may not wait: "a wait for a reply inside it, or inside a function it calls that can wait, which section 6 makes a state machine, is a compile error" (section 2, decided).
 
 ## 5. Debugging support is weak
 
 - Evidence: 2024 State of Rust Survey Results (https://blog.rust-lang.org/2025/02/13/2024-State-Of-Rust-Survey-results/): "Other challenges included subpar support for debugging Rust and high disk usage of Rust compiler artifacts."; 2025 State of Rust Survey Results (https://blog.rust-lang.org/2026/03/02/2025-State-Of-Rust-Survey-results/): "The debugging story slipped from 2nd to 4th place (~2pp)."; the async status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Stacktraces are full of gobbly gook and hard to read."
-- Since: The 2025 results post: "We just started a survey to learn more about it!"
+- Since: The 2025 results post (2026-03-02): "We just started a survey to learn more about it!"
 - Kurz: answered: "Variables in test builds", section 2 of the record. Before the answers: OPEN.
 
 ## 6. The editor is slow on large projects
@@ -80,7 +80,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 11. The orphan rule blocks glue between two crates
 
 - Evidence: Rust project goals, "Experiment with relaxing the Orphan Rule" (https://github.com/rust-lang/rust-project-goals/blob/main/src/2024h2/Relaxing-the-Orphan-Rule.md): "it prevents providing a third-party library that integrates two other libraries with each other, and instead requires convincing the author of one of the two libraries to add (optional) support for the other, or requires using a newtype wrapper."; the async status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Some of the problems are due to the design of Rust itself. The coherence rules in particular."
-- Since: The goal's page gives its status as "Not accepted".
+- Since: The goal's page gives its status as "Not accepted" on 2026-10-30.
 - Kurz: answered: "Any package + check" and "Rust's impl block", section 4 of the record: any package declares the glue with an `impl` block, and the build refuses two declarations of one pair. Before the answers: REPEATED.
 
 ## 12. `Pin` and self-referential structs
@@ -126,7 +126,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 20. Macros are hard to debug and run unchecked code in the build
 
 - Evidence: Rust compiler performance survey 2025 results (https://blog.rust-lang.org/2025/09/10/rust-compiler-performance-survey-2025-results/): "For example, expansion of derive proc macros is not currently cached, although work is underway to change that."; Procedural macros, the Rust Reference (https://doc.rust-lang.org/reference/procedural-macros.html): "Procedural macros run during compilation, and thus have the same resources that the compiler has." and "Endless loops are not caught by the compiler which hangs the compiler."
-- Kurz: AVOIDED. Section 9 sets the rules of a keyword: "The pattern is data the editor reads without running code." (rule 1), "The output is plain Kurz and viewable. Errors point at the developer's source, not at the expansion." (rule 4), and "Keyword code cannot read files, network or clock." (rule 5).
+- Kurz: AVOIDED for I/O in the build and for errors in the expansion. Section 9 sets the rules of a keyword: "The pattern is data the editor reads without running code." (rule 1), "The output is plain Kurz and viewable. Errors point at the developer's source, not at the expansion." (rule 4), and "Keyword code cannot read files, network or clock." (rule 5). An expansion is recomputed only where an edit touched it ("Recompute what changed", section 2). REPEATED in part: keyword code that loops forever hangs the build, which no rule of section 9 bounds.
 
 ## 21. Trait bounds sprawl through generic code
 

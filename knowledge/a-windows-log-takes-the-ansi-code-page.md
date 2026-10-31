@@ -14,7 +14,7 @@ raised by `print(output[-6000:])` in `tools/compiler_gate.py`, the line that pri
 red test run. The gate had judged the run red and was about to say why. The output held xunit's
 message for two collections that differ, which marks the place of the difference with an arrow,
 U+2193. The job runs the gate with its output redirected to the runner's log, a pipe, and Python on
-Windows writes a pipe or a file in the system locale's encoding, the ANSI code page, not the
+Windows (3.12.10 in that run, the image's default, as the path of its traceback names) writes a pipe or a file in the system locale's encoding, the ANSI code page, not the
 console's: "Non-character devices such as disk files and pipes use the system locale encoding
 (i.e. the ANSI codepage)" (the Python 3.12 documentation of `sys.stdout`, read on 2026-10-30). On
 the runner that is cp1252, which has no arrow. So `chcp 65001`, which sets the console's code page,
