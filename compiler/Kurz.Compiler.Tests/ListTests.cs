@@ -1569,8 +1569,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // a list and a map in a field, written through a path from a `mut` variable (M4, M5, M9) by each `mut` member, an item and an entry
     // written, `Add`, `Clear` and `Remove`: beside a copy taken before (M3), in a `mut` parameter, after a value that replaced the variable
-    // (M4), nested, in a data type that holds itself, whose block another variable holds, grown past its first block, and in a nullable
-    // field known not null (N3), of a plain value and of a block
+    // (M4), nested, in a data type that holds itself, whose block another variable holds, with a key `Remove` reads from that block,
+    // grown past its first block, and in a nullable field known not null (N3), of a plain value and of a block
     private const string Fields = """
         data Store(List<string> Names, Map<string, string> Etags, int Hits)
         data Shelf(Store Main, string Label)
@@ -1632,6 +1632,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(n.Counts.Remove("c") ?? 0)
         print(n.Counts)
         print(old.Counts)
+        n.Counts[n.Name] = 3
+        named = n
+        print(n.Counts.Remove(n.Name) ?? 0)
+        print(n.Counts)
+        print(named.Counts)
         mut i = 0
         while i < 40 {
             s.Names.Add("n{i}")
@@ -1702,6 +1707,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "1", // a `Remove`
         "[]",
         "[c: 1]",
+        "3", // a `Remove` whose key is read from the block the path copies, which the other variable keeps
+        "[]",
+        "[a: 3]",
         "40", // grown past the first block
         "v39",
         "after",

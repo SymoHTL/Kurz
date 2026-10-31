@@ -2411,7 +2411,8 @@ pub long Accept(int fd) {
 // The kind of a failure of the calls above: the kind Rust 1.82's `decode_error_kind` gives the error
 // number on Linux, each abbreviation written out, `AddrInUse` as `AddressInUse`, `Other` for a number
 // it gives no kind, `InvalidData` for a name that is not UTF-8 (S1), `InvalidInput` for an address that
-// is no host and port or gives no address, and `NotFound` for a lookup that failed (S9).
+// is no host and port or gives no address, `NotFound` for a lookup that failed with no error of the system,
+// and `Other` for one that failed with `EAI_AGAIN` or `EAI_FAIL`, -4099, by the arm of a number it gives no kind (S9).
 pub IoKind ErrorKind(long failure) => match -failure {
     1 => IoKind.PermissionDenied
     2 => IoKind.NotFound

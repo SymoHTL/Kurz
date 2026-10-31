@@ -106,9 +106,10 @@ public sealed partial class Checker
                             break;
                         }
 
-                        // N1 (the owner, 2026-10-30, "Allow, as C#"): a `null` arm over a subject whose type has no `null` is an arm no value
-                        // reaches, with no diagnostic, as C# compiles `case null` on a `string`; a second one is `unreachable-arm`, as on a `T?`
-                        if (Unwrap(vp.Value) is NullLiteral && !cases.Any(c => c is NullType or PointerType or TypeParameterType))
+                        // N1 (the owner, 2026-10-30, "Allow, as C#", a second answer): a `null` arm over a subject whose type has no `null` is an
+                        // arm no value reaches, with no diagnostic, as C# compiles `case null` on a `string`; a second one is `unreachable-arm`, as
+                        // on a `T?` (section 4, assumed: the default the answers' product pass took)
+                        if (Unwrap(vp.Value) is NullLiteral && Types.NullArmReachesNothing(cases))
                         {
                             RecordThrough(vp.Value, new Typed(Types.Null, new NullConstant()));
                             if (nullNamed)

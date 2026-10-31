@@ -64,9 +64,10 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_nullable_function_value_is_its_pair_and_a_nullable_union_is_laid_out_as_its_union()
     {
-        // N1 (section 4, the owner, 2026-10-30, "Nullable form, as Option"): the `null` of a function value is the pair whose code
-        // address is 0, so a `((int) => int)?` takes the function value's 16 bytes; a union's nullable form keeps each case's number in
-        // its tag, so where the tags have one width the two are laid out alike
+        // N1 (section 4, the owner, 2026-10-30, "Nullable form, as Option", whose cost names a niche in a function value): the `null` of a
+        // function value is the pair whose code address is 0 (section 4, assumed: that address as the niche, as Rust's), so a
+        // `((int) => int)?` takes the function value's 16 bytes; a union's nullable form keeps each case's number in its tag, so where the
+        // tags have one width the two are laid out alike, the tag, then room for the string's 16 bytes
         var layout = new Layout(new IrModule());
         var function = Types.Nullable(new Semantics.FunctionType([Types.Int], Types.Int));
         Assert.Equal("zeroinitializer", layout.Niche(function));
@@ -74,7 +75,8 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal((16, 8), layout.Measure(function));
         var union = new Semantics.UnionType([Types.Int, Types.String]);
         Assert.Null(layout.Niche(Types.Nullable(union)));
-        Assert.Equal(layout.Ir(union), layout.Ir(Types.Nullable(union)));
+        Assert.Equal("{ i8, [2 x i64] }", layout.Ir(union));
+        Assert.Equal("{ i8, [2 x i64] }", layout.Ir(Types.Nullable(union)));
     }
 
     [Fact]

@@ -469,6 +469,8 @@ Case: [null/nullable-union.kz](../corpus/null/nullable-union.kz)
 
 Case: [null/nullable-function.kz](../corpus/null/nullable-function.kz)
 
+Case: [values/map-function-value.kz](../corpus/values/map-function-value.kz)
+
 ### N4 (decided, §4) `??`
 
 `a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#. `??` on a value whose type is

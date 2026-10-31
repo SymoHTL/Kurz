@@ -193,6 +193,22 @@ zs.Add(z)
 print(ys == zs)
 ```
 
+Case: [values/list-union-equality.kz](../corpus/values/list-union-equality.kz)
+```kurz
+// two lists of union items compare by their counts and their items, each pair by its case, then its value (M9)
+mut xs = List<int | string>()
+xs.Add(1)
+xs.Add("a")
+mut ys = List<int | string>()
+ys.Add(1)
+ys.Add("a")
+mut zs = List<int | string>()
+zs.Add(1)
+zs.Add(1)
+print(xs == ys)
+print(xs == zs)
+```
+
 Case: [data/equality-nested-generic.kz](../corpus/data/equality-nested-generic.kz)
 ```kurz
 data Wrap<T>(T Value)

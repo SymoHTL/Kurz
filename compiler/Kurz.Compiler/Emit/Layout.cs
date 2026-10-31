@@ -165,8 +165,8 @@ internal sealed class Layout(IrModule module)
     /// address 0, and a list's the address 1, since a list without items is the address 0; a C function's is the address 0, which no
     /// function has, as Rust lays out <c>Option&lt;extern "C" fn()&gt;</c> (R17); a function value's is the pair of no code and no
     /// environment, the address 0 in its code, which no function value has, as Rust lays out <c>Option&lt;fn()&gt;</c> (section 4, the
-    /// owner, 2026-10-30, "Nullable form, as Option": "a <c>null</c> niche in a function value"). Null for every other union, which keeps
-    /// its tag.
+    /// owner, 2026-10-30, "Nullable form, as Option", whose cost names "a <c>null</c> niche in a function value"; that the niche is the
+    /// code address 0 is the record's assumption there, as Rust's). Null for every other union, which keeps its tag.
     /// </summary>
     public string? Niche(UnionType union) => Types.NonNull(union) switch
     {

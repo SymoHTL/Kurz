@@ -16,9 +16,9 @@ namespace Kurz.Compiler.Tests;
 /// opened close-on-exec (S2, S8); a directory that exists is created again without an error, and one under a file is not (S8); the text
 /// of an error without a path (S1); a socket is opened close-on-exec, a listener reuses its address, an address is read at its last
 /// colon, a literal of IPv6 binds where the machine has its loopback, and a connection <c>Accept</c> gave names its listener's address
-/// (S9), while the error of the system a lookup names, and the kind <c>Other</c> of a lookup that fails with <c>EAI_AGAIN</c> or
-/// <c>EAI_FAIL</c>, are held by no test, since nothing makes <c>getaddrinfo</c> fail so on demand; and a
-/// build for Windows says <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
+/// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c> is the kind <c>Other</c>, through a runtime whose lookup gives
+/// that result, while the error of the system a lookup names is held by no test, since nothing makes <c>getaddrinfo</c> fail so on
+/// demand; and a build for Windows says <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
 /// the runtime of this machine and under the fenced allocator of <see cref="ListTests.Fenced"/>, where no other runtime is named; on
 /// Windows each is held to the build's refusal instead.
 /// </summary>
@@ -457,6 +457,16 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(text, "socket-addresses", ["bound", "bound", "bound", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "NotFound 0", "InvalidInput 0"]);
+
+        // a lookup that fails with `EAI_AGAIN` (-3), a failure the resolver calls temporary, or `EAI_FAIL` (-4), one of the name server,
+        // which no name server gives on demand, through a runtime whose lookup gives that result: `Other`, with the number 0 (S9)
+        const string lookup = "int looked = getaddrinfo(text, null, Ptr<void>(held + 64), Ptr<void>(held + 112))";
+        const string failed = "match TcpListener.Bind(\"name.invalid:0\") {\n    TcpListener => print(\"bound\")\n    IoError e => print(\"{e.Kind} {e.Code}\")\n}\n";
+        foreach (var (result, name) in new[] { ("-3", "again"), ("-4", "fail") })
+        {
+            var failing = ListTests.Edited(("runtime/linux/linux.kz", lookup, $"int looked = {result}"));
+            Ran(failed, $"socket-lookup-{name}", ["Other 0"], runtimes: [failing]);
+        }
     }
 
     /// <summary>
