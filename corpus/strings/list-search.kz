@@ -11,7 +11,8 @@
 // a request's head ends at the first empty line: 14 bytes of the request line, its line break, 7 of the header
 b = "GET / HTTP/1.1\r\nHost: a\r\n\r\nbody".Bytes
 print(b.IndexOf("\r\n\r\n".Bytes))
-print(b.IndexOf(13))
+// `IndexOf` takes an item or a run, so a literal keeps its own type, `int`, and `byte(13)` is the item (F14)
+print(b.IndexOf(byte(13)))
 print(b.IndexOf("xyz".Bytes))
 xs = [1, 2, 3, 2, 3]
 print(xs.IndexOf([2, 3]))
