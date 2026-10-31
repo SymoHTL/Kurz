@@ -164,6 +164,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int List() => 1\nxs = List<int>(\"a\")\nprint(xs.Count)")); // M9
         Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int Map() => 1\nm = Map<int, int>(1)\nprint(m.Count)")); // M9
         Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int Bytes() => 1\nb = Bytes(1, 2)\nprint(b.Count)")); // M9
+        Assert.Equal([(ErrorIds.Redeclared, 5), (ErrorIds.TypeMismatch, 7)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nint abs(int n) => n\nraw {\n    print(abs(\"a\"))\n}", grants: "raw native")); // the C call's argument (R16)
     }
 
     [Fact]
