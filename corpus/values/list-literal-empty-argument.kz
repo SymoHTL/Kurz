@@ -1,0 +1,5 @@
+// expect: error cannot-infer at 5
+// rules: M11, T27
+
+int Take<T>(List<T> xs) => xs.Count
+print(Take([]))

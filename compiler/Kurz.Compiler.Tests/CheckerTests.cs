@@ -152,7 +152,7 @@ public sealed class CheckerTests
     [Fact]
     public void Args_given_a_value_among_the_top_level_statements_is_redeclared()
     {
-        // S13 with V8: the checker's reading of the question S13 and section 14 of the record hold open, `assign-immutable` under V8 the
+        // S13 with V9: the checker's reading of the question S13 and section 14 of the record hold open, `assign-immutable` under V8 the
         // other; no corpus case stands on it
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("args = [\"a\"]\nprint(args)"));
     }
