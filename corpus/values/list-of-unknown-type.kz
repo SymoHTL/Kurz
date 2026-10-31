@@ -1,0 +1,6 @@
+// expect: error unknown-name at 5
+// rules: E1
+
+// `Nope` names no type, and `List<T>()` takes no argument: the unknown type is reported, and nothing more
+xs = List<Nope>(1)
+print(xs)

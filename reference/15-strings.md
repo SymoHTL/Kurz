@@ -261,7 +261,8 @@ as Rust's `sort`, `sort_by_key` and `sort_unstable`. Each changes the list and t
 `mut` variable, as `Add` does (M5) (§12, the owner, 2026-10-31, "Same + SortUnstable"). A list of
 `double` or `float` values sorts as C#'s `double.CompareTo` orders them: NaN first, `-0` equal to `0`,
 so that the stable sort keeps the order of `-0` and `0` (§12, the owner, 2026-10-31, "C# CompareTo").
-A buffer the system refuses raises `allocation-failed`, as a list's growth does (M9) *(assumed, §12)*.
+A buffer the system refuses, the keys `SortBy` keeps among them, raises `allocation-failed`, as a
+list's growth does (M9) *(assumed, §12)*.
 `SortBy` calls its key once for each item and keeps the keys beside the list while it sorts, as C#'s
 `OrderBy` and Rust's `sort_by_cached_key` (§12, the owner, 2026-10-31, "Once per item"), in the order
 of the list *(assumed, §12)*. A sort on an item type or a key type `<` does not order is

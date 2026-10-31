@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 5
+// rules: T18
+
+// `<` orders no `bool`, as in C#
+print(true < false)

@@ -22,8 +22,8 @@ expects it (V12).
 | `argument-mismatch` | D11, F13 | a call with an argument whose name no parameter has, two arguments for one parameter, or none for a parameter without a default; a call of a name that has more than one function and fits none of them, at the call (F13) |
 | `enum-number` | D20 | an `enum` that numbers two values alike or only some of its values, or with a number that is not a constant expression, and `.Number`, `From`, `<`, `<=`, `>` and `>=` on one that numbers none |
 | `flags-number` | D19 | a flags name whose number is not one bit of its own, more names than the `int` has bits, or a name `None` |
-| `unknown-name` | V10, F16, S13 | a name that is not visible at this place, a top-level variable read inside a top-level function included, and `args` there, while a lambda among the top-level statements sees it (S13) |
-| `type-mismatch` | T1, T13, T19, N4, N5, N6, C3, O4, K5, C8, D9, T8, R17, D20, M9, C6, D3, M11, H6, X8 | a value of one type where another type is required, `??`, `?.` or `?[` on a value whose type is not nullable (N4, N5), a written union type that lists only some of a call's cases (O4), a union where one is required whose first case its first case does not go to, or where one of its other cases goes to none of the cases after the first, or, being none of them, to two of them (D9, the case of two fits an assumption there), a value that is no case of a union and would widen into two of its cases, a literal among them by its own type where the union has two or more number cases (T8), or derive from two of them (D9), an arithmetic operator on two class instances (K5), a range end that is no integer (C8), the number of an `enum` value whose type is no integer (D20), a map's key of a type `==` does not take, a map among them (M9), two names in a `for` loop over a list or a range (C6, a proposed reading there), and `==` on two lists whose items `==` does not take (M9), on a `data` value that holds a map, a function value, a file, a socket (D3) or a hasher (H6), or on two hashers (H6), and a sort of a list whose item type or key type `<` does not order (X8) |
+| `unknown-name` | V10, F16, S13, E1 | a name that is not visible at this place, a top-level variable read inside a top-level function included, and `args` there, while a lambda among the top-level statements sees it (S13); a type argument that no declaration names, before the error of a call that does not take its arguments, `List<Nope>(1)` (E1) |
+| `type-mismatch` | T1, T13, T19, N4, N5, N6, C3, O4, K5, C8, D9, T8, R17, D20, M9, C6, D3, M11, H6, X8, T18 | a value of one type where another type is required, `??`, `?.` or `?[` on a value whose type is not nullable (N4, N5), a written union type that lists only some of a call's cases (O4), a union where one is required whose first case its first case does not go to, or where one of its other cases goes to none of the cases after the first, or, being none of them, to two of them (D9, the case of two fits an assumption there), a value that is no case of a union and would widen into two of its cases, a literal among them by its own type where the union has two or more number cases (T8), or derive from two of them (D9), an arithmetic operator on two class instances (K5), a range end that is no integer (C8), the number of an `enum` value whose type is no integer (D20), a map's key of a type `==` does not take, a map among them (M9), two names in a `for` loop over a list or a range (C6, a proposed reading there), and `==` on two lists whose items `==` does not take (M9), on a `data` value that holds a map, a function value, a file, a socket (D3) or a hasher (H6), or on two hashers (H6), and a sort of a list whose item type or key type `<` does not order (X8), as an operator on two values it does not take, `true < false` among them, is (T18) |
 | `missing-return` | F3 | a function with a result whose end can be reached without a `return`, or a bare `return` in one |
 | `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance, or an interpolation of one, whose `Text()` is not `pub`, from outside its class (A9); the same inside the class is A15's reading |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
@@ -130,7 +130,9 @@ chosen, its error line naming the file and the line that a throw or a check of t
 carries, with nothing below it, and being the fixed line above for a raise that carries none (§6,
 assumptions there); the error line of `allocation-failed` names the size asked for and no place (O11;
 §6, the owner, 2026-10-23); the error line of `random-failed` is `error: random-failed`, with no place
-(M9; §4, assumed); the error line of every other id ends with its line, or with the note in its place (§6, decided there).
+(M9; §4, assumed); the error line of `not-char-boundary` ends with a colon, and the position of the cut stands on the line
+below it, as the text of a `throw` does (X10; §12, the owner, 2026-10-31, "Below, as throw text", the colon assumed); the
+error line of every other id ends with its line, or with the note in its place (§6, decided there).
 
 | id | rules | meaning |
 |---|---|---|
@@ -163,7 +165,15 @@ the file, E4 names the line. A call with a type argument that no declaration nam
 that does not fit, `List<Nope>(1)`, reports `unknown-name` at the type and nothing more (§8, the
 owner, 2026-10-31, "unknown-name first").
 
-No case: every corpus case that expects an error shows it.
+Every corpus case that expects an error shows the rule; the case below shows the order of two errors
+in one call.
+
+Case: [values/list-of-unknown-type.kz](../corpus/values/list-of-unknown-type.kz)
+```kurz
+// `Nope` names no type, and `List<T>()` takes no argument: the unknown type is reported, and nothing more
+xs = List<Nope>(1)
+print(xs)
+```
 
 ### E2 (decided, §8) The ids
 
