@@ -1779,7 +1779,9 @@ public sealed partial class Checker
 
         if (IsDeclaredName(a.Name))
         {
+            // E1: the declaration is the one error, and a read of the name after it reports nothing more, as F16's branch above
             Report(ErrorIds.Redeclared, a.Line, $"`{a.Name}` is visible already (V9)");
+            DeclareUnreadable(a.Name, VariableKind.Local, a.Line, a);
             CheckExpression(a.Value, null);
             return;
         }

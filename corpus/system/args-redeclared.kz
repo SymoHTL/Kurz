@@ -1,5 +1,5 @@
 // expect: error redeclared at 4
 // rules: S13
 
-args = 1
-print(args)
+List<string> args = ["a"]
+print(args.Count)

@@ -1,0 +1,5 @@
+// expect: error redeclared at 4
+// rules: S13
+
+f = (int args) => args + 1
+print(f(1))
