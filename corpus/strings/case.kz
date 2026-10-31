@@ -1,6 +1,7 @@
 // expect: output
 // | STRASSE
 // | σας
+// | ὀδυσσεύς
 // | true
 // | false
 // | HTTP/1.1 äB
@@ -9,6 +10,7 @@
 
 print("straße".ToUpper())
 print("ΣΑΣ".ToLower())
+print("ὈΔΥΣΣΕΎΣ".ToLower())
 print("\u212A".ToLower() == "k")
 print("\u212A".ToLowerAscii() == "k")
 print("http/1.1 äb".ToUpperAscii())

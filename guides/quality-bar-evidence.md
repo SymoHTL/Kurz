@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-24
-digest: 6459b9c2afaf27073cc7c9845b51a0f969775ca96c794abb22445979178a910e
+generated: 2026-10-31
+digest: 72345fccbbef52eadaa73b6b1e516bbcbdc4bc789d88666c24cced18e8f5558e
 ttl_days: 60
 metadata:
   type: reference
@@ -41,6 +41,7 @@ defined in its docstring.
 | `knowledge` | every run | an INDEX link to a missing file; an entry without an INDEX line, a hook or frontmatter; a store file named in an entry, in CLAUDE.md or in a skill that does not exist; a link in a store file that reaches no entry or file or leaves the repository; a nested entry; a LIVING entry without diagram or update triggers; expired or future-dated numbers in a guide; a generated block that is empty or is not what the page's digest says; fewer entries or living diagrams than their floors |
 | `reference` | every run | a rule of the reference without id, status or the record section it cites; a decided, assumed or proposed rule with neither a case nor a reason; a case on an open rule; a sample that differs from its corpus file; a code block that is neither a case sample nor marked text, or that is never closed, and a fence the lint would not read; a corpus header that cannot be read or names an unknown rule; an error id the error table does not list, or lists for other rules; an error-table row that does not read as one, or a row that reads as one outside an error table; a design record, a chapter or a corpus file that cannot be read, named with what went unchecked; fewer rules or cases than the floors |
 | `compiler-tests` | every run | the compiler under compiler/ does not build, or a unit test fails; no test summary was printed, fewer tests passed than the floor, a test was skipped, or the test command exited non-zero with no failed test; the restore is not the one the lock files pin (locked mode) or the SDK not the one global.json pins, which the command reads from inside compiler/; compiler/NuGet.config is missing, is not well-formed XML, does not open its package sources with a clear or maps no package to a source; the dotnet command is missing or ran out of time; `kurz --version`, which it prints, refused the clang it found or found none, or named no clang release |
+| `unicode-tables` | every run | compiler/Kurz.Compiler/Emit/CaseTables.cs is not what the Unicode Character Database of the version tools/unicode_tables.py pins gives; a file of the database whose SHA-256 is not the pinned one; a table with fewer entries than its floor; PARTLY where a file cannot be fetched, since nothing was compared |
 | `ci-config` | every run | a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; a job beside services, or in a container but the gates job in the repository's image named by its digest, with no SDK step of its own; the credential anywhere but the env of the job's last step; a gates job that can be skipped, a step with an `if` or one that may fail quietly; a path filter, a filter on pull_request or a push trigger not limited to main; a wider token; a key twice in one mapping; an expression inside a run line; a review job whose `if`, checkout or concurrency is not the pinned one; the compiler job on another label than its versioned Windows one, an SDK step that does not take its version from compiler/global.json, an LLVM install that is not the pinned script, or of another major than the compiler pins, or with its archive's cache missing or keyed by another release; the image workflow's triggers, token, checkout or publish step; a base of ci/Dockerfile not named by its digest, an SDK other than global.json's, an LLVM major other than the compiler's, or a download it uses unchecked; a workflow without facts |
 | `merge-checks` | every run | the rules active on main differ from tools/ruleset.json or carry a parameter that file does not name, the ruleset is not active, it has bypass actors, or auto-merge is allowed; PARTLY where the token cannot read the last two |
 | `pr-title` | pull requests | a workflow-skip literal, a credential-shaped or machine-bound string or a conflict marker in the title, the description or a commit message of the branch: each of them can become the squash commit on main |
@@ -57,19 +58,20 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:self-tests -->
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
-| `tools/compiler_gate.py` | 29 | 29 |
+| `tools/compiler_gate.py` | 31 | 32 |
 | `tools/gates.py` | 33 | 23 |
 | `tools/kit.py` | 26 | 24 |
 | `tools/lint_ci.py` | 158 | 153 |
-| `tools/lint_knowledge.py` | 91 | 74 |
+| `tools/lint_knowledge.py` | 120 | 104 |
 | `tools/lint_reference.py` | 86 | 90 |
 | `tools/merge_pr.py` | 154 | 142 |
-| `tools/pr_gates.py` | 117 | 124 |
+| `tools/pr_gates.py` | 145 | 158 |
 | `tools/quality_evidence.py` | 40 | 45 |
 | `tools/red_proof.py` | 35 | 34 |
-| `tools/review/review.py` | 276 | 256 |
+| `tools/review/review.py` | 294 | 274 |
 | `tools/tree_gate.py` | 133 | 109 |
-| **total** | 1178 | 1103 |
+| `tools/unicode_tables.py` | 26 | 12 |
+| **total** | 1281 | 1200 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -77,15 +79,15 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 39 |
+| Entries in INDEX.md | 54 |
 | tagged (untagged) | 2 |
-| tagged HARD | 15 |
+| tagged HARD | 17 |
 | tagged LIVING | 4 |
-| tagged POSTMORTEM | 5 |
-| tagged RECIPE | 3 |
-| tagged TRAP | 15 |
+| tagged POSTMORTEM | 7 |
+| tagged RECIPE | 6 |
+| tagged TRAP | 25 |
 | Review rule sections | 12 |
-| Review rules | 69 |
+| Review rules | 71 |
 <!-- /generated:store -->
 
 ## The design record
@@ -102,8 +104,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 136 |
-| Bullets of the Open section | 12 |
+| Occurrences of the marker *(assumed)* | 240 |
+| Bullets of the Open section | 49 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -115,14 +117,14 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 190 |
-| of them decided | 150 |
-| of them assumed | 40 |
+| Rules in the reference | 230 |
+| of them decided | 192 |
+| of them assumed | 38 |
 | of them proposed | 0 |
 | of them open | 0 |
-| Corpus cases, none of them run | 406 |
-| Compile-error ids | 60 |
-| Run-time error ids | 8 |
+| Corpus cases, none of them run | 623 |
+| Compile-error ids | 63 |
+| Run-time error ids | 10 |
 <!-- /generated:reference -->
 
 ## The forge
@@ -141,11 +143,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 34 |
-| Pull requests merged | 32 |
-| Merged over red, with a recorded waiver | 11 |
-| Review findings posted: high | 100 |
-| Review findings posted: medium | 1477 |
-| Review findings posted: low | 1790 |
+| Pull requests opened by a writer, or merged | 104 |
+| Pull requests merged | 100 |
+| Merged over red, with a recorded waiver | 24 |
+| Review findings posted: high | 167 |
+| Review findings posted: medium | 2423 |
+| Review findings posted: low | 2712 |
 | Open HAZARD issues | 17 |
 <!-- /generated:forge -->

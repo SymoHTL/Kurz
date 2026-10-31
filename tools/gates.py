@@ -59,6 +59,10 @@ GATES = [
      "compiler/NuGet.config is missing, is not well-formed XML, does not open its package sources with a clear or maps no "
      "package to a source; the dotnet command is missing or ran out of time; `kurz --version`, which it prints, refused the "
      "clang it found or found none, or named no clang release"),
+    ("unicode-tables", ["tools/unicode_tables.py", "--check"], "always",
+     "compiler/Kurz.Compiler/Emit/CaseTables.cs is not what the Unicode Character Database of the version tools/unicode_tables.py "
+     "pins gives; a file of the database whose SHA-256 is not the pinned one; a table with fewer entries than its floor; PARTLY "
+     "where a file cannot be fetched, since nothing was compared"),
     ("ci-config", ["tools/lint_ci.py"], "always",
      "a workflow fact that changed: an action not pinned by commit SHA, another runner label, an unpinned CLI, pip without hashes; "
      "a job beside services, or in a container but the gates job in the repository's image named by its digest, with no SDK "
