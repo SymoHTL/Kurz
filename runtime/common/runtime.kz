@@ -437,6 +437,37 @@ pub bool Same(string first, string second) {
     return same
 }
 
+// The order of two strings, below 0, 0 or above 0: the first byte in which they differ, and where one starts the other, the shorter
+// first, as Rust's `Ord` for `str` compares them; in UTF-8 that is the order of their code points (T32).
+pub int Order(string first, string second) {
+    long a = long(first.Bytes.Count)
+    long b = long(second.Bytes.Count)
+    mut long shared = a
+    if b < a {
+        shared = b
+    }
+
+    mut int order = 0
+    raw {
+        byte* x = first.Pointer
+        byte* y = second.Pointer
+        mut long i = 0
+        while i < shared && order == 0 {
+            order = int(x[i]) - int(y[i])
+            i = i + 1
+        }
+    }
+
+    if order == 0 && a != b {
+        order = 1
+        if a < b {
+            order = -1
+        }
+    }
+
+    return order
+}
+
 // The byte at position `at` of the `count` bytes at `bytes`, and -1 past them.
 long ByteAt(byte* bytes, long count, long at) {
     mut long b = -1

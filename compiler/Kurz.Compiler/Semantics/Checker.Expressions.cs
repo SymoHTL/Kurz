@@ -1338,6 +1338,10 @@ public sealed partial class Checker
 
             ok = true;
         }
+        else if (!equality && left.Type is PrimitiveType { Kind: Primitive.String } && right.Type is PrimitiveType { Kind: Primitive.String })
+        {
+            ok = true; // T32: two strings in the order of their code points
+        }
         else if (equality)
         {
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
@@ -1379,7 +1383,8 @@ public sealed partial class Checker
             (RealConstant l, RealConstant r) => double.IsNaN(l.Value) || double.IsNaN(r.Value) ? b.Operator == TokenKind.NotEqual : Compare(b.Operator, l.Value.CompareTo(r.Value), true),
             (DecimalConstant l, DecimalConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
             (CharConstant l, CharConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
-            (StringConstant l, StringConstant r) => Compare(b.Operator, string.CompareOrdinal(l.Value, r.Value), true),
+            // T32: by their code points, the order of their UTF-8 bytes, where C#'s ordinal order of UTF-16 units puts U+FFFF after U+1F600
+            (StringConstant l, StringConstant r) => Compare(b.Operator, System.Text.Encoding.UTF8.GetBytes(l.Value).AsSpan().SequenceCompareTo(System.Text.Encoding.UTF8.GetBytes(r.Value)), true),
             (BoolConstant l, BoolConstant r) => Compare(b.Operator, l.Value.CompareTo(r.Value), true),
             (EnumConstant l, EnumConstant r) when left.Type is EnumType { Symbol: { Numbered: true } numbered } =>
                 Compare(b.Operator, numbered.Numbers[l.Index].CompareTo(numbered.Numbers[r.Index]), true),

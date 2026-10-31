@@ -570,6 +570,13 @@ public sealed partial class Emitter
             return fn.Value($"icmp {Condition(op, signed: false)} i32 {left}, {right}");
         }
 
+        if (leftType is PrimitiveType { Kind: Primitive.String } && op is not (TokenKind.EqualEqual or TokenKind.NotEqual))
+        {
+            // T32: in the order of their bytes, which in UTF-8 is the order of their code points
+            var order = fn.Value($"call i32 {RuntimeFunction("Order")}(%kz.str {left}, %kz.str {right})");
+            return fn.Value($"icmp {Condition(op, signed: true)} i32 {order}, 0");
+        }
+
         if (Types.IsTime(leftType) && Types.IsTime(rightType))
         {
             return TimeComparison(op, left, leftType, right, rightType);

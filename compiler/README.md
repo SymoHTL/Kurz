@@ -716,8 +716,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code
   with its environment (section 4, the owner, 2026-10-25, "Pair + heap env");
-- `print` and the text of a value in a string's holes (A1, A2, A8, L6), and `==` on strings by
-  their bytes (T18);
+- `print` and the text of a value in a string's holes (A1, A2, A8, L6), `==` on strings by
+  their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
+  the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32);
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
