@@ -62,6 +62,21 @@ public enum CallKind
     /// <summary>A list's <c>Clear</c> (M9).</summary>
     ListClear,
 
+    /// <summary>A list's <c>IndexOf(item)</c> (X9).</summary>
+    ListIndexOf,
+
+    /// <summary>A list's <c>IndexOf(value)</c> of a run of items, a list of its own type (X9).</summary>
+    ListIndexOfRun,
+
+    /// <summary>A list's <c>AddRange(collection)</c> (X9).</summary>
+    ListAddRange,
+
+    /// <summary>A list's <c>Reverse()</c> (X9).</summary>
+    ListReverse,
+
+    /// <summary>A string's <c>Contains</c>, <c>StartsWith</c>, <c>EndsWith</c> or <c>IndexOf</c>, of a <c>string</c> or of a <c>char</c>, which the argument's type names (X1).</summary>
+    StringSearch,
+
     /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>
     MapContainsKey,
 
