@@ -159,6 +159,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.UnknownName, 2)], Errors("int File(int x) => x\nprint(File(nothing))")); // the argument's own defect
         Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.TypeMismatch, 3)], Errors("data User(int Id)\nint User() => 1\nprint(User(\"a\").Id)")); // the data type's construction
         Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.TypeMismatch, 4)], Errors("static mut long total = 0\nlong total() => 1\nraw {\n    print(total())\n}", grants: "raw")); // the state's call (F11)
+        Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.Syntax, 3)], Errors("enum Color { Red }\nint Color() => 1\nprint(Color())")); // the enum's form (D18)
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int print() => 1\nprint()")); // `print`'s one value (A1)
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int List() => 1\nxs = List<int>(\"a\")\nprint(xs.Count)")); // M9
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int Map() => 1\nm = Map<int, int>(1)\nprint(m.Count)")); // M9
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int Bytes() => 1\nb = Bytes(1, 2)\nprint(b.Count)")); // M9
     }
 
     [Fact]
