@@ -2697,7 +2697,25 @@ public sealed class CheckerTests
     {
         Assert.Contains("a `long` where an `int` is required", Assert.Single(Check("long l = 1\nint i = l\nprint(i)").Diagnostics.Items).Message, StringComparison.Ordinal);
         Assert.Contains("an `int` where a `uint` is required", Assert.Single(Check("int i = 1\nuint u = i\nprint(u)").Diagnostics.Items).Message, StringComparison.Ordinal);
+        Assert.Contains("an `Item` where an `int` is required", Assert.Single(Check("data Item(int N)\n\nint i = Item(1)\nprint(i)").Diagnostics.Items).Message, StringComparison.Ordinal);
     }
+
+    // each letter `Types.A` reads: the vowels but `u`, small and capital, take "an"; `u`, the other letters and an empty name "a"
+    [Theory]
+    [InlineData("int", "an `int`")]
+    [InlineData("apple", "an `apple`")]
+    [InlineData("elem", "an `elem`")]
+    [InlineData("object", "an `object`")]
+    [InlineData("IoError", "an `IoError`")]
+    [InlineData("Array", "an `Array`")]
+    [InlineData("Entry", "an `Entry`")]
+    [InlineData("Order", "an `Order`")]
+    [InlineData("uint", "a `uint`")]
+    [InlineData("User", "a `User`")]
+    [InlineData("string", "a `string`")]
+    [InlineData("", "a ``")]
+    public void The_article_is_an_before_a_vowel_letter_but_u(string name, string written) =>
+        Assert.Equal(written, Types.A(name));
 
     // a type's name where a value stands cites the rule of the type, D2, D12 or T10, and E4 for its `syntax` id; D12: a value of the
     // enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not; a row holds the
