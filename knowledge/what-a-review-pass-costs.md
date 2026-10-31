@@ -105,6 +105,13 @@ What follows from it:
   run's first line: a run off the pipeline that names more batches than the plan did is stopped,
   because the go-ahead covered the plan; a run in CI is reported with the count it names.
   Gate: `self-tests` for the plan; the rest is a `judgment step`.
+- A line over 4000 characters is sent in parts (`line_parts` in `review.py`, #128), so a change of
+  one sentence in a long bullet of the record is billed for that sentence, about 1500 characters
+  on each side of it and the bullet's start, not for the whole bullet and the long bullets beside
+  it. The plan counts the batches of what is sent, and its first line says how many characters it
+  left out. The record's diff of 0f524ba (2026-10-31, `tools/review/fixtures/long-line-diff.txt`)
+  is 23993 characters; the batch `--plan` counts for it is 7175, with 16864 characters of its two
+  long lines left out. Gate: `self-tests`.
 - Low findings do not keep a review going: a batch converges when a pass after the first adds
   nothing above low (with `--passes 1`, when its only pass does; the audit note names that limit),
   and lows are collected on the issue labelled `review-lows` instead of threads. They are fixed
