@@ -1,4 +1,4 @@
-// expect: throws index-out-of-range at 6
+// expect: throws index-out-of-range at 7
 // | bc
 // rules: X2
 

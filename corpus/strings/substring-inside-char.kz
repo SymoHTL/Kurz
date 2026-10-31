@@ -1,4 +1,4 @@
-// expect: throws not-char-boundary at 6
+// expect: throws not-char-boundary at 7
 // | h
 // rules: X2
 

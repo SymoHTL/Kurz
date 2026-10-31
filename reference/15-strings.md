@@ -261,6 +261,13 @@ ys.Reverse()
 print(ys)
 ```
 
+Case: [strings/add-range-without-mut.kz](../corpus/strings/add-range-without-mut.kz)
+```kurz
+xs = [1]
+xs.AddRange([2])
+print(xs)
+```
+
 ### X10 (open) Where the error line of `not-char-boundary` names the position
 
 The record leaves open (§14) whether the position of the cut stands after the error line's place,

@@ -224,7 +224,7 @@ bytes (X2), and the text of the error is the words of its kind in lower case and
 `invalid digit at 3` (§12, the owner, 2026-10-31, "Without input"). The digits are read in upper and
 lower case, with no `0x` and no whitespace, as the `hex` crate's `decode`; a string of an odd length is
 `OddLength`, with `At` its length; and `HexError` and `HexKind` are types every file sees, as
-`ParseError` is (X7) *(assumed, §12: the digits read and the two names, defaults of the question; the
+`ParseError` is (X7), so that a file's own declaration of one is `redeclared` (V9) *(assumed, §12: the digits read and the two names, defaults of the question; the
 odd length, not put to the owner)*.
 
 Case: [hashing/hex-decode.kz](../corpus/hashing/hex-decode.kz)
@@ -240,4 +240,11 @@ Show(Hex.Decode("0001abFF"))
 Show(Hex.Decode("abc"))
 Show(Hex.Decode("0xff"))
 Show(Hex.Decode(""))
+```
+
+Case: [hashing/hex-kind-redeclared.kz](../corpus/hashing/hex-kind-redeclared.kz)
+```kurz
+enum HexKind { Lost }
+
+print(1)
 ```
