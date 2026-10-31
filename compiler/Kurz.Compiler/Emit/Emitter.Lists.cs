@@ -736,6 +736,310 @@ public sealed partial class Emitter
     }
 
     /// <summary>
+    /// X9, M5: <c>list.AddRange(collection)</c> on a <c>mut</c> variable or parameter, or on a path of fields from one: the items of
+    /// <c>collection</c> after the list's own, each held once more by the list, as C#'s <c>List.AddRange</c> appends them. The argument is
+    /// read first and held with a count of its own while the list grows, then the list the variable holds as the argument left it, as
+    /// <c>Add</c> reads its item first (M4): so <c>xs.AddRange(xs)</c>, which the checker lets through as it lets <c>Add</c>'s receiver
+    /// stand in its argument (M7), finds the block shared, copies it (M3) and appends the items of the block as it was. Room for all the
+    /// items is made at once, as Rust's <c>Vec::extend_from_slice</c> reserves it (<c>ListReserve</c>), and a block the system refuses
+    /// raises <c>allocation-failed</c> (M9).
+    /// </summary>
+    private string? EmitListAddRange(CallExpression c)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var list = (ListType)TypeOf(member.Target);
+        var argument = c.Arguments[0].Value;
+        string other = null!;
+        InRegion(() => other = Owned(argument));
+        var place = CollectionPlace(member.Target);
+        var add = Helper($"addrange.{Lower.Mangle(list)}", "void", ["ptr", "ptr"], () =>
+        {
+            var size = ItemSize(list.Element);
+            var count = ListCount("%a1");
+            var some = fn.Label("some");
+            var none = fn.Label("none");
+            fn.CondBranch(fn.Value($"icmp sgt i32 {count}, 0"), some, none);
+            fn.Block(none);
+            fn.Return(null);
+            fn.Block(some);
+            var more = fn.Value($"sext i32 {count} to i64");
+            var block = fn.Value("load ptr, ptr %a0");
+            var shared = fn.Value($"call i1 {StdFunction("ListShared")}(ptr {block})");
+            var asked = fn.Alloca("i64", "asked");
+            var room = fn.Value($"call ptr {StdFunction("ListReserve")}(ptr {block}, i64 {more}, i64 {size}, ptr {asked})");
+            Refused(fn.Value($"icmp eq ptr {room}, null"), asked);
+            if (Counted(list.Element))
+            {
+                var copied = fn.Label("copied");
+                var held = fn.Label("held");
+                fn.CondBranch(shared, copied, held);
+                fn.Block(copied);
+                EachItem(room, list.Element, item => Retain(item, list.Element)); // the copy holds the items' blocks too
+                fn.Branch(held);
+                fn.Block(held);
+                EachItem("%a1", list.Element, item => Retain(item, list.Element)); // and the list holds the added ones
+            }
+
+            fn.Emit($"store ptr {room}, ptr %a0");
+            fn.Emit($"call void {StdFunction("ListAppend")}(ptr {room}, ptr {fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a1)")}, i64 {more}, i64 {size})");
+            fn.Return(null);
+        });
+        fn.Emit($"call void {add}(ptr {place}, ptr {other})");
+        Release(other, list);
+        return null;
+    }
+
+    /// <summary>
+    /// X9, M5: <c>list.Reverse()</c>, the items in the reverse order, swapped in place from both ends as Rust's <c>reverse</c> swaps them,
+    /// through the place of the list's variable or of the field a path from one ends at. A list of two items or more in a block other
+    /// values hold is copied first (M3), as <c>Add</c> copies it; a swap moves the items, so no count changes.
+    /// </summary>
+    private string? EmitListReverse(CallExpression c)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var list = (ListType)TypeOf(member.Target);
+        var reverse = Helper($"reverse.{Lower.Mangle(list)}", "void", ["ptr"], () =>
+        {
+            var element = Ir(list.Element);
+            var block = fn.Value("load ptr, ptr %a0");
+            var count = ListCount(block);
+            var some = fn.Label("some");
+            var done = fn.Label("done");
+            fn.CondBranch(fn.Value($"icmp sge i32 {count}, 2"), some, done);
+            fn.Block(some);
+            var copy = fn.Label("copy");
+            var own = fn.Label("own");
+            fn.CondBranch(fn.Value($"call i1 {StdFunction("ListShared")}(ptr {block})"), copy, own);
+            fn.Block(copy);
+            var asked = fn.Alloca("i64", "asked");
+            var copied = fn.Value($"call ptr {StdFunction("ListCopy")}(ptr {block}, i64 {ItemSize(list.Element)}, ptr {asked})"); // which lowers the old block's count
+            Refused(fn.Value($"icmp eq ptr {copied}, null"), asked);
+            if (Counted(list.Element))
+            {
+                EachItem(copied, list.Element, held => Retain(held, list.Element)); // the copy holds the items' blocks too
+            }
+
+            fn.Emit($"store ptr {copied}, ptr %a0");
+            fn.Branch(own);
+            fn.Block(own);
+            var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {fn.Value("load ptr, ptr %a0")})");
+            var low = fn.Alloca("i32", "low");
+            var high = fn.Alloca("i32", "high");
+            fn.Emit($"store i32 0, ptr {low}");
+            fn.Emit($"store i32 {fn.Value($"sub i32 {count}, 1")}, ptr {high}");
+            var check = fn.Label("check");
+            var swap = fn.Label("swap");
+            fn.Branch(check);
+            fn.Block(check);
+            var i = fn.Value($"load i32, ptr {low}");
+            var j = fn.Value($"load i32, ptr {high}");
+            fn.CondBranch(fn.Value($"icmp slt i32 {i}, {j}"), swap, done);
+            fn.Block(swap);
+            var first = fn.Value($"getelementptr {element}, ptr {items}, i64 {fn.Value($"sext i32 {i} to i64")}");
+            var last = fn.Value($"getelementptr {element}, ptr {items}, i64 {fn.Value($"sext i32 {j} to i64")}");
+            var a = fn.Value($"load {element}, ptr {first}");
+            var b = fn.Value($"load {element}, ptr {last}");
+            fn.Emit($"store {element} {b}, ptr {first}");
+            fn.Emit($"store {element} {a}, ptr {last}");
+            fn.Emit($"store i32 {fn.Value($"add i32 {i}, 1")}, ptr {low}");
+            fn.Emit($"store i32 {fn.Value($"sub i32 {j}, 1")}, ptr {high}");
+            fn.Branch(check);
+            fn.Block(done);
+            fn.Return(null);
+        });
+        fn.Emit($"call void {reverse}(ptr {CollectionPlace(member.Target)})");
+        return null;
+    }
+
+    // ---- the searches of a list and of a string (X1, X9) ---------------------------------------------
+
+    /// <summary>
+    /// X9: <c>list.IndexOf(item)</c>, the position of the first item equal to <c>item</c> as <c>==</c> finds two items of a list equal
+    /// (<see cref="ItemEqual"/>), and <c>list.IndexOf(value)</c> of a run of items, the position of the first run equal to the items of
+    /// <c>value</c>, an empty one found at 0: an <c>int?</c>, <c>null</c> where there is none (<see cref="Position"/>). The list is read
+    /// before the argument and held without a count of its own while the argument is made and while the search runs: an argument that
+    /// changes it is the checker's <c>changed-while-held</c> (M7). A list of one-byte items, whose equality is that of their bits, is
+    /// searched by the standard library's <c>Find</c>, as a string is (<see cref="EmitStringSearch"/>), so that a run is found in linear
+    /// time; a run of other items is compared at each position in turn, as Rust compares a slice's <c>windows</c>.
+    /// </summary>
+    private string EmitListIndexOf(CallExpression c, bool run)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var list = (ListType)TypeOf(member.Target);
+        var source = EmitExpression(member.Target);
+        var argument = c.Arguments[0].Value;
+        var value = Convert(EmitExpression(argument), TypeOf(argument), run ? list : list.Element, argument.Line);
+        if (Ir(list.Element) == "i8")
+        {
+            var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {source})");
+            var count = fn.Value($"sext i32 {ListCount(source)} to i64");
+            string needle;
+            string length;
+            if (run)
+            {
+                needle = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {value})");
+                length = fn.Value($"sext i32 {ListCount(value)} to i64");
+            }
+            else
+            {
+                needle = fn.Alloca("i8", "item");
+                fn.Emit($"store i8 {value}, ptr {needle}");
+                length = "1";
+            }
+
+            var found = fn.Value($"call i64 {StdFunction("Find")}(ptr {items}, i64 {count}, ptr {needle}, i64 {length})");
+            return Position(fn.Value($"trunc i64 {found} to i32"));
+        }
+
+        var parameter = run ? "ptr" : Ir(list.Element);
+        var name = Helper($"indexof.{(run ? "run." : "")}{Lower.Mangle(list)}", "i32", ["ptr", parameter], () =>
+        {
+            if (run)
+            {
+                IndexOfRunBody(list, c.Line);
+            }
+            else
+            {
+                IndexOfBody(list, c.Line);
+            }
+        });
+        return Position(fn.Value($"call i32 {name}(ptr {source}, {parameter} {value})"));
+    }
+
+    /// <summary>The helper of <c>IndexOf(item)</c>: the list in <c>%a0</c>, the item in <c>%a1</c>; the position of the first equal item, or -1.</summary>
+    private void IndexOfBody(ListType list, int line)
+    {
+        var element = Ir(list.Element);
+        var count = ListCount("%a0");
+        var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a0)");
+        var counter = fn.Alloca("i32", "item");
+        fn.Emit($"store i32 0, ptr {counter}");
+        var check = fn.Label("check");
+        var item = fn.Label("item");
+        var next = fn.Label("next");
+        var found = fn.Label("found");
+        var none = fn.Label("none");
+        fn.Branch(check);
+        fn.Block(check);
+        var i = fn.Value($"load i32, ptr {counter}");
+        fn.CondBranch(fn.Value($"icmp slt i32 {i}, {count}"), item, none);
+        fn.Block(item);
+        var a = fn.Value($"load {element}, ptr {fn.Value($"getelementptr {element}, ptr {items}, i64 {fn.Value($"sext i32 {i} to i64")}")}");
+        fn.CondBranch(ItemEqual(a, "%a1", list.Element, line), found, next);
+        fn.Block(found);
+        fn.Return($"i32 {i}");
+        fn.Block(next);
+        fn.Emit($"store i32 {fn.Value($"add i32 {i}, 1")}, ptr {counter}");
+        fn.Branch(check);
+        fn.Block(none);
+        fn.Return("i32 -1");
+    }
+
+    /// <summary>The helper of <c>IndexOf(value)</c> of a run: the list in <c>%a0</c>, the run in <c>%a1</c>; the first position at which every item of the run equals the list's, or -1.</summary>
+    private void IndexOfRunBody(ListType list, int line)
+    {
+        var element = Ir(list.Element);
+        var n = ListCount("%a0");
+        var m = ListCount("%a1");
+        var first = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a0)");
+        var second = fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a1)");
+        var fits = fn.Label("fits");
+        var none = fn.Label("none");
+        fn.CondBranch(fn.Value($"icmp sle i32 {m}, {n}"), fits, none);
+        fn.Block(fits);
+        var last = fn.Value($"sub i32 {n}, {m}");
+        var at = fn.Alloca("i32", "at");
+        var offset = fn.Alloca("i32", "offset");
+        fn.Emit($"store i32 0, ptr {at}");
+        var window = fn.Label("window");
+        var start = fn.Label("start");
+        var compare = fn.Label("compare");
+        var item = fn.Label("item");
+        var step = fn.Label("step");
+        var advance = fn.Label("advance");
+        var found = fn.Label("found");
+        fn.Branch(window);
+        fn.Block(window);
+        var position = fn.Value($"load i32, ptr {at}");
+        fn.CondBranch(fn.Value($"icmp sle i32 {position}, {last}"), start, none);
+        fn.Block(start);
+        fn.Emit($"store i32 0, ptr {offset}");
+        fn.Branch(compare);
+        fn.Block(compare);
+        var j = fn.Value($"load i32, ptr {offset}");
+        fn.CondBranch(fn.Value($"icmp slt i32 {j}, {m}"), item, found);
+        fn.Block(item);
+        var a = fn.Value($"load {element}, ptr {fn.Value($"getelementptr {element}, ptr {first}, i64 {fn.Value($"sext i32 {fn.Value($"add i32 {position}, {j}")} to i64")}")}");
+        var b = fn.Value($"load {element}, ptr {fn.Value($"getelementptr {element}, ptr {second}, i64 {fn.Value($"sext i32 {j} to i64")}")}");
+        fn.CondBranch(ItemEqual(a, b, list.Element, line), step, advance);
+        fn.Block(step);
+        fn.Emit($"store i32 {fn.Value($"add i32 {j}, 1")}, ptr {offset}");
+        fn.Branch(compare);
+        fn.Block(advance);
+        fn.Emit($"store i32 {fn.Value($"add i32 {position}, 1")}, ptr {at}");
+        fn.Branch(window);
+        fn.Block(found);
+        fn.Return($"i32 {position}");
+        fn.Block(none);
+        fn.Return("i32 -1");
+    }
+
+    /// <summary>
+    /// X9: whether two items of a list are equal as <c>==</c> finds two items of a list equal (M9): a <c>double</c> or a <c>float</c> by
+    /// IEEE's <c>==</c>, NaN unequal to NaN, and so the items of the lists and the cases of the unions among them, and a <c>data</c> value
+    /// as D3 compares it (<see cref="Equal"/>).
+    /// </summary>
+    private string ItemEqual(string a, string b, KurzType element, int line) =>
+        element is PrimitiveType p && Types.IsFloating(p) ? fn.Value($"fcmp oeq {Ir(p)} {a}, {b}") : Equal(a, b, element, line, ieee: true);
+
+    /// <summary>X1, X9: a position found, an <c>i32</c> that is -1 where none was, as an <c>int?</c>, <c>null</c> for -1, as Rust's <c>find</c> gives <c>None</c> where C#'s gives -1.</summary>
+    private string Position(string found)
+    {
+        var result = Types.Nullable(Types.Int);
+        var none = MakeUnion(result, Types.Null, "zeroinitializer");
+        var some = MakeUnion(result, Types.Int, found);
+        return fn.Value($"select i1 {fn.Value($"icmp slt i32 {found}, 0")}, {Ir(result)} {none}, {Ir(result)} {some}");
+    }
+
+    /// <summary>
+    /// X1: <c>s.Contains(x)</c>, <c>s.StartsWith(x)</c>, <c>s.EndsWith(x)</c> and <c>s.IndexOf(x)</c> of a <c>string</c> or of a <c>char</c>,
+    /// over the string's bytes, ordinal (T32): a <c>char</c> is searched for as its UTF-8 bytes, so that a position found is at the start
+    /// of a code point (X2), and an empty <c>x</c> is found at 0. The string is read before the argument and held without a count of its
+    /// own while the argument is made and while the search runs: an argument that changes it is the checker's <c>changed-while-held</c>
+    /// (M7). The standard library's <c>Find</c> searches, in linear time, and its <c>BytesAt</c> compares the start and the end.
+    /// </summary>
+    private string EmitStringSearch(CallExpression c)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var text = EmitExpression(member.Target);
+        var argument = c.Arguments[0].Value;
+        var value = EmitExpression(argument);
+        var hay = fn.Value($"extractvalue %kz.str {text}, 0");
+        var n = fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {text}, 1")}, 9223372036854775807"); // without the mark of a block
+        string needle;
+        string m;
+        if (TypeOf(argument) is PrimitiveType { Kind: Primitive.Char })
+        {
+            needle = fn.Alloca("[4 x i8]", "char");
+            m = fn.Value($"call i64 {StdFunction("Utf8")}(i32 {value}, ptr {needle})");
+        }
+        else
+        {
+            needle = fn.Value($"extractvalue %kz.str {value}, 0");
+            m = fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {value}, 1")}, 9223372036854775807");
+        }
+
+        if (member.Member is "StartsWith" or "EndsWith")
+        {
+            var at = member.Member == "StartsWith" ? "0" : fn.Value($"sub i64 {n}, {m}");
+            return fn.Value($"call i1 {StdFunction("BytesAt")}(ptr {hay}, i64 {n}, ptr {needle}, i64 {m}, i64 {at})");
+        }
+
+        var found = fn.Value($"call i64 {StdFunction("Find")}(ptr {hay}, i64 {n}, ptr {needle}, i64 {m})");
+        return member.Member == "Contains" ? fn.Value($"icmp sge i64 {found}, 0") : Position(fn.Value($"trunc i64 {found} to i32"));
+    }
+
+    /// <summary>
     /// C6: <c>for x in list</c> runs its block for each item, in order, over the list as it was when the loop started: the loop holds
     /// the list's block, so a write to the variable inside the block copies it first (M3). The name is the item, borrowed from that
     /// block.

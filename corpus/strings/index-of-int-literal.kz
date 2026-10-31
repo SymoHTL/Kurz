@@ -1,0 +1,6 @@
+// expect: error argument-mismatch at 6
+// rules: X9
+
+// `IndexOf` has two forms, so the literal keeps its own type, `int`, which fits neither (F14)
+b = "ab".Bytes
+print(b.IndexOf(97))

@@ -1,0 +1,7 @@
+// expect: output
+// | [1, 2, 1, 2]
+// rules: X9
+
+mut xs = [1, 2]
+xs.AddRange(xs)
+print(xs)

@@ -157,12 +157,10 @@ for any `data Q<T>`, so `qs.Add(Keep(() => qs.Count))`, with a `Keep` that gives
 the error. A field's type is read with the type's arguments in place of its parameters, so a field
 of type `T` holds what the argument for `T` holds, and a map holds one where its key or its value
 type can, a nullable type where the type it makes nullable can, and a class where one of its type
-arguments or a field of it or of a class derived from it can *(assumed, as §4 marks them)*. Whether another `mut` method takes
-`Add`'s exception is open (§14), with two options: the exception for every `mut` method that stores
-what its argument gave before it changes its receiver, as `Add` stores its counted item before the
-list grows, or for `Add` alone. While it is open, the general rule of §4 (the owner, 2026-10-24),
-which opens this paragraph, holds for such a method as for any call that takes its receiver as
-`mut`, with every condition it states. The
+arguments or a field of it or of a class derived from it can *(assumed, as §4 marks them)*. Every `mut`
+method that stores what its argument gave, counted, before it changes its receiver takes `Add`'s
+exception, with the conditions above, so that `xs.AddRange(xs)` appends a copy of the list (X9) (§4,
+the owner, 2026-10-31, "Store-first methods"). The
 expression holds the value of a read made as any other argument of that call without `mut` in front
 of it, before or after the argument after `mut` (a second argument after `mut` that reaches the same
 value is `mut-at-call`, above); as an argument of a call around it given before
