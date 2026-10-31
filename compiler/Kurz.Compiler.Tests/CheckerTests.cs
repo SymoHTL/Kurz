@@ -2840,16 +2840,61 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void The_trims_splits_replaces_joins_and_ascii_cases_of_x3_to_x6_take_their_forms_and_their_types()
+    {
+        // X3 to X6: a string, or a list of strings for `Split`, of a `string` or of a `char` where a member takes either; `string.Join` of a
+        // list of any item type that has a text
+        Assert.Equal("string", TypeOf("s = \" a \"\nt = s.Trim()\nprint(t)", "t"));
+        Assert.Equal("string", TypeOf("s = \"xax\"\nt = s.Trim('x')\nprint(t)", "t"));
+        Assert.Equal("List<string>", TypeOf("s = \"a,b\"\nt = s.Split(',')\nprint(t)", "t"));
+        Assert.Equal("string", TypeOf("s = \"ab\"\nt = s.Replace('a', \"c\")\nprint(t)", "t"));
+        Assert.Equal("string", TypeOf("t = string.Join(\"-\", [1.5, 2.5])\nprint(t)", "t"));
+        Assert.Empty(Errors("s = \" aB \"\nprint(s.TrimStart())\nprint(s.TrimEnd())\nprint(s.TrimAscii())\nprint(s.TrimStartAscii())\nprint(s.TrimEndAscii())\nprint(s.ToLowerAscii())\nprint(s.ToUpperAscii())\nprint(s.Split(\"a\"))\nprint(s.Replace(\"a\", \"b\"))"));
+        Assert.Empty(Errors("data P(int X)\nint? n = null\nprint(string.Join(\", \", [P(1)]))\nprint(string.Join(\", \", [n]))\nprint(string.Join(\", \", [[\"a\"]]))\nprint(string.Join(\", \", List<string>()))"));
+
+        // F13: a call that fits no form of a member of two is `argument-mismatch`, with a line for each form as a declaration would write it
+        var (diagnostics, _) = Check("s = \"ab\"\nprint(s.Split(5))");
+        Assert.Equal(
+            "the call fits none of the forms of `Split` (F13):\n"
+                + "  `List<string> Split(string separator)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `string` is required: a value of another type (T1)\n"
+                + "  `List<string> Split(char separator)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `char` is required: a value of another type (T1)",
+            Assert.Single(diagnostics.Items).Message);
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim(5))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim('a', 'b'))"));
+
+        // X5 names `old` alone a `char` form, so `new` is a `string`, and X4 gives the `char` form to `Trim` alone; a `string` fits
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Replace('a', 'b'))"));
+        Assert.Empty(Errors("s = \"ab\"\nprint(s.Replace('a', \"b\"))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.TrimStart('a'))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToLowerAscii(1))"));
+
+        // X6: one form, `Join<T>(string separator, List<T> values)`, so a separator of another type is its own `type-mismatch` (T1) and
+        // values that are no list give `T` nothing to infer from, `cannot-infer`, as for any generic function (T27); items without a text
+        // are `no-text` (A4, A7)
+        Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("print(string.Join(\", \", 5))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(string.Join(1, [\"a\"]))"));
+        Assert.Equal([(ErrorIds.NoText, 2)], Errors("fs = List<() => int>()\nprint(string.Join(\", \", fs))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("print(string.Join(\", \", []))"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(string.Join<int>(\", \", [1]))"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("s = \"ab\"\nprint(s.Trim<int>())"));
+
+        // M7: an argument that changes the string a member holds, or a string an argument before it holds
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("string G(mut string t) {\n    t = \"c\"\n    return \"a\"\n}\n\nmut s = \"ab\"\nprint(s.Replace(G(mut s), \"x\"))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("string G(mut string t) {\n    t = \"c\"\n    return \"a\"\n}\n\ns = \"ab\"\nmut o = \"a\"\nprint(s.Replace(o, G(mut o)))"));
+
+        // the parameters take C#'s names
+        Assert.Empty(Errors("s = \"a,b\"\nprint(s.Split(separator: \",\"))\nprint(s.Replace(newValue: \"c\", oldValue: \"a\"))\nprint(s.Trim(trimChar: 'a'))\nprint(string.Join(values: [1], separator: \"-\"))"));
+    }
+
+    [Fact]
     public void The_members_of_strings_and_lists_and_the_functions_of_chapter_15_and_H7_are_not_supported_and_a_member_no_rule_names_is_unknown()
     {
-        // X2 to X8 and H7: each call is `not supported` with its rule, and no error stands beside it (E1); the arguments are read, so the
-        // variables they use count as used
+        // X2, X3's change of case by Unicode's mapping, X7, X8 and H7: each call is `not supported` with its rule, and no error stands
+        // beside it (E1); the arguments are read, so the variables they use count as used
         var members = new (string Receiver, string Member, string Rule)[]
         {
             ("s", "Substring", "X2"),
-            ("s", "ToLower", "X3"), ("s", "ToUpper", "X3"), ("s", "ToLowerAscii", "X3"), ("s", "ToUpperAscii", "X3"),
-            ("s", "Trim", "X4"), ("s", "TrimStart", "X4"), ("s", "TrimEnd", "X4"), ("s", "TrimAscii", "X4"), ("s", "TrimStartAscii", "X4"), ("s", "TrimEndAscii", "X4"),
-            ("s", "Split", "X5"), ("s", "Replace", "X5"),
+            ("s", "ToLower", "X3"), ("s", "ToUpper", "X3"),
             ("xs", "Sort", "X8"), ("xs", "SortBy", "X8"), ("xs", "SortUnstable", "X8"),
         };
         foreach (var (receiver, member, rule) in members)
@@ -2860,7 +2905,7 @@ public sealed class CheckerTests
 
         foreach (var (call, construct) in new[]
         {
-            ("string.Join(\", \", [1])", "`string.Join` (X6)"), ("long.Parse(\"1\")", "`long.Parse` (X7)"), ("byte.Parse(\"1\")", "`byte.Parse` (X7)"),
+            ("long.Parse(\"1\")", "`long.Parse` (X7)"), ("byte.Parse(\"1\")", "`byte.Parse` (X7)"),
             ("double.Parse(\"1\")", "`double.Parse` (X7)"), ("decimal.Parse(\"1\")", "`decimal.Parse` (X7)"), ("Hex.Decode(\"ab\")", "`Hex.Decode` (H7)"),
         })
         {

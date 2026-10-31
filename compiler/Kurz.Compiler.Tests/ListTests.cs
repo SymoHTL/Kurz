@@ -1579,6 +1579,124 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "false", // a `char` whose four bytes differ from the string's in the last
     ];
 
+    // The trims, splits, replaces, changes of case and joins of X3 to X6 on strings made while the program runs, each source given a
+    // new value after its result is taken, with the result printed after that: a trim that copies, one that keeps the whole string,
+    // which shares it, and one of a literal, which keeps its bytes in place; a split into copies, into the whole string and of a
+    // literal, an item of a split read after its list is gone; a replace that finds nothing, which shares the string, one with
+    // arguments made in the call, one into an empty string and one into the variable it reads; a change of case that changes nothing
+    // and one that changes the string; a join of a list in a field of a data value given a new value, of a list made for the call, and
+    // of items whose text is made for the join (A4)
+    private const string Pieces = """
+        data Bag(List<string> Items)
+        data Name(string Value)
+
+        string Made(int n) => "made {n}"
+
+        mut t = "  {Made(1)}\t"
+        a = t.Trim()
+        t = Made(2)
+        print(a)
+        mut w = Made(3)
+        b = w.Trim()
+        w = Made(4)
+        print(b)
+        print("  lit  ".Trim())
+        print("x{Made(5)}xx".Trim('x'))
+        mut q = "\u3000{Made(6)}\u00A0 "
+        print(q.TrimAscii())
+        q = q.Trim()
+        print(q)
+        name = Name("  {Made(7)} ")
+        start = name.Value.TrimStart()
+        end = name.Value.TrimEnd()
+        print("[{start}]")
+        print("[{end}]")
+
+        mut s = "{Made(1)},{Made(2)},"
+        parts = s.Split(',')
+        s = Made(0)
+        print(parts)
+        print(parts.Count)
+        mut s2 = Made(8)
+        whole = s2.Split(";")
+        s2 = Made(9)
+        print(whole)
+        print("a b".Split(' '))
+        first = "{Made(1)}:{Made(2)}".Split(':')[0]
+        print(first)
+        print("{Made(3)}::".Split("::"))
+
+        mut r = Made(7)
+        same = r.Replace("zz", "y")
+        r = Made(8)
+        print(same)
+        print(r.Replace("made", "M"))
+        print(r.Replace(Made(8), Made(9)))
+        none = ""
+        gone = r.Replace(Made(8), none)
+        print("[{gone}]")
+        print(r.Replace(' ', "_"))
+        r = r.Replace('e', "ee")
+        print(r)
+
+        mut u = Made(1)
+        low = u.ToLowerAscii()
+        u = Made(2)
+        print(low)
+        up = low.ToUpperAscii()
+        print(up)
+        print(up.ToLowerAscii())
+
+        mut bag = Bag([Made(1), Made(2)])
+        j = string.Join(", ", bag.Items)
+        bag = Bag([Made(3)])
+        print(j)
+        print(string.Join("-", [1, 2, 3]))
+        print(string.Join(Made(0), bag.Items))
+        words = [Made(4), Made(5)]
+        print(string.Join(Made(0), words))
+        print(string.Join("+", "{Made(1)} {Made(2)}".Split(' ')))
+        print(string.Join("; ", [[1], [2, 3]]))
+        print(string.Join(",", [true, false]))
+        empty = string.Join(", ", List<string>())
+        print("[{empty}]")
+        """;
+
+    private static readonly string[] PiecesPrint =
+    [
+        "made 1", // a trim that copies, its source given a new value
+        "made 3", // a trim that keeps the whole string shares it
+        "lit", // a literal's bytes in place
+        "made 5",
+        "\u3000made 6\u00A0", // the ASCII form keeps whitespace outside ASCII (X4)
+        "made 6", // into the variable it reads
+        "[made 7 ]",
+        "[  made 7]",
+        "[made 1, made 2, ]", // copies, an empty piece kept
+        "3",
+        "[made 8]", // the whole string, shared
+        "[a, b]",
+        "made 1", // an item read from a list that is gone after the statement
+        "[made 3, ]",
+        "made 7", // a replace that finds nothing shares the string
+        "M 8",
+        "made 9",
+        "[]",
+        "made_8",
+        "madee 8", // into the variable it reads
+        "made 1", // a change of case that changes nothing shares the string
+        "MADE 1",
+        "made 1",
+        "made 1, made 2", // the field's list, its data value given a new value after the join
+        "1-2-3",
+        "made 3",
+        "made 4made 0made 5",
+        "made+1+made+2",
+        "[1]; [2, 3]",
+        "true,false",
+        "[]",
+    ];
+
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
     // the list it is written into, over another item and over itself, a value that changes the list through a `mut` argument before the
     // write (M4), a `mut` parameter, an index of a narrow type, a list of lists, a list known not null, and a value made before the index
@@ -2130,6 +2248,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, toolchain.Runtime, "map-members"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, toolchain.Runtime, "list-searches"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
     }
@@ -2144,6 +2263,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, fenced, "map-members-fenced"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, fenced, "list-searches-fenced"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Pieces, fenced, "string-pieces-fenced"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block

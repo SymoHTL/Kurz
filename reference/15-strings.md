@@ -117,6 +117,14 @@ print(s.TrimEndAscii() == "\u00A0 a b")
 print("xxaxx".Trim('x'))
 ```
 
+A call of `Trim` that fits neither form, with no argument or a `char`, `s.Trim(5)` among them, is `argument-mismatch`, with a line for each form (F13).
+
+Case: [strings/trim-of-a-number.kz](../corpus/strings/trim-of-a-number.kz)
+```kurz
+s = " a "
+print(s.Trim(5))
+```
+
 ### X5 (decided, §12) Splitting and replacing
 
 `s.Split(separator)` gives a `List<string>` of the pieces between the separators, each a new string,
@@ -137,6 +145,14 @@ print("aaa".Replace("aa", "b"))
 print("abc".Replace("", "x"))
 ```
 
+A call of `Split` or `Replace` that fits neither form, a `string` or a `char`, is `argument-mismatch`, with a line for each form (F13).
+
+Case: [strings/split-of-a-number.kz](../corpus/strings/split-of-a-number.kz)
+```kurz
+s = "a,b"
+print(s.Split(5))
+```
+
 ### X6 (decided, §12) Joining
 
 `string.Join(separator, items)` takes a list of any item type and writes the text of each item (A4)
@@ -152,6 +168,7 @@ print(string.Join(", ", List<string>()) == "")
 
 Case: [strings/join-no-text.kz](../corpus/strings/join-no-text.kz)
 ```kurz
+// `Counter` declares no `Text()`, so an instance has no text (A5), and a list of them has none (A7)
 class Counter(mut int Count)
 
 print(string.Join(", ", [Counter(0)]))

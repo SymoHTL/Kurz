@@ -77,6 +77,21 @@ public enum CallKind
     /// <summary>A string's <c>Contains</c>, <c>StartsWith</c>, <c>EndsWith</c> or <c>IndexOf</c>, of a <c>string</c> or of a <c>char</c>, which the argument's type names (X1).</summary>
     StringSearch,
 
+    /// <summary>A string's <c>Trim</c>, <c>TrimStart</c>, <c>TrimEnd</c>, <c>TrimAscii</c>, <c>TrimStartAscii</c> or <c>TrimEndAscii</c>, or <c>Trim(c)</c> of a <c>char</c> (X4).</summary>
+    StringTrim,
+
+    /// <summary>A string's <c>Split(separator)</c>, of a <c>string</c> or of a <c>char</c>, which the argument's type names (X5).</summary>
+    StringSplit,
+
+    /// <summary>A string's <c>Replace(old, new)</c>, the first of a <c>string</c> or of a <c>char</c>, which its type names (X5).</summary>
+    StringReplace,
+
+    /// <summary>A string's <c>ToLowerAscii</c> or <c>ToUpperAscii</c> (X3).</summary>
+    StringCase,
+
+    /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text (X6).</summary>
+    StringJoin,
+
     /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>
     MapContainsKey,
 

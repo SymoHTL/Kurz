@@ -1,0 +1,5 @@
+// expect: error argument-mismatch at 5
+// rules: X4
+
+s = " a "
+print(s.Trim(5))

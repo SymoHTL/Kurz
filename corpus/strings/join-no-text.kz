@@ -1,6 +1,7 @@
-// expect: error no-text at 6
-// rules: X6
+// expect: error no-text at 7
+// rules: X6, A7
 
+// `Counter` declares no `Text()`, so an instance has no text (A5), and a list of them has none (A7)
 class Counter(mut int Count)
 
 print(string.Join(", ", [Counter(0)]))
