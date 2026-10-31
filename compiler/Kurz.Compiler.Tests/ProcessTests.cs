@@ -87,6 +87,12 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 Assert.Equal((1, "error: invalid-argument\n"), (refused.Code, refused.Error));
                 Assert.Empty(refused.Output);
             }
+
+            if (Ran(text, $"{name}-control", "ok x", trace: null) is { } accepted)
+            {
+                Assert.Equal((0, ""), (accepted.Code, accepted.Error)); // the positive control
+                Assert.Equal(["1"], accepted.Output);
+            }
         }
 
         // `Environment.Args()`, at its call with its place and its trace
