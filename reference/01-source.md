@@ -124,8 +124,6 @@ print(xs)
 ys = [4, 5]
 print(ys.Count)
 print(Sum([1, 2]))
-Bytes b = [104, 105]
-print(string.FromUtf8Lossy(b))
 nested = [[1], [2, 3]]
 print(nested)
 List<string> none = []
@@ -137,8 +135,22 @@ lines = [
 print(lines)
 List<int | string> mixed = [1, "a"]
 print(mixed.Count)
-List<int?> maybe = [1, null]
-print(maybe.Count)
+```
+
+Case: [values/list-literal-lines.kz](../corpus/values/list-literal-lines.kz)
+```kurz
+int Count(int x) {
+    return x
+}
+
+a = [5, 6]
+xs = [
+    a
+    [0]
+]
+print(xs)
+print(Count(a
+[1]))
 ```
 
 ### L5 (decided, §8) No `;`
@@ -465,6 +477,14 @@ Case: [values/list-literal-byte-overflow.kz](../corpus/values/list-literal-byte-
 ```kurz
 Bytes b = [1, 300]
 print(b.Count)
+```
+
+Case: [values/list-literal-bytes.kz](../corpus/values/list-literal-bytes.kz)
+```kurz
+Bytes b = [104, 105]
+print(string.FromUtf8Lossy(b))
+List<long> big = [2147483647 + 1]
+print(big)
 ```
 
 ### L11 (decided, §4) Number literals

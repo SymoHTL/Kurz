@@ -149,6 +149,15 @@ int small = big
 print(small)
 ```
 
+Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)
+```kurz
+List<T> Pair<T>(T a, List<T> b) => b
+
+x = 5
+r = Pair(1L, [x])
+print(r)
+```
+
 ### T8 (decided, §4) Implicit widening
 
 A value of a narrower integer type becomes a wider one without a word when the wider type holds
@@ -1084,7 +1093,10 @@ different classes with one base are `cannot-infer`, since no common base is sear
 2026-10-10). When literals alone stand in a parameter's positions they take the type a constant
 expression of them has (L10, L17), so `Pick(1, 2)` infers `int` and `Pick(1, 2.5)` `double`; a literal
 that does not fit the fixed type, `Pick(small, 300)` with a `byte`, is `constant-overflow`, as a literal
-that does not fit the type it takes is wherever it stands (L17); and where one argument's class is the
+that does not fit the type it takes is wherever it stands (L17); the items of a list literal of literals
+given to a parameter `List<T>` count as literal arguments of `T`, so `Pair(1L, [1])` with
+`Pair<T>(T a, List<T> b)` infers `long` (M11) *(assumed, §4: the items read as arguments of the
+parameter)*; and where one argument's class is the
 base of the other's, `Pick(Dog(), Animal())`, the parameter takes the base, which every argument has
 (K6) (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 
@@ -1135,6 +1147,35 @@ Case: [values/list-literal-mixed-items.kz](../corpus/values/list-literal-mixed-i
 x = [1, "a"]
 print(x.Count)
 ```
+
+Case: [values/list-literal-inference.kz](../corpus/values/list-literal-inference.kz)
+```kurz
+List<T> Pair<T>(T a, List<T> b) => b
+List<T> Pick<T>(List<T> a, List<T> b) => b
+
+r1 = Pair(1L, [1])
+List<long> y1 = r1
+print(y1)
+r2 = Pair(1, [2L])
+List<long> y2 = r2
+print(y2)
+r3 = Pick([1], [2L])
+List<long> y3 = r3
+print(y3)
+r4 = Pair(1, [2, 3])
+List<int> y4 = r4
+print(y4)
+List<long> xs = [1]
+r5 = Pick(xs, [7])
+List<long> y5 = r5
+print(y5)
+byte small = 1
+r6 = Pair(small, [2])
+List<byte> y6 = r6
+print(y6)
+```
+
+Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)
 
 ### T18 (assumed, §4) Operators
 

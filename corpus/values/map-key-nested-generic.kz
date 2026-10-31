@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 6
+// rules: M9
+
+data Wrap<T>(T Value)
+
+mut m = Map<Wrap<Wrap<Map<int, int>>>, int>()
+print(m.Count)

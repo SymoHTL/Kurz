@@ -1018,6 +1018,26 @@ print(Samples(xs) == Samples(ys))
 print(xs == ys)
 ```
 
+Case: [values/map-key-nested-generic.kz](../corpus/values/map-key-nested-generic.kz)
+```kurz
+data Wrap<T>(T Value)
+
+mut m = Map<Wrap<Wrap<Map<int, int>>>, int>()
+print(m.Count)
+```
+
+Case: [data/nested-generic-equal.kz](../corpus/data/nested-generic-equal.kz)
+```kurz
+data Wrap<T>(T Value)
+
+mut m = Map<Wrap<Wrap<int>>, int>()
+k = Wrap<Wrap<int>>(Wrap<int>(4))
+m[k] = 1
+print(m[k] ?? 0)
+print(k == Wrap<Wrap<int>>(Wrap<int>(4)))
+print(k == Wrap<Wrap<int>>(Wrap<int>(5)))
+```
+
 ### M10 (decided, §4) The order of a map's entries
 
 A map has no order a program may rely on. A `for` loop over it (C6) and its text (A6) yield the
@@ -1036,17 +1056,31 @@ collection expression writes one (§4, the owner, 2026-10-30, "[1, 2, 3], as C#"
 the list type where one stands, a written type, `List<int> xs = [1, 2, 3]`, or a parameter's,
 `Take([1, 2])`, and each item is read under its item type as an argument is under its parameter's: a
 literal takes it (L17), so `Bytes b = [1, 300]` is `constant-overflow`, a lambda takes its parameters
-from it (F11), and an item of another type is `type-mismatch` (T1). Where a union stands whose cases
-hold one list type, a nullable list among them, the literal takes that one *(assumed, §4: as a number
-literal takes the one number case of a union, L17)*. Where no list type stands, the items give it, as
-T27 infers a type parameter from a call's arguments (§4, the owner, 2026-10-30, "From its items"):
-`x = [1, 2]` is a `List<int>` and `[1, 2L]` a `List<long>`, while `x = []` and `[1, "a"]` are
-`cannot-infer`, and `[1, null]` is the `type-mismatch` of a `null` that no nullable type takes (N6).
+from it (F11), and an item of another type is `type-mismatch` (T1). The list type stands wherever a
+type is expected, as L17 reads it for a number literal: the result of a `return` in a function that
+returns a list, an assignment to a variable of a list type, the right side of `??`, an arm of a `match`
+and the result of a lambda whose type is given *(assumed, §4: the places of L17's expected type)*;
+whether the other operand of `==` gives the literal its type, as it gives one to a number literal (L17),
+stands open (§14). Where a union stands whose cases hold one list type, a nullable list among them, the
+literal takes that one *(assumed, §4: as a number literal takes the one number case of a union, L17)*.
+Where no list type stands, the items give it, as T27 infers a type parameter from a call's arguments
+(§4, the owner, 2026-10-30, "From its items"): `x = [1, 2]` is a `List<int>` and `[1, 2L]` a
+`List<long>`, while `x = []` and `[1, "a"]` are `cannot-infer`, and `[1, null]` is the `type-mismatch`
+of a `null` that no nullable type takes (N6) *(assumed, §4: as T27 and N6 read `Pick(1, null)`)*. A
+literal of literal items given to a parameter `List<T>` of a generic call gives its items to the
+literal arguments of `T` (T27), so that with `Pair<T>(T a, List<T> b)` the call `Pair(1L, [1])` makes
+`T` a `long`, and with two parameters `List<T>` the call `Pick([1], [2L])` does, as `Pick(1, 2L)` does
+and as C# 12 infers for a collection expression and Rust for `vec![1]`; a literal with an item that is
+not a literal, `[x]`, gives `T` the type of that item, as any other argument does *(assumed, §4: the
+items read as arguments of the parameter, "From its items")*.
 
 A comma after the last item is accepted, `[1, 2,]` (§4, the owner, 2026-10-30, "Accept, as C# 12
-and Rust"); a line break inside the brackets continues the statement (L4), and a line that starts
-with `[` continues none, so `[` after an expression on its line is that expression's index (M9) and
-`[` where an expression starts is a list. `..` before an item, C# 12's spread, `[..xs, 3]`, is
+and Rust"); a line break inside the brackets continues the statement (L4), and where no `(` or `[` is
+open a line that starts with `[` continues none, so `[` after an expression on its line is that
+expression's index (M9) and `[` where an expression starts is a list. Inside an open `(` or `[` a line
+break ends nothing (L4), so a `[` at the start of a line there indexes the expression before it, and
+`[`, `a`, `[0]` and `]` on four lines are `[a[0]]`, while a block between braces there holds statements
+of its own (L4). `..` before an item, C# 12's spread, `[..xs, 3]`, is
 `syntax` (E4); whether a list takes the items of another so stands open (§14).
 
 The items run from left to right, each counted as it is made, and the list takes the room for all of
@@ -1074,8 +1108,6 @@ print(xs)
 ys = [4, 5]
 print(ys.Count)
 print(Sum([1, 2]))
-Bytes b = [104, 105]
-print(string.FromUtf8Lossy(b))
 nested = [[1], [2, 3]]
 print(nested)
 List<string> none = []
@@ -1087,8 +1119,6 @@ lines = [
 print(lines)
 List<int | string> mixed = [1, "a"]
 print(mixed.Count)
-List<int?> maybe = [1, null]
-print(maybe.Count)
 ```
 Case: [values/list-literal-cannot-infer.kz](../corpus/values/list-literal-cannot-infer.kz)
 ```kurz
@@ -1124,3 +1154,97 @@ ys = [..xs, 3]
 print(ys.Count)
 ```
 Case: [values/list-literal-held.kz](../corpus/values/list-literal-held.kz)
+
+Case: [values/list-literal-inference.kz](../corpus/values/list-literal-inference.kz)
+```kurz
+List<T> Pair<T>(T a, List<T> b) => b
+List<T> Pick<T>(List<T> a, List<T> b) => b
+
+r1 = Pair(1L, [1])
+List<long> y1 = r1
+print(y1)
+r2 = Pair(1, [2L])
+List<long> y2 = r2
+print(y2)
+r3 = Pick([1], [2L])
+List<long> y3 = r3
+print(y3)
+r4 = Pair(1, [2, 3])
+List<int> y4 = r4
+print(y4)
+List<long> xs = [1]
+r5 = Pick(xs, [7])
+List<long> y5 = r5
+print(y5)
+byte small = 1
+r6 = Pair(small, [2])
+List<byte> y6 = r6
+print(y6)
+```
+
+Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)
+```kurz
+List<T> Pair<T>(T a, List<T> b) => b
+
+x = 5
+r = Pair(1L, [x])
+print(r)
+```
+
+Case: [values/list-literal-expected.kz](../corpus/values/list-literal-expected.kz)
+```kurz
+List<long> Made() {
+    return [1, 2]
+}
+
+List<long>? Missing(bool b) => null
+
+List<long> Arm(int x) {
+    return match x {
+        1 => [8]
+        else => [5, 6]
+    }
+}
+
+print(Made())
+mut List<long> xs = [0]
+xs = [2, 3]
+print(xs)
+ys = Missing(true) ?? [4]
+List<long> zs = ys
+print(zs)
+print(Arm(2))
+(int) => List<long> f = n => [7]
+print(f(1))
+```
+
+Case: [values/list-literal-lines.kz](../corpus/values/list-literal-lines.kz)
+```kurz
+int Count(int x) {
+    return x
+}
+
+a = [5, 6]
+xs = [
+    a
+    [0]
+]
+print(xs)
+print(Count(a
+[1]))
+```
+
+Case: [values/list-literal-bytes.kz](../corpus/values/list-literal-bytes.kz)
+```kurz
+Bytes b = [104, 105]
+print(string.FromUtf8Lossy(b))
+List<long> big = [2147483647 + 1]
+print(big)
+```
+
+Case: [values/list-literal-nullable-items.kz](../corpus/values/list-literal-nullable-items.kz)
+```kurz
+List<int?> maybe = [1, null]
+print(maybe.Count)
+print(maybe)
+```

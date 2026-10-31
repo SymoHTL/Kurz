@@ -1,0 +1,9 @@
+// expect: output
+// | hi
+// | [2147483648]
+// rules: M11, L17
+
+Bytes b = [104, 105]
+print(string.FromUtf8Lossy(b))
+List<long> big = [2147483647 + 1]
+print(big)

@@ -1,0 +1,17 @@
+// expect: output
+// | [5]
+// | 6
+// rules: M11, L4
+
+int Count(int x) {
+    return x
+}
+
+a = [5, 6]
+xs = [
+    a
+    [0]
+]
+print(xs)
+print(Count(a
+[1]))
