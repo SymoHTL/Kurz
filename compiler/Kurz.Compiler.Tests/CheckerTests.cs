@@ -2921,17 +2921,20 @@ public sealed class CheckerTests
     [Fact]
     public void A_cut_a_parse_and_a_decode_take_their_types_and_csharps_names()
     {
-        // X2: `Substring` of two `int`s, a `string`, the one form the record names; X7: an integer type's `Parse`, the number or the case
+        // X2: `Substring` of two `int`s, a `string`, the one form the record names; X7: a number type's `Parse`, the number or the case
         // `ParseError`; H7: `Hex.Decode`, `Bytes` or the case `HexError`; the parameters take C#'s names
         Assert.Empty(Errors("s = \"hello\"\nstring t = s.Substring(1, 2)\nprint(t)"));
         Assert.Empty(Errors("long | ParseError a = long.Parse(\"1\")\nbyte | ParseError b = byte.Parse(\"1\")\nprint(a)\nprint(b)"));
+        Assert.Empty(Errors("double | ParseError d = double.Parse(\"1.5\")\nfloat | ParseError f = float.Parse(s: \"1\")\ndecimal | ParseError m = decimal.Parse(\"2.50\")\nprint(d)\nprint(f)\nprint(m)"));
         Assert.Empty(Errors("Bytes | HexError h = Hex.Decode(\"ab\")\nprint(h)"));
         Assert.Empty(Errors("s = \"hello\"\nprint(s.Substring(length: 2, startIndex: 1))\nint | ParseError a = int.Parse(s: \"1\")\nBytes | HexError h = Hex.Decode(s: \"ab\")\nprint(a)\nprint(h)"));
 
         // O2, O3, O9: a parse and a decode a function's type lists unwrap, and their error leaves it; at the top level it has no caller
         Assert.Empty(Errors("long | ParseError Twice(string s) {\n    return long.Parse(s) * 2\n}\n\nBytes | HexError Key(string s) {\n    return Hex.Decode(s)\n}\n\nmatch Twice(\"2\") {\n    long n => print(n)\n    ParseError e => print(e)\n}\nmatch Key(\"ab\") {\n    Bytes b => print(b)\n    HexError e => print(e)\n}"));
-        Assert.Equal([(ErrorIds.UnlistedCase, 1), (ErrorIds.UnlistedCase, 2)], Errors("print(long.Parse(\"1\"))\nprint(Hex.Decode(\"ab\"))"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 1), (ErrorIds.UnlistedCase, 2), (ErrorIds.UnlistedCase, 3)], Errors("print(long.Parse(\"1\"))\nprint(Hex.Decode(\"ab\"))\nprint(decimal.Parse(\"1\"))"));
         Assert.Equal([(ErrorIds.UnlistedCase, 2)], Errors("long Twice(string s) {\n    return long.Parse(s) * 2\n}\n\nprint(Twice(\"2\"))"));
+        Assert.Empty(Errors("double | ParseError Half(string s) {\n    return double.Parse(s) / 2.0\n}\n\nfloat | ParseError Twice(string s) {\n    return float.Parse(s) * 2f\n}\n\ndecimal | ParseError Cents(string s) {\n    return decimal.Parse(s) * 100m\n}\n\nmatch Half(\"3\") {\n    double d => print(d)\n    ParseError e => print(e)\n}\nmatch Twice(\"1\") {\n    float f => print(f)\n    ParseError e => print(e)\n}\nmatch Cents(\"0.5\") {\n    decimal m => print(m)\n    ParseError e => print(e)\n}"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 2), (ErrorIds.UnlistedCase, 6), (ErrorIds.UnlistedCase, 10)], Errors("double Half(string s) {\n    return double.Parse(s) / 2.0\n}\n\nfloat Twice(string s) {\n    return float.Parse(s) * 2f\n}\n\ndecimal Cents(string s) {\n    return decimal.Parse(s) * 100m\n}\n\nprint(Half(\"3\"))\nprint(Twice(\"1\"))\nprint(Cents(\"0.5\"))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"hello\"\nprint(s.Substring(1))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("s = \"hello\"\nprint(s.Substring(\"a\", 1))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(long.Parse(5))"));
@@ -2978,10 +2981,10 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void The_members_of_strings_and_lists_and_the_parses_of_chapter_15_the_checker_does_not_read_are_not_supported_and_a_member_no_rule_names_is_unknown()
+    public void The_members_of_strings_and_lists_the_checker_does_not_read_are_not_supported_and_a_member_no_rule_names_is_unknown()
     {
-        // X3's change of case by Unicode's mapping and X7's `Parse` of a floating-point type and of `decimal`: each call is `not supported` with its rule, and no error stands
-        // beside it (E1); the arguments are read, so the variables they use count as used
+        // X3's change of case by Unicode's mapping: each call is `not supported` with its rule, and no error stands beside it (E1); the
+        // arguments are read, so the variables they use count as used
         var members = new (string Receiver, string Member, string Rule)[]
         {
             ("s", "ToLower", "X3"), ("s", "ToUpper", "X3"),
@@ -2990,14 +2993,6 @@ public sealed class CheckerTests
         {
             var (start, kind) = receiver == "s" ? ("s = \"ab\"", "a string's") : ("mut xs = [1]", "a list's");
             Assert.Equal([$"3: {kind} `{member}` ({rule})"], NotSupported($"{start}\na = \"a\"\nprint({receiver}.{member}(a))"));
-        }
-
-        foreach (var (call, construct) in new[]
-        {
-            ("double.Parse(\"1\")", "`double.Parse` (X7)"), ("float.Parse(\"1\")", "`float.Parse` (X7)"), ("decimal.Parse(\"1\")", "`decimal.Parse` (X7)"),
-        })
-        {
-            Assert.Equal([$"1: {construct}"], NotSupported($"print({call})"));
         }
 
         // V10, the positive controls: a member or a function no rule names, and `Parse` on a type that is no number type, stay unknown

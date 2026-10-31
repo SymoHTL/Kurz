@@ -1580,6 +1580,1246 @@ pub int ParseInteger(byte* text, long count, ulong most, ulong least, mut ulong 
     return -1
 }
 
+// Whether the `length` bytes at `p` spell, in any case, the lower-case ASCII letters packed in `word`, the
+// first in its highest byte: `Infinity` and `NaN`, as C#'s `Parse` reads them with the invariant culture (X7).
+bool Spells(byte* p, ulong word, int length) {
+    mut int i = 0
+    raw {
+        while i < length {
+            if (int(p[i]) | 32) != int((word >> ((length - 1 - i) * 8)) & 255UL) {
+                return false
+            }
+
+            i = i + 1
+        }
+    }
+
+    return true
+}
+
+// A floating-point number read from the `count` bytes at `text` in C#'s invariant form (X7): whitespace
+// around it, a leading `+` or `-`, then digits, with `,` anywhere after the first of them before the point, a
+// point and the digits after it, one digit at least, and an `e` or `E` with a sign and one digit or more; or
+// the words `Infinity` and `NaN` in any case after the sign, as C#'s `double.Parse` reads them with the
+// invariant culture. 0, `Empty`, where the bytes hold whitespace alone; 1, `InvalidDigit`, for any other form;
+// 2 for `Infinity` and 3 for `NaN`; else -1, with the sign in `negative`, the first 19 significant digits in
+// `mantissa`, the power of ten they stand at in `exponent`, and in `many` whether a digit that is not 0 follows
+// them, as Rust's `parse_number` reads the digits; for the slow path, where the digits start and end, `from`
+// and `to`, and the written exponent, `power`, whose digits stop counting past 65536, as Rust's stop.
+int ScanFloating(byte* text, long count, mut bool negative, mut ulong mantissa, mut long exponent, mut bool many, mut long from, mut long to, mut long power) {
+    mut long at = 0
+    mut int taken = 0
+    mut bool digits = false
+    mut bool point = false
+    raw {
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+
+        if at == count {
+            return 0
+        }
+
+        if text[at] == 43 {
+            at = at + 1
+        } else if text[at] == 45 {
+            negative = true
+            at = at + 1
+        }
+
+        from = at
+        while at < count {
+            int b = int(text[at])
+            if b >= 48 && b <= 57 {
+                digits = true
+                if taken == 0 && b == 48 {
+                    if point {
+                        exponent = exponent - 1
+                    }
+                } else if taken < 19 {
+                    mantissa = mantissa * 10UL + ulong(b - 48)
+                    taken = taken + 1
+                    if point {
+                        exponent = exponent - 1
+                    }
+                } else {
+                    many = many || b != 48
+                    if !point {
+                        exponent = exponent + 1
+                    }
+                }
+            } else if b == 46 && !point {
+                point = true
+            } else if b != 44 || !digits || point {
+                break
+            }
+
+            at = at + 1
+        }
+
+        to = at
+        if !digits {
+            if point {
+                return 1
+            }
+
+            mut int kind = 1
+            if count - at >= 8 && Spells(text + at, 0x696E66696E697479UL, 8) {
+                kind = 2
+                at = at + 8
+            } else if count - at >= 3 && Spells(text + at, 0x6E616EUL, 3) {
+                kind = 3
+                at = at + 3
+            }
+
+            while at < count && NumberWhite(int(text[at])) {
+                at = at + 1
+            }
+
+            if kind == 1 || at != count {
+                return 1
+            }
+
+            return kind
+        }
+
+        if at < count && (text[at] == 101 || text[at] == 69) {
+            at = at + 1
+            mut bool down = false
+            if at < count && text[at] == 43 {
+                at = at + 1
+            } else if at < count && text[at] == 45 {
+                down = true
+                at = at + 1
+            }
+
+            long start = at
+            while at < count && text[at] >= 48 && text[at] <= 57 {
+                if power < 65536 {
+                    power = power * 10 + long(int(text[at]) - 48)
+                }
+
+                at = at + 1
+            }
+
+            if at == start {
+                return 1
+            }
+
+            if down {
+                power = -power
+            }
+
+            exponent = exponent + power
+        }
+
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+    }
+
+    if at != count {
+        return 1
+    }
+
+    return -1
+}
+
+// `double.Parse` (X7): -1 with the bits of the `double` nearest to the number the `count` bytes at `text`
+// hold, ties to even, as Rust's `f64::from_str` and .NET Core 3.0's `double.Parse` round it, an infinity past
+// the largest and a zero below the smallest, each with the number's sign, and for `NaN`, with a sign or
+// without, the NaN C# reads; else the index of the failure's `ParseKind`, 0 or 1 (`ScanFloating`). `digits` is
+// the 768 bytes of the slow path, which the emitted code keeps on its stack, as Rust keeps its `Decimal`, and
+// `fives` the table of the 128-bit powers of five Eisel-Lemire takes, two words for each power from 5^-342 to
+// 5^308, the high one first, which the compiler writes into the program, as Rust's `POWER_OF_FIVE_128`.
+pub int ParseDouble(byte* text, long count, byte* digits, ulong* fives, mut ulong bits) {
+    mut bool negative = false
+    mut ulong mantissa = 0UL
+    mut long exponent = 0
+    mut bool many = false
+    mut long from = 0
+    mut long to = 0
+    mut long power = 0
+    int read = ScanFloating(text, count, mut negative, mut mantissa, mut exponent, mut many, mut from, mut to, mut power)
+    if read == 0 || read == 1 {
+        return read
+    }
+
+    mut ulong sign = 0UL
+    if negative {
+        sign = 9223372036854775808UL
+    }
+
+    if read == 3 {
+        bits = 0xFFF8000000000000UL
+        return -1
+    }
+
+    if read == 2 {
+        bits = sign | 0x7FF0000000000000UL
+        return -1
+    }
+
+    // Clinger's fast path, as Rust's `try_fast_path`: a significand of 53 bits at most times or over a power of
+    // ten a `double` holds exactly, 10^22 at most, rounds once; a power up to 10^37 is moved into the
+    // significand first where it stays within 53 bits
+    if !many && exponent >= -22 && exponent <= 37 && mantissa <= 9007199254740992UL {
+        mut ulong whole = mantissa
+        mut long ten = exponent
+        if ten > 22 {
+            ulong moved = TenPower(int(ten - 22))
+            if whole <= 9007199254740992UL / moved {
+                whole = whole * moved
+                ten = 22
+            }
+        }
+
+        if ten <= 22 {
+            mut double value = double(whole)
+            if ten < 0 {
+                value = value / DoublePower(int(-ten))
+            } else {
+                value = value * DoublePower(int(ten))
+            }
+
+            raw {
+                bits = sign | *Ptr<ulong>(&value)
+            }
+
+            return -1
+        }
+    }
+
+    mut ulong f = 0UL
+    int e = Nearest(mantissa, exponent, many, text, from, to, power, digits, fives, false, mut f)
+    bits = sign | f | (ulong(e) << 52)
+    return -1
+}
+
+// `float.Parse` (X7), as `ParseDouble` reads a `double`, with the bits of the `float` nearest to the number,
+// rounded once, from its digits.
+pub int ParseFloat(byte* text, long count, byte* digits, ulong* fives, mut uint bits) {
+    mut bool negative = false
+    mut ulong mantissa = 0UL
+    mut long exponent = 0
+    mut bool many = false
+    mut long from = 0
+    mut long to = 0
+    mut long power = 0
+    int read = ScanFloating(text, count, mut negative, mut mantissa, mut exponent, mut many, mut from, mut to, mut power)
+    if read == 0 || read == 1 {
+        return read
+    }
+
+    mut uint sign = 0U
+    if negative {
+        sign = 2147483648U
+    }
+
+    if read == 3 {
+        bits = 0xFFC00000U
+        return -1
+    }
+
+    if read == 2 {
+        bits = sign | 0x7F800000U
+        return -1
+    }
+
+    // Clinger's fast path for a `float`: 24 bits and 10^10, a power up to 10^17 moved into the significand
+    if !many && exponent >= -10 && exponent <= 17 && mantissa <= 16777216UL {
+        mut ulong whole = mantissa
+        mut long ten = exponent
+        if ten > 10 {
+            ulong moved = TenPower(int(ten - 10))
+            if whole <= 16777216UL / moved {
+                whole = whole * moved
+                ten = 10
+            }
+        }
+
+        if ten <= 10 {
+            mut float value = float(whole)
+            if ten < 0 {
+                value = value / FloatPower(int(-ten))
+            } else {
+                value = value * FloatPower(int(ten))
+            }
+
+            raw {
+                bits = sign | *Ptr<uint>(&value)
+            }
+
+            return -1
+        }
+    }
+
+    mut ulong f = 0UL
+    int e = Nearest(mantissa, exponent, many, text, from, to, power, digits, fives, true, mut f)
+    bits = sign | uint(f | (ulong(e) << 23))
+    return -1
+}
+
+// 10^k as a `double`, k from 0 to 22, each exact.
+double DoublePower(int k) => match k {
+    0 => 1.0
+    1 => 10.0
+    2 => 100.0
+    3 => 1000.0
+    4 => 10000.0
+    5 => 100000.0
+    6 => 1000000.0
+    7 => 10000000.0
+    8 => 100000000.0
+    9 => 1000000000.0
+    10 => 10000000000.0
+    11 => 100000000000.0
+    12 => 1000000000000.0
+    13 => 10000000000000.0
+    14 => 100000000000000.0
+    15 => 1000000000000000.0
+    16 => 10000000000000000.0
+    17 => 100000000000000000.0
+    18 => 1000000000000000000.0
+    19 => 10000000000000000000.0
+    20 => 100000000000000000000.0
+    21 => 1000000000000000000000.0
+    else => 10000000000000000000000.0
+}
+
+// 10^k as a `float`, k from 0 to 10, each exact.
+float FloatPower(int k) => match k {
+    0 => 1f
+    1 => 10f
+    2 => 100f
+    3 => 1000f
+    4 => 10000f
+    5 => 100000f
+    6 => 1000000f
+    7 => 10000000f
+    8 => 100000000f
+    9 => 1000000000f
+    else => 10000000000f
+}
+
+// 10^k, k from 0 to 15.
+ulong TenPower(int k) {
+    mut ulong p = 1UL
+    mut int i = 0
+    while i < k {
+        p = p * 10UL
+        i = i + 1
+    }
+
+    return p
+}
+
+// The significand of the floating-point number nearest to `mantissa` times 10^`exponent`, ties to even, without
+// its first bit, in `f`, and its biased exponent returned, the format's largest for an infinity: Eisel-Lemire
+// on the 19 digits, and where it cannot settle the rounding, or where digits that are not 0 follow them and
+// `mantissa + 1` would round otherwise, the slow path over every digit, as Rust's `dec2flt`. A `double` where
+// `single` is false, a `float` where it is true.
+int Nearest(ulong mantissa, long exponent, bool many, byte* text, long from, long to, long power, byte* digits, ulong* fives, bool single, mut ulong f) {
+    mut int e = Lemire(exponent, mantissa, fives, single, mut f)
+    if many && e >= 0 {
+        mut ulong g = 0UL
+        int above = Lemire(exponent, mantissa + 1UL, fives, single, mut g)
+        if above != e || g != f {
+            e = -1
+        }
+    }
+
+    if e < 0 {
+        e = Slow(text, from, to, power, digits, single, mut f)
+    }
+
+    return e
+}
+
+// The count of the zero bits above the first bit that is set, of a number that is not 0.
+int LeadingZeros(ulong w) {
+    mut int n = 0
+    mut ulong v = w
+    if v >> 32 == 0UL {
+        n = n + 32
+        v = v << 32
+    }
+
+    if v >> 48 == 0UL {
+        n = n + 16
+        v = v << 16
+    }
+
+    if v >> 56 == 0UL {
+        n = n + 8
+        v = v << 8
+    }
+
+    if v >> 60 == 0UL {
+        n = n + 4
+        v = v << 4
+    }
+
+    if v >> 62 == 0UL {
+        n = n + 2
+        v = v << 2
+    }
+
+    if v >> 63 == 0UL {
+        n = n + 1
+    }
+
+    return n
+}
+
+// The 128-bit product of two 64-bit numbers, from the products of their 32-bit halves: the low 64 bits
+// returned, the high 64 into `high`.
+ulong Product(ulong a, ulong b, mut ulong high) {
+    ulong a0 = a & 4294967295UL
+    ulong a1 = a >> 32
+    ulong b0 = b & 4294967295UL
+    ulong b1 = b >> 32
+    ulong b00 = a0 * b0
+    ulong mid1 = a1 * b0 + (b00 >> 32)
+    ulong mid2 = a0 * b1 + (mid1 & 4294967295UL)
+    high = a1 * b1 + (mid1 >> 32) + (mid2 >> 32)
+    return (mid2 << 32) | (b00 & 4294967295UL)
+}
+
+// Eisel-Lemire (Lemire, "Number Parsing at a Gigabyte per Second", 2021), as Rust's `compute_float`: the
+// significand without its first bit in `f` and the biased exponent returned, of the floating-point number
+// nearest to `w` times 10^`q`, ties to even, from the product of `w` and the 128-bit power of five of `q` in
+// `fives` (`ParseDouble`); -1 where that product cannot settle the rounding. A `double` where `single` is false,
+// a `float` where it is true.
+int Lemire(long q, ulong w, ulong* fives, bool single, mut ulong f) {
+    mut int explicit = 52
+    mut int minimum = -1023
+    mut int infinite = 2047
+    mut long smallest = -342
+    mut long largest = 308
+    mut long evenLow = -4
+    mut long evenHigh = 23
+    if single {
+        explicit = 23
+        minimum = -127
+        infinite = 255
+        smallest = -65
+        largest = 38
+        evenLow = -17
+        evenHigh = 10
+    }
+
+    f = 0UL
+    if w == 0UL || q < smallest {
+        return 0
+    }
+
+    if q > largest {
+        return infinite
+    }
+
+    int lz = LeadingZeros(w)
+    ulong v = w << lz
+    // the product to explicit + 3 bits, as Rust's `compute_product_approx`: a second product, with the low
+    // half of the power, where the first leaves those bits all set
+    int row = int(q) + 342
+    mut ulong upperFive = 0UL
+    mut ulong lowerFive = 0UL
+    raw {
+        upperFive = fives[2 * row]
+        lowerFive = fives[2 * row + 1]
+    }
+
+    ulong mask = 0xFFFFFFFFFFFFFFFFUL >> (explicit + 3)
+    mut ulong high = 0UL
+    mut ulong low = Product(v, upperFive, mut high)
+    if (high & mask) == mask {
+        mut ulong second = 0UL
+        Product(v, lowerFive, mut second)
+        low = low +% second
+        if second > low {
+            high = high + 1UL
+        }
+    }
+
+    // the product may lie a unit too low only outside 5^-27 to 5^55, where it is not exact
+    if low == 0xFFFFFFFFFFFFFFFFUL && (q < -27 || q > 55) {
+        return -1
+    }
+
+    int upper = int(high >> 63)
+    mut ulong m = high >> (upper + 64 - explicit - 3)
+    mut int power = (((int(q) * 217706) >> 16) + 63) + upper - lz - minimum
+    if power <= 0 {
+        // a number below the smallest normal one: shifted into place and rounded, the smallest normal one where
+        // the rounding carries
+        if -power + 1 >= 64 {
+            return 0
+        }
+
+        m = m >> (-power + 1)
+        m = m + (m & 1UL)
+        m = m >> 1
+        f = m
+        if m >= 1UL << explicit {
+            return 1
+        }
+
+        return 0
+    }
+
+    // a tie, which 5^q of 64 bits alone makes exact, rounds to the even significand
+    if low <= 1UL && q >= evenLow && q <= evenHigh && (m & 3UL) == 1UL && (m << (upper + 64 - explicit - 3)) == high {
+        m = m ^ 1UL
+    }
+
+    m = m + (m & 1UL)
+    m = m >> 1
+    if m >= 2UL << explicit {
+        m = 1UL << explicit
+        power = power + 1
+    }
+
+    if power >= infinite {
+        return infinite
+    }
+
+    f = m & ((1UL << explicit) - 1UL)
+    return power
+}
+
+// Rust's `parse_long_mantissa`, Nigel Tao's simple decimal conversion: the digits between `from` and `to` as a
+// decimal of up to 768 digits in `d`, shifted by powers of two until it lies in [1/2, 1), then by the bits of
+// the significand, and rounded, ties to even, the digits past the 768th counted as one that is not 0; the
+// significand without its first bit in `f` and the biased exponent returned, as `Lemire` gives them.
+int Slow(byte* text, long from, long to, long power, byte* d, bool single, mut ulong f) {
+    mut int explicit = 52
+    mut int minimum = -1023
+    mut int infinite = 2047
+    if single {
+        explicit = 23
+        minimum = -127
+        infinite = 255
+    }
+
+    f = 0UL
+    mut int n = 0
+    mut int point = 0
+    mut bool truncated = false
+    ReadDigits(text, from, to, power, d, mut n, mut point, mut truncated)
+    if n == 0 || point < -324 {
+        return 0
+    }
+
+    if point >= 310 {
+        return infinite
+    }
+
+    mut int exp2 = 0
+    while point > 0 {
+        int shift = Shift(point)
+        RightShift(d, mut n, mut point, mut truncated, shift)
+        if point < -2047 {
+            return 0
+        }
+
+        exp2 = exp2 + shift
+    }
+
+    while point <= 0 {
+        mut int shift = 0
+        if point == 0 {
+            mut int first = 0
+            raw {
+                first = int(d[0])
+            }
+
+            if first >= 5 {
+                break
+            }
+
+            shift = 1
+            if first < 2 {
+                shift = 2
+            }
+        } else {
+            shift = Shift(-point)
+        }
+
+        LeftShift(d, mut n, mut point, mut truncated, shift)
+        if point > 2047 {
+            return infinite
+        }
+
+        exp2 = exp2 - shift
+    }
+
+    exp2 = exp2 - 1
+    while minimum + 1 > exp2 {
+        mut int shift = minimum + 1 - exp2
+        if shift > 60 {
+            shift = 60
+        }
+
+        RightShift(d, mut n, mut point, mut truncated, shift)
+        exp2 = exp2 + shift
+    }
+
+    if exp2 - minimum >= infinite {
+        return infinite
+    }
+
+    LeftShift(d, mut n, mut point, mut truncated, explicit + 1)
+    mut ulong m = RoundDecimal(d, n, point, truncated)
+    if m >= 1UL << (explicit + 1) {
+        RightShift(d, mut n, mut point, mut truncated, 1)
+        exp2 = exp2 + 1
+        m = RoundDecimal(d, n, point, truncated)
+        if exp2 - minimum >= infinite {
+            return infinite
+        }
+    }
+
+    mut int e = exp2 - minimum
+    if m < 1UL << explicit {
+        e = e - 1
+    }
+
+    f = m & ((1UL << explicit) - 1UL)
+    return e
+}
+
+// Rust's `get_shift`: a shift of the decimal by powers of two that moves its point by `n` digits at most.
+int Shift(int n) => match n {
+    0 => 0
+    1 => 3
+    2 => 6
+    3 => 9
+    4 => 13
+    5 => 16
+    6 => 19
+    7 => 23
+    8 => 26
+    9 => 29
+    10 => 33
+    11 => 36
+    12 => 39
+    13 => 43
+    14 => 46
+    15 => 49
+    16 => 53
+    17 => 56
+    18 => 59
+    else => 60
+}
+
+// The digits between `from` and `to`, past a `,` and the point, as Rust's `parse_decimal` reads them: in `d`
+// the significant ones, from the first that is not 0 to the last that is not 0, 768 at most, with `truncated`
+// where more stand; in `n` their count; in `point` the power of ten the number is 0.d times, the written
+// exponent `power` among it, held within 100000 either way.
+void ReadDigits(byte* text, long from, long to, long power, byte* d, mut int n, mut int point, mut bool truncated) {
+    mut long at = from
+    mut long read = 0
+    mut long last = 0
+    mut long place = power
+    mut bool before = true
+    raw {
+        while at < to {
+            int b = int(text[at])
+            if b == 46 {
+                before = false
+            } else if b != 44 {
+                if read == 0 && b == 48 {
+                    if !before {
+                        place = place - 1
+                    }
+                } else {
+                    if read < 768 {
+                        d[read] = byte(b - 48)
+                    }
+
+                    read = read + 1
+                    if b != 48 {
+                        last = read
+                    }
+
+                    if before {
+                        place = place + 1
+                    }
+                }
+            }
+
+            at = at + 1
+        }
+    }
+
+    truncated = last > 768
+    n = 768
+    if last < 768 {
+        n = int(last)
+    }
+
+    if place > 100000 {
+        place = 100000
+    } else if place < -100000 {
+        place = -100000
+    }
+
+    point = int(place)
+}
+
+// Rust's `Decimal::round`: the integer part of the decimal, rounded half to even, the digits past the 768th
+// counted as one that is not 0; all bits set where it has more than 18 digits.
+ulong RoundDecimal(byte* d, int n, int point, bool truncated) {
+    if n == 0 || point < 0 {
+        return 0UL
+    }
+
+    if point > 18 {
+        return 0xFFFFFFFFFFFFFFFFUL
+    }
+
+    mut ulong m = 0UL
+    mut bool up = false
+    raw {
+        mut int i = 0
+        while i < point {
+            m = m * 10UL
+            if i < n {
+                m = m + ulong(d[i])
+            }
+
+            i = i + 1
+        }
+
+        if point < n {
+            up = d[point] >= 5
+            if d[point] == 5 && point + 1 == n {
+                up = truncated || (point != 0 && (int(d[point - 1]) & 1) != 0)
+            }
+        }
+    }
+
+    if up {
+        m = m + 1UL
+    }
+
+    return m
+}
+
+// Rust's `Decimal::left_shift`: the decimal times 2^`shift`, `shift` from 1 to 60, from its last digit to its
+// first, the digits it adds counted first; a digit that is not 0 past the 768th sets `truncated`.
+void LeftShift(byte* d, mut int n, mut int point, mut bool truncated, int shift) {
+    if n == 0 {
+        return
+    }
+
+    int added = NewDigits(d, n, shift)
+    mut int read = n
+    mut int write = n + added
+    mut ulong carry = 0UL
+    raw {
+        while read != 0 {
+            read = read - 1
+            write = write - 1
+            carry = carry + (ulong(d[read]) << shift)
+            ulong quotient = carry / 10UL
+            ulong remainder = carry - 10UL * quotient
+            if write < 768 {
+                d[write] = byte(remainder)
+            } else if remainder > 0UL {
+                truncated = true
+            }
+
+            carry = quotient
+        }
+
+        while carry > 0UL {
+            write = write - 1
+            ulong quotient = carry / 10UL
+            ulong remainder = carry - 10UL * quotient
+            if write < 768 {
+                d[write] = byte(remainder)
+            } else if remainder > 0UL {
+                truncated = true
+            }
+
+            carry = quotient
+        }
+    }
+
+    n = n + added
+    if n > 768 {
+        n = 768
+    }
+
+    point = point + added
+    Trim(d, mut n)
+}
+
+// Rust's `number_of_digits_decimal_left_shift`: the digits a left shift by `shift` adds, one fewer where the
+// decimal's digits lie below those of 5^`shift`.
+int NewDigits(byte* d, int n, int shift) {
+    int a = ShiftDigits(shift)
+    int start = a & 2047
+    int end = ShiftDigits(shift + 1) & 2047
+    int added = a >> 11
+    mut int i = 0
+    raw {
+        while i < end - start {
+            if i >= n {
+                return added - 1
+            }
+
+            int five = FiveDigit(start + i)
+            if int(d[i]) != five {
+                if int(d[i]) < five {
+                    return added - 1
+                }
+
+                return added
+            }
+
+            i = i + 1
+        }
+    }
+
+    return added
+}
+
+// The decimal digit at `at` of the digits of 5^1 to 5^61, one after another.
+int FiveDigit(int at) => int((FiveDigits(at / 16) >> ((15 - at % 16) * 4)) & 15UL)
+
+// Rust's `Decimal::right_shift`: the decimal over 2^`shift`, `shift` from 1 to 60, from its first digit to its
+// last; a digit that is not 0 past the 768th sets `truncated`, and a decimal whose point falls below -2047 is 0.
+void RightShift(byte* d, mut int n, mut int point, mut bool truncated, int shift) {
+    mut int read = 0
+    mut int write = 0
+    mut ulong carry = 0UL
+    raw {
+        while (carry >> shift) == 0UL {
+            if read < n {
+                carry = 10UL * carry + ulong(d[read])
+                read = read + 1
+            } else if carry == 0UL {
+                return
+            } else {
+                while (carry >> shift) == 0UL {
+                    carry = carry * 10UL
+                    read = read + 1
+                }
+
+                break
+            }
+        }
+
+        point = point - read + 1
+        if point < -2047 {
+            n = 0
+            point = 0
+            truncated = false
+            return
+        }
+
+        ulong mask = (1UL << shift) - 1UL
+        while read < n {
+            byte digit = byte(carry >> shift)
+            carry = 10UL * (carry & mask) + ulong(d[read])
+            read = read + 1
+            d[write] = digit
+            write = write + 1
+        }
+
+        while carry > 0UL {
+            byte digit = byte(carry >> shift)
+            carry = 10UL * (carry & mask)
+            if write < 768 {
+                d[write] = digit
+                write = write + 1
+            } else if digit > 0 {
+                truncated = true
+            }
+        }
+    }
+
+    n = write
+    Trim(d, mut n)
+}
+
+// The decimal without the zeros after its last digit that is not 0.
+void Trim(byte* d, mut int n) {
+    raw {
+        while n != 0 && d[n - 1] == 0 {
+            n = n - 1
+        }
+    }
+}
+
+// The next digit at `at` or after it and before `to`, past a `,` and the point, with `at` moved after it; -1
+// where none is left.
+int NextDigit(byte* text, long to, mut long at) {
+    raw {
+        while at < to {
+            int b = int(text[at])
+            at = at + 1
+            if b >= 48 && b <= 57 {
+                return b - 48
+            }
+        }
+    }
+
+    return -1
+}
+
+// `decimal.Parse` (X7): -1 with the `decimal` the `count` bytes at `text` hold in its two words, `low`, the low
+// 64 bits of its integer, and `high`, its high 32 bits with System.Decimal's flags above them, the scale in
+// bits 48 to 55 and the sign in bit 63; else the index of the failure's `ParseKind`. The form is C#'s `Number`
+// style with the invariant culture without its trailing sign: whitespace around the number, a leading `+` or
+// `-`, digits with `,` anywhere after the first of them before the point, a point and the digits after it, one
+// digit at least. The digits that fit in 96 bits at a scale of 28 at most are taken, and the number is rounded
+// at the first digit that does not fit, half to even, every digit after it counted, as C#'s `decimal.Parse`
+// rounds it (Number.NumberToDecimal); past the range after the rounding it is 2, `TooLarge`, or 3, `TooSmall`,
+// where it is below 0. A zero keeps its scale, 28 at most, and its sign (§12, the owner, 2026-10-31, "-0.00,
+// keep the sign").
+pub int ParseDecimal(byte* text, long count, mut ulong low, mut ulong high) {
+    mut long at = 0
+    mut bool negative = false
+    mut long first = -1
+    mut long to = 0
+    mut long e = 0
+    mut long fraction = 0
+    mut bool digits = false
+    mut bool point = false
+    raw {
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+
+        if at == count {
+            return 0
+        }
+
+        if text[at] == 43 {
+            at = at + 1
+        } else if text[at] == 45 {
+            negative = true
+            at = at + 1
+        }
+
+        // `e` counts the significant digits before the point, or else, below 0, the zeros after it before the
+        // first digit that is not 0, as the scale of .NET's number buffer counts them
+        while at < count {
+            int b = int(text[at])
+            if b >= 48 && b <= 57 {
+                digits = true
+                if point {
+                    fraction = fraction + 1
+                }
+
+                if first < 0 && b == 48 {
+                    if point {
+                        e = e - 1
+                    }
+                } else {
+                    if first < 0 {
+                        first = at
+                    }
+
+                    if !point {
+                        e = e + 1
+                    }
+                }
+            } else if b == 46 && !point {
+                point = true
+            } else if b != 44 || !digits || point {
+                break
+            }
+
+            at = at + 1
+        }
+
+        to = at
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+    }
+
+    if !digits || at != count {
+        return 1
+    }
+
+    mut ulong sign = 0UL
+    if negative {
+        sign = 9223372036854775808UL
+    }
+
+    if first < 0 {
+        mut long scale = fraction
+        if scale > 28 {
+            scale = 28
+        }
+
+        low = 0UL
+        high = sign | (ulong(scale) << 48)
+        return -1
+    }
+
+    mut int failed = 2
+    if negative {
+        failed = 3
+    }
+
+    if e > 29 {
+        return failed
+    }
+
+    // the digits into 64 bits while the scale stays within 28, then into 96 bits while they fit, the integer
+    // digits all, the first digit left over in `c`, as Number.NumberToDecimal takes them
+    mut long position = first
+    mut int c = NextDigit(text, to, mut position)
+    mut ulong lo = 0UL
+    while e > -28 {
+        e = e - 1
+        lo = lo * 10UL + ulong(c)
+        c = NextDigit(text, to, mut position)
+        if lo >= 1844674407370955161UL {
+            break
+        }
+
+        if c < 0 {
+            while e > 0 {
+                e = e - 1
+                lo = lo * 10UL
+                if lo >= 1844674407370955161UL {
+                    break
+                }
+            }
+
+            break
+        }
+    }
+
+    mut ulong hi = 0UL
+    while (e > 0 || (c >= 0 && e > -28)) && (hi < 429496729UL || (hi == 429496729UL && (lo < 0x9999999999999999UL || (lo == 0x9999999999999999UL && c <= 5)))) {
+        ulong part = (lo & 4294967295UL) * 10UL
+        ulong carried = (lo >> 32) * 10UL + (part >> 32)
+        lo = (part & 4294967295UL) + (carried << 32)
+        hi = (carried >> 32) + hi * 10UL
+        if c >= 0 {
+            lo = lo +% ulong(c)
+            if lo < ulong(c) {
+                hi = hi + 1UL
+            }
+
+            c = NextDigit(text, to, mut position)
+        }
+
+        e = e - 1
+    }
+
+    // half to even: a 5 with nothing but zeros after it rounds to the even number
+    if c >= 5 {
+        mut bool up = true
+        if c == 5 && (lo & 1UL) == 0UL {
+            mut bool zeros = true
+            c = NextDigit(text, to, mut position)
+            while c >= 0 && zeros {
+                zeros = c == 0
+                c = NextDigit(text, to, mut position)
+            }
+
+            up = !zeros
+        }
+
+        if up {
+            lo = lo +% 1UL
+            if lo == 0UL {
+                hi = hi + 1UL
+                if hi == 4294967296UL {
+                    // past 96 bits: the number one digit shorter, 2^96 / 10 rounded
+                    lo = 0x999999999999999AUL
+                    hi = 429496729UL
+                    e = e + 1
+                }
+            }
+        }
+    }
+
+    if e > 0 {
+        return failed
+    }
+
+    if e <= -29 {
+        lo = 0UL
+        hi = 0UL
+        e = -28
+    }
+
+    low = lo
+    high = sign | (ulong(-e) << 48) | hi
+    return -1
+}
+
+// For a left shift by `shift` bits, 1 to 60, the count of digits it adds, or one more than it adds
+// where the digits of the number lie below those of 5^shift, in bits 11 up, and where the digits of
+// 5^shift start in FiveDigit's sequence, in bits 0 to 10, as Rust's `number_of_digits_decimal_left_shift`.
+int ShiftDigits(int shift) => match shift {
+    0 => 0
+    1 => 2048
+    2 => 2049
+    3 => 2051
+    4 => 4102
+    5 => 4105
+    6 => 4109
+    7 => 6162
+    8 => 6167
+    9 => 6173
+    10 => 8228
+    11 => 8235
+    12 => 8243
+    13 => 8252
+    14 => 10310
+    15 => 10320
+    16 => 10331
+    17 => 12391
+    18 => 12403
+    19 => 12416
+    20 => 14478
+    21 => 14492
+    22 => 14507
+    23 => 14523
+    24 => 16588
+    25 => 16605
+    26 => 16623
+    27 => 18690
+    28 => 18709
+    29 => 18729
+    30 => 20798
+    31 => 20819
+    32 => 20841
+    33 => 20864
+    34 => 22936
+    35 => 22960
+    36 => 22985
+    37 => 25059
+    38 => 25085
+    39 => 25112
+    40 => 27188
+    41 => 27216
+    42 => 27245
+    43 => 27275
+    44 => 29354
+    45 => 29385
+    46 => 29417
+    47 => 31498
+    48 => 31531
+    49 => 31565
+    50 => 33648
+    51 => 33683
+    52 => 33719
+    53 => 33756
+    54 => 35842
+    55 => 35880
+    56 => 35919
+    57 => 38007
+    58 => 38047
+    59 => 38088
+    60 => 40178
+    61 => 40220
+    else => 0
+}
+
+// The decimal digits of 5^1 to 5^61 one after another, 1351 of them, sixteen to a word, one to
+// four bits, the first in the highest four: the hexadecimal digits of each word are the decimal ones.
+ulong FiveDigits(int word) => match word {
+    0 => 0x5251256253125156
+    1 => 0x2578125390625195
+    2 => 0x3125976562548828
+    3 => 0x1252441406251220
+    4 => 0x7031256103515625
+    5 => 0x3051757812515258
+    6 => 0x7890625762939453
+    7 => 0x1253814697265625
+    8 => 0x1907348632812595
+    9 => 0x3674316406254768
+    10 => 0x3715820312523841
+    11 => 0x8579101562511920
+    12 => 0x9289550781255960
+    13 => 0x4644775390625298
+    14 => 0x0232238769531251
+    15 => 0x4901161193847656
+    16 => 0x2574505805969238
+    17 => 0x2812537252902984
+    18 => 0x6191406251862645
+    19 => 0x1492309570312593
+    20 => 0x1322574615478515
+    21 => 0x6254656612873077
+    22 => 0x3925781252328306
+    23 => 0x4365386962890625
+    24 => 0x1164153218269348
+    25 => 0x1445312558207660
+    26 => 0x9134674072265625
+    27 => 0x2910383045673370
+    28 => 0x3613281251455191
+    29 => 0x5228366851806640
+    30 => 0x6257275957614183
+    31 => 0x4259033203125363
+    32 => 0x7978807091712951
+    33 => 0x6601562518189894
+    34 => 0x0354585647583007
+    35 => 0x8125909494701772
+    36 => 0x9282379150390625
+    37 => 0x4547473508864641
+    38 => 0x1895751953125227
+    39 => 0x3736754432320594
+    40 => 0x7875976562511368
+    41 => 0x6837721616029739
+    42 => 0x3798828125568434
+    43 => 0x1886080801486968
+    44 => 0x9941406252842170
+    45 => 0x9430404007434844
+    46 => 0x9707031251421085
+    47 => 0x4715202003717422
+    48 => 0x4853515625710542
+    49 => 0x7357601001858711
+    50 => 0x2426757812535527
+    51 => 0x1367880050092935
+    52 => 0x5621337890625177
+    53 => 0x6356839400250464
+    54 => 0x6778106689453125
+    55 => 0x8881784197001252
+    56 => 0x3233890533447265
+    57 => 0x6254440892098500
+    58 => 0x6261616945266723
+    59 => 0x6328125222044604
+    60 => 0x9250313080847263
+    61 => 0x3361816406251110
+    62 => 0x2230246251565404
+    63 => 0x2363166809082031
+    64 => 0x2555511151231257
+    65 => 0x8270211815834045
+    66 => 0x4101562527755575
+    67 => 0x6156289135105907
+    68 => 0x9170227050781251
+    69 => 0x3877787807814456
+    70 => 0x7552953958511352
+    71 => 0x5390625693889390
+    72 => 0x3907228377647697
+    73 => 0x9255676269531253
+    74 => 0x4694469519536141
+    75 => 0x8882384896278381
+    76 => 0x3476562517347234
+    77 => 0x7597680709441192
+    78 => 0x4481391906738281
+    79 => 0x2586736173798840
+    80 => 0x3547205962240695
+    81 => 0x9533691406254336
+    82 => 0x8086899420177360
+    83 => 0x2981120347976684
+    84 => 0x5703125000000000
+    else => 0
+}
+
 // The block of a map (M9). A map value is the address of its block, null for a map that holds none: one
 // that never took one, and one whose `Clear` let go of a block other values held; the `Remove` of its last
 // entry and the `Clear` of a block it alone held keep the block, its count of entries 0. A block holds

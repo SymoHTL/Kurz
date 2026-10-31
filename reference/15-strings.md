@@ -210,8 +210,8 @@ holds a byte the form does not take is `InvalidDigit` though its digits run past
 string read before the range, as C#'s `Parse` reads it, so that `long.Parse("99999999999999999999x")`
 is `InvalidDigit` (§12, the owner, 2026-10-31, "InvalidDigit, as C#"). Whitespace is the tab, the line
 feed, the vertical tab, the form feed, the carriage return and the space, and a string of whitespace
-alone is `Empty`, and a sign with no digits, `"+"` or `"-"`, is `InvalidDigit`; a NUL is no
-whitespace, so that `"5\0"` is `InvalidDigit`; `,` stands among the digits before the point, its
+alone is `Empty`, and a sign with no digits, `"+"` or `"-"`, is `InvalidDigit`;
+`,` stands among the digits before the point, its
 groups not checked, so that `"1,2,3"` reads as 123; `Infinity`, `-Infinity` and `NaN` are read in any
 case; a number may start or end with its point; a sign before the digits of an unsigned type reads as
 C#'s `Parse` reads it, `"-0"` as 0 and `"-1"` as `TooSmall`; `float.Parse` reads as `double.Parse`
@@ -219,6 +219,26 @@ does, a number past the largest `float` being infinity; and `ParseError` and `Pa
 every file sees, so that a file's own declaration of one is `redeclared` (V9), as a file's own
 `InvalidUtf8` is (T15) *(assumed, §12: the readings said back with the answers and the defaults of the
 build's product pass, not put to the owner as questions, and the two names, a default of the question)*.
+A `decimal` zero read with a sign keeps it, so that `print(decimal.Parse("-0.00"))` shows `-0.00`, as
+C#'s `decimal.Parse` keeps the sign in the value's bits (§12, the owner, 2026-10-31, "-0.00, keep the
+sign"). A `double` is the one nearest the number its digits write, ties to the even one, and a `float`
+is rounded once, from the digits, as Rust's `parse` and C#'s `Parse` since .NET Core 3.0 read them:
+Clinger's fast path where the digits and the power of ten are exact in a `double`, Eisel-Lemire's with
+a table of the 128-bit powers of five from 5^-342 to 5^308, and for the strings the two cannot settle
+a slow path over at most 768 of the digits on the stack, so that a parse asks the allocator for
+nothing. The forms are .NET's: a `,` only after the first digit, as many as stand, so that `",5"` is
+`InvalidDigit` and `"1,,2"` reads as 12; a sign before `Infinity` and `NaN`, and no `Inf`; a point
+with a digit beside it and an exponent with a digit after its sign, so that `"."` and `"1e"` are
+`InvalidDigit`; no hexadecimal form and no `_` between digits. A number past the largest `double` or
+`float` is an infinity and one below the smallest a zero, each with the sign, so that `"-1e-999"`
+reads as `-0`, and `"NaN"` and `"-NaN"` read as the same NaN. A `decimal` keeps the digits that fit in
+its 96 bits at a scale of at most 28, rounds half to even at the cut, every digit after it counted, and
+is held to its range after the rounding, so that `"7922816251426433759354395033.55"` reads as
+7922816251426433759354395034 and `"79228162514264337593543950335.5"` is `TooLarge`; a zero keeps its
+scale, at most 28 *(assumed, §12: the defaults of the build's product pass, not put to the owner)*. A NUL
+after the number is `InvalidDigit` for every number type, as Rust's `parse` reads it, where .NET's
+`Parse` skips NUL characters after the digits, so that `"5\0"` is `InvalidDigit` (§12, the owner,
+2026-10-31, "InvalidDigit, as Rust").
 The reading takes no culture (§4).
 
 Case: [strings/parse.kz](../corpus/strings/parse.kz)
@@ -355,6 +375,70 @@ match int.Parse("5\0") {
     int n => print(n)
     ParseError e => print(e)
 }
+```
+
+Case: [strings/parse-floating.kz](../corpus/strings/parse-floating.kz)
+```kurz
+void ShowDouble(string s) {
+    match double.Parse(s) {
+        double d => print(d)
+        ParseError e => print(e)
+    }
+}
+
+void ShowFloat(string s) {
+    match float.Parse(s) {
+        float f => print(f)
+        ParseError e => print(e)
+    }
+}
+
+// a `,` after the first digit, as many as stand, and none before it
+ShowDouble("1,")
+ShowDouble("1,,2")
+ShowDouble(",5")
+// a point with a digit beside it, and an exponent with a digit after its sign
+ShowDouble("1.e5")
+ShowDouble(".")
+ShowDouble("1e")
+// a sign before the words, and no `Inf`
+ShowDouble("-NaN")
+ShowDouble("Inf")
+// a NUL after the number, as Rust reads it
+ShowDouble("1.5\0")
+// below the smallest `double` a zero with the sign, and the nearest `double`, ties to the even one
+ShowDouble("-1e-999")
+ShowDouble("2.4703282292062327e-324")
+ShowDouble("2.4703282292062328e-324")
+ShowDouble("9007199254740993")
+ShowDouble("-1e999")
+// a `float` is rounded once, from the digits
+ShowFloat("16777217")
+ShowFloat("3.4028236e38")
+```
+
+Case: [strings/parse-decimal.kz](../corpus/strings/parse-decimal.kz)
+```kurz
+void ShowDecimal(string s) {
+    match decimal.Parse(s) {
+        decimal m => print(m)
+        ParseError e => print(e)
+    }
+}
+
+// a zero read with a sign keeps it
+ShowDecimal("-0.00")
+// past 28 places the number rounds half to even, every digit after the cut counted
+ShowDecimal("0.00000000000000000000000000015")
+ShowDecimal("0.00000000000000000000000000005")
+ShowDecimal("1.0000000000000000000000000000500001")
+// past 29 digits the digits that fit, rounded
+ShowDecimal("7922816251426433759354395033.55")
+// the range is held after the rounding
+ShowDecimal("79228162514264337593543950335.4")
+ShowDecimal("79228162514264337593543950335.5")
+ShowDecimal("-79228162514264337593543950335.5")
+ShowDecimal("1,000.5")
 ```
 
 Case: [strings/parse-error-redeclared.kz](../corpus/strings/parse-error-redeclared.kz)

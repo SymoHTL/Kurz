@@ -1,0 +1,32 @@
+// expect: output
+// | -0.00
+// | 0.0000000000000000000000000002
+// | 0.0000000000000000000000000000
+// | 1.0000000000000000000000000001
+// | 7922816251426433759354395034
+// | 79228162514264337593543950335
+// | too large
+// | too small
+// | 1000.5
+// rules: X7
+
+void ShowDecimal(string s) {
+    match decimal.Parse(s) {
+        decimal m => print(m)
+        ParseError e => print(e)
+    }
+}
+
+// a zero read with a sign keeps it
+ShowDecimal("-0.00")
+// past 28 places the number rounds half to even, every digit after the cut counted
+ShowDecimal("0.00000000000000000000000000015")
+ShowDecimal("0.00000000000000000000000000005")
+ShowDecimal("1.0000000000000000000000000000500001")
+// past 29 digits the digits that fit, rounded
+ShowDecimal("7922816251426433759354395033.55")
+// the range is held after the rounding
+ShowDecimal("79228162514264337593543950335.4")
+ShowDecimal("79228162514264337593543950335.5")
+ShowDecimal("-79228162514264337593543950335.5")
+ShowDecimal("1,000.5")

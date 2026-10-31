@@ -1901,37 +1901,129 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// X7: <c>long.Parse(s)</c>, and the same call on each integer type, the number the string's bytes give, which the standard library's
-    /// <c>ParseInteger</c> reads against the type's range, or the case <c>ParseError</c> of the kind it gives (section 12, the owner,
-    /// 2026-10-31, "Outcome long | ParseError"). The string is borrowed for the call.
+    /// X7: <c>long.Parse(s)</c>, and the same call on each number type, the number the string's bytes give, or the case <c>ParseError</c> of
+    /// the kind the standard library gives (section 12, the owner, 2026-10-31, "Outcome long | ParseError"): an integer from
+    /// <c>ParseInteger</c>, which reads it against the type's range; the bits of a <c>double</c> and a <c>float</c> from <c>ParseDouble</c>
+    /// and <c>ParseFloat</c>, through a helper that keeps the 768 bytes of their slow path on its stack, as Rust keeps its <c>Decimal</c>,
+    /// so that a parse asks the allocator for nothing; and the two words of a <c>decimal</c> from <c>ParseDecimal</c>. The string is
+    /// borrowed for the call.
     /// </summary>
+    /// <summary>
+    /// The 128-bit powers of five of Eisel-Lemire (X7), 5^q for q from -342 to 308, two words each, the high one first, as fast_float's
+    /// and Rust's <c>POWER_OF_FIVE_128</c> hold them: for q from 0, 5^q shifted until its first bit is bit 127 and cut to 128 bits; for
+    /// a negative q, 2^b / 5^-q rounded down and then up by one, cut to 128 bits, where b is 127 more than the bits of 5^-q from 5^-27
+    /// up and twice those bits and 128 more below it.
+    /// </summary>
+    internal static readonly Lazy<ulong[]> Fives = new(() =>
+    {
+        var words = new ulong[2 * 651];
+        var top = BigInteger.One << 128;
+        for (var q = -342; q <= 308; q++)
+        {
+            BigInteger power;
+            if (q >= 0)
+            {
+                power = BigInteger.Pow(5, q);
+                while (power < (BigInteger.One << 127))
+                {
+                    power <<= 1;
+                }
+            }
+            else
+            {
+                var five = BigInteger.Pow(5, -q);
+                var bits = 0;
+                while ((BigInteger.One << bits) < five)
+                {
+                    bits++;
+                }
+
+                power = ((BigInteger.One << (q >= -27 ? bits + 127 : (2 * bits) + 128)) / five) + 1;
+            }
+
+            while (power >= top)
+            {
+                power >>= 1;
+            }
+
+            words[2 * (q + 342)] = (ulong)(power >> 64);
+            words[(2 * (q + 342)) + 1] = (ulong)(power & ulong.MaxValue);
+        }
+
+        return words;
+    });
+
+    /// <summary>The global that holds <see cref="Fives"/>, written once into a program that parses a <c>double</c> or a <c>float</c> (X7).</summary>
+    private string FivesTable()
+    {
+        const string name = "@\"parse.fives\"";
+        if (helpers.Add(name))
+        {
+            var words = string.Join(", ", Fives.Value.Select(w => $"i64 {IntegerText(w, Types.ULong)}"));
+            module.Global($"{name} = private unnamed_addr constant [{Fives.Value.Length} x i64] [{words}]");
+        }
+
+        return name;
+    }
+
     private string EmitParse(CallExpression c, CallInfo info)
     {
         var text = Arguments(c, info, _ => Types.String, _ => false, _ => null, cConvention: false, owned: false).Single()["%kz.str ".Length..];
         var union = (UnionType)Sub(info.Result);
         var number = union.Cases[0];
         var error = (DataType)union.Cases[1];
-        var width = Lower.Size(number) * 8;
-        var signed = Types.IsSigned(number);
-        var most = signed ? (BigInteger.One << (width - 1)) - 1 : (BigInteger.One << width) - 1;
-        var least = signed ? BigInteger.One << (width - 1) : BigInteger.Zero;
         var (bytes, count, _) = StringParts(text);
-        var magnitude = fn.Alloca("i64", "magnitude");
-        var kind = fn.Value($"call i32 {StdFunction("ParseInteger")}(ptr {bytes}, i64 {count}, i64 {IntegerText(most, Types.ULong)}, i64 {IntegerText(least, Types.ULong)}, ptr {magnitude})");
+        string kind;
+        Func<string> value;
+        if (Types.IsFloating(number))
+        {
+            var single = number is PrimitiveType { Kind: Primitive.Float };
+            var bitsType = single ? "i32" : "i64";
+            var parse = StdFunction(single ? "ParseFloat" : "ParseDouble");
+            var helper = Helper(single ? "parse.float" : "parse.double", "i32", ["ptr", "i64", "ptr"], () =>
+            {
+                var digits = fn.Alloca("[768 x i8]", "digits");
+                fn.Return($"i32 {fn.Value($"call i32 {parse}(ptr %a0, i64 %a1, ptr {digits}, ptr {FivesTable()}, ptr %a2)")}");
+            });
+            var bits = fn.Alloca(bitsType, "bits");
+            kind = fn.Value($"call i32 {helper}(ptr {bytes}, i64 {count}, ptr {bits})");
+            value = () => fn.Value($"bitcast {bitsType} {fn.Value($"load {bitsType}, ptr {bits}")} to {Ir(number)}");
+        }
+        else if (number is PrimitiveType { Kind: Primitive.Decimal })
+        {
+            var low = fn.Alloca("i64", "low");
+            var high = fn.Alloca("i64", "high");
+            kind = fn.Value($"call i32 {StdFunction("ParseDecimal")}(ptr {bytes}, i64 {count}, ptr {low}, ptr {high})");
+            value = () => DecimalOf(fn.Value($"load i64, ptr {low}"), fn.Value($"load i64, ptr {high}"));
+        }
+        else
+        {
+            var width = Lower.Size(number) * 8;
+            var signed = Types.IsSigned(number);
+            var most = signed ? (BigInteger.One << (width - 1)) - 1 : (BigInteger.One << width) - 1;
+            var least = signed ? BigInteger.One << (width - 1) : BigInteger.Zero;
+            var magnitude = fn.Alloca("i64", "magnitude");
+            var integer = fn.Value($"call i32 {StdFunction("ParseInteger")}(ptr {bytes}, i64 {count}, i64 {IntegerText(most, Types.ULong)}, i64 {IntegerText(least, Types.ULong)}, ptr {magnitude})");
+            kind = integer;
+            value = () =>
+            {
+                var positive = fn.Value($"load i64, ptr {magnitude}");
+                var whole = fn.Value($"select i1 {fn.Value($"icmp eq i32 {integer}, -2")}, i64 {fn.Value($"sub i64 0, {positive}")}, i64 {positive}");
+                return width == 64 ? whole : fn.Value($"trunc i64 {whole} to {Ir(number)}");
+            };
+        }
+
         var result = fn.Alloca(Ir(union), "parsed");
         var done = fn.Label("parse.done");
         var read = fn.Label("parse.number");
         var failed = fn.Label("parse.failed");
         fn.CondBranch(fn.Value($"icmp slt i32 {kind}, 0"), read, failed);
         fn.Block(read);
-        var positive = fn.Value($"load i64, ptr {magnitude}");
-        var value = fn.Value($"select i1 {fn.Value($"icmp eq i32 {kind}, -2")}, i64 {fn.Value($"sub i64 0, {positive}")}, i64 {positive}");
-        var narrowed = width == 64 ? value : fn.Value($"trunc i64 {value} to {Ir(number)}");
-        fn.Emit($"store {Ir(union)} {MakeUnion(union, number, narrowed)}, ptr {result}");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, number, value())}, ptr {result}");
         fn.Branch(done);
         fn.Block(failed);
         var kindType = (EnumType)Layout.Fields(error)[0];
-        // `ParseKind` numbers none of its values, so that each is stored as its index, the one `ParseInteger` gives (D18)
+        // `ParseKind` numbers none of its values, so that each is stored as its index, the one the standard library gives (D18)
         var stored = Ir(kindType) == "i32" ? kind : fn.Value($"trunc i32 {kind} to {Ir(kindType)}");
         var failure = fn.Value($"insertvalue {Ir(error)} undef, {Ir(kindType)} {stored}, 0");
         fn.Emit($"store {Ir(union)} {MakeUnion(union, error, failure)}, ptr {result}");
