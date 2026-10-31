@@ -82,7 +82,7 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
-        if (keepCases || result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null)
+        if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
         }
@@ -1801,7 +1801,7 @@ public sealed partial class Checker
             {
                 // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
                 // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
-                candidate.Keeps = pres.Select((p, i) => p.Whole is not null && Types.KeepsCases(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map))).ToArray();
+                candidate.Keeps = pres.Select((p, i) => p.Whole is not null && Types.KeepsCases(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p.Whole)).ToArray();
             }
 
             if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
@@ -2187,6 +2187,14 @@ public sealed partial class Checker
                 return d.TypeArguments.Zip(da.TypeArguments).All(pair => Unify(pair.First, pair.Second, map));
             case FunctionType f when argument is FunctionType fa && f.Parameters.Count == fa.Parameters.Count:
                 return f.Parameters.Zip(fa.Parameters).All(pair => Unify(pair.First, pair.Second, map)) && Unify(f.Result, fa.Result, map);
+            case UnionType u when u.Cases.Count(c => c is TypeParameterType) == 1:
+                {
+                    // O4 (the owner, 2026-10-31, "Keep, infer T = int"): in `T | NotFound` the type parameter takes the cases of the argument
+                    // the union does not name, the success of a call that keeps its cases
+                    IEnumerable<KurzType> cases = argument is UnionType ua ? ua.Cases : [argument];
+                    var rest = cases.Where(c => !u.Cases.Any(w => Types.Same(w, c))).ToList();
+                    return rest.Count == 0 || Unify(u.Cases.First(c => c is TypeParameterType), rest.Count == 1 ? rest[0] : new UnionType(rest), map);
+                }
             default:
                 return true; // nothing to bind here; whether the types fit is the fit's question
         }

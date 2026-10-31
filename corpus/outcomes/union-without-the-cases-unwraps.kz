@@ -1,0 +1,39 @@
+// expect: output
+// | 10
+// | 10
+// | done
+// | none
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report(int | string value) {
+    match value {
+        int n => print(n)
+        string s => print(s)
+    }
+}
+
+// `int | string` names no case of the call beyond its success, so the call unwraps and `NotFound` leaves `Shown`
+int | NotFound Shown(int id) {
+    Report(Find(id))
+    int | string kept = Find(id)
+    Report(kept)
+    return 0
+}
+
+match Shown(1) {
+    int n => print("done")
+    NotFound => print("none")
+}
+match Shown(2) {
+    int n => print("done")
+    NotFound => print("none")
+}
