@@ -532,7 +532,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
   or a change of case that changes nothing gives the string itself, held once more; `CaseTests` holds `ToLower` and
   `ToUpper` of every code point of the first two planes to `CaseTables`, read without the standard library's search,
-  and the final sigma and the mappings to several code points to fixed lines; `PieceTests` holds each
+  and the final sigma and the mappings to several code points to fixed lines, each program a test build, which clang
+builds at `-O0`, so that a literal input runs the standard library's walk as any string's does; `PieceTests` holds each
   of these members to what .NET's members of the same strings give, and `ParseTests` each integer type's `Parse`,
   `Hex.Decode` and the cuts that stand to .NET's `Parse`, `Convert.FromHexString` and cut of the UTF-8 bytes,
   each over 2000 generated strings, the first 500 of them under the allocator that makes every freed block
