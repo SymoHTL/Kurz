@@ -620,6 +620,29 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// X7: <c>long.Parse(s)</c>, and the same call on each integer type, the number the string holds or the case <c>ParseError</c>, an
+    /// outcome (O1), as Rust's <c>parse</c> (section 12, the owner, 2026-10-31, "Outcome long | ParseError"); the parameter takes C#'s
+    /// name.
+    /// </summary>
+    private Typed CheckParse(CallExpression c, string name, PrimitiveType number)
+    {
+        if (RefusesTypeArguments(c, $"`{name}.Parse`"))
+        {
+            return Typed.Error;
+        }
+
+        KurzType result = new UnionType([number, new DataType(dataTypes["ParseError"], [])]);
+        var candidate = new Candidate { Slots = [new Slot("s", Types.String, false, false, false)], Result = result };
+        var typed = Call([candidate], c, null, out var picked);
+        if (picked is not null && !typed.IsError)
+        {
+            model.RecordCall(c, new CallInfo(CallKind.Parse, null, null, result, NoMap, picked.Binding, 1, result));
+        }
+
+        return typed;
+    }
+
+    /// <summary>
     /// D18: <c>Plan.From(n)</c>, the value whose number is <c>n</c>, an <c>int</c>, or the case <c>Invalid</c>, an outcome (O1); on an enum that
     /// numbers none it is <c>enum-number</c> (D20).
     /// </summary>
@@ -1093,6 +1116,11 @@ public sealed partial class Checker
                 return CheckStringJoin(c);
             }
 
+            if (m.Member == "Parse" && Types.ByName.TryGetValue(n.Name, out var parsed) && Types.IsInteger(parsed))
+            {
+                return CheckParse(c, n.Name, parsed); // X7
+            }
+
             if (UnreadFunction(n.Name, m.Member) is { } unreadFunction)
             {
                 NotSupported(m.Line, unreadFunction);
@@ -1154,7 +1182,7 @@ public sealed partial class Checker
             return CheckStringSearch(c, m);
         }
 
-        if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Trim" or "TrimStart" or "TrimEnd" or "TrimAscii" or "TrimStartAscii" or "TrimEndAscii" or "Split" or "Replace" or "ToLowerAscii" or "ToUpperAscii")
+        if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Trim" or "TrimStart" or "TrimEnd" or "TrimAscii" or "TrimStartAscii" or "TrimEndAscii" or "Split" or "Replace" or "ToLowerAscii" or "ToUpperAscii" or "Substring")
         {
             return CheckStringMember(c, m);
         }
@@ -1307,10 +1335,10 @@ public sealed partial class Checker
         return CallValue(member.Type, c);
     }
 
-    /// <summary>X7: a number type's <c>Parse</c>, which the checker does not read; else null.</summary>
+    /// <summary>X7: the <c>Parse</c> of a floating-point type and of <c>decimal</c>, which the checker does not read; else null.</summary>
     private static string? UnreadFunction(string type, string member) => (type, member) switch
     {
-        (_, "Parse") when Types.ByName.TryGetValue(type, out var number) && Types.IsNumber(number) => $"`{type}.Parse` (X7)",
+        (_, "Parse") when Types.ByName.TryGetValue(type, out var number) && Types.IsNumber(number) && !Types.IsInteger(number) => $"`{type}.Parse` (X7)",
         _ => null,
     };
 
@@ -1336,7 +1364,8 @@ public sealed partial class Checker
     /// X3 to X5: a string's trims, a <c>string</c> each (X4): <c>Trim</c>, <c>TrimStart</c> and <c>TrimEnd</c>, each with no argument
     /// or with a <c>char trimChar</c>, two forms, and the ASCII forms; <c>Split</c>, a <c>List&lt;string&gt;</c>, of a <c>string</c> or
     /// of a <c>char</c>, and <c>Replace</c>, a <c>string</c>, of two strings, of a <c>char</c> by a string or of a <c>char</c> by a
-    /// <c>char</c>, three forms (X5); and <c>ToLowerAscii()</c> and <c>ToUpperAscii()</c> (X3). A member of two forms takes a literal argument at its own type (F14) and
+    /// <c>char</c>, three forms (X5); <c>ToLowerAscii()</c> and <c>ToUpperAscii()</c> (X3); and <c>Substring(startIndex, length)</c>, a
+    /// <c>string</c> of two <c>int</c>s, the form the record names (X2). A member of two forms takes a literal argument at its own type (F14) and
     /// gives a call that fits neither <c>argument-mismatch</c> with a line for each form (F13), as X1's searches do; the parameters
     /// take C#'s names.
     /// </summary>
@@ -1368,6 +1397,7 @@ public sealed partial class Checker
                 new() { Slots = [Of("oldChar", Types.Char), Of("newChar", Types.Char)], Result = Types.String, Form = "string Replace(char oldChar, char newChar)" },
             }),
             "ToLowerAscii" or "ToUpperAscii" => (CallKind.StringCase, new List<Candidate> { new() { Slots = [], Result = Types.String } }),
+            "Substring" => (CallKind.StringSubstring, new List<Candidate> { new() { Slots = [Of("startIndex", Types.Int), Of("length", Types.Int)], Result = Types.String } }),
             _ => (CallKind.StringTrim, new List<Candidate> { new() { Slots = [], Result = Types.String } }),
         };
         return Record(c, kind, Call(candidates, c, null, out var picked), picked);
@@ -1420,10 +1450,9 @@ public sealed partial class Checker
         return Record(c, CallKind.StringJoin, typed, picked);
     }
 
-    /// <summary>X2, X3's change of case by Unicode's mapping, X8: the members of a string and of a list that chapter 15 names, which the checker does not read; else null.</summary>
+    /// <summary>X3's change of case by Unicode's mapping, X8: the members of a string and of a list that chapter 15 names, which the checker does not read; else null.</summary>
     private static string? UnreadMember(KurzType type, string member) => (type, member) switch
     {
-        (PrimitiveType { Kind: Primitive.String }, "Substring") => "a string's `Substring` (X2)",
         (PrimitiveType { Kind: Primitive.String }, "ToLower" or "ToUpper") => $"a string's `{member}` (X3)",
         (ListType, "Sort" or "SortBy" or "SortUnstable") => $"a list's `{member}` (X8)",
         _ => null,

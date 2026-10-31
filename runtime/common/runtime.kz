@@ -193,6 +193,23 @@ pub void Throw(string text, string file, int line) {
     sys.Exit(1)
 }
 
+// The error line of `not-char-boundary` (X2, X10): `error: not-char-boundary at <file>:<n>:`, the
+// position of the cut on the line below it, `byte <at> is inside a code point`, where the text of a
+// `throw` stands (O6), the trace of the calls below that, and the end of the process with the exit code 1.
+pub void NotCharBoundary(long at, string file, int line) {
+    sys.Crashing()
+    WriteError("error: not-char-boundary at ")
+    WriteError(file)
+    WriteError(":")
+    WriteNumber(ulong(line))
+    WriteError(":\n")
+    WriteError("byte ")
+    WriteNumber(ulong(at))
+    WriteError(" is inside a code point\n")
+    sys.Trace()
+    sys.Exit(1)
+}
+
 // The text of a signed integer (A2): its decimal digits, with a leading `-` when it is negative.
 pub string TextOfLong(long value) {
     if value >= 0 {

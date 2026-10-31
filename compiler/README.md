@@ -504,12 +504,23 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   items)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6); and
   `s.ToLowerAscii()` and `s.ToUpperAscii()`, which change `A` to `Z` or `a` to `z` alone, as Rust's
-  `to_ascii_lowercase` (X3). A piece of `Split` and a trimmed string is the string itself, held once more
+  `to_ascii_lowercase` (X3); `s.Substring(startIndex, length)`, whose cut the standard library's `SubstringCut` reads,
+  `index-out-of-range` where it reaches outside the string, read first, and else `not-char-boundary` where its start or
+  then its end falls on a byte of the form 10xxxxxx, the runtime's `NotCharBoundary` writing the position on the line
+  below the error line, as Rust's `&s[a..b]` reads a cut (X2, X10); an integer type's `Parse(s)`, which the standard
+  library's `ParseInteger` reads in C#'s Integer style, checking each digit against the type's range before it adds it,
+  as Rust's `from_str_radix` checks its multiplication, and reading a byte the form does not take before the range, as
+  C#'s `Parse` does, and whose case `ParseError` writes the words of its kind (X7); and `Hex.Decode(s)`, the bytes of
+  a new list the standard library's `HexDecode` makes, or the case `HexError` at the length where it is odd, read
+  first, or at the first byte that is no digit, as the `hex` crate's `decode` (H7). A piece of `Split`, a trimmed
+  string and a cut of `Substring` is the string itself, held once more
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
   or a change of case that changes nothing gives the string itself, held once more; `PieceTests` holds each
-  of these members to what .NET's members of the same strings give, over 2000 generated strings, the first 500
-  of them under the allocator that makes every freed block inaccessible as well;
+  of these members to what .NET's members of the same strings give, and `ParseTests` each integer type's `Parse`,
+  `Hex.Decode` and the cuts that stand to .NET's `Parse`, `Convert.FromHexString` and cut of the UTF-8 bytes,
+  each over 2000 generated strings, the first 500 of them under the allocator that makes every freed block
+  inaccessible as well;
 - `enum` (D12, D18, D20): a value is its number, or its place among the values where the declaration
   writes none, in the smallest of `i8`, `i16` and `i32` that holds every one, signed where a number is
   negative, as Rust stores the value of an enum without fields (section 4, an assumption there); `==`
@@ -1263,9 +1274,9 @@ unread; the limit of a type parameter and a member of a type parameter with one 
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29); `this` (K7);
-the members of a string and of a list that chapter 15 names but those of X1, X3's ASCII forms, X4, X5
-and X9, which are `Substring`, `ToLower`, `ToUpper`, `Sort`, `SortBy` and `SortUnstable` (X2, X3, X8), a
-number type's `Parse` (X7), and `Hex.Decode` (H7);
+the members of a string and of a list that chapter 15 names but those of X1, X2, X3's ASCII forms, X4, X5
+and X9, which are `ToLower`, `ToUpper`, `Sort`, `SortBy` and `SortUnstable` (X3, X8), and the `Parse` of
+`float`, `double` and `decimal` (X7);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory

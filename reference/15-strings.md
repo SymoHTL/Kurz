@@ -38,12 +38,12 @@ print(s.Contains(5))
 ### X2 (decided, §12) A position counts bytes
 
 A position in a string is an index into `s.Bytes` (T15), reached without a walk, as Rust's positions
-in a `str` (§12, the owner, 2026-10-31, "Bytes, as Rust"). `s.Substring(start, length)` is a new
-string of the `length` bytes from `start`. A `Substring` that reaches outside the string, a `start`
-or a `length` below 0 among them, raises `index-out-of-range`, as a list's index does (M9), and one
+in a `str` (§12, the owner, 2026-10-31, "Bytes, as Rust"). `s.Substring(startIndex, length)` is a new
+string of the `length` bytes from `startIndex`. A `Substring` that reaches outside the string, a
+`startIndex` or a `length` below 0 among them, raises `index-out-of-range`, as a list's index does (M9), and one
 whose start or end falls inside a code point raises `not-char-boundary`, which names the position,
-as Rust's `&s[a..b]` panics (§12, the owner, 2026-10-31, "Two ids"). A negative `start` or `length` is
-outside, and so is a `start + length` past the largest `int`; the bounds are read before the code
+as Rust's `&s[a..b]` panics (§12, the owner, 2026-10-31, "Two ids"). A negative `startIndex` or `length`
+is outside, and so is a `startIndex + length` past the largest `int`; the bounds are read before the code
 points, so that a `Substring` both outside the string and inside a code point raises
 `index-out-of-range`, and the start's code point before the end's, as Rust's `&s[a..b]` reads a cut
 *(assumed, §12, not put to the owner)*. Where the error line names the position is X10.
@@ -205,32 +205,37 @@ around it and a leading sign, and for `double`, `float` and `decimal` a point an
 of thousands, and for `double` and `float` an exponent and the words `Infinity` and `NaN` (§12, the
 owner, 2026-10-31, "C#'s invariant forms"), so that `"1,5"` reads as 15; an integer reads no
 separator and no point (§12, the owner, 2026-10-31, "C#'s Integer style"); a `decimal` reads no sign
-after its digits and no exponent (§12, the owner, 2026-10-31, "Without trailing sign"). Whitespace is
-the tab, the line feed, the vertical tab, the form feed, the carriage return and the space, and a
-string of whitespace alone is `Empty`; `,` stands among the digits before the point, its groups not
-checked, so that `"1,2,3"` reads as 123; `Infinity`, `-Infinity` and `NaN` are read in any case; a
-number may start or end with its point; a sign before the digits of an unsigned type reads as C#'s
-`Parse` reads it, `"-0"` as 0 and `"-1"` as `TooSmall`; `float.Parse` reads as `double.Parse` does,
-a number past the largest `float` being infinity; and `ParseError` and `ParseKind` are types every
-file sees, so that a file's own declaration of one is `redeclared` (V9), as a file's own
-`InvalidUtf8` is (T15) *(assumed, §12: the readings said back with the answers, not put to the owner
-as questions, and the two names, a default of the question)*. The reading takes no culture (§4).
+after its digits and no exponent (§12, the owner, 2026-10-31, "Without trailing sign"). A string that
+holds a byte the form does not take is `InvalidDigit` though its digits run past the range, the whole
+string read before the range, as C#'s `Parse` reads it, so that `long.Parse("99999999999999999999x")`
+is `InvalidDigit` (§12, the owner, 2026-10-31, "InvalidDigit, as C#"). Whitespace is the tab, the line
+feed, the vertical tab, the form feed, the carriage return and the space, and a string of whitespace
+alone is `Empty`, and a sign with no digits, `"+"` or `"-"`, is `InvalidDigit`; a NUL is no
+whitespace, so that `"5\0"` is `InvalidDigit`; `,` stands among the digits before the point, its
+groups not checked, so that `"1,2,3"` reads as 123; `Infinity`, `-Infinity` and `NaN` are read in any
+case; a number may start or end with its point; a sign before the digits of an unsigned type reads as
+C#'s `Parse` reads it, `"-0"` as 0 and `"-1"` as `TooSmall`; `float.Parse` reads as `double.Parse`
+does, a number past the largest `float` being infinity; and `ParseError` and `ParseKind` are types
+every file sees, so that a file's own declaration of one is `redeclared` (V9), as a file's own
+`InvalidUtf8` is (T15) *(assumed, §12: the readings said back with the answers and the defaults of the
+build's product pass, not put to the owner as questions, and the two names, a default of the question)*.
+The reading takes no culture (§4).
 
 Case: [strings/parse.kz](../corpus/strings/parse.kz)
 ```kurz
-void Show(long | ParseError result) {
-    match result {
+void Show(string s) {
+    match long.Parse(s) {
         long n => print(n)
         ParseError e => print(e)
     }
 }
 
-Show(long.Parse("42"))
-Show(long.Parse("+5"))
-Show(long.Parse(""))
-Show(long.Parse("4x"))
-Show(long.Parse("9223372036854775808"))
-Show(long.Parse("-9223372036854775809"))
+Show("42")
+Show("+5")
+Show("")
+Show("4x")
+Show("9223372036854775808")
+Show("-9223372036854775809")
 match byte.Parse("-1") {
     byte b => print(b)
     ParseError e => print(e.Kind)
@@ -247,45 +252,109 @@ match double.Parse("1e999") {
 
 Case: [strings/parse-forms.kz](../corpus/strings/parse-forms.kz)
 ```kurz
-void Show(long | ParseError result) {
-    match result {
+void Show(string s) {
+    match long.Parse(s) {
         long n => print(n)
         ParseError e => print(e)
     }
 }
 
-void ShowDouble(double | ParseError result) {
-    match result {
+void ShowDouble(string s) {
+    match double.Parse(s) {
         double d => print(d)
         ParseError e => print(e)
     }
 }
 
-void ShowDecimal(decimal | ParseError result) {
-    match result {
+void ShowDecimal(string s) {
+    match decimal.Parse(s) {
         decimal m => print(m)
         ParseError e => print(e)
     }
 }
 
 // whitespace around the number, and no separator in an integer
-Show(long.Parse(" 7\t"))
-Show(long.Parse("1,000"))
-Show(long.Parse("  "))
+Show(" 7\t")
+Show("1,000")
+Show("  ")
 match byte.Parse("-0") {
     byte b => print(b)
     ParseError e => print(e)
 }
 // a separator of thousands, the words of an infinity in any case, and a point at the start
-ShowDouble(double.Parse(" 1,000.5 "))
-ShowDouble(double.Parse("-infinity"))
-ShowDouble(double.Parse(".5"))
+ShowDouble(" 1,000.5 ")
+ShowDouble("-infinity")
+ShowDouble(".5")
 // a `decimal` keeps its scale, and reads no sign after its digits and no exponent
-ShowDecimal(decimal.Parse("+2.50"))
-ShowDecimal(decimal.Parse("5-"))
-ShowDecimal(decimal.Parse("1e5"))
-ShowDecimal(decimal.Parse("79228162514264337593543950336"))
-ShowDecimal(decimal.Parse("-79228162514264337593543950336"))
+ShowDecimal("+2.50")
+ShowDecimal("5-")
+ShowDecimal("1e5")
+ShowDecimal("79228162514264337593543950336")
+ShowDecimal("-79228162514264337593543950336")
+```
+
+Case: [strings/parse-integers.kz](../corpus/strings/parse-integers.kz)
+```kurz
+// each integer type reads its own range: a number past it is `too large`, below it `too small`
+match sbyte.Parse("-128") {
+    sbyte n => print(n)
+    ParseError e => print(e)
+}
+match sbyte.Parse("-129") {
+    sbyte n => print(n)
+    ParseError e => print(e)
+}
+match byte.Parse("-0") {
+    byte n => print(n)
+    ParseError e => print(e)
+}
+match byte.Parse("-1") {
+    byte n => print(n)
+    ParseError e => print(e)
+}
+match ushort.Parse("65535") {
+    ushort n => print(n)
+    ParseError e => print(e)
+}
+match int.Parse("2147483648") {
+    int n => print(n)
+    ParseError e => print(e)
+}
+match long.Parse("-9223372036854775808") {
+    long n => print(n)
+    ParseError e => print(e)
+}
+match ulong.Parse("18446744073709551615") {
+    ulong n => print(n)
+    ParseError e => print(e)
+}
+match ulong.Parse("18446744073709551616") {
+    ulong n => print(n)
+    ParseError e => print(e)
+}
+// a byte the form does not take is read before the range, whitespace alone is `empty`, and a sign with no digits is
+// `invalid digit`
+match long.Parse("99999999999999999999x") {
+    long n => print(n)
+    ParseError e => print(e)
+}
+match int.Parse("\t\r\n") {
+    int n => print(n)
+    ParseError e => print(e)
+}
+match long.Parse("-") {
+    long n => print(n)
+    ParseError e => print(e)
+}
+match long.Parse("+") {
+    long n => print(n)
+    ParseError e => print(e)
+}
+// a NUL is no whitespace, where .NET's `Parse` takes NUL characters after the digits
+match int.Parse("5\0") {
+    int n => print(n)
+    ParseError e => print(e)
+}
 ```
 
 Case: [strings/parse-error-redeclared.kz](../corpus/strings/parse-error-redeclared.kz)
@@ -429,7 +498,7 @@ print(xs)
 ### X10 (decided, §12) Where the error line of `not-char-boundary` names the position
 
 The position of the cut stands on the line below the error line, where the text of a `throw` stands
-(O6): `error: not-char-boundary at a.kz:5`, then `byte 2 is inside a code point` (§12, the owner,
+(O6): `error: not-char-boundary at a.kz:5:`, then `byte 2 is inside a code point` (§12, the owner,
 2026-10-31, "Below, as throw text"). The error line ends with a colon, as the line of a `throw` does
 *(assumed, §12)*.
 

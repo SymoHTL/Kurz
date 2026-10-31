@@ -89,6 +89,12 @@ public enum CallKind
     /// <summary>A string's <c>ToLowerAscii</c> or <c>ToUpperAscii</c> (X3).</summary>
     StringCase,
 
+    /// <summary>A string's <c>Substring(startIndex, length)</c> (X2).</summary>
+    StringSubstring,
+
+    /// <summary><c>long.Parse(s)</c>, or the same call on another integer type, the number or the case <c>ParseError</c> (X7).</summary>
+    Parse,
+
     /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text (X6).</summary>
     StringJoin,
 
@@ -169,6 +175,9 @@ public enum CallKind
 
     /// <summary><c>Hex.Encode(bytes)</c> (H2).</summary>
     HexEncode,
+
+    /// <summary><c>Hex.Decode(s)</c> (H7), the bytes of the digits or the case <c>HexError</c>.</summary>
+    HexDecode,
 
     /// <summary><c>Sha256.New()</c>, <c>Md5.New()</c> or <c>Crc32.New()</c> (H3); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
     HasherNew,

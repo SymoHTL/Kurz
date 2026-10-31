@@ -1474,6 +1474,112 @@ pub byte* AsciiCase(byte* bytes, long n, bool upper, mut long asked) {
     return text
 }
 
+// Where `s.Substring(startIndex, length)` cannot cut the string whose bytes are at `bytes`, `count` of
+// them (X2): -2 where the part reaches outside the string, a `startIndex` or a `length` below 0 among
+// them, which is read first; else the position, the start before the end, that falls inside a code
+// point, on a byte of the form 10xxxxxx, which a UTF-8 sequence has after its first byte alone (T15), as
+// Rust's `&s[a..b]` reads a cut; and -1 where the cut stands.
+pub long SubstringCut(byte* bytes, long count, long startIndex, long length) {
+    if startIndex < 0 || length < 0 || startIndex > count || length > count - startIndex {
+        return -2
+    }
+
+    long end = startIndex + length
+    mut long inside = -1
+    raw {
+        if startIndex < count && (int(bytes[startIndex]) & 192) == 128 {
+            inside = startIndex
+        } else if end < count && (int(bytes[end]) & 192) == 128 {
+            inside = end
+        }
+    }
+
+    return inside
+}
+
+// Whether the byte `b` is whitespace around a number (X7): the tab, the line feed, the vertical tab, the
+// form feed, the carriage return and the space, as C#'s `NumberStyles.Integer` takes them.
+bool NumberWhite(int b) {
+    return b == 32 || (b >= 9 && b <= 13)
+}
+
+// An integer read from the `count` bytes at `text` in C#'s Integer style with the invariant culture (X7):
+// whitespace around it, a leading `+` or `-`, and one decimal digit or more. `most` is the largest value
+// of the type and `least` the magnitude of its smallest, 0 for an unsigned type, so that `-0` reads as 0
+// and `-1` lies below the range. -1 with the number in `magnitude`, or -2 with its magnitude there where
+// it is below 0; else the index of the failure's `ParseKind`: 0, `Empty`, where the bytes hold nothing
+// but whitespace; 1, `InvalidDigit`, where a byte stands that the form does not take, or no digit,
+// which is read before the range, as C#'s `Parse` reads the whole string before it reports an overflow;
+// 2, `TooLarge`, and 3, `TooSmall`, where the number lies past the largest or below the smallest value.
+// Each digit is checked against the range before it is added, as Rust's `from_str_radix` checks its
+// multiplication, so that no arithmetic leaves the range of a `ulong`.
+pub int ParseInteger(byte* text, long count, ulong most, ulong least, mut ulong magnitude) {
+    magnitude = 0
+    mut long at = 0
+    mut bool negative = false
+    mut bool past = false
+    mut long start = 0
+    raw {
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+
+        if at == count {
+            return 0
+        }
+
+        if text[at] == 43 {
+            at = at + 1
+        } else if text[at] == 45 {
+            negative = true
+            at = at + 1
+        }
+
+        mut ulong limit = most
+        if negative {
+            limit = least
+        }
+
+        start = at
+        while at < count && text[at] >= 48 && text[at] <= 57 {
+            ulong digit = ulong(int(text[at]) - 48)
+            if !past {
+                if magnitude > limit / 10 || (magnitude == limit / 10 && digit > limit % 10) {
+                    past = true
+                } else {
+                    magnitude = magnitude * 10 + digit
+                }
+            }
+
+            at = at + 1
+        }
+
+        if at > start {
+            while at < count && NumberWhite(int(text[at])) {
+                at = at + 1
+            }
+        }
+    }
+
+    if at == start || at != count {
+        return 1
+    }
+
+    if past && negative {
+        return 3
+    }
+
+    if past {
+        return 2
+    }
+
+    if negative {
+        return -2
+    }
+
+    return -1
+}
+
 // The block of a map (M9). A map value is the address of its block, null for a map that holds none: one
 // that never took one, and one whose `Clear` let go of a block other values held; the `Remove` of its last
 // entry and the `Clear` of a block it alone held keep the block, its count of entries 0. A block holds
@@ -2786,4 +2892,73 @@ pub byte* HexEncode(byte* message, mut long asked) {
 
     StringTakeOver(text, size)
     return text
+}
+
+// The value of the hexadecimal digit `b`, 0 to 15, in upper or lower case, or -1 for a byte that is no
+// digit (H7), as the `hex` crate's `val` reads one.
+int HexValue(int b) {
+    if b >= 48 && b <= 57 {
+        return b - 48
+    }
+
+    if b >= 65 && b <= 70 {
+        return b - 55
+    }
+
+    if b >= 97 && b <= 102 {
+        return b - 87
+    }
+
+    return -1
+}
+
+// The bytes the hexadecimal digits of the `count` bytes at `text` give (H7): -1 with a new list of
+// `count / 2` bytes in `made`, two digits for each byte, the higher half first, null for no bytes, as the
+// `hex` crate's `decode`; else the position `HexError` holds, with null in `made`: `count` where it is
+// odd, read before the digits, and else the position of the first byte that is no digit; and -1 with
+// null in `made` and `asked` set where the system refuses.
+pub long HexDecode(byte* text, long count, mut byte* made, mut long asked) {
+    made = null
+    if count % 2 != 0 {
+        return count
+    }
+
+    if count == 0 {
+        return -1
+    }
+
+    long size = count / 2
+    byte* list = ByteBlock(size, mut asked)
+    if list == null {
+        return -1
+    }
+
+    mut long bad = -1
+    raw {
+        mut long at = 0
+        while at < count {
+            int high = HexValue(int(text[at]))
+            int low = HexValue(int(text[at + 1]))
+            if high < 0 {
+                bad = at
+                break
+            }
+
+            if low < 0 {
+                bad = at + 1
+                break
+            }
+
+            list[16 + at / 2] = byte(high << 4 | low)
+            at = at + 2
+        }
+    }
+
+    if bad >= 0 {
+        Free(list, 16 + size)
+        return bad
+    }
+
+    made = list
+    return -1
 }

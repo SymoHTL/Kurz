@@ -2919,13 +2919,36 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void The_members_of_strings_and_lists_and_the_functions_of_chapter_15_and_H7_are_not_supported_and_a_member_no_rule_names_is_unknown()
+    public void A_cut_a_parse_and_a_decode_take_their_types_and_csharps_names()
     {
-        // X2, X3's change of case by Unicode's mapping, X7, X8 and H7: each call is `not supported` with its rule, and no error stands
+        // X2: `Substring` of two `int`s, a `string`, the one form the record names; X7: an integer type's `Parse`, the number or the case
+        // `ParseError`; H7: `Hex.Decode`, `Bytes` or the case `HexError`; the parameters take C#'s names
+        Assert.Empty(Errors("s = \"hello\"\nstring t = s.Substring(1, 2)\nprint(t)"));
+        Assert.Empty(Errors("long | ParseError a = long.Parse(\"1\")\nbyte | ParseError b = byte.Parse(\"1\")\nprint(a)\nprint(b)"));
+        Assert.Empty(Errors("Bytes | HexError h = Hex.Decode(\"ab\")\nprint(h)"));
+        Assert.Empty(Errors("s = \"hello\"\nprint(s.Substring(length: 2, startIndex: 1))\nint | ParseError a = int.Parse(s: \"1\")\nBytes | HexError h = Hex.Decode(s: \"ab\")\nprint(a)\nprint(h)"));
+
+        // O2, O3, O9: a parse and a decode a function's type lists unwrap, and their error leaves it; at the top level it has no caller
+        Assert.Empty(Errors("long | ParseError Twice(string s) {\n    return long.Parse(s) * 2\n}\n\nBytes | HexError Key(string s) {\n    return Hex.Decode(s)\n}\n\nmatch Twice(\"2\") {\n    long n => print(n)\n    ParseError e => print(e)\n}\nmatch Key(\"ab\") {\n    Bytes b => print(b)\n    HexError e => print(e)\n}"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 1), (ErrorIds.UnlistedCase, 2)], Errors("print(long.Parse(\"1\"))\nprint(Hex.Decode(\"ab\"))"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 2)], Errors("long Twice(string s) {\n    return long.Parse(s) * 2\n}\n\nprint(Twice(\"2\"))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"hello\"\nprint(s.Substring(1))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("s = \"hello\"\nprint(s.Substring(\"a\", 1))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(long.Parse(5))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("xs = [1]\nprint(Hex.Decode(xs))"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(long.Parse<int>(\"1\"))"));
+
+        // M7: an argument that changes the string `Substring` holds
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int G(mut string t) {\n    t = \"c\"\n    return 0\n}\n\nmut s = \"ab\"\nprint(s.Substring(G(mut s), 1))"));
+    }
+
+    [Fact]
+    public void The_members_of_strings_and_lists_and_the_parses_of_chapter_15_the_checker_does_not_read_are_not_supported_and_a_member_no_rule_names_is_unknown()
+    {
+        // X3's change of case by Unicode's mapping, X8, and X7's `Parse` of a floating-point type and of `decimal`: each call is `not supported` with its rule, and no error stands
         // beside it (E1); the arguments are read, so the variables they use count as used
         var members = new (string Receiver, string Member, string Rule)[]
         {
-            ("s", "Substring", "X2"),
             ("s", "ToLower", "X3"), ("s", "ToUpper", "X3"),
             ("xs", "Sort", "X8"), ("xs", "SortBy", "X8"), ("xs", "SortUnstable", "X8"),
         };
@@ -2937,8 +2960,7 @@ public sealed class CheckerTests
 
         foreach (var (call, construct) in new[]
         {
-            ("long.Parse(\"1\")", "`long.Parse` (X7)"), ("byte.Parse(\"1\")", "`byte.Parse` (X7)"),
-            ("double.Parse(\"1\")", "`double.Parse` (X7)"), ("decimal.Parse(\"1\")", "`decimal.Parse` (X7)"), ("Hex.Decode(\"ab\")", "`Hex.Decode` (H7)"),
+            ("double.Parse(\"1\")", "`double.Parse` (X7)"), ("float.Parse(\"1\")", "`float.Parse` (X7)"), ("decimal.Parse(\"1\")", "`decimal.Parse` (X7)"),
         })
         {
             Assert.Equal([$"1: {construct}"], NotSupported($"print({call})"));

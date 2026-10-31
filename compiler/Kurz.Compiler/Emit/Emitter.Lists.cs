@@ -1,3 +1,4 @@
+using System.Numerics;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using FunctionType = Kurz.Compiler.Semantics.FunctionType;
@@ -1238,6 +1239,100 @@ public sealed partial class Emitter
         var result = fn.Value($"call ptr {StdFunction("AsciiCase")}(ptr {bytes}, i64 {n}, i1 {upper}, ptr {asked})");
         Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
         return Made(result, fn.Value($"select i1 {fn.Value($"icmp eq ptr {result}, null")}, i64 -1, i64 {n}"), text);
+    }
+
+    /// <summary>
+    /// X2: <c>s.Substring(startIndex, length)</c>, the part of the string from the byte at <c>startIndex</c>, <c>length</c> bytes of it
+    /// (<see cref="Piece"/>). A part that reaches outside the string raises <c>index-out-of-range</c>, and one whose start or end falls
+    /// inside a code point <c>not-char-boundary</c>, which the runtime's <c>NotCharBoundary</c> writes with the position on the line below
+    /// (X10), as Rust's <c>&amp;s[a..b]</c> panics; the standard library's <c>SubstringCut</c> reads which, the bounds first. The string is
+    /// held without a count of its own while the arguments are made: an argument that changes it is <c>changed-while-held</c> (M7).
+    /// </summary>
+    private string EmitStringSubstring(CallExpression c, CallInfo info)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var text = EmitExpression(member.Target);
+        var arguments = Arguments(c, info, _ => Types.Int, _ => false, _ => null, cConvention: false, owned: false);
+        var start = fn.Value($"sext i32 {arguments[0]["i32 ".Length..]} to i64");
+        var length = fn.Value($"sext i32 {arguments[1]["i32 ".Length..]} to i64");
+        var (bytes, n, _) = StringParts(text);
+        var cut = fn.Value($"call i64 {StdFunction("SubstringCut")}(ptr {bytes}, i64 {n}, i64 {start}, i64 {length})");
+        var stands = fn.Label("cut");
+        var refused = fn.Label("no.cut");
+        fn.CondBranch(fn.Value($"icmp eq i64 {cut}, -1"), stands, refused);
+        fn.Block(refused);
+        var outside = fn.Label("outside");
+        var inside = fn.Label("inside");
+        fn.CondBranch(fn.Value($"icmp eq i64 {cut}, -2"), outside, inside);
+        fn.Block(outside);
+        Raise(ErrorIds.IndexOutOfRange, c.Line);
+        fn.Block(inside);
+        fn.Emit($"call void {RuntimeFunction("NotCharBoundary")}(i64 {cut}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
+        fn.Unreachable();
+        fn.Block(stands);
+        return Piece(text, start, fn.Value($"add i64 {start}, {length}"));
+    }
+
+    /// <summary>
+    /// X7: <c>long.Parse(s)</c>, and the same call on each integer type, the number the string's bytes give, which the standard library's
+    /// <c>ParseInteger</c> reads against the type's range, or the case <c>ParseError</c> of the kind it gives (section 12, the owner,
+    /// 2026-10-31, "Outcome long | ParseError"). The string is borrowed for the call.
+    /// </summary>
+    private string EmitParse(CallExpression c, CallInfo info)
+    {
+        var text = Arguments(c, info, _ => Types.String, _ => false, _ => null, cConvention: false, owned: false).Single()["%kz.str ".Length..];
+        var union = (UnionType)Sub(info.Result);
+        var number = union.Cases[0];
+        var error = (DataType)union.Cases[1];
+        var width = Lower.Size(number) * 8;
+        var signed = Types.IsSigned(number);
+        var most = signed ? (BigInteger.One << (width - 1)) - 1 : (BigInteger.One << width) - 1;
+        var least = signed ? BigInteger.One << (width - 1) : BigInteger.Zero;
+        var (bytes, count, _) = StringParts(text);
+        var magnitude = fn.Alloca("i64", "magnitude");
+        var kind = fn.Value($"call i32 {StdFunction("ParseInteger")}(ptr {bytes}, i64 {count}, i64 {IntegerText(most, Types.ULong)}, i64 {IntegerText(least, Types.ULong)}, ptr {magnitude})");
+        var result = fn.Alloca(Ir(union), "parsed");
+        var done = fn.Label("parse.done");
+        var read = fn.Label("parse.number");
+        var failed = fn.Label("parse.failed");
+        fn.CondBranch(fn.Value($"icmp slt i32 {kind}, 0"), read, failed);
+        fn.Block(read);
+        var positive = fn.Value($"load i64, ptr {magnitude}");
+        var value = fn.Value($"select i1 {fn.Value($"icmp eq i32 {kind}, -2")}, i64 {fn.Value($"sub i64 0, {positive}")}, i64 {positive}");
+        var narrowed = width == 64 ? value : fn.Value($"trunc i64 {value} to {Ir(number)}");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, number, narrowed)}, ptr {result}");
+        fn.Branch(done);
+        fn.Block(failed);
+        var kindType = (EnumType)Layout.Fields(error)[0];
+        // `ParseKind` numbers none of its values, so that each is stored as its index, the one `ParseInteger` gives (D18)
+        var stored = Ir(kindType) == "i32" ? kind : fn.Value($"trunc i32 {kind} to {Ir(kindType)}");
+        var failure = fn.Value($"insertvalue {Ir(error)} undef, {Ir(kindType)} {stored}, 0");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, error, failure)}, ptr {result}");
+        fn.Branch(done);
+        fn.Block(done);
+        return fn.Value($"load {Ir(union)}, ptr {result}");
+    }
+
+    /// <summary>Whether the data type is <c>ParseError</c>, which no file can declare beside the one every file sees (X7, V9).</summary>
+    private static bool IsParseError(KurzType type) => type is DataType { Symbol.Name: "ParseError" };
+
+    /// <summary>X7: in the helper of the text of a <c>ParseError</c> in <c>%a0</c>: the words of its kind in lower case, <c>too large</c>.</summary>
+    private void ParseErrorText(DataType error)
+    {
+        var kind = (EnumType)Layout.Fields(error)[0];
+        var value = fn.Value($"extractvalue {Ir(error)} %a0, 0");
+        var values = kind.Symbol.Values;
+        var labels = values.Select(_ => fn.Label("kind")).ToList();
+        var other = fn.Label("other");
+        fn.Terminate($"switch {Ir(kind)} {value}, label %{other} [ {string.Join(" ", values.Select((_, i) => $"{Ir(kind)} {IntegerText(Lower.EnumStored(kind.Symbol, i), kind)}, label %{labels[i]}"))} ]");
+        for (var i = 0; i < values.Count; i++)
+        {
+            fn.Block(labels[i]);
+            fn.Return($"%kz.str {StringValue(Words(values[i]))}");
+        }
+
+        fn.Block(other);
+        fn.Unreachable(); // a kind is one of its values (D18)
     }
 
     /// <summary>

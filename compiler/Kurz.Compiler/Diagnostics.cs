@@ -166,6 +166,7 @@ public static class ErrorIds
     public const string Overflow = "overflow";
     public const string DivideByZero = "divide-by-zero";
     public const string IndexOutOfRange = "index-out-of-range";
+    public const string NotCharBoundary = "not-char-boundary";
     public const string ReversedRangeAtRunTime = "reversed-range-at-run-time";
     public const string StackOverflow = "stack-overflow";
 }
