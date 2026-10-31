@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
@@ -79,7 +80,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_allocation_the_system_refuses_ends_the_program_with_the_id_and_the_size_and_no_line()
     {
-        // the text's 5 bytes and the 16 of the counts of its block (design record, section 3)
+        // the text's 5 bytes and the 16 in front of them, its counts and its room (design record, section 4, assumed)
         var compilation = Compile("print(12345)\n", RuntimeWithoutMemory(Builder.HostTarget!.Value));
         Ran(Toolchain.Run(toolchain.Build(compilation.Program!, "allocation-failed")), 1, [], "error: allocation-failed (21 bytes)\n");
 
@@ -122,6 +123,28 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // in the executable on Linux, in the PDB beside it on Windows
         var built = new[] { (test, "lines-test"), (release, "lines-release"), (lines, "lines-lines") }.Select(b => Toolchain.HasLineTables(toolchain.Build(b.Item1, b.Item2)));
         Assert.Equal([true, false, true], built);
+    }
+
+    [Fact]
+    public void An_instruction_after_a_nested_statement_carries_the_line_of_the_statement_around_it()
+    {
+        // compiler/README.md: the line of each statement on the instructions emitted for it, so that the back edge of a loop, emitted
+        // after its body, is the `while`'s at line 2 and not the line of the body's last statement
+        var ir = Emit("mut i = 0\nwhile i < 2 {\n    i = i + 1\n}\nprint(i)\n").Ir;
+        var start = ir.IndexOf("define internal void @kz.main()", StringComparison.Ordinal);
+        Assert.True(start >= 0, "no kz.main in the IR");
+        var body = ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+        var lines = Regex.Matches(body, @"br label %while\.[0-9]+, !dbg (![0-9]+)")
+            .Select(m => Regex.Match(ir, $@"^{m.Groups[1].Value} = !DILocation\(line: ([0-9]+),", RegexOptions.Multiline).Groups[1].Value);
+        Assert.Equal(["2"], lines);
+    }
+
+    [Fact]
+    public void A_module_rendered_twice_writes_the_same_text()
+    {
+        // the line tables' nodes, the module's flags among them, are made once
+        var module = new IrModule { Debug = new DebugInfo(".", "program.kz", "kurz", optimized: false, codeView: false) };
+        Assert.Equal(module.Render(), module.Render());
     }
 
     [Fact]

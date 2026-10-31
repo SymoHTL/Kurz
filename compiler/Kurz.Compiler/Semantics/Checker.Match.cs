@@ -273,7 +273,7 @@ public sealed partial class Checker
             {
                 if (!Types.Assignable(type, expected))
                 {
-                    Report(Types.MismatchId(type, expected), armLine, $"the arm is a `{type}` where a `{expected}` is required (C9, T1)");
+                    ReportMismatch(type, expected, armLine, $"the arm is a `{type}` where a `{expected}` is required", "C9");
                 }
             }
 
@@ -383,8 +383,11 @@ public sealed partial class Checker
                     throw new InvalidOperationException(arm.Pattern.GetType().Name);
             }
 
-            CheckElseArmBody(arm.Body, success);
-            reaching.Add(frame.Known);
+            if (CheckElseArmBody(arm.Body, success) == Flow.Completes)
+            {
+                reaching.Add(frame.Known); // an arm that returns or throws reaches nothing after the call (N3)
+            }
+
             PopScope();
         }
 
@@ -441,10 +444,12 @@ public sealed partial class Checker
     /// O5: what an arm does; in a block, its last statement. With a success that is not <c>void</c> the
     /// arm recovers with a value, returns or throws; a last statement that does none of these and can
     /// complete leaves the call without a value, text no rule gives a meaning (E4). The bare <c>throw</c>
-    /// of O7 stands in the arm's last statement, not in the statements before it.
+    /// of O7 stands in the arm's last statement, not in the statements before it. The arm ends where
+    /// every path leaves it.
     /// </summary>
-    private void CheckElseArmBody(Statement body, KurzType success)
+    private Flow CheckElseArmBody(Statement body, KurzType success)
     {
+        var flow = Flow.Completes;
         var wasInElseArm = inElseArm;
         inElseArm = true;
         switch (body)
@@ -458,7 +463,7 @@ public sealed partial class Checker
                     }
                     else if (!t.IsError && !Types.IsError(success) && !Types.Assignable(t.Type, success))
                     {
-                        Report(Types.MismatchId(t.Type, success), es.Line, $"the arm recovers with a `{t.Type}` where the success is a `{success}` (O5, T1)");
+                        ReportMismatch(t.Type, success, es.Line, $"the arm recovers with a `{t.Type}` where the success is a `{success}`", "O5");
                     }
 
                     break;
@@ -477,12 +482,19 @@ public sealed partial class Checker
                 {
                     if (i == b.Statements.Count - 1)
                     {
-                        CheckElseArmBody(b.Statements[i], success);
+                        if (CheckElseArmBody(b.Statements[i], success) == Flow.Ends)
+                        {
+                            flow = Flow.Ends;
+                        }
                     }
                     else
                     {
                         inElseArm = false;
-                        CheckStatement(b.Statements[i]);
+                        if (CheckStatement(b.Statements[i]) == Flow.Ends)
+                        {
+                            flow = Flow.Ends;
+                        }
+
                         inElseArm = true;
                     }
                 }
@@ -492,7 +504,8 @@ public sealed partial class Checker
                 PopScope();
                 break;
             default:
-                if (CheckStatement(body) == Flow.Completes && !Types.IsVoid(success) && !Types.IsError(success))
+                flow = CheckStatement(body);
+                if (flow == Flow.Completes && !Types.IsVoid(success) && !Types.IsError(success))
                 {
                     Report(ErrorIds.Syntax, body.Line, "an arm of `else` recovers with a value of the success type, returns or throws; a statement that completes does none (O5)");
                 }
@@ -501,5 +514,6 @@ public sealed partial class Checker
         }
 
         inElseArm = wasInElseArm;
+        return flow;
     }
 }

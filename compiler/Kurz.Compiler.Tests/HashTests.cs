@@ -9,8 +9,8 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The decisions on the hashes (H1 to H6; design record, section 12) that no corpus case pins: a message of every count of bytes from 0
 /// to 130, so that every count of bytes waiting in a block and the padding that takes a second block are read, gives the digests .NET's
-/// SHA-256, MD5 and HMAC-SHA256 give and the CRC-32 of a table this class computes, and the same in two pieces cut at every place, with a
-/// copy of the hasher taken between the pieces, under the allocator that makes every block it frees inaccessible; every call of a
+/// SHA-256, MD5 and HMAC-SHA256 give and the CRC-32 this class computes bit by bit, and the same in two pieces cut at every place, with
+/// a copy of the SHA-256 hasher taken between the pieces, under the allocator that makes every block it frees inaccessible; every call of a
 /// function of <c>Md5</c> is the lint <c>md5-insecure</c> at its line, once, and the program is built (H5); and a build for Windows
 /// builds the hashes, which make no call of the system (H1). The names and members the checker reads are pinned beside them.
 /// </summary>
@@ -101,7 +101,7 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 Convert.ToHexStringLower(HMACSHA256.HashData(key, whole))))
             .Append("0")
             .ToList();
-        Assert.Equal(0xCBF43926u, Crc32("123456789"u8.ToArray())); // the check value: the table of the test is CRC-32/ISO-HDLC's
+        Assert.Equal(0xCBF43926u, Crc32("123456789"u8.ToArray())); // the check value: the reference computation of the test is CRC-32/ISO-HDLC
         foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
         {
             var compilation = Compile(text, runtime);
@@ -171,7 +171,7 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("mut h = Sha256.New()\nprint(h.Count)\n", "unknown-name", 2)]
     [InlineData("h = Crc32.New()\nprint(h.Finish())\n", "mut-required", 2)]
     [InlineData("mut h = Hmac.NewSha256(Bytes())\nmut g = Hmac.NewSha256(Bytes())\nprint(h != g)\n", "type-mismatch", 3)] // H6
-    [InlineData("Map<Sha256, int> m = Map<Sha256, int>()\nprint(m.Count)\n", "type-mismatch", 1)]
+    [InlineData("Map<Sha256, int> m = Map<Sha256, int>()\nprint(m.Count)\n", "type-mismatch", 1)] // H6, M9: `==` takes no hasher, and a key is a value of a type `==` compares
     [InlineData("data Hex(int Digits)\nprint(Hex(1))\n", "redeclared", 1)] // H1: the names every file sees, as a type, a function, a variable and a parameter
     [InlineData("int Hex(int n) => n\nprint(1)\n", "redeclared", 1)]
     [InlineData("int FixedTime = 1\nprint(FixedTime)\n", "redeclared", 1)]
@@ -207,7 +207,7 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_empty_key_of_hmac_is_a_key_of_no_bytes()
     {
-        // RFC 2104: K0 is the key padded with zeros to 64 bytes, all zeros for an empty key, whose block the standard library holds as null
+        // FIPS 198-1: K0 is the key padded with zeros to 64 bytes (RFC 2104's step (1)), all zeros for an empty key, whose block the standard library holds as null
         const string text = """
             print(Hex.Encode(Hmac.Sha256(Bytes(), "abc".Bytes)))
             mut h = Hmac.NewSha256(Bytes())

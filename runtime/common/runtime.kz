@@ -79,7 +79,8 @@ pub void RandomFailed() {
 
 // The end of the process where an argument made before the program's first statement, `args`, is not
 // UTF-8 (S13; the owner, 2026-10-30, "Refused, as Rust"): `error: invalid-argument` and the exit code 1,
-// with no place and no trace, as `random-failed` ends it, the id and that end assumed there.
+// with no place and no trace, as `random-failed` ends it, the id and that end assumed in the record's
+// marker of that answer.
 pub void InvalidArgument() {
     sys.Crashing()
     WriteError("error: invalid-argument\n")

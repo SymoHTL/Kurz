@@ -317,10 +317,11 @@ thread static mut long linesAttribute = -1
 
 // The trace of the calls below the error line of an exception that ends the process (design record,
 // section 6), on standard error, from the frame that raised to `main`, innermost first, the runtime's
-// frames left out: `  at <function> in <file>:<n>`, `  at <function>` where the line tables hold no
-// line there, and `  at <unknown> (0x55d2a8c5b2e4)` where the executable's file cannot be read or names
-// no function there, every frame the unwinder gives written so where the file cannot be read or holds no
-// symbol table, the runtime's and the C library's start below `main` among them; a hundred frames, and a line that counts the rest, `  ... 12 more frames`. The
+// frames left out where the symbol table names them: `  at <function> in <file>:<n>`, `  at <function>`
+// where the line tables hold no line there, and `  at <unknown> (0x55d2a8c5b2e4)` where the executable's
+// file cannot be read or names no function there. Where the file cannot be read or holds no symbol
+// table, every frame the unwinder gives is written so, the runtime's and the C library's start below
+// `main` among them. A hundred frames, and a line that counts the rest, `  ... 12 more frames`. The
 // walk, by the platform's unwinder, and the reads of the file run on the stack that raised (the owner,
 // 2026-10-29, "Where it raised, as Rust"), through the two pages, from the system and not from the
 // allocator. `KURZ_TRACE=0` switches it off, and a line whose write fails ends it.
@@ -2158,9 +2159,9 @@ pub int Variable(byte* key, mut string value) {
 // `NotFound` (S9).
 
 // The page of each thread that holds a call's address and what the calls of the system take by address,
-// mapped at its first use and never given back, not even when its thread ends: a literal address at its byte 0, with room for one of IPv6, 28 bytes; the
-// length `getsockname` takes at 32; the 1 that `setsockopt` sets at 36; the hints for `getaddrinfo` at
-// 64, 48 bytes; and the list it gives at 112.
+// mapped at its first use and never given back, not even when its thread ends: a literal address at its
+// byte 0, with room for one of IPv6, 28 bytes; the length `getsockname` takes at 32; the 1 that
+// `setsockopt` sets at 36; the hints for `getaddrinfo` at 64, 48 bytes; and the list it gives at 112.
 thread static mut byte* endpoints = null
 
 // The port written in the `count` bytes at `text`: a number from 0 to 65535 in decimal digits, after a

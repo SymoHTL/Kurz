@@ -449,7 +449,8 @@ public sealed partial class Checker
 
         if (enums.ContainsKey(n.Name))
         {
-            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here: a value of it is written `{n.Name}.Name` (D12)");
+            var example = enums[n.Name].Values is [var first, ..] ? $"`{n.Name}.{first}`" : "as its name, a dot and a value's name";
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here: a value of it is written {example} (D12)");
             return Typed.Error;
         }
 
@@ -490,7 +491,7 @@ public sealed partial class Checker
 
         if (n.Name == "args")
         {
-            Report(ErrorIds.UnknownName, n.Line, "`args` is seen by the top-level code alone: a function reads `Environment.Args()` or takes the list as a parameter (S13, V10)");
+            Report(ErrorIds.UnknownName, n.Line, "`args` is seen by the top-level code alone: a function takes it as a parameter, or reads `Environment.Args()`, the list with the program's name first (S13, V10)");
             return Typed.Error;
         }
 
@@ -764,13 +765,13 @@ public sealed partial class Checker
         return new Typed(Types.Nullable(map.Value));
     }
 
-    /// <summary>M9: a key of the map, given to an index, to <c>ContainsKey</c> or to <c>Remove</c>.</summary>
+    /// <summary>M9: the key of an index into the map, read or written.</summary>
     private void CheckKey(Expression index, MapType map)
     {
         var key = CheckExpression(index, map.Key);
         if (!key.IsError && !Types.Assignable(key.Type, map.Key))
         {
-            Report(Types.MismatchId(key.Type, map.Key), index.Line, $"a `{key.Type}` where a key of `{map}`, a `{map.Key}`, is required (M9, T1)");
+            ReportMismatch(key.Type, map.Key, index.Line, $"a `{key.Type}` where a key of `{map}`, a `{map.Key}`, is required", "M9");
         }
     }
 
@@ -1528,7 +1529,7 @@ public sealed partial class Checker
                     }
                     else if (!body.IsError && !Types.IsError(result) && !Types.Assignable(body.Type, result))
                     {
-                        Report(Types.MismatchId(body.Type, result), l.Line, $"the lambda's result is a `{body.Type}` where `{expected}` requires a `{result}` (F11, T1)");
+                        ReportMismatch(body.Type, result, l.Line, $"the lambda's result is a `{body.Type}` where `{expected}` requires a `{result}`", "F11");
                     }
                 }
             }
@@ -1599,7 +1600,7 @@ public sealed partial class Checker
             var value = CheckExpression(a.Value, type);
             if (!value.IsError && !Types.IsError(type) && !Types.Assignable(value.Type, type))
             {
-                Report(Types.MismatchId(value.Type, type), a.Line, $"a `{value.Type}` where the field `{a.Field}` is a `{type}` (D5, T1)");
+                ReportMismatch(value.Type, type, a.Line, $"a `{value.Type}` where the field `{a.Field}` is a `{type}`", "D5");
             }
         }
 

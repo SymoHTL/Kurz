@@ -53,7 +53,7 @@ public enum CallKind
     /// <summary><c>string.FromUtf8(b)</c> (T15), a string of the bytes or the case <c>InvalidUtf8</c>.</summary>
     FromUtf8,
 
-    /// <summary><c>string.FromUtf8Lossy(b)</c> (T15), a string of the bytes with U+FFFD for each sequence that is not UTF-8.</summary>
+    /// <summary><c>string.FromUtf8Lossy(b)</c> (T15), a string of the bytes with U+FFFD for each maximal part of a sequence that is not UTF-8, as Rust counts them.</summary>
     FromUtf8Lossy,
 
     /// <summary><c>Plan.From(n)</c> (D18), the value of the <c>enum</c> whose number is <c>n</c> or the case <c>Invalid</c>; <see cref="CallInfo.Target"/> is the enum.</summary>
@@ -208,8 +208,8 @@ public sealed class SemanticModel
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
-    /// <c>args</c>, the program's arguments without its name, which the top-level code sees (S13), and the line of its first read; null
-    /// in a file that is no program's top-level code.
+    /// <c>args</c>, the program's arguments without its name, which the top-level code sees (S13); null in a file that is no program's
+    /// top-level code.
     /// </summary>
     public VariableSymbol? Arguments { get; private set; }
 

@@ -74,9 +74,14 @@ public sealed class PlaceTests : IDisposable
         var outside = Path.Combine(root, "outside");
         Directory.CreateDirectory(outside);
         File.WriteAllText(Path.Combine(outside, "kept"), "");
+        var linked = Path.Combine(root, "linked");
+        Directory.CreateDirectory(linked);
+        File.WriteAllText(Path.Combine(linked, Place.LockName), Place.Mark);
+        File.WriteAllText(Path.Combine(linked, "kept"), "");
         if (!OperatingSystem.IsWindows())
         {
             Directory.CreateSymbolicLink(Path.Combine(left, "link"), outside); // a link is removed, never followed
+            Directory.CreateSymbolicLink(Path.Combine(Places, "place-link"), linked); // a link among the places is never followed either
         }
 
         var empty = Make("place-empty", "");
@@ -94,6 +99,7 @@ public sealed class PlaceTests : IDisposable
 
         Assert.False(Directory.Exists(left), "a left place stayed");
         Assert.True(File.Exists(Path.Combine(outside, "kept")));
+        Assert.True(File.Exists(Path.Combine(linked, "kept")), "a link among the places was followed");
         Assert.All([empty, unmarked, longer, other, noLock, held.Directory], d => Assert.True(Directory.Exists(d), $"{d} was removed"));
         Assert.True(File.Exists(file));
     }

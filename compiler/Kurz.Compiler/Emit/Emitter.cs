@@ -489,9 +489,15 @@ public sealed partial class Emitter
         }
     });
 
-    /// <summary>A type the emitter does not lay out, met anywhere inside the statement, is the one diagnostic, at the statement's line.</summary>
+    /// <summary>
+    /// A type the emitter does not lay out, met anywhere inside the statement, is the one diagnostic, at the statement's line. Its
+    /// instructions carry its line in the line tables, and what the statement around it emits after it carries that one's again, as
+    /// <see cref="EmitExpression"/> does.
+    /// </summary>
     private void EmitStatement(Statement statement)
     {
+        var f = fn;
+        var around = f.Location;
         At(statement.Line);
         try
         {
@@ -500,6 +506,10 @@ public sealed partial class Emitter
         catch (NotSupportedException e)
         {
             throw Unsupported(statement.Line, e.Message);
+        }
+        finally
+        {
+            f.Location = around;
         }
     }
 

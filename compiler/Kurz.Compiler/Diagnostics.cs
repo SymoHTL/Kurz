@@ -48,8 +48,8 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
 
     /// <summary>
     /// The diagnostic as the command writes it, the file's name and the line in front: <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> (design
-    /// record, section 2), <c>hello.kz:3: warning: &lt;id&gt;: &lt;text&gt;</c> (H5), or <c>hello.kz:3: not supported: &lt;text&gt;</c>, with
-    /// its <see cref="Help"/> on the line below.
+    /// record, section 2), <c>hello.kz:3: warning: &lt;id&gt;: &lt;text&gt;</c> (H5), or <c>hello.kz:3: not supported: &lt;text&gt;</c>; an
+    /// error that has a <see cref="Help"/>, N2's <c>nullable-unchecked</c>, gets it on the line below.
     /// </summary>
     public string At(string file) => Kind switch
     {

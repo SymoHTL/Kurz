@@ -222,7 +222,7 @@ command then removes the place, its other files first and the lock file last, an
 program's exit code, on Linux 128 and the signal's number where a signal ended the program, 130 for
 Ctrl-C. At its start, before the build, it removes every place whose lock it can take and whose lock
 file holds the mark and nothing else, a place a run cut short left, and leaves a place whose lock
-file is missing or holds anything else alone. A removal that fails is passed over without a word
+file is missing or holds anything else alone, and a link among the places, which it never follows. A removal that fails is passed over without a word
 (the owner, 2026-10-29, "Silent"). A program refused, or a source not read, makes no place and ends
 the command with 1, as do the failures of `build` above that a run shares and these, in the owner's
 words (the owner, 2026-10-29, "Keep these words"), the first on Linux and the second on Windows:
@@ -1189,7 +1189,7 @@ which is the complete one: a `class`, an `interface` or a `flags` type and a val
 nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` to a member or an
 item of a pointer, a C function type or `void`, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
-a part after `?[` and an assignment through it, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
+a part after `?[` on a nullable list and an assignment through `?[`, which section 4 does not name (N5), `?[` on a nullable map, whose entry the
 emitter does not read through a chain (N5, M9), and an assignment of a field, an item or an entry
 through a nullable variable or field known not null, `o.I.X = 1` and `o.I.Items[0] = 1`, which the
 emitter does not write through, where an index written on a narrowed map or list, `o.Items[0] = 1`
@@ -1232,7 +1232,7 @@ flags type (chapter 7, K10, D13), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
-rule gives a meaning (below); a conversion to `string`, `bool` or `char` (A5 to A7); `this` (K7);
+rule gives a meaning (below); a conversion to `string`, `bool` or `char`, which is no number type and no time type (T10, T29); `this` (K7);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
@@ -1481,7 +1481,7 @@ round can ask about it by the rule's id.
   the member or the item before as its own type, so that a nullable one there is
   `nullable-unchecked`, unless a test showed that member's path not null (N3), as C#'s analysis
   narrows it: after `if u?.Email != null`, `u?.Email.Bytes` and `u.Email.Bytes` both read `Email`
-  as a `string`, while `Find(1)?.Email.Bytes`, whose path is no variable's, stays
+  as a `string`, and after `if xs?[0] != null` `xs` is known not null, as C# reads `?[]`, while `Find(1)?.Email.Bytes`, whose path is no variable's, stays
   `nullable-unchecked`; a parenthesis ends the chain. After `?[` holds what held before its index, since the
   index runs only where the list is not null, and an index that changes the list is
   `changed-while-held` (M7), since the list is read before it.
