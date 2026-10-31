@@ -694,6 +694,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   where it gives false; and `File.Modified` is a call on a file (above) whose value is the
   nanoseconds `FileModified` read. `ProcessTests` pins what no case can: the words a process was
   given and the program's name, an argument that is not UTF-8 read by either form and by neither,
+  and named by `args` only in a lambda's body or a branch that never runs,
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;

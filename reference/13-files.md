@@ -447,22 +447,28 @@ Top-level code sees `args`, a `List<string>` of the program's arguments without 
 `Environment.Args()` is the list with the program's name first (§12, the owner, 2026-10-30, "Both"). Only
 the top-level statements see `args`: in a function it is `unknown-name`, as a top-level variable is
 (V10), and a function may name a parameter or a variable of its own `args`, while a top-level `args` of
-the program's own is `redeclared` (§12, the owner, 2026-10-30, "Top-level code only"). A lambda written
-among the top-level statements sees `args`, as it sees a top-level variable it captures (V10). `args` is
-declared without `mut`, so that `args.Add("x")` is `mut-required` (M5), and each call of
-`Environment.Args()` makes a new list. *(assumed, §12: the lambda, `args` without `mut`, the new list)*
+the program's own, `List<string> args = ["a"]`, is `redeclared` (§12, the owner, 2026-10-30, "Top-level
+code only"). Whether `args = value` among the top-level statements assigns to the program's `args`, a
+variable without `mut`, and is `assign-immutable` (V8), or declares one and is `redeclared`, stands open
+(§14). A lambda written among the top-level statements sees `args`, as it sees a top-level variable it
+captures (V10), so that within the top-level code `args` is a visible name, and a lambda's parameter or a
+block's variable named `args` there is `redeclared` (V9). `args` is declared without `mut`, so that
+`args.Add("x")` is `mut-required` (M5), and each call of `Environment.Args()` makes a new list.
+*(assumed, §12: the lambda, a lambda's parameter and a block's variable, `args` without `mut`, the new
+list)*
 An argument that is not UTF-8 ends the process with the run-time error `invalid-argument` (§12, the
 owner, 2026-10-30, "Refused, as Rust"): `Environment.Args()` raises it at its call, with its place and
 its trace, and `args`, made before the first statement of a top-level code that names it, with no place
-and no trace, as `random-failed`; no `catch` takes the raise (O6). `args` checks the words it holds and
+and no trace, as `random-failed`; no `catch` takes the raise (O6). A top-level code names `args` where
+any of its statements does, a lambda's body and a branch that never runs among them. `args` checks the words it holds and
 not the program's name, which it does not hold, as C#'s `args`, while `Environment.Args()` checks the
 name too. The program's name is the first argument as the process was started, under `kurz run` and
 `kurz exec` the path of the executable in the command's place, as `cargo run` gives its program the
 path in `target`. `kurz run app.kz -- a b` gives the program the words after the first `--`, a further
 `--` among them, as `kurz exec "<program text>" -- a b` does, and a word after the file or the text
 without `--` is a command line the command cannot read (§2, the owner, 2026-10-30, "After `--`, as
-cargo"). *(assumed, §12: the id, the place of the refusal of `args` and of `Environment.Args()`, the
-words `args` checks, the name, under `kurz run` and `kurz exec` too)*
+cargo"). *(assumed, §12: the id, the place of the refusal of `args` and of `Environment.Args()`, what names
+`args`, the words `args` checks, the name, under `kurz run` and `kurz exec` too)*
 
 No case expects `invalid-argument`: a case gives its program no argument; `ProcessTests` runs a built
 program with an argument that is not UTF-8.
@@ -500,8 +506,14 @@ print(Count())
 
 Case: [system/args-redeclared.kz](../corpus/system/args-redeclared.kz)
 ```kurz
-args = 1
-print(args)
+List<string> args = ["a"]
+print(args.Count)
+```
+
+Case: [system/args-lambda-parameter.kz](../corpus/system/args-lambda-parameter.kz)
+```kurz
+f = (int args) => args + 1
+print(f(1))
 ```
 
 Case: [system/args-in-lambda.kz](../corpus/system/args-in-lambda.kz)
@@ -532,7 +544,8 @@ variable that is not set is the kind `NotPresent`, and one whose value is not UT
 Kind, string Name)` and `enum EnvKind { NotPresent, NotUnicode }`, as it sees `IoError` (S1), and the
 text of an `EnvError` (A3) is the words of its kind in lower case, a colon and the name,
 `not present: HOME`; a name that is empty or holds `=` or a NUL byte is `NotPresent`. A file's own
-type or variable named `EnvError`, `EnvKind` or `Environment` is `redeclared` (V9). A package that
+declaration of `EnvError`, `EnvKind` or `Environment`, a type, a function, a variable or a parameter at
+any level, is `redeclared` (V9), while a field takes the name, as H1 says of the names of hashing. A package that
 reads a variable needs `allow env` (S12). *(assumed, §12: the name `Variable`, the type, its text and
 the names that are `NotPresent`, a file's own `EnvError`, `EnvKind` and `Environment`)*
 

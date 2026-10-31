@@ -79,6 +79,22 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(["1", "[ok, x]"], control.Output);
         }
 
+        // a top-level code names `args` where a lambda's body or a branch that never runs does (S13)
+        foreach (var (text, name) in new[] { ("f = () => args.Count\nif false {\n    print(f())\n}\nprint(1)\n", "argument-lambda"), ("if false {\n    print(args)\n}\nprint(1)\n", "argument-branch") })
+        {
+            if (Ran(text, name, bad, trace: null) is { } refused)
+            {
+                Assert.Equal((1, "error: invalid-argument\n"), (refused.Code, refused.Error));
+                Assert.Empty(refused.Output);
+            }
+
+            if (Ran(text, $"{name}-control", "ok x", trace: null) is { } accepted)
+            {
+                Assert.Equal((0, ""), (accepted.Code, accepted.Error)); // the positive control
+                Assert.Equal(["1"], accepted.Output);
+            }
+        }
+
         // `Environment.Args()`, at its call with its place and its trace
         if (Ran("print(1)\nall = Environment.Args()\nprint(all.Count)\n", "argument-call", bad, trace: null) is { } call)
         {
@@ -227,17 +243,20 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
-    [InlineData("data EnvError(int Code)\nprint(1)\n")]
-    [InlineData("int EnvError = 1\nprint(EnvError)\n")]
-    [InlineData("enum EnvKind { Missing }\nprint(1)\n")]
-    [InlineData("data Environment(int Code)\nprint(1)\n")]
-    [InlineData("int Environment = 1\nprint(Environment)\n")]
-    public void A_files_own_type_or_variable_named_like_the_environment_is_redeclared(string text)
+    [InlineData("data EnvError(int Code)\nprint(1)\n", 1)]
+    [InlineData("int EnvError = 1\nprint(EnvError)\n", 1)]
+    [InlineData("enum EnvKind { Missing }\nprint(1)\n", 1)]
+    [InlineData("data Environment(int Code)\nprint(1)\n", 1)]
+    [InlineData("int Environment = 1\nprint(Environment)\n", 1)]
+    [InlineData("void Environment() {\n}\n\nprint(1)\n", 1)]
+    [InlineData("int Twice(int EnvKind) => EnvKind * 2\n\nprint(Twice(1))\n", 1)]
+    [InlineData("int Read() {\n    EnvError = 1\n    return EnvError\n}\n\nprint(Read())\n", 2)] // and its read reports nothing more (E1)
+    public void A_files_own_declaration_named_like_the_environment_is_redeclared_and_only_there(string text, int line)
     {
-        // S14, V9: the names every file sees, as a file's own `InvalidUtf8` (T15)
+        // S14, V9: the names every file sees, as a file's own `InvalidUtf8` (T15), in every form H1 names for the names of hashing
         var refused = Compile(text, Builder.CheckRuntime(Target.Linux));
         Assert.Null(refused.Program);
-        Assert.Equal(("redeclared", 1), (Assert.Single(refused.Diagnostics.Items).Id, Assert.Single(refused.Diagnostics.Items).Line));
+        Assert.Equal(("redeclared", line), (Assert.Single(refused.Diagnostics.Items).Id, Assert.Single(refused.Diagnostics.Items).Line));
         Assert.NotNull(Compile(text.Replace("Env", "Own", StringComparison.Ordinal), Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 
