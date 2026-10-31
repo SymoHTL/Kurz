@@ -86,6 +86,21 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(["1"], call.Output);
         }
 
+        // `args` holds the words and not the program's name, which `Environment.Args()` checks too: the name is a link to the executable
+        // whose name is not UTF-8, which the setup starts in place of the shell
+        static string Named(string link) => $"ln -sf \"$0\" \"./{link}-$(printf 'x\\377')\" && exec \"./{link}-$(printf 'x\\377')\" ok; ";
+        if (Ran("print(args)\n", "argument-name-args", "", Named("argument-name-args")) is { } words)
+        {
+            Assert.Equal((0, ""), (words.Code, words.Error));
+            Assert.Equal(["[ok]"], words.Output);
+        }
+
+        if (Ran("print(1)\nall = Environment.Args()\nprint(all.Count)\n", "argument-name-all", "", Named("argument-name-all"), trace: null) is { } named)
+        {
+            Assert.Equal((1, "error: invalid-argument at program.kz:2\n  at main in program.kz:2\n"), (named.Code, named.Error));
+            Assert.Equal(["1"], named.Output);
+        }
+
         // a program that reads no argument does not look at them
         if (Ran("print(1)\n", "argument-unread", bad, reads: false) is { } unread)
         {
@@ -140,6 +155,35 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void Two_reads_of_the_clock_keep_their_order_and_a_file_just_written_has_a_time_of_this_minute()
+    {
+        // S15 gives no order where the system's clock is set back, so the corpus cases print none: this test assumes that nothing sets
+        // the clock of this machine back while it runs, that the file system's time agrees with the clock, and a run under a minute
+        const string text = """
+            void | IoError Times() {
+                first = timestamp.Now
+                second = timestamp.Now
+                print(second >= first)
+                File.WriteAll("stamped.txt", "x".Bytes)
+                written = File.Modified("stamped.txt")
+                print(written <= timestamp.Now)
+                print(timestamp.Now - written < 1min)
+                File.Delete("stamped.txt")
+            }
+
+            Times() else {
+                IoError e => print(e)
+            }
+
+            """;
+        if (Ran(text, "clock-order", "") is { } read)
+        {
+            Assert.Equal((0, ""), (read.Code, read.Error));
+            Assert.Equal(["true", "true", "true"], read.Output);
+        }
+    }
+
+    [Fact]
     public void The_time_of_a_file_or_a_directory_is_its_last_write_to_the_nanosecond_and_one_a_timestamp_does_not_hold_is_invalid_data()
     {
         // the edges of the 64 bits (T24) after 1970 on the build's file system and before it in the memory of /dev/shm, a tmpfs, whose
@@ -183,6 +227,21 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
+    [InlineData("data EnvError(int Code)\nprint(1)\n")]
+    [InlineData("int EnvError = 1\nprint(EnvError)\n")]
+    [InlineData("enum EnvKind { Missing }\nprint(1)\n")]
+    [InlineData("data Environment(int Code)\nprint(1)\n")]
+    [InlineData("int Environment = 1\nprint(Environment)\n")]
+    public void A_files_own_type_or_variable_named_like_the_environment_is_redeclared(string text)
+    {
+        // S14, V9: the names every file sees, as a file's own `InvalidUtf8` (T15)
+        var refused = Compile(text, Builder.CheckRuntime(Target.Linux));
+        Assert.Null(refused.Program);
+        Assert.Equal(("redeclared", 1), (Assert.Single(refused.Diagnostics.Items).Id, Assert.Single(refused.Diagnostics.Items).Line));
+        Assert.NotNull(Compile(text.Replace("Env", "Own", StringComparison.Ordinal), Builder.CheckRuntime(Target.Linux)).Program); // the positive control
+    }
+
+    [Theory]
     [InlineData("print(1)\nprint(args)\n", 2)]
     [InlineData("print(Environment.Args())\n", 1)]
     [InlineData("print(Environment.Variable(\"HOME\") else {\n    EnvError e => \"{e}\"\n})\n", 1)]
@@ -193,6 +252,7 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((line, Emitter.ProcessNotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.StartsWith($"program.kz:{line}: not supported: a read of the command line, the environment or the clock", diagnostic.At("program.kz"), StringComparison.Ordinal);
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 
@@ -204,6 +264,7 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((2, Emitter.NotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.StartsWith("program.kz:2: not supported: a call on a file", diagnostic.At("program.kz"), StringComparison.Ordinal);
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 }

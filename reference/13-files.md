@@ -427,7 +427,7 @@ program's code to such a function needs the grant, so that no package borrows a 
 another that has it (§13, the owner, 2026-10-30, "Every package on path"). A call without the grant
 is the compile error `files-not-allowed` or `network-not-allowed` at the call. A package that reads a
 variable of the environment needs `allow env` in the same way, and a read without it is `env-not-allowed`;
-the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno"). For a package on the
+the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno", the option that carried this sentence). For a package on the
 path that calls no such function itself, the error stands at its call that leads on toward the
 function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
 error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
@@ -447,13 +447,22 @@ Top-level code sees `args`, a `List<string>` of the program's arguments without 
 `Environment.Args()` is the list with the program's name first (§12, the owner, 2026-10-30, "Both"). Only
 the top-level statements see `args`: in a function it is `unknown-name`, as a top-level variable is
 (V10), and a function may name a parameter or a variable of its own `args`, while a top-level `args` of
-the program's own is `redeclared` (§12, the owner, 2026-10-30, "Top-level code only"). An argument that
-is not UTF-8 ends the process with the run-time error `invalid-argument` (§12, the owner, 2026-10-30,
-"Refused, as Rust"): `Environment.Args()` raises it at its call, and `args`, made before the first
-statement of a top-level code that names it, with no place and no trace, as `random-failed`. The
-program's name is the first argument as the process was started, and `kurz run app.kz -- a b` gives the
-program the words after `--` (§2, the owner, 2026-10-30, "After `--`, as cargo"). *(assumed, §12: the
-id, the place of `args`'s refusal, the name)*
+the program's own is `redeclared` (§12, the owner, 2026-10-30, "Top-level code only"). A lambda written
+among the top-level statements sees `args`, as it sees a top-level variable it captures (V10). `args` is
+declared without `mut`, so that `args.Add("x")` is `mut-required` (M5), and each call of
+`Environment.Args()` makes a new list. *(assumed, §12: the lambda, `args` without `mut`, the new list)*
+An argument that is not UTF-8 ends the process with the run-time error `invalid-argument` (§12, the
+owner, 2026-10-30, "Refused, as Rust"): `Environment.Args()` raises it at its call, with its place and
+its trace, and `args`, made before the first statement of a top-level code that names it, with no place
+and no trace, as `random-failed`; no `catch` takes the raise (O6). `args` checks the words it holds and
+not the program's name, which it does not hold, as C#'s `args`, while `Environment.Args()` checks the
+name too. The program's name is the first argument as the process was started, under `kurz run` and
+`kurz exec` the path of the executable in the command's place, as `cargo run` gives its program the
+path in `target`. `kurz run app.kz -- a b` gives the program the words after the first `--`, a further
+`--` among them, as `kurz exec "<program text>" -- a b` does, and a word after the file or the text
+without `--` is a command line the command cannot read (§2, the owner, 2026-10-30, "After `--`, as
+cargo"). *(assumed, §12: the id, the place of the refusal of `args` and of `Environment.Args()`, the
+words `args` checks, the name, under `kurz run` and `kurz exec` too)*
 
 No case expects `invalid-argument`: a case gives its program no argument; `ProcessTests` runs a built
 program with an argument that is not UTF-8.
@@ -471,7 +480,13 @@ int Count(List<string> args) {
     return args.Count
 }
 
+int Local() {
+    List<string> args = ["a", "b"]
+    return args.Count
+}
+
 print(Count(args))
+print(Local())
 ```
 
 Case: [system/args-in-function.kz](../corpus/system/args-in-function.kz)
@@ -489,6 +504,26 @@ args = 1
 print(args)
 ```
 
+Case: [system/args-in-lambda.kz](../corpus/system/args-in-lambda.kz)
+```kurz
+(() => int) count = () => args.Count
+print(count())
+```
+
+Case: [system/args-without-mut.kz](../corpus/system/args-without-mut.kz)
+```kurz
+args.Add("x")
+print(args)
+```
+
+Case: [system/args-new-list.kz](../corpus/system/args-new-list.kz)
+```kurz
+mut all = Environment.Args()
+all.Add("x")
+print(all.Count)
+print(Environment.Args().Count)
+```
+
 ### S14 (decided, §12, §13) The environment
 
 `Environment.Variable(name)` reads one variable of the process's environment, `string | EnvError`: a
@@ -496,9 +531,10 @@ variable that is not set is the kind `NotPresent`, and one whose value is not UT
 `NotUnicode` (§12, the owner, 2026-10-30, "An outcome, as Rust"). Every file sees `data EnvError(EnvKind
 Kind, string Name)` and `enum EnvKind { NotPresent, NotUnicode }`, as it sees `IoError` (S1), and the
 text of an `EnvError` (A3) is the words of its kind in lower case, a colon and the name,
-`not present: HOME`; a name that is empty or holds `=` or a NUL byte is `NotPresent`. A package that
+`not present: HOME`; a name that is empty or holds `=` or a NUL byte is `NotPresent`. A file's own
+type or variable named `EnvError`, `EnvKind` or `Environment` is `redeclared` (V9). A package that
 reads a variable needs `allow env` (S12). *(assumed, §12: the name `Variable`, the type, its text and
-the names that are `NotPresent`)*
+the names that are `NotPresent`, a file's own `EnvError`, `EnvKind` and `Environment`)*
 
 Case: [system/environment-missing.kz](../corpus/system/environment-missing.kz)
 ```kurz
@@ -517,6 +553,13 @@ match Environment.Variable("KURZ_CASE_NOT_SET") {
 print(Read("A=B"))
 ```
 
+Case: [system/environment-name-redeclared.kz](../corpus/system/environment-name-redeclared.kz)
+```kurz
+data EnvError(int Code)
+
+print(1)
+```
+
 ### S15 (decided, §12) The clock and the time of a file
 
 `timestamp.Now` is the time of the wall clock, a `timestamp` (T24), read from
@@ -528,18 +571,20 @@ time; and a time the 64 bits of a `timestamp` do not hold is an `IoError` of the
 
 Case: [system/clock.kz](../corpus/system/clock.kz)
 ```kurz
-first = timestamp.Now
-second = timestamp.Now
-print(second >= first)
+timestamp first = timestamp.Now
+timestamp second = timestamp.Now
+duration between = second - first
+print(first + between == second)
+print(first + between + 1ns == second)
 ```
 
 Case: [system/file-modified.kz](../corpus/system/file-modified.kz)
 ```kurz
 void | IoError Times() {
     File.WriteAll("stamped.txt", "x".Bytes)
-    written = File.Modified("stamped.txt")
-    print(written <= timestamp.Now)
-    print(timestamp.Now - written < 1min)
+    timestamp written = File.Modified("stamped.txt")
+    timestamp again = File.Modified("stamped.txt")
+    print(again == written)
     File.Delete("stamped.txt")
     match File.Modified("no-such-file.txt") {
         timestamp t => print(t)

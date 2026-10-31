@@ -1,7 +1,10 @@
 // expect: output
 // | true
+// | false
 // rules: S15
 
-first = timestamp.Now
-second = timestamp.Now
-print(second >= first)
+timestamp first = timestamp.Now
+timestamp second = timestamp.Now
+duration between = second - first
+print(first + between == second)
+print(first + between + 1ns == second)

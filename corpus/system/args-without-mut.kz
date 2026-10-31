@@ -1,0 +1,5 @@
+// expect: error mut-required at 4
+// rules: S13
+
+args.Add("x")
+print(args)

@@ -11,7 +11,9 @@ public sealed partial class Emitter
     /// H1 to H4: a hash, a hasher's <c>New</c>, <c>Hex.Encode</c>, the check of a tag or a comparison in fixed time, each a call of a
     /// <c>pub</c> function of the standard library, whose Kurz code they are (design record, section 12, "In Kurz, as RustCrypto"), on the
     /// blocks of the lists of bytes it takes; a block the system refuses ends the process with <c>allocation-failed</c>, as a list's does
-    /// (M9). A hasher's state is the block of a list of bytes, which its counts and its copies treat as one.
+    /// (M9). A hasher's state is the block of a list of bytes, which its counts and its copies treat as one. The arguments are borrowed,
+    /// with no count of their own: an argument after one that takes its place as <c>mut</c> is <c>changed-while-held</c> (M7), so that
+    /// none changes while the call reads it.
     /// </summary>
     private string? EmitHashCall(CallExpression c, CallInfo info)
     {
@@ -83,7 +85,9 @@ public sealed partial class Emitter
     /// <summary>
     /// H3: a hasher's <c>Update(bytes)</c> and <c>Finish()</c>, on the block in the hasher's place, a <c>mut</c> variable or a path of fields
     /// from one (M5): a block other values hold is copied first, as a list's is before a write (M3), and the block the hasher then holds is
-    /// stored back in its place. <c>Finish</c> gives a new block of the digest, or the CRC, and starts the state over.
+    /// stored back in its place. <c>Finish</c> gives a new block of the digest, or the CRC, and starts the state over. The bytes of
+    /// <c>Update</c> are borrowed before the place is read, which runs no code: an item of a list as the place is <c>not supported</c>
+    /// (M5, M9), and an argument that takes the place's root as <c>mut</c> is <c>changed-while-held</c> (M7).
     /// </summary>
     private string? EmitHasherMethod(CallExpression c, CallInfo info, Hasher hasher)
     {

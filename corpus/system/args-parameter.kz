@@ -1,9 +1,16 @@
 // expect: output
 // | 0
+// | 2
 // rules: S13
 
 int Count(List<string> args) {
     return args.Count
 }
 
+int Local() {
+    List<string> args = ["a", "b"]
+    return args.Count
+}
+
 print(Count(args))
+print(Local())

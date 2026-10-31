@@ -1944,7 +1944,8 @@ void HmacClose(byte* s, byte* out) {
     HmacKeyed(s)
 }
 
-// A new hasher of HMAC-SHA256 on the bytes of the list `key` (H3), as `Sha256New` makes one of SHA-256.
+// A new hasher of HMAC-SHA256 on the bytes of the list `key` (H3), as `Sha256New` makes one of SHA-256; the
+// null block of an empty list is a key of no bytes, of which `ListCount` gives 0 and `HmacStart` reads none.
 pub byte* HmacNew(byte* key, mut long asked) {
     byte* block = ByteBlock(1296, mut asked)
     if block != null {
