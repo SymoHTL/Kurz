@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text;
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -16,7 +17,7 @@ namespace Kurz.Compiler.Tests;
 /// <c>Hex.Decode</c> the bytes .NET's <c>Convert.FromHexString</c> gives, or the error at the length or the first byte that is no digit;
 /// and 2000 cuts of strings of letters of one to four bytes give the bytes of .NET's cut of their UTF-8 bytes, where the cut falls on no
 /// byte inside a code point; and the same for the first 500 of them under the allocator that makes every block it frees inaccessible. Each
-/// kind of result is taken at least 100 times.
+/// kind of result is taken at least 100 times. The parses of a floating-point number and of a <c>decimal</c> are the second fact's.
 /// </summary>
 public sealed class ParseTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -250,6 +251,289 @@ public sealed class ParseTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal((0, ""), (code, error));
             Assert.Equal(expected.Take(3 * count), output); // three lines for each string
         }
+    }
+
+    /// <summary>The program of the floating-point and <c>decimal</c> parses: a line of the strings' parses follows it for each string.</summary>
+    private const string FloatingProgram = """
+        string D(string s) => match double.Parse(s) {
+            double v => "{v}"
+            ParseError e => "{e}"
+        }
+
+        string F(string s) => match float.Parse(s) {
+            float v => "{v}"
+            ParseError e => "{e}"
+        }
+
+        string M(string s) => match decimal.Parse(s) {
+            decimal v => "{v}"
+            ParseError e => "{e}"
+        }
+
+        void All(string s) {
+            print("{D(s)} {F(s)} {M(s)}")
+        }
+
+        void Two(string s) {
+            print("{D(s)} {F(s)}")
+        }
+
+        """;
+
+    private static readonly string[] Pieces = ["0", "1", "9", "5", "2", "7", "00", ".", ",", "e", "E", "+", "-", " ", "\t", "\u000B", "x", "\u00A0", "\0", "Infinity", "nAn"];
+
+    private static readonly string[] FloatingFronts = ["", "", " ", "-", "+", "\t-", "+-", " +", ".", ","];
+
+    private static readonly string[] FloatingBacks = ["", "", " ", "e5", "E-3", "\n", ".", ",", "\0", "x", "e"];
+
+    private static readonly string[] Blanks = [" ", "\t", "\n", "\r", "\u000B", "\u000C"];
+
+    private static readonly string[] Words = ["Infinity", "infinity", "INFINITY", "iNfInItY", "NaN", "nan", "NAN", "Inf", "infinit", "na"];
+
+    private static readonly string[] Tails = ["5", "50", "500000000000000000000001", "4999999", "51", "15", "25"];
+
+    private const string Largest = "79228162514264337593543950335";
+
+    /// <summary>One step of the generator the strings take their letters from.</summary>
+    private static ulong Step(ulong state) => unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
+
+    /// <summary>A string as a Kurz literal: a backslash, a quote and a brace escaped, and a control character or one past ASCII as <c>\u</c> (L7, L16).</summary>
+    private static string Literal(string s) => "\"" + string.Concat(s.Select(c => c switch
+    {
+        '\\' => "\\\\",
+        '"' => "\\\"",
+        '{' => "\\{",
+        < ' ' or > '~' => $"\\u{(int)c:X4}",
+        _ => c.ToString(),
+    })) + "\"";
+
+    /// <summary>The text of a <c>decimal</c> as <c>print</c> writes it (A8): .NET's, with a <c>-</c> before a zero whose sign is set.</summary>
+    private static string DecimalText(decimal m) =>
+        (m == 0m && (decimal.GetBits(m)[3] & int.MinValue) != 0 ? "-" : "") + m.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// What <c>double.Parse</c>, <c>float.Parse</c> (<paramref name="type"/> <c>d</c> or <c>f</c>) or <c>decimal.Parse</c> of the string
+    /// prints: the number .NET's <c>Parse</c> of the type gives with the invariant culture, in <c>NumberStyles.Float |
+    /// NumberStyles.AllowThousands</c> and for a <c>decimal</c> in <c>NumberStyles.Number</c> without its trailing sign, a
+    /// <c>FormatException</c> read as <c>empty</c> where the string holds whitespace alone and else as <c>invalid digit</c>, an
+    /// <c>OverflowException</c> as <c>too small</c> below 0 and else as <c>too large</c>; and <c>invalid digit</c> for a string that holds
+    /// a NUL, which .NET takes after the number and X7 does not.
+    /// </summary>
+    private static string Floating(string s, char type)
+    {
+        if (s.Contains('\0'))
+        {
+            return "invalid digit";
+        }
+
+        try
+        {
+            const NumberStyles style = NumberStyles.Float | NumberStyles.AllowThousands;
+            return type switch
+            {
+                'd' => double.Parse(s, style, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+                'f' => float.Parse(s, style, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+                _ => DecimalText(decimal.Parse(s, NumberStyles.Number & ~NumberStyles.AllowTrailingSign, CultureInfo.InvariantCulture)),
+            };
+        }
+        catch (FormatException)
+        {
+            return s.All(White) ? "empty" : "invalid digit";
+        }
+        catch (OverflowException)
+        {
+            return s.TrimStart().StartsWith('-') ? "too small" : "too large";
+        }
+    }
+
+    /// <summary>
+    /// The decimal text of the number halfway between a positive <c>double</c> or <c>float</c>, <paramref name="significand"/> times
+    /// 2^<paramref name="exponent"/>, and the next one up, exactly, as the integer <c>2M + 1</c> times 2^(<c>E</c> - 1) written in digits
+    /// and a power of ten; and of the numbers one digit past its last above it and below it.
+    /// </summary>
+    private static string[] Halfway(BigInteger significand, int exponent)
+    {
+        var middle = (2 * significand) + 1;
+        var (digits, ten) = exponent - 1 >= 0 ? (middle << (exponent - 1), 0) : (middle * BigInteger.Pow(5, 1 - exponent), exponent - 1);
+        var text = digits.ToString(CultureInfo.InvariantCulture);
+        return [$"{text}e{ten}", $"{text}1e{ten - 1}", $"{(digits * 10) - 1}e{ten - 1}"];
+    }
+
+    /// <summary>
+    /// X7: <c>double.Parse</c>, <c>float.Parse</c> and <c>decimal.Parse</c> give what .NET's <c>Parse</c> of the type gives
+    /// (<see cref="Floating"/>) for 1500 strings of the pieces of a number's forms and of other bytes, each read by all three, 120 of
+    /// the words <c>Infinity</c> and <c>NaN</c> in their cases with a sign and without, 100 strings of whitespace alone, 400 texts of random <c>double</c> values as .NET
+    /// writes them to round-trip, with separators of thousands and to 30 digits, 300 exact halfway points between two neighbouring
+    /// <c>double</c> values and as many between two <c>float</c> values, a tenth of each below the smallest normal value and a tenth at the
+    /// largest exponent, with the numbers a digit above and below each, which Eisel-Lemire and the slow path round to the even one, 200 strings of 19 to 800 digits, which take the slow path, and 1200 <c>decimal</c> strings
+    /// of up to 39 digits before the point and 34 after it, at the largest <c>decimal</c> and past it, with the tails that round half to
+    /// even. Each kind of result is taken at least 100 times, and the first 600 lines are run again under the allocator that makes every
+    /// block it frees inaccessible.
+    /// </summary>
+    [Fact]
+    public void Every_parse_of_a_floating_point_number_and_a_decimal_gives_what_dotnet_gives()
+    {
+        var lines = new List<string>();
+        var expected = new List<string>();
+        var kinds = new Dictionary<string, int>(StringComparer.Ordinal);
+        void Count(string kind) => kinds[kind] = kinds.GetValueOrDefault(kind) + 1;
+        string Kind(string r) => r is "empty" or "invalid digit" or "too large" or "too small" ? r : "number";
+        void Read(string s, string types)
+        {
+            var results = types.Select(type => Floating(s, type)).ToList();
+            foreach (var (type, r) in types.Zip(results))
+            {
+                Count($"{type} {Kind(r)}");
+            }
+
+            lines.Add(types switch { "dfm" => $"All({Literal(s)})", "df" => $"Two({Literal(s)})", _ => $"print({char.ToUpperInvariant(types[0])}({Literal(s)}))" });
+            expected.Add(string.Join(' ', results));
+        }
+
+        var state = 13579UL;
+        ulong Next() => state = Step(state);
+        string Pick(string[] pool) => pool[(int)((Next() >> 33) % (ulong)pool.Length)];
+        for (var n = 0; n < 1500; n++)
+        {
+            var body = string.Concat(Enumerable.Range(0, (int)((Next() >> 40) % 12UL)).Select(_ => Pick(Pieces)));
+            Read(Pick(FloatingFronts) + body + Pick(FloatingBacks), "dfm");
+        }
+
+        for (var n = 0; n < 120; n++)
+        {
+            Read(Pick(FloatingFronts) + Pick(Words) + Pick(FloatingBacks), "df");
+        }
+
+        for (var n = 0; n < 100; n++)
+        {
+            Read(string.Concat(Enumerable.Range(0, (int)(Next() % 4UL)).Select(_ => Pick(Blanks))), "dfm");
+        }
+
+        for (var n = 0; n < 400; n++)
+        {
+            var d = BitConverter.Int64BitsToDouble((long)Next());
+            if (double.IsFinite(d))
+            {
+                Read(d.ToString("R", CultureInfo.InvariantCulture), "d");
+                Read(n % 2 == 0 ? d.ToString("N" + (n % 17), CultureInfo.InvariantCulture) : d.ToString("E30", CultureInfo.InvariantCulture), "d");
+            }
+        }
+
+        var (doubleHalves, floatHalves, subnormal) = (0, 0, 0);
+        for (var n = 0; n < 300; n++)
+        {
+            // every tenth value below the smallest normal one and every tenth at the largest exponent, where the halfway point above the largest
+            // finite value is infinity
+            var bits = ((Next() >> 1) & (n % 10 is 0 or 1 ? (1UL << 52) - 1 : ulong.MaxValue)) | (n % 10 == 1 ? 2046UL << 52 : 0);
+            var biased = (int)(bits >> 52);
+            if (biased < 2047)
+            {
+                var fraction = new BigInteger(bits & ((1UL << 52) - 1));
+                subnormal += biased == 0 ? 1 : 0;
+                foreach (var s in biased == 0 ? Halfway(fraction, -1074) : Halfway(fraction + (BigInteger.One << 52), biased - 1075))
+                {
+                    Read(s, "d");
+                    doubleHalves++;
+                }
+            }
+
+            var single = ((uint)(Next() >> 33) & (n % 10 is 0 or 1 ? (1U << 23) - 1 : uint.MaxValue)) | (n % 10 == 1 ? 254U << 23 : 0);
+            var exponent = (int)(single >> 23);
+            if (exponent < 255)
+            {
+                var fraction = new BigInteger(single & ((1U << 23) - 1));
+                subnormal += exponent == 0 ? 1 : 0;
+                foreach (var s in exponent == 0 ? Halfway(fraction, -149) : Halfway(fraction + (BigInteger.One << 23), exponent - 150))
+                {
+                    Read(s, "f");
+                    floatHalves++;
+                }
+            }
+        }
+
+        for (var n = 0; n < 200; n++)
+        {
+            var length = 19 + (int)(Next() % 782UL);
+            var digits = new StringBuilder();
+            while (digits.Length < length)
+            {
+                digits.Append((char)('0' + (int)((Next() >> 33) % 10UL)));
+            }
+
+            digits.Insert((int)(Next() % (ulong)length), '.');
+            Read($"{digits}e{(int)(Next() % 801UL) - 400 - (length / 2)}", n % 2 == 0 ? "d" : "f");
+        }
+
+        var rounded = 0;
+        for (var n = 0; n < 1200; n++)
+        {
+            var whole = new StringBuilder();
+            var count = (int)(Next() % 40UL);
+            if (Next() % 4UL == 0)
+            {
+                whole.Append(Largest[..Math.Min(count, Largest.Length)]);
+            }
+
+            while (whole.Length < count)
+            {
+                whole.Append((char)('0' + (int)((Next() >> 33) % 10UL)));
+            }
+
+            var integer = whole.ToString();
+            if (Next() % 3UL == 0 && integer.Length > 3)
+            {
+                integer = string.Join(',', Enumerable.Range(0, (integer.Length + 2) / 3).Select(i => integer[Math.Max(0, integer.Length - (3 * (i + 1)))..(integer.Length - (3 * i))]).Reverse());
+            }
+
+            var fraction = new StringBuilder();
+            for (var places = (int)(Next() % 35UL); fraction.Length < places;)
+            {
+                fraction.Append((char)('0' + (int)((Next() >> 33) % 10UL)));
+            }
+
+            if (Next() % 3UL == 0)
+            {
+                fraction.Append(Pick(Tails));
+            }
+
+            var s = (Next() % 2UL == 0 ? "-" : Pick(["", "+", " "])) + (Next() % 5UL == 0 ? "000" : "") + integer + (fraction.Length > 0 ? "." + fraction : "");
+            var significant = (integer + fraction).Replace(",", "", StringComparison.Ordinal).TrimStart('0').Length;
+            rounded += (significant > 29 || fraction.Length > 28) && Kind(Floating(s, 'm')) == "number" ? 1 : 0;
+            Read(s, "m");
+        }
+
+        // the floors: each kind of result is taken often, the halfway points and the numbers below the smallest normal one among them
+        foreach (var kind in (string[])["d number", "d empty", "d invalid digit", "f number", "f empty", "f invalid digit", "m number", "m empty", "m invalid digit", "m too large", "m too small"])
+        {
+            Assert.True(kinds.GetValueOrDefault(kind) >= 100, $"only {kinds.GetValueOrDefault(kind)} parses give `{kind}`");
+        }
+
+        Assert.True(doubleHalves >= 600 && floatHalves >= 600, $"only {doubleHalves} and {floatHalves} halfway points");
+        Assert.True(subnormal >= 60 && rounded >= 100, $"only {subnormal} values below the smallest normal `double` or `float` and {rounded} rounded `decimal` values");
+        foreach (var (runtime, suffix, count) in new[] { (toolchain.Runtime, "", lines.Count), (ListTests.Fenced, "-fenced", 600) })
+        {
+            var program = FloatingProgram + string.Join('\n', lines.Take(count)) + "\n";
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", program), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "floating" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected.Take(count), output);
+        }
+    }
+
+    /// <summary>
+    /// X7: the powers of five the compiler writes into a program that parses a <c>double</c> or a <c>float</c> (<see cref="Emitter.Fives"/>)
+    /// are fast_float's and Rust's: two words for each power from 5^-342 to 5^308, the first, the one of 5^0 and the last as their
+    /// tables hold them; the other rows are held by the parses of the fact above that reach them.
+    /// </summary>
+    [Fact]
+    public void The_powers_of_five_of_the_parse_are_those_of_rusts_table()
+    {
+        var fives = Emitter.Fives.Value;
+        Assert.Equal(2 * 651, fives.Length);
+        Assert.Equal((0xEEF453D6923BD65AUL, 0x113FAA2906A13B3FUL), (fives[0], fives[1]));
+        Assert.Equal((0x8000000000000000UL, 0UL), (fives[2 * 342], fives[(2 * 342) + 1]));
+        Assert.Equal((0x8E679C2F5E44FF8FUL, 0x570F09EAA7EA7648UL), (fives[2 * 650], fives[(2 * 650) + 1]));
     }
 
     /// <summary>

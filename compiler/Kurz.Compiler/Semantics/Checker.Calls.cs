@@ -620,7 +620,7 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// X7: <c>long.Parse(s)</c>, and the same call on each integer type, the number the string holds or the case <c>ParseError</c>, an
+    /// X7: <c>long.Parse(s)</c>, and the same call on each number type, the number the string holds or the case <c>ParseError</c>, an
     /// outcome (O1), as Rust's <c>parse</c> (section 12, the owner, 2026-10-31, "Outcome long | ParseError"); the parameter takes C#'s
     /// name.
     /// </summary>
@@ -1116,16 +1116,9 @@ public sealed partial class Checker
                 return CheckStringJoin(c);
             }
 
-            if (m.Member == "Parse" && Types.ByName.TryGetValue(n.Name, out var parsed) && Types.IsInteger(parsed))
+            if (m.Member == "Parse" && Types.ByName.TryGetValue(n.Name, out var parsed) && Types.IsNumber(parsed))
             {
                 return CheckParse(c, n.Name, parsed); // X7
-            }
-
-            if (UnreadFunction(n.Name, m.Member) is { } unreadFunction)
-            {
-                NotSupported(m.Line, unreadFunction);
-                CheckArgumentsLoosely(c);
-                return Typed.Error;
             }
 
             if (n.Name is "File" or "Directory" or "TcpListener" or "TcpStream")
@@ -1393,13 +1386,6 @@ public sealed partial class Checker
         model.RecordType(m, member); // the callee is the field's value (F11)
         return CallValue(member.Type, c);
     }
-
-    /// <summary>X7: the <c>Parse</c> of a floating-point type and of <c>decimal</c>, which the checker does not read; else null.</summary>
-    private static string? UnreadFunction(string type, string member) => (type, member) switch
-    {
-        (_, "Parse") when Types.ByName.TryGetValue(type, out var number) && Types.IsNumber(number) && !Types.IsInteger(number) => $"`{type}.Parse` (X7)",
-        _ => null,
-    };
 
     /// <summary>
     /// X1: a string's <c>Contains</c>, <c>StartsWith</c> and <c>EndsWith</c>, each a <c>bool</c>, and <c>IndexOf</c>, an <c>int?</c>, of a

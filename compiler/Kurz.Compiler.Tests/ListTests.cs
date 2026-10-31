@@ -1647,7 +1647,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // list made for the call, of items whose text is made for the join (A4), and with a `char` separator read from a variable and
     // written in the call; and a cut of X2 that copies, one that keeps the whole string, one of a literal, one of nothing and one
     // through a field, and a parse and a decode (X7, H7) of a variable given a new value after it, of a cut made in the call and of a
-    // field
+    // field, and a parse of a `double`, a `float` and a `decimal` of the same and of an interpolation
     private const string Pieces = """
         data Bag(List<string> Items)
         data Name(string Value)
@@ -1754,6 +1754,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(hexed)
         Bytes | HexError wrong = Hex.Decode(named.Value)
         print(wrong)
+        mut real = " {1}.5e1 "
+        double | ParseError scaled = double.Parse(real)
+        real = Made(0)
+        print(scaled)
+        float | ParseError single = float.Parse(Made(1).Substring(5, 1))
+        print(single)
+        decimal | ParseError money = decimal.Parse("-{Made(2).Substring(5, 1)}.50")
+        print(money)
+        double | ParseError fielded = double.Parse(named.Value)
+        print(fielded)
         """;
 
     private static readonly string[] PiecesPrint =
@@ -1804,6 +1814,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "1",
         "[31]",
         "invalid digit at 0", // a decode of a field
+        "15", // a parse of a `double` from a variable given a new value after it
+        "1", // of a `float` from a cut that is gone after the statement
+        "-2.50", // of a `decimal` from an interpolation
+        "invalid digit", // of a field
     ];
 
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
