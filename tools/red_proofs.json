@@ -1183,5 +1183,8 @@
   {"tool": "tools/review/review.py", "anchor": "            if hunk:\n                flush()\n", "replacement": "            if hunk:\n", "expect": "diff: lines keep the order of the diff where a hunk ends in a change"},
   {"tool": "tools/review/review.py", "anchor": "        cut = left_out(todo)", "replacement": "        cut = left_out([])", "expect": "run: the log line of --plan names what was left out"},
   {"tool": "tools/review/review.py", "anchor": "characters. \"{MARKER.format('N')}\" stands for", "replacement": "characters. \"[[... N chars left out ...]]\" stands for", "expect": "long line: the prompt names the marker as the parse writes it"},
-  {"tool": "tools/review/review.py", "anchor": "{len(replay)} files replayed; {cut}.", "replacement": "{len(replay)} files replayed.", "expect": "run: the audit note and the state comment name what was left out"}
+  {"tool": "tools/review/review.py", "anchor": "{len(replay)} files replayed; {cut}.", "replacement": "{len(replay)} files replayed.", "expect": "run: the audit note and the state comment name what was left out"},
+  {"tool": "tools/review/review.py", "anchor": "converged: {'no' if capped else 'yes'}{limited}; {cut}; \"", "replacement": "converged: {'no' if capped else 'yes'}{limited}; \"", "expect": "run: the audit note and the state comment name what was left out"},
+  {"tool": "tools/review/review.py", "anchor": "{no:>5} + {line_parts(new, spans_of[('+', j)], left) if ('+', j) in spans_of else new}", "replacement": "{no:>5} + {new if ('+', j) in spans_of else new}", "expect": "run: --plan counts the batches of the cut text, and the run gives the model those batches"},
+  {"tool": "tools/review/review.py", "anchor": "            out.append(MARKER.format(a - at))", "replacement": "            out.append(MARKER.format(a - at - 1))", "expect": "long line: a changed line and its removed form are sent in parts that join back into them"}
 ]
