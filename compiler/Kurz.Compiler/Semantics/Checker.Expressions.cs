@@ -1526,7 +1526,7 @@ public sealed partial class Checker
                 }
                 else
                 {
-                    var body = CheckExpression(l.ExpressionBody, result, keepCases: result is UnionType);
+                    var body = CheckExpression(l.ExpressionBody, result, keepCases: Types.KeepsCases(result));
                     if (Types.IsVoid(body.Type))
                     {
                         Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)} (F11, T1)");

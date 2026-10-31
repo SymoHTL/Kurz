@@ -1501,10 +1501,20 @@ round can ask about it by the rule's id.
 - D9 with C4: a value of a union stands where a union is required only, since a union is one of its
   cases only after a `match`: a `byte | short` is no `int`, and a union of two data types derived
   from one base no value of the base; each is `type-mismatch`.
-- O2 to O4 with F7: O4 keeps a call's cases only as the subject of a `match` and in a written union
-  type, so a call that a lambda with an inferred result returns unwraps (O2), and the result F7
+- O2 to O4 with F7: O4 keeps a call's cases only as the subject of a `match` and where a written union
+  type stands for its value, a variable's, a result's, a parameter's, a field's or a list's item type,
+  so a call that a lambda with an inferred result returns unwraps (O2), and the result F7
   infers from the value lists no case: a case the calling function does not list is
   `unlisted-case` (O3).
+- O4 with F13 and T27: a call that stands as an argument is read whole, and each function of the
+  name reads it by its own parameter: a parameter whose type is a union, with the type arguments the
+  call writes or the receiver gives (`Add` on a `List<int | NotFound>` among them), keeps the cases
+  and fits the whole result; any other parameter takes the success, and so does a type parameter the
+  arguments infer, as the parameter is read before the inference. A `T?` of one type is no union of
+  cases there, nor in a variable or a result, so `int? x = Find(id)` unwraps, as O4's sentence on a
+  type the success converts to says. Of two functions that both fit exactly, the one whose parameter
+  keeps the cases is picked (the owner, 2026-10-31, "The union one"). Where no function fits, the
+  call's error stands alone and no case of the argument is passed on beside it (E1).
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
   ways meet, at the end of an `if`, after the arms of a `match` or an `else` and at the head of a

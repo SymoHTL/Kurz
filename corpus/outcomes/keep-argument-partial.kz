@@ -1,0 +1,21 @@
+// expect: error type-mismatch at 21
+// rules: O4
+
+data NotFound
+
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    print(found)
+}
+
+// the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+Report(Find(1))
