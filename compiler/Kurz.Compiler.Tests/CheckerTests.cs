@@ -2794,17 +2794,61 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void The_searches_of_a_string_and_the_members_of_a_list_of_x9_take_their_forms_and_their_types()
+    {
+        // X1: a `bool`, or the position as an `int?`, of a `string` or of a `char`; X9: an item or a run, the literal widened to the one
+        // form it fits (F14), and `AddRange` of the list itself, which reads its receiver in its argument as `Add` may (M7)
+        Assert.Equal("bool", TypeOf("s = \"ab\"\nc = s.Contains('a')\nprint(c)", "c"));
+        Assert.Equal("int?", TypeOf("s = \"ab\"\np = s.IndexOf(\"b\")\nprint(p)", "p"));
+        Assert.Equal("int?", TypeOf("xs = [[1], [2]]\np = xs.IndexOf([2])\nprint(p)", "p"));
+        Assert.Equal("int?", TypeOf("List<long> xs = [1]\np = xs.IndexOf(1)\nprint(p)", "p"));
+        Assert.Empty(Errors("mut xs = [1]\nxs.AddRange(xs)\nxs.Reverse()\nprint(xs)"));
+
+        // F13: a call that fits neither form is `argument-mismatch`, with a line for each form as a declaration would write it
+        var (diagnostics, _) = Check("s = \"ab\"\nprint(s.Contains(5))");
+        Assert.Equal(
+            "the call fits none of the forms of `Contains` (F13):\n"
+                + "  `bool Contains(string value)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `string` is required: a value of another type (T1)\n"
+                + "  `bool Contains(char value)`: argument 1 is an `int`, the literal's own type for the pick (F14), where a `char` is required: a value of another type (T1)",
+            Assert.Single(diagnostics.Items).Message);
+
+        // F14: `IndexOf` has two forms, so a literal keeps its own type, `int`, which fits no form of a list of bytes; a `byte` fits
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("b = \"ab\".Bytes\nprint(b.IndexOf(97))"));
+        Assert.Empty(Errors("b = \"ab\".Bytes\nprint(b.IndexOf(byte(97)))"));
+
+        // M11 and E1: `[]` against a list of lists, where no one list type stands, is its own `cannot-infer`, and nothing is picked
+        Assert.Equal([(ErrorIds.CannotInfer, 2)], Errors("grid = [[1]]\nprint(grid.IndexOf([]))"));
+
+        // M9: items of a type `==` does not take
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("mut fs = List<() => int>()\nfs.Add(() => 1)\nprint(fs.IndexOf(() => 1))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("ms = List<Map<string, int>>()\nprint(ms.IndexOf(Map<string, int>()))"));
+
+        // an argument of the wrong type or count, type arguments, and a receiver that is not `mut` (M5)
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.AddRange(1)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("mut xs = [1]\nxs.Reverse(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("xs = [1]\nprint(xs.IndexOf<int>(1))"));
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("xs = [1]\nxs.Reverse()"));
+
+        // M7: an argument that changes the string or the list the search holds
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("string G(mut string t) {\n    t = \"c\"\n    return \"a\"\n}\n\nmut s = \"ab\"\nprint(s.Contains(G(mut s)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int F(mut List<int> ys) {\n    ys.Add(1)\n    return 1\n}\n\nmut xs = [1]\nprint(xs.IndexOf(F(mut xs)))"));
+
+        // the parameters take C#'s names, as `Add`'s does
+        Assert.Empty(Errors("s = \"ab\"\nprint(s.Contains(value: \"a\"))\nxs = [1]\nprint(xs.IndexOf(item: 1))\nmut ys = [1]\nys.AddRange(collection: xs)\nprint(ys)"));
+    }
+
+    [Fact]
     public void The_members_of_strings_and_lists_and_the_functions_of_chapter_15_and_H7_are_not_supported_and_a_member_no_rule_names_is_unknown()
     {
-        // X1 to X9 and H7: each call is `not supported` with its rule, and no error stands beside it (E1); the arguments are read, so the
+        // X2 to X8 and H7: each call is `not supported` with its rule, and no error stands beside it (E1); the arguments are read, so the
         // variables they use count as used
         var members = new (string Receiver, string Member, string Rule)[]
         {
-            ("s", "Contains", "X1"), ("s", "StartsWith", "X1"), ("s", "EndsWith", "X1"), ("s", "IndexOf", "X1"), ("s", "Substring", "X2"),
+            ("s", "Substring", "X2"),
             ("s", "ToLower", "X3"), ("s", "ToUpper", "X3"), ("s", "ToLowerAscii", "X3"), ("s", "ToUpperAscii", "X3"),
             ("s", "Trim", "X4"), ("s", "TrimStart", "X4"), ("s", "TrimEnd", "X4"), ("s", "TrimAscii", "X4"), ("s", "TrimStartAscii", "X4"), ("s", "TrimEndAscii", "X4"),
             ("s", "Split", "X5"), ("s", "Replace", "X5"),
-            ("xs", "Sort", "X8"), ("xs", "SortBy", "X8"), ("xs", "SortUnstable", "X8"), ("xs", "IndexOf", "X9"), ("xs", "AddRange", "X9"), ("xs", "Reverse", "X9"),
+            ("xs", "Sort", "X8"), ("xs", "SortBy", "X8"), ("xs", "SortUnstable", "X8"),
         };
         foreach (var (receiver, member, rule) in members)
         {

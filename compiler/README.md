@@ -490,7 +490,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `string.FromUtf8Lossy(b)`, whose string takes a count of the block of the bytes where every sequence is UTF-8,
   their case `InvalidUtf8` a data type every file sees, declared before the file's own, and the lossy text, where a
   sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
-  owner, 2026-10-29, "Union, as Rust");
+  owner, 2026-10-29, "Union, as Rust"); `s.Contains(x)`, `s.StartsWith(x)`, `s.EndsWith(x)` and `s.IndexOf(x)`
+  of a `string` or of a `char`, which is searched for as its UTF-8 bytes, over the string's bytes, through
+  the standard library's `Find`, a byte at a time for one byte and Crochemore and Perrin's two-way search
+  for more, as Rust's `str::find`, linear in the string, and its `BytesAt` for the start and the end (X1);
 - `enum` (D12, D18, D20): a value is its number, or its place among the values where the declaration
   writes none, in the smallest of `i8`, `i16` and `i32` that holds every one, signed where a number is
   negative, as Rust stores the value of an enum without fields (section 4, an assumption there); `==`
@@ -580,6 +583,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   variables, parameters, fields, unions and lists; an `Add` past the largest `int` of items ends the
   program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
   lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
+  `IndexOf(item)` and `IndexOf(value)` of a run, an `int?`, which compare items as `==` compares two
+  items of a list, a list of one-byte items through the standard library's two-way search, as a string,
+  and a run of other items at each position in turn, as Rust's `windows`; `AddRange(collection)`, which
+  reads its argument first and holds it with a count of its own while the list makes room for all of its
+  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block and appends
+  the items as they were (section 12, assumed); and `Reverse()`, which swaps the items in place and copies
+  a block another value holds first (X9, M3);
 - list literals (M11): `[1, 2, 3]` and `[]`, read as a call of one function `List<T> Of<T>(T a, T b, T c)`, so
   that the list type where one stands, a parameter's among them, reaches the items as a parameter's type
   reaches a call's literals and lambdas, and where none stands the items infer `T` as T27 infers it (section
@@ -1139,7 +1149,7 @@ generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths non
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 and X9), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
@@ -1237,8 +1247,9 @@ unread; the limit of a type parameter and a member of a type parameter with one 
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29); `this` (K7);
-the members of a string and of a list that chapter 15 names, `string.Join` and a number type's `Parse`
-(X1 to X9), and `Hex.Decode` (H7);
+the members of a string and of a list that chapter 15 names but a string's searches and a list's
+`IndexOf`, `AddRange` and `Reverse`, `string.Join` and a number type's `Parse` (X2 to X8), and
+`Hex.Decode` (H7);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory

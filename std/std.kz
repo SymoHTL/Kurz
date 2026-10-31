@@ -1,6 +1,6 @@
 // The standard library's Kurz code (design record, section 2; the owner, 2026-10-24, "A std/ directory
 // now"), which the compiler compiles with every program, as it compiles the runtime: the allocator of
-// section 3, the blocks of a list and of a string, and the hashes of section 12. It takes its memory from the system through the
+// section 3, the blocks of a list and of a string, and the searches of a string and of a list of bytes and the hashes of section 12. It takes its memory from the system through the
 // runtime's boundary call, reached as the folder `sys`, the directory of the target the program is
 // built for, and the runtime reaches it as the folder `std`, through its allocation entry, `Allocate`
 // (the owner, 2026-10-24, "As built"; compiler/README.md, "The runtime"). The emitted code calls the
@@ -595,6 +595,101 @@ pub void ListClear(byte* block) {
     }
 }
 
+// For an `AddRange` (X9): a block with room for `more` items of `item` bytes after its own that no
+// other list value holds, as Rust's `Vec::reserve` makes room before `extend_from_slice` copies: the
+// block itself where it has the room and no other value holds it; a block no other value holds grown by
+// `Reallocate`; else a new block with its items, the old block held by one value less (M3), never freed
+// here, whose caller counts the copied items' own blocks. A new or grown block has the room of the old
+// one where that holds `more` items after them, else the larger of the room a full block grows to and
+// the count and `more`. A count and `more` past the largest `int` give null with `asked` set to the
+// bytes of that many items, as an `Add` past it does (M9); a block the system refuses gives null with
+// `asked` set to the bytes asked for.
+pub byte* ListReserve(byte* block, long more, long item, mut long asked) {
+    mut long count = 0
+    mut long room = 0
+    mut bool shared = false
+    raw {
+        if block != null {
+            count = long(*Ptr<int>(block + 8))
+            room = long(*Ptr<int>(block + 12))
+            shared = *Ptr<long>(block) > 1
+        }
+    }
+
+    if count + more > 2147483647 {
+        asked = (count + more) * item
+        return null
+    }
+
+    if !shared && room - count >= more {
+        return block
+    }
+
+    mut long grown = room
+    if room - count < more {
+        grown = Grown(room, item)
+        if grown < count + more {
+            grown = count + more
+        }
+    }
+
+    long bytes = 16 + grown * item
+    if block != null && !shared {
+        byte* q = Reallocate(block, 16 + room * item, bytes)
+        raw {
+            if q == null {
+                asked = bytes
+            } else {
+                *Ptr<int>(q + 12) = int(grown)
+            }
+        }
+
+        return q
+    }
+
+    mut byte* p = null
+    raw {
+        p = Allocate(bytes)
+        if p == null {
+            asked = bytes
+        } else {
+            *Ptr<long>(p) = 1
+            *Ptr<int>(p + 8) = int(count)
+            *Ptr<int>(p + 12) = int(grown)
+            long n = count * item
+            mut long i = 0
+            while i < n {
+                p[16 + i] = block[16 + i]
+                i = i + 1
+            }
+        }
+    }
+
+    if p != null && shared {
+        raw {
+            *Ptr<long>(block) = *Ptr<long>(block) - 1
+        }
+    }
+
+    return p
+}
+
+// The `count` items of `item` bytes at `items` put after the items of a block with room for them,
+// whose count of items it raises by `count` (X9); the caller counts the items' own blocks.
+pub void ListAppend(byte* block, byte* items, long count, long item) {
+    raw {
+        long at = 16 + long(*Ptr<int>(block + 8)) * item
+        long n = count * item
+        mut long i = 0
+        while i < n {
+            block[at + i] = items[i]
+            i = i + 1
+        }
+
+        *Ptr<int>(block + 8) = *Ptr<int>(block + 8) + int(count)
+    }
+}
+
 // A new block, held by one list value, with a copy of the `count` items at `items`, each `item` bytes,
 // and room for them: the part of a list (M9) and the bytes of a literal string (T15), whose items' own
 // blocks the caller counts. Null for no items, and null with `asked` set to the bytes asked for where
@@ -751,6 +846,231 @@ pub void StringFree(byte* bytes) {
     }
 
     Free(bytes - 16, 16 + room)
+}
+
+// The searches of a string and of a list of bytes (X1, X9), over the bytes of each, as Rust's
+// `str::find` searches a string's: the position of the first `m` bytes at `needle` among the `n` bytes
+// at `hay`, or -1 where they stand nowhere there; an `m` of 0 is found at 0. One byte is looked for
+// byte by byte, as `memchr` looks; more take the two-way search of `TwoWay`, which reads no byte of
+// `hay` more than a bounded number of times, so that no input makes a search slower than linear.
+pub long Find(byte* hay, long n, byte* needle, long m) {
+    if m == 0 {
+        return 0
+    }
+
+    if m > n {
+        return -1
+    }
+
+    if m > 1 {
+        return TwoWay(hay, n, needle, m)
+    }
+
+    mut long found = -1
+    raw {
+        byte b = needle[0]
+        mut long i = 0
+        while i < n {
+            if hay[i] == b {
+                found = i
+                break
+            }
+
+            i = i + 1
+        }
+    }
+
+    return found
+}
+
+// Whether the `m` bytes at `needle` stand at the position `at` among the `n` bytes at `hay`: false
+// for a position below 0 and one after which fewer than `m` bytes stand (X1).
+pub bool BytesAt(byte* hay, long n, byte* needle, long m, long at) {
+    if at < 0 || at > n - m {
+        return false
+    }
+
+    mut bool same = true
+    raw {
+        mut long i = 0
+        while i < m {
+            if hay[at + i] != needle[i] {
+                same = false
+                break
+            }
+
+            i = i + 1
+        }
+    }
+
+    return same
+}
+
+// The UTF-8 bytes of the code point `point` written at `bytes`, one to four, as `TextOfChar` writes
+// them: their count. A `char` searched for is searched for as these bytes (X1).
+pub long Utf8(uint point, byte* bytes) {
+    mut long count = 4
+    if point < 128 {
+        count = 1
+    } else if point < 2048 {
+        count = 2
+    } else if point < 65536 {
+        count = 3
+    }
+
+    raw {
+        if count == 1 {
+            bytes[0] = byte(point)
+        } else if count == 2 {
+            bytes[0] = byte(192 | (point >> 6))
+            bytes[1] = byte(128 | (point & 63))
+        } else if count == 3 {
+            bytes[0] = byte(224 | (point >> 12))
+            bytes[1] = byte(128 | ((point >> 6) & 63))
+            bytes[2] = byte(128 | (point & 63))
+        } else {
+            bytes[0] = byte(240 | (point >> 18))
+            bytes[1] = byte(128 | ((point >> 12) & 63))
+            bytes[2] = byte(128 | ((point >> 6) & 63))
+            bytes[3] = byte(128 | (point & 63))
+        }
+    }
+
+    return count
+}
+
+// The start of the maximal suffix of the `m` bytes at `x` under the order of bytes, or under its
+// reverse where `greater` is set, as Crochemore and Perrin compute it, with its period in `period`.
+long MaximalSuffix(byte* x, long m, bool greater, mut long period) {
+    mut long start = 0
+    mut long other = 1
+    mut long offset = 0
+    period = 1
+    raw {
+        while other + offset < m {
+            byte a = x[other + offset]
+            byte b = x[start + offset]
+            if (a < b && !greater) || (a > b && greater) {
+                other = other + offset + 1
+                offset = 0
+                period = other - start
+            } else if a == b {
+                if offset + 1 == period {
+                    other = other + offset + 1
+                    offset = 0
+                } else {
+                    offset = offset + 1
+                }
+            } else {
+                start = other
+                other = other + 1
+                offset = 0
+                period = 1
+            }
+        }
+    }
+
+    return start
+}
+
+// The two-way search of Crochemore and Perrin, as Rust's `TwoWaySearcher` runs it, for `m` bytes,
+// from 2 to `n`. The needle is cut at its critical position, the later start of its two maximal
+// suffixes. A window of `hay` is compared right of the cut first, and a mismatch there moves the
+// window past it; then left of the cut, and a mismatch there moves the window by the period. Where
+// the part left of the cut repeats at the period, the search remembers how much of the needle the last
+// move kept matched and compares it no more; else it moves by more than either part. A set of the low
+// six bits of the needle's bytes, of its first period where it repeats, moves the window by the whole
+// needle where its last byte is none of them.
+long TwoWay(byte* hay, long n, byte* needle, long m) {
+    mut long periodLess = 0
+    mut long periodGreater = 0
+    long critLess = MaximalSuffix(needle, m, false, mut periodLess)
+    long critGreater = MaximalSuffix(needle, m, true, mut periodGreater)
+    mut long crit = critGreater
+    mut long period = periodGreater
+    if critLess > critGreater {
+        crit = critLess
+        period = periodLess
+    }
+
+    mut bool periodic = period + crit <= m
+    mut ulong set = 0UL
+    mut long found = -1
+    raw {
+        mut long k = 0
+        while periodic && k < crit {
+            if needle[k] != needle[period + k] {
+                periodic = false
+            }
+
+            k = k + 1
+        }
+
+        mut long setEnd = m
+        if periodic {
+            setEnd = period
+        }
+
+        mut long s = 0
+        while s < setEnd {
+            set = set | 1UL << int(needle[s] & 63)
+            s = s + 1
+        }
+
+        if !periodic {
+            period = crit
+            if m - crit > period {
+                period = m - crit
+            }
+
+            period = period + 1
+        }
+
+        mut long position = 0
+        mut long memory = 0
+        while found < 0 && position + m <= n {
+            byte tail = hay[position + m - 1]
+            if ((set >> int(tail & 63)) & 1UL) == 0UL {
+                position = position + m
+                memory = 0
+            } else {
+                mut long i = crit
+                if periodic && memory > i {
+                    i = memory
+                }
+
+                while i < m && needle[i] == hay[position + i] {
+                    i = i + 1
+                }
+
+                if i < m {
+                    position = position + i - crit + 1
+                    memory = 0
+                } else {
+                    mut long j = crit
+                    mut long low = 0
+                    if periodic {
+                        low = memory
+                    }
+
+                    while j > low && needle[j - 1] == hay[position + j - 1] {
+                        j = j - 1
+                    }
+
+                    if j > low {
+                        position = position + period
+                        if periodic {
+                            memory = m - period
+                        }
+                    } else {
+                        found = position
+                    }
+                }
+            }
+        }
+    }
+
+    return found
 }
 
 // The block of a map (M9). A map value is the address of its block, null for a map that holds none: one
