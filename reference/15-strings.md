@@ -27,6 +27,14 @@ print(s.IndexOf(""))
 print("".EndsWith(""))
 ```
 
+A call that fits neither form, a `string` or a `char`, is `argument-mismatch`, with a line for each form (F13).
+
+Case: [strings/search-of-a-number.kz](../corpus/strings/search-of-a-number.kz)
+```kurz
+s = "ab"
+print(s.Contains(5))
+```
+
 ### X2 (decided, §12) A position counts bytes
 
 A position in a string is an index into `s.Bytes` (T15), reached without a walk, as Rust's positions
@@ -330,6 +338,9 @@ print(xs)
 "C# overloads"). `xs.Reverse()` reverses a list in place, as C#'s `List.Reverse` and Rust's `reverse`.
 `AddRange` and `Reverse` change the list and take it through a `mut` variable (M5) *(assumed, §12:
 `Reverse`, a default of the question, and the empty `run`, not put to the owner)*.
+`xs.AddRange(xs)` appends the items the list held before the call, so that the list is followed by
+a copy of itself, as C#'s `List.AddRange` appends a list to itself: `AddRange` stores the items of its
+argument before the list changes, and takes `Add`'s exception (M7; §4, the owner, 2026-10-31, "Store-first methods").
 
 Case: [strings/list-search.kz](../corpus/strings/list-search.kz)
 ```kurz
@@ -347,6 +358,31 @@ ys.AddRange([2, 3])
 print(ys)
 ys.Reverse()
 print(ys)
+```
+
+`IndexOf` has two forms, so that a literal argument keeps its own type (F14), and one that fits neither is
+`argument-mismatch` (F13); items of a type `==` does not take give `type-mismatch`, as `==` on two such lists
+does (M9).
+
+Case: [strings/index-of-int-literal.kz](../corpus/strings/index-of-int-literal.kz)
+```kurz
+// `IndexOf` has two forms, so the literal keeps its own type, `int`, which fits neither (F14)
+b = "ab".Bytes
+print(b.IndexOf(97))
+```
+
+Case: [strings/index-of-functions.kz](../corpus/strings/index-of-functions.kz)
+```kurz
+mut fs = List<() => int>()
+fs.Add(() => 1)
+print(fs.IndexOf(() => 1))
+```
+
+Case: [strings/add-range-self.kz](../corpus/strings/add-range-self.kz)
+```kurz
+mut xs = [1, 2]
+xs.AddRange(xs)
+print(xs)
 ```
 
 Case: [strings/add-range-without-mut.kz](../corpus/strings/add-range-without-mut.kz)

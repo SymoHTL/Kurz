@@ -1448,6 +1448,137 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "0",
     ];
 
+    // `AddRange` and `Reverse` (X9): a list appended to itself, beside a copy and alone, a list made for the call, a list of one item, a
+    // path of fields beside a copy of the data value; `IndexOf` of an item and of a run (X9), on a list of lists (F13), of `double` items
+    // by IEEE's `==` and of `data` items as D3 compares them (M9); the searches of a string made while the program runs, with arguments
+    // made in the call and read from a variable, a field and an item, and of `char`s of three and four bytes (X1); a list of bytes that
+    // shares a string's block, grown while the string keeps its bytes (M3); and `AddRange` of a list read from an item and from a field
+    private const string Searches = """
+        data Bag(List<string> Items)
+        data P(string Name, double X)
+
+        string Made(int n) => "made {n}"
+
+        mut words = [Made(0), Made(1)]
+        copy = words
+        words.AddRange(words)
+        print(words)
+        print(copy)
+        mut alone = List<string>()
+        for i in 0..<3 {
+            alone.Add(Made(i + 2))
+        }
+        alone.AddRange(alone)
+        print(alone)
+        alone.AddRange(List<string>())
+        alone.AddRange([Made(5)])
+        print(alone.Count)
+        held = alone
+        alone.Reverse()
+        print(alone)
+        print(held)
+        alone.Reverse()
+        print(alone == held)
+        mut one = [Made(9)]
+        one.Reverse()
+        print(one)
+        mut bag = Bag([Made(6)])
+        other = bag
+        bag.Items.AddRange(bag.Items)
+        bag.Items.Reverse()
+        print(bag.Items)
+        print(other.Items)
+
+        mut grid = [[1], [2, 3]]
+        grid.AddRange([[4]])
+        grid.AddRange(grid)
+        print(grid)
+        print(grid.IndexOf([2, 3]) ?? -1)
+        print(grid.IndexOf([[4], [1]]) ?? -1)
+        print(grid.IndexOf([[4], [2]]) ?? -1)
+        double z = 0.0
+        nan = z / z
+        ds = [1.0, nan, -z]
+        print(ds.IndexOf(nan) ?? -1)
+        print(ds.IndexOf(z) ?? -1)
+        print(ds.IndexOf([nan]) ?? -1)
+        ps = [P(Made(7), nan), P(Made(8), 1.0)]
+        print(ps.IndexOf(P(Made(7), nan)) ?? -1)
+        print(ps.IndexOf(P(Made(8), 2.0)) ?? -1)
+        print(words.IndexOf(Made(1)) ?? -1)
+        print(words.IndexOf([Made(1), Made(0)]) ?? -1)
+
+        s = "{Made(1)}-{Made(2)}"
+        print(s.IndexOf("-") ?? -1)
+        print(s.IndexOf(Made(2)) ?? -1)
+        print(s.Contains(Made(3)))
+        print(s.StartsWith(Made(1)))
+        print(s.EndsWith('2'))
+        print(s.IndexOf('ä') ?? -1)
+        mut bs = s.Bytes
+        bs.AddRange("!".Bytes)
+        print(bs.IndexOf(byte(33)) ?? -1)
+        print(bs.IndexOf("e 2!".Bytes) ?? -1)
+        print(s)
+        needle = Made(2)
+        print(s.IndexOf(needle) ?? -1)
+        print(s.StartsWith(words[1]))
+        print(s.Contains(bag.Items[0]))
+        mut flat = [0]
+        flat.AddRange(grid[1])
+        print(flat)
+        mut more = [Made(3)]
+        more.AddRange(bag.Items)
+        print(more)
+        t = "a€😀"
+        euro = '€'
+        print(t.IndexOf(euro) ?? -1)
+        print(t.IndexOf('😀') ?? -1)
+        print(t.Contains('😁'))
+        """;
+
+    private static readonly string[] SearchesPrint =
+    [
+        "[made 0, made 1, made 0, made 1]", // a list appended to itself beside a copy, which keeps its items (M3)
+        "[made 0, made 1]",
+        "[made 2, made 3, made 4, made 2, made 3, made 4]", // a list it alone holds, appended to itself
+        "7",
+        "[made 5, made 4, made 3, made 2, made 4, made 3, made 2]", // reversed beside a copy, which keeps its order
+        "[made 2, made 3, made 4, made 2, made 3, made 4, made 5]",
+        "true",
+        "[made 9]",
+        "[made 6, made 6]", // through a field, beside a copy of the data value
+        "[made 6]",
+        "[[1], [2, 3], [4], [1], [2, 3], [4]]",
+        "1", // an item of a list of lists
+        "2", // a run of it
+        "-1",
+        "-1", // NaN is no item of a list of `double`: IEEE's `==`
+        "2", // 0.0 is -0.0
+        "-1",
+        "0", // a `data` item with a NaN field is equal to itself (D3)
+        "-1",
+        "1",
+        "1",
+        "6",
+        "7",
+        "false",
+        "true",
+        "true",
+        "-1",
+        "13", // a list of bytes that shares the string's block, grown
+        "10",
+        "made 1-made 2", // the string keeps its bytes (M3)
+        "7",
+        "true",
+        "false",
+        "[0, 2, 3]",
+        "[made 3, made 6, made 6]",
+        "1", // a `char` of three bytes
+        "4", // of four
+        "false", // a `char` whose four bytes differ from the string's in the last
+    ];
+
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
     // the list it is written into, over another item and over itself, a value that changes the list through a `mut` argument before the
     // write (M4), a `mut` parameter, an index of a narrow type, a list of lists, a list known not null, and a value made before the index
@@ -1998,6 +2129,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Strings, toolchain.Runtime, "string-values", "raw"), 0, StringsPrint, "");
         Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, toolchain.Runtime, "map-members"), 0, MapMembersPrint, "");
+        Ran(BuildAndRun(Searches, toolchain.Runtime, "list-searches"), 0, SearchesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
     }
@@ -2011,6 +2143,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Strings, fenced, "string-values-fenced", "raw"), 0, StringsPrint, "");
         Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, fenced, "map-members-fenced"), 0, MapMembersPrint, "");
+        Ran(BuildAndRun(Searches, fenced, "list-searches-fenced"), 0, SearchesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
@@ -2309,6 +2442,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun("raw {\n    p = List<long>.Allocate(1)\n    xs = List<long>.FromRaw(p, 2147483648)\n    print(xs.Count)\n}\n", toolchain.Runtime, "list-from-raw-limit", "raw"), 1, [], "error: allocation-failed (17179869184 bytes)\n");
         Ran(BuildAndRun("b = \"abc\".Bytes\nprint(b)\n", EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "bytes-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
         Ran(BuildAndRun("b = \"abc\".Bytes\nprint(b)\n", toolchain.Runtime, "bytes-granted"), 0, ["[97, 98, 99]"], ""); // the positive control
+    }
+
+    [Fact]
+    public void An_AddRange_past_the_limit_reports_the_bytes_of_the_items_after_it()
+    {
+        // M9, X9: the limit of the largest `int` lowered to 3 in the library's `ListReserve`, so that `AddRange` of three items to a list
+        // of one asks past it with the bytes of 4 `long`s, as an `Add` past the limit does; a block the system refuses ends the same way
+        // through the emitter's `Refused`, as every growth's does
+        const string text = "mut xs = List<long>()\nxs.Add(1)\nxs.AddRange([2, 3, 4])\nprint(xs.Count)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "if count + more > 2147483647 {\n        asked = (count + more) * item", "if count + more > 3 {\n        asked = (count + more) * item")), "add-range-limit"), 1, [], "error: allocation-failed (32 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "add-range-below-limit"), 0, ["4"], ""); // the positive control
     }
 
     [Fact]

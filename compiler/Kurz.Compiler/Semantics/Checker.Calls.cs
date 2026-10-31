@@ -66,6 +66,9 @@ public sealed partial class Checker
         public bool Exact { get; set; }
 
         public KurzType Result { get; set; } = Types.Error;
+
+        /// <summary>A built-in member's form as a declaration would write it, for the message of a call that fits none of its forms, where no function stands (F13).</summary>
+        public string? Form { get; init; }
     }
 
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
@@ -1033,7 +1036,7 @@ public sealed partial class Checker
         return new Typed(made);
     }
 
-    /// <summary>M5, M9, T15, S2 to S8: a call of a member: a list's <c>Add</c>, <c>Where</c> and <c>Clear</c>; a function of <c>File</c> and <c>Directory</c>, and a file's methods; a data value's field of function type.</summary>
+    /// <summary>M5, M9, T15, S2 to S8, X1, X9: a call of a member: a list's <c>Add</c>, <c>Where</c>, <c>Clear</c>, <c>IndexOf</c>, <c>AddRange</c> and <c>Reverse</c>; a string's searches; a function of <c>File</c> and <c>Directory</c>, and a file's methods; a data value's field of function type.</summary>
     private Typed CheckMethodCall(MemberAccess m, CallExpression c)
     {
         if (m.Conditional || InChain(m.Target))
@@ -1141,10 +1144,82 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Contains" or "StartsWith" or "EndsWith" or "IndexOf")
+        {
+            return CheckStringSearch(c, m);
+        }
+
         if (target.Type is ListType list)
         {
             switch (m.Member)
             {
+                case "IndexOf":
+                    {
+                        // X9: an item or a run of items, two forms, so that a literal argument keeps its own type (F14) and `[]`,
+                        // which only one list type standing where it does would type, is its own `cannot-infer` (M11, E1); the
+                        // parameters take C#'s names, as `Add`'s does
+                        if (RefusesTypeArguments(c, "`IndexOf`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        if (ItemEquality(list.Element) is { } refused)
+                        {
+                            // an item is equal as `==` finds two items of a list equal (M9), so a type `==` does not take finds none
+                            if (refused.Mismatch)
+                            {
+                                Report(ErrorIds.TypeMismatch, c.Line, $"`IndexOf` compares the items of {Types.A(list)} by `==`: {refused.Why} (X9, M9)");
+                            }
+                            else
+                            {
+                                NotSupported(c.Line, $"`IndexOf` on {Types.A(list)}: {refused.Why} (X9, M9)");
+                            }
+
+                            CheckArgumentsLoosely(c);
+                            return Typed.Error;
+                        }
+
+                        var position = Types.Nullable(Types.Int);
+                        var item = new Candidate { Slots = [new Slot("item", list.Element, false, false, false)], Result = position, Form = $"int? IndexOf({list.Element} item)" };
+                        var run = new Candidate { Slots = [new Slot("value", list, false, false, false)], Result = position, Form = $"int? IndexOf({list} value)" };
+                        var typed = Call([item, run], c, null, out var picked);
+                        return Record(c, ReferenceEquals(picked, run) ? CallKind.ListIndexOfRun : CallKind.ListIndexOf, typed, picked);
+                    }
+
+                case "AddRange":
+                    {
+                        if (RefusesTypeArguments(c, "`AddRange`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var candidate = new Candidate { Slots = [new Slot("collection", list, false, false, false)], Result = Types.Void };
+                        var result = Record(c, CallKind.ListAddRange, Call([candidate], c, null, out var picked), picked);
+                        if (!result.IsError)
+                        {
+                            MutReceiver(c, m.Target, c.Line, "`AddRange` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
+                        return result;
+                    }
+
+                case "Reverse":
+                    {
+                        if (RefusesTypeArguments(c, "`Reverse`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var candidate = new Candidate { Slots = [], Result = Types.Void };
+                        var result = Record(c, CallKind.ListReverse, Call([candidate], c, null, out var picked), picked);
+                        if (!result.IsError)
+                        {
+                            MutReceiver(c, m.Target, c.Line, "`Reverse` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
+                        return result;
+                    }
+
                 case "Add":
                     {
                         if (RefusesTypeArguments(c, "`Add`"))
@@ -1230,16 +1305,32 @@ public sealed partial class Checker
         _ => null,
     };
 
-    /// <summary>X1 to X5, X8, X9: the members of a string and of a list that chapter 15 names, which the checker does not read; else null.</summary>
+    /// <summary>
+    /// X1: a string's <c>Contains</c>, <c>StartsWith</c> and <c>EndsWith</c>, each a <c>bool</c>, and <c>IndexOf</c>, an <c>int?</c>, of a
+    /// <c>string</c> or of a <c>char</c>: two forms, so that a literal argument keeps its own type (F14) and an argument that fits
+    /// neither is <c>argument-mismatch</c> with a line for each form (F13). The parameter takes C#'s name.
+    /// </summary>
+    private Typed CheckStringSearch(CallExpression c, MemberAccess m)
+    {
+        if (RefusesTypeArguments(c, $"`{m.Member}`"))
+        {
+            return Typed.Error;
+        }
+
+        KurzType result = m.Member == "IndexOf" ? Types.Nullable(Types.Int) : Types.Bool;
+        var text = new Candidate { Slots = [new Slot("value", Types.String, false, false, false)], Result = result, Form = $"{result} {m.Member}(string value)" };
+        var single = new Candidate { Slots = [new Slot("value", Types.Char, false, false, false)], Result = result, Form = $"{result} {m.Member}(char value)" };
+        return Record(c, CallKind.StringSearch, Call([text, single], c, null, out var picked), picked);
+    }
+
+    /// <summary>X2 to X5, X8: the members of a string and of a list that chapter 15 names, which the checker does not read; else null.</summary>
     private static string? UnreadMember(KurzType type, string member) => (type, member) switch
     {
-        (PrimitiveType { Kind: Primitive.String }, "Contains" or "StartsWith" or "EndsWith" or "IndexOf") => $"a string's `{member}` (X1)",
         (PrimitiveType { Kind: Primitive.String }, "Substring") => "a string's `Substring` (X2)",
         (PrimitiveType { Kind: Primitive.String }, "ToLower" or "ToUpper" or "ToLowerAscii" or "ToUpperAscii") => $"a string's `{member}` (X3)",
         (PrimitiveType { Kind: Primitive.String }, "Trim" or "TrimStart" or "TrimEnd" or "TrimAscii" or "TrimStartAscii" or "TrimEndAscii") => $"a string's `{member}` (X4)",
         (PrimitiveType { Kind: Primitive.String }, "Split" or "Replace") => $"a string's `{member}` (X5)",
         (ListType, "Sort" or "SortBy" or "SortUnstable") => $"a list's `{member}` (X8)",
-        (ListType, "IndexOf" or "AddRange" or "Reverse") => $"a list's `{member}` (X9)",
         _ => null,
     };
 
@@ -1946,8 +2037,9 @@ public sealed partial class Checker
     {
         if (candidates.Count > 1)
         {
-            var reasons = candidates.Select(x => $"  `{Signature(x.Function!)}` at line {x.Function!.Line}: {WhyNot(x, pres)}");
-            Report(ErrorIds.ArgumentMismatch, c.Line, $"the call fits none of the functions named `{candidates[0].Function!.Name}` (F13):\n{string.Join("\n", reasons)}");
+            var reasons = candidates.Select(x => x.Form is { } form ? $"  `{form}`: {WhyNot(x, pres)}" : $"  `{Signature(x.Function!)}` at line {x.Function!.Line}: {WhyNot(x, pres)}");
+            var named = candidates[0].Function is { } f ? $"the functions named `{f.Name}`" : $"the forms of `{((MemberAccess)c.Callee).Member}`";
+            Report(ErrorIds.ArgumentMismatch, c.Line, $"the call fits none of {named} (F13):\n{string.Join("\n", reasons)}");
             return;
         }
 
