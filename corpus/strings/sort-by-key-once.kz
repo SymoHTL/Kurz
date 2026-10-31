@@ -1,0 +1,16 @@
+// expect: output
+// | key 3
+// | key 1
+// | key 2
+// | [1, 2, 3]
+// rules: X8
+
+int Key(int x) {
+    print("key {x}")
+    return x
+}
+
+// the key is made once for each item, in the order of the list, and not at each comparison
+mut xs = [3, 1, 2]
+xs.SortBy(x => Key(x))
+print(xs)

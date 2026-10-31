@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 5
+// rules: X8
+
+mut xs = [true, false]
+xs.Sort()
+print(xs)

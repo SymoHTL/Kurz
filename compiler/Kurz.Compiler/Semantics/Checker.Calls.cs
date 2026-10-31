@@ -661,7 +661,7 @@ public sealed partial class Checker
         if (Types.IsError(element))
         {
             CheckArgumentsLoosely(c);
-            return Typed.Error; // a type it cannot find comes first, as rustc's E0412 and C#'s CS0246, and nothing more (E1)
+            return Typed.Error; // a type it cannot find comes first, and nothing more (E1; §8, the owner, 2026-10-31, "unknown-name first")
         }
 
         if (c.Arguments.Count != 0)

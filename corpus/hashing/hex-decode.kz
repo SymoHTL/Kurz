@@ -2,6 +2,7 @@
 // | [0, 1, 171, 255]
 // | odd length at 3
 // | invalid digit at 1
+// | odd length at 3
 // | []
 // rules: H7
 
@@ -15,4 +16,6 @@ void Show(Bytes | HexError result) {
 Show(Hex.Decode("0001abFF"))
 Show(Hex.Decode("abc"))
 Show(Hex.Decode("0xff"))
+// an odd length and a character that is no digit: the length is read first
+Show(Hex.Decode("0xf"))
 Show(Hex.Decode(""))

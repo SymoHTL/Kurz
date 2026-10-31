@@ -34,8 +34,11 @@ in a `str` (§12, the owner, 2026-10-31, "Bytes, as Rust"). `s.Substring(start, 
 string of the `length` bytes from `start`. A `Substring` that reaches outside the string, a `start`
 or a `length` below 0 among them, raises `index-out-of-range`, as a list's index does (M9), and one
 whose start or end falls inside a code point raises `not-char-boundary`, which names the position,
-as Rust's `&s[a..b]` panics (§12, the owner, 2026-10-31, "Two ids") *(assumed, §12: a negative `start`
-or `length` is outside)*. Where the error line names the position is X10.
+as Rust's `&s[a..b]` panics (§12, the owner, 2026-10-31, "Two ids"). A negative `start` or `length` is
+outside, and so is a `start + length` past the largest `int`; the bounds are read before the code
+points, so that a `Substring` both outside the string and inside a code point raises
+`index-out-of-range`, and the start's code point before the end's, as Rust's `&s[a..b]` reads a cut
+*(assumed, §12, not put to the owner)*. Where the error line names the position is X10.
 
 Case: [strings/substring.kz](../corpus/strings/substring.kz)
 ```kurz
@@ -58,6 +61,13 @@ Case: [strings/substring-inside-char.kz](../corpus/strings/substring-inside-char
 s = "hä"
 print(s.Substring(0, 1))
 print(s.Substring(0, 2))
+```
+
+Case: [strings/substring-outside-and-inside.kz](../corpus/strings/substring-outside-and-inside.kz)
+```kurz
+// the start, 2, falls inside `ä`, and the end, 7, past the string's 3 bytes: the bounds are read first
+s = "hä"
+print(s.Substring(2, 5))
 ```
 
 ### X3 (decided, §12) A change of case
@@ -145,14 +155,24 @@ print(string.Join(", ", [Counter(0)]))
 `long | ParseError` (O1), as Rust's `parse` (§12, the owner, 2026-10-31, "Outcome long | ParseError").
 `data ParseError(ParseKind Kind)` with `enum ParseKind { Empty, InvalidDigit, TooLarge, TooSmall }`
 holds none of the input, and its text is the words of its kind in lower case, `too large` (§12, the
-owner, 2026-10-31, "Without input"). `double.Parse` and `decimal.Parse` give the kinds `Empty` and
-`InvalidDigit` alone, and `double.Parse("1e999")` is infinity. An integer reads as Rust's `parse` reads
-one, an optional `+` or `-` and then ASCII digits and nothing else, a `-` before the digits of an
-unsigned type being `InvalidDigit`; `ParseError` and `ParseKind` are types every file sees, so that a
-file's own declaration of one is `redeclared` (V9), as a file's own `InvalidUtf8` is (T15) *(assumed,
-§12: the form of an integer, not put to the owner, and the two names, a default of the question)*.
-What `double.Parse` and `decimal.Parse` read beyond that is open (§14). The reading takes no culture
-(§4).
+owner, 2026-10-31, "Without input"). `double.Parse` gives the kinds `Empty` and `InvalidDigit` alone,
+and `double.Parse("1e999")` is infinity (§12, the owner, 2026-10-31, "Without input"); `decimal.Parse`
+gives `TooLarge` and `TooSmall` as well, past the largest and below the smallest `decimal` (§12, the
+owner, 2026-10-31, "TooLarge / TooSmall"). A number is read in C#'s invariant forms: whitespace
+around it and a leading sign, and for `double`, `float` and `decimal` a point and `,` as a separator
+of thousands, and for `double` and `float` an exponent and the words `Infinity` and `NaN` (§12, the
+owner, 2026-10-31, "C#'s invariant forms"), so that `"1,5"` reads as 15; an integer reads no
+separator and no point (§12, the owner, 2026-10-31, "C#'s Integer style"); a `decimal` reads no sign
+after its digits and no exponent (§12, the owner, 2026-10-31, "Without trailing sign"). Whitespace is
+the tab, the line feed, the vertical tab, the form feed, the carriage return and the space, and a
+string of whitespace alone is `Empty`; `,` stands among the digits before the point, its groups not
+checked, so that `"1,2,3"` reads as 123; `Infinity`, `-Infinity` and `NaN` are read in any case; a
+number may start or end with its point; a sign before the digits of an unsigned type reads as C#'s
+`Parse` reads it, `"-0"` as 0 and `"-1"` as `TooSmall`; `float.Parse` reads as `double.Parse` does,
+a number past the largest `float` being infinity; and `ParseError` and `ParseKind` are types every
+file sees, so that a file's own declaration of one is `redeclared` (V9), as a file's own
+`InvalidUtf8` is (T15) *(assumed, §12: the readings said back with the answers, not put to the owner
+as questions, and the two names, a default of the question)*. The reading takes no culture (§4).
 
 Case: [strings/parse.kz](../corpus/strings/parse.kz)
 ```kurz
@@ -183,6 +203,49 @@ match double.Parse("1e999") {
 }
 ```
 
+Case: [strings/parse-forms.kz](../corpus/strings/parse-forms.kz)
+```kurz
+void Show(long | ParseError result) {
+    match result {
+        long n => print(n)
+        ParseError e => print(e)
+    }
+}
+
+void ShowDouble(double | ParseError result) {
+    match result {
+        double d => print(d)
+        ParseError e => print(e)
+    }
+}
+
+void ShowDecimal(decimal | ParseError result) {
+    match result {
+        decimal m => print(m)
+        ParseError e => print(e)
+    }
+}
+
+// whitespace around the number, and no separator in an integer
+Show(long.Parse(" 7\t"))
+Show(long.Parse("1,000"))
+Show(long.Parse("  "))
+match byte.Parse("-0") {
+    byte b => print(b)
+    ParseError e => print(e)
+}
+// a separator of thousands, the words of an infinity in any case, and a point at the start
+ShowDouble(double.Parse(" 1,000.5 "))
+ShowDouble(double.Parse("-infinity"))
+ShowDouble(double.Parse(".5"))
+// a `decimal` keeps its scale, and reads no sign after its digits and no exponent
+ShowDecimal(decimal.Parse("+2.50"))
+ShowDecimal(decimal.Parse("5-"))
+ShowDecimal(decimal.Parse("1e5"))
+ShowDecimal(decimal.Parse("79228162514264337593543950336"))
+ShowDecimal(decimal.Parse("-79228162514264337593543950336"))
+```
+
 Case: [strings/parse-error-redeclared.kz](../corpus/strings/parse-error-redeclared.kz)
 ```kurz
 data ParseError(string Input)
@@ -199,7 +262,10 @@ as Rust's `sort`, `sort_by_key` and `sort_unstable`. Each changes the list and t
 `double` or `float` values sorts as C#'s `double.CompareTo` orders them: NaN first, `-0` equal to `0`,
 so that the stable sort keeps the order of `-0` and `0` (§12, the owner, 2026-10-31, "C# CompareTo").
 A buffer the system refuses raises `allocation-failed`, as a list's growth does (M9) *(assumed, §12)*.
-How often `SortBy` calls its key is open (§14).
+`SortBy` calls its key once for each item and keeps the keys beside the list while it sorts, as C#'s
+`OrderBy` and Rust's `sort_by_cached_key` (§12, the owner, 2026-10-31, "Once per item"), in the order
+of the list *(assumed, §12)*. A sort on an item type or a key type `<` does not order is
+`type-mismatch`, as `<` on two values of that type is (T18) *(assumed, §12)*.
 
 Case: [strings/sort.kz](../corpus/strings/sort.kz)
 ```kurz
@@ -230,6 +296,26 @@ print(ds)
 Case: [strings/sort-without-mut.kz](../corpus/strings/sort-without-mut.kz)
 ```kurz
 xs = [3, 1, 2]
+xs.Sort()
+print(xs)
+```
+
+Case: [strings/sort-by-key-once.kz](../corpus/strings/sort-by-key-once.kz)
+```kurz
+int Key(int x) {
+    print("key {x}")
+    return x
+}
+
+// the key is made once for each item, in the order of the list, and not at each comparison
+mut xs = [3, 1, 2]
+xs.SortBy(x => Key(x))
+print(xs)
+```
+
+Case: [strings/sort-of-bools.kz](../corpus/strings/sort-of-bools.kz)
+```kurz
+mut xs = [true, false]
 xs.Sort()
 print(xs)
 ```
@@ -269,9 +355,11 @@ xs.AddRange([2])
 print(xs)
 ```
 
-### X10 (open) Where the error line of `not-char-boundary` names the position
+### X10 (decided, §12) Where the error line of `not-char-boundary` names the position
 
-The record leaves open (§14) whether the position of the cut stands after the error line's place,
-`error: not-char-boundary at a.kz:5: byte 2`, or below the line, as the text of a `throw` stands (O6).
+The position of the cut stands on the line below the error line, where the text of a `throw` stands
+(O6): `error: not-char-boundary at a.kz:5`, then `byte 2 is inside a code point` (§12, the owner,
+2026-10-31, "Below, as throw text"). The error line ends with a colon, as the line of a `throw` does
+*(assumed, §12)*.
 
-No case: the form is open, and a case of X2 expects the id and the line alone.
+No case: a case pins the id and the line of the error (E3), and no case reads the lines below it.
