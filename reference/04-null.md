@@ -17,8 +17,11 @@ of the answer, which named the arm itself)* A `null` arm over a subject whose ty
 `string` or a union without `null`, builds as an arm no value reaches, with no diagnostic, and covers
 nothing, as C# compiles `case null` on a `string` (§4, the owner, 2026-10-30, "Allow, as C#", a
 second answer, against `type-mismatch`, as Rust refuses `None =>` on an `i32`, and against
-`unreachable-arm`); over a subject of a type parameter, which a nullable type can fill (N11), it is
-`type-mismatch`, as `null` where a `T` is required is (N6), and whether it builds stands open (§14).
+`unreachable-arm`), and so after an arm that covers the subject's type, `string t` over a `string`, where
+C4's `unreachable-arm` for an arm after the arm of its type does not reach it, since `null` is no `string`. Over a subject of a type parameter, which a
+nullable type can fill (N11), N6 makes it `type-mismatch`, as `null` where a `T` is required is, while §14
+holds whether it builds: as C# builds `case null` on a `T` without a constraint, or `type-mismatch`.
+Whether it builds over a number type, an `int`, whose `case null` C# refuses (CS0037), stands open (§14).
 An arm after `else`, a `null` arm among them, is `syntax` (C9). A second `null` arm is
 `unreachable-arm`, as a second arm of one literal is (C4), over a `T?` and over a subject with no `null`
 alike. *(assumed, §4: the second `null` arm, which the answers named not)*
@@ -771,8 +774,9 @@ print(acc.Email.Bytes.Count)
 ### N10 (decided, §4) `==` and `!=` with a nullable value
 
 `==` and `!=` with a nullable value on either side are lifted, as C#'s are: `null` equals `null`
-alone, two values compare as their types do (D3, T18), and `a == 1` is `false` for an `a` that is
-null. `<`, `<=`, `>` and `>=` with a nullable value stay `nullable-unchecked` (N2). A test
+alone, two values compare as their types do, the `null` taken off each side first (D3, T18), so
+`(int | string)? a == 1` reads an `int | string` beside an `int`, which D3 refuses, and `a == 1` is
+`false` for an `a` that is null. `<`, `<=`, `>` and `>=` with a nullable value stay `nullable-unchecked` (N2). A test
 `a == b` or `b == a`, with a nullable `a` and a `b` whose type is not nullable or that is a
 variable or a path known not null at that point (N3), shows that `a` is not null where it is true,
 and `a != b` or `b != a` where it is false, so `"x" == email` narrows `email` as `email == "x"`
