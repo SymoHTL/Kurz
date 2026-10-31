@@ -16,7 +16,7 @@ namespace Kurz.Compiler.Emit;
 /// <c>%kz.str</c>, a pointer to UTF-8 bytes
 /// and their count, whose highest bit marks a string that holds a block of the standard library in front of the bytes, which a
 /// literal does not, the pointer of an empty string pointing at a constant of no bytes and never
-/// <c>null</c> (R15; design record, section 3); a pointer and a C function value are <c>ptr</c> (R10, R17), and so are a list, the
+/// <c>null</c> (R15; design record, section 3, and section 4, the counter: the owner, 2026-10-29, "Bit in the count"); a pointer and a C function value are <c>ptr</c> (R10, R17), and so are a list, the
 /// address of its block (M9), and a file, the address of its handle's block (S5); a function value is <c>%kz.fn</c>, the address of its code and of its
 /// environment, null for a lambda that reads no variable (F11, F15); a value of an enum is its number, or its place among the values
 /// where the declaration writes none, in the smallest of <c>i8</c>, <c>i16</c> and <c>i32</c> that holds every one, signed where a number
@@ -64,10 +64,10 @@ internal static class Lower
         var other => throw new InvalidOperationException($"no size for `{other}`"),
     };
 
-    /// <summary>The alignment of a value of the type in memory, as LLVM lays out its IR type: 16 for an <c>i128</c> (T29), else its size up to 8.</summary>
+    /// <summary>The alignment of a value of the type in memory, as LLVM lays out its IR type: 16 for an <c>i128</c> (T29), 1 for a type of no size, <c>null</c>'s <c>{}</c> (N1), else its size up to 8.</summary>
     public static int Align(KurzType type) => IrType(type) == "i128" ? 16 : Math.Clamp(Size(type), 1, 8);
 
-    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, the time types, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, a file or a socket, a hasher, pointers to them and C function types over them.</summary>
+    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, the time types, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, <c>null</c>, of no size (N1), an enum's value (D12, D18), a file or a socket, a hasher, pointers to them and C function types over them.</summary>
     public static bool Supported(KurzType type) => type switch
     {
         PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt

@@ -27,9 +27,18 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     [GeneratedRegex(@"^  at <unknown> \(0x[0-9a-f]+\)$")]
     private static partial Regex Unknown();
 
-    /// <summary>An error stream cut where its trace starts: its lines up to the last that is no frame and no cut, and the lines after it.</summary>
-    internal static (string Error, IReadOnlyList<string> Trace) Split(string all)
+    /// <summary>
+    /// An error stream cut where its trace starts: after <paramref name="error"/>, the text the caller expects, where the stream starts
+    /// with it; else its lines up to the last that is no frame and no cut, which takes a line of a frame's form at the end of a thrown
+    /// text into the trace, and the lines after it.
+    /// </summary>
+    internal static (string Error, IReadOnlyList<string> Trace) Split(string all, string? error = null)
     {
+        if (error is not null && all.StartsWith(error, StringComparison.Ordinal))
+        {
+            return (error, Toolchain.Lines(all[error.Length..]));
+        }
+
         var lines = Toolchain.Lines(all);
         var first = lines.Count;
         while (first > 0 && (Frame().IsMatch(lines[first - 1]) || Cut().IsMatch(lines[first - 1])))
@@ -55,20 +64,20 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
 
         Assert.NotEmpty(trace);
         var cut = Cut().IsMatch(trace[^1]);
-        var frames = trace.Take(cut ? trace.Count - 1 : trace.Count).Select(l => Frame().Match(l)).ToList();
-        Assert.All(frames, m => Assert.True(m.Success && m.Groups["place"].Success == lines, $"not a frame {(lines ? "with" : "without")} a line: {m.Value}"));
+        var frames = trace.Take(cut ? trace.Count - 1 : trace.Count).Select(l => (Line: l, Match: Frame().Match(l))).ToList();
+        Assert.All(frames, f => Assert.True(f.Match.Success && f.Match.Groups["place"].Success == lines, $"not a frame {(lines ? "with" : "without")} a line: {f.Line}"));
         if (cut)
         {
             Assert.Equal(100, frames.Count);
         }
         else
         {
-            Assert.Equal("main", frames[^1].Groups["name"].Value);
+            Assert.Equal("main", frames[^1].Match.Groups["name"].Value);
         }
 
         if (lines)
         {
-            Assert.Equal(place, frames[0].Groups["place"].Value);
+            Assert.Equal(place, frames[0].Match.Groups["place"].Value);
         }
     }
 
@@ -84,6 +93,17 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     }
 
     private const string Down = "int Down(int n) {\n    if n == 0 {\n        return 1 / n\n    }\n\n    return Down(n - 1) + 1\n}\n\nprint(Down(3))\n";
+
+    [Fact]
+    public void A_thrown_text_whose_last_line_has_a_frames_form_stays_whole_where_the_caller_names_the_text()
+    {
+        const string error = "error: thrown at program.kz:3:\n  at Fail in program.kz:9\n";
+        const string all = error + "  at Fail in program.kz:3\n  at main in program.kz:5\n";
+        var (cut, trace) = Split(all, error);
+        Assert.Equal(error, cut);
+        Assert.Equal(["  at Fail in program.kz:3", "  at main in program.kz:5"], trace);
+        Assert.Equal("error: thrown at program.kz:3:\n", Split(all).Error); // the positive control: the walk back takes that line
+    }
 
     [Fact]
     public void A_raise_writes_the_frames_from_the_one_that_raised_to_main_innermost_first_with_their_lines()
@@ -157,7 +177,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     {
         var text = $"int Deep(int n) {{\n    if n == 0 {{\n        return 1 / n\n    }}\n\n    return Deep(n - 1) + 1\n}}\n\nprint(Deep({depth}))\n";
         var run = Toolchain.Run(Build(text, $"trace-cut-{depth}"), null);
-        var (error, trace) = Split(run.Error);
+        var (error, trace) = Split(run.Error, "error: divide-by-zero at program.kz:3\n");
         Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
         if (!OperatingSystem.IsLinux())
         {
@@ -187,7 +207,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
             var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], refused, testBuild: true);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var run = Toolchain.Run(toolchain.Build(compilation.Program, $"trace-cut-without-pages-{depth}"), null);
-            var (error, trace) = Split(run.Error);
+            var (error, trace) = Split(run.Error, "error: divide-by-zero at program.kz:3\n");
             Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
             if (!OperatingSystem.IsLinux())
             {
@@ -215,7 +235,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     public void Kurz_trace_set_to_0_switches_the_trace_off_and_every_other_value_leaves_it_on(string? value, bool on)
     {
         var run = Toolchain.Run(Build(Down, $"trace-variable-{(value is null ? "absent" : value.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + value)}"), value);
-        var (error, trace) = Split(run.Error);
+        var (error, trace) = Split(run.Error, "error: divide-by-zero at program.kz:3\n");
         Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
         Assert.Equal(on && OperatingSystem.IsLinux() ? 5 : 0, trace.Count);
     }
@@ -264,7 +284,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
             return;
         }
 
-        var (error, trace) = Split(run.Error);
+        var (error, trace) = Split(run.Error, "error: stack-overflow at program.kz:2\n");
         Assert.Equal((1, "error: stack-overflow at program.kz:2\n"), (run.Code, error));
         AssertOverflowTrace(trace, "  at Down in program.kz:2");
 
@@ -288,11 +308,11 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
             return;
         }
 
-        var (error, trace) = Split(release.Error);
+        var (error, trace) = Split(release.Error, "error: stack-overflow (no line tables: build with --lines)\n");
         Assert.Equal((1, "error: stack-overflow (no line tables: build with --lines)\n"), (release.Code, error));
         AssertOverflowTrace(trace, "  at Down");
 
-        (error, trace) = Split(lines.Error);
+        (error, trace) = Split(lines.Error, "error: stack-overflow at program.kz:2\n");
         Assert.Equal((1, "error: stack-overflow at program.kz:2\n"), (lines.Code, error));
         AssertOverflowTrace(trace, "  at Down in program.kz:2");
     }

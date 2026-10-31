@@ -8,7 +8,7 @@ namespace Kurz.Compiler.Emit;
 
 /// <summary>
 /// Lists (M9) and the counting of their blocks and of the blocks of strings (design record, section 3: compiler-inserted reference
-/// counting; the owner, 2026-10-24, "Full counting now", and 2026-10-29, "Bit in the count"). A list value is the address of its
+/// counting; section 4, the counter: the owner, 2026-10-24, "Full counting now", and 2026-10-29, "Bit in the count"). A list value is the address of its
 /// block in the standard library, null for a list without items; the block counts the list values that hold it, and
 /// <c>std/std.kz</c> alone reads its layout. A string made at run time holds a block of the standard library in front of its bytes,
 /// which counts the string values that hold it, and the highest bit of the string's count of bytes marks it; a literal holds none.
@@ -21,8 +21,8 @@ namespace Kurz.Compiler.Emit;
 /// and at a <c>return</c>, a <c>break</c> and a <c>continue</c> that leave the block; a <c>throw</c> ends the process. A parameter
 /// is borrowed from the caller for the call. The blocks of data types in a relation of inheritance or that hold themselves are
 /// never freed, so what they hold keeps the count it was stored with. A function value is counted as a list is, by the
-/// environment of its lambda (<see cref="EmitLambda"/>), and so is a file, by the block of its handle, which closes it at its last count
-/// (S5), and values of every other type are not counted.
+/// environment of its lambda (<see cref="EmitLambda"/>), a map and a hasher by their blocks, and a file or a socket by the block of its
+/// handle, which closes it at its last count (S5); values of every other type are not counted.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -30,7 +30,7 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    /// <summary>Whether a value of the type holds the block of a list, of a string or of a file's handle or the environment of a lambda: a list, a string, a file, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
+    /// <summary>Whether a value of the type holds the block of a list, of a map, of a string or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
         ListType or MapType or FunctionType or HandleType or HasherType or PrimitiveType { Kind: Primitive.String } => true,

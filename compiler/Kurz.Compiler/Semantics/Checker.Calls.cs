@@ -146,7 +146,8 @@ public sealed partial class Checker
 
                     if (enums.ContainsKey(n.Name))
                     {
-                        // D18: the value of a number is `Plan.From(n)`, against the C# form `Plan(2)` (section 4, the owner, 2026-10-02)
+                        // D18: the value of a number is `Plan.From(n)`, against C#'s cast, which the option wrote `Plan(2)` and C# writes
+                        // `(Plan)2` (section 4, the owner, 2026-10-02)
                         Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is an enum, and the value of a number is `{n.Name}.From(n)` (D18)");
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
@@ -356,12 +357,12 @@ public sealed partial class Checker
         return new Typed(Types.Void);
     }
 
-    /// <summary>T10: a conversion written as a call of a number type or a time type; the constant folded as T6 and T26 say.</summary>
+    /// <summary>T10: a conversion written as a call of a number type or a time type (T29); the constant folded as T6 and T26 say.</summary>
     private Typed CheckConversion(PrimitiveType target, CallExpression c)
     {
         if (!Types.IsNumber(target) && !Types.IsTime(target))
         {
-            NotSupported(c.Line, $"a conversion to `{target}` (A5 to A7)");
+            NotSupported(c.Line, $"a conversion to `{target}`, which is no number type and no time type (T10, T29)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -573,7 +574,6 @@ public sealed partial class Checker
         throw new InvalidOperationException("the value is outside decimal's range"); // the caller reported it: `constant-overflow` (T6)
     }
 
-    /// <summary>M9: <c>List&lt;T&gt;()</c> makes an empty list.</summary>
     /// <summary>M9: <c>Bytes()</c>, an empty list of bytes, through the second name of <c>List&lt;byte&gt;</c> (section 4, the owner, 2026-10-29).</summary>
     private Typed CheckBytesConstruction(CallExpression c)
     {
@@ -647,6 +647,7 @@ public sealed partial class Checker
         return symbol.Refused ? Typed.Error : typed;
     }
 
+    /// <summary>M9: <c>List&lt;T&gt;()</c> makes an empty list.</summary>
     private Typed CheckListConstruction(CallExpression c)
     {
         if (c.TypeArguments.Count != 1)
@@ -660,6 +661,7 @@ public sealed partial class Checker
         {
             Report(ErrorIds.ArgumentMismatch, c.Line, "`List<T>()` takes no arguments (M9)");
             CheckArgumentsLoosely(c);
+            return Typed.Error; // after the call's own error nothing more (E1)
         }
 
         var element = Resolve(c.TypeArguments[0]);
@@ -712,7 +714,7 @@ public sealed partial class Checker
     {
         if (c.TypeArguments.Count != 2)
         {
-            Report(c.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, c.Line, "`Map` takes two type arguments (M9, T17)");
+            Report(c.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, c.Line, "`Map` takes two type arguments (M9, T17; E4 for another count)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -721,6 +723,7 @@ public sealed partial class Checker
         {
             Report(ErrorIds.ArgumentMismatch, c.Line, "`Map<K, V>()` takes no arguments (M9)");
             CheckArgumentsLoosely(c);
+            return Typed.Error; // after the call's own error nothing more (E1)
         }
 
         var key = Resolve(c.TypeArguments[0]);
@@ -737,7 +740,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// M9: the type of a map the checker reads. A key is a value of a type that compares by content (section 4, the owner, 2026-10-30,
-    /// "Any type with =="): a string, a number, a <c>char</c>, a <c>bool</c>, a time, an enum, a <c>data</c> value of such fields, a
+    /// "Any type with =="): a string, an integer, a <c>double</c> or a <c>float</c>, a <c>char</c>, a <c>bool</c>, a time, an enum, a <c>data</c> value of such fields, a
     /// union of them, alone, in a field or as an item, by its case and its value (D3; section 4, the owner, 2026-10-30, "Case and value,
     /// as Rust"), and a list of such items; a <c>double</c> or a <c>float</c>, alone or in a field,
     /// compares as C#'s <c>double.Equals</c> does in a <c>Dictionary</c> (section 4, the owner, 2026-10-30, "As C#"), and so do the
@@ -776,7 +779,7 @@ public sealed partial class Checker
     /// key the checker does not read. A union, <c>null</c> among its cases or not, is a key where each of its cases is one, and compares
     /// by its case and its value (D3; section 4, the owner, 2026-10-30, "Case and value, as Rust"). A field of a map or a function value
     /// is <c>type-mismatch</c> (section 4, the owner, 2026-10-30, "type-mismatch"), and so is one of a file or a socket (section 4, the
-    /// owner, 2026-10-30, "Handle ==": "type-mismatch"). <paramref name="seen"/> holds the data types on the way, each with its type
+    /// owner, 2026-10-30, "type-mismatch"). <paramref name="seen"/> holds the data types on the way, each with its type
     /// arguments, whose fields are read at the first meeting (<see cref="Met"/>), <paramref name="path"/> the data types the walk is
     /// inside of, and <paramref name="cut"/> the ones it stops at (<see cref="Inside"/>).
     /// </summary>
@@ -1029,7 +1032,7 @@ public sealed partial class Checker
         if (m.Conditional || InChain(m.Target))
         {
             // N5: C# reads a call after `?.` inside the chain, which section 4 does not say
-            NotSupported(m.Line, "`?.` (N5)");
+            NotSupported(m.Line, "a call after `?.` or `?[` (N5)");
             CheckExpression(m.Target, null);
             CheckArgumentsLoosely(c);
             return Typed.Error;
@@ -1928,9 +1931,13 @@ public sealed partial class Checker
             return;
         }
 
-        var argumentType = pre.Lambda is not null ? "a lambda" : $"a `{pre.Typed.Type}`";
-        var id = pre.Lambda is not null ? ErrorIds.TypeMismatch : Types.MismatchId(pre.Typed.Type, parameter);
-        Report(id, pre.Argument.Line, $"{argumentType} where a `{parameter}` is required (T1)");
+        if (pre.Lambda is not null)
+        {
+            Report(ErrorIds.TypeMismatch, pre.Argument.Line, $"a lambda where a `{parameter}` is required (T1)");
+            return;
+        }
+
+        ReportMismatch(pre.Typed.Type, parameter, pre.Argument.Line, $"a `{pre.Typed.Type}` where a `{parameter}` is required");
     }
 
     /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>, each default after its parameter (<c>int b = 0</c>).</summary>
@@ -1988,11 +1995,12 @@ public sealed partial class Checker
 
         var why = Types.MismatchId(pre.Typed.Type, parameter) switch
         {
-            ErrorIds.NarrowingConversion => "a narrowing conversion (T7)",
-            ErrorIds.SignMix => "a type of the other signedness (T23)",
-            _ => "a value of another type (T1)",
+            ErrorIds.NarrowingConversion => "a narrowing conversion",
+            ErrorIds.SignMix => "a type of the other signedness",
+            ErrorIds.NullableUnchecked => "a nullable value without a check",
+            _ => "a value of another type",
         };
-        return $"argument {index + 1} is a `{pre.Typed.Type}`{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where a `{parameter}` is required: {why}";
+        return $"argument {index + 1} is a `{pre.Typed.Type}`{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where a `{parameter}` is required: {why} ({Types.MismatchRule(pre.Typed.Type, parameter)})";
     }
 
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7).</summary>
@@ -2025,7 +2033,7 @@ public sealed partial class Checker
                 var typed = CheckExpression(a.Value, Unwrap(a.Value) is NullLiteral && Types.IsError(type) && !Types.IsError(slot.Type) ? null : type);
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
-                    Report(Types.MismatchId(typed.Type, type), a.Line, $"a `{typed.Type}` where a `{type}` is required (T1)");
+                    ReportMismatch(typed.Type, type, a.Line, $"a `{typed.Type}` where a `{type}` is required");
                 }
             }
             else if (pre.ListLiteral && pre.Typed.IsError && Types.IsError(type))
@@ -2040,7 +2048,7 @@ public sealed partial class Checker
                 var typed = CheckExpression(a.Value, type);
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
-                    Report(Types.MismatchId(typed.Type, type), a.Line, $"a `{typed.Type}` where a `{type}` is required (T1)");
+                    ReportMismatch(typed.Type, type, a.Line, $"a `{typed.Type}` where a `{type}` is required");
                 }
             }
             else

@@ -17,8 +17,8 @@ namespace Kurz.Compiler.Tests;
 /// of an error without a path (S1); a socket is opened close-on-exec, a listener reuses its address, an address is read at its last
 /// colon, a literal of IPv6 binds where the machine has its loopback, and a connection <c>Accept</c> gave names its listener's address
 /// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c>, or with <c>EAI_SYSTEM</c> while <c>errno</c> holds 0, is the kind
-/// <c>Other</c>, through a runtime whose lookup gives that result, while the error of a number the system puts in <c>errno</c> at a
-/// lookup is held by no test, since nothing makes <c>getaddrinfo</c> fail so on demand; and a build for Windows says
+/// <c>Other</c>, and one that fails with <c>EAI_SYSTEM</c> while <c>errno</c> holds 13 the error of that number, each through a runtime
+/// whose lookup gives that result; and a build for Windows says
 /// <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
 /// the runtime of this machine and under the fenced allocator of <see cref="ListTests.Fenced"/>, where no other runtime is named; on
 /// Windows each is held to the build's refusal instead.
@@ -381,18 +381,24 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        Assert.Equal([true, true, true], CloseOnExec(toolchain.Runtime, "socket-cloexec"));
+        if (CloseOnExec(toolchain.Runtime, "socket-cloexec") is { } with) // null on Windows, where the build refuses the program
+        {
+            Assert.Equal([true, true, true], with);
+        }
 
         // the positive control: the runtime's socket and accept without `SOCK_CLOEXEC`
         var without = ListTests.Edited(("runtime/linux/linux.kz", "int fd = socket(family, 524289, 0)", "int fd = socket(family, 1, 0)"), ("runtime/linux/linux.kz", "accept4(fd, null, null, 524288)", "accept4(fd, null, null, 0)"));
-        Assert.Equal([false, false, false], CloseOnExec(without, "socket-cloexec-without"));
+        if (CloseOnExec(without, "socket-cloexec-without") is { } withoutFlag)
+        {
+            Assert.Equal([false, false, false], withoutFlag);
+        }
 
-        List<bool> CloseOnExec(CheckedRuntime runtime, string name)
+        List<bool>? CloseOnExec(CheckedRuntime runtime, string name)
         {
             if (Builder.HostTarget == Target.Windows)
             {
                 RefusedOnWindows(Compile(flags, toolchain.Runtime));
-                return runtime == toolchain.Runtime ? [true, true, true] : [false, false, false];
+                return null;
             }
 
             var compilation = Compile(flags, runtime);
@@ -434,7 +440,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void An_address_is_a_host_and_a_port_after_its_last_colon_and_a_lookup_that_fails_is_not_found()
+    public void An_address_is_a_host_and_a_port_after_its_last_colon_and_a_lookup_that_finds_no_host_is_not_found()
     {
         // a port as Rust reads a `u16`, `+` and zeros in front taken; a host that is no literal looked up, `127.1` by the C library's
         // reading of a number, the empty one failing with `EAI_NONAME`, which names no error of the system; a NUL byte `InvalidInput`, as in a path (S9)
@@ -458,7 +464,11 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(text, "socket-addresses", ["bound", "bound", "bound", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "NotFound 0", "InvalidInput 0"]);
+    }
 
+    [Fact]
+    public void A_lookup_that_fails_otherwise_than_finding_no_host_is_the_kind_Other_or_the_error_of_the_number_in_errno()
+    {
         // a lookup that fails with `EAI_AGAIN` (-3), a failure the resolver calls temporary, or `EAI_FAIL` (-4), one of the name server,
         // which no name server gives on demand, through a runtime whose lookup gives that result: `Other`, with the number 0 (S9)
         const string lookup = "int looked = getaddrinfo(text, null, Ptr<void>(held + 64), Ptr<void>(held + 112))";
@@ -475,6 +485,10 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var system = ListTests.Edited(("runtime/linux/linux.kz", lookup, "*__errno_location() = 0\n            int looked = -11"));
         const string both = failed + "match TcpStream.Connect(\"name.invalid:80\") {\n    TcpStream => print(\"connected\")\n    IoError e => print(\"{e.Kind} {e.Code}\")\n}\n";
         Ran(both, "socket-lookup-system", ["Other 0", "Other 0"], runtimes: [system]);
+
+        // with `errno` holding 13, `EACCES`: the error of that number, `PermissionDenied`, as S1 gives it after Rust's `decode_error_kind`
+        var denied = ListTests.Edited(("runtime/linux/linux.kz", lookup, "*__errno_location() = 13\n            int looked = -11"));
+        Ran(both, "socket-lookup-errno", ["PermissionDenied 13", "PermissionDenied 13"], runtimes: [denied]);
     }
 
     /// <summary>

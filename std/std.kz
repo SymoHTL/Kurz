@@ -755,8 +755,9 @@ pub void StringFree(byte* bytes) {
 
 // The block of a map (M9). A map value is the address of its block, null for a map that holds none: one
 // that never took one, and one whose `Clear` let go of a block other values held; the `Remove` of its last
-// entry and the `Clear` of a block it alone held keep the block, its count 0. A block holds the count of the map values that hold it, 8 bytes, the count of
-// its entries and the count of slots it has room for, a power of two from 8, 4 bytes each, the two keys
+// entry and the `Clear` of a block it alone held keep the block, its count of entries 0. A block holds
+// the count of the map values that hold it, 8 bytes, the count of its entries and the count of slots it
+// has room for, a power of two from 8, 4 bytes each, the two keys
 // of its hash, 8 bytes each, the count of slots without an entry that entries can still take before the
 // block grows, 4 bytes, and 12 bytes unused, from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an

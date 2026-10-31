@@ -103,9 +103,10 @@ internal sealed class IrModule
 /// <summary>
 /// The line tables of a module as LLVM's debug metadata (design record, section 2): one compile unit, a file per source the module
 /// holds code of, named as a compile error names it in the directory the build ran in (the owner, 2026-10-29, "As Rust: the
-/// build's directory"), a subprogram per function with the name a trace shows, and a location per line of each function, which
-/// LLVM writes as DWARF into the executable on Linux and as CodeView into the PDB on Windows. Only the line tables: no variables
-/// and no types.
+/// build's directory"), a subprogram per function with the name a trace shows, and a location per line of each function. LLVM
+/// writes them as CodeView into the PDB on Windows; on Linux it writes the line table as DWARF into the executable and a
+/// subprogram only where a call was inlined (knowledge/a-line-only-unit-writes-no-subprogram-on-linux.md). Only the line tables: no
+/// variables and no types.
 /// </summary>
 internal sealed class DebugInfo
 {
@@ -114,6 +115,8 @@ internal sealed class DebugInfo
     private readonly Dictionary<(int Line, string Scope), string> locations = [];
     private readonly string unit;
     private readonly string subroutine;
+    private readonly string version;
+    private readonly string format;
     private readonly string directory;
     private readonly bool codeView;
     private readonly bool optimized;
@@ -133,6 +136,8 @@ internal sealed class DebugInfo
         nodes[0] = $"{unit} = distinct !DICompileUnit(language: DW_LANG_C, file: {File(first)}, producer: {IrModule.Quote(producer)}, "
             + $"isOptimized: {(optimized ? "true" : "false")}, runtimeVersion: 0, emissionKind: LineTablesOnly)";
         subroutine = Node("!DISubroutineType(types: !{})");
+        version = Node("!{i32 2, !\"Debug Info Version\", i32 3}");
+        format = Node(codeView ? "!{i32 2, !\"CodeView\", i32 1}" : "!{i32 7, !\"Dwarf Version\", i32 5}");
     }
 
     private string Node(string text)
@@ -176,10 +181,9 @@ internal sealed class DebugInfo
         return id;
     }
 
+    /// <summary>The nodes, the module's flags among them, made once, so that a second rendering writes what the first wrote.</summary>
     public void Render(StringBuilder sb)
     {
-        var version = Node("!{i32 2, !\"Debug Info Version\", i32 3}");
-        var format = Node(codeView ? "!{i32 2, !\"CodeView\", i32 1}" : "!{i32 7, !\"Dwarf Version\", i32 5}");
         sb.Append("!llvm.dbg.cu = !{").Append(unit).AppendLine("}");
         sb.Append("!llvm.module.flags = !{").Append(version).Append(", ").Append(format).AppendLine("}");
         foreach (var n in nodes)

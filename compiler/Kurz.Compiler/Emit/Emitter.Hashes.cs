@@ -12,7 +12,7 @@ public sealed partial class Emitter
     /// <c>pub</c> function of the standard library, whose Kurz code they are (design record, section 12, "In Kurz, as RustCrypto"), on the
     /// blocks of the lists of bytes it takes; a block the system refuses ends the process with <c>allocation-failed</c>, as a list's does
     /// (M9). A hasher's state is the block of a list of bytes, which its counts and its copies treat as one. The arguments are borrowed,
-    /// with no count of their own: an argument after one that takes its place as <c>mut</c> is <c>changed-while-held</c> (M7), so that
+    /// with no count of their own: an argument whose place a later argument takes as <c>mut</c> is <c>changed-while-held</c> (M7), so that
     /// none changes while the call reads it.
     /// </summary>
     private string? EmitHashCall(CallExpression c, CallInfo info)

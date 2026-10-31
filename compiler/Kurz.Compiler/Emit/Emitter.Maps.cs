@@ -11,8 +11,9 @@ namespace Kurz.Compiler.Emit;
 /// it says whether a slot holds an entry, 255 where it holds none and a probe ends at its group, never filled or emptied in a group
 /// that holds a 255 still, and 128 where its entry was removed in a group with no 255, which a probe passes, and a slot holds an
 /// entry as <c>{ i64, K, V }</c>, the hash of its key, the key and the value. A
-/// key's hash is SipHash-1-3 under the keys of the map's block: of a string's UTF-8 bytes, of any other key of one value widened to 64
-/// bits, and of the hashes of a <c>data</c> value's fields, of a list's items or of a union's tag and value, as words.
+/// key's hash is SipHash-1-3 under the keys of the map's block: of a string's UTF-8 bytes, of a time of 128 bits its 16 bytes, of a
+/// <c>double</c> or a <c>float</c> the bits of its <c>double</c>, every NaN as one NaN and -0.0 as 0.0, of any other key of one value
+/// widened to 64 bits (<see cref="Word"/>), and of the hashes of a <c>data</c> value's fields, of a list's items or of a union's tag and value, as words.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -89,7 +90,7 @@ public sealed partial class Emitter
         }
     }
 
-    /// <summary>A key of one word as an <c>i64</c>: an integer widened by its sign, a <c>bool</c>, a <c>char</c> and an enum's value by zeros.</summary>
+    /// <summary>A key of one word as an <c>i64</c>: a signed integer widened by its sign, an unsigned one, a <c>bool</c>, a <c>char</c> and an enum's value by zeros.</summary>
     private string Word(string value, KurzType type) => type switch
     {
         _ when Ir(type) == "i64" => value,
@@ -469,8 +470,8 @@ public sealed partial class Emitter
     /// (M3), the entry lets go of its own key, and its slot's control byte becomes 255 or 128 (<c>MapErase</c>, as hashbrown's
     /// <c>erase</c>). The key is made before the place and takes no count where it is read from a variable, a field or an item: what it
     /// was read from keeps it while the helper runs, since <c>CollectionPlace</c> copies a block on the path only where other values
-    /// hold it (M3), and those keep the block the key was read from; <c>ListTests</c> holds <c>n.Counts.Remove(n.Name)</c> on a block
-    /// another variable holds.
+    /// hold it (M3), and those keep the block the key was read from; <c>ListTests</c> holds <c>n.Counts.Remove(n.Name)</c>, the copy of a
+    /// shared map block with a key read from a field, whose literal holds no block of its own.
     /// </summary>
     private string EmitMapRemove(CallExpression c)
     {

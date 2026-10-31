@@ -190,6 +190,14 @@ public sealed partial class Checker
 
     private void Report(string id, int line, string message) => Add(Diagnostic.Error(id, line, message));
 
+    /// <summary>
+    /// A value of <paramref name="from"/> where <paramref name="to"/> is required: the id <see cref="Types.MismatchId"/> gives, and
+    /// <paramref name="text"/> with the rules it cites, <paramref name="rule"/> where the place has one, then the rule of that id
+    /// (<see cref="Types.MismatchRule"/>).
+    /// </summary>
+    private void ReportMismatch(KurzType from, KurzType to, int line, string text, string? rule = null) =>
+        Report(Types.MismatchId(from, to), line, $"{text} ({(rule is null ? "" : rule + ", ")}{Types.MismatchRule(from, to)})");
+
     private void NotSupported(int line, string construct) => Add(Diagnostic.NotSupported(line, construct));
 
     /// <summary>Diagnostics of what follows go into a list of their own until <see cref="Pop"/>.</summary>
@@ -217,7 +225,8 @@ public sealed partial class Checker
         // T15, D18, S1, C6: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From`
         // returns besides its value, of the case a call on a file returns where it failed and of the entry of a loop over a map, declared
         // before the file's own types, so that a declaration of their names is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union,
-        // as Rust" and "Built-in, no fields", and 2026-10-30, "A value, as C#"; section 12, the owner, 2026-10-29, "One union, as Rust")
+        // as Rust" and "Built-in, no fields", and 2026-10-30, "A value, as C#"; section 12, the owner, 2026-10-29, "One union, as Rust"; for
+        // `Entry` an assumption of section 4, C6)
         foreach (var s in BuiltInTypes.Statements)
         {
             DeclareType((TypeDeclaration)s);
@@ -533,7 +542,7 @@ public sealed partial class Checker
 
                 if (!Types.Assignable(typed.Type, Types.Int) || typed.Constant is not IntegerConstant number)
                 {
-                    Report(Types.MismatchId(typed.Type, Types.Int), value.Number.Line, $"the number of `{value.Name}` is a `{typed.Type}` where an `int` is required (D20, T1)");
+                    ReportMismatch(typed.Type, Types.Int, value.Number.Line, $"the number of `{value.Name}` is a `{typed.Type}` where an `int` is required", "D20");
                     symbol.Refused = true;
                     continue;
                 }
@@ -840,7 +849,7 @@ public sealed partial class Checker
         {
             if (n.TypeArguments.Count != 2)
             {
-                Report(n.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, n.Line, "`Map` takes two type arguments (M9, T17)");
+                Report(n.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, n.Line, "`Map` takes two type arguments (M9, T17; E4 for another count)");
                 return Types.Error;
             }
 
@@ -1143,7 +1152,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(t.Type, type))
         {
-            Report(Types.MismatchId(t.Type, type), value.Line, $"the default is a `{t.Type}` where a `{type}` is required (T1)");
+            ReportMismatch(t.Type, type, value.Line, $"the default is a `{t.Type}` where a `{type}` is required");
         }
     }
 
@@ -1211,7 +1220,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(typed.Type, returnType))
         {
-            Report(Types.MismatchId(typed.Type, returnType), body.Line, $"the body is a `{typed.Type}` where the result is a `{returnType}` (F2, T1)"); // E1: at the value's line, as for every value that does not fit
+            ReportMismatch(typed.Type, returnType, body.Line, $"the body is a `{typed.Type}` where the result is a `{returnType}`", "F2"); // E1: at the value's line, as for every value that does not fit
         }
     }
 
@@ -1293,7 +1302,7 @@ public sealed partial class Checker
         functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
 
     /// <summary>
-    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9), the types of
+    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c> (M9), the types of
     /// files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), and the hashes' (H1 to H4).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
@@ -1305,14 +1314,15 @@ public sealed partial class Checker
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
     /// (T15), <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18), and <c>IoError</c> with its <c>IoKind</c>, the
-    /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux (S1; section 12, the owner,
-    /// 2026-10-29, "One union, as Rust"), <c>EnvError</c> with its <c>EnvKind</c>, the case of a read of a variable of the environment that
+    /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux, beside them
+    /// <c>WriteZero</c> and <c>InvalidData</c>, which no number gives, and <c>Other</c> for a number none of them has, the number 0
+    /// where the error is not the system's (S1; section 12, the owner, 2026-10-29, "One union, as Rust"), <c>EnvError</c> with its <c>EnvKind</c>, the case of a read of a variable of the environment that
     /// gave no string, in the form of <c>IoError</c> (S14; section 12, the owner, 2026-10-30, "An outcome, as Rust"), and <c>Entry</c>, the
     /// entry of a loop over a map, a value as C#'s <c>KeyValuePair</c> is one (C6;
     /// section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies by <c>with</c> as every data type
     /// (section 4, the owner, 2026-10-30, "Both, as a data type").
     /// </summary>
-    private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(
+    private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
         SourceText.FromString(
             "<built-in>",
             """
@@ -1329,8 +1339,17 @@ public sealed partial class Checker
             enum EnvKind { NotPresent, NotUnicode }
             data EnvError(EnvKind Kind, string Name)
             data Entry<K, V>(K Key, V Value)
-            """),
-        new DiagnosticBag());
+            """));
+
+    /// <summary>The tree of the built-in types, which reads clean and holds type declarations alone, or the compiler's defect.</summary>
+    private static ProgramSyntax BuiltIn(SourceText text)
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(text, diagnostics);
+        return diagnostics.Items.Count == 0 && tree.Statements.All(s => s is TypeDeclaration)
+            ? tree
+            : throw new InvalidOperationException("the text of the built-in types does not read as type declarations");
+    }
 
     private void PushScope() => frame.Scope = new Scope { Parent = frame.Scope };
 
@@ -1717,7 +1736,7 @@ public sealed partial class Checker
         }
         else if (declared is not null && !Types.Assignable(t.Type, declared))
         {
-            Report(Types.MismatchId(t.Type, declared), v.Value.Line, $"a `{t.Type}` where a `{declared}` is required (T1)");
+            ReportMismatch(t.Type, declared, v.Value.Line, $"a `{t.Type}` where a `{declared}` is required");
         }
 
         Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
@@ -1760,7 +1779,7 @@ public sealed partial class Checker
             }
             else if (!Types.Assignable(value.Type, variable.Type))
             {
-                Report(Types.MismatchId(value.Type, variable.Type), a.Value.Line, $"a `{value.Type}` where a `{variable.Type}` is required (T1)");
+                ReportMismatch(value.Type, variable.Type, a.Value.Line, $"a `{value.Type}` where a `{variable.Type}` is required");
             }
 
             variable.Changed = true;
@@ -1948,7 +1967,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, current))
         {
-            Report(Types.MismatchId(value.Type, current), a.Value.Line, $"a `{value.Type}` where a `{current}` is required (T1)");
+            ReportMismatch(value.Type, current, a.Value.Line, $"a `{value.Type}` where a `{current}` is required");
         }
 
         Assigned(through, current, value); // N7, N9: a path of `data` fields is narrowed by its assignment as a variable is
@@ -1993,7 +2012,8 @@ public sealed partial class Checker
     /// <summary>
     /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
     /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
-    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is.
+    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is (C6, proposed:
+    /// section 4 gives the form over a map alone).
     /// </summary>
     private void CheckForIn(ForInStatement f)
     {
@@ -2105,7 +2125,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, expected))
         {
-            Report(Types.MismatchId(value.Type, expected), r.Value.Line, $"a `{value.Type}` is returned where the result is a `{expected}` (F3, T1)"); // E1: at the value's line, as for every value that does not fit
+            ReportMismatch(value.Type, expected, r.Value.Line, $"a `{value.Type}` is returned where the result is a `{expected}`", "F3"); // E1: at the value's line, as for every value that does not fit
         }
     }
 

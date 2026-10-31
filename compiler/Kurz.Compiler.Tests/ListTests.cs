@@ -626,7 +626,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // maps (M9): a read that is a value of its own, a write over a key, a copy written to (M3), a value read from the map it is
     // written into, a key the map keeps after its variable changes, a `mut` parameter, a missing key, growth, a map in a data value
-    // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, keys of each kind the checker takes, a map in a
+    // and in `with`, a map of lists, a list of maps, a map of maps, a lambda's copy, integer, `bool`, `char` and `string` keys (the
+    // other kinds in `MapMembers`), a map in a
     // union, a block replaced by growth under a `mut` parameter and under a lambda that read it, strings equal by their bytes with
     // and without a block, and the texts
     private const string Maps = """
@@ -1300,8 +1301,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(Twice(Made(8)))
         print(Twice(List<int>()))
 
-        // values of a union and function values, read and removed, each kept past a write over its key and a `Clear` (N1; section 4,
-        // the owner, 2026-10-30, "Nullable form, as Option")
+        // values of a union and function values: `taken` and `f` read and kept past a write over their key and a `Clear`, `gone` and
+        // `g` removed after that write and kept past the `Clear` (N1; section 4, the owner, 2026-10-30, "Nullable form, as Option")
         mut mixed = Map<string, int | string>()
         mixed["n"] = 5
         mixed["s"] = Made(6)
@@ -1890,9 +1891,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// The runtime of this machine's target whose system refuses a request that would take what it gave and was not given back past
-    /// 64 mebibytes; its own `Memory`, `Release` and `Resize` run behind the count, a `Resize` counted by what it adds.
+    /// 64 mebibytes; its own `Memory`, `Release` and `Resize` run behind the count, a `Resize` counted by what it adds, with the edits
+    /// <paramref name="more"/> beside them.
     /// </summary>
-    private static CheckedRuntime Bytes() => Edited(
+    private static CheckedRuntime Bytes(params (string Path, string Old, string New)[] more) => Edited([.. Counting, .. more]);
+
+    /// <summary>The edits of <see cref="Bytes"/>: the target's `Memory`, `Release` and `Resize` behind the count.</summary>
+    private static (string Path, string Old, string New)[] Counting =>
+    [
         (TargetFile, "pub byte* Memory(long bytes) {", """
             thread static mut long live = 0
 
@@ -1946,7 +1952,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             byte* Resized(byte* p, long bytes, long grown) {
-            """));
+            """),
+    ];
+
+    /// <summary>The edit that has the thread keep no freed block of more than 262144 bytes, so that each one's `Free` gives it back to the system.</summary>
+    private static readonly (string Path, string Old, string New) KeptNone = ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0");
 
     /// <summary>
     /// The edits that make the allocator take every block from pages of its own and make them unreachable when the block is freed, so
@@ -2032,7 +2042,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(1, kept.Code);
         Assert.StartsWith("error: allocation-failed (", kept.Error, StringComparison.Ordinal);
 
-        // and a map of 1000 entries held each round, a block of 32800 bytes in the size class of 65536: 196 megabytes
+        // and a map of 1000 entries held each round, a block of 34864 bytes, 2048 slots, in the size class of 65536: 196 megabytes
         const string maps = "Map<int, int> Make(int n) {\n    mut m = Map<int, int>()\n    for i in 0..<n {\n        m[i] = i\n    }\n    return m\n}\n\nmut all = List<Map<int, int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    all.Add(Make(1000))\n}\nprint(all.Count)\n";
         var full = BuildAndRun(maps, Budget(), "map-rounds-held");
         Assert.Equal(1, full.Code);
@@ -2055,17 +2065,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string notFreed = "    byte* p = Allocate(33554432)\n    raw {\n        p[0] = 1\n        p[0] = 2\n    }\n";
         Ran(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + notFreed)), "list-large-not-freed"), 0, ["1"], ""); // the positive control: the block not freed
 
-        // the lists of 70000 items: 150 mebibytes in 200 rounds were none of their blocks given back or given out again
-        Ran(BuildAndRun(LargeRounds, Bytes(), "list-large-rounds"), 0, ["14000000"], "");
-        var run = BuildAndRun(LargeHeld, Bytes(), "list-large-held"); // the positive control: the same lists, all of them held
+        // the lists of 70000 items, with the thread keeping no freed block, so that each `Free` of a large block gives it back: 150
+        // mebibytes in 200 rounds were none of them given back
+        Ran(BuildAndRun(LargeRounds, Bytes(KeptNone), "list-large-rounds"), 0, ["14000000"], "");
+        var run = BuildAndRun(LargeHeld, Bytes(KeptNone), "list-large-held"); // the positive control: the same lists, all of them held
         Assert.Equal(1, run.Code);
         Assert.StartsWith("error: allocation-failed (", run.Error, StringComparison.Ordinal);
 
-        // strings of 524288 bytes joined from halves of 262144, blocks of 524304 and 262160 bytes with their counts: 150 mebibytes in
-        // 200 rounds were none of them given back or given out again
+        // strings of 524288 bytes joined from halves of 262144, blocks of 524304 and 262160 bytes with their counts, with the thread
+        // keeping none of them: 150 mebibytes in 200 rounds were none of them given back
         const string fill = "string Fill(int n) {\n    mut s = \"x\"\n    mut i = 0\n    while i < n {\n        s = \"{s}{s}\"\n        i = i + 1\n    }\n    return s\n}\n\n";
-        Ran(BuildAndRun(fill + "mut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + long(Fill(19).Bytes.Count)\n}\nprint(total)\n", Bytes(), "string-large-rounds"), 0, ["104857600"], "");
-        var strings = BuildAndRun(fill + "mut all = List<string>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    all.Add(Fill(19))\n}\nprint(all.Count)\n", Bytes(), "string-large-held");
+        Ran(BuildAndRun(fill + "mut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + long(Fill(19).Bytes.Count)\n}\nprint(total)\n", Bytes(KeptNone), "string-large-rounds"), 0, ["104857600"], "");
+        var strings = BuildAndRun(fill + "mut all = List<string>()\nmut round = 0\nwhile round < 200 {\n    round = round + 1\n    all.Add(Fill(19))\n}\nprint(all.Count)\n", Bytes(KeptNone), "string-large-held");
         Assert.Equal(1, strings.Code); // the positive control: the same strings, all of them held
         Assert.StartsWith("error: allocation-failed (", strings.Error, StringComparison.Ordinal);
     }

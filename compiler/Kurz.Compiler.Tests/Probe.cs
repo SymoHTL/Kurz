@@ -29,8 +29,14 @@ public static class Probe
             {
                 fenced = true;
             }
-            else if (args[i] == "--grant" && i + 1 < args.Count)
+            else if (args[i] == "--grant")
             {
+                if (i + 1 >= args.Count || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                {
+                    output.WriteLine("probe: `--grant` needs a name");
+                    return 2;
+                }
+
                 grants.Add(args[++i]);
             }
             else if (path is null && !args[i].StartsWith("--", StringComparison.Ordinal))

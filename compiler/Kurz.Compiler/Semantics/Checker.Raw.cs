@@ -634,7 +634,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, current))
         {
-            Report(Types.MismatchId(value.Type, current), a.Value.Line, $"a `{value.Type}` where a `{current}` is required (T1)");
+            ReportMismatch(value.Type, current, a.Value.Line, $"a `{value.Type}` where a `{current}` is required");
         }
     }
 
@@ -701,7 +701,7 @@ public sealed partial class Checker
         }
 
         var (variable, captured) = Lookup(name.Name);
-        if (ThroughNullable(variable!, fields, "an assignment into a path through a nullable field (N3, M4)"))
+        if (ThroughNullable(variable!, fields, "an assignment into a path through a nullable variable or field (N3, M4)"))
         {
             CheckLoosely(index.Index, a.Value);
             return false;
@@ -748,7 +748,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, type))
         {
-            Report(Types.MismatchId(value.Type, type), a.Value.Line, $"a `{value.Type}` where a `{type}` is required (T1)");
+            ReportMismatch(value.Type, type, a.Value.Line, $"a `{value.Type}` where a `{type}` is required");
         }
     }
 
@@ -1766,7 +1766,7 @@ public sealed partial class Checker
 
         if (!Types.Assignable(value.Type, type))
         {
-            Report(Types.MismatchId(value.Type, type), v.Value.Line, $"a `{value.Type}` where a `{type}` is required (T1)");
+            ReportMismatch(value.Type, type, v.Value.Line, $"a `{value.Type}` where a `{type}` is required");
             return type;
         }
 
