@@ -847,10 +847,11 @@ public sealed partial class Checker
 
     /// <summary>
     /// The data types a walk over types stops at below a field: those it stops at already, and those the walk is inside of that the
-    /// field's declared type names. A generic data type that names itself through its own fields holds a value of its own type, whose
-    /// instances can grow without end, <c>Node&lt;List&lt;T&gt;&gt;</c> in <c>Node&lt;T&gt;</c>; a build refuses such a type (D1, T19), so
-    /// the walk reads it no deeper. A data type met inside itself through a type argument, the inner <c>Wrap</c> of
-    /// <c>Wrap&lt;Wrap&lt;Map&lt;int, int&gt;&gt;&gt;</c>, holds a part of the outer one's argument and is read, as D3 reads a field at any depth.
+    /// field's declared type names. The walk reads such a type no deeper: a generic one is a type the build says <c>not supported</c> to
+    /// whatever its type arguments (D1, T19), <c>Node&lt;T&gt;?</c> in <c>Node&lt;T&gt;</c> and <c>Outer&lt;Map&lt;int, int&gt;&gt;?</c> in
+    /// <c>Outer&lt;T&gt;</c>, and one that is not generic had its fields read where the walk met it first. A data type met inside itself
+    /// through a type argument, the inner <c>Wrap</c> of <c>Wrap&lt;Wrap&lt;Map&lt;int, int&gt;&gt;&gt;</c>, holds a part of the outer one's
+    /// argument and is read, as D3 reads a field at any depth.
     /// </summary>
     private static HashSet<DataSymbol> Inside(HashSet<DataSymbol> cut, List<DataSymbol> path, KurzType declared)
     {
