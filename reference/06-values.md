@@ -1056,7 +1056,7 @@ A6 does.
 `[1, 2, 3]` is a list of the items between the brackets, and `[]` a list without items, as C# 12's
 collection expression writes one (§4, the owner, 2026-10-30, "[1, 2, 3], as C#"). The literal takes
 the list type where one stands, a written type, `List<int> xs = [1, 2, 3]`, or a parameter's,
-`Sum([1, 2])` with `int Sum(List<int> xs)`, and each item is read under its item type as an argument is under its parameter's: a
+`Sum([1, 2])` with `int Sum(List<int> numbers)`, and each item is read under its item type as an argument is under its parameter's: a
 literal takes it (L17), so `Bytes b = [1, 300]` is `constant-overflow`, a lambda takes its parameters
 from it (F11), and an item of another type is `type-mismatch` (T1). The list type stands wherever a
 type is expected, as L17 reads it for a number literal, but for the other operand of `==` (below):
