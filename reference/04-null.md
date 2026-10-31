@@ -8,7 +8,8 @@ its nullable form, a union's and a function type's among them: `(int | string)?`
 every type and a C# delegate is nullable (§4, the owner, 2026-10-30, "Nullable form, as Option").
 `void` and a pointer, which takes `null` itself (R10), have no nullable form, and a build says
 `not supported` to both *(assumed, §4: the two, readings of that answer)*; what a nullable type written as a
-case of a union is, `int? | string`, stands open (§14).
+case of a union is, `int? | string`, stands open (§14): nested, as Rust's `Result<Option<i32>, String>`,
+flattened to `int | null | string`, or an error; the build says `not supported` to it.
 
 An arm of a `match` may name `null`, which matches the `null` of a `T?` value, as C#'s `case null`
 and Rust's `None =>` do (C9; §4, the owner, 2026-10-30, "Allow, as C#"), and a `match` over a `T?`
@@ -26,7 +27,8 @@ C4's `unreachable-arm` for an arm after the arm of its type does not reach it, s
 nullable type can fill (N11), N6 makes it `type-mismatch`, as `null` where a `T` is required is, while §14
 holds whether it builds: as C# builds `case null` on a `T` without a constraint, or `type-mismatch`.
 Whether it builds over a number type, an `int`, whose `case null` C# refuses (CS0037), stands open (§14),
-since the answer's "as C#" and the `i32` of the option it set aside point two ways there.
+since the answer's "as C#" and the `i32` of the option it set aside point two ways there: it builds as
+over a `string`, an arm no value reaches, or it is refused, as C# refuses it.
 An arm after `else`, a `null` arm among them, is `syntax` (C9). A second `null` arm is
 `unreachable-arm`, as a second arm of one literal is (C4), over a `T?` and over a subject with no `null`
 alike. *(assumed, §4: the second `null` arm, which the answers named not)*

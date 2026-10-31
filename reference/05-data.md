@@ -51,7 +51,8 @@ union with no `null` case beside a value of one of its cases takes no `==` and n
 `type-mismatch`, as Rust refuses an enum beside the payload of one of its variants, `Ok(5) == 5` on a
 `Result<i32, String>` as `Some(5) == 5` (§4, the owner, 2026-10-30, "Refuse, as Rust"); a side
 whose type is nullable is lifted first (N10), so `int? a == 5`, the shape of `Some(5) == 5`, compares as
-C# lifts it. A field that is a
+C# lifts it, and `(int | string)? a == 1` is `type-mismatch`, the union the lift leaves standing beside a
+value of one of its cases. A field that is a
 list compares by its items (M9), and its `double` or `float` items, and the values of its `double?` or
 `float?` items, at any depth, compare as C#'s `Equals` compares them, NaN equal to NaN and 0.0 equal to
 -0.0, `null` equal to `null`, so that such a value equals itself, where `==` on two lists outside a

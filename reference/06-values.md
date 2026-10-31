@@ -630,7 +630,7 @@ C#'s `Equals` (§4). A class instance is a key as K12 says: `mutable-key` where 
 union's and a function type's among them (N1), so `map[key]` and `Remove(key)` give `V?` for every `V`
 (§4, the owner, 2026-10-30, "Nullable form, as Option"), a `V` that is nullable already giving that type,
 in which a missing entry and an entry that holds `null` read alike and `ContainsKey` alone tells them
-apart (N11; §4, the owner, 2026-10-30, "Flatten, as C#"). A key of a nullable type, with
+apart, called while the entry stands, before a `Remove` takes it out (N11; §4, the owner, 2026-10-30, "Flatten, as C#"). A key of a nullable type, with
 `null` among its keys, compares as `==` compares two nullable values (N10), `null` equal to `null` alone
 and two values as their type compares as a key *(assumed, §4: for the nullable types beside `double?` and
 `float?`)*, and a `double?` or a `float?` key compares its value as a `double` key does. `xs == ys` on two
