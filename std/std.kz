@@ -1,6 +1,6 @@
 // The standard library's Kurz code (design record, section 2; the owner, 2026-10-24, "A std/ directory
 // now"), which the compiler compiles with every program, as it compiles the runtime: the allocator of
-// section 3 and the blocks of a list and of a string. It takes its memory from the system through the
+// section 3, the blocks of a list and of a string, and the hashes of section 12. It takes its memory from the system through the
 // runtime's boundary call, reached as the folder `sys`, the directory of the target the program is
 // built for, and the runtime reaches it as the folder `std`, through its allocation entry, `Allocate`
 // (the owner, 2026-10-24, "As built"; compiler/README.md, "The runtime"). The emitted code calls the
@@ -1232,4 +1232,833 @@ void SipRound(mut ulong v0, mut ulong v1, mut ulong v2, mut ulong v3) {
     v1 = v1 << 17 | v1 >> 47
     v1 = v1 ^ v2
     v2 = v2 << 32 | v2 >> 32
+}
+
+// SHA-256 (FIPS 180-4), MD5 (RFC 1321), CRC-32/ISO-HDLC and HMAC-SHA256 (RFC 2104), written in Kurz as
+// RustCrypto's crates are written in Rust (design record, section 12, "In Kurz, as RustCrypto"), which the
+// emitted code calls for `Sha256`, `Md5`, `Crc32`, `Hmac`, `Hex` and `FixedTime` (H1 to H4). A hasher's
+// state is the block of a list of bytes (M9) whose count is fixed: the emitted code counts and copies it as
+// a list's block, and the functions here read and write its bytes after the block's 16 bytes of counts.
+// A state holds every table its hash reads, so that a hasher needs nothing else, on whatever thread.
+
+// A new block of a list of `size` bytes, held by one value, whose bytes are what the allocator left there:
+// a hasher's state or a digest. Null, with `asked` set to the bytes asked for, where the system refuses.
+byte* ByteBlock(long size, mut long asked) {
+    long bytes = 16 + size
+    mut byte* p = null
+    raw {
+        p = Allocate(bytes)
+        if p == null {
+            asked = bytes
+        } else {
+            *Ptr<long>(p) = 1
+            *Ptr<int>(p + 8) = int(size)
+            *Ptr<int>(p + 12) = int(size)
+        }
+    }
+
+    return p
+}
+
+// The block a hasher's `Update` or `Finish` writes: the block itself where no other value holds it, else
+// a copy of its bytes held by one value, the old block held by one value less, which never frees it, as a
+// list copies its block before a write (M3). Null, with `asked` set, where the system refuses.
+pub byte* HasherOwned(byte* block, mut long asked) {
+    if !ListShared(block) {
+        return block
+    }
+
+    long size = long(ListCount(block))
+    byte* p = ByteBlock(size, mut asked)
+    if p != null {
+        raw {
+            mut long i = 0
+            while i < size {
+                p[16 + i] = block[16 + i]
+                i = i + 1
+            }
+
+            *Ptr<long>(block) = *Ptr<long>(block) - 1
+        }
+    }
+
+    return p
+}
+
+// SHA-256's state at `s`, 616 bytes: the eight words of the hash (0), the count of bytes added (32), the
+// block of 64 bytes being filled (40), the 64 words of the message schedule (104) and the 64 words of
+// FIPS 180-4's constants K (360). MD5's, 408 bytes: its four words A, B, C and D (0), the count of bytes
+// added (16), the block being filled (24), RFC 1321's 64 words T (88) and the 16 shifts of its rounds,
+// four for each round (344).
+
+// The state of a new hasher of SHA-256 at `s`: FIPS 180-4's initial hash (5.3.3) and K (4.2.2).
+void Sha256Start(byte* s) {
+    raw {
+        uint* hash = Ptr<uint>(s)
+        hash[0] = 0x6a09e667
+        hash[1] = 0xbb67ae85
+        hash[2] = 0x3c6ef372
+        hash[3] = 0xa54ff53a
+        hash[4] = 0x510e527f
+        hash[5] = 0x9b05688c
+        hash[6] = 0x1f83d9ab
+        hash[7] = 0x5be0cd19
+        *Ptr<long>(s + 32) = 0
+        uint* k = Ptr<uint>(s + 360)
+        k[0] = 0x428a2f98
+        k[1] = 0x71374491
+        k[2] = 0xb5c0fbcf
+        k[3] = 0xe9b5dba5
+        k[4] = 0x3956c25b
+        k[5] = 0x59f111f1
+        k[6] = 0x923f82a4
+        k[7] = 0xab1c5ed5
+        k[8] = 0xd807aa98
+        k[9] = 0x12835b01
+        k[10] = 0x243185be
+        k[11] = 0x550c7dc3
+        k[12] = 0x72be5d74
+        k[13] = 0x80deb1fe
+        k[14] = 0x9bdc06a7
+        k[15] = 0xc19bf174
+        k[16] = 0xe49b69c1
+        k[17] = 0xefbe4786
+        k[18] = 0x0fc19dc6
+        k[19] = 0x240ca1cc
+        k[20] = 0x2de92c6f
+        k[21] = 0x4a7484aa
+        k[22] = 0x5cb0a9dc
+        k[23] = 0x76f988da
+        k[24] = 0x983e5152
+        k[25] = 0xa831c66d
+        k[26] = 0xb00327c8
+        k[27] = 0xbf597fc7
+        k[28] = 0xc6e00bf3
+        k[29] = 0xd5a79147
+        k[30] = 0x06ca6351
+        k[31] = 0x14292967
+        k[32] = 0x27b70a85
+        k[33] = 0x2e1b2138
+        k[34] = 0x4d2c6dfc
+        k[35] = 0x53380d13
+        k[36] = 0x650a7354
+        k[37] = 0x766a0abb
+        k[38] = 0x81c2c92e
+        k[39] = 0x92722c85
+        k[40] = 0xa2bfe8a1
+        k[41] = 0xa81a664b
+        k[42] = 0xc24b8b70
+        k[43] = 0xc76c51a3
+        k[44] = 0xd192e819
+        k[45] = 0xd6990624
+        k[46] = 0xf40e3585
+        k[47] = 0x106aa070
+        k[48] = 0x19a4c116
+        k[49] = 0x1e376c08
+        k[50] = 0x2748774c
+        k[51] = 0x34b0bcb5
+        k[52] = 0x391c0cb3
+        k[53] = 0x4ed8aa4a
+        k[54] = 0x5b9cca4f
+        k[55] = 0x682e6ff3
+        k[56] = 0x748f82ee
+        k[57] = 0x78a5636f
+        k[58] = 0x84c87814
+        k[59] = 0x8cc70208
+        k[60] = 0x90befffa
+        k[61] = 0xa4506ceb
+        k[62] = 0xbef9a3f7
+        k[63] = 0xc67178f2
+    }
+}
+
+// One block of 64 bytes at `p` through the 64 rounds of SHA-256 into the hash at `s` (FIPS 180-4,
+// 6.2.2), each word of the block read with its highest byte first.
+void Sha256Block(byte* s, byte* p) {
+    raw {
+        uint* hash = Ptr<uint>(s)
+        uint* w = Ptr<uint>(s + 104)
+        uint* k = Ptr<uint>(s + 360)
+        mut int t = 0
+        while t < 16 {
+            w[t] = uint(p[4 * t]) << 24 | uint(p[4 * t + 1]) << 16 | uint(p[4 * t + 2]) << 8 | uint(p[4 * t + 3])
+            t = t + 1
+        }
+
+        while t < 64 {
+            uint x = w[t - 15]
+            uint y = w[t - 2]
+            uint small0 = (x >> 7 | x << 25) ^ (x >> 18 | x << 14) ^ x >> 3
+            uint small1 = (y >> 17 | y << 15) ^ (y >> 19 | y << 13) ^ y >> 10
+            w[t] = small1 +% w[t - 7] +% small0 +% w[t - 16]
+            t = t + 1
+        }
+
+        mut uint a = hash[0]
+        mut uint b = hash[1]
+        mut uint c = hash[2]
+        mut uint d = hash[3]
+        mut uint e = hash[4]
+        mut uint f = hash[5]
+        mut uint g = hash[6]
+        mut uint h = hash[7]
+        t = 0
+        while t < 64 {
+            uint big1 = (e >> 6 | e << 26) ^ (e >> 11 | e << 21) ^ (e >> 25 | e << 7)
+            uint choose = (e & f) ^ (~e & g)
+            uint first = h +% big1 +% choose +% k[t] +% w[t]
+            uint big0 = (a >> 2 | a << 30) ^ (a >> 13 | a << 19) ^ (a >> 22 | a << 10)
+            uint majority = (a & b) ^ (a & c) ^ (b & c)
+            h = g
+            g = f
+            f = e
+            e = d +% first
+            d = c
+            c = b
+            b = a
+            a = first +% big0 +% majority
+            t = t + 1
+        }
+
+        hash[0] = hash[0] +% a
+        hash[1] = hash[1] +% b
+        hash[2] = hash[2] +% c
+        hash[3] = hash[3] +% d
+        hash[4] = hash[4] +% e
+        hash[5] = hash[5] +% f
+        hash[6] = hash[6] +% g
+        hash[7] = hash[7] +% h
+    }
+}
+
+// The digest of the message of SHA-256's state at `s`, its eight words with the highest byte of each
+// first, written at `out`; the state is then a new hasher's.
+void Sha256Close(byte* s, byte* out) {
+    HashPad(s, false)
+    raw {
+        uint* hash = Ptr<uint>(s)
+        mut int i = 0
+        while i < 8 {
+            uint word = hash[i]
+            out[4 * i] = byte(word >> 24)
+            out[4 * i + 1] = byte(word >> 16 & 255)
+            out[4 * i + 2] = byte(word >> 8 & 255)
+            out[4 * i + 3] = byte(word & 255)
+            i = i + 1
+        }
+    }
+
+    Sha256Start(s)
+}
+
+// The state of a new hasher of MD5 at `s`: RFC 1321's initial words (3.3), T (3.4) and the shifts of its
+// four rounds.
+void Md5Start(byte* s) {
+    raw {
+        uint* words = Ptr<uint>(s)
+        words[0] = 0x67452301
+        words[1] = 0xefcdab89
+        words[2] = 0x98badcfe
+        words[3] = 0x10325476
+        *Ptr<long>(s + 16) = 0
+        uint* t = Ptr<uint>(s + 88)
+        t[0] = 0xd76aa478
+        t[1] = 0xe8c7b756
+        t[2] = 0x242070db
+        t[3] = 0xc1bdceee
+        t[4] = 0xf57c0faf
+        t[5] = 0x4787c62a
+        t[6] = 0xa8304613
+        t[7] = 0xfd469501
+        t[8] = 0x698098d8
+        t[9] = 0x8b44f7af
+        t[10] = 0xffff5bb1
+        t[11] = 0x895cd7be
+        t[12] = 0x6b901122
+        t[13] = 0xfd987193
+        t[14] = 0xa679438e
+        t[15] = 0x49b40821
+        t[16] = 0xf61e2562
+        t[17] = 0xc040b340
+        t[18] = 0x265e5a51
+        t[19] = 0xe9b6c7aa
+        t[20] = 0xd62f105d
+        t[21] = 0x02441453
+        t[22] = 0xd8a1e681
+        t[23] = 0xe7d3fbc8
+        t[24] = 0x21e1cde6
+        t[25] = 0xc33707d6
+        t[26] = 0xf4d50d87
+        t[27] = 0x455a14ed
+        t[28] = 0xa9e3e905
+        t[29] = 0xfcefa3f8
+        t[30] = 0x676f02d9
+        t[31] = 0x8d2a4c8a
+        t[32] = 0xfffa3942
+        t[33] = 0x8771f681
+        t[34] = 0x6d9d6122
+        t[35] = 0xfde5380c
+        t[36] = 0xa4beea44
+        t[37] = 0x4bdecfa9
+        t[38] = 0xf6bb4b60
+        t[39] = 0xbebfbc70
+        t[40] = 0x289b7ec6
+        t[41] = 0xeaa127fa
+        t[42] = 0xd4ef3085
+        t[43] = 0x04881d05
+        t[44] = 0xd9d4d039
+        t[45] = 0xe6db99e5
+        t[46] = 0x1fa27cf8
+        t[47] = 0xc4ac5665
+        t[48] = 0xf4292244
+        t[49] = 0x432aff97
+        t[50] = 0xab9423a7
+        t[51] = 0xfc93a039
+        t[52] = 0x655b59c3
+        t[53] = 0x8f0ccc92
+        t[54] = 0xffeff47d
+        t[55] = 0x85845dd1
+        t[56] = 0x6fa87e4f
+        t[57] = 0xfe2ce6e0
+        t[58] = 0xa3014314
+        t[59] = 0x4e0811a1
+        t[60] = 0xf7537e82
+        t[61] = 0xbd3af235
+        t[62] = 0x2ad7d2bb
+        t[63] = 0xeb86d391
+        uint* shifts = Ptr<uint>(s + 344)
+        shifts[0] = 7
+        shifts[1] = 12
+        shifts[2] = 17
+        shifts[3] = 22
+        shifts[4] = 5
+        shifts[5] = 9
+        shifts[6] = 14
+        shifts[7] = 20
+        shifts[8] = 4
+        shifts[9] = 11
+        shifts[10] = 16
+        shifts[11] = 23
+        shifts[12] = 6
+        shifts[13] = 10
+        shifts[14] = 15
+        shifts[15] = 21
+    }
+}
+
+// One block of 64 bytes at `p` through the 64 steps of MD5 into the words at `s` (RFC 1321, 3.4), each
+// word of the block read with its lowest byte first.
+void Md5Block(byte* s, byte* p) {
+    raw {
+        uint* words = Ptr<uint>(s)
+        uint* t = Ptr<uint>(s + 88)
+        uint* shifts = Ptr<uint>(s + 344)
+        mut uint a = words[0]
+        mut uint b = words[1]
+        mut uint c = words[2]
+        mut uint d = words[3]
+        mut int i = 0
+        while i < 64 {
+            mut uint f = 0
+            mut int g = 0
+            if i < 16 {
+                f = (b & c) | (~b & d)
+                g = i
+            } else if i < 32 {
+                f = (d & b) | (~d & c)
+                g = (5 * i + 1) % 16
+            } else if i < 48 {
+                f = b ^ c ^ d
+                g = (3 * i + 5) % 16
+            } else {
+                f = c ^ (b | ~d)
+                g = 7 * i % 16
+            }
+
+            uint m = uint(p[4 * g]) | uint(p[4 * g + 1]) << 8 | uint(p[4 * g + 2]) << 16 | uint(p[4 * g + 3]) << 24
+            uint sum = f +% a +% t[i] +% m
+            int r = int(shifts[i / 16 * 4 + i % 4])
+            a = d
+            d = c
+            c = b
+            b = b +% (sum << r | sum >> (32 - r))
+            i = i + 1
+        }
+
+        words[0] = words[0] +% a
+        words[1] = words[1] +% b
+        words[2] = words[2] +% c
+        words[3] = words[3] +% d
+    }
+}
+
+// The digest of the message of MD5's state at `s`, its four words with the lowest byte of each first,
+// written at `out`; the state is then a new hasher's.
+void Md5Close(byte* s, byte* out) {
+    HashPad(s, true)
+    raw {
+        uint* words = Ptr<uint>(s)
+        mut int i = 0
+        while i < 4 {
+            uint word = words[i]
+            out[4 * i] = byte(word & 255)
+            out[4 * i + 1] = byte(word >> 8 & 255)
+            out[4 * i + 2] = byte(word >> 16 & 255)
+            out[4 * i + 3] = byte(word >> 24)
+            i = i + 1
+        }
+    }
+
+    Md5Start(s)
+}
+
+// One block of 64 bytes at `p` through the rounds of MD5 or of SHA-256 into the state at `s`.
+void HashBlock(byte* s, byte* p, bool md5) {
+    if md5 {
+        Md5Block(s, p)
+    } else {
+        Sha256Block(s, p)
+    }
+}
+
+// The `n` bytes at `p` added to the message of the state of MD5 or of SHA-256 at `s`: each block of 64
+// bytes the message fills goes through the hash's rounds, and the bytes after the last whole block wait
+// in the state's block.
+void HashFeed(byte* s, byte* p, long n, bool md5) {
+    mut long counted = 32
+    if md5 {
+        counted = 16
+    }
+
+    long buffer = counted + 8
+    raw {
+        long total = *Ptr<long>(s + counted)
+        *Ptr<long>(s + counted) = total + n
+        mut long pending = total % 64
+        mut long at = 0
+        if pending > 0 {
+            while pending < 64 && at < n {
+                s[buffer + pending] = p[at]
+                pending = pending + 1
+                at = at + 1
+            }
+
+            if pending == 64 {
+                HashBlock(s, s + buffer, md5)
+                pending = 0
+            }
+        }
+
+        while n - at >= 64 {
+            HashBlock(s, p + at, md5)
+            at = at + 64
+        }
+
+        while at < n {
+            s[buffer + pending] = p[at]
+            pending = pending + 1
+            at = at + 1
+        }
+    }
+}
+
+// The padding of MD5 (RFC 1321, 3.1 and 3.2) or of SHA-256 (FIPS 180-4, 5.1.1) put through the state at
+// `s`: the byte 0x80, zeros up to 8 bytes before the end of a block, and the count of bits of the
+// message, its lowest byte first for MD5 and its highest first for SHA-256.
+void HashPad(byte* s, bool md5) {
+    mut long counted = 32
+    if md5 {
+        counted = 16
+    }
+
+    long buffer = counted + 8
+    raw {
+        long total = *Ptr<long>(s + counted)
+        ulong bits = ulong(total) << 3
+        mut long pending = total % 64
+        s[buffer + pending] = 128
+        pending = pending + 1
+        if pending > 56 {
+            while pending < 64 {
+                s[buffer + pending] = 0
+                pending = pending + 1
+            }
+
+            HashBlock(s, s + buffer, md5)
+            pending = 0
+        }
+
+        while pending < 56 {
+            s[buffer + pending] = 0
+            pending = pending + 1
+        }
+
+        mut int i = 0
+        while i < 8 {
+            mut int shift = 56 - 8 * i
+            if md5 {
+                shift = 8 * i
+            }
+
+            s[buffer + 56 + long(i)] = byte(bits >> shift & 255UL)
+            i = i + 1
+        }
+
+        HashBlock(s, s + buffer, md5)
+    }
+}
+
+// A new hasher of SHA-256 (H3): the block of its state; null, with `asked` set, where the system refuses.
+pub byte* Sha256New(mut long asked) {
+    byte* block = ByteBlock(616, mut asked)
+    if block != null {
+        Sha256Start(block + 16)
+    }
+
+    return block
+}
+
+// The bytes of the list `message` added to the hasher of SHA-256 whose block, which no other value holds,
+// is `block`.
+pub void Sha256Update(byte* block, byte* message) {
+    if message != null {
+        HashFeed(block + 16, ListItems(message), long(ListCount(message)), false)
+    }
+}
+
+// The digest of the hasher of SHA-256 whose block, which no other value holds, is `block`: a new list of
+// 32 bytes, after which the hasher starts over; null, with `asked` set and the hasher as it was, where the
+// system refuses.
+pub byte* Sha256Finish(byte* block, mut long asked) {
+    byte* digest = ByteBlock(32, mut asked)
+    if digest != null {
+        Sha256Close(block + 16, digest + 16)
+    }
+
+    return digest
+}
+
+// SHA-256 of the bytes of the list `message` (H1): a new list of 32 bytes, made on a state of its own, which
+// it frees; null, with `asked` set, where the system refuses.
+pub byte* Sha256Hash(byte* message, mut long asked) {
+    byte* block = Sha256New(mut asked)
+    if block == null {
+        return null
+    }
+
+    Sha256Update(block, message)
+    byte* digest = Sha256Finish(block, mut asked)
+    Free(block, 632)
+    return digest
+}
+
+// A new hasher of MD5 (H3), as `Sha256New` makes one of SHA-256.
+pub byte* Md5New(mut long asked) {
+    byte* block = ByteBlock(408, mut asked)
+    if block != null {
+        Md5Start(block + 16)
+    }
+
+    return block
+}
+
+// As `Sha256Update`, for MD5.
+pub void Md5Update(byte* block, byte* message) {
+    if message != null {
+        HashFeed(block + 16, ListItems(message), long(ListCount(message)), true)
+    }
+}
+
+// As `Sha256Finish`, for MD5: a new list of 16 bytes.
+pub byte* Md5Finish(byte* block, mut long asked) {
+    byte* digest = ByteBlock(16, mut asked)
+    if digest != null {
+        Md5Close(block + 16, digest + 16)
+    }
+
+    return digest
+}
+
+// MD5 of the bytes of the list `message` (H1), as `Sha256Hash` gives SHA-256: a new list of 16 bytes.
+pub byte* Md5Hash(byte* message, mut long asked) {
+    byte* block = Md5New(mut asked)
+    if block == null {
+        return null
+    }
+
+    Md5Update(block, message)
+    byte* digest = Md5Finish(block, mut asked)
+    Free(block, 424)
+    return digest
+}
+
+// CRC-32/ISO-HDLC's state at `s`, 1028 bytes: the register (0) and the remainders of the 256 bytes under
+// the reflected polynomial 0xEDB88320 (4), as zlib's `crc32` reads a byte at a time; the register starts
+// at all ones, and the CRC is the register with every bit flipped.
+void Crc32Start(byte* s) {
+    raw {
+        *Ptr<uint>(s) = 0xffffffff
+        uint* table = Ptr<uint>(s + 4)
+        mut int i = 0
+        while i < 256 {
+            mut uint c = uint(i)
+            mut int k = 0
+            while k < 8 {
+                if (c & 1) != 0 {
+                    c = 0xedb88320 ^ c >> 1
+                } else {
+                    c = c >> 1
+                }
+
+                k = k + 1
+            }
+
+            table[i] = c
+            i = i + 1
+        }
+    }
+}
+
+// The `n` bytes at `p` through the register of the state at `s`.
+void Crc32Feed(byte* s, byte* p, long n) {
+    raw {
+        uint* table = Ptr<uint>(s + 4)
+        mut uint c = *Ptr<uint>(s)
+        mut long i = 0
+        while i < n {
+            c = table[long((c ^ uint(p[i])) & 255)] ^ c >> 8
+            i = i + 1
+        }
+
+        *Ptr<uint>(s) = c
+    }
+}
+
+// A new hasher of CRC-32 (H3), as `Sha256New` makes one of SHA-256.
+pub byte* Crc32New(mut long asked) {
+    byte* block = ByteBlock(1028, mut asked)
+    if block != null {
+        Crc32Start(block + 16)
+    }
+
+    return block
+}
+
+// As `Sha256Update`, for CRC-32.
+pub void Crc32Update(byte* block, byte* message) {
+    if message != null {
+        Crc32Feed(block + 16, ListItems(message), long(ListCount(message)))
+    }
+}
+
+// The CRC of the hasher of CRC-32 whose block, which no other value holds, is `block`, after which the
+// hasher starts over.
+pub uint Crc32Finish(byte* block) {
+    mut uint c = 0
+    raw {
+        c = *Ptr<uint>(block + 16) ^ 0xffffffff
+        *Ptr<uint>(block + 16) = 0xffffffff
+    }
+
+    return c
+}
+
+// CRC-32 of the bytes of the list `message` (H1), made on a state of its own, which it frees; 0, with
+// `asked` set, where the system refuses.
+pub uint Crc32Hash(byte* message, mut long asked) {
+    byte* block = Crc32New(mut asked)
+    if block == null {
+        return 0
+    }
+
+    Crc32Update(block, message)
+    uint c = Crc32Finish(block)
+    Free(block, 1044)
+    return c
+}
+
+// HMAC-SHA256's state at `s`, 1296 bytes (RFC 2104): the key K0 (0), 64 bytes, the state of the inner
+// hash, which has taken K0 ^ ipad (64), and the state of the outer hash, which `HmacClose` starts (680)
+// and whose block of 64 bytes being filled, at 720, nothing reads between two calls of it.
+
+// The state of a new hasher of HMAC-SHA256 at `s` on the `n` bytes of the key at `key`: K0 is the key,
+// or SHA-256 of a key longer than a block of 64 bytes, with zeros after it to 64 bytes.
+void HmacStart(byte* s, byte* key, long n) {
+    raw {
+        mut long i = 0
+        if n > 64 {
+            byte* outer = s + 680
+            Sha256Start(outer)
+            HashFeed(outer, key, n, false)
+            Sha256Close(outer, s)
+            i = 32
+        } else {
+            while i < n {
+                s[i] = key[i]
+                i = i + 1
+            }
+        }
+
+        while i < 64 {
+            s[i] = 0
+            i = i + 1
+        }
+    }
+
+    HmacKeyed(s)
+}
+
+// The inner hash of the state at `s` started over on K0 ^ ipad, K0 with every byte xored with 0x36.
+void HmacKeyed(byte* s) {
+    byte* pad = s + 720
+    raw {
+        mut long i = 0
+        while i < 64 {
+            pad[i] = byte(int(s[i]) ^ 54)
+            i = i + 1
+        }
+    }
+
+    Sha256Start(s + 64)
+    HashFeed(s + 64, pad, 64, false)
+}
+
+// The tag of the message of the state at `s`, SHA-256 of K0 ^ opad, K0 with every byte xored with 0x5C,
+// and of the inner hash's digest, written at `out`, 32 bytes; the inner hash then starts over on K0.
+void HmacClose(byte* s, byte* out) {
+    byte* outer = s + 680
+    byte* pad = s + 720
+    raw {
+        mut long i = 0
+        while i < 64 {
+            pad[i] = byte(int(s[i]) ^ 92)
+            i = i + 1
+        }
+    }
+
+    Sha256Start(outer)
+    HashFeed(outer, pad, 64, false)
+    Sha256Close(s + 64, out)
+    HashFeed(outer, out, 32, false)
+    Sha256Close(outer, out)
+    HmacKeyed(s)
+}
+
+// A new hasher of HMAC-SHA256 on the bytes of the list `key` (H3), as `Sha256New` makes one of SHA-256.
+pub byte* HmacNew(byte* key, mut long asked) {
+    byte* block = ByteBlock(1296, mut asked)
+    if block != null {
+        HmacStart(block + 16, ListItems(key), long(ListCount(key)))
+    }
+
+    return block
+}
+
+// As `Sha256Update`, for HMAC-SHA256.
+pub void HmacUpdate(byte* block, byte* message) {
+    if message != null {
+        HashFeed(block + 80, ListItems(message), long(ListCount(message)), false)
+    }
+}
+
+// As `Sha256Finish`, for HMAC-SHA256: the tag, a new list of 32 bytes.
+pub byte* HmacFinish(byte* block, mut long asked) {
+    byte* digest = ByteBlock(32, mut asked)
+    if digest != null {
+        HmacClose(block + 16, digest + 16)
+    }
+
+    return digest
+}
+
+// HMAC-SHA256 of the bytes of the list `message` under the bytes of the list `key` (H1), as `Sha256Hash`
+// gives SHA-256: a new list of 32 bytes.
+pub byte* HmacSha256(byte* key, byte* message, mut long asked) {
+    byte* block = HmacNew(key, mut asked)
+    if block == null {
+        return null
+    }
+
+    HmacUpdate(block, message)
+    byte* digest = HmacFinish(block, mut asked)
+    Free(block, 1312)
+    return digest
+}
+
+// Whether the tag of the message `message` under the key `key` is the bytes of `tag` (H4), compared by
+// `FixedTimeEqual`; false, with `asked` set, where the system refuses.
+pub bool HmacVerifySha256(byte* key, byte* message, byte* tag, mut long asked) {
+    byte* digest = HmacSha256(key, message, mut asked)
+    if digest == null {
+        return false
+    }
+
+    bool same = FixedTimeEqual(digest, tag)
+    Free(digest, 48)
+    return same
+}
+
+// Whether the lists of bytes `a` and `b` hold the same bytes (H4): false where their counts differ, and
+// else every byte is read, and the code stops at no difference, as C#'s `FixedTimeEquals` reads them.
+pub bool FixedTimeEqual(byte* a, byte* b) {
+    int n = ListCount(a)
+    if n != ListCount(b) {
+        return false
+    }
+
+    mut int differ = 0
+    raw {
+        mut long i = 0
+        while i < long(n) {
+            differ = differ | (int(a[16 + i]) ^ int(b[16 + i]))
+            i = i + 1
+        }
+    }
+
+    return differ == 0
+}
+
+// The digit of `d`, 0 to 15, in lower-case hexadecimal.
+byte HexDigit(int d) {
+    if d < 10 {
+        return byte(48 + d)
+    }
+
+    return byte(87 + d)
+}
+
+// The lower-case hexadecimal of the bytes of the list `message`, two digits for each byte, the higher half
+// first (H2), as the bytes of a new string's block; null for a list without bytes, which is the empty
+// string, and null with `asked` set where the system refuses or where the text would pass the largest
+// `int` of bytes, as a list does past it (M9).
+pub byte* HexEncode(byte* message, mut long asked) {
+    long n = long(ListCount(message))
+    if n == 0 {
+        return null
+    }
+
+    long size = 2 * n
+    if size > 2147483647 {
+        asked = size
+        return null
+    }
+
+    byte* text = StringBlock(size)
+    if text == null {
+        asked = 16 + size
+        return null
+    }
+
+    raw {
+        mut long i = 0
+        while i < n {
+            int b = int(message[16 + i])
+            text[2 * i] = HexDigit(b >> 4)
+            text[2 * i + 1] = HexDigit(b & 15)
+            i = i + 1
+        }
+    }
+
+    StringTakeOver(text, size)
+    return text
 }

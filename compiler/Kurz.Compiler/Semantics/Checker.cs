@@ -23,6 +23,9 @@ public sealed partial class Checker
 {
     private readonly DiagnosticBag diagnostics;
     private readonly Stack<List<Diagnostic>> sinks = new();
+
+    // H5: the lint of each call, by its node, added once after the whole file was read, since a call can be read more than once (F13, M11)
+    private readonly Dictionary<CallExpression, Diagnostic> lints = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, List<FunctionSymbol>> functions = new(StringComparer.Ordinal);
     private readonly List<FunctionSymbol> duplicates = [];
     private readonly List<FunctionSymbol> refused = [];
@@ -109,6 +112,11 @@ public sealed partial class Checker
 
         var checker = new Checker(diagnostics, grants, folders);
         checker.Run(program);
+        foreach (var lint in checker.lints.Values)
+        {
+            diagnostics.Add(lint);
+        }
+
         return checker;
     }
 
@@ -857,6 +865,17 @@ public sealed partial class Checker
             };
         }
 
+        if (HasherOf(n.Name) is { } hasher)
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (H3, T17)");
+                return Types.Error;
+            }
+
+            return new HasherType(hasher);
+        }
+
         var parameter = TypeParameter(n.Name);
         if (parameter is not null)
         {
@@ -1275,10 +1294,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9), the types of
-    /// files and sockets and their functions (S2, S8, S9), and <c>Environment</c> (S13, S14).
+    /// files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), and the hashes' (H1 to H4).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
-        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment";
+        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name);
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
     private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6" };

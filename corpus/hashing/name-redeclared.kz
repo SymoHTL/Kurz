@@ -1,0 +1,7 @@
+// expect: error redeclared at 5
+// rules: H1
+
+// the hexadecimal digits of a number, under a name every file sees
+data Hex(int Digits)
+
+print(1)

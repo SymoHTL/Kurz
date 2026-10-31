@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 6
+// rules: H6
+
+a = Sha256.New()
+b = Sha256.New()
+print(a == b)

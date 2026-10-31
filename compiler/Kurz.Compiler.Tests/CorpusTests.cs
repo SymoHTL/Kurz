@@ -169,7 +169,8 @@ public sealed class CorpusTests
         Checker.Check(tree, diagnostics, header.Grants);
         var errors = diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList();
         var unsupported = diagnostics.Sorted.Where(IsNotSupported).Select(d => d.ToString()).ToList();
-        Assert.Equal(errors.Count + unsupported.Count, diagnostics.Items.Count); // the two kinds, and no third one that the floors would count as read in full
+        var lints = diagnostics.Items.Count(d => d.Kind == DiagnosticKind.Warning); // H5: a warning, which builds the program and which no header expects
+        Assert.Equal(errors.Count + unsupported.Count + lints, diagnostics.Items.Count); // the three kinds, and no fourth one that the floors would count as read in full
         if (unsupported.Count > 0)
         {
             Assert.True(header.Rules.Any(OutsideTheChecker) || UnsupportedByConstruct.ContainsKey(relativePath),

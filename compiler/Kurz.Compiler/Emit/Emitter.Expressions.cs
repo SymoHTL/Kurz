@@ -746,8 +746,8 @@ public sealed partial class Emitter
     /// <summary>The text of a value as <see cref="TextOf"/> makes it, a temporary of the region where it made one.</summary>
     private string Text(string value, KurzType type, int line) => MakesText(type) ? Temp(TextOf(value, type, line), Types.String) : TextOf(value, type, line);
 
-    /// <summary>Whether <see cref="TextOf"/> makes a text for a value of the type, which holds a count its caller lets go of: for every type but a string, which is its own text, and a <c>bool</c>, an enum and <c>null</c>, whose texts are literals.</summary>
-    private static bool MakesText(KurzType type) => type is not (PrimitiveType { Kind: Primitive.String or Primitive.Bool } or EnumType or NullType);
+    /// <summary>Whether <see cref="TextOf"/> makes a text for a value of the type, which holds a count its caller lets go of: for every type but a string, which is its own text, and a <c>bool</c>, an enum, <c>null</c> and a hasher, whose texts are literals.</summary>
+    private static bool MakesText(KurzType type) => type is not (PrimitiveType { Kind: Primitive.String or Primitive.Bool } or EnumType or NullType or HasherType);
 
     /// <summary>
     /// The text of a value as `print` and an interpolation show it (A1, L6), as a <c>%kz.str</c>, made by the runtime: a string as it
@@ -789,6 +789,8 @@ public sealed partial class Emitter
                 return EnumText(value, e); // A4
             case NullType:
                 return StringValue("null"); // A4
+            case HasherType:
+                return StringValue(type.Text); // H6: the name of its type and nothing of its state
             case ListType list:
                 return ListText(value, list, line);
             case MapType map:

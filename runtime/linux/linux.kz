@@ -705,7 +705,7 @@ void Frame(long ip, long at) {
         if symbol < 0 {
             if Counted() {
                 Out("  at <unknown> (")
-                Hex(ip)
+                HexAddress(ip)
                 Out(")\n")
             }
 
@@ -1679,7 +1679,7 @@ void Number(long value) {
 }
 
 // An address in hexadecimal after `0x`, as a frame without a name gives it (design record, section 6).
-void Hex(long value) {
+void HexAddress(long value) {
     raw {
         Out("0x")
         mut int shift = 60

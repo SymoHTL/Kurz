@@ -8,7 +8,7 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   turns it into tokens and a syntax tree (the syntax of chapters 1 to 11: every declaration,
   statement and expression form the reference shows), `Semantics/` checks a tree the parser read
   without an error against the rules of chapters 1 to 3, 5, 6, 8 to 10, the raw forms of 11 and
-  the calls on files of 13 (the section "What the checker reads" below) and says `not supported` to a construct of the
+  the calls on files of 13 and the hashes of 14 (the section "What the checker reads" below) and says `not supported` to a construct of the
   other chapters, and keeps what it found out, node by node, for a code generator
   (`Semantics/SemanticModel.cs`: the type and constant of every expression, the variable or
   function every name means, the variable every declaration makes, the function every call picks
@@ -297,7 +297,9 @@ ask about it.
 The runtime a built program links is written in Kurz, in `runtime/` at the top of the repository
 (design record, section 2): `runtime/common/` holds the code every target shares, and
 `runtime/linux/` and `runtime/windows/` the code of one target each. The standard library's Kurz
-code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"), at
+code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"),
+and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
+section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
@@ -695,6 +697,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
+- the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
+  blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
+  process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
+  holds its state, of a fixed count for each type (616 bytes for SHA-256, 408 for MD5, 1028 for CRC-32's register and
+  table, 1296 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
+  the hasher's place, a `mut` variable or a path of fields from one (M5), copy it where another value holds it, as a
+  list is copied before a write (M3), and store the block back. `Finish` gives a new block of the digest, or the
+  CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
+  literal for no bytes; `FixedTime.Equal` reads every byte of two lists of one count and stops at no difference,
+  which promises nothing of the code LLVM makes of it (H4). The text of a hasher is a literal of its type's name
+  (H6). `HashTests` pins what no case can: every count of bytes from 0 to 130, whole and in two pieces cut at every
+  place, with a copy of the hasher between the pieces, against .NET's SHA-256, MD5 and HMAC-SHA256 and a CRC-32
+  computed a bit at a time, under the normal allocator and the fenced one; the lint at each call of a function of
+  `Md5`; and a build for Windows;
 - lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code
@@ -941,7 +957,7 @@ ask about it.
 
 ## What the compiler says about a program
 
-A diagnostic is one of two kinds. A compile error carries an id from the table of
+A diagnostic is one of three kinds. A compile error carries an id from the table of
 `reference/12-errors.md`, or the one id a rule names and keeps out of the table, L1's
 `invalid-source` (the table lists the ids a case can expect, and no case can be a file that is not
 UTF-8), and the line the reference's E1 names; a corpus case pins both and never the message,
@@ -962,6 +978,13 @@ reads it clean. One such case, `data/flags-match.kz`, expects a `syntax` that de
 of the matched value (D13), which the front end cannot see and the checker does not read; the
 corpus theories check that it parses with no diagnostic and that the checker says `not supported`
 on its `flags` type, and no test holds its expected error.
+
+The third kind, a lint, is a warning with an id of its own, outside the table, and builds the program: the checker
+raises `md5-insecure` at every call of a function of `Md5` (H5), once for each call in the source, and the command
+writes it as it writes an error, with `warning:` before the id, `app.kz:3: warning: md5-insecure: <text>`, in every
+build. The record gives `project.kz` a line that silences the lint for its package and leaves the form of that line
+open (section 14); the compiler reads no `project.kz`, so nothing silences it. No corpus case can expect a lint, for the reason
+V12 gives of its warning:the corpus theory counts it beside the errors and `not supported`, and `HashTests` and `CommandTests` hold it.
 
 A declaration whose type is a user type is parsed speculatively, since its first token is a plain
 name, and so is one whose type is a function type (F11), since it starts with `(` as an expression
@@ -1108,7 +1131,7 @@ generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths non
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a

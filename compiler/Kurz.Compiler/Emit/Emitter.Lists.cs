@@ -30,10 +30,10 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    /// <summary>Whether a value of the type holds the block of a list, of a string or of a file's handle or the environment of a lambda: a list, a string, a file, a function value, a plain data value with a field that does, a union with a case that does.</summary>
+    /// <summary>Whether a value of the type holds the block of a list, of a string or of a file's handle or the environment of a lambda: a list, a string, a file, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or MapType or FunctionType or HandleType or HasherType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
@@ -177,7 +177,7 @@ public sealed partial class Emitter
     /// <summary>One more holder of every block the value holds.</summary>
     private void Retain(string value, KurzType type)
     {
-        if (type is ListType)
+        if (type is ListType or HasherType) // H3: a hasher's state is the block of a list of bytes
         {
             fn.Emit($"call void {StdFunction("ListRetain")}(ptr {value})");
             return;
@@ -218,6 +218,12 @@ public sealed partial class Emitter
     /// <summary>One holder less of every block the value holds; a list's block that loses its last holder lets go of its items and is freed.</summary>
     private void Release(string value, KurzType type)
     {
+        if (type is HasherType)
+        {
+            Release(value, new ListType(Types.Byte)); // H3: a hasher's state is the block of a list of bytes
+            return;
+        }
+
         if (type is FunctionType)
         {
             fn.Emit($"call void {ReleaseEnvironment()}(%kz.fn {value})");
