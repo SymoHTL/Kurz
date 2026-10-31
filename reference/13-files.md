@@ -448,7 +448,7 @@ shortest"). *(assumed, §13: `Directory` among the file functions; such a call c
 the function; of two paths of one length, the one that stands first where the two part, the call
 written first in that function, or, at one call through an interface or a function value, the
 implementer, or the function the function value holds, whose file comes first in the order of the file
-paths and, in one file, whose line and then whose column come first)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
+paths (§4) and, in one file, whose line and then whose column come first)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
 
 No case: a case is a program and no package, and the program needs no grant.
 
