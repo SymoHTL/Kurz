@@ -160,6 +160,11 @@ flowchart TD
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
         no program of them"]
+        G11["unicode-tables: compiler/Kurz.Compiler/Emit/CaseTables.cs is not what tools/unicode_tables.py writes from
+        the Unicode Character Database of the version it pins, the one Rust's stable release pins; a file of the
+        database whose SHA-256 is not the pinned one; a table with fewer entries than its floor; PARTLY, which is red,
+        where a file cannot be fetched from unicode.org, since nothing was compared. A fetched file is kept under its
+        hash in the system's temporary directory and read again while the hash holds"]
         G4["ci-config: a pinned fact of a workflow changed. All four workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
@@ -345,6 +350,7 @@ flowchart TD
   `compiler/global.json` changes the SDK: G10, whose command reads it from inside `compiler/`, and C1, whose SDK
   step installs it. A lock file, `compiler/Directory.Packages.props`, `compiler/Directory.Build.props` or
   `compiler/NuGet.config` changes what the gate restores or builds: G10 and C1.
+- `tools/unicode_tables.py` changes (the version, a hash, the form of the tables, a floor): G11.
 - `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.
 - `tools/lint_reference.py` changes a check: G9 and X2. The emitter emits more of the corpus, or the runner's
   lists change: G10 and X2.

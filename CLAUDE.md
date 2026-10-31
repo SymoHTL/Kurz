@@ -338,6 +338,14 @@ Gate: review rule "rules for sessions".
   the walk counts) for the shapes those tests hold; a borrowing construct no program reaches, and a
   change the walk does not count: review rule "compiler".
 
+- **The case tables are generated, never edited.** `compiler/Kurz.Compiler/Emit/CaseTables.cs` is what
+  `tools/unicode_tables.py` writes from the Unicode Character Database of the version Rust's stable
+  release pins, each of its three files fetched and checked by its SHA-256 (section 12 of the design
+  record: the owner, 2026-10-31, "Rust's pin" and "Generated, as Rust"); a newer version comes in by a
+  pull request that runs the tool and lists the mappings it prints, with no question to the owner
+  ([knowledge/a-new-unicode-version-is-one-generator-run.md](knowledge/a-new-unicode-version-is-one-generator-run.md)).
+  Gate: `unicode-tables`, which ends PARTLY, and so red, where a file cannot be fetched.
+
 ### A public repository
 
 - **Future plans stay out**: what gets built when, steps, milestones, schedules, the order in
@@ -500,6 +508,7 @@ Gate: review rule "rules for sessions".
 | workflow facts, the image the `gates` job runs in, named by its digest, with the facts of its Dockerfile, and the LLVM major of that image and of the Windows job's install, held to the compiler's (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest, and the sections of the design record the research findings cite (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, every corpus case the compiler emits builds and runs as its header says, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
+| the case tables of X3 are what the pinned version of the Unicode Character Database gives (`unicode-tables`) | |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, and the expectations of the corpus cases the compiler does not emit, being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |

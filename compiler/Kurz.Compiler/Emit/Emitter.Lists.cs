@@ -1852,8 +1852,10 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// X3: <c>s.ToLowerAscii()</c> and <c>s.ToUpperAscii()</c>, the string the standard library's <c>AsciiCase</c> makes, or the string
-    /// itself where no byte changes (<see cref="Made"/>). A block the system refuses ends the process (M9).
+    /// X3: <c>s.ToLower()</c> and <c>s.ToUpper()</c>, the string the standard library's <c>UnicodeCase</c> makes by Unicode's full
+    /// mapping, with the table of the direction (<see cref="CaseTable"/>), and <c>s.ToLowerAscii()</c> and <c>s.ToUpperAscii()</c>, the
+    /// string its <c>AsciiCase</c> makes; each the string itself where nothing changes (<see cref="Made"/>). A block the system refuses
+    /// ends the process (M9).
     /// </summary>
     private string EmitStringCase(CallExpression c)
     {
@@ -1862,10 +1864,43 @@ public sealed partial class Emitter
         var (bytes, n, _) = StringParts(text);
         var asked = fn.Alloca("i64", "asked");
         fn.Emit($"store i64 0, ptr {asked}");
+        if (member.Member is "ToLower" or "ToUpper")
+        {
+            var made = fn.Alloca("i64", "case.made");
+            fn.Emit($"store i64 0, ptr {made}");
+            var toUpper = member.Member == "ToUpper";
+            var changed = fn.Value($"call ptr {StdFunction("UnicodeCase")}(ptr {bytes}, i64 {n}, i1 {(toUpper ? "true" : "false")}, ptr {CaseTable(toUpper)}, ptr {made}, ptr {asked})");
+            Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
+            var length = fn.Value($"load i64, ptr {made}");
+            return Made(changed, fn.Value($"select i1 {fn.Value($"icmp eq ptr {changed}, null")}, i64 -1, i64 {length}"), text);
+        }
+
         var upper = member.Member == "ToUpperAscii" ? "true" : "false";
         var result = fn.Value($"call ptr {StdFunction("AsciiCase")}(ptr {bytes}, i64 {n}, i1 {upper}, ptr {asked})");
         Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
         return Made(result, fn.Value($"select i1 {fn.Value($"icmp eq ptr {result}, null")}, i64 -1, i64 {n}"), text);
+    }
+
+    /// <summary>
+    /// The global that holds the case table of one direction (X3), written once into a program that changes case by Unicode's mapping in
+    /// that direction: four counts, of the runs, the mappings to several code points and the ranges of Cased and Case_Ignorable, then
+    /// those numbers of <see cref="CaseTables"/> in that order, as the standard library's <c>CaseMapped</c> reads them. Only lowering reads
+    /// the ranges, for the final sigma, so the table of uppercasing holds none.
+    /// </summary>
+    private string CaseTable(bool upper)
+    {
+        var name = upper ? "@\"case.upper\"" : "@\"case.lower\"";
+        if (helpers.Add(name))
+        {
+            var runs = upper ? CaseTables.UpperRuns : CaseTables.LowerRuns;
+            var multis = upper ? CaseTables.UpperMultis : CaseTables.LowerMultis;
+            var cased = upper ? [] : CaseTables.Cased;
+            var ignorable = upper ? [] : CaseTables.CaseIgnorable;
+            int[] words = [runs.Length / 4, multis.Length / 4, cased.Length / 2, ignorable.Length / 2, .. runs, .. multis, .. cased, .. ignorable];
+            module.Global($"{name} = private unnamed_addr constant [{words.Length} x i32] [{string.Join(", ", words.Select(w => $"i32 {w}"))}]");
+        }
+
+        return name;
     }
 
     /// <summary>
