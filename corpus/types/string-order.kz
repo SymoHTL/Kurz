@@ -1,0 +1,21 @@
+// expect: output
+// | true true false false
+// | true true false false
+// | true true false false
+// | false true false true
+// | false false true true
+// | false false true true
+// | false false true true
+// rules: T32
+
+void Show(string a, string b) {
+    print("{a < b} {a <= b} {a > b} {a >= b}")
+}
+
+Show("", "a")
+Show("a", "ab")
+Show("ab", "b")
+Show("b", "b")
+Show("é", "z")
+Show("😀", "\uFFFF")
+Show("a\0", "a")
