@@ -252,7 +252,8 @@ print(xs)
 `AddRange` and `Reverse` change the list and take it through a `mut` variable (M5) *(assumed, §12:
 `Reverse`, a default of the question, and the empty `run`, not put to the owner)*.
 `xs.AddRange(xs)` appends the items the list held before the call, so that the list is followed by
-a copy of itself, as C#'s `List.AddRange` appends a list to itself *(assumed, §12, not put to the owner)*.
+a copy of itself, as C#'s `List.AddRange` appends a list to itself: `AddRange` stores the items of its
+argument before the list changes, and takes `Add`'s exception (M7; §4, the owner, 2026-10-31, "Store-first methods").
 
 Case: [strings/list-search.kz](../corpus/strings/list-search.kz)
 ```kurz

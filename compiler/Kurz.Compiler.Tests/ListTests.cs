@@ -1451,7 +1451,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // `AddRange` and `Reverse` (X9): a list appended to itself, beside a copy and alone, a list made for the call, a list of one item, a
     // path of fields beside a copy of the data value; `IndexOf` of an item and of a run (X9), on a list of lists (F13), of `double` items
     // by IEEE's `==` and of `data` items as D3 compares them (M9); the searches of a string made while the program runs, with arguments
-    // made in the call (X1); and a list of bytes that shares a string's block, grown while the string keeps its bytes (M3)
+    // made in the call and read from a variable, a field and an item, and of `char`s of three and four bytes (X1); a list of bytes that
+    // shares a string's block, grown while the string keeps its bytes (M3); and `AddRange` of a list read from an item and from a field
     private const string Searches = """
         data Bag(List<string> Items)
         data P(string Name, double X)
@@ -1519,6 +1520,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(bs.IndexOf(byte(33)) ?? -1)
         print(bs.IndexOf("e 2!".Bytes) ?? -1)
         print(s)
+        needle = Made(2)
+        print(s.IndexOf(needle) ?? -1)
+        print(s.StartsWith(words[1]))
+        print(s.Contains(bag.Items[0]))
+        mut flat = [0]
+        flat.AddRange(grid[1])
+        print(flat)
+        mut more = [Made(3)]
+        more.AddRange(bag.Items)
+        print(more)
+        t = "a€😀"
+        euro = '€'
+        print(t.IndexOf(euro) ?? -1)
+        print(t.IndexOf('😀') ?? -1)
+        print(t.Contains('😁'))
         """;
 
     private static readonly string[] SearchesPrint =
@@ -1553,6 +1569,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "13", // a list of bytes that shares the string's block, grown
         "10",
         "made 1-made 2", // the string keeps its bytes (M3)
+        "7",
+        "true",
+        "false",
+        "[0, 2, 3]",
+        "[made 3, made 6, made 6]",
+        "1", // a `char` of three bytes
+        "4", // of four
+        "false", // a `char` whose four bytes differ from the string's in the last
     ];
 
     // `xs[i] = v` (M9, M4; section 4, the owner, 2026-10-30, "As C# and Rust"): a write into a list a copy holds (M3), an item read from
@@ -2418,6 +2442,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun("raw {\n    p = List<long>.Allocate(1)\n    xs = List<long>.FromRaw(p, 2147483648)\n    print(xs.Count)\n}\n", toolchain.Runtime, "list-from-raw-limit", "raw"), 1, [], "error: allocation-failed (17179869184 bytes)\n");
         Ran(BuildAndRun("b = \"abc\".Bytes\nprint(b)\n", EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "bytes-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
         Ran(BuildAndRun("b = \"abc\".Bytes\nprint(b)\n", toolchain.Runtime, "bytes-granted"), 0, ["[97, 98, 99]"], ""); // the positive control
+    }
+
+    [Fact]
+    public void An_AddRange_past_the_limit_reports_the_bytes_of_the_items_after_it()
+    {
+        // M9, X9: the limit of the largest `int` lowered to 3 in the library's `ListReserve`, so that `AddRange` of three items to a list
+        // of one asks past it with the bytes of 4 `long`s, as an `Add` past the limit does; a block the system refuses ends the same way
+        // through the emitter's `Refused`, as every growth's does
+        const string text = "mut xs = List<long>()\nxs.Add(1)\nxs.AddRange([2, 3, 4])\nprint(xs.Count)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "if count + more > 2147483647 {\n        asked = (count + more) * item", "if count + more > 3 {\n        asked = (count + more) * item")), "add-range-limit"), 1, [], "error: allocation-failed (32 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "add-range-below-limit"), 0, ["4"], ""); // the positive control
     }
 
     [Fact]

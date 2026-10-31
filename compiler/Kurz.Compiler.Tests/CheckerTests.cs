@@ -2797,7 +2797,7 @@ public sealed class CheckerTests
     public void The_searches_of_a_string_and_the_members_of_a_list_of_x9_take_their_forms_and_their_types()
     {
         // X1: a `bool`, or the position as an `int?`, of a `string` or of a `char`; X9: an item or a run, the literal widened to the one
-        // form it fits (F14), and `AddRange` of the list itself, which reads its receiver in its argument as `Add` may (M7)
+        // form it fits (F14), and `AddRange` of the list itself, which stores its argument before the list changes, as `Add` does (M7)
         Assert.Equal("bool", TypeOf("s = \"ab\"\nc = s.Contains('a')\nprint(c)", "c"));
         Assert.Equal("int?", TypeOf("s = \"ab\"\np = s.IndexOf(\"b\")\nprint(p)", "p"));
         Assert.Equal("int?", TypeOf("xs = [[1], [2]]\np = xs.IndexOf([2])\nprint(p)", "p"));
@@ -2814,6 +2814,7 @@ public sealed class CheckerTests
 
         // F14: `IndexOf` has two forms, so a literal keeps its own type, `int`, which fits no form of a list of bytes; a `byte` fits
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("b = \"ab\".Bytes\nprint(b.IndexOf(97))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("xs = [1]\nprint(xs.IndexOf('a'))")); // a `char` is no `int`
         Assert.Empty(Errors("b = \"ab\".Bytes\nprint(b.IndexOf(byte(97)))"));
 
         // M11 and E1: `[]` against a list of lists, where no one list type stands, is its own `cannot-infer`, and nothing is picked
@@ -2832,6 +2833,7 @@ public sealed class CheckerTests
         // M7: an argument that changes the string or the list the search holds
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("string G(mut string t) {\n    t = \"c\"\n    return \"a\"\n}\n\nmut s = \"ab\"\nprint(s.Contains(G(mut s)))"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int F(mut List<int> ys) {\n    ys.Add(1)\n    return 1\n}\n\nmut xs = [1]\nprint(xs.IndexOf(F(mut xs)))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("List<int> G(mut List<int> ys) {\n    ys.Add(1)\n    return [1]\n}\n\nmut xs = [1]\nxs.AddRange(G(mut xs))"));
 
         // the parameters take C#'s names, as `Add`'s does
         Assert.Empty(Errors("s = \"ab\"\nprint(s.Contains(value: \"a\"))\nxs = [1]\nprint(xs.IndexOf(item: 1))\nmut ys = [1]\nys.AddRange(collection: xs)\nprint(ys)"));

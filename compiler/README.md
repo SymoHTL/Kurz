@@ -493,7 +493,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   owner, 2026-10-29, "Union, as Rust"); `s.Contains(x)`, `s.StartsWith(x)`, `s.EndsWith(x)` and `s.IndexOf(x)`
   of a `string` or of a `char`, which is searched for as its UTF-8 bytes, over the string's bytes, through
   the standard library's `Find`, a byte at a time for one byte and Crochemore and Perrin's two-way search
-  for more, as Rust's `str::find`, linear in the string, and its `BytesAt` for the start and the end (X1);
+  for more, as Rust's `str::find`, and its `BytesAt` for the start and the end (X1);
 - `enum` (D12, D18, D20): a value is its number, or its place among the values where the declaration
   writes none, in the smallest of `i8`, `i16` and `i32` that holds every one, signed where a number is
   negative, as Rust stores the value of an enum without fields (section 4, an assumption there); `==`
@@ -1281,8 +1281,9 @@ round can ask about it by the rule's id.
   variable or parameter or on a path of data fields from one, with M4's order, the value before the key or the index; an index of a type
   other than an integer is `type-mismatch` (T2). Two names in a `for` loop over a list or a range are
   `type-mismatch` at the collection (C6, a proposal). A read of a map in the key of its own `Remove` is a
-  value of its own and holds nothing of the map, so whether `Add`'s exception holds for another `mut`
-  method, which the record leaves open (section 14), does not arise for a map's methods. A map that
+  value of its own and holds nothing of the map, so a map's methods need none of `Add`'s exception, which
+  every `mut` method that stores what its argument gave before it changes its receiver takes, `AddRange`
+  among them (M7). A map that
   holds a value without a text is `no-text` (A7).
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
