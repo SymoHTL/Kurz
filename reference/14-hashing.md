@@ -8,12 +8,12 @@ or of `message` under `key`, as `Bytes` in the order their standards write it: 3
 `Crc32.Hash(b)` gives the CRC-32/ISO-HDLC of the bytes, zlib's, as a `uint`, whose check value, of the
 bytes of `123456789`, is `0xCBF43926`. A key of HMAC takes any length: a key longer than the block of 64
 bytes is hashed first. A `string` is hashed through `s.Bytes`. The code of the four is Kurz in the
-standard library (§12, the owner, 2026-10-30, "In Kurz, as RustCrypto"; 2026-10-31, "`Sha256.Hash(b)`"
-and "`Bytes`, CRC32 a `uint`"). They need no grant and build for every target, Windows among them; their
+standard library (§12, the owner, 2026-10-30, "In Kurz, as RustCrypto"; 2026-10-31, "`Sha256.Hash(b)`",
+the option that named the four, and "`Bytes`, CRC32 a `uint`"). They need no grant and build for every target, Windows among them; their
 parameters are named `bytes`, `key` and `message`; and a block the system refuses for a digest or a
 state ends the process with `allocation-failed`, as a list's does (M9). Every file sees the names
 `Sha256`, `Md5`, `Crc32`, `Hmac`, `Hex` and `FixedTime`, and a file's own declaration of one, a type, a
-function or a variable, is `redeclared` (V9). *(assumed, §12: no grant, every target, the `string`
+function, a variable or a parameter at any level, is `redeclared` (V9), while a field takes the name. *(assumed, §12: no grant, every target, the `string`
 through `s.Bytes`, the names of the parameters, the refused block and the six names)*
 
 Case: [hashing/sha256.kz](../corpus/hashing/sha256.kz)
@@ -114,8 +114,8 @@ Case: [hashing/hmac.kz](../corpus/hashing/hmac.kz)
 message, and `h.Finish()` gives the digest of the message, as the hash of H1 gives it, a `uint` for a
 `Crc32` and `Bytes` for the others, and starts the hasher over, a hasher of `Hmac` under its key, so that
 a `Finish` with no `Update` before it gives the digest of no bytes (§12, the owner, 2026-10-31, "Yes, as
-Rust"). `Update` and `Finish` change the hasher, which a `mut` variable holds, or a path of fields from
-one, as the receiver of a list's `Add` (M5); another receiver is `mut-required`. *(assumed, §12:
+Rust"). `Update` and `Finish` change the hasher, so that their receiver is one a list's `Add` takes, a
+value reachable through a `mut` variable (M5); another receiver is `mut-required`. *(assumed, §12:
 `Hmac.NewSha256` and the type `Hmac`; the `mut` receiver)*
 
 Case: [hashing/pieces.kz](../corpus/hashing/pieces.kz)
@@ -178,7 +178,8 @@ Every call of a function of `Md5`, `Md5.Hash` and `Md5.New`, is the lint `md5-in
 call, in every build, which builds the program, written as the command writes an error, with `warning:`
 before the id, `app.kz:3: warning: md5-insecure: <text>` (§12, the owner, 2026-10-31, "A lint at each call"
 and "Warning, build goes on"). A line in `project.kz` silences the lint for its package; the form of that
-line stands open (§14). *(assumed, §12: the id, the form of the warning, and that the calls are those of
+line stands open (§14): a table of lint ids with a level, as Cargo's `[lints]`, or a list of the ids
+it silences; while it stands open, nothing silences the lint. *(assumed, §12: the id, the form of the warning, and that the calls are those of
 `Md5`'s functions, which a hasher's `Update` and `Finish` are not)*
 
 No case: a warning changes neither what a program prints nor whether it compiles, and a corpus header
@@ -188,7 +189,8 @@ cannot expect one (V12).
 
 A hasher is a value: a copy goes on from where the hasher stood, as a list's copy does (M3), and a change
 of one leaves the other as it was. The text of a hasher is the name of its type and nothing of its state,
-`Sha256`. `==` on two hashers is `type-mismatch`, as on two files. *(assumed, §12)*
+`Sha256`. `==` on two hashers is `type-mismatch`, as on two files, and so is `==` on a `data` value
+that holds one, as on one that holds a file (D3). *(assumed, §12)*
 
 Case: [hashing/hasher-copy.kz](../corpus/hashing/hasher-copy.kz)
 ```kurz
@@ -203,7 +205,7 @@ print(h)
 c = Crc32.New()
 m = Hmac.NewSha256("key".Bytes)
 print("{c} {m}")
-print([Md5.New()])
+print([Crc32.New()])
 ```
 
 Case: [hashing/hasher-equal.kz](../corpus/hashing/hasher-equal.kz)

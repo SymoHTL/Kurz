@@ -6,7 +6,9 @@ namespace Kurz.Compiler;
 /// names and the table keeps out: the id and the line are what a corpus case pins (E1, E2), and the
 /// message is free. <see cref="DiagnosticKind.NotSupported"/> names a construct the reference
 /// states and this compiler does not implement: it carries no id, so it can never pass for an error
-/// a case expects; a corpus case that gets one fails its theory, and nothing produces the kind. A <see cref="DiagnosticKind.Warning"/>
+/// a case expects. The checker gives it to a construct it does not read, and the emitter to one it does not lay out, a build for
+/// Windows to the calls on files and sockets and the reads of the command line, the environment and the clock among them (S11); a
+/// corpus case that gets one fails its theory unless the theory names the case or its rules lie outside the checker. A <see cref="DiagnosticKind.Warning"/>
 /// is a lint with its id, <c>md5-insecure</c> (H5), which builds the program (design record, section 12, "Warning, build goes on").
 /// </summary>
 public enum DiagnosticKind

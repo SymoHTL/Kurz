@@ -101,7 +101,8 @@ flowchart TD
         or another result;
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
         pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, red on
-        output, an exit code or an error line other than the header's, on a case
+        output, an exit code or an error line other than the header's (a warning builds the case and passes, as it
+        passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
         cases run than RunFloor in RunTests names for Linux and for Windows, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start

@@ -137,7 +137,9 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
             [(DiagnosticKind.Warning, "md5-insecure", 1), (DiagnosticKind.Warning, "md5-insecure", 5), (DiagnosticKind.Warning, "md5-insecure", 5), (DiagnosticKind.Warning, "md5-insecure", 10)],
             lints.Select(d => (d.Kind, d.Id, d.Line)));
         Assert.All(lints, d => Assert.False(d.IsError || d.IsNotSupported));
-        Assert.Matches(@"^program\.kz:1: warning: md5-insecure: .+ \(H5\)$", lints[0].At("program.kz"));
+        Assert.Equal(
+            "program.kz:1: warning: md5-insecure: two messages with one MD5 digest are made in seconds: a checksum may take it, a signature or a tag takes `Sha256` or `Hmac` (H5)",
+            lints[0].At("program.kz")); // no password: one is stored with a slow, salted function, which SHA-256 and HMAC are not
         Assert.Matches(@"^1: warning md5-insecure: .+ \(H5\)$", lints[0].ToString());
         Assert.Empty(Compile("print(Sha256.Hash(Bytes()).Count)\n", toolchain.Runtime).Diagnostics.Items);
     }
@@ -174,12 +176,53 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("int Hex(int n) => n\nprint(1)\n", "redeclared", 1)]
     [InlineData("int FixedTime = 1\nprint(FixedTime)\n", "redeclared", 1)]
     [InlineData("void Show(int Md5) {\n    print(Md5)\n}\n\nShow(1)\n", "redeclared", 1)]
+    [InlineData("void Show() {\n    int Hex = 1\n    print(Hex)\n}\n\nShow()\n", "redeclared", 2)] // at any level
+    [InlineData("data Holder(Sha256 Hasher)\n\na = Holder(Sha256.New())\nb = Holder(Sha256.New())\nprint(a == b)\n", "type-mismatch", 5)] // H6, D3
+    [InlineData("Bytes Change(mut Bytes k) {\n    k = \"x\".Bytes\n    return k\n}\n\nmut key = \"k\".Bytes\nprint(Hmac.Sha256(key, Change(mut key)))\n", "changed-while-held", 7)] // M7: the borrowed arguments of a hash
+    [InlineData("Bytes Change(mut Bytes k) {\n    k = \"x\".Bytes\n    return k\n}\n\nmut key = \"k\".Bytes\nprint(Hmac.VerifySha256(key, \"m\".Bytes, Change(mut key)))\n", "changed-while-held", 7)]
+    [InlineData("Bytes Change(mut Bytes k) {\n    k.Add(1)\n    return k\n}\n\nmut a = \"ab\".Bytes\nprint(FixedTime.Equal(a, Change(mut a)))\n", "changed-while-held", 7)]
+    [InlineData("data Holder(Sha256 Hasher)\n\nBytes Make(mut Holder h) {\n    h = Holder(Sha256.New())\n    return \"abc\".Bytes\n}\n\nmut holder = Holder(Sha256.New())\nholder.Hasher.Update(Make(mut holder))\n", "changed-while-held", 9)] // M7: the receiver's root
     [InlineData("mut h = Sha256.New()\nh = Md5.New()\nprint(h)\n", "type-mismatch", 2)] // H3: four types
     public void The_checker_holds_the_names_the_parameters_and_the_members_of_the_hashes(string text, string id, int line)
     {
         var compilation = Compile(text, toolchain.Runtime);
         Assert.Null(compilation.Program);
         Assert.Contains((id, line), compilation.Diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
+    }
+
+    [Fact]
+    public void A_field_takes_a_name_of_the_hashes_and_the_items_of_a_list_take_no_update_from_this_compiler()
+    {
+        // H1: a field is no declaration of a name every file sees; H3, M5: an item of a list is a receiver this compiler does not read,
+        // so that the bytes `Update` borrows are read before a place that runs no code (compiler/README.md)
+        var field = Compile("data Point(int Hex)\n\nprint(Point(1).Hex)\n", toolchain.Runtime);
+        Assert.True(field.Program is not null, string.Join("; ", field.Diagnostics.Sorted));
+        var item = Compile("mut hs = [Sha256.New()]\nhs[0].Update(\"abc\".Bytes)\nprint(hs)\n", toolchain.Runtime);
+        Assert.Null(item.Program);
+        var refused = Assert.Single(item.Diagnostics.Items);
+        Assert.Equal((DiagnosticKind.NotSupported, 2, "a `mut` method on an element of a list (M5, M9)"), (refused.Kind, refused.Line, refused.Message));
+        Assert.NotNull(Compile("mut h = Sha256.New()\nh.Update(\"abc\".Bytes)\nprint(h)\n", toolchain.Runtime).Program); // the positive control
+    }
+
+    [Fact]
+    public void An_empty_key_of_hmac_is_a_key_of_no_bytes()
+    {
+        // RFC 2104: K0 is the key padded with zeros to 64 bytes, all zeros for an empty key, whose block the standard library holds as null
+        const string text = """
+            print(Hex.Encode(Hmac.Sha256(Bytes(), "abc".Bytes)))
+            mut h = Hmac.NewSha256(Bytes())
+            h.Update("abc".Bytes)
+            print(Hex.Encode(h.Finish()))
+            print(Hmac.VerifySha256(Bytes(), "abc".Bytes, Hmac.Sha256(Bytes(), "abc".Bytes)))
+            print(Hmac.VerifySha256(Bytes(), "abd".Bytes, Hmac.Sha256(Bytes(), "abc".Bytes)))
+
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "hash-empty-key"));
+        Assert.Equal((0, ""), (code, error));
+        var tag = Convert.ToHexStringLower(HMACSHA256.HashData([], "abc"u8));
+        Assert.Equal([tag, tag, "true", "false"], output);
     }
 
     [Fact]

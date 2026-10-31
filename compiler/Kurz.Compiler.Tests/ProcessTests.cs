@@ -86,6 +86,21 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(["1"], call.Output);
         }
 
+        // `args` holds the words and not the program's name, which `Environment.Args()` checks too: the name is a link to the executable
+        // whose name is not UTF-8, which the setup starts in place of the shell
+        static string Named(string link) => $"ln -sf \"$0\" \"./{link}-$(printf 'x\\377')\" && exec \"./{link}-$(printf 'x\\377')\" ok; ";
+        if (Ran("print(args)\n", "argument-name-args", "", Named("argument-name-args")) is { } words)
+        {
+            Assert.Equal((0, ""), (words.Code, words.Error));
+            Assert.Equal(["[ok]"], words.Output);
+        }
+
+        if (Ran("print(1)\nall = Environment.Args()\nprint(all.Count)\n", "argument-name-all", "", Named("argument-name-all"), trace: null) is { } named)
+        {
+            Assert.Equal((1, "error: invalid-argument at program.kz:2\n  at main in program.kz:2\n"), (named.Code, named.Error));
+            Assert.Equal(["1"], named.Output);
+        }
+
         // a program that reads no argument does not look at them
         if (Ran("print(1)\n", "argument-unread", bad, reads: false) is { } unread)
         {
@@ -209,6 +224,21 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 File.Delete($"{low}-lower");
             }
         }
+    }
+
+    [Theory]
+    [InlineData("data EnvError(int Code)\nprint(1)\n")]
+    [InlineData("int EnvError = 1\nprint(EnvError)\n")]
+    [InlineData("enum EnvKind { Missing }\nprint(1)\n")]
+    [InlineData("data Environment(int Code)\nprint(1)\n")]
+    [InlineData("int Environment = 1\nprint(Environment)\n")]
+    public void A_files_own_type_or_variable_named_like_the_environment_is_redeclared(string text)
+    {
+        // S14, V9: the names every file sees, as a file's own `InvalidUtf8` (T15)
+        var refused = Compile(text, Builder.CheckRuntime(Target.Linux));
+        Assert.Null(refused.Program);
+        Assert.Equal(("redeclared", 1), (Assert.Single(refused.Diagnostics.Items).Id, Assert.Single(refused.Diagnostics.Items).Line));
+        Assert.NotNull(Compile(text.Replace("Env", "Own", StringComparison.Ordinal), Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 
     [Theory]

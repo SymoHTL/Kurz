@@ -3,7 +3,7 @@
 // | a52d159f262b2c6ddb724a61840befc36eb30c88877a4030b65cbe86298449c9
 // | Sha256
 // | Crc32 Hmac
-// | [Md5]
+// | [Crc32]
 // rules: H6
 
 mut h = Sha256.New()
@@ -17,4 +17,4 @@ print(h)
 c = Crc32.New()
 m = Hmac.NewSha256("key".Bytes)
 print("{c} {m}")
-print([Md5.New()])
+print([Crc32.New()])

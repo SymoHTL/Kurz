@@ -63,7 +63,7 @@ public sealed partial class Checker
                 lints[c] = Diagnostic.Warning(
                     LintIds.Md5Insecure,
                     c.Line,
-                    "two messages with one MD5 digest are made in seconds: a checksum may take it, a signature or a password takes `Sha256` or `Hmac` (H5)");
+                    "two messages with one MD5 digest are made in seconds: a checksum may take it, a signature or a tag takes `Sha256` or `Hmac` (H5)");
             }
         }
 
