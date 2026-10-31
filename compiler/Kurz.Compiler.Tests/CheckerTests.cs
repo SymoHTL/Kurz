@@ -150,6 +150,24 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_call_of_a_function_refused_as_redeclared_reports_nothing_more()
+    {
+        // E1 with V9: the declaration is the one error, as for a variable named so; the call's arguments are still checked, and a
+        // name another declaration has keeps that one's reading
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("int File() => 1\nprint(File())"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("int Sha256(int x) => x\nint y = Sha256(1, 2) + 1\nprint(y)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.UnknownName, 2)], Errors("int File(int x) => x\nprint(File(nothing))")); // the argument's own defect
+        Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.TypeMismatch, 3)], Errors("data User(int Id)\nint User() => 1\nprint(User(\"a\").Id)")); // the data type's construction
+        Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.TypeMismatch, 4)], Errors("static mut long total = 0\nlong total() => 1\nraw {\n    print(total())\n}", grants: "raw")); // the state's call (F11)
+        Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.Syntax, 3)], Errors("enum Color { Red }\nint Color() => 1\nprint(Color())")); // the enum's form (D18)
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int print() => 1\nprint()")); // `print`'s one value (A1)
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int List() => 1\nxs = List<int>(\"a\")\nprint(xs.Count)")); // M9
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int Map() => 1\nm = Map<int, int>(1)\nprint(m.Count)")); // M9
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int Bytes() => 1\nb = Bytes(1, 2)\nprint(b.Count)")); // M9
+        Assert.Equal([(ErrorIds.Redeclared, 5), (ErrorIds.TypeMismatch, 7)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nint abs(int n) => n\nraw {\n    print(abs(\"a\"))\n}", grants: "raw native")); // the C call's argument (R16)
+    }
+
+    [Fact]
     public void Args_given_a_value_among_the_top_level_statements_is_redeclared()
     {
         // S13 with V9: the checker's reading of the question S13 and section 14 of the record hold open, `assign-immutable` under V8 the

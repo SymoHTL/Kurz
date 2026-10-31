@@ -179,6 +179,13 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
+                    if (refused.Exists(f => f.Name == n.Name))
+                    {
+                        // E1: the declaration refused as `redeclared` is the one error (V9), and a call of it reports nothing more, as a read of a variable refused so
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
                     Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
                     CheckArgumentsLoosely(c);
                     return Typed.Error;

@@ -1345,6 +1345,10 @@ round can ask about it by the rule's id.
 - V9 with A1 and F6: a variable named `print`, or named as a function or a type of the file, is
   `redeclared`, since a function's and a type's name is visible in the whole file and so is
   `print`.
+- E1 with V9: a function named as a built-in (`int File() => 1`) is `redeclared`, and a call of it
+  reports nothing more, its arguments checked, as a read of a variable named so does; where a data
+  type, an enum, a C declaration or a state of the file has the name, or `print`, `List`, `Map` or
+  `Bytes` is it, the call keeps that one's reading and its errors.
 - S13 with V9: `args = value` among the top-level statements is `redeclared`, with a text that cites
   S13 and V9. It is one reading of the question S13 and section 14 of the record hold open, where V8's
   reading is `assign-immutable`, and no corpus case stands on it.
