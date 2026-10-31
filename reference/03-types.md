@@ -979,9 +979,27 @@ as an argument (§4, the owner, 2026-10-30, against the culture of the machine, 
 `string.Compare` takes it, and against no `<` on strings). *(assumed, §4: that `!=`, `<=`, `>` and
 `>=` follow `==` and `<`)*
 
-No case: the compiler's checker, which reads this chapter, reports `<` on two strings as
-`type-mismatch` (T18), so a case that prints its result fails the compiler's test of the corpus, and
-a case that expects that error states the opposite of this rule.
+Case: [types/string-order.kz](../corpus/types/string-order.kz)
+```kurz
+void Show(string a, string b) {
+    print("{a < b} {a <= b} {a > b} {a >= b}")
+}
+
+Show("", "a")
+Show("a", "ab")
+Show("ab", "b")
+Show("b", "b")
+Show("é", "z")
+Show("😀", "\uFFFF")
+Show("a\0", "a")
+```
+
+Case: [types/string-order-literals.kz](../corpus/types/string-order-literals.kz)
+```kurz
+print("\uFFFF" < "😀")
+print("z" < "é")
+print("b" > "b")
+```
 
 ### T17 (decided, §4) Generics
 

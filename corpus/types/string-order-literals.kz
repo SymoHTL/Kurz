@@ -1,0 +1,9 @@
+// expect: output
+// | true
+// | true
+// | false
+// rules: T32
+
+print("\uFFFF" < "😀")
+print("z" < "é")
+print("b" > "b")
