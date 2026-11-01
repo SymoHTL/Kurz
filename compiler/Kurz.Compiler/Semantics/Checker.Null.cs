@@ -301,9 +301,10 @@ public sealed partial class Checker
             var (whenTrue, whenFalse) = (ImmutableHashSet<NullPath>.Empty, ImmutableHashSet<NullPath>.Empty);
             if (condition is not null)
             {
+                var calls = callsRun;
                 CheckCondition(condition);
                 tested = frame.Known; // what the condition's `mut` arguments changed, while the head stays what a round comes back to
-                (whenTrue, whenFalse) = Tests(condition);
+                (whenTrue, whenFalse) = ConditionTests(condition, calls);
             }
 
             var exits = new LoopExits();

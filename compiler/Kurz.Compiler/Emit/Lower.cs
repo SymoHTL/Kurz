@@ -48,6 +48,7 @@ internal static class Lower
         UnionType u when Types.NonNull(u) is CFunctionType => "ptr", // R17: its `null` is the address 0 (Layout.Niche)
         UnionType u when Types.NonNull(u) is FunctionType => "%kz.fn", // N1: its `null` is the pair of no code and no environment (Layout.Niche)
         FunctionType => "%kz.fn",
+        WeakRefType => "ptr", // R3: the address of its target's block, its `null` the address 0
         TypeParameterType t => throw new InvalidOperationException($"the type parameter `{t}` was not substituted"),
         _ => throw new NotSupportedException(Refusal(type)),
     };

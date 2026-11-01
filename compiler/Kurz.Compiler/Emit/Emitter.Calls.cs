@@ -203,7 +203,7 @@ public sealed partial class Emitter
             {
                 var a = c.Arguments[i].Value;
                 var value = owned ? Owned(a) : EmitExpression(a);
-                values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line);
+                values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line, owned);
             }
         }
 
@@ -257,7 +257,7 @@ public sealed partial class Emitter
         unit = declaredIn;
         try
         {
-            return Convert(owned ? Owned(d) : EmitExpression(d), TypeOf(d), type, d.Line);
+            return Convert(owned ? Owned(d) : EmitExpression(d), TypeOf(d), type, d.Line, owned);
         }
         finally
         {

@@ -147,6 +147,7 @@ internal sealed class Layout(IrModule module)
                 DataType d when d.Symbol.IsGeneric && recursive.Contains(d.Symbol) => $"a generic data type that holds a value of its own type, `{d}` (D1, T19)",
                 DataType d when IsBlock(d) && Fields(d).Any(f => HoldsInstance(f, [])) => $"an instance of a class held by `{d}`, a data value laid out as a block, which is never freed (section 3, R3)",
                 ClassType c => c.Symbol.Fields.Select(f => Refusal(f.Type)).FirstOrDefault(r => r is not null),
+                WeakRefType w => Refusal(w.Target),
                 DataType d => Fields(d).Select(Refusal).FirstOrDefault(r => r is not null),
                 UnionType u => u.Cases.Where(c => c is not VoidType).Select(Refusal).FirstOrDefault(r => r is not null),
                 ListType l => Refusal(l.Element),
@@ -164,7 +165,7 @@ internal sealed class Layout(IrModule module)
     /// <summary>Whether a value of the type holds an instance of a class: the instance itself, or a field, a case, an item, a key or a value that does.</summary>
     private static bool HoldsInstance(KurzType type, HashSet<DataSymbol> seen) => type switch
     {
-        ClassType => true,
+        ClassType or WeakRefType => true,
         DataType d => seen.Add(d.Symbol) && Fields(d).Any(f => HoldsInstance(f, seen)),
         UnionType u => u.Cases.Any(c => HoldsInstance(c, seen)),
         ListType l => HoldsInstance(l.Element, seen),

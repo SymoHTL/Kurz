@@ -34,7 +34,7 @@ public sealed partial class Emitter
     /// <summary>Whether a value of the type holds the block of a list, of a map, of a string or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
@@ -208,6 +208,12 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is WeakRefType)
+        {
+            fn.Emit($"call void {RetainWeak()}(ptr {value})"); // R3
+            return;
+        }
+
         if (type is PrimitiveType { Kind: Primitive.String })
         {
             if (!IsLiteral(value))
@@ -246,6 +252,12 @@ public sealed partial class Emitter
         if (type is ClassType c)
         {
             fn.Emit($"call void {ReleaseInstance(c.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is WeakRefType w)
+        {
+            fn.Emit($"call void {ReleaseWeak(w.Target.Symbol)}(ptr {value})"); // R3
             return;
         }
 
@@ -2217,9 +2229,24 @@ public sealed partial class Emitter
         fn.CondBranch(fn.Value($"icmp slt i32 {i}, {count}"), body, exit);
         fn.Block(body);
         var wide = fn.Value($"sext i32 {i} to i64");
-        fn.Emit($"store {Ir(type.Element)} {fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {wide}")}")}, ptr {slot}");
+        var item = fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {wide}")}");
         loops.Push((exit, next, regions.Count, scopes.Count));
-        EmitBlock(f.Body);
+        if (type.Element is WeakRefType weak)
+        {
+            // R3: each round's variable is the item's read, a strong `T?` the round holds, let go of where the round ends or leaves
+            InScope(() =>
+            {
+                fn.Emit($"store ptr {Upgraded(item)}, ptr {slot}");
+                Declare(slot, Types.Read(weak));
+                EmitBlock(f.Body);
+            });
+        }
+        else
+        {
+            fn.Emit($"store {Ir(type.Element)} {item}, ptr {slot}");
+            EmitBlock(f.Body);
+        }
+
         loops.Pop();
         fn.Block(next);
         var again = fn.Value($"load i32, ptr {counter}");

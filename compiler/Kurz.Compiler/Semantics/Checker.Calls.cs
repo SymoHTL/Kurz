@@ -82,7 +82,7 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
-        EndChangeableNarrowing(); // N9: a call can assign a `mut` field through another reference (K2)
+        CallRan(); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
@@ -778,7 +778,7 @@ public sealed partial class Checker
 
         var key = Resolve(c.TypeArguments[0]);
         var value = Resolve(c.TypeArguments[1]);
-        if (Types.IsError(key) || Types.IsError(value))
+        if (Types.IsError(key) || Types.IsError(value) || WeakUnread(c.Line, "a key or a value of a map", key, value))
         {
             CheckArgumentsLoosely(c);
             return Typed.Error; // a type it cannot find comes first, as for `List<T>()` above, and nothing more (E1)
@@ -1075,7 +1075,14 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            candidate.Map = data.TypeParameters.Zip(c.TypeArguments.Select(Resolve)).ToDictionary(p => p.First, p => p.Second);
+            var written = c.TypeArguments.Select(Resolve).ToList();
+            if (WeakUnread(c.Line, "a type argument of a data type", [.. written]))
+            {
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            candidate.Map = data.TypeParameters.Zip(written).ToDictionary(p => p.First, p => p.Second);
         }
 
         var typed = Call([candidate], c, expected);
@@ -1726,6 +1733,12 @@ public sealed partial class Checker
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function, CallKind kind)
     {
         var typeArguments = c.TypeArguments.Select(Resolve).ToList(); // once: an error in one is one diagnostic, whatever the number of overloads (E1)
+        if (WeakUnread(c.Line, "a type argument of a function", [.. typeArguments]))
+        {
+            function = null;
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
