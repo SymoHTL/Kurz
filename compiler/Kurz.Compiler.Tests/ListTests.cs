@@ -2181,6 +2181,199 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[3]",
     ];
 
+    // instances of classes (chapter 7): a method that changes its fields by their names and through `this`, a second reference, a
+    // list and an instance read from fields while a method replaces them, also inside one interpolation, a nullable field, an
+    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, and a chain of 1000 links
+    // made and let go of, which the release frees off its work list
+    private const string Classes = """
+        class Counter(mut int Count, string Name) {
+            pub void Add(int n) {
+                Count = Count + n
+                this.Count = this.Count + 1
+            }
+
+            pub string Text() => "{Name}={Count}"
+        }
+
+        class Holder(mut List<string> Items, mut Counter? Current) {
+            pub void Replace() {
+                Items = List<string>()
+                Items.Add("new")
+                Current = null
+            }
+
+            pub int Size() => Items.Count
+        }
+
+        class Link(int V, Link? Next)
+
+        class Note(mut string Title, mut Map<string, int> Counts) {
+            pub void Reset() {
+                Title = "{Title}!"
+                Counts = Map<string, int>()
+            }
+
+            pub void Mark() {
+                Counts["m"] = 2
+            }
+        }
+
+        data Pair(Counter Left, int Right)
+
+        int Sum(Link? head) {
+            mut total = 0
+            mut cur = head
+            while cur != null {
+                total = total + cur.V
+                cur = cur.Next
+            }
+
+            return total
+        }
+
+        string Touch(Holder x) {
+            x.Replace()
+            return "t"
+        }
+
+        string Clear(Note n) {
+            n.Reset()
+            return "r"
+        }
+
+        c = Counter(0, "c")
+        c.Add(2)
+        print(c)
+        alias = c
+        alias.Count = 10
+        print(c.Count)
+        h = Holder(List<string>(), Counter(5, "k"))
+        h.Items.Add("a")
+        items = h.Items
+        kept = h.Current
+        h.Replace()
+        print(items)
+        print(h.Items)
+        print(h.Size())
+        print(kept?.Name ?? "gone")
+        print(h.Current?.Name ?? "gone")
+        h.Items.Add("b")
+        print("{h.Items} {Touch(h)} {h.Items}")
+        p = Pair(Counter(1, "p"), 2)
+        p.Left.Add(1)
+        print(p)
+        bump = () => c.Add(1)
+        bump()
+        bump()
+        print(c)
+        mut cs = List<Counter>()
+        cs.Add(Counter(1, "a"))
+        cs.Add(c)
+        cs[0].Add(1)
+        print(cs)
+        mut Link? links = null
+        for i in 0..<1000 {
+            links = Link(i, links)
+        }
+
+        print(Sum(links))
+        links = null
+        print(alias)
+        note = Note("{c.Count}n", Map<string, int>())
+        note.Counts["a"] = 1
+        print("{note.Title} {note.Counts} {Clear(note)} {note.Title} {note.Counts}")
+        note.Mark()
+        print(note.Counts)
+        """;
+
+    private static readonly string[] ClassesPrint =
+    [
+        "c=3",
+        "10", // K3: one instance through two references
+        "[a]", // the list the variable took a count of, which the field let go of
+        "[new]",
+        "1",
+        "k",
+        "gone",
+        "[new, b] t [new]", // the first hole took a count of the list the call replaced (K2)
+        "Pair { Left = p=3, Right = 2 }",
+        "c=14",
+        "[a=3, c=14]",
+        "499500",
+        "c=14",
+        "14n [a: 1] r 14n! []", // the string and the map the first holes took a count of, which the call replaced (K2)
+        "[m: 2]",
+    ];
+
+    // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
+    // over, a `return` and a `break` and a `continue` that leave a block, a call's result nothing holds, a `data` value's field, a
+    // lambda's environment and a list's item, each holding a chain of links
+    private const string ClassRounds = """
+        class Link(int V, Link? Next)
+
+        class Box(mut List<int> Xs, mut Link? Chain) {
+            pub void Fill(int n) {
+                for i in 0..<n {
+                    Xs.Add(i)
+                    Chain = Link(i, Chain)
+                }
+            }
+
+            pub int Count() => Xs.Count
+        }
+
+        data Pair(Box Left, int Right)
+
+        Box Make(int n) {
+            b = Box(List<int>(), null)
+            b.Fill(n)
+            return b
+        }
+
+        int Early(int n) {
+            b = Make(n)
+            if n > 0 {
+                return b.Count()
+            }
+
+            return 0
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(100)
+            a.Chain = Link(0, null)
+            p = Pair(Make(100), 1)
+            for j in 0..<3 {
+                c = Make(100)
+                if j == 1 {
+                    continue
+                }
+
+                total = total + c.Count()
+            }
+
+            for x in 0..<5 {
+                d = Make(100)
+                total = total + d.Count() - 100
+                if x == 2 {
+                    break
+                }
+            }
+
+            Make(100)
+            h = () => a.Count()
+            mut bs = List<Box>()
+            bs.Add(Make(100))
+            total = total + Early(100) + p.Left.Count() + h() + bs[0].Count() - 400
+        }
+
+        print(round)
+        print(total)
+        """;
+
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
     // of maps whose entry is written over, a map of strings whose value and key a write over a key lets go of, and entries kept, made
@@ -2665,10 +2858,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, fenced, "string-pieces-fenced"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
         Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
+        Ran(BuildAndRun(ClassRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "class-rounds-fenced"), 0, ["20", "4000"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -2734,6 +2929,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Rounds, Budget(), "list-rounds"), 0, ["3000", "12003000"], "");
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
         Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
+        Ran(BuildAndRun(ClassRounds, Budget(), "class-rounds"), 0, ["3000", "600000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -2752,6 +2948,28 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var full = BuildAndRun(maps, Budget(), "map-rounds-held");
         Assert.Equal(1, full.Code);
         Assert.StartsWith("error: allocation-failed (", full.Error, StringComparison.Ordinal);
+
+        // and the rounds' boxes, each with a chain of 1000 links, all held: about 100 megabytes
+        var boxes = BuildAndRun(ClassRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    all.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "class-rounds-held");
+        Assert.Equal(1, boxes.Code);
+        Assert.StartsWith("error: allocation-failed (", boxes.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_chain_of_a_million_instances_is_freed_off_the_work_list_where_a_recursive_walk_of_it_overflows_the_stack()
+    {
+        // section 3 with the owner's answer of 2026-11-01, "Iterative, never crashes": the last count of a link that a release lets go
+        // of waits on its class's work list, so no release calls itself once for each link
+        const string chain = "class Link(int V, Link? Next)\n\nLink? Build(int n) {\n    mut Link? head = null\n    for i in 0..<n {\n        head = Link(i, head)\n    }\n\n    return head\n}\n\nmut Link? all = Build(1000000)\nprint(all?.V ?? -1)\nall = null\nprint(\"freed\")\n";
+        Ran(BuildAndRun(chain, toolchain.Runtime, "class-chain-freed"), 0, ["999999", "freed"], "");
+
+        // the positive control: a function that walks the same chain by calling itself for each link ends with `stack-overflow`
+        var walked = BuildAndRun(chain.Replace("print(\"freed\")", "print(Depth(Build(1000000)))", StringComparison.Ordinal) + "\nint Depth(Link? l) {\n    if l == null {\n        return 0\n    }\n\n    return 1 + Depth(l.Next)\n}\n", toolchain.Runtime, "class-chain-walked");
+        Assert.NotEqual(0, walked.Code);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.StartsWith("error: stack-overflow", walked.Error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
+        }
     }
 
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
