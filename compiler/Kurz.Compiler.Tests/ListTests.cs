@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Text;
@@ -11,7 +12,8 @@ namespace Kurz.Compiler.Tests;
 /// a block nothing holds, which the allocator gives out again, and a lambda's environment as it frees a list's block (the owner,
 /// 2026-10-25, "Pair + heap env"), and a string's block, which a literal does not have (the owner, 2026-10-29, "Bit in the count"
 /// and "string.Allocate, take over"), no block is read after it is freed, the number `allocation-failed`
-/// reports past the limit and for a refused growth, and what the emitter says `not supported` to; what the checker refuses of a
+/// reports past the limit and for a refused growth, an integer's digits in every text that holds them, against what .NET writes (A2),
+/// and what the emitter says `not supported` to; what the checker refuses of a
 /// read beside a `mut` call (M7) the corpus pins.
 /// </summary>
 public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -322,7 +324,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // strings in variables, fields, a `with`, a path assignment, an arm's name while the arm changes the subject's variable, a
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
-    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block,
+    // parameters of a call, an interpolation, one of several texts in one block that a variable holds past its statement, one of no
+    // bytes, the empty string with no block, and a hole of it, integers whose digits the block takes in place, the text of a value
+    // laid out as a block, literals, a string made in a `raw` block,
     // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
     // nullable variable known not null, an `Add` through the place of one, the item `?[` reads, a list without items in a nullable
     // variable, a `match` with a `null` arm on one whose arm changes it, a nullable parameter read in the arm of its case and after
@@ -334,6 +338,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         data Leaf
         data Node(string Label, Node | Leaf Next)
         data Contact(string? Email)
+        data Reading(long Low, ulong High, List<int> Xs, double D)
 
         string Same(string s) => s
 
@@ -449,6 +454,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Show(Made(15), Same(Made(16)))
         e = ""
         print("{Made(17)}{e}{Made(18)}")
+        joined = "<{Made(40)}|{e}|{Made(41)}>"
+        blank = "{e}{e}"
+        print("{joined}{blank}[{blank}]")
+        raw {
+            print(blank.Pointer == "".Pointer)
+        }
+        long smallest = -9223372036854775807 - 1
+        ulong largest = 18446744073709551615
+        print("{smallest}|{largest}|{byte(255)}|{-7}|{0}:{Made(42)}")
+        print(Reading(smallest, largest, [-1, 22], 2.5))
         node = Node(Made(19), Node(Made(20), Leaf))
         print(node)
         print(Raw(1))
@@ -548,6 +563,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "n15",
         "n16",
         "n17n18",
+        "<n40||n41>[]", // texts in one block, which the variable takes over from the statement, and the empty string as a hole
+        "true", // pieces of no bytes together are the empty string, the constant of no bytes, with no block
+        "-9223372036854775808|18446744073709551615|255|-7|0:n42", // digits written in the block, a `-` before a negative number's
+        "Reading { Low = -9223372036854775808, High = 18446744073709551615, Xs = [-1, 22], D = 2.5 }", // a value's text in one block
         "Node { Label = n19, Next = Node { Label = n20, Next = Leaf } }", // strings a value laid out as a block holds
         "1!",
         "2",
@@ -587,6 +606,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // them, which shares their block, and a part of them; each other string of 1024 bytes, joined from halves the join lets go of
     private const string StringRounds = """
         data Pair(string A, int B)
+        data Wrap(Pair P, List<int> Xs)
 
         string Make(int n) {
             mut s = "x"
@@ -608,11 +628,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         void Drop(int n) => Make(n)
 
+        mut big = List<int>()
+        for n in 0..<1000 {
+            big.Add(n)
+        }
+
         mut round = 0
         mut total = 0
         while round < 3000 {
             round = round + 1
             a = Make(10)
+            w = Wrap(Pair("a", 1), big)
+            wrapped = "{w}"
             mut b = a
             b = "{b}!"
             p = Pair(Make(10), 1)
@@ -641,7 +668,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             bb = Make(12).Bytes
             tt = string.FromUtf8Lossy(bb)
             pp = bb[0..<4000]
-            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096 + bb.Count - 4096 + tt.Bytes.Count - 4096 + pp.Count - 4000
+            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096 + bb.Count - 4096 + tt.Bytes.Count - 4096 + pp.Count - 4000 + wrapped.Bytes.Count - 4931
         }
         print(round)
         print(total)
@@ -2442,6 +2469,72 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void An_integer_shows_the_digits_dotnet_writes_in_a_print_a_hole_a_list_and_a_data_value()
+    {
+        // both signs of every length, each side of each power of ten, the ends of the range, and a xorshift sequence whose groups of
+        // four and of two digits take every pair of the runtime's table
+        var longs = new List<long> { long.MinValue, long.MaxValue, 0 };
+        for (var p = 1L; ; p *= 10)
+        {
+            longs.AddRange([p - 1, p, p + 1, -p, 1 - p, p * 9]);
+            if (p > long.MaxValue / 10)
+            {
+                break;
+            }
+        }
+
+        var ulongs = new List<ulong> { ulong.MaxValue, 0 };
+        for (var p = 1UL; ; p *= 10)
+        {
+            ulongs.AddRange([p - 1, p, p + 1]);
+            if (p <= ulong.MaxValue / 9)
+            {
+                ulongs.Add(p * 9);
+            }
+
+            if (p > ulong.MaxValue / 10)
+            {
+                break;
+            }
+        }
+
+        var x = 88172645463325252UL;
+        for (var i = 0; i < 400; i++)
+        {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            longs.Add((long)x >> (int)(x % 61));
+            ulongs.Add(x >> (int)(x % 61));
+        }
+
+        static string Literal(long v) => v == long.MinValue ? "-9223372036854775807 - 1" : v.ToString(CultureInfo.InvariantCulture);
+        var text = $$"""
+            data Pair(long L, ulong U)
+
+            List<long> ls = [{{string.Join(", ", longs.Select(Literal))}}]
+            List<ulong> us = [{{string.Join(", ", ulongs.Select(u => u.ToString(CultureInfo.InvariantCulture)))}}]
+            for v in ls {
+                print(v)
+                print("<{v}>")
+                print([v])
+                print(Pair(v, 0))
+            }
+            for u in us {
+                print(u)
+                print("<{u}>")
+                print([u])
+                print(Pair(0, u))
+            }
+            """;
+        string[] Shown(string digits, string pair) => [digits, $"<{digits}>", $"[{digits}]", $"Pair {{ {pair} }}"];
+        var lines = longs.SelectMany(v => Shown(v.ToString(CultureInfo.InvariantCulture), $"L = {v.ToString(CultureInfo.InvariantCulture)}, U = 0"))
+            .Concat(ulongs.SelectMany(u => Shown(u.ToString(CultureInfo.InvariantCulture), $"L = 0, U = {u.ToString(CultureInfo.InvariantCulture)}")))
+            .ToArray();
+        Ran(BuildAndRun(text, toolchain.Runtime, "integer-texts"), 0, lines, "");
+    }
+
+    [Fact]
     public void No_block_is_read_or_written_after_it_is_freed()
     {
         var fenced = Fenced;
@@ -2832,6 +2925,201 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void FromUtf8_finds_the_first_sequence_that_is_not_UTF_8_wherever_it_stands_among_the_words_its_ASCII_skip_reads()
+    {
+        // T15: the runtime reads the first 16 bytes of a run of ASCII byte by byte and skips the rest as Rust 1.82's
+        // `run_utf8_validation` does, two words of 8 bytes at a time from an address that is a multiple of 8, then byte by byte.
+        // Each case is 0 to 7 bytes of ASCII and a letter of two bytes, which put the run that follows at every distance from such
+        // an address, a run of 0 to 63 bytes of ASCII, then a byte that begins no sequence (128, 255), a sequence cut short at the
+        // end, a letter of three bytes, or nothing, and 20 bytes of ASCII after the first two and the letter: so the first byte of
+        // 128 or more stands among the first 16 bytes, in the first word of a pair, in the second, past the last pair and among the
+        // bytes read one at a time after it. What each case gives is what .NET's decoder reads of the same bytes, the count of the
+        // bytes in front of the first sequence it cannot read, which is Rust's `valid_up_to`.
+        static string Valid(byte[] bytes) =>
+            System.Text.Unicode.Utf8.ToUtf16(bytes, new char[bytes.Length], out var read, out _, replaceInvalidSequences: false)
+                == System.Buffers.OperationStatus.Done
+                ? "ok"
+                : read.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        // the positive control: the decoder reads as Rust 1.82's `str::from_utf8` read these on 2026-10-29 (the table above)
+        Assert.Equal("1", Valid([0x61, 0xE2, 0x82, 0x61]));
+        Assert.Equal("2", Valid([0x68, 0x69, 0xC3, 0x28, 0x21]));
+        Assert.Equal("5", Valid([0xE2, 0x82, 0xAC, 0xC3, 0xA4, 0x80, 0xBF, 0x7A]));
+        Assert.Equal("0", Valid([0xED, 0xA0, 0x80]));
+        Assert.Equal("0", Valid([0xF0, 0x90, 0x80]));
+        Assert.Equal("ok", Valid([0xF4, 0x8F, 0xBF, 0xBF]));
+
+        byte[][] ends = [[128], [255], [226, 130], [226, 130, 172], []];
+        var lines = new List<string>();
+        for (var lead = 0; lead < 8; lead++)
+        {
+            for (var run = 0; run < 64; run++)
+            {
+                foreach (var end in ends)
+                {
+                    byte[] after = end.Length is 1 or 3 ? [.. Enumerable.Repeat((byte)67, 20)] : [];
+                    lines.Add(Valid([.. Enumerable.Repeat((byte)65, lead), 195, 169, .. Enumerable.Repeat((byte)66, run), .. end, .. after]));
+                }
+            }
+        }
+
+        // the floor: 2560 cases, of which the 1536 that end in a byte that begins no sequence or in a cut one give the error
+        Assert.Equal(2560, lines.Count);
+        Assert.Equal(1024, lines.Count(l => l == "ok"));
+
+        const string text = """
+            void Show(Bytes b) {
+                match string.FromUtf8(b) {
+                    InvalidUtf8 e => print(e.At)
+                    else => print("ok")
+                }
+            }
+
+            for lead in 0..<8 {
+                for run in 0..<64 {
+                    for end in 0..<5 {
+                        mut b = Bytes()
+                        for i in 0..<lead {
+                            b.Add(65)
+                        }
+
+                        b.Add(195)
+                        b.Add(169)
+                        for j in 0..<run {
+                            b.Add(66)
+                        }
+
+                        if end == 0 {
+                            b.Add(128)
+                        } else if end == 1 {
+                            b.Add(255)
+                        } else if end == 2 {
+                            b.Add(226)
+                            b.Add(130)
+                        } else if end == 3 {
+                            b.Add(226)
+                            b.Add(130)
+                            b.Add(172)
+                        }
+
+                        if end == 0 || end == 1 || end == 3 {
+                            for k in 0..<20 {
+                                b.Add(67)
+                            }
+                        }
+
+                        Show(b)
+                    }
+                }
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "utf8-words"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "utf8-words-fenced"), 0, [.. lines], "");
+
+        // no pair of words is read past the bytes: under the fence a part of 4064 bytes is a block that ends where its page ends,
+        // the system maps it right below the block made before it (on Linux), which the fence makes inaccessible when it is freed,
+        // and after the letter of two bytes and 16 bytes of ASCII the words start 8 bytes past an address that is a multiple of 16,
+        // so that a pair read where fewer than 16 bytes are left reads into the freed page
+        const string edge = """
+            mut source = Bytes()
+            source.Add(195)
+            source.Add(169)
+            while source.Count < 4064 {
+                source.Add(65)
+            }
+
+            mut freed = source[0..<4064]
+            held = source[0..<4064]
+            freed = Bytes()
+            print(freed.Count)
+            match string.FromUtf8(held) {
+                string s => print(s.Bytes.Count)
+                InvalidUtf8 e => print(e.At)
+            }
+
+            """;
+        Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    /// <summary>
+    /// The runtime of this machine's target whose <c>Utf8Invalid</c> ends the process with the exit code 70 where it would read a
+    /// word at an address that is no multiple of 8. The read through a pointer is emitted with no alignment written, which LLVM's
+    /// language reference reads as the ABI alignment of the type ("An omitted `align` argument means that the operation has the
+    /// ABI alignment for the target", LLVM 23, the `load` instruction), 8 for a <c>ulong</c>, and "Overestimating the alignment
+    /// results in undefined behavior"; a word read at any address reads right on x86-64, so only such a check shows one.
+    /// </summary>
+    private static CheckedRuntime WordsAligned => Edited(("runtime/common/runtime.kz", "                            ulong u = *Ptr<ulong>(bytes + at)\n", """
+                                    if (long(bytes + at) & 7) != 0 {
+                                        WriteError("error: a word read at an address that is no multiple of 8\n")
+                                        sys.Exit(70)
+                                    }
+
+                                    ulong u = *Ptr<ulong>(bytes + at)
+
+        """));
+
+    [Fact]
+    public void FromUtf8_reads_a_word_only_at_an_address_that_is_a_multiple_of_8()
+    {
+        // T15: the letters of two, three and four bytes stand at every position from 0 to 15, each followed by a run of 1 to 40 bytes
+        // of ASCII, so that the walk finds its address that is a multiple of 8 again after each letter; the runtime that ends the
+        // process at a word read anywhere else (<see cref="WordsAligned"/>) prints what the runtime does, the positive control
+        var lines = new List<string>();
+        for (var lead = 0; lead < 16; lead++)
+        {
+            for (var run = 1; run <= 40; run++)
+            {
+                lines.Add((lead + 9 + 3 * run).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+
+        Assert.Equal(640, lines.Count);
+        const string text = """
+            long Count(Bytes b) {
+                match string.FromUtf8(b) {
+                    string s => return s.Bytes.Count
+                    InvalidUtf8 => return -1
+                }
+            }
+
+            for lead in 0..<16 {
+                for run in 1..40 {
+                    mut b = Bytes()
+                    for i in 0..<lead {
+                        b.Add(65)
+                    }
+
+                    for k in 0..<3 {
+                        if k == 0 {
+                            b.Add(195)
+                            b.Add(169)
+                        } else if k == 1 {
+                            b.Add(226)
+                            b.Add(130)
+                            b.Add(172)
+                        } else {
+                            b.Add(240)
+                            b.Add(159)
+                            b.Add(152)
+                            b.Add(128)
+                        }
+
+                        for j in 0..<run {
+                            b.Add(66)
+                        }
+                    }
+
+                    print(Count(b))
+                }
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "utf8-aligned-plain"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, WordsAligned, "utf8-aligned"), 0, [.. lines], "");
+    }
+
+    [Fact]
     public void A_list_takes_over_the_room_Allocate_gave_and_shows_its_memory_in_raw()
     {
         // R15 (section 3, the owner, 2026-10-29, "List.Allocate, take over"): the list holds the room `Allocate` gave and grows from it;
@@ -2984,6 +3272,47 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal((0, ""), (second.Code, second.Error));
         Assert.NotEqual(first.Output, second.Output);
         Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first.Output).Trim('[', ']').Split(", ").Order());
+    }
+
+    [Fact]
+    public void A_key_of_every_count_of_bytes_from_0_to_24_has_the_SipHash_1_3_of_the_reference()
+    {
+        // SipHash13 reads each whole word of 8 bytes in one read and the bytes after the last one four, two and one at a time, as Rust's
+        // SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes (i * 37 + 200) % 256, half of them 128 or more, of every count
+        // from 0 to 24, under keys of 0 and under the reference implementation's keys, against SipHash-1-3 in Python, which gives
+        // CPython's `hash` of the same bytes under keys of 0 (`PYTHONHASHSEED=0`) and the three vectors of the test above
+        ulong[] zero =
+        [
+            15130871412783076140UL, 12449551661063549815UL, 18410336655117930453UL, 14036337907613256389UL, 8188850183964244334UL,
+            3177195191231020720UL, 11112996053577049341UL, 12494225358345731408UL, 3712373850883526462UL, 12892607951876773325UL,
+            12632183819240295938UL, 2608151670788947609UL, 15991896908241025576UL, 3217457963781418757UL, 5175628169687003164UL,
+            324940683844405139UL, 4078673874090109879UL, 15226221049046578814UL, 11307112605383110513UL, 9713625952335163347UL,
+            15212928445191759854UL, 10622023044703524569UL, 13280180098544721076UL, 4160088133271530178UL, 14255749407410980665UL,
+        ];
+        ulong[] reference =
+        [
+            12370263754033579228UL, 7382509910418742475UL, 2494721049683813306UL, 11620750396190661065UL, 5010687366671536750UL,
+            14218513396531960822UL, 11621134531688062575UL, 17244704406219703104UL, 12416751392242888934UL, 421987831323517835UL,
+            10723776196378657725UL, 13352898446040941761UL, 6124211783992107166UL, 18243523408008742371UL, 119414829251180199UL,
+            5538372403305982465UL, 1478129454238627121UL, 2867072306180843416UL, 1984877967642593061UL, 8806513419543075307UL,
+            16461867054457208225UL, 6477134911588130379UL, 7484306140281614234UL, 7636386497915317409UL, 11166856279661420457UL,
+        ];
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
+        const string hash = "    byte* p = Allocate(24)\n    raw {\n        for i in 0..<24 {\n            p[i] = byte((i * 37 + 200) % 256)\n        }\n    }\n    for n in 0..<25 {\n        WriteNumber(std.SipHash13(0, 0, p, long(n)))\n        WriteError(\" \")\n        WriteNumber(std.SipHash13(506097522914230528UL, 1084818905618843912UL, p, long(n)))\n        WriteError(\"\\n\")\n    }\n";
+        var runtime = Edited(("std/std.kz", "\nulong SipHash13(", "\npub ulong SipHash13("), ("runtime/common/runtime.kz", start, start + hash));
+        var expected = string.Concat(zero.Zip(reference, (z, r) => $"{z} {r}\n"));
+        Ran(BuildAndRun("print(1)\n", runtime, "map-siphash-counts"), 0, ["1"], expected);
+    }
+
+    [Fact]
+    public void Two_strings_are_equal_where_every_byte_is_compared_a_word_at_a_time_and_the_bytes_after()
+    {
+        // T18: the runtime's `Same` compares 8 bytes at a time and the bytes after the last 8 one at a time: a string of every count from 0
+        // to 20 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
+        // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
+        // byte 128 or more, against one letter changed at each place, which changes its second byte alone
+        const string text = "s = \"abcdefghijklmnopqrst\"\nmut long n = 0\nfor count in 0..<21 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["21000", "21000"], "");
     }
 
     [Theory]

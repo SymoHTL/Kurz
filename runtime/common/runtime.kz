@@ -210,27 +210,22 @@ pub void NotCharBoundary(long at, string file, int line) {
     sys.Exit(1)
 }
 
-// The text of a signed integer (A2): its decimal digits, with a leading `-` when it is negative.
+// The text of a signed integer (A2): its decimal digits, with a leading `-` when it is negative, in
+// one block, as Rust's `Display` writes the sign and the digits into one `String`.
 pub string TextOfLong(long value) {
     if value >= 0 {
         return TextOfULong(ulong(value))
     }
 
-    // the magnitude of the smallest `long` is no `long`: the digits of -(value + 1), plus one
-    string digits = TextOfULong(ulong(-(value + 1)) + 1)
-    long count = long(digits.Bytes.Count)
+    // the magnitude of the smallest `long` is no `long`: that of value + 1, plus one
+    ulong magnitude = ulong(-(value + 1)) + 1
+    long count = DigitCount(magnitude) + 1
     mut string text = ""
     raw {
-        byte* p = string.Allocate(count + 1)
-        byte* from = digits.Pointer
+        byte* p = string.Allocate(count)
         p[0] = 45
-        mut long i = 0
-        while i < count {
-            p[i + 1] = from[i]
-            i = i + 1
-        }
-
-        text = string.FromRaw(p, count + 1)
+        WriteDigits(p + 1, magnitude, int(count - 1))
+        text = string.FromRaw(p, count)
     }
 
     return text
@@ -238,24 +233,11 @@ pub string TextOfLong(long value) {
 
 // The text of an unsigned integer (A2): its decimal digits.
 pub string TextOfULong(ulong value) {
-    mut long count = 1
-    mut ulong rest = value / 10
-    while rest > 0 {
-        count = count + 1
-        rest = rest / 10
-    }
-
+    long count = DigitCount(value)
     mut string text = ""
     raw {
         byte* p = string.Allocate(count)
-        mut ulong v = value
-        mut long i = count - 1
-        while i >= 0 {
-            p[i] = byte(v % 10 + 48)
-            v = v / 10
-            i = i - 1
-        }
-
+        WriteDigits(p, value, int(count))
         text = string.FromRaw(p, count)
     }
 
@@ -341,46 +323,6 @@ pub string TextOfFloat(uint bits) {
     return DecimalText(negative, digits, power, 9)
 }
 
-// Two strings joined (T15): the bytes of the first, then those of the second; more bytes than the
-// largest `int` end the process as a refused allocation does.
-pub string Concat(string first, string second) {
-    long a = long(first.Bytes.Count)
-    long b = long(second.Bytes.Count)
-    if b == 0 {
-        return first
-    }
-
-    if a == 0 {
-        return second
-    }
-
-    if a + b > 2147483647 {
-        AllocationFailed(a + b)
-    }
-
-    mut string text = ""
-    raw {
-        byte* p = string.Allocate(a + b)
-        byte* x = first.Pointer
-        byte* y = second.Pointer
-        mut long i = 0
-        while i < a {
-            p[i] = x[i]
-            i = i + 1
-        }
-
-        i = 0
-        while i < b {
-            p[a + i] = y[i]
-            i = i + 1
-        }
-
-        text = string.FromRaw(p, a + b)
-    }
-
-    return text
-}
-
 // The text of a list (A4): the texts of its `count` items, one or more, which `texts` holds as a
 // string is laid out, the address of its bytes and their count, 8 bytes each, the count's highest bit
 // the mark of a string that holds a block (`std/std.kz`), between `[` and `]` and with `, ` between
@@ -431,7 +373,8 @@ pub string ListText(byte* texts, long count) {
     return text
 }
 
-// Whether two strings hold the same bytes (T18).
+// Whether two strings hold the same bytes (T18): 8 at a time, then the bytes after the last 8 one at a
+// time, where Rust's `==` of two slices of bytes compares them in one `compare_bytes`, LLVM's `memcmp`.
 pub bool Same(string first, string second) {
     long a = long(first.Bytes.Count)
     if a != long(second.Bytes.Count) {
@@ -443,6 +386,14 @@ pub bool Same(string first, string second) {
         byte* x = first.Pointer
         byte* y = second.Pointer
         mut long i = 0
+        while i + 8 <= a && same {
+            if std.WordAt(x + i) != std.WordAt(y + i) {
+                same = false
+            }
+
+            i = i + 8
+        }
+
         while i < a && same {
             if x[i] != y[i] {
                 same = false
@@ -552,8 +503,15 @@ long Utf8Sequence(byte* bytes, long count, long at) {
 
 // The count of the bytes in front of the first sequence of the `count` bytes at `bytes` that is not
 // UTF-8, as Rust's `Utf8Error::valid_up_to` counts them, and -1 where every sequence is UTF-8: what
-// `string.FromUtf8` puts into `InvalidUtf8` (T15; the owner, 2026-10-29, "Union, as Rust").
+// `string.FromUtf8` puts into `InvalidUtf8` (T15; the owner, 2026-10-29, "Union, as Rust"). Every
+// sequence is read through `Utf8Sequence`, and the first 16 bytes of a run of ASCII byte by byte; a
+// longer run is skipped as Rust 1.82's `run_utf8_validation` skips one: byte by byte up to an address
+// that is a multiple of 8, from there two words of 8 bytes at a time while both lie inside the bytes and
+// neither holds a byte of 128 or more, then byte by byte up to the first byte of 128 or more. A word is
+// read only at a multiple of 8, since the read through a pointer is emitted with no alignment written,
+// which LLVM's language reference reads as the ABI alignment of the type, 8 for a `ulong`.
 pub long Utf8Invalid(byte* bytes, long count) {
+    long blocksEnd = count - 15
     mut long at = 0
     while at < count {
         long n = Utf8Sequence(bytes, count, at)
@@ -562,6 +520,40 @@ pub long Utf8Invalid(byte* bytes, long count) {
         }
 
         at = at + n
+        if n == 1 {
+            mut long limit = at + 15
+            if limit > count {
+                limit = count
+            }
+
+            raw {
+                while at < limit && bytes[at] < 128 {
+                    at = at + 1
+                }
+
+                if at == limit {
+                    while at < count && bytes[at] < 128 && (long(bytes + at) & 7) != 0 {
+                        at = at + 1
+                    }
+
+                    if (long(bytes + at) & 7) == 0 {
+                        while at < blocksEnd {
+                            ulong u = *Ptr<ulong>(bytes + at)
+                            ulong v = *Ptr<ulong>(bytes + at + 8)
+                            if ((u | v) & 0x8080808080808080UL) != 0 {
+                                break
+                            }
+
+                            at = at + 16
+                        }
+                    }
+
+                    while at < count && bytes[at] < 128 {
+                        at = at + 1
+                    }
+                }
+            }
+        }
     }
 
     return -1
@@ -796,15 +788,36 @@ string DecimalText(bool negative, ulong digits, int power, int precision) {
     return text
 }
 
-// The `count` decimal digits of `value` at `p`, the last one at `p + count - 1`.
-void WriteDigits(byte* p, ulong value, int count) {
+// The `count` decimal digits of `value` at `p`, the last one at `p + count - 1`, which an interpolation
+// writes an integer's digits into its block with (L6): four at a time and then two from the table of
+// the pairs 00 to 99, as Rust's `Display` of an integer writes them, and the first alone.
+pub void WriteDigits(byte* p, ulong value, int count) {
     mut ulong v = value
-    mut long i = long(count) - 1
+    mut long i = long(count)
     raw {
-        while i >= 0 {
-            p[i] = byte(v % 10 + 48)
-            v = v / 10
-            i = i - 1
+        byte* pairs = "00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899".Pointer
+        while i >= 4 {
+            ulong four = v % 10000
+            v = v / 10000
+            long high = long(four / 100) * 2
+            long low = long(four % 100) * 2
+            p[i - 4] = pairs[high]
+            p[i - 3] = pairs[high + 1]
+            p[i - 2] = pairs[low]
+            p[i - 1] = pairs[low + 1]
+            i = i - 4
+        }
+
+        if i >= 2 {
+            long two = long(v % 100) * 2
+            v = v / 100
+            p[i - 2] = pairs[two]
+            p[i - 1] = pairs[two + 1]
+            i = i - 2
+        }
+
+        if i == 1 {
+            p[0] = byte(v % 10 + 48)
         }
     }
 }
@@ -2208,16 +2221,26 @@ int Bits(ulong value) {
     return n + int(v)
 }
 
-// The count of decimal digits of a number, 1 for 0.
-long DigitCount(ulong value) {
+// The count of decimal digits of a number, 1 for 0, which an interpolation counts an integer's with (L6),
+// as Rust's `ilog10` counts them: ten digits and five at a time, then the last five from the bits that
+// four sums set above the 17th, as its `less_than_5` reads them.
+pub long DigitCount(ulong value) {
+    mut ulong v = value
     mut long count = 1
-    mut ulong rest = value / 10
-    while rest > 0 {
-        count = count + 1
-        rest = rest / 10
+    if v >= 10000000000 {
+        v = v / 10000000000
+        count = count + 10
     }
 
-    return count
+    if v >= 100000 {
+        v = v / 100000
+        count = count + 5
+    }
+
+    // each sum reaches the bits above the 17th by whether `v` reaches 10, 100, 1000 and 10000
+    ulong tens = (v + 393206) & (v + 524188)
+    ulong thousands = (v + 916504) & (v + 514288)
+    return count + long((tens ^ thousands) >> 17)
 }
 
 // Ten to the n, n from 0 to 19.

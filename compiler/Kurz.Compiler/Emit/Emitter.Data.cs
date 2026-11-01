@@ -558,7 +558,7 @@ public sealed partial class Emitter
         return fn.Value($"load {Ir(union)}, ptr {slot}");
     }
 
-    /// <summary>A3: `Name { Field = text, ... }`, or the name alone for a type without fields; the texts it joined on the way are let go of.</summary>
+    /// <summary>A3: `Name { Field = text, ... }`, or the name alone for a type without fields, its pieces in one block (<see cref="Joined"/>).</summary>
     private string RecordText(DataType type, List<string> values, int line)
     {
         var fields = type.Symbol.Fields;
@@ -567,27 +567,31 @@ public sealed partial class Emitter
             return StringValue(type.Symbol.Name);
         }
 
-        var text = StringValue($"{type.Symbol.Name} {{ ");
+        var pieces = new List<InterpolationPiece>();
         var types = Layout.Fields(type);
         for (var i = 0; i < fields.Count; i++)
         {
-            text = Joined(text, StringValue($"{(i == 0 ? string.Empty : ", ")}{fields[i].Name} = "));
-            var piece = TextOf(values[i], types[i], line);
-            text = Joined(text, piece);
-            if (MakesText(types[i]))
-            {
-                Release(piece, Types.String);
-            }
+            var before = i == 0 ? $"{type.Symbol.Name} {{ " : ", ";
+            pieces.Add(LiteralPiece($"{before}{fields[i].Name} = "));
+            pieces.Add(PieceOf(values[i], types[i], line));
         }
 
-        return Joined(text, StringValue(" }"));
+        pieces.Add(LiteralPiece(" }"));
+        return Joined(pieces);
     }
 
-    /// <summary>The runtime's <c>Concat</c> of the two texts, after which the first, a text the caller held, is let go of.</summary>
-    private string Joined(string first, string second)
+    /// <summary>
+    /// The pieces in one block (<see cref="InOneBlock"/>), as Rust's <c>Debug</c> writes a value's parts into one <c>String</c>, after
+    /// which each text of them the caller held is let go of.
+    /// </summary>
+    private string Joined(List<InterpolationPiece> pieces)
     {
-        var joined = fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {first}, %kz.str {second})");
-        Release(first, Types.String);
+        var joined = InOneBlock(pieces);
+        foreach (var piece in pieces.Where(p => p.Held))
+        {
+            Release(piece.Value, Types.String);
+        }
+
         return joined;
     }
 
