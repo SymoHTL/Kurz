@@ -955,7 +955,9 @@ types `Vector128<T>` and `Vector256<T>` hold the lanes, and each class has `IsSu
 the CPU for its set (§13, the owner, 2026-11-01, "C#'s shape"). The classes and their functions take
 C#'s names, the class of x86's SHA set is `X86.Sha`, and the operations of `Vector128<T>` and
 `Vector256<T>` on their lanes, `Vector128.Create(1, 2, 3, 4)` and `v.GetElement(2)`, are no
-intrinsics and need no test *(assumed: as §13 marks them)*.
+intrinsics and need no test *(assumed: as §13 marks them)*. The functions of `X86.Sha` are the seven
+of .NET's closed proposal, `Sha256TwoRounds` among them, on `Vector128<uint>` (§13, the owner,
+2026-11-01, "Proposal names, uint lanes").
 
 An intrinsic stands where a test of its class's `IsSupported` guards it, as a test narrows a
 nullable variable (N3), and in a `raw` block (R7) (§13, the owner, 2026-11-01, "Checker narrows"):
@@ -966,9 +968,11 @@ is guarded; a test of a class guards the intrinsics of the classes C# derives it
 `X86.Avx2.IsSupported` those of `X86.Sse41`, while the `else` block of `if X86.Sse41.IsSupported { }`
 and a test of another class guard nothing *(assumed: as §13 marks them)*. Anywhere else an intrinsic is the compile error
 `intrinsic-unguarded` *(proposed: the id)*. The compiler compiles a guarded block as a function of
-its own for the sets its tests name, and a function the block calls again for them, in which the
+its own for the sets its tests name, and every function the block reaches by direct calls, the
+runtime's included, again for them, in which the
 tests of those sets are `true`; where the build names a CPU that has a set, its test is `true`
-everywhere (§2, §13, the owner, 2026-11-01, "Guarded block" and "Copied per feature").
+everywhere (§2, §13, the owner, 2026-11-01, "Guarded block", "Copied per feature" and "Transitive,
+all").
 `IsSupported` of a set the build's target does not have is `false`, and its block is still
 checked; a case is read for x86-64 (R11), where the test of every class under `Arm` is `false`
 *(assumed: as §13 marks it)*.
