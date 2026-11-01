@@ -274,17 +274,17 @@ that takes the success case, such a call runs the one that takes the union, its 
 the owner, 2026-10-31, "The union one"); that pick is made among the functions that fit exactly, so
 of `Show(int n)` and `Show(long | NotFound x)`, `Show(Find(1))` runs `Show(int n)` and the other cases
 leave the caller (§5, the owner, 2026-10-31, "Exact fit first"). A parameter whose type is a type
-parameter, `Same(Find(1))`, is no written union: the call unwraps, and the type
+parameter the call infers, `Same(Find(1))`, is no written union: the call unwraps, and the type
 parameter is the success case (§5, the owner, 2026-10-31, "Unwrap: T = int"). A parameter whose
 written union holds a type parameter, `void F<T>(T | NotFound x)`, keeps the cases where it names one
 beyond the success, as a variable of that type, and `T` is inferred from the success (§5, the owner,
 2026-10-31, "Keep, infer T = int"). A parameter whose union names some of the call's cases beyond the
-success and not all is `type-mismatch`, as for a variable; a parameter of the success case or of a type it converts to
+success and not all is `type-mismatch` where the call's name has one function, as for a variable; a parameter of the success case or of a type it converts to
 unwraps the call, a union that names no case of the call beyond the success, `int | string` for an
 `int | NotFound` call, among them, at a parameter as at a variable; a lambda's and a function value's parameter and a named argument follow the same
 rule; and a call inside an expression, `Show(Find(1) + 1)`, unwraps; a list literal takes its written item
 type from the type that stands where it does, a declaration's, a parameter's or a result's (M11); an
-exact fit of such a call (F13) is its whole union at a parameter that keeps the cases and its success
+exact fit of a call whose cases a parameter keeps or unwraps (F13) is its whole union at a parameter that keeps the cases and its success
 case at one that unwraps it, so that the two functions of "The union one" both fit exactly; two
 functions that fit with a widening, neither exactly, are `ambiguous-call` (F13), both of them keeping
 the cases or one keeping them and one unwrapping the call, `Show(long n)` beside
@@ -617,8 +617,12 @@ void Show(long | NotFound x) {
     print("the union")
 }
 
-// one function takes the success with a widening and one keeps the cases with a widening: neither fits exactly
-Show(Find(1))
+// one function takes the success with a widening and one keeps the cases with a widening: neither fits exactly, in a
+// function whose result lists `NotFound`, where the one that unwraps the call would pass the case on
+int | NotFound Run() {
+    Show(Find(1))
+    return 0
+}
 ```
 
 Case: [outcomes/keep-argument-generic-union.kz](../corpus/outcomes/keep-argument-generic-union.kz)

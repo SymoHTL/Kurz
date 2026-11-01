@@ -390,10 +390,13 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S6: the helper that reads the whole file at the C path in <c>%a0</c> into the list of bytes at <c>%a1</c>, as Rust's
-    /// <c>fs::read</c> reads to the end: the piece <c>BytesPiece</c> gives, read again while a read gives bytes, the file closed after,
-    /// its error ignored. A list that holds the largest <c>int</c> of items reads one byte more, as Rust's <c>read_to_end</c> probes a
-    /// full <c>Vec</c> before it grows it: none is the end of the file, and one raises <c>allocation-failed</c> as an <c>Add</c> past
-    /// the limit does (M9). 0, or the failure of the open or of a read.
+    /// <c>fs::read</c> reads it: the room for the size the system names for the open file (<c>DescriptorSize</c>, <c>BytesHint</c>),
+    /// made at once, as <c>fs::read</c> reserves the size the file's metadata gives, then the piece <c>BytesPiece</c> gives, read again
+    /// while a read gives bytes, the file closed after, its error ignored. A list full at that size, or at the largest <c>int</c> of
+    /// items, reads one byte more, as Rust's <c>read_to_end</c> reads a probe where its <c>Vec</c> is full at the room it started with:
+    /// none is the end of the file, and one is added after room for it is made, which grows the list past that size as
+    /// <c>read_to_end</c> grows its <c>Vec</c> and, past the limit, raises <c>allocation-failed</c> as an <c>Add</c> past it does (M9).
+    /// 0, or the failure of the open or of a read.
     /// </summary>
     private string ReadAll() => Helper("file.read.all", "i64", ["ptr", "ptr"], () =>
     {
@@ -407,11 +410,16 @@ public sealed partial class Emitter
         var fd = fn.Value($"trunc i64 {opened} to i32");
         var result = fn.Alloca("i64", "result");
         var probe = fn.Alloca("i8", "probe");
+        var hint = fn.Value($"call i64 {StdFunction("BytesHint")}(i64 {SysCall("DescriptorSize", $"i32 {fd}")})");
+        var sized = fn.Label("sized");
         var loop = fn.Label("read");
         var end = fn.Label("end");
+        fn.CondBranch(fn.Value($"icmp sgt i64 {hint}, 0"), sized, loop);
+        fn.Block(sized);
+        Reserve("%a1", hint);
         fn.Branch(loop);
         fn.Block(loop);
-        var more = fn.Value($"call i64 {StdFunction("BytesPiece")}(ptr {fn.Value("load ptr, ptr %a1")}, i64 {ReadAllChunk})");
+        var more = fn.Value($"call i64 {StdFunction("BytesPiece")}(ptr {fn.Value("load ptr, ptr %a1")}, i64 {ReadAllChunk}, i64 {hint})");
         var full = fn.Label("full");
         var room = fn.Label("room");
         fn.CondBranch(fn.Value($"icmp eq i64 {more}, 0"), full, room);
@@ -421,7 +429,7 @@ public sealed partial class Emitter
         var past = fn.Label("past");
         fn.CondBranch(fn.Value($"icmp sle i64 {probed}, 0"), end, past);
         fn.Block(past);
-        Reserve("%a1", "1");
+        fn.Emit($"call void {StdFunction("ListAppend")}(ptr {Reserve("%a1", "1")}, ptr {probe}, i64 1, i64 1)");
         fn.Branch(loop);
         fn.Block(room);
         var block = Reserve("%a1", more);

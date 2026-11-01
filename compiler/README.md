@@ -488,7 +488,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `s.Bytes` as a `Bytes`, which takes a count of the block of a string made while the program runs and copies the
   bytes of a literal, `s.Bytes[i]`, read from the string in place, and `string.FromUtf8(b)` and
   `string.FromUtf8Lossy(b)`, whose string takes a count of the block of the bytes where every sequence is UTF-8,
-  their case `InvalidUtf8` a data type every file sees, declared before the file's own, and the lossy text, where a
+  which `string.FromUtf8` reads a sequence at a time and a run of ASCII byte by byte, a run of more than 16 bytes
+  as Rust 1.82's `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a
+  multiple of 8, their case `InvalidUtf8` a data type every file sees,
+  declared before the file's own, and the lossy text, where a
   sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
   owner, 2026-10-29, "Union, as Rust"); `s.Contains(x)`, `s.StartsWith(x)`, `s.EndsWith(x)` and `s.IndexOf(x)`
   of a `string` or of a `char`, which is searched for as its UTF-8 bytes, over the string's bytes, through
@@ -504,7 +507,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   values)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
-  library's `UnicodeCase`, a first walk that counts the bytes and a second that writes them, with the table of the
+  library's `UnicodeCase`, which copies the bytes before the first code point that changes into a block of the
+  input's size and looks up and writes the code points after them one at a time, Latin-1 by Rust's rules without
+  the table, up to one whose mapping outgrows the block, from which it sizes the rest in a walk, grows the block
+  once and writes the rest in a second walk, with the table of the
   direction the emitter writes into the program once, `case.lower` or `case.upper`, from `Emit/CaseTables.cs`, which
   `tools/unicode_tables.py` generates from the Unicode Character Database of the version Rust's stable pins and the
   gate `unicode-tables` holds to that database: the runs of code points with one delta and a step of 1 or 2, found by
@@ -753,13 +759,22 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   closed at zero, the error of that close ignored, and `Close` writes -1 as the descriptor before it
   closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
-  holds, before it reads (S3), and `File.ReadAll` reads into the room the list has, else 8192
-  bytes more, no more than the largest `int` of items leaves, while a read gives bytes, and a list that
-  holds that many reads one byte more, which raises `allocation-failed` where the file has it (S6). `FileTests` pins what no case can: 200 opens of a
+  holds, before it reads (S3), and `File.ReadAll` makes room for the size `fstat` names for the open
+  file, no more than the largest `int` of items, as Rust's `fs::read` reserves it, then reads into the
+  room the list has, else 8192 bytes more, no more than the largest `int` of items leaves, while a read
+  gives bytes; a list full at that size, or that holds the largest `int` of items, reads one byte more,
+  none being the end of the file, and one added after room for it, which past the limit raises
+  `allocation-failed` (S6). `FileTests` pins what no case can: 200 opens of a
   file, and the files and directories the calls on a path open for themselves, under a limit of 32
   descriptors, and the same files all held, which reach the limit; a close through a copy; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
-  largest `int` of bytes, lowered to 20 in the library's text, and one byte more; a read and a write in
+  largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
+  file the system names no size for; files of 1 to 1048579 bytes read without their list grown, under
+  a library that ends the process where a read would grow one, and read whole where the size the
+  system names is 3 bytes short, 3 bytes long or a failure; a file whose room a system that refuses
+  more than a mebibyte refuses, one of more bytes than a list holds whose room it refuses, and one
+  whose room it gives; the room of the list a whole read gives,
+  under a library that ends the process where an `Add` would grow one; a read and a write in
   the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
   created again and one under a file; the text of an error without a path; and the refusal for Windows;
 - the command line, the environment and the clock (S13 to S15), in a build for Linux: `args` is a
@@ -1535,8 +1550,9 @@ round can ask about it by the rule's id.
   parameter is read before the inference. One test, `Types.KeepsCases`, decides it at a parameter and
   at every other place a call's cases can be kept: a variable, a result, a field, a list's items. A `T?` of one type is no union of
   cases there, nor in a variable or a result, so `int? x = Find(id)` unwraps, as O4's sentence on a
-  type the success converts to says. Of two functions that both fit exactly, the one whose parameter
-  keeps the cases is picked (the owner, 2026-10-31, "The union one"); the exact fit is read first,
+  type the success converts to says. Of a function whose parameter keeps the cases and one that takes the
+  success, the one that keeps them, the exact fit for the call's whole type, is picked (the owner, 2026-10-31,
+  "The union one"); the exact fit is read first,
   so `Show(int)` wins over `Show(long | NotFound)`, which fits with a widening (the owner, 2026-10-31,
   "Exact fit first"). Where no function fits, the
   call's error stands alone and no case of the argument is passed on beside it (E1).
