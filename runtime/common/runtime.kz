@@ -539,8 +539,15 @@ long Utf8Sequence(byte* bytes, long count, long at) {
 
 // The count of the bytes in front of the first sequence of the `count` bytes at `bytes` that is not
 // UTF-8, as Rust's `Utf8Error::valid_up_to` counts them, and -1 where every sequence is UTF-8: what
-// `string.FromUtf8` puts into `InvalidUtf8` (T15; the owner, 2026-10-29, "Union, as Rust").
+// `string.FromUtf8` puts into `InvalidUtf8` (T15; the owner, 2026-10-29, "Union, as Rust"). Every
+// sequence is read through `Utf8Sequence`, and the first 16 bytes of a run of ASCII byte by byte; a
+// longer run is skipped as Rust 1.82's `run_utf8_validation` skips one: byte by byte up to an address
+// that is a multiple of 8, from there two words of 8 bytes at a time while both lie inside the bytes and
+// neither holds a byte of 128 or more, then byte by byte up to the first byte of 128 or more. A word is
+// read only at a multiple of 8, since the read through a pointer is emitted with no alignment written,
+// which LLVM's language reference reads as the ABI alignment of the type, 8 for a `ulong`.
 pub long Utf8Invalid(byte* bytes, long count) {
+    long blocksEnd = count - 15
     mut long at = 0
     while at < count {
         long n = Utf8Sequence(bytes, count, at)
@@ -549,6 +556,40 @@ pub long Utf8Invalid(byte* bytes, long count) {
         }
 
         at = at + n
+        if n == 1 {
+            mut long limit = at + 15
+            if limit > count {
+                limit = count
+            }
+
+            raw {
+                while at < limit && bytes[at] < 128 {
+                    at = at + 1
+                }
+
+                if at == limit {
+                    while at < count && bytes[at] < 128 && (long(bytes + at) & 7) != 0 {
+                        at = at + 1
+                    }
+
+                    if (long(bytes + at) & 7) == 0 {
+                        while at < blocksEnd {
+                            ulong u = *Ptr<ulong>(bytes + at)
+                            ulong v = *Ptr<ulong>(bytes + at + 8)
+                            if ((u | v) & 0x8080808080808080UL) != 0 {
+                                break
+                            }
+
+                            at = at + 16
+                        }
+                    }
+
+                    while at < count && bytes[at] < 128 {
+                        at = at + 1
+                    }
+                }
+            }
+        }
     }
 
     return -1

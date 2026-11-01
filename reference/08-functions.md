@@ -422,8 +422,12 @@ void Show(long | NotFound x) {
     print("the union")
 }
 
-// one function takes the success with a widening and one keeps the cases with a widening: neither fits exactly
-Show(Find(1))
+// one function takes the success with a widening and one keeps the cases with a widening: neither fits exactly, in a
+// function whose result lists `NotFound`, where the one that unwraps the call would pass the case on
+int | NotFound Run() {
+    Show(Find(1))
+    return 0
+}
 ```
 
 ### F14 (decided, §8) A literal as an argument of an overloaded function

@@ -2842,6 +2842,201 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void FromUtf8_finds_the_first_sequence_that_is_not_UTF_8_wherever_it_stands_among_the_words_its_ASCII_skip_reads()
+    {
+        // T15: the runtime reads the first 16 bytes of a run of ASCII byte by byte and skips the rest as Rust 1.82's
+        // `run_utf8_validation` does, two words of 8 bytes at a time from an address that is a multiple of 8, then byte by byte.
+        // Each case is 0 to 7 bytes of ASCII and a letter of two bytes, which put the run that follows at every distance from such
+        // an address, a run of 0 to 63 bytes of ASCII, then a byte that begins no sequence (128, 255), a sequence cut short at the
+        // end, a letter of three bytes, or nothing, and 20 bytes of ASCII after the first two and the letter: so the first byte of
+        // 128 or more stands among the first 16 bytes, in the first word of a pair, in the second, past the last pair and among the
+        // bytes read one at a time after it. What each case gives is what .NET's decoder reads of the same bytes, the count of the
+        // bytes in front of the first sequence it cannot read, which is Rust's `valid_up_to`.
+        static string Valid(byte[] bytes) =>
+            System.Text.Unicode.Utf8.ToUtf16(bytes, new char[bytes.Length], out var read, out _, replaceInvalidSequences: false)
+                == System.Buffers.OperationStatus.Done
+                ? "ok"
+                : read.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        // the positive control: the decoder reads as Rust 1.82's `str::from_utf8` read these on 2026-10-29 (the table above)
+        Assert.Equal("1", Valid([0x61, 0xE2, 0x82, 0x61]));
+        Assert.Equal("2", Valid([0x68, 0x69, 0xC3, 0x28, 0x21]));
+        Assert.Equal("5", Valid([0xE2, 0x82, 0xAC, 0xC3, 0xA4, 0x80, 0xBF, 0x7A]));
+        Assert.Equal("0", Valid([0xED, 0xA0, 0x80]));
+        Assert.Equal("0", Valid([0xF0, 0x90, 0x80]));
+        Assert.Equal("ok", Valid([0xF4, 0x8F, 0xBF, 0xBF]));
+
+        byte[][] ends = [[128], [255], [226, 130], [226, 130, 172], []];
+        var lines = new List<string>();
+        for (var lead = 0; lead < 8; lead++)
+        {
+            for (var run = 0; run < 64; run++)
+            {
+                foreach (var end in ends)
+                {
+                    byte[] after = end.Length is 1 or 3 ? [.. Enumerable.Repeat((byte)67, 20)] : [];
+                    lines.Add(Valid([.. Enumerable.Repeat((byte)65, lead), 195, 169, .. Enumerable.Repeat((byte)66, run), .. end, .. after]));
+                }
+            }
+        }
+
+        // the floor: 2560 cases, of which the 1536 that end in a byte that begins no sequence or in a cut one give the error
+        Assert.Equal(2560, lines.Count);
+        Assert.Equal(1024, lines.Count(l => l == "ok"));
+
+        const string text = """
+            void Show(Bytes b) {
+                match string.FromUtf8(b) {
+                    InvalidUtf8 e => print(e.At)
+                    else => print("ok")
+                }
+            }
+
+            for lead in 0..<8 {
+                for run in 0..<64 {
+                    for end in 0..<5 {
+                        mut b = Bytes()
+                        for i in 0..<lead {
+                            b.Add(65)
+                        }
+
+                        b.Add(195)
+                        b.Add(169)
+                        for j in 0..<run {
+                            b.Add(66)
+                        }
+
+                        if end == 0 {
+                            b.Add(128)
+                        } else if end == 1 {
+                            b.Add(255)
+                        } else if end == 2 {
+                            b.Add(226)
+                            b.Add(130)
+                        } else if end == 3 {
+                            b.Add(226)
+                            b.Add(130)
+                            b.Add(172)
+                        }
+
+                        if end == 0 || end == 1 || end == 3 {
+                            for k in 0..<20 {
+                                b.Add(67)
+                            }
+                        }
+
+                        Show(b)
+                    }
+                }
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "utf8-words"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "utf8-words-fenced"), 0, [.. lines], "");
+
+        // no pair of words is read past the bytes: under the fence a part of 4064 bytes is a block that ends where its page ends,
+        // the system maps it right below the block made before it (on Linux), which the fence makes inaccessible when it is freed,
+        // and after the letter of two bytes and 16 bytes of ASCII the words start 8 bytes past an address that is a multiple of 16,
+        // so that a pair read where fewer than 16 bytes are left reads into the freed page
+        const string edge = """
+            mut source = Bytes()
+            source.Add(195)
+            source.Add(169)
+            while source.Count < 4064 {
+                source.Add(65)
+            }
+
+            mut freed = source[0..<4064]
+            held = source[0..<4064]
+            freed = Bytes()
+            print(freed.Count)
+            match string.FromUtf8(held) {
+                string s => print(s.Bytes.Count)
+                InvalidUtf8 e => print(e.At)
+            }
+
+            """;
+        Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    /// <summary>
+    /// The runtime of this machine's target whose <c>Utf8Invalid</c> ends the process with the exit code 70 where it would read a
+    /// word at an address that is no multiple of 8. The read through a pointer is emitted with no alignment written, which LLVM's
+    /// language reference reads as the ABI alignment of the type ("An omitted `align` argument means that the operation has the
+    /// ABI alignment for the target", LLVM 23, the `load` instruction), 8 for a <c>ulong</c>, and "Overestimating the alignment
+    /// results in undefined behavior"; a word read at any address reads right on x86-64, so only such a check shows one.
+    /// </summary>
+    private static CheckedRuntime WordsAligned => Edited(("runtime/common/runtime.kz", "                            ulong u = *Ptr<ulong>(bytes + at)\n", """
+                                    if (long(bytes + at) & 7) != 0 {
+                                        WriteError("error: a word read at an address that is no multiple of 8\n")
+                                        sys.Exit(70)
+                                    }
+
+                                    ulong u = *Ptr<ulong>(bytes + at)
+
+        """));
+
+    [Fact]
+    public void FromUtf8_reads_a_word_only_at_an_address_that_is_a_multiple_of_8()
+    {
+        // T15: the letters of two, three and four bytes stand at every position from 0 to 15, each followed by a run of 1 to 40 bytes
+        // of ASCII, so that the walk finds its address that is a multiple of 8 again after each letter; the runtime that ends the
+        // process at a word read anywhere else (<see cref="WordsAligned"/>) prints what the runtime does, the positive control
+        var lines = new List<string>();
+        for (var lead = 0; lead < 16; lead++)
+        {
+            for (var run = 1; run <= 40; run++)
+            {
+                lines.Add((lead + 9 + 3 * run).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+
+        Assert.Equal(640, lines.Count);
+        const string text = """
+            long Count(Bytes b) {
+                match string.FromUtf8(b) {
+                    string s => return s.Bytes.Count
+                    InvalidUtf8 => return -1
+                }
+            }
+
+            for lead in 0..<16 {
+                for run in 1..40 {
+                    mut b = Bytes()
+                    for i in 0..<lead {
+                        b.Add(65)
+                    }
+
+                    for k in 0..<3 {
+                        if k == 0 {
+                            b.Add(195)
+                            b.Add(169)
+                        } else if k == 1 {
+                            b.Add(226)
+                            b.Add(130)
+                            b.Add(172)
+                        } else {
+                            b.Add(240)
+                            b.Add(159)
+                            b.Add(152)
+                            b.Add(128)
+                        }
+
+                        for j in 0..<run {
+                            b.Add(66)
+                        }
+                    }
+
+                    print(Count(b))
+                }
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "utf8-aligned-plain"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, WordsAligned, "utf8-aligned"), 0, [.. lines], "");
+    }
+
+    [Fact]
     public void A_list_takes_over_the_room_Allocate_gave_and_shows_its_memory_in_raw()
     {
         // R15 (section 3, the owner, 2026-10-29, "List.Allocate, take over"): the list holds the room `Allocate` gave and grows from it;
