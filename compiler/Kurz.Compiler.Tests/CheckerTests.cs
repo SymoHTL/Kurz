@@ -2941,7 +2941,7 @@ public sealed class CheckerTests
         Assert.Contains("the call passes 2 arguments to 1 parameter (D11)", Assert.Single(diagnostics.Items).Message); // each count picks its noun
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim('a', 'b'))"));
 
-        // X5's three forms of `Replace` give no `string` `old` a `char` `new`, since the record names no such form (section 12); the
+        // X5's three forms of `Replace` replace no `string` by a `char`, since the record names no such form (section 12); the
         // ASCII trims and the changes of case take no argument
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Replace(\"a\", 'b'))"));
         (diagnostics, _) = Check("s = \"ab\"\nprint(s.Replace(1, 2))");
@@ -3029,11 +3029,14 @@ public sealed class CheckerTests
         Assert.Empty(Errors("mut xs = [\"b\", \"a\"]\nxs.SortBy(s => s.Bytes.Count)\nxs.SortBy(keySelector: s => s)\nxs.SortBy((string s) => double(s.Bytes.Count) / 2.0)\nprint(xs)"));
         Assert.Empty(Errors("key = (string s) => s.Bytes.Count\nmut xs = [\"b\"]\nxs.SortBy(key)\nprint(xs)"));
 
-        // T18 and D20: items or keys `<` does not order, and the values of an enum that numbers none, as `<` on two of them is
+        // T18 and D20: items or keys `<` does not order, and the values of an enum that numbers none, as `<` on two of them is, their
+        // nullable form among them, as items and as keys (section 12)
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [true]\nxs.Sort()"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [[1]]\nxs.SortUnstable()"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(x => x == 1)"));
         Assert.Equal([(ErrorIds.EnumNumber, 3)], Errors("enum Plan { Free, Pro }\nmut xs = [1]\nxs.SortBy(x => Plan.Free)"));
+        Assert.Equal([(ErrorIds.EnumNumber, 3)], Errors("enum Plan { Free, Pro }\nmut List<Plan?> xs = [Plan.Free, null]\nxs.Sort()"));
+        Assert.Equal([(ErrorIds.EnumNumber, 7)], Errors("enum Plan { Free, Pro }\nPlan? Pick(int x) {\n    return null\n}\n\nmut xs = [1]\nxs.SortBy(x => Pick(x))"));
 
         // the key: one argument, `keySelector`, a function of one item that gives a value (section 12, the owner, 2026-10-31, "As the
         // checker does"): a form of the call that fits none, a lambda of no parameter or of two among them, is `argument-mismatch`,

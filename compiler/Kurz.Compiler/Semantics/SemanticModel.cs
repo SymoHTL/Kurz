@@ -101,7 +101,7 @@ public enum CallKind
     /// <summary>A string's <c>Substring(startIndex, length)</c> (X2).</summary>
     StringSubstring,
 
-    /// <summary><c>long.Parse(s)</c>, or the same call on another integer type, the number or the case <c>ParseError</c> (X7).</summary>
+    /// <summary><c>long.Parse(s)</c>, or the same call on another number type, the number or the case <c>ParseError</c> (X7).</summary>
     Parse,
 
     /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text, with a <c>string</c> or a <c>char</c> separator, which the argument's type names (X6).</summary>
