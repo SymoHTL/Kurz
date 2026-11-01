@@ -569,6 +569,30 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("xs = List<int>()\nprint(xs.Where<int>(x => x > 1).Count)"));
     }
 
+    [Theory]
+    [InlineData("void Other<T>() {\n}\n\nOther<void>()", "4: `void` as a type argument of `Other` (T17, T19)")]
+    [InlineData("List<void> a = List<void>()\nprint(a.Count)", "1: `void` as a type argument of `List` (T17, T19)|1: `void` as a type argument of `List` (T17, T19)")]
+    [InlineData("m = Map<string, void>()\nprint(m.Count)", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("m = Map<void, int>()\nprint(m.Count)", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("void Count(Map<void, int> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("void Count(Map<string, void> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("data Box<T>(T Value)\n\nvoid Show(Box<void> b) {\n}", "3: `void` as a type argument of `Box` (T17, T19)")]
+    [InlineData("data Box<T>(T Value)\n\nb = Box<void>(1)", "3: `void` as a type argument of `Box` (T17, T19)")]
+    public void Void_as_a_type_argument_is_not_supported_where_it_is_written(string program, string expected)
+    {
+        // T17, T19: C# refuses `void` as a type argument and Rust's `()` takes one; the record says neither, so the checker refuses it
+        // where it is written, of a generic function, a generic data type, `List` and `Map`, before the emitter writes a copy of it
+        Assert.Equal(expected.Split('|'), NotSupported(program));
+    }
+
+    [Fact]
+    public void Void_inside_a_type_argument_stands()
+    {
+        // T17, F11: the result of a function type is no type argument, so a list of `void` functions and a call's `void` lambda stand
+        Clean("fs = List<(int) => void>()\nprint(fs.Count)");
+        Clean("void Run<T>(T x, (T) => void f) {\n    f(x)\n}\n\nRun<int>(1, x => print(x))");
+    }
+
     [Fact]
     public void A_lambda_argument_fixes_no_type_parameter()
     {

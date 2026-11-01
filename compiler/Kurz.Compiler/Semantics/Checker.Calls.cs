@@ -713,7 +713,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var element = Resolve(c.TypeArguments[0]);
+        var element = ResolveTypeArgument(c.TypeArguments[0], "`List`");
         if (Types.IsError(element))
         {
             CheckArgumentsLoosely(c);
@@ -776,8 +776,8 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var key = Resolve(c.TypeArguments[0]);
-        var value = Resolve(c.TypeArguments[1]);
+        var key = ResolveTypeArgument(c.TypeArguments[0], "`Map`");
+        var value = ResolveTypeArgument(c.TypeArguments[1], "`Map`");
         if (Types.IsError(key) || Types.IsError(value))
         {
             CheckArgumentsLoosely(c);
@@ -1075,7 +1075,7 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            candidate.Map = data.TypeParameters.Zip(c.TypeArguments.Select(Resolve)).ToDictionary(p => p.First, p => p.Second);
+            candidate.Map = data.TypeParameters.Zip(c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{data.Name}`"))).ToDictionary(p => p.First, p => p.Second);
         }
 
         var typed = Call([candidate], c, expected);
@@ -1725,7 +1725,8 @@ public sealed partial class Checker
     /// <summary>As above, recorded as a call of <paramref name="kind"/>: of a function, or of a method of a class (K7).</summary>
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function, CallKind kind)
     {
-        var typeArguments = c.TypeArguments.Select(Resolve).ToList(); // once: an error in one is one diagnostic, whatever the number of overloads (E1)
+        // once: an error in one is one diagnostic, whatever the number of overloads (E1)
+        var typeArguments = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{candidates.FirstOrDefault()?.Name}`")).ToList();
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
