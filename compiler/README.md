@@ -355,9 +355,11 @@ blocks, where a request of the class takes it first, and a larger one to the fro
 thread keeps where they take no more than 32 mebibytes with it, else to the system through the
 target's `Release`; the mebibytes a thread carved from and the blocks it keeps stay its own. `Reallocate` grows a block with
 its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes stays where it is where its
-header names room enough, as a kept block given out whole can, else grows through the target's
-`Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
-with its bytes copied and the old one freed. A target's directory gives
+header names room enough, as a kept block given out whole can, else moves into the smallest kept
+block that holds the grown block and that the grown block takes at least half of, its bytes copied
+and the old block freed (record, section 2: the owner, 2026-11-01, "Kept block first"), else grows
+through the target's `Resize`, which can grow it without a copy, else, and where `Resize` gives null,
+into a new block with its bytes copied and the old one freed. A target's directory gives
 `Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Random`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` keeping the count and the addresses of the arguments (S13), setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
 `Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap`, `Resize` calling `mremap`,
@@ -511,7 +513,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   values)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
-  library's `UnicodeCase`, a first walk that counts the bytes and a second that writes them, with the table of the
+  library's `UnicodeCase`, which copies the bytes before the first code point that changes into a block of the
+  input's size and looks up and writes the code points after them one at a time, Latin-1 by Rust's rules without
+  the table, up to one whose mapping outgrows the block, from which it sizes the rest in a walk, grows the block
+  once and writes the rest in a second walk, with the table of the
   direction the emitter writes into the program once, `case.lower` or `case.upper`, from `Emit/CaseTables.cs`, which
   `tools/unicode_tables.py` generates from the Unicode Character Database of the version Rust's stable pins and the
   gate `unicode-tables` holds to that database: the runs of code points with one delta and a step of 1 or 2, found by
@@ -651,7 +656,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
   `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first: `Sort` a merge sort, which keeps
   equal items in their order, runs of 20 items sorted by insertion and merged in pairs through a buffer of
-  half the items; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
+  half the items, rounded up, as Rust's stable sort asks for at the least; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
   median of three, insertion below 21 items and a heapsort past twice the base-2 logarithm of the count
   in splits; and `SortBy` the key of each item made once, in order, kept with the item's position in a
   pair, the pairs sorted by the quicksort and the items moved where they say, as Rust's
@@ -796,8 +801,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
-  holds its state, of a fixed count for each type (616 bytes for SHA-256, 408 for MD5, 1028 for CRC-32's register and
-  table, 1296 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
+  holds its state, of a fixed count for each type (104 bytes for SHA-256, 88 for MD5, 1028 for CRC-32's register and
+  table, 272 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
   the hasher's place, a `mut` variable or a path of fields from one (M5), copy it where another value holds it, as a
   list is copied before a write (M3), and store the block back. `Finish` gives a new block of the digest, or the
   CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
@@ -909,8 +914,16 @@ it was given. The runtime makes every string it makes in such a block, through `
 the block over (R15, the owner, 2026-10-29, "string.Allocate, take over"); the text the emitted code
 makes of a value, for a `print` or a hole of a string, is a temporary of its statement, an
 interpolation of one hole of a string takes a count of the string, a new value as Rust's `format!`
-makes one (the owner, 2026-10-29, "New value, as format!"), and the helper that makes the text of a
-list or of a `data` value lets go of each text it joined. The environment of a lambda that reads variables starts with the
+makes one (the owner, 2026-10-29, "New value, as format!"), an interpolation of more pieces, or of one integer, writes
+them into one block of their bytes together, as Rust's `format!` writes into one `String`, an
+integer's digits in place, counted first, with no text of their own, and pieces of no bytes
+together are the empty string with no block; the text of a `data` value, of a map's entry and of
+an `IoError`, an `EnvError` and a `HexError` is written into one block the same way, as Rust's
+`Debug` writes a value's parts into one `String`, and the helper that makes the text of a
+list or of a `data` value lets go of each text it joined after its block is written. The runtime
+writes an integer's digits four and two at a time from a table of the pairs 00 to 99, as Rust's
+`Display` of an integer does, counts them as Rust's `ilog10` does, and the text of a negative
+integer is one block, its `-` and then its digits. The environment of a lambda that reads variables starts with the
 count of the function values that hold it, 8 bytes, and the address of the function that lets go
 of it, then holds each value the lambda read, counted once more where its type is counted; it is
 counted as a list's block is, and at zero the values it holds are let go of and it goes back to
@@ -1309,7 +1322,8 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
+type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
+which the intrinsics and their vector types stand (R18); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item
@@ -1544,7 +1558,7 @@ round can ask about it by the rule's id.
   at every other place a call's cases can be kept: a variable, a result, a field, a list's items. A `T?` of one type is no union of
   cases there, nor in a variable or a result, so `int? x = Find(id)` unwraps, as O4's sentence on a
   type the success converts to says. Of a function whose parameter keeps the cases and one that takes the
-  success, the one that keeps them, the exact fit for the call's whole type, is picked (the owner, 2026-10-31,
+  success, the one that keeps them is picked where it is the exact fit for the call's whole type (the owner, 2026-10-31,
   "The union one"); the exact fit is read first,
   so `Show(int)` wins over `Show(long | NotFound)`, which fits with a widening (the owner, 2026-10-31,
   "Exact fit first"). Where no function fits, the

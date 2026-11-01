@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Text;
@@ -11,7 +12,8 @@ namespace Kurz.Compiler.Tests;
 /// a block nothing holds, which the allocator gives out again, and a lambda's environment as it frees a list's block (the owner,
 /// 2026-10-25, "Pair + heap env"), and a string's block, which a literal does not have (the owner, 2026-10-29, "Bit in the count"
 /// and "string.Allocate, take over"), no block is read after it is freed, the number `allocation-failed`
-/// reports past the limit and for a refused growth, and what the emitter says `not supported` to; what the checker refuses of a
+/// reports past the limit and for a refused growth, an integer's digits in every text that holds them, against what .NET writes (A2),
+/// and what the emitter says `not supported` to; what the checker refuses of a
 /// read beside a `mut` call (M7) the corpus pins.
 /// </summary>
 public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -322,7 +324,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // strings in variables, fields, a `with`, a path assignment, an arm's name while the arm changes the subject's variable, a
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
-    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block,
+    // parameters of a call, an interpolation, one of several texts in one block that a variable holds past its statement, one of no
+    // bytes, the empty string with no block, and a hole of it, integers whose digits the block takes in place, the text of a value
+    // laid out as a block, literals, a string made in a `raw` block,
     // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
     // nullable variable known not null, an `Add` through the place of one, the item `?[` reads, a list without items in a nullable
     // variable, a `match` with a `null` arm on one whose arm changes it, a nullable parameter read in the arm of its case and after
@@ -334,6 +338,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         data Leaf
         data Node(string Label, Node | Leaf Next)
         data Contact(string? Email)
+        data Reading(long Low, ulong High, List<int> Xs, double D)
 
         string Same(string s) => s
 
@@ -449,6 +454,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Show(Made(15), Same(Made(16)))
         e = ""
         print("{Made(17)}{e}{Made(18)}")
+        joined = "<{Made(40)}|{e}|{Made(41)}>"
+        blank = "{e}{e}"
+        print("{joined}{blank}[{blank}]")
+        raw {
+            print(blank.Pointer == "".Pointer)
+        }
+        long smallest = -9223372036854775807 - 1
+        ulong largest = 18446744073709551615
+        print("{smallest}|{largest}|{byte(255)}|{-7}|{0}:{Made(42)}")
+        print(Reading(smallest, largest, [-1, 22], 2.5))
         node = Node(Made(19), Node(Made(20), Leaf))
         print(node)
         print(Raw(1))
@@ -548,6 +563,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "n15",
         "n16",
         "n17n18",
+        "<n40||n41>[]", // texts in one block, which the variable takes over from the statement, and the empty string as a hole
+        "true", // pieces of no bytes together are the empty string, the constant of no bytes, with no block
+        "-9223372036854775808|18446744073709551615|255|-7|0:n42", // digits written in the block, a `-` before a negative number's
+        "Reading { Low = -9223372036854775808, High = 18446744073709551615, Xs = [-1, 22], D = 2.5 }", // a value's text in one block
         "Node { Label = n19, Next = Node { Label = n20, Next = Leaf } }", // strings a value laid out as a block holds
         "1!",
         "2",
@@ -587,6 +606,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // them, which shares their block, and a part of them; each other string of 1024 bytes, joined from halves the join lets go of
     private const string StringRounds = """
         data Pair(string A, int B)
+        data Wrap(Pair P, List<int> Xs)
 
         string Make(int n) {
             mut s = "x"
@@ -608,11 +628,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         void Drop(int n) => Make(n)
 
+        mut big = List<int>()
+        for n in 0..<1000 {
+            big.Add(n)
+        }
+
         mut round = 0
         mut total = 0
         while round < 3000 {
             round = round + 1
             a = Make(10)
+            w = Wrap(Pair("a", 1), big)
+            wrapped = "{w}"
             mut b = a
             b = "{b}!"
             p = Pair(Make(10), 1)
@@ -641,7 +668,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             bb = Make(12).Bytes
             tt = string.FromUtf8Lossy(bb)
             pp = bb[0..<4000]
-            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096 + bb.Count - 4096 + tt.Bytes.Count - 4096 + pp.Count - 4000
+            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096 + bb.Count - 4096 + tt.Bytes.Count - 4096 + pp.Count - 4000 + wrapped.Bytes.Count - 4931
         }
         print(round)
         print(total)
@@ -2403,6 +2430,52 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static readonly (string Path, string Old, string New) KeptNone = ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0");
 
     /// <summary>
+    /// The runtime of this machine's target whose `Memory` and `Resize` count the bytes the system gives, by a `Memory` and by the
+    /// growth of a `Resize`, none of them counted back by `Release`, and whose `Memory` refuses a request that takes them past
+    /// <paramref name="limit"/>; a `Resize` is counted and not refused, since `Reallocate` takes a kept block after a refused one.
+    /// </summary>
+    private static CheckedRuntime Taking(long limit) => Edited(
+        (TargetFile, "pub byte* Memory(long bytes) {", $$"""
+            thread static mut long taken = 0
+
+            pub byte* Memory(long bytes) {
+                mut long total = 0
+                raw {
+                    total = taken + bytes
+                }
+
+                if total > {{limit}} {
+                    return null
+                }
+
+                byte* p = Granted(bytes)
+                if p != null {
+                    raw {
+                        taken = total
+                    }
+                }
+
+                return p
+            }
+
+            byte* Granted(long bytes) {
+            """),
+        (TargetFile, "pub byte* Resize(byte* p, long bytes, long grown) {", """
+            pub byte* Resize(byte* p, long bytes, long grown) {
+                byte* q = Resized(p, bytes, grown)
+                if q != null {
+                    raw {
+                        taken = taken + grown - bytes
+                    }
+                }
+
+                return q
+            }
+
+            byte* Resized(byte* p, long bytes, long grown) {
+            """));
+
+    /// <summary>
     /// The edits that make the allocator take every block from pages of its own and make them unreachable when the block is freed, so
     /// that a read or a write of a freed block ends the process with the system's signal; nothing is used again. The thread keeps no
     /// freed block: a kept block stays readable so that a request can take it, so the fence gives every block back to the system.
@@ -2439,6 +2512,72 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
+    }
+
+    [Fact]
+    public void An_integer_shows_the_digits_dotnet_writes_in_a_print_a_hole_a_list_and_a_data_value()
+    {
+        // both signs of every length, each side of each power of ten, the ends of the range, and a xorshift sequence whose groups of
+        // four and of two digits take every pair of the runtime's table
+        var longs = new List<long> { long.MinValue, long.MaxValue, 0 };
+        for (var p = 1L; ; p *= 10)
+        {
+            longs.AddRange([p - 1, p, p + 1, -p, 1 - p, p * 9]);
+            if (p > long.MaxValue / 10)
+            {
+                break;
+            }
+        }
+
+        var ulongs = new List<ulong> { ulong.MaxValue, 0 };
+        for (var p = 1UL; ; p *= 10)
+        {
+            ulongs.AddRange([p - 1, p, p + 1]);
+            if (p <= ulong.MaxValue / 9)
+            {
+                ulongs.Add(p * 9);
+            }
+
+            if (p > ulong.MaxValue / 10)
+            {
+                break;
+            }
+        }
+
+        var x = 88172645463325252UL;
+        for (var i = 0; i < 400; i++)
+        {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            longs.Add((long)x >> (int)(x % 61));
+            ulongs.Add(x >> (int)(x % 61));
+        }
+
+        static string Literal(long v) => v == long.MinValue ? "-9223372036854775807 - 1" : v.ToString(CultureInfo.InvariantCulture);
+        var text = $$"""
+            data Pair(long L, ulong U)
+
+            List<long> ls = [{{string.Join(", ", longs.Select(Literal))}}]
+            List<ulong> us = [{{string.Join(", ", ulongs.Select(u => u.ToString(CultureInfo.InvariantCulture)))}}]
+            for v in ls {
+                print(v)
+                print("<{v}>")
+                print([v])
+                print(Pair(v, 0))
+            }
+            for u in us {
+                print(u)
+                print("<{u}>")
+                print([u])
+                print(Pair(0, u))
+            }
+            """;
+        string[] Shown(string digits, string pair) => [digits, $"<{digits}>", $"[{digits}]", $"Pair {{ {pair} }}"];
+        var lines = longs.SelectMany(v => Shown(v.ToString(CultureInfo.InvariantCulture), $"L = {v.ToString(CultureInfo.InvariantCulture)}, U = 0"))
+            .Concat(ulongs.SelectMany(u => Shown(u.ToString(CultureInfo.InvariantCulture), $"L = 0, U = {u.ToString(CultureInfo.InvariantCulture)}")))
+            .ToArray();
+        Ran(BuildAndRun(text, toolchain.Runtime, "integer-texts"), 0, lines, "");
     }
 
     [Fact]
@@ -2595,6 +2734,29 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.StartsWith("error: allocation-failed (", over.Error, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void A_block_of_more_than_262144_bytes_that_outgrows_its_room_takes_a_kept_block_before_the_targets_Resize()
+    {
+        // the owner, 2026-11-01, "Kept block first": a list of 2^21 `long`s made and dropped for 20 rounds, its block growing from
+        // 262176 bytes with its header to 16777248, the bytes the system gives counted with none given back. On Linux the first round
+        // takes 17825824 bytes, the mebibyte the small blocks are carved from among them; in the second the block of 8388640 takes
+        // the kept one of 16777248, which it uses at least half of, and the growths below it, too small for it, take 4194336 by
+        // `Resize`; the third takes 1048608 and the fourth 262176 so, and each round after them none, its growths all served by kept
+        // blocks, 23330944 bytes in all. Grown by `Resize` before the kept blocks, each round takes 16777248 bytes again, past the
+        // 24 mebibytes in its second, and the first `Memory` of the third is refused. On Windows, whose `Resize` gives none, each growth
+        // of the first round takes a block of its own, 34341088 bytes with the first mebibyte by the sizes above, and each round after it
+        // the kept blocks of its sizes, within 40 mebibytes
+        const string fill = "long Fill(int n) {\n    mut xs = List<long>()\n    mut i = 0\n    while i < n {\n        xs.Add(long(i))\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 20 {\n    round = round + 1\n    total = total + Fill(2097152)\n}\nprint(total)\n";
+        long limit = Builder.HostTarget == Target.Windows ? 41943040 : 25165824;
+        Ran(BuildAndRun(fill, Taking(limit), "list-grown-kept"), 0, ["41943040"], "");
+
+        // the positive control: the same lists, all of them held, take memory of their own in the second round, past the limit, and a
+        // `Memory` after it is refused
+        var held = BuildAndRun("mut all = List<List<long>>()\nmut round = 0\nwhile round < 20 {\n    round = round + 1\n    mut xs = List<long>()\n    mut i = 0\n    while i < 2097152 {\n        xs.Add(long(i))\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n", Taking(limit), "list-grown-kept-held");
+        Assert.Equal(1, held.Code);
+        Assert.StartsWith("error: allocation-failed (", held.Error, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("long", "1", 32)]
     [InlineData("byte", "byte(1)", 4)]
@@ -2696,13 +2858,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_sort_whose_buffer_or_keys_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
         // M9, X8: the runtime's `Allocate` refusing 1000 to 4095 bytes (<see cref="RefusingSmallBlocks"/>): a stable sort of 300 `long`
-        // items asks for a buffer of half of them, 150 of 8 bytes, and `SortBy` of 100 items with `long` keys for the pairs of a key and
-        // a position, 100 of 16 bytes; an unstable sort asks for nothing
+        // items asks for a buffer of half of them, 150 of 8 bytes, and one of 301 items for half of them rounded up, 151 of 8 bytes, as
+        // Rust's stable sort asks for at the least; `SortBy` of 100 items with `long` keys for the pairs of a key and a position, 100 of
+        // 16 bytes; an unstable sort asks for nothing
         var refusing = RefusingSmallBlocks;
         const string list = "mut xs = List<long>()\nfor i in 0..<300 {\n    xs.Add(long(299 - i))\n}\n\n";
         const string sort = list + "xs.Sort()\nprint(xs[0])\n";
         Ran(BuildAndRun(sort, refusing, "sort-refused"), 1, [], "error: allocation-failed (1200 bytes)\n");
         Ran(BuildAndRun(sort, toolchain.Runtime, "sort-granted"), 0, ["0"], ""); // the positive control
+        const string odd = "mut xs = List<long>()\nfor i in 0..<301 {\n    xs.Add(long(300 - i))\n}\n\nxs.Sort()\nprint(xs[0])\n";
+        Ran(BuildAndRun(odd, refusing, "sort-refused-odd"), 1, [], "error: allocation-failed (1208 bytes)\n");
+        Ran(BuildAndRun(odd, toolchain.Runtime, "sort-granted-odd"), 0, ["0"], "");
         const string keys = list + "mut ys = xs[0..<100]\nys.SortBy(y => y * 2)\nprint(ys[0])\n";
         Ran(BuildAndRun(keys, refusing, "keys-refused"), 1, [], "error: allocation-failed (1600 bytes)\n");
         Ran(BuildAndRun(keys, toolchain.Runtime, "keys-granted"), 0, ["200"], "");
@@ -3322,6 +3488,47 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal((0, ""), (second.Code, second.Error));
         Assert.NotEqual(first.Output, second.Output);
         Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first.Output).Trim('[', ']').Split(", ").Order());
+    }
+
+    [Fact]
+    public void A_key_of_every_count_of_bytes_from_0_to_24_has_the_SipHash_1_3_of_the_reference()
+    {
+        // SipHash13 reads each whole word of 8 bytes in one read and the bytes after the last one four, two and one at a time, as Rust's
+        // SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes (i * 37 + 200) % 256, half of them 128 or more, of every count
+        // from 0 to 24, under keys of 0 and under the reference implementation's keys, against SipHash-1-3 in Python, which gives
+        // CPython's `hash` of the same bytes under keys of 0 (`PYTHONHASHSEED=0`) and the three vectors of the test above
+        ulong[] zero =
+        [
+            15130871412783076140UL, 12449551661063549815UL, 18410336655117930453UL, 14036337907613256389UL, 8188850183964244334UL,
+            3177195191231020720UL, 11112996053577049341UL, 12494225358345731408UL, 3712373850883526462UL, 12892607951876773325UL,
+            12632183819240295938UL, 2608151670788947609UL, 15991896908241025576UL, 3217457963781418757UL, 5175628169687003164UL,
+            324940683844405139UL, 4078673874090109879UL, 15226221049046578814UL, 11307112605383110513UL, 9713625952335163347UL,
+            15212928445191759854UL, 10622023044703524569UL, 13280180098544721076UL, 4160088133271530178UL, 14255749407410980665UL,
+        ];
+        ulong[] reference =
+        [
+            12370263754033579228UL, 7382509910418742475UL, 2494721049683813306UL, 11620750396190661065UL, 5010687366671536750UL,
+            14218513396531960822UL, 11621134531688062575UL, 17244704406219703104UL, 12416751392242888934UL, 421987831323517835UL,
+            10723776196378657725UL, 13352898446040941761UL, 6124211783992107166UL, 18243523408008742371UL, 119414829251180199UL,
+            5538372403305982465UL, 1478129454238627121UL, 2867072306180843416UL, 1984877967642593061UL, 8806513419543075307UL,
+            16461867054457208225UL, 6477134911588130379UL, 7484306140281614234UL, 7636386497915317409UL, 11166856279661420457UL,
+        ];
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
+        const string hash = "    byte* p = Allocate(24)\n    raw {\n        for i in 0..<24 {\n            p[i] = byte((i * 37 + 200) % 256)\n        }\n    }\n    for n in 0..<25 {\n        WriteNumber(std.SipHash13(0, 0, p, long(n)))\n        WriteError(\" \")\n        WriteNumber(std.SipHash13(506097522914230528UL, 1084818905618843912UL, p, long(n)))\n        WriteError(\"\\n\")\n    }\n";
+        var runtime = Edited(("std/std.kz", "\nulong SipHash13(", "\npub ulong SipHash13("), ("runtime/common/runtime.kz", start, start + hash));
+        var expected = string.Concat(zero.Zip(reference, (z, r) => $"{z} {r}\n"));
+        Ran(BuildAndRun("print(1)\n", runtime, "map-siphash-counts"), 0, ["1"], expected);
+    }
+
+    [Fact]
+    public void Two_strings_are_equal_where_every_byte_is_compared_a_word_at_a_time_and_the_bytes_after()
+    {
+        // T18: the runtime's `Same` compares 8 bytes at a time and the bytes after the last 8 one at a time: a string of every count from 0
+        // to 20 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
+        // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
+        // byte 128 or more, against one letter changed at each place, which changes its second byte alone
+        const string text = "s = \"abcdefghijklmnopqrst\"\nmut long n = 0\nfor count in 0..<21 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["21000", "21000"], "");
     }
 
     [Theory]

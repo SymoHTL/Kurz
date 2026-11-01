@@ -171,9 +171,7 @@ public sealed partial class Emitter
         for (var i = 0; i < values.Count; i++)
         {
             fn.Block(labels[i]);
-            var number = fn.Value($"call %kz.str {RuntimeFunction("TextOfLong")}(i64 {at})");
-            var words = fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue(Words(values[i]) + " at ")}, %kz.str {number})");
-            Release(number, Types.String);
+            var words = Joined([LiteralPiece(Words(values[i]) + " at "), NumberPiece(at, true)]);
             fn.Return($"%kz.str {words}");
         }
 

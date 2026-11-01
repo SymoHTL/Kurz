@@ -12,7 +12,7 @@ List<long> Made() {
 
 List<long>? Missing(bool b) => null
 
-List<long> Arm(int x) {
+List<long> Branch(int x) {
     return match x {
         1 => [8]
         else => [5, 6]
@@ -26,6 +26,6 @@ print(xs)
 ys = Missing(true) ?? [4]
 List<long> zs = ys
 print(zs)
-print(Arm(2))
+print(Branch(2))
 (int) => List<long> f = n => [7]
 print(f(1))

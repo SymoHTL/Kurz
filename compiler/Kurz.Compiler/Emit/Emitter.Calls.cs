@@ -404,6 +404,15 @@ public sealed partial class Emitter
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {count})");
         fn.Unreachable();
         fn.Block(fits);
+        return TakenOver(pointer, count);
+    }
+
+    /// <summary>
+    /// The string of the <paramref name="count"/> bytes at <paramref name="pointer"/>, in a block <c>string.Allocate</c> gave, which it
+    /// takes over, its count of bytes marked in its highest bit as a string that holds a block (R15, T15).
+    /// </summary>
+    private string TakenOver(string pointer, string count)
+    {
         fn.Emit($"call void {StdFunction("StringTakeOver")}(ptr {pointer}, i64 {count})"); // the count in the block, which `s.Bytes` shares (T15)
         var withPointer = fn.Value($"insertvalue %kz.str undef, ptr {pointer}, 0");
         return fn.Value($"insertvalue %kz.str {withPointer}, i64 {fn.Value($"or i64 {count}, -9223372036854775808")}, 1");
