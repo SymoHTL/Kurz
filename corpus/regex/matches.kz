@@ -1,0 +1,13 @@
+// expect: output
+// | 1 at 1
+// | 22 at 3
+// | 333 at 6
+// | 2
+// | 0
+// rules: G4
+
+for m in Regex.New(r"\d+").Matches("a1b22c333") {
+    print("{m.Value} at {m.Index}")
+}
+print(Regex.New("aa").Matches("aaaa").Count)
+print(Regex.New(r"\d").Matches("abc").Count)

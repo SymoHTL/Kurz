@@ -164,7 +164,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    if (IsUnreadName(n.Name))
+                    if (IsUnreadName(n.Name) || UnreadRegexName(n.Name, n.Line))
                     {
                         CheckArgumentsLoosely(c);
                         return Typed.Error;

@@ -1,0 +1,5 @@
+// expect: error regex-invalid at 4
+// rules: G3
+
+closing = Regex.New("a)")
+print(closing.IsMatch("a"))
