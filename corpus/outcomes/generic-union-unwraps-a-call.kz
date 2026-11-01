@@ -1,0 +1,27 @@
+// expect: output
+// | []
+// | 1
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+List<T> F<T>(T | string x) => List<T>()
+
+int | NotFound Run() {
+    // `T | string` names no case of the call beyond its success: the call unwraps, and `T` is `int`
+    List<int> got = F(Find(1))
+    print(got)
+    return 1
+}
+
+match Run() {
+    int n => print(n)
+    NotFound => print("none")
+}

@@ -1,0 +1,9 @@
+// expect: output
+// | []
+// rules: O4
+
+List<T> F<T>(T | string x) => List<T>()
+
+// the literal binds `T` to its own type, as at a bare `T`: `int`
+List<int> got = F(5)
+print(got)

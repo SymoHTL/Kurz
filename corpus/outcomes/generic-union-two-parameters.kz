@@ -1,0 +1,18 @@
+// expect: error cannot-infer at 18
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void G<T, U>(T | U | NotFound x) {
+    print("g")
+}
+
+// two type parameters in one union: neither is inferred, and the call writes them
+G(Find(1))
