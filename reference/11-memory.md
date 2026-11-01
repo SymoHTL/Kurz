@@ -957,7 +957,10 @@ C#'s names, the class of x86's SHA set is `X86.Sha`, and the operations of `Vect
 `Vector256<T>` on their lanes, `Vector128.Create(1, 2, 3, 4)` and `v.GetElement(2)`, are no
 intrinsics and need no test *(assumed: as §13 marks them)*. The functions of `X86.Sha` are the seven
 of .NET's closed proposal, `Sha256TwoRounds` among them, on `Vector128<uint>` (§13, the owner,
-2026-11-01, "Proposal names, uint lanes").
+2026-11-01, "Proposal names, uint lanes"). A constant given for an intrinsic's parameter that C#
+types `byte`, the `2` of `X86.Sse41.Extract(v, 2)`, is an `int` for the pick of the function (F14)
+and has to fit the parameter's type: `X86.Sse41.Extract(v, 300)` is `constant-overflow`
+*(assumed: as §13 marks it)*.
 
 An intrinsic stands where a test of its class's `IsSupported` guards it, as a test narrows a
 nullable variable (N3), and in a `raw` block (R7) (§13, the owner, 2026-11-01, "Checker narrows"):
@@ -996,6 +999,15 @@ Case: [memory/intrinsic-unguarded.kz](../corpus/memory/intrinsic-unguarded.kz)
 v = Vector128.Create(1, 2, 3, 4)
 // an intrinsic that no test of its class's `IsSupported` guards, outside a `raw` block, is intrinsic-unguarded (R18)
 print(X86.Sse41.Extract(v, 2))
+```
+
+Case: [memory/intrinsic-immediate.kz](../corpus/memory/intrinsic-immediate.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Sse41.IsSupported {
+    // the index of Extract is a `byte` in C#: the constant 300 does not fit it (R18)
+    print(X86.Sse41.Extract(v, 300))
+}
 ```
 
 Case: [memory/intrinsic-in-else.kz](../corpus/memory/intrinsic-in-else.kz)
