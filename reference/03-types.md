@@ -1228,10 +1228,12 @@ file's own `TypeKind` is `redeclared` (V9); it has a value for each number type,
 and one for each other kind, `TypeKind.Data` and `TypeKind.String` among them; an arm of a `match`
 on `T.Kind` is checked only in the copies whose kind it names; `Kind`, `Fields` and `Make` are
 members of a type parameter alone; `f.Get(value)` reads as `value.Field`)* A `match` on `T.Kind`
-need not name every kind (O8): where it has no arm for the kind of a copy's type argument, the call
-that made the copy is the compile error `kind-not-read`, which names the generic function, the type,
-its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile error").
-*(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the same error)*
+is not held to name every kind or end in an `else` arm, unlike one on a union or an `enum` (O8,
+D12): it is checked in each copy, and where it has no arm for the kind of a copy's type argument,
+the call that made the copy is the compile error `kind-not-read`, which names the generic function,
+the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
+error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
+same error)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
