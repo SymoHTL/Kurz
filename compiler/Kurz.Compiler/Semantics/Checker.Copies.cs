@@ -197,6 +197,11 @@ public sealed partial class Checker
                 diagnostics.Remove(d);
             }
         }
+
+        foreach (var f in readers)
+        {
+            model.RecordReader(f);
+        }
     }
 
     /// <summary>The call's record where it calls a function that reads its type.</summary>
@@ -263,7 +268,7 @@ public sealed partial class Checker
         copiesByArguments[(original, arguments)] = copy;
         copies[symbol] = copy;
         model.RecordFunction(declaration, symbol);
-        model.RecordCopy(symbol);
+        model.RecordCopy(original, symbol);
         CheckCopy(copy);
         return copy;
     }

@@ -252,6 +252,8 @@ public sealed class SemanticModel
     private readonly Dictionary<object, VariableSymbol> declarations = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<CallExpression, CallInfo> calls = new(ReferenceEqualityComparer.Instance);
     private readonly List<FunctionSymbol> copies = [];
+    private readonly Dictionary<FunctionSymbol, List<FunctionSymbol>> copiesOf = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<FunctionSymbol> readers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Expression, MatchArm> kindArms = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
@@ -314,6 +316,12 @@ public sealed class SemanticModel
     /// <summary>T33: the copies of the generic functions of the file that read their type, each a function of its own, in the order they were made.</summary>
     public IReadOnlyList<FunctionSymbol> Copies => copies;
 
+    /// <summary>T33: whether a function is checked in its copies alone, since it reads its type or passes its type parameter to a function that does: a code generator reads its copies and never its own body.</summary>
+    public bool ReadsItsType(FunctionSymbol function) => readers.Contains(function);
+
+    /// <summary>T33: the copies made of a function that reads its type, in the order they were made; none where no call made one.</summary>
+    public IReadOnlyList<FunctionSymbol> CopiesOf(FunctionSymbol original) => copiesOf.TryGetValue(original, out var made) ? made : [];
+
     /// <summary>T33: the one arm a <c>match</c> on <c>T.Kind</c> in a copy reads, by the match's subject; null for any other <c>match</c>.</summary>
     public MatchArm? KindArmOf(Expression subject) => kindArms.GetValueOrDefault(subject);
 
@@ -373,7 +381,18 @@ public sealed class SemanticModel
 
     internal void RecordCall(CallExpression call, CallInfo info) => calls[call] = info;
 
-    internal void RecordCopy(FunctionSymbol copy) => copies.Add(copy);
+    internal void RecordCopy(FunctionSymbol original, FunctionSymbol copy)
+    {
+        copies.Add(copy);
+        if (!copiesOf.TryGetValue(original, out var made))
+        {
+            copiesOf[original] = made = [];
+        }
+
+        made.Add(copy);
+    }
+
+    internal void RecordReader(FunctionSymbol function) => readers.Add(function);
 
     internal void RecordKindArm(Expression subject, MatchArm arm) => kindArms[subject] = arm;
 
