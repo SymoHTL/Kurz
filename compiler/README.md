@@ -1518,13 +1518,18 @@ round can ask about it by the rule's id.
   infers from the value lists no case: a case the calling function does not list is
   `unlisted-case` (O3).
 - O4 with F13 and T27: a call that stands as an argument is read whole, and each function of the
-  name reads it by its own parameter: a parameter whose type is a union, with the type arguments the
-  call writes or the receiver gives (`Add` on a `List<int | NotFound>` among them), keeps the cases
-  and fits the whole result; any other parameter takes the success, and so does a type parameter the
-  arguments infer, as the parameter is read before the inference. A `T?` of one type is no union of
+  name reads it by its own parameter: a parameter whose type is a union that names a case of the call
+  beyond its success, with the type arguments the call writes or the receiver gives (`Add` on a
+  `List<int | NotFound>` among them, and `T | NotFound`, whose `T` the success then fills), keeps the
+  cases and fits the whole result; any other parameter takes the success, `int | string` for an
+  `int | NotFound` call among them, and so does a type parameter the arguments infer, as the
+  parameter is read before the inference. One test, `Types.KeepsCases`, decides it at a parameter and
+  at every other place a call's cases can be kept: a variable, a result, a field, a list's items. A `T?` of one type is no union of
   cases there, nor in a variable or a result, so `int? x = Find(id)` unwraps, as O4's sentence on a
   type the success converts to says. Of two functions that both fit exactly, the one whose parameter
-  keeps the cases is picked (the owner, 2026-10-31, "The union one"). Where no function fits, the
+  keeps the cases is picked (the owner, 2026-10-31, "The union one"); the exact fit is read first,
+  so `Show(int)` wins over `Show(long | NotFound)`, which fits with a widening (the owner, 2026-10-31,
+  "Exact fit first"). Where no function fits, the
   call's error stands alone and no case of the argument is passed on beside it (E1).
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
