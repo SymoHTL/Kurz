@@ -2789,13 +2789,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_sort_whose_buffer_or_keys_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
         // M9, X8: the runtime's `Allocate` refusing 1000 to 4095 bytes (<see cref="RefusingSmallBlocks"/>): a stable sort of 300 `long`
-        // items asks for a buffer of half of them, 150 of 8 bytes, and `SortBy` of 100 items with `long` keys for the pairs of a key and
-        // a position, 100 of 16 bytes; an unstable sort asks for nothing
+        // items asks for a buffer of half of them, 150 of 8 bytes, and one of 301 items for half of them rounded up, 151 of 8 bytes, as
+        // Rust's stable sort asks for at the least; `SortBy` of 100 items with `long` keys for the pairs of a key and a position, 100 of
+        // 16 bytes; an unstable sort asks for nothing
         var refusing = RefusingSmallBlocks;
         const string list = "mut xs = List<long>()\nfor i in 0..<300 {\n    xs.Add(long(299 - i))\n}\n\n";
         const string sort = list + "xs.Sort()\nprint(xs[0])\n";
         Ran(BuildAndRun(sort, refusing, "sort-refused"), 1, [], "error: allocation-failed (1200 bytes)\n");
         Ran(BuildAndRun(sort, toolchain.Runtime, "sort-granted"), 0, ["0"], ""); // the positive control
+        const string odd = "mut xs = List<long>()\nfor i in 0..<301 {\n    xs.Add(long(300 - i))\n}\n\nxs.Sort()\nprint(xs[0])\n";
+        Ran(BuildAndRun(odd, refusing, "sort-refused-odd"), 1, [], "error: allocation-failed (1208 bytes)\n");
+        Ran(BuildAndRun(odd, toolchain.Runtime, "sort-granted-odd"), 0, ["0"], "");
         const string keys = list + "mut ys = xs[0..<100]\nys.SortBy(y => y * 2)\nprint(ys[0])\n";
         Ran(BuildAndRun(keys, refusing, "keys-refused"), 1, [], "error: allocation-failed (1600 bytes)\n");
         Ran(BuildAndRun(keys, toolchain.Runtime, "keys-granted"), 0, ["200"], "");
