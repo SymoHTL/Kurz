@@ -602,7 +602,8 @@ use as syntax, and `extern`, which the boundary with C uses (§2, §13, R16, R17
 `sym`, `label` and `options` *(assumed: as §3 marks them)*; `in` is a core word already. `thread` is
 a word only before `static` in R13's declaration and a name everywhere else (§3, the owner,
 2026-10-21). `Ptr` and `SizeOf`, which R14 uses as syntax, are core words too (§3, the owner,
-2026-10-21).
+2026-10-21). `as` is a word of a `use` line alone, after the folder it renames (F10), and a name
+everywhere else *(assumed, §13)*.
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
