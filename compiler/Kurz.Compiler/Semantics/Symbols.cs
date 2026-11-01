@@ -74,6 +74,9 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
     public int Line => Declaration?.Line ?? CDeclaration?.Line ?? 0;
 
     public bool IsGeneric => TypeParameters.Count > 0;
+
+    /// <summary>The class whose method this is (K7), with its instance as <c>this</c>; null for a function of the file.</summary>
+    public ClassSymbol? Owner { get; init; }
 }
 
 /// <summary>A field of a <c>data</c> type (D1), its own or inherited (D7).</summary>
@@ -104,6 +107,31 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     public bool IsGeneric => TypeParameters.Count > 0;
 
     public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
+}
+
+/// <summary>
+/// A <c>class</c> (K1): the fields of its primary constructor in their order, <c>mut</c> where written (K1), and its methods by name
+/// (K7), each a function whose instance is <c>this</c>.
+/// </summary>
+public sealed class ClassSymbol(string name, TypeDeclaration declaration)
+{
+    public string Name { get; } = name;
+
+    public TypeDeclaration Declaration { get; } = declaration;
+
+    public List<FieldSymbol> Fields { get; } = [];
+
+    public Dictionary<string, List<FunctionSymbol>> Methods { get; } = new(StringComparer.Ordinal);
+
+    public int Line => Declaration.Line;
+
+    public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
+
+    public int FieldIndex(string name) => Fields.FindIndex(f => f.Name == name);
+
+    /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of no parameters with a <c>string</c> result; null where the class has none.</summary>
+    public FunctionSymbol? TextMethod =>
+        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
 }
 
 /// <summary>

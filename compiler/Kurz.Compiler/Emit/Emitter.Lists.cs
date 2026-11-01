@@ -34,7 +34,7 @@ public sealed partial class Emitter
     /// <summary>Whether a value of the type holds the block of a list, of a map, of a string or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or HasherType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
@@ -202,6 +202,12 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is ClassType)
+        {
+            fn.Emit($"call void {RetainInstance()}(ptr {value})");
+            return;
+        }
+
         if (type is PrimitiveType { Kind: Primitive.String })
         {
             if (!IsLiteral(value))
@@ -234,6 +240,12 @@ public sealed partial class Emitter
         if (type is HandleType)
         {
             fn.Emit($"call void {ReleaseHandle()}(ptr {value})");
+            return;
+        }
+
+        if (type is ClassType c)
+        {
+            fn.Emit($"call void {ReleaseInstance(c.Symbol)}(ptr {value})");
             return;
         }
 
