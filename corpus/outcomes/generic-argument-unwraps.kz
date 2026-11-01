@@ -14,9 +14,13 @@ int | NotFound Find(int id) {
 
 T Same<T>(T x) => x
 
-// a type parameter is no written union, so the call unwraps: `T` is `int`, and `NotFound` leaves `Doubled`
+// a type parameter the call infers is no written union, so the call unwraps: `T` is `int`, and the match lists no `NotFound`
 int | NotFound Doubled(int id) {
-    return Same(Find(id)) * 2
+    mut doubled = 0
+    match Same(Find(id)) {
+        int n => doubled = n * 2
+    }
+    return doubled
 }
 
 match Doubled(1) {

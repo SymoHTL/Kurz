@@ -1,0 +1,24 @@
+// expect: output
+// | found
+// | none
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report<T>(T | NotFound found) {
+    match found {
+        NotFound => print("none")
+        else => print("found")
+    }
+}
+
+// `T | NotFound` names a case of the call beyond its success, so it keeps the cases, and `T` is `int`
+Report(Find(1))
+Report(Find(2))
