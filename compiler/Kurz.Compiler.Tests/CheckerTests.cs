@@ -3321,6 +3321,12 @@ public sealed class CheckerTests
     [Theory]
     [InlineData("void Show<T>(T value) {\n    for f in T.Fields {\n        print(f.Name)\n    }\n}\n\nShow(1)", "2: reading a type in generic code, `T.Fields` (T33)")]
     [InlineData("data P(int X)\n\nT Zero<T>() => T.Make(f => 0)\n\nprint(Zero<P>())", "3: reading a type in generic code, `T.Make` (T33)")]
+    [InlineData("enum Shape { Round }\n\nvoid Show<T>() {\n    print(T.Values)\n}\n\nShow<Shape>()", "4: reading a type in generic code, `T.Values` (T33)")]
+    [InlineData("void Show<T>() {\n    print(T.Item)\n}\n\nShow<List<int>>()", "2: reading a type in generic code, `T.Item` (T33)")]
+    [InlineData("void Show<T>() {\n    print(T.Key)\n}\n\nShow<Map<string, int>>()", "2: reading a type in generic code, `T.Key` (T33)")]
+    [InlineData("void Show<T>() {\n    print(T.Value)\n}\n\nShow<Map<string, int>>()", "2: reading a type in generic code, `T.Value` (T33)")]
+    [InlineData("void Show<T>() {\n    print(T.Inner)\n}\n\nShow<int?>()", "2: reading a type in generic code, `T.Inner` (T33)")]
+    [InlineData("void Show<T>() {\n    print(T.Cases)\n}\n\nShow<int | string>()", "2: reading a type in generic code, `T.Cases` (T33)")]
     public void Reading_a_type_by_its_fields_is_not_supported_in_a_copy(string program, string expected) =>
         // T33: the members of a type parameter beyond `Kind`, at a member and at a member's call, in the copy the call makes (E1)
         Assert.Equal([expected], NotSupported(program));
@@ -3349,7 +3355,7 @@ public sealed class CheckerTests
         // second call for the same type makes no copy and no second error
         var program = ShowKind + "void Outer<U>() {\n    ShowKind<U>()\n}\n\nShowKind<Order>()\nOuter<bool>()\nShowKind<bool>()";
         Assert.Equal([(ErrorIds.KindNotRead, 15)], Errors(program));
-        Assert.Contains("`Outer<bool>`: `bool` is of the kind `TypeKind.Bool`, which no arm of the `match` on `T.Kind` in `ShowKind` takes", Check(program).Diagnostics.Items[0].Message);
+        Assert.Equal("`Outer<bool>`: `bool` is of the kind `TypeKind.Bool`, which no arm of the `match` on `T.Kind` in `ShowKind` takes (T33)", Check(program).Diagnostics.Items[0].Message);
     }
 
     [Theory]
@@ -3363,6 +3369,14 @@ public sealed class CheckerTests
     [InlineData("Shape", "Enum")]
     [InlineData("(int) => int", "Function")]
     [InlineData("Counter", "Class")]
+    [InlineData("duration", "Duration")]
+    [InlineData("timestamp", "Timestamp")]
+    [InlineData("longduration", "LongDuration")]
+    [InlineData("longtimestamp", "LongTimestamp")]
+    [InlineData("File", "Class")]
+    [InlineData("TcpListener", "Class")]
+    [InlineData("TcpStream", "Class")]
+    [InlineData("Sha256", "Class")]
     public void T_Kind_in_a_copy_is_the_constant_of_the_kind_of_its_type(string type, string kind)
     {
         // T33: each copy reads its type's kind, a constant of `TypeKind`, so that a `match` on it takes the arm of that value alone
