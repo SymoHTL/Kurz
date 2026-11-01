@@ -397,7 +397,9 @@ error of the system, where Rust gives `Uncategorized`, and -4099, `Other`, for o
 `EAI_FAIL` (section 12, "Split NotFound / Other"). `Listen` sets `SO_REUSEADDR`, listens
 with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
-socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
+socket is opened close-on-exec (S9). `LockWait` puts the thread to sleep on a file's lock word while it holds
+the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
+as Rust's `futex_wait` and `futex_wake` do (S16). `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
 block of a map, its growth and the hash of its keys (M9, below).
 
@@ -603,7 +605,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (A4), `==` on a field of one, by the case and its value (D3), a call whose result is one, kept
   whole (O4) or used where its success is required, with its other cases passed on to the caller
   (O1, O2), a success case without a value (O10), `match` with arms of a type, of a value and
-  `else` (C4, C9, O8), postfix `else` after a call (O5), and `throw` of a data value and the bare
+  `else` (C4, C9, O8), postfix `else` after a call (O5) and after a loop over a file's lines (S16), and `throw` of a data value and the bare
   `throw` of an arm of `else`, which throws the case that reached it (O7);
 - nullable types (N1): `T?` is the union `T | null`, laid out as every union is, its `null` a case
   of no size, `{}` in the IR, whose value is `zeroinitializer` and whose text is `null` (A4), and a
@@ -762,12 +764,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   and `TcpStream`, each of a file's and a stream's `Read`, `Write` and `Close` and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` and `ErrorCode` and its path the call's first,
-  whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 32 bytes,
-  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, and the path or the address, which a stream from `Accept` takes from its listener (S9), counted as a list's block is and
-  closed at zero, the error of that close ignored, and `Close` writes -1 as the descriptor before it
+  whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
+  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), counted as a list's block is and
+  closed at zero, the error of that close ignored, the buffer freed with the block, and `Close` writes -1 as the descriptor and gives up the buffer's bytes before it
   closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
-  holds, before it reads (S3), and `File.ReadAll` makes room for the size `fstat` names for the open
+  holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
+  the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
+  through a helper that takes the file's lock, a compare-and-swap from 0 to 1 and else Rust's futex wait, makes the buffer of 8192
+  bytes at the first pull, reads it again where every byte of it was taken, looks for the next `\n` with `std/`'s `Find` and gathers
+  the bytes up to it in a list of bytes, whose block the line's string takes over, without the `\n` and a `\r` in front of it; a line
+  that is not UTF-8 by `Utf8Invalid` makes the case `InvalidUtf8`, a failed read the case `IoError`, which the arms of the loop's `else`
+  take as a call's or which leave the function (S16); and `File.ReadAll` makes room for the size `fstat` names for the open
   file, no more than the largest `int` of items, as Rust's `fs::read` reserves it, then reads into the
   room the list has, else 8192 bytes more, no more than the largest `int` of items leaves, while a read
   gives bytes; a list full at that size, or that holds the largest `int` of items, reads one byte more,
@@ -784,7 +792,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose room it gives; the room of the list a whole read gives,
   under a library that ends the process where an `Add` would grow one; a read and a write in
   the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
-  created again and one under a file; the text of an error without a path; and the refusal for Windows;
+  created again and one under a file; the text of an error without a path; a `\r\n` split by the end of the buffer's read, a line
+  longer than two reads and a last `\r` with no `\n`; a pull and a read after a close; an assignment to the file in the block of a
+  loop over its lines; and the refusal for Windows, at a call and at such a loop;
 - the command line, the environment and the clock (S13 to S15), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
@@ -1249,7 +1259,7 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths none, since they run through a
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
+flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -1272,7 +1282,7 @@ function, `argument-mismatch` at the call, with a line of the message per functi
 not fit (F13), and for a name with one function the error of that function: `argument-mismatch`,
 `cannot-infer`, E4's `syntax` for a count of type arguments it does not have (the reading on E4
 below), or the id of the argument that does not fit, `narrowing-conversion` among them. A `match`
-and a postfix `else` are checked for the cases they cover (C4, C9, O5, O8), and a case the
+and a postfix `else`, after a call or after a loop over a file's lines, are checked for the cases they cover (C4, C9, O5, O8, S16), and a case the
 calling function does not list after the first case of its return type propagates as
 `unlisted-case` (O1 to O3, O9); a cycle of `data` bases is `base-cycle` (D6), where the order in
 which D6 reads the files of a program, the order of their paths, is not reached, since the checker

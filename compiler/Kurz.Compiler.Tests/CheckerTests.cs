@@ -926,6 +926,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 15)], Errors(arm + "        numbers.Add(1)\n        5\n    }\n}))"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ndata Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => xs.Count + n\n\nmut cart = Cart(List<int>())\nprint(Count(cart.Items, Find(2) else {\n    NotFound => {\n        cart.Items.Add(1)\n        5\n    }\n}))")); // a `mut` method on a path
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 17)], Errors(arm + "        k = 1\n        if k == 1 {\n            numbers = List<int>()\n        }\n        5\n    }\n}))"));
+        // S16: and so does one in an arm of the `else` after a loop over a file's lines, in such a block, and a statement there that
+        // changes nothing passes
+        var lines = arm + "        f = File.Open(\"lines.txt\") else {\n            IoError => throw\n        }\n\n        for line in f.Lines() {\n            print(line)\n        } else {\n            IoError => CHANGE\n            InvalidUtf8 => print(0)\n        }\n\n        5\n    }\n}))";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 22)], Errors(lines.Replace("CHANGE", "numbers = List<int>()", StringComparison.Ordinal)));
+        Clean(lines.Replace("CHANGE", "print(1)", StringComparison.Ordinal));
         Clean(arm + "        mut others = List<int>()\n        others.Add(1)\n        others.Count\n    }\n}))"); // a variable of the arm's own
         Clean(find + "mut numbers = List<int>()\nprint(Find(2) else {\n    NotFound => {\n        numbers = List<int>()\n        5\n    }\n})\nprint(numbers.Count)"); // an arm's change that nothing holds
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ndata Cart(List<int> Items)\n\nint Count(List<int> xs, int n) => xs.Count + n\n\nmut cart = Cart(List<int>())\nprint(Count(cart.Items, Find(2) else {\n    NotFound => {\n        cart.Items = List<int>()\n        5\n    }\n}))")); // a path assignment

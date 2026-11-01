@@ -1,0 +1,10 @@
+// expect: error type-mismatch at 9
+// rules: S16
+
+// an `else` after a loop takes the cases its collection can fail with: a list's has none
+xs = [1, 2]
+for x in xs {
+    print(x)
+} else {
+    IoError e => print(e)
+}

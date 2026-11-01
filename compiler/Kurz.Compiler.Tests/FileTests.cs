@@ -20,8 +20,9 @@ namespace Kurz.Compiler.Tests;
 /// colon, a literal of IPv6 binds where the machine has its loopback, and a connection <c>Accept</c> gave names its listener's address
 /// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c>, or with <c>EAI_SYSTEM</c> while <c>errno</c> holds 0, is the kind
 /// <c>Other</c>, and one that fails with <c>EAI_SYSTEM</c> while <c>errno</c> holds 13 the error of that number, each through a runtime
-/// whose lookup gives that result; and a build for Windows says
-/// <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
+/// whose lookup gives that result; a line is whole across the reads of the buffer, a <c>\r</c> in front of a <c>\n</c> in the next read is
+/// not part of it, a close gives up the bytes the buffer holds, and a loop over the lines holds its file (S16); and a build for Windows says
+/// <c>not supported</c> at a call on a file or a socket, and at a loop over a file's lines (S11). Each program runs under
 /// the runtime of this machine and under the fenced allocator of <see cref="ListTests.Fenced"/>, where no other runtime is named; on
 /// Windows each is held to the build's refusal instead.
 /// </summary>
@@ -773,11 +774,136 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(text, "socket-accepted-path", ["other (os error 9): 127.0.0.1:0"]);
     }
 
+    private const string Buffered = """
+        void | IoError | InvalidUtf8 Show() {
+            mut content = Bytes()
+            mut i = 0
+            while i < 8191 {
+                content.Add(byte(97))
+                i = i + 1
+            }
+
+            // the `\r` is the last byte of the first 8 KiB the buffer reads, and the `\n` after it the first of the next
+            content.AddRange("\r\n".Bytes)
+            i = 0
+            while i < 20000 {
+                content.Add(byte(98))
+                i = i + 1
+            }
+
+            content.AddRange("\nc\nend\r".Bytes)
+            File.WriteAll("lines-buffer.txt", content)
+            f = File.Open("lines-buffer.txt")
+            File.Delete("lines-buffer.txt")
+            for line in f.Lines() {
+                print("{line.Bytes.Count} {line.Contains('\r')}")
+            }
+        }
+
+        Show() else {
+            IoError e => print(e)
+            InvalidUtf8 u => print(u)
+        }
+
+        """;
+
+    [Fact]
+    public void A_line_is_whole_across_the_buffer_s_reads_and_a_carriage_return_in_front_of_a_line_break_in_the_next_read_is_not_part_of_it()
+    {
+        // S16: a `\r\n` split by the end of the buffer's 8 KiB, a line longer than two reads of it, and a last line whose `\r` no `\n`
+        // follows, which keeps it
+        Ran(Buffered, "lines-buffer", ["8191 false", "20000 false", "1 false", "4 true"]);
+
+        // the positive control: the same bytes with the `\r\n` one byte earlier, inside the first read
+        Ran(Buffered.Replace("i < 8191", "i < 8190", StringComparison.Ordinal), "lines-buffer-inside", ["8190 false", "20000 false", "1 false", "4 true"]);
+    }
+
+    private const string Closed = """
+        void | IoError | InvalidUtf8 Show() {
+            File.WriteAll("lines-closed.txt", "one\ntwo\n".Bytes)
+            f = File.Open("lines-closed.txt")
+            File.Delete("lines-closed.txt")
+            for line in f.Lines() {
+                print(line)
+                break
+            }
+
+            f.Close()
+            for line in f.Lines() {
+                print(line)
+            } else {
+                IoError e => print(e.Code)
+            }
+
+            mut buffer = Bytes()
+            print(f.Read(mut buffer, 4) else {
+                IoError e => -e.Code
+            })
+        }
+
+        Show() else {
+            IoError e => print(e)
+            InvalidUtf8 u => print(u)
+        }
+
+        """;
+
+    [Fact]
+    public void A_close_gives_up_the_bytes_the_buffer_holds_so_a_pull_and_a_read_after_it_are_the_system_s_error_9()
+    {
+        // S5, S16: `EBADF`, though the buffer still held the second line
+        Ran(Closed, "lines-closed", ["one", "9", "-9"]);
+
+        // the positive control: without the close the second loop takes the line the buffer held, and the read finds the end
+        Ran(Closed.Replace("    f.Close()\n", "", StringComparison.Ordinal), "lines-closed-open", ["one", "two", "0"]);
+    }
+
+    private const string Held = """
+        void | IoError | InvalidUtf8 Show() {
+            File.WriteAll("lines-held.txt", "one\ntwo\nthree\n".Bytes)
+            File.WriteAll("lines-other.txt", "other\n".Bytes)
+            mut f = File.Open("lines-held.txt")
+            for line in f.Lines() {
+                // the loop holds the file it started with, which this assignment lets go of
+                f = File.Open("lines-other.txt")
+                print(line)
+            }
+
+            for line in f.Lines() {
+                print(line)
+            }
+
+            File.Delete("lines-held.txt")
+            File.Delete("lines-other.txt")
+        }
+
+        Show() else {
+            IoError e => print(e)
+            InvalidUtf8 u => print(u)
+        }
+
+        """;
+
+    [Fact]
+    public void A_loop_over_the_lines_holds_its_file_so_an_assignment_in_its_block_lets_go_of_no_block_it_reads()
+    {
+        // S16, S5: under the fenced allocator a read of the handle's block or of its buffer after either was freed ends the process
+        Ran(Held, "lines-held", ["one", "two", "three", "other"]);
+
+        // the positive control: without the assignment the second loop finds the first file at its end
+        Ran(Held.Replace("        f = File.Open(\"lines-other.txt\")\n", "", StringComparison.Ordinal), "lines-held-kept", ["one", "two", "three"]);
+    }
+
     [Fact]
     public void A_build_for_windows_says_not_supported_at_a_call_on_a_file_and_one_for_linux_builds_it()
     {
         const string text = "File.Delete(\"gone.txt\") else {\n    IoError e => print(e)\n}\n";
         RefusedOnWindows(Compile(text, Builder.CheckRuntime(Target.Windows)));
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
+
+        // S16: and at a loop over a file's lines
+        const string lines = "void | IoError Pull(File f) {\n    for line in f.Lines() {\n        print(line)\n    } else {\n        InvalidUtf8 => print(0)\n    }\n}\n\nPull(File.Open(\"lines.txt\") else {\n    IoError => throw\n}) else {\n    IoError e => print(e)\n}\n";
+        RefusedOnWindows(Compile(lines, Builder.CheckRuntime(Target.Windows)));
+        Assert.NotNull(Compile(lines, Builder.CheckRuntime(Target.Linux)).Program);
     }
 }

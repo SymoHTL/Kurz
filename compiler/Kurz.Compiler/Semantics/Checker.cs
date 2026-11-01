@@ -52,6 +52,7 @@ public sealed partial class Checker
     private Frame frame = null!;
     private List<TypeParameterSymbol>? typeContext;
     private bool inElseArm;
+    private CallExpression? loopSource; // S16: the collection of the `for` loop being checked, the one place `f.Lines()` stands
     private bool realKeepsOwnType;
     private int blockDepth;
     private int rawDepth; // R7, R12: the `raw` blocks and `naked` bodies around the code being checked
@@ -2047,12 +2048,14 @@ public sealed partial class Checker
     /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
     /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
     /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is (C6, proposed:
-    /// section 4 gives the form over a map alone).
+    /// section 4 gives the form over a map alone). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
+    /// failures the arms of an <c>else</c> after the block handle as a call's (O5) and every other one leaves the function at the loop's line.
     /// </summary>
     private void CheckForIn(ForInStatement f)
     {
         KurzType element;
         KurzType? value = null;
+        UnionType? failures = null;
         if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
@@ -2060,22 +2063,33 @@ public sealed partial class Checker
         }
         else
         {
+            var outer = loopSource;
+            loopSource = Unwrap(f.Collection) as CallExpression;
             var t = CheckExpression(f.Collection, null);
-            if (Types.IsVoid(t.Type))
+            loopSource = outer;
+            if (Unwrap(f.Collection) is CallExpression lines && model.HasCall(lines) && model.CallOf(lines).Kind == CallKind.FileLines && t.Type is UnionType pulls)
             {
-                this.Report(ErrorIds.Syntax, f.Collection.Line, "a call with a `void` success used as a value (O10)");
+                failures = pulls; // S16: a line is a `string`, and a pull's cases go to the loop's `else`, or leave the function through it
+                element = Types.String;
             }
-
-            element = t.Type switch
+            else
             {
-                ListType l => l.Element,
-                ErrorType or VoidType => Types.Error,
-                MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
-                MapType m => m.Key,
-                _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
-                _ => Report(f.Collection.Line, t.Type),
-            };
-            value = t.Type is MapType map ? map.Value : null;
+                if (Types.IsVoid(t.Type))
+                {
+                    this.Report(ErrorIds.Syntax, f.Collection.Line, "a call with a `void` success used as a value (O10)");
+                }
+
+                element = t.Type switch
+                {
+                    ListType l => l.Element,
+                    ErrorType or VoidType => Types.Error,
+                    MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
+                    MapType m => m.Key,
+                    _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
+                    _ => Report(f.Collection.Line, t.Type),
+                };
+                value = t.Type is MapType map ? map.Value : null;
+            }
         }
 
         if (f.Second is not null && value is null && !Types.IsError(element))
@@ -2093,6 +2107,12 @@ public sealed partial class Checker
 
         CheckLoop(null, f.Body);
         PopScope();
+        if (failures is not null || f.Arms is not null)
+        {
+            // S16: the cases a pull fails with are handled by the arms of the `else` after the block, as a call's (O5), and every other
+            // one leaves the function at the loop's line (O2, O3, O9); a collection that fails with none gives its arms no case
+            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line);
+        }
 
         KurzType Report(int line, KurzType type)
         {

@@ -631,3 +631,277 @@ Times() else {
     IoError e => print(e)
 }
 ```
+
+### S16 (decided, §12) The lines of a file
+
+`for line in f.Lines() { }` runs its block once for each line of a file `File.Open` opened, pulling the
+lines one at a time, as Rust's `BufRead::lines()` and C#'s `File.ReadLines` give them; `line` is a
+`string`. `\n` and `\r\n` end a line and are not part of it, the last line needs no line break, and a
+final `\n` gives no empty line after it (§12, the owner, 2026-11-01, "Lazy, `for line in ...`",
+"`f.Lines()` on an open File" and "As Rust"). A lone `\r` stays in its line, and an empty file gives no
+line *(assumed, §12)*.
+
+Case: [system/lines-read.kz](../corpus/system/lines-read.kz)
+```kurz
+void | IoError | InvalidUtf8 Show() {
+    // `\n` and `\r\n` end a line, and the last line needs no line break
+    File.WriteAll("lines-read.txt", "a\nb\r\n\r\nc".Bytes)
+    f = File.Open("lines-read.txt")
+    for line in f.Lines() {
+        print(line)
+    }
+
+    // a lone `\r` stays in its line, and a final `\n` gives no empty line after it
+    File.WriteAll("lines-read.txt", "x\ry\n".Bytes)
+    g = File.Open("lines-read.txt")
+    File.Delete("lines-read.txt")
+    for line in g.Lines() {
+        print(line.Bytes.Count)
+        print(line.Contains('\r'))
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}
+```
+
+Case: [system/lines-empty.kz](../corpus/system/lines-empty.kz)
+```kurz
+int | IoError | InvalidUtf8 Count(string text) {
+    File.WriteAll("lines-empty.txt", text.Bytes)
+    f = File.Open("lines-empty.txt")
+    File.Delete("lines-empty.txt")
+    mut count = 0
+    for line in f.Lines() {
+        count = count + 1
+    }
+
+    return count
+}
+
+// an empty file has no line, one line break alone one empty line, and an empty line between two counts
+print(Count("") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})
+print(Count("\n") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})
+print(Count("a\n\nb") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})
+```
+
+The `File` buffers its own reads and stays open after the loop, whether it ended, a `break` left it or
+a failure ended it: the lines it did not pull stay in the `File`, so that a later `Lines()` or `Read`
+goes on where the loop stopped, and a `Read` takes the buffered bytes first (§12, the owner, 2026-11-01,
+"`f.Lines()` on an open File" and "Stays open, continues"). Such a `Read` takes at most `max` of the
+buffered bytes and reads from the descriptor only where the buffer holds none, as Rust's
+`BufReader::read` does *(assumed, §12)*. The buffer takes 8 KiB at a time, as Rust's `BufReader` reads
+*(assumed, §12)*.
+
+Case: [system/lines-break-read.kz](../corpus/system/lines-break-read.kz)
+```kurz
+void | IoError | InvalidUtf8 Show() {
+    File.WriteAll("lines-break.txt", "one\ntwo\nthree\nfour\n".Bytes)
+    f = File.Open("lines-break.txt")
+    File.Delete("lines-break.txt")
+    for line in f.Lines() {
+        print(line)
+        break
+    }
+
+    // the file stays open, and a `Read` takes the bytes the loop left in its buffer first
+    mut buffer = Bytes()
+    print(f.Read(mut buffer, 4))
+    print(string.FromUtf8(buffer).Trim())
+    // a second loop goes on where the `Read` stopped
+    for line in f.Lines() {
+        print(line)
+    }
+
+    print(f.Read(mut buffer, 4))
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}
+```
+
+A failure part-way through the read ends the loop and leaves the function through it, as a case of a
+call does (O2, O3): a line that is not UTF-8 with the case `InvalidUtf8`, as `string.FromUtf8` gives it
+(T15), and a failed read with an `IoError` (S1). A postfix `else` after the loop's block, on the line of
+its closing brace, handles the cases it names, as after a call (O5), and the program goes on after the
+loop; top-level code, which has no caller, writes it (O9) (§12, the owner, 2026-11-01, "As Rust" and
+"Unwrap like a call"). The `At` of `InvalidUtf8` is the position in the line, and the line's bytes are
+taken, so that a later loop goes on after them; an `IoError` in the middle of a line gives no part of it
+*(assumed, §12)*.
+
+Case: [system/lines-invalid-utf8.kz](../corpus/system/lines-invalid-utf8.kz)
+```kurz
+void | IoError Show() {
+    mut content = "first\nab".Bytes
+    content.Add(byte(255))
+    content.AddRange("\nthird\n".Bytes)
+    File.WriteAll("lines-invalid.txt", content)
+    f = File.Open("lines-invalid.txt")
+    File.Delete("lines-invalid.txt")
+    // a line that is not UTF-8 ends the loop with `InvalidUtf8`, whose `At` is the position in the line
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 u => print("bad line at {u.At}")
+    }
+
+    // its bytes were taken, and the next loop goes on after them
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => print("bad line")
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/lines-propagate.kz](../corpus/system/lines-propagate.kz)
+```kurz
+// a failure of the read leaves the function through the loop, as a case of a call does
+int | IoError | InvalidUtf8 Longest(File f) {
+    mut longest = 0
+    for line in f.Lines() {
+        if line.Bytes.Count > longest {
+            longest = line.Bytes.Count
+        }
+    }
+
+    return longest
+}
+
+void Show(Bytes content) {
+    File.WriteAll("lines-propagate.txt", content) else {
+        IoError => return
+    }
+
+    f = File.Open("lines-propagate.txt") else {
+        IoError => return
+    }
+
+    File.Delete("lines-propagate.txt") else {
+        IoError => return
+    }
+
+    match Longest(f) {
+        int n => print(n)
+        IoError e => print(e)
+        InvalidUtf8 u => print("not UTF-8 at {u.At}")
+    }
+}
+
+Show("ab\nc\n".Bytes)
+mut bad = "x\n".Bytes
+bad.Add(byte(255))
+Show(bad)
+```
+
+On a file `File.Create` opened, and on a closed file, the first pull gives the error the system gives a
+descriptor that is not open to read, `Other` with the number 9 (S5) *(assumed, §12)*.
+
+Case: [system/lines-not-open-to-read.kz](../corpus/system/lines-not-open-to-read.kz)
+```kurz
+// a file created to write, and a closed one, give the system's error for a descriptor that is not open to read
+void | IoError Pull(File f) {
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => print("not UTF-8")
+    }
+}
+
+void | IoError Show() {
+    created = File.Create("lines-created.txt")
+    File.Delete("lines-created.txt")
+    Pull(created) else {
+        IoError e => print(e)
+    }
+
+    File.WriteAll("lines-closed.txt", "a\n".Bytes)
+    closed = File.Open("lines-closed.txt")
+    File.Delete("lines-closed.txt")
+    closed.Close()
+    Pull(closed) else {
+        IoError e => print(e)
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+A case the loop can fail with that the function's return type does not list is `unlisted-case`, at the
+loop's line, as for a call (O3, O9).
+
+Case: [system/lines-unlisted.kz](../corpus/system/lines-unlisted.kz)
+```kurz
+// the read's `InvalidUtf8` can leave the function through the loop, and its return type does not list it
+int | IoError Count(File f) {
+    mut count = 0
+    for line in f.Lines() {
+        count = count + 1
+    }
+
+    return count
+}
+
+print(1)
+```
+
+Case: [system/lines-top-level.kz](../corpus/system/lines-top-level.kz)
+```kurz
+f = File.Open("lines-top-level.txt") else {
+    IoError => throw
+}
+// top-level code has no caller: the loop's failures are handled in an `else` after it
+for line in f.Lines() {
+    print(line)
+}
+```
+
+`f.Lines()` stands as the collection of a `for` loop alone and has no type name: anywhere else it is
+text no rule gives a meaning, `syntax` (E4) (§12, the owner, 2026-11-01, "Loop source only";
+*(assumed, §12: the id)*). An `else` after a loop whose collection fails with no case names cases the
+collection cannot give, `type-mismatch`, as an arm of O5's that names no case of the call *(assumed, §12)*.
+
+Case: [system/lines-not-a-value.kz](../corpus/system/lines-not-a-value.kz)
+```kurz
+// `f.Lines()` stands as the collection of a `for` loop alone
+void Show(File f) {
+    print(f.Lines())
+}
+
+print(1)
+```
+
+Case: [system/lines-else-on-list.kz](../corpus/system/lines-else-on-list.kz)
+```kurz
+// an `else` after a loop takes the cases its collection can fail with: a list's has none
+xs = [1, 2]
+for x in xs {
+    print(x)
+} else {
+    IoError e => print(e)
+}
+```
+
+A pull takes a lock in the `File`, so that two holders that pull lines at once each take whole lines
+(§12, the owner, 2026-11-01, "Lock per pull").
+
+No case: a case runs one actor, and two holders that pull at once need two.

@@ -87,6 +87,11 @@ public sealed partial class Checker
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
         }
 
+        if (model.HasCall(c) && model.CallOf(c).Kind == CallKind.FileLines)
+        {
+            return result; // S16: the loop takes the cases of `f.Lines()`, after its `else` (CheckForIn)
+        }
+
         // O2: the success case is the value; every other case leaves the calling function (O3, O9)
         Propagate(u.Cases.Skip(1), c.Line);
         return new Typed(u.Cases[0]);
