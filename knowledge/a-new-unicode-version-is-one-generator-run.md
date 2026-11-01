@@ -38,10 +38,13 @@ cannot be fetched, since then nothing was compared.
    are measured again where the counts of `CaseTables.cs` grew.
 
 The tool keeps each fetched file in the system's temporary directory under its hash and reads it
-from there while the hash holds: a machine fetches the three files, about 3.4 MB, again only when
-its temporary directory has lost them, while the container of the `gates` job starts empty and
-fetches them on every run, so that an outage of unicode.org turns every run of the job PARTLY,
-and red. A file served with another hash is refused, not read: the tool holds each file to the
+from there while the hash holds: a machine fetches a file again where it is missing from its
+temporary directory, cannot be read there or no longer has its hash. The three files are about 3.4 MB (1134783, 2198209
+and 17049 bytes, `ls -l` of the kept files on 2026-11-01). The `gates` job runs in a container of
+its image (`container:` in `.github/workflows/gates.yml`), and no step of the workflow keeps a
+temporary directory from one run to the next, so the job fetches the files on every run: on
+2026-11-01 a run went PARTLY where unicode.org answered the fetch of `UnicodeData.txt` with HTTP
+520. An outage of unicode.org turns every run of the job PARTLY, and red. A file served with another hash is refused, not read: the tool holds each file to the
 hash it pins, whatever unicode.org serves.
 
 ## Where the tables come from, and how they were checked

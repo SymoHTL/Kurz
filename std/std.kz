@@ -539,11 +539,25 @@ pub byte* BytesReserve(byte* block, long more, mut long asked) {
     return p
 }
 
-// The bytes the next read of a whole file asks for (S6): the room a list of bytes has after its own,
-// else `piece` more, as Rust's `read_to_end` reads into the room its `Vec` has before it grows it, and
-// no more than the largest `int` of items leaves, so that a file a list holds is read whole; 0 for a
-// list that holds that many.
-pub long BytesPiece(byte* block, long piece) {
+// The room a read of a whole file makes before its first read (S6): the size the system names for the
+// open file, as Rust's `fs::read` reserves the size the file's metadata gives, no more than the largest
+// `int` of items, so that a larger file is read up to the list's limit and the byte after it raises
+// `allocation-failed` (M9). A size of 0, and a failure, below 0, make no room, as no size does in Rust's.
+pub long BytesHint(long size) {
+    if size > 2147483647 {
+        return 2147483647
+    }
+
+    return size
+}
+
+// The bytes the next read of a whole file asks for (S6): the room a list of bytes has after its own;
+// 0 for a list full at `hint`, the size `BytesHint` gave, as Rust's `read_to_end` reads a probe
+// into a buffer of its own where its `Vec` is full at the room it started with, so that a file of that
+// size is read without the list grown; else `piece` more, as Rust's `read_to_end` reads into the room
+// its `Vec` has before it grows it, and no more than the largest `int` of items leaves, so that a file
+// a list holds is read whole; 0 for a list that holds that many.
+pub long BytesPiece(byte* block, long piece, long hint) {
     mut long count = 0
     mut long room = 0
     raw {
@@ -555,6 +569,10 @@ pub long BytesPiece(byte* block, long piece) {
 
     if room > count {
         return room - count
+    }
+
+    if hint > 0 && count == hint {
+        return 0
     }
 
     if piece > 2147483647 - count {

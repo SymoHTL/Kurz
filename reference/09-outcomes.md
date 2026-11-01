@@ -278,19 +278,23 @@ parameter the call infers, `Same(Find(1))`, is no written union: the call unwrap
 parameter is the success case (§5, the owner, 2026-10-31, "Unwrap: T = int"). A parameter whose
 written union holds a type parameter, `void F<T>(T | NotFound x)`, keeps the cases where it names one
 beyond the success, as a variable of that type, and `T` is inferred from the success (§5, the owner,
-2026-10-31, "Keep, infer T = int"). A parameter whose union names some of the call's cases and not all is
-`type-mismatch`, as for a variable; a parameter of the success case or of a type it converts to
+2026-10-31, "Keep, infer T = int"). A parameter whose union names some of the call's cases beyond the
+success and not all is `type-mismatch` where the call's name has one function, as for a variable; a parameter of the success case or of a type it converts to
 unwraps the call, a union that names no case of the call beyond the success, `int | string` for an
 `int | NotFound` call, among them, at a parameter as at a variable; a lambda's and a function value's parameter and a named argument follow the same
 rule; and a call inside an expression, `Show(Find(1) + 1)`, unwraps; a list literal takes its written item
-type from the type that stands where it does, a declaration's, a parameter's or a result's (M11); two
-functions that both keep the cases, neither of which fits exactly, are `ambiguous-call` (F13); and a
-call that fits no function reports that error alone, with no case of a call among its arguments
-passed on beside it (E1) *(assumed, §5: the defaults of the change's product pass and the readings
-its review left)*. A parameter whose type is a union by a type argument written at the call,
+type from the type that stands where it does, a declaration's, a parameter's or a result's (M11); an
+exact fit of a call whose cases a parameter keeps or unwraps (F13) is its whole union at a parameter that keeps the cases and its success
+case at one that unwraps it, so that the two functions of "The union one" both fit exactly; two
+functions that fit with a widening, neither exactly, are `ambiguous-call` (F13), both of them keeping
+the cases or one keeping them and one unwrapping the call, `Show(long n)` beside
+`Show(long | NotFound x)`; and a call that fits none of two or more functions of its name is
+`argument-mismatch` (F13), and one that does not fit the one function of its name `type-mismatch`
+(T1), each alone, with no `unlisted-case` for a case of a call among its arguments beside it (E1) *(assumed, §5: the
+defaults of the change's product pass and the readings its reviews left)*. A parameter whose type is a union by a type argument written at the call,
 `Same<int | NotFound>(Find(1))`, or by the type of the list a method is called on, `xs.Add(Find(1))`
-on a `List<int | NotFound>`, is a written union and keeps the cases *(assumed, §5: a reading of the
-change)*.
+on a `List<int | NotFound>`, is a written union and keeps the cases, so that a call unwraps at a type
+parameter where the arguments infer it *(assumed, §5: a reading of the change)*.
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -592,6 +596,33 @@ void Show(double | NotFound x) {
 
 // both functions keep the cases with a widening, and neither fits exactly
 Show(Find(1))
+```
+
+Case: [outcomes/keep-argument-ambiguous-widening.kz](../corpus/outcomes/keep-argument-ambiguous-widening.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(long n) {
+    print("the success")
+}
+
+void Show(long | NotFound x) {
+    print("the union")
+}
+
+// one function takes the success with a widening and one keeps the cases with a widening: neither fits exactly, in a
+// function whose result lists `NotFound`, where the one that unwraps the call would pass the case on
+int | NotFound Run() {
+    Show(Find(1))
+    return 0
+}
 ```
 
 Case: [outcomes/keep-argument-generic-union.kz](../corpus/outcomes/keep-argument-generic-union.kz)

@@ -1179,20 +1179,22 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 18)], Errors(find + "void Show(string v) {\n    print(v)\n}\n\nShow(Find(1))"));
         Assert.Equal([(ErrorIds.AmbiguousCall, 22)], Errors(find + "void Show(long v) {\n    print(v)\n}\n\nvoid Show(double v) {\n    print(v)\n}\n\nShow(Find(1))"));
 
-        // O4 (the owner, 2026-10-10): a union that names no case of the call beyond its success is a type the success converts to, so
-        // the call unwraps there, at a parameter as at a variable, and the other cases leave the function or are unlisted at the top
+        // O4: a union that names no case of the call beyond its success is a type the success converts to (the owner, 2026-10-10, for a
+        // variable), so the call unwraps there, at a parameter as at a variable (assumed, section 5: a reading the reviews of the O4
+        // change left, pull requests 139 and 144, #39), and the other cases leave the function or are unlisted at the top
         var either = "void Show(int | string v) {\n    print(v)\n}\n\n";
         Clean(find + either + "int | NotFound | Rejected Twice(int id) {\n    Show(Find(id))\n    int | string w = Find(id)\n    print(w)\n    return 2\n}\n\nx = Twice(1) else {\n    else => 0\n}\nprint(x)");
         Assert.Equal([(ErrorIds.UnlistedCase, 18)], Errors(find + either + "Show(Find(1))"));
         Assert.Equal([(ErrorIds.UnlistedCase, 14)], Errors(find + "int | string w = Find(1)\nprint(w)"));
 
         // F13 with O4 (the owner, 2026-10-31, "Exact fit first"): the success's exact fit wins over a union that keeps the cases with a
-        // widening; two that keep them, neither exactly, are ambiguous
+        // widening; two that keep them, neither exactly, are ambiguous (assumed, section 5: as F13 says of two that fit)
         Assert.Equal([(ErrorIds.UnlistedCase, 22)], Errors(find + "void Show(int v) {\n    print(v)\n}\n\nvoid Show(long | NotFound | Rejected v) {\n    print(v)\n}\n\nShow(Find(1))"));
         Assert.Equal([(ErrorIds.AmbiguousCall, 22)], Errors(find + "void Show(long | NotFound | Rejected v) {\n    print(v)\n}\n\nvoid Show(double | NotFound | Rejected v) {\n    print(v)\n}\n\nShow(Find(1))"));
 
         // O4 (the owner, 2026-10-31, "Keep, infer T = int"): a written union that holds a type parameter keeps the cases it names, and the
-        // type parameter is the success; a list literal passed to a parameter takes the parameter's item type (M11) and keeps them
+        // type parameter is the success; a list literal passed to a parameter takes the parameter's item type and keeps them (assumed,
+        // section 5: a reading the reviews of the O4 change left, pull requests 139 and 144, #39, as M11 reads a literal)
         Clean(find + "void Show<T>(T | NotFound | Rejected v) {\n    print(\"kept\")\n}\n\nShow(Find(1))");
         Assert.Equal("List<int>", TypeOf(find + "List<T> Wrap<T>(T | NotFound | Rejected v) => List<T>()\n\nxs = Wrap(Find(1))\nprint(xs)", "xs"));
         Clean(find + "void Show(List<int | NotFound | Rejected> xs) {\n    print(xs)\n}\n\nShow([Find(1), Find(2)])");
@@ -2941,7 +2943,7 @@ public sealed class CheckerTests
         Assert.Contains("the call passes 2 arguments to 1 parameter (D11)", Assert.Single(diagnostics.Items).Message); // each count picks its noun
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Trim('a', 'b'))"));
 
-        // X5's three forms of `Replace` give no `string` `old` a `char` `new`, since the record names no such form (section 12); the
+        // X5's three forms of `Replace` replace no `string` by a `char`, since the record names no such form (section 12); the
         // ASCII trims and the changes of case take no argument
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.Replace(\"a\", 'b'))"));
         (diagnostics, _) = Check("s = \"ab\"\nprint(s.Replace(1, 2))");
@@ -3029,11 +3031,14 @@ public sealed class CheckerTests
         Assert.Empty(Errors("mut xs = [\"b\", \"a\"]\nxs.SortBy(s => s.Bytes.Count)\nxs.SortBy(keySelector: s => s)\nxs.SortBy((string s) => double(s.Bytes.Count) / 2.0)\nprint(xs)"));
         Assert.Empty(Errors("key = (string s) => s.Bytes.Count\nmut xs = [\"b\"]\nxs.SortBy(key)\nprint(xs)"));
 
-        // T18 and D20: items or keys `<` does not order, and the values of an enum that numbers none, as `<` on two of them is
+        // T18 and D20: items or keys `<` does not order, and the values of an enum that numbers none, as `<` on two of them is, their
+        // nullable form among them, as items and as keys (section 12)
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [true]\nxs.Sort()"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [[1]]\nxs.SortUnstable()"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("mut xs = [1]\nxs.SortBy(x => x == 1)"));
         Assert.Equal([(ErrorIds.EnumNumber, 3)], Errors("enum Plan { Free, Pro }\nmut xs = [1]\nxs.SortBy(x => Plan.Free)"));
+        Assert.Equal([(ErrorIds.EnumNumber, 3)], Errors("enum Plan { Free, Pro }\nmut List<Plan?> xs = [Plan.Free, null]\nxs.Sort()"));
+        Assert.Equal([(ErrorIds.EnumNumber, 7)], Errors("enum Plan { Free, Pro }\nPlan? Pick(int x) {\n    return null\n}\n\nmut xs = [1]\nxs.SortBy(x => Pick(x))"));
 
         // the key: one argument, `keySelector`, a function of one item that gives a value (section 12, the owner, 2026-10-31, "As the
         // checker does"): a form of the call that fits none, a lambda of no parameter or of two among them, is `argument-mismatch`,

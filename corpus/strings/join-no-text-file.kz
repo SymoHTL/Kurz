@@ -1,0 +1,7 @@
+// expect: error no-text at 6
+// rules: X6
+
+// a `File` has no text (S5), so a list of them has none for `Join` to write
+void Show(List<File> files) {
+    print(string.Join(", ", files))
+}

@@ -30,6 +30,7 @@ extern "C" {
     int mkdir(byte* path, int mode)
     int rmdir(byte* path)
     int stat(byte* path, void* status)
+    int fstat(int fd, void* status)
     int clock_gettime(int clock, void* time)
     void* opendir(byte* path)
     void* readdir(void* directory)
@@ -1890,6 +1891,27 @@ pub long FileSize(byte* path) {
     }
 
     return size
+}
+
+// The size in bytes of the open file `fd`, by `fstat`, into the thread's page as `Status` reads a path's,
+// as Rust's `fs::read` asks the file it opened for its metadata: the size, or the failure, `ENOMEM` (12)
+// where the page cannot be mapped.
+pub long DescriptorSize(int fd) {
+    mut long result = -12
+    raw {
+        if status == null {
+            status = Memory(4096)
+        }
+
+        if status != null {
+            result = Checked(long(fstat(fd, Ptr<void>(status))))
+            if result == 0 {
+                result = *Ptr<long>(status + 48)
+            }
+        }
+    }
+
+    return result
 }
 
 // Whether anything has the path: 1, 0 where `stat` finds nothing (`ENOENT`, 2), as Rust's

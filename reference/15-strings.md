@@ -122,7 +122,8 @@ character from both ends, as C#'s `Trim(char)` *(assumed, §12: the names `TrimS
 the `char` from the start or the end, as C#'s `TrimStart(char)` and `TrimEnd(char)` (§12, the owner,
 2026-10-31, "TrimStart(c), TrimEnd(c)"). A trim of a `char` takes every repeat of it at its end, as C#'s
 does, so that `"xxaxx".TrimStart('x')` is `axx` and a string of that `char` alone gives `""`
-*(assumed, §12)*. The forms,
+*(assumed, §12)*. A block of a trim the system refuses raises `allocation-failed` by T15 and M9, as
+every block of a string does. The forms, written as signatures and not as code a case runs,
 with C#'s names for their parameters (§12, the owner, 2026-10-31, "C#'s names"):
 
 ```text
@@ -170,9 +171,9 @@ whole string as its one piece, and `s.Replace("", x)` gives the string as it is 
 C#'s `Replace(char, char)` (§12, the owner, 2026-10-31, "Replace(char, char)"), so that `Replace` has
 three forms: a `string` by a `string`, a `char` by a `string` and a `char` by a `char`; a `string` by a
 `char` is none of them, since the record names no such form. A block of `Split` or `Replace` the
-system refuses, and a result of more bytes than the largest `int`, raise `allocation-failed`, as every
-block of a string does (T15, M9). The forms, with C#'s names for their parameters (§12, the owner,
-2026-10-31, "C#'s names"):
+system refuses, and a result of more bytes than the largest `int`, raise `allocation-failed` by T15 and
+M9, as every block of a string does. The forms, as signatures (X4), with C#'s names for their
+parameters (§12, the owner, 2026-10-31, "C#'s names"):
 
 ```text
 List<string> Split(string separator)
@@ -214,12 +215,12 @@ print(s.Replace("-", '+'))
 with the separator between two items, as C#'s `Join` calls `ToString`; an item type that has no text
 is `no-text` (§12, the owner, 2026-10-31, "Any list"). The separator is a `string` or a `char`, as
 C#'s `Join(char, ...)` (§12, the owner, 2026-10-31, "Join(char, items)"). A call that fits neither
-form, a separator of another type, or values that are no list, from which neither form reads an
-item type (T27), is `argument-mismatch`, with a line for each form (F13). An empty list literal,
-`string.Join(",", [])`, gives `T` nothing, and no list type stands where it does, so it is
-`cannot-infer`, as `x = []` is (M11). A block of `Join` the system refuses, and a result of more bytes
-than the largest `int`, raise `allocation-failed`, as every block of a string does (T15, M9). The forms,
-with C#'s names for their parameters (§12, the owner, 2026-10-31, "C#'s names"):
+form, a separator of another type or values that are no list, is `argument-mismatch`, with a line for
+each form (F13). An empty list literal, `string.Join(",", [])`, is a list from which no item type is
+read: it gives `T` nothing, and no list type stands where it does, so it is `cannot-infer` by M11, as
+`x = []` is. A block of `Join` the system refuses, and a result of more bytes than the largest `int`,
+raise `allocation-failed` by T15 and M9, as every block of a string does. The forms, as signatures
+(X4), with C#'s names for their parameters (§12, the owner, 2026-10-31, "C#'s names"):
 
 ```text
 string Join<T>(string separator, List<T> values)
@@ -240,6 +241,14 @@ Case: [strings/join-no-text.kz](../corpus/strings/join-no-text.kz)
 class Counter(mut int Count)
 
 print(string.Join(", ", [Counter(0)]))
+```
+
+Case: [strings/join-no-text-file.kz](../corpus/strings/join-no-text-file.kz)
+```kurz
+// a `File` has no text (S5), so a list of them has none for `Join` to write
+void Show(List<File> files) {
+    print(string.Join(", ", files))
+}
 ```
 
 Case: [strings/join-of-a-number.kz](../corpus/strings/join-of-a-number.kz)
@@ -281,12 +290,13 @@ is `InvalidDigit` (§12, the owner, 2026-10-31, "InvalidDigit, as C#"). Whitespa
 feed, the vertical tab, the form feed, the carriage return and the space, and a string of whitespace
 alone is `Empty`, and a sign with no digits, `"+"` or `"-"`, is `InvalidDigit`; whitespace stands
 before the sign and after the digits alone, so that `"- 5"` is `InvalidDigit`, as C#'s Integer style
-reads it;
+reads it under the invariant culture;
 `,` stands among the digits before the point, its
-groups not checked, so that `"1,2,3"` reads as 123; `Infinity`, `-Infinity` and `NaN` are read in any
-case; a number may start or end with its point; a sign before the digits of an unsigned type reads as
-C#'s `Parse` reads it, `"-0"` as 0 and `"-1"` as `TooSmall`; `float.Parse` reads as `double.Parse`
-does, a number past the largest `float` being infinity; and `ParseError` and `ParseKind` are types
+groups not checked, so that `"1,2,3"` reads as 123; `Infinity`, `-Infinity` and `NaN`, the words of
+`double` and `float`, are read in any case; a number may start or end with its point; a sign before
+the digits of an unsigned type reads as C#'s `Parse` reads it, `"-0"` as 0 and `"-1"` as `TooSmall`; `float.Parse` reads as `double.Parse`
+does, a number at or past the halfway point above the largest finite `float` being infinity
+(below); and `ParseError` and `ParseKind` are types
 every file sees, so that a file's own declaration of one is `redeclared` (V9), as a file's own
 `InvalidUtf8` is (T15) *(assumed, §12: the readings said back with the answers and the defaults of the
 build's product pass, not put to the owner as questions, and the two names, a default of the question)*.
@@ -295,11 +305,16 @@ C#'s `decimal.Parse` keeps the sign in the value's bits (§12, the owner, 2026-1
 sign"). A `double` is the one nearest the number its digits write, ties to the even one, and a `float`
 is rounded once, from the digits, as Rust's `parse` and C#'s `Parse` since .NET Core 3.0 read them,
 by Rust's mechanism: Clinger's fast path where the digits and the power of ten are exact in the type,
-at most 53 bits and 10^22 for a `double` and 24 bits and 10^10 for a `float`, Eisel-Lemire's with a
+that is, where the digits are an integer of at most 2^53 and the power is from 10^-22 to 10^22 for a
+`double`, and the digits are at most 2^24 and the power from 10^-10 to 10^10 for a `float`, as Rust's limits are, with a power up to 10^37 or 10^17
+first moved into the digits where they stay within that limit, Eisel-Lemire's with a
 table of the 128-bit powers of five from 5^-342 to 5^308, and for the strings the two cannot settle a
 slow path over at most 768 of the digits on the stack, so that a parse asks the allocator for nothing;
-the digits past the 768th count as a remainder that is not 0 where one of them is not, so that a number
-at a halfway point with such a digit rounds up. The forms are .NET's: a `,` only after the first digit, as many as stand, so that `",5"` is
+the digits count from the first that is not 0, and those past the 768th count as a remainder that is
+not 0 where one of them is not, so that a number at a halfway point with such a digit rounds up
+*(assumed, §12: the nearest value, ties to the even one, a `float` rounded once, from the digits, and
+Rust's mechanism, with its limits, its table and its slow path, defaults of the build's product pass)*.
+The forms are .NET's: a `,` only after the first digit, as many as stand, so that `",5"` is
 `InvalidDigit` and `"1,,2"` reads as 12; a sign before `Infinity` and `NaN`, and no `Inf`; a point
 with a digit beside it and an exponent with a digit after its sign, so that `"."` and `"1e"` are
 `InvalidDigit`; no hexadecimal form and no `_` between digits. A `decimal` reads none of the words,
@@ -308,7 +323,8 @@ exponent and a sign after its digits are. A number at or past the halfway point 
 finite `double` or `float` is an infinity and one at or below half the smallest positive one a zero,
 each with the sign, so that `"-1e-999"` reads as `-0`, and `"NaN"` and `"-NaN"` read as the same NaN. A `decimal` keeps the digits that fit in
 its 96 bits at a scale of at most 28 and rounds half to even at the cut, every digit after it counted; a
-carry of the rounding past 96 bits drops the last digit kept and lowers the scale by one, as .NET's
+carry of the rounding past 96 bits makes the number one digit shorter, 2^96 / 10 rounded up, and lowers
+the scale by one, as .NET's
 `NumberToDecimal` does, so that `"7922816251426433759354395033.55"` reads as
 7922816251426433759354395034, and at a scale of 0 puts the number past the range. The number is held to
 its range after the rounding, so that `"79228162514264337593543950335.5"` is `TooLarge` and
@@ -559,11 +575,12 @@ of the list, one call for a list of one item and none for an empty one *(assumed
 argument `keySelector`, the name C#'s `OrderBy` gives it, a lambda or a function value of one item
 *(assumed, §12)*. A `SortBy` with no key, with two, with a key of another name or with a lambda of
 another count of parameters than one is `argument-mismatch`, as a call that fits no form is (D11), and
-a key that is no function of one item, `xs.SortBy(1)`, a function value of another parameter type or
-count among them, or a function that gives nothing, is `type-mismatch`, as an argument of a type its
-parameter does not take is (F11) (§12, the owner, 2026-10-31, "As the checker does"). A sort of the
+every other key that is no function of one item, `xs.SortBy(1)`, a function value of another parameter
+type or count among them, or a function that gives nothing, is `type-mismatch`, as an argument of a type
+its parameter does not take is (F11) (§12, the owner, 2026-10-31, "As the checker does"). A sort of the
 values of an enum that numbers none, as items or as keys, is `enum-number`, as `<` on two of them is
-(D20) (§12, the owner, 2026-10-31, "enum-number"), and a sort on any other item type or key type `<`
+(D20) (§12, the owner, 2026-10-31, "enum-number"), and so is a sort of the values of its nullable form,
+as items or as keys *(assumed, §12)*; a sort on any other item type or key type `<`
 does not order, a nullable form of one it orders aside, is `type-mismatch`, as `<` on two values of that type is
 (T18) *(assumed, §12)*. A list of
 nullable items, and a nullable key, sort with `null` before every value, as C#'s

@@ -12,7 +12,16 @@ The emitted IR declares the C functions it calls. A string here is a pointer and
 a pointer and a count: 16 bytes each. A C function that takes such a struct by value is called by
 the rules of the platform's C ABI, which clang applies when it compiles the C: on System V x86-64
 the struct goes in two integer registers, on Windows x64 it goes by a hidden pointer to a copy,
-and a struct returned by value goes through a hidden result pointer there. An LLVM function type
+and a struct returned by value goes through a hidden result pointer there. Microsoft's page on
+the x64 calling convention (read on 2026-11-01) says that structs of other sizes than 8, 16, 32 or
+64 bits "are passed as a pointer to memory allocated by the caller", and that for a result that
+does not fit "the caller must allocate memory for the return value and pass a pointer to it as the
+first argument". clang 23.1 shows both lowerings, run on 2026-11-01 over
+`struct S { const char *p; long long n; }; struct S Pass(struct S s) { return s; }` with
+`clang --target=<target> -O1 -S -emit-llvm`: for `x86_64-unknown-linux-gnu` it writes
+`define { ptr, i64 } @Pass(ptr %0, i64 %1)`, the struct as two values in and out, and for
+`x86_64-pc-windows-msvc` `define void @Pass(ptr sret(%struct.S) %0, ptr %1)`, the result through
+a pointer the caller gives and the argument as a pointer, attributes left out here. An LLVM function type
 that names the struct as an aggregate parameter is not lowered by those rules: the IR would have
 to be written differently for each platform the compiler targets, and a mismatch reads the wrong
 registers without a diagnostic.
