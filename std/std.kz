@@ -2036,14 +2036,20 @@ bool NumberWhite(int b) {
 // but whitespace; 1, `InvalidDigit`, where a byte stands that the form does not take, or no digit,
 // which is read before the range, as C#'s `Parse` reads the whole string before it reports an overflow;
 // 2, `TooLarge`, and 3, `TooSmall`, where the number lies past the largest or below the smallest value.
-// Each digit is checked against the range before it is added, as Rust's `from_str_radix` checks its
-// multiplication, so that no arithmetic leaves the range of a `ulong`.
+// The first 19 digits are added with no check and the number is held to the range once, after them: a
+// `ulong` holds every number of 19 digits, as Rust's `from_str_radix` adds unchecked where the count of the
+// digits proves that its type holds them (`can_not_overflow`). Each digit past them is checked against the
+// range before it is added, as Rust's `from_str_radix` checks its multiplication where the count does not
+// prove it, so that no arithmetic leaves the range of a `ulong`. The 19 digits are not Rust's bound, which
+// is the type's: a test of the count alone, all unchecked up to 19 bytes and all checked past them, took
+// 105.43 ms, and the check of every digit 100.31, for 5 million parses of 20 digits (#157).
 pub int ParseInteger(byte* text, long count, ulong most, ulong least, mut ulong magnitude) {
     magnitude = 0
     mut long at = 0
     mut bool negative = false
     mut bool past = false
     mut long start = 0
+    mut ulong value = 0
     raw {
         while at < count && NumberWhite(int(text[at])) {
             at = at + 1
@@ -2066,13 +2072,24 @@ pub int ParseInteger(byte* text, long count, ulong most, ulong least, mut ulong 
         }
 
         start = at
+        mut long unchecked = count
+        if count - at > 19 {
+            unchecked = at + 19
+        }
+
+        while at < unchecked && text[at] >= 48 && text[at] <= 57 {
+            value = value * 10 + ulong(int(text[at]) - 48)
+            at = at + 1
+        }
+
+        past = value > limit
         while at < count && text[at] >= 48 && text[at] <= 57 {
             ulong digit = ulong(int(text[at]) - 48)
             if !past {
-                if magnitude > limit / 10 || (magnitude == limit / 10 && digit > limit % 10) {
+                if value > limit / 10 || (value == limit / 10 && digit > limit % 10) {
                     past = true
                 } else {
-                    magnitude = magnitude * 10 + digit
+                    value = value * 10 + digit
                 }
             }
 
@@ -2086,6 +2103,7 @@ pub int ParseInteger(byte* text, long count, ulong most, ulong least, mut ulong 
         }
     }
 
+    magnitude = value
     if at == start || at != count {
         return 1
     }
@@ -2122,20 +2140,51 @@ bool Spells(byte* p, ulong word, int length) {
     return true
 }
 
+// The digits from `at` on, up to `count`, added to `value`, and the index after the last: 8 at a time while 8
+// bytes stand, as Rust's `try_parse_digits` reads them, the 8 bytes as one word, the first lowest (`WordAt`),
+// digits where adding 0x46 to each byte and taking 0x30 from it carries into no top bit (`is_8digits`),
+// joined into their number by three multiplications (`parse_8digits`); then one at a time. The sum wraps past
+// 2^64, as Rust's does, where more than 19 digits stand, and the caller reads it for 19 at most.
+long DigitsAt(byte* text, long at, long count, mut ulong value) {
+    mut long i = at
+    mut ulong sum = value
+    raw {
+        while count - i >= 8 {
+            ulong word = WordAt(text + i)
+            if (((word +% 0x4646464646464646UL) | (word -% 0x3030303030303030UL)) & 0x8080808080808080UL) != 0UL {
+                break
+            }
+
+            mut ulong v = word - 0x3030303030303030UL
+            v = v * 10UL + (v >> 8)
+            ulong low = (v & 0x000000FF000000FFUL) *% 0x000F424000000064UL
+            ulong high = ((v >> 16) & 0x000000FF000000FFUL) *% 0x0000271000000001UL
+            sum = sum *% 100000000UL +% (((low +% high) >> 32) & 0xFFFFFFFFUL)
+            i = i + 8
+        }
+
+        while i < count && text[i] >= 48 && text[i] <= 57 {
+            sum = sum *% 10UL +% ulong(int(text[i]) - 48)
+            i = i + 1
+        }
+    }
+
+    value = sum
+    return i
+}
+
 // A floating-point number read from the `count` bytes at `text` in C#'s invariant form (X7): whitespace
 // around it, a leading `+` or `-`, then digits, with `,` anywhere after the first of them before the point, a
 // point and the digits after it, one digit at least, and an `e` or `E` with a sign and one digit or more; or
 // the words `Infinity` and `NaN` in any case after the sign, as C#'s `double.Parse` reads them with the
 // invariant culture. 0, `Empty`, where the bytes hold whitespace alone; 1, `InvalidDigit`, for any other form;
 // 2 for `Infinity` and 3 for `NaN`; else -1, with the sign in `negative`, the first 19 significant digits in
-// `mantissa`, the power of ten they stand at in `exponent`, and in `many` whether a digit that is not 0 follows
-// them, as Rust's `parse_number` reads the digits; for the slow path, where the digits start and end, `from`
-// and `to`, and the written exponent, `power`, whose digits stop counting past 65536, as Rust's stop.
+// `mantissa`, the power of ten they stand at in `exponent`, and in `many` whether more digits follow them, as
+// Rust's `parse_number` reads the digits; for the slow path, where the digits start and end, `from` and `to`,
+// and the written exponent, `power`, whose digits stop counting past 65536, as Rust's stop.
 int ScanFloating(byte* text, long count, mut bool negative, mut ulong mantissa, mut long exponent, mut bool many, mut long from, mut long to, mut long power) {
     mut long at = 0
-    mut int taken = 0
     mut bool digits = false
-    mut bool point = false
     raw {
         while at < count && NumberWhite(int(text[at])) {
             at = at + 1
@@ -2152,42 +2201,83 @@ int ScanFloating(byte* text, long count, mut bool negative, mut ulong mantissa, 
             at = at + 1
         }
 
+        // Rust's `parse_number`: the digits before the point and after it, 8 at a time (`DigitsAt`), with .NET's `,`
+        // among the digits before the point, after the first of them; where more than 19 stand past the zeros before
+        // them, the first 19 of those read again, one at a time, with the power of ten after them, as Rust's
+        // `parse_partial_number` reads them again
         from = at
-        while at < count {
-            int b = int(text[at])
-            if b >= 48 && b <= 57 {
-                digits = true
-                if taken == 0 && b == 48 {
-                    if point {
-                        exponent = exponent - 1
-                    }
-                } else if taken < 19 {
-                    mantissa = mantissa * 10UL + ulong(b - 48)
-                    taken = taken + 1
-                    if point {
-                        exponent = exponent - 1
-                    }
-                } else {
-                    many = many || b != 48
-                    if !point {
-                        exponent = exponent + 1
-                    }
-                }
-            } else if b == 46 && !point {
-                point = true
-            } else if b != 44 || !digits || point {
-                break
-            }
+        mut ulong whole = 0UL
+        mut long end = DigitsAt(text, at, count, mut whole)
+        mut long shown = end - at
+        while shown > 0 && end < count && text[end] == 44 {
+            long next = DigitsAt(text, end + 1, count, mut whole)
+            shown = shown + next - end - 1
+            end = next
+        }
 
-            at = at + 1
+        long dot = end
+        mut long after = 0
+        if end < count && text[end] == 46 {
+            end = DigitsAt(text, dot + 1, count, mut whole)
+            after = end - dot - 1
+        }
+
+        if shown + after > 0 {
+            digits = true
+            at = end
+            mantissa = whole
+            exponent = -after
+            if shown + after > 19 {
+                mut long zeros = 0
+                mut long p = from
+                while p < end && (text[p] == 48 || text[p] == 44 || text[p] == 46) {
+                    if text[p] == 48 {
+                        zeros = zeros + 1
+                    }
+
+                    p = p + 1
+                }
+
+                if shown + after - zeros > 19 {
+                    many = true
+                    mut ulong m = 0UL
+                    p = from
+                    while p < dot && m < 1000000000000000000UL {
+                        if text[p] != 44 {
+                            m = m * 10UL + ulong(int(text[p]) - 48)
+                        }
+
+                        p = p + 1
+                    }
+
+                    if m >= 1000000000000000000UL {
+                        mut long beyond = 0
+                        while p < dot {
+                            if text[p] != 44 {
+                                beyond = beyond + 1
+                            }
+
+                            p = p + 1
+                        }
+
+                        exponent = beyond
+                    } else {
+                        p = dot + 1
+                        while p < end && m < 1000000000000000000UL {
+                            m = m * 10UL + ulong(int(text[p]) - 48)
+                            p = p + 1
+                        }
+
+                        exponent = dot + 1 - p
+                    }
+
+                    mantissa = m
+                }
+            }
         }
 
         to = at
         if !digits {
-            if point {
-                return 1
-            }
-
             mut int kind = 1
             if count - at >= 8 && Spells(text + at, 0x696E66696E697479UL, 8) {
                 kind = 2
@@ -2497,8 +2587,11 @@ int LeadingZeros(ulong w) {
     return n
 }
 
-// The 128-bit product of two 64-bit numbers, from the products of their 32-bit halves: the low 64 bits
-// returned, the high 64 into `high`.
+// The 128-bit product of two 64-bit numbers, as Rust's `full_multiplication` takes it in a `u128`: the high 64
+// bits into `high`, from the products of their 32-bit halves, and the low 64 returned, the product that wraps,
+// which LLVM joins with the high half into one multiplication of 64 by 64 bits. The low half from the halves as
+// well measured 64.93 ms against 59.89 for 5 million parses of 17 digits, where LLVM joined only the second
+// product (#157).
 ulong Product(ulong a, ulong b, mut ulong high) {
     ulong a0 = a & 4294967295UL
     ulong a1 = a >> 32
@@ -2508,7 +2601,7 @@ ulong Product(ulong a, ulong b, mut ulong high) {
     ulong mid1 = a1 * b0 + (b00 >> 32)
     ulong mid2 = a0 * b1 + (mid1 & 4294967295UL)
     high = a1 * b1 + (mid1 >> 32) + (mid2 >> 32)
-    return (mid2 << 32) | (b00 & 4294967295UL)
+    return a *% b
 }
 
 // Eisel-Lemire (Lemire, "Number Parsing at a Gigabyte per Second", 2021), as Rust's `compute_float`: the
