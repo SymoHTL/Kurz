@@ -719,8 +719,9 @@ the signal's number where a signal ended the child, `Signal`, an `int?` that hol
 `Success`, a `bool` (§12, the owner, 2026-11-01, "Code int + Signal int?"). `Status()` runs the command
 with the program's three streams and gives `void | IoError | ExitError`. The text of an `ExitError` is
 the words of what ended the child, a colon and the program: `exit status 3: sh`, `signal 15: sh`.
-*(assumed, §12: `Status()`'s result and its `ExitError` with no output, the name `ExitError`, its fields
-and its text, `ProcessOutput` keeping the status, `Success` where `Code` is 0 and `Signal` is `null`)*
+*(assumed, §12: `Status()`'s result, its streams and its `ExitError` with no output, the name
+`ExitError`, its fields and its text, `ProcessOutput` keeping the status, `Success` where `Code` is 0 and
+`Signal` is `null`)*
 
 Case: [system/command-output.kz](../corpus/system/command-output.kz)
 
@@ -797,8 +798,14 @@ Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)
 void | IoError | ExitError | InvalidUtf8 Run() {
     child = Command.New("cat").Stdin(Stdio.Piped).Stdout(Stdio.Piped).Spawn()
     print(child.Id > 0)
-    print(child.Stdout != null)
-    print(child.Stderr == null)
+    match child.Stdout {
+        File => print("stdout piped")
+        null => print("no stdout")
+    }
+    match child.Stderr {
+        File => print("stderr piped")
+        null => print("no stderr")
+    }
     match child.Stdin {
         File input => {
             input.Write("piped".Bytes)
@@ -944,7 +951,7 @@ needs no grant (S12); a file's own declaration of `Stdin` is `redeclared` (V9); 
 says `not supported` to it (S11). *(assumed, §12: the reading of the lines as a file's, `ReadAll`'s
 result, no `Close`, the path, the grant, the name and Windows)*
 
-Both cases expect a standard input that holds nothing.
+Both cases read the standard input a case is given, which holds nothing (chapter 0).
 
 Case: [system/stdin-empty.kz](../corpus/system/stdin-empty.kz)
 ```kurz
@@ -992,16 +999,15 @@ print(1)
 ### S23 (decided, §12) The exit code
 
 `Environment.Exit(code)` ends the process at once with `code`: the other actors end where they stand,
-no handle is closed at its last count but by the system, and nothing written is lost, since `print`,
-`eprint` and `f.Write` keep no buffer (§12, the owner, 2026-11-01, "Top-level return n + Exit"). No path
+no handle is closed at its last count but by the system, and nothing written is lost, since `print`
+and `f.Write` keep no buffer (§12, the owner, 2026-11-01, "Top-level return n + Exit"). No path
 goes on after the call, so that no `return` follows it, as after a `throw`; Linux takes the low 8 bits
 of the code, `Environment.Exit(256)` ending with 0; a call in any actor ends the process; and a build for
 Windows says `not supported` to it (S11). A `return` with an `int` among the top-level statements ends
 the program with that code (F17). *(assumed, §12: the name, the end at once, the path after the call,
 the low 8 bits, any actor and Windows)*
 
-No case for a code other than 0: a case that expects output exits with 0 (E3); `ProcessTests` runs
-built programs that end with other codes.
+No case for a code other than 0: a case that expects output ends with 0.
 
 Case: [system/exit-in-function.kz](../corpus/system/exit-in-function.kz)
 ```kurz

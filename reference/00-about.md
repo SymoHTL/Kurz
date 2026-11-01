@@ -53,7 +53,8 @@ carries the `Case:` line alone.
 // rules: R7
 ```
 
-A case is a single file with no `project.kz`; its `// allow:` line gives it the grants a
+A case is a single file with no `project.kz`, run with no argument and with nothing on its standard
+input; its `// allow:` line gives it the grants a
 `project.kz` would give its package (R7; §3, the owner, 2026-10-21). The line takes `raw`, `native` or
 `raw native`, in that order, and each compiler's runner of the corpus reads it; a program outside the
 corpus takes no grant from it *(assumed: as §3 marks it)*.
@@ -85,8 +86,9 @@ fail, which `print-failed` needs.
 
 `eprint(value)` writes the text of the value and a line break to standard error, as `print` writes them
 to standard output, with `print`'s rules (A1): the one line feed, and the run-time error `print-failed`
-where its write fails (§12, the owner, 2026-11-01, "eprint(x)"). A file's own declaration of `eprint` is
-read as its own `print` is, and is `redeclared` (V9). *(assumed, §12: the file's own `eprint`)*
+where its write fails (§12, the owner, 2026-11-01, "eprint(x)"). A file's own declaration of `eprint`, a
+function, a variable or a parameter at any level, is `redeclared` (V9), as of `Environment` (S14).
+*(assumed, §12: the file's own `eprint`)*
 
 No case for what it writes: the lines of a case's header are what the program writes to standard
 output, and a case that expects output writes nothing to standard error.

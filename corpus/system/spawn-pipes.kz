@@ -1,15 +1,21 @@
 // expect: output
 // | true
-// | true
-// | true
+// | stdout piped
+// | no stderr
 // | piped
 // rules: S19
 
 void | IoError | ExitError | InvalidUtf8 Run() {
     child = Command.New("cat").Stdin(Stdio.Piped).Stdout(Stdio.Piped).Spawn()
     print(child.Id > 0)
-    print(child.Stdout != null)
-    print(child.Stderr == null)
+    match child.Stdout {
+        File => print("stdout piped")
+        null => print("no stdout")
+    }
+    match child.Stderr {
+        File => print("stderr piped")
+        null => print("no stderr")
+    }
     match child.Stdin {
         File input => {
             input.Write("piped".Bytes)
