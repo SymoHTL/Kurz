@@ -488,9 +488,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `s.Bytes` as a `Bytes`, which takes a count of the block of a string made while the program runs and copies the
   bytes of a literal, `s.Bytes[i]`, read from the string in place, and `string.FromUtf8(b)` and
   `string.FromUtf8Lossy(b)`, whose string takes a count of the block of the bytes where every sequence is UTF-8,
-  which `string.FromUtf8` reads a sequence at a time and a run of ASCII byte by byte, a run of more than 16 bytes
-  as Rust 1.82's `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a
-  multiple of 8, their case `InvalidUtf8` a data type every file sees,
+  which `string.FromUtf8` reads a sequence at a time, a letter with three bytes after it in place with no check of
+  the end between its bytes, and a run of ASCII byte by byte, a run of more than 16 bytes as Rust 1.82's
+  `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a multiple of 8, where
+  `run_utf8_validation` whole, which checks each byte of a letter against the end and tries its words at every byte
+  of ASCII at such an address, read text of short runs of ASCII between letters in 354 ms against the 280 ms of
+  every sequence read through one check (measured for pull request 154; record, section 1: the owner, 2026-11-01,
+  "Allow, faster wins"), their case `InvalidUtf8` a data type every file sees,
   declared before the file's own, and the lossy text, where a
   sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
   owner, 2026-10-29, "Union, as Rust"); `s.Contains(x)`, `s.StartsWith(x)`, `s.EndsWith(x)` and `s.IndexOf(x)`

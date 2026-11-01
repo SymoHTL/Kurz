@@ -2827,6 +2827,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(program.ToString(), Fenced, "utf8-table-fenced"), 0, lines, "");
     }
 
+    /// <summary>
+    /// What .NET's decoder reads of <paramref name="bytes"/>: "ok", or the count of the bytes in front of the first sequence it cannot
+    /// read, which is Rust's `valid_up_to`, what `string.FromUtf8` puts into `InvalidUtf8`.
+    /// </summary>
+    private static string Valid(byte[] bytes) =>
+        System.Text.Unicode.Utf8.ToUtf16(bytes, new char[bytes.Length], out var read, out _, replaceInvalidSequences: false)
+            == System.Buffers.OperationStatus.Done
+            ? "ok"
+            : read.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     [Fact]
     public void FromUtf8_finds_the_first_sequence_that_is_not_UTF_8_wherever_it_stands_among_the_words_its_ASCII_skip_reads()
     {
@@ -2837,12 +2847,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // end, a letter of three bytes, or nothing, and 20 bytes of ASCII after the first two and the letter: so the first byte of
         // 128 or more stands among the first 16 bytes, in the first word of a pair, in the second, past the last pair and among the
         // bytes read one at a time after it. What each case gives is what .NET's decoder reads of the same bytes, the count of the
-        // bytes in front of the first sequence it cannot read, which is Rust's `valid_up_to`.
-        static string Valid(byte[] bytes) =>
-            System.Text.Unicode.Utf8.ToUtf16(bytes, new char[bytes.Length], out var read, out _, replaceInvalidSequences: false)
-                == System.Buffers.OperationStatus.Done
-                ? "ok"
-                : read.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // bytes in front of the first sequence it cannot read, which is Rust's `valid_up_to` (<see cref="Valid"/>).
 
         // the positive control: the decoder reads as Rust 1.82's `str::from_utf8` read these on 2026-10-29 (the table above)
         Assert.Equal("1", Valid([0x61, 0xE2, 0x82, 0x61]));
@@ -2943,6 +2948,148 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    [Fact]
+    public void FromUtf8_reads_a_letter_with_three_bytes_after_it_in_place_as_it_reads_one_nearer_the_end()
+    {
+        // T15: a letter with three bytes after it is read in place, its bytes held to the ranges `Utf8Sequence` holds them to, and a
+        // letter nearer the end through `Utf8Sequence`. Each case is a first byte of 128 to 255, a second byte at an end of the ranges
+        // a second byte takes (127, 128, 143, 144, 159, 160, 191, 192), a third byte that continues a sequence or does not (128, 127,
+        // 192) and a fourth (191, 192), with two bytes of ASCII after them, so that the letter has three bytes after it; then the same
+        // first three bytes, the first two and the first alone at the end of the bytes, nearer it. What each case gives is what .NET's
+        // decoder reads of the same bytes (<see cref="Valid"/>).
+        byte[] seconds = [127, 128, 143, 144, 159, 160, 191, 192];
+        byte[] thirds = [128, 127, 192];
+        byte[] fourths = [191, 192];
+        var cases = new List<byte[]>();
+        for (var first = 128; first < 256; first++)
+        {
+            foreach (var second in seconds)
+            {
+                foreach (var third in thirds)
+                {
+                    foreach (var fourth in fourths)
+                    {
+                        cases.Add([(byte)first, second, third, fourth, 65, 65]);
+                    }
+                }
+            }
+        }
+
+        for (var first = 128; first < 256; first++)
+        {
+            foreach (var second in seconds)
+            {
+                foreach (var third in thirds)
+                {
+                    cases.Add([(byte)first, second, third]);
+                }
+
+                cases.Add([(byte)first, second]);
+            }
+
+            cases.Add([(byte)first]);
+        }
+
+        string[] lines = [.. cases.Select(Valid)];
+
+        // the floor: 10368 cases. With three bytes after the letter, 24 are UTF-8 whole, the letters of four bytes whose third byte
+        // continues them and whose fourth is 191; nearer the end, 450, the letters of two bytes that end the bytes or stand before
+        // 127, and of three bytes that end them
+        Assert.Equal(10368, lines.Length);
+        Assert.Equal(24, lines[..6144].Count(l => l == "ok"));
+        Assert.Equal(450, lines[6144..].Count(l => l == "ok"));
+
+        const string text = """
+            void Show(Bytes b) {
+                match string.FromUtf8(b) {
+                    InvalidUtf8 e => print(e.At)
+                    else => print("ok")
+                }
+            }
+
+            mut seconds = Bytes()
+            seconds.Add(127)
+            seconds.Add(128)
+            seconds.Add(143)
+            seconds.Add(144)
+            seconds.Add(159)
+            seconds.Add(160)
+            seconds.Add(191)
+            seconds.Add(192)
+            mut thirds = Bytes()
+            thirds.Add(128)
+            thirds.Add(127)
+            thirds.Add(192)
+            mut fourths = Bytes()
+            fourths.Add(191)
+            fourths.Add(192)
+            for first in 128..<256 {
+                for s in 0..<seconds.Count {
+                    for t in 0..<thirds.Count {
+                        for u in 0..<fourths.Count {
+                            mut b = Bytes()
+                            b.Add(byte(first))
+                            b.Add(seconds[s])
+                            b.Add(thirds[t])
+                            b.Add(fourths[u])
+                            b.Add(65)
+                            b.Add(65)
+                            Show(b)
+                        }
+                    }
+                }
+            }
+
+            for first in 128..<256 {
+                for s in 0..<seconds.Count {
+                    for t in 0..<thirds.Count {
+                        mut b = Bytes()
+                        b.Add(byte(first))
+                        b.Add(seconds[s])
+                        b.Add(thirds[t])
+                        Show(b)
+                    }
+
+                    mut c = Bytes()
+                    c.Add(byte(first))
+                    c.Add(seconds[s])
+                    Show(c)
+                }
+
+                mut d = Bytes()
+                d.Add(byte(first))
+                Show(d)
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "utf8-letters"), 0, lines, "");
+        Ran(BuildAndRun(text, Fenced, "utf8-letters-fenced"), 0, lines, "");
+
+        // no letter is read in place where fewer than three bytes follow it: under the fence a part of 4064 bytes ends where its
+        // page ends, below the page of the part freed before it, as above, and its last three bytes are a letter of three bytes,
+        // whose read in place would read the byte past the part
+        const string edge = """
+            mut source = Bytes()
+            while source.Count < 4061 {
+                source.Add(65)
+            }
+
+            source.Add(226)
+            source.Add(130)
+            source.Add(172)
+            mut freed = source[0..<4064]
+            held = source[0..<4064]
+            freed = Bytes()
+            print(freed.Count)
+            match string.FromUtf8(held) {
+                string s => print(s.Bytes.Count)
+                InvalidUtf8 e => print(e.At)
+            }
+
+            """;
+        Ran(BuildAndRun(edge, Fenced, "utf8-letters-edge-fenced"), 0, ["0", "4064"], "");
     }
 
     /// <summary>
