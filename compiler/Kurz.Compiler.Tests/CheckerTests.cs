@@ -3650,9 +3650,11 @@ public sealed class CheckerTests
     public void A_type_parameter_that_holds_a_constant_of_an_enum_is_read_in_each_copy()
     {
         // T34: the call writes the constant among its type arguments, a call that leaves it out takes its default, the body reads it as a
-        // value of its enum, in a `match`, a lambda and a hole, and a copy passes its own constant on; `const` is a name elsewhere (L18)
+        // value of its enum, in a `match`, a lambda and a hole, a copy passes its own constant on, and overloads that hold a constant of
+        // one enum at a place are read as one; `const` is a name elsewhere (L18)
         Clean(Modes + "void Say<const Mode M>(string text) {\n    match M {\n        Mode.Plain => print(text)\n        Mode.Loud => print(\"{text}!\")\n    }\n}\n\n" +
             "void Twice<T, const Mode M = Mode.Plain>(T value) {\n    f = () => M\n    Say<M>(\"{value} {f()}\")\n}\n\nSay<Mode.Loud>(\"a\")\nTwice(1)\nTwice<string, Mode.Loud>(\"b\")\nTwice<bool>(true)\nprint(Color.Red)");
+        Clean(Modes + "void Pick<const Mode M>() {\n    print(M)\n}\n\nvoid Pick<const Mode M>(int x) {\n    print(x)\n}\n\nPick<Mode.Plain>()\nPick<Mode.Loud>(1)");
         Clean("const = 1\nprint(const)");
     }
 
@@ -3683,10 +3685,14 @@ public sealed class CheckerTests
     [InlineData("void Count<const int N>() {\n    print(N)\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `int`, where an `enum`'s value alone is read (T34)")]
     [InlineData("void Flag<const bool B>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `bool`, where an `enum`'s value alone is read (T34)")]
     [InlineData("data Box<const Mode M>(int X)\n\nprint(1)", "4: a type parameter that holds a constant, of a `data` type (T34)")]
+    [InlineData("void F<const Mode M>(int x) {\n}\n\nvoid F<T>(T x, int y) {\n}\n\nF<int>(1, 2)", "10: overloads of `F` that hold a constant of `Mode` and a type at type argument 1 (T34, F12)")]
+    [InlineData("void F<T>(T x, int y) {\n}\n\nvoid F<const Mode M>(int x) {\n}\n\nF<Mode.Plain>(1)", "10: overloads of `F` that hold a type and a constant of `Mode` at type argument 1 (T34, F12)")]
+    [InlineData("void F<const Mode M>() {\n}\n\nvoid F<const Color C>(int x) {\n}\n\nF<Color.Red>(1)", "10: overloads of `F` that hold a constant of `Mode` and a constant of `Color` at type argument 1 (T34, F12)")]
     public void A_constant_type_parameter_of_a_type_but_an_enum_or_of_a_data_type_is_not_supported(string program, string expected)
     {
         // T34: the record's integer types, `bool` and `char` are written as literals among a call's type arguments, which no rule reads
-        // yet, and a `data` type's copies are no part of the build
+        // yet, a `data` type's copies are no part of the build, and a call's type argument is read before an overload is picked (F12),
+        // so overloads that hold a type and a constant at one place, or constants of two enums, are not read
         Assert.Equal(expected.Split('|'), NotSupported(Modes + program));
     }
 }

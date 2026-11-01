@@ -1401,8 +1401,9 @@ such a loop and an `enum`'s value, which is `type-mismatch` there (T34), which a
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, and `void` as a type argument of such a function, `void` having no value of
 `TypeKind` (T33); a type parameter that holds a constant of a type but an `enum`, the record's integer types, `bool` and
-`char`, whose literal among a call's type arguments no rule reads, which leaves the function unread, and one of a `data` type
-(T34); and `use` (F10) of any folder but the runtime's `sys`;
+`char`, whose literal among a call's type arguments no rule reads, which leaves the function unread, one of a `data` type,
+and overloads that hold a type and a constant, or constants of two enums, at the place of a type argument a call writes,
+which is read before the overload is picked (T34, F12); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

@@ -1727,7 +1727,7 @@ public sealed partial class Checker
     {
         // once: an error in one is one diagnostic, whatever the number of overloads (E1); where a type parameter holds a constant, the
         // type argument is its value (T34)
-        var typeArguments = c.TypeArguments.Select((t, i) => ConstantPlace(candidates, i) is { } holds ? ResolveConstantArgument(t, holds) : Resolve(t)).ToList();
+        var typeArguments = c.TypeArguments.Select((t, i) => TypeArgument(candidates, t, i, c.Line)).ToList();
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
@@ -1756,9 +1756,23 @@ public sealed partial class Checker
         return typed;
     }
 
-    /// <summary>T34: the type parameter that holds a constant at a place of a call's type arguments, where a candidate has one there.</summary>
-    private static TypeParameterSymbol? ConstantPlace(List<FunctionSymbol> candidates, int place) =>
-        candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).FirstOrDefault(p => p?.Constant is EnumType);
+    /// <summary>
+    /// T34: a call's type argument at a place, a constant where the candidates' type parameter there holds one, else a type; overloads
+    /// that hold a type there and a constant, or constants of two enums, are not supported, since the argument is read before the
+    /// overload is picked.
+    /// </summary>
+    private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
+    {
+        var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
+        var kinds = there.Select(p => p.Constant is EnumType e ? $"a constant of `{e.Text}`" : "a type").Distinct().ToList();
+        if (kinds.Count > 1)
+        {
+            NotSupported(line, $"overloads of `{candidates[0].Name}` that hold {string.Join(" and ", kinds)} at type argument {place + 1} (T34, F12)");
+            return Types.Error;
+        }
+
+        return there.FirstOrDefault(p => p.Constant is EnumType) is { } holds ? ResolveConstantArgument(argument, holds) : Resolve(argument);
+    }
 
     /// <summary>
     /// T34: the constant a call gives a type parameter that holds one: a value of its enum by name, <c>JsonKeys.SnakeCase</c>, or, in a
