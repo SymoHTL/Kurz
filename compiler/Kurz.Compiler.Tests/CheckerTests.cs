@@ -1193,8 +1193,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.AmbiguousCall, 22)], Errors(find + "void Show(long | NotFound | Rejected v) {\n    print(v)\n}\n\nvoid Show(double | NotFound | Rejected v) {\n    print(v)\n}\n\nShow(Find(1))"));
 
         // O4 (the owner, 2026-10-31, "Keep, infer T = int"): a written union that holds a type parameter keeps the cases it names, and the
-        // type parameter is the success; a list literal passed to a parameter takes the parameter's item type and keeps them (assumed,
-        // section 5: a reading the reviews of the O4 change left, pull requests 139 and 144, #39, as M11 reads a literal)
+        // type parameter is the success; a list literal passed to a parameter takes the parameter's item type (assumed, section 5: a
+        // reading the reviews of the O4 change left, pull requests 139 and 144, #39, as M11 reads a literal), and its items keep the
+        // cases that item type names (the owner, 2026-10-31, "Keep, as the item type")
         Clean(find + "void Show<T>(T | NotFound | Rejected v) {\n    print(\"kept\")\n}\n\nShow(Find(1))");
         Assert.Equal("List<int>", TypeOf(find + "List<T> Wrap<T>(T | NotFound | Rejected v) => List<T>()\n\nxs = Wrap(Find(1))\nprint(xs)", "xs"));
         Clean(find + "void Show(List<int | NotFound | Rejected> xs) {\n    print(xs)\n}\n\nShow([Find(1), Find(2)])");
