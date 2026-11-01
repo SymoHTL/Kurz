@@ -37,6 +37,8 @@ public sealed partial class Emitter
             CallKind.ListWhere => EmitListWhere(c, info),
             CallKind.FromRaw => EmitListFromRaw(c, info),
             CallKind.DataNew => EmitConstruction(c, info),
+            CallKind.ClassNew => EmitClassNew(c, info),
+            CallKind.Method => EmitMethodCall(c, info),
             CallKind.ListClear => EmitListClear(c),
             CallKind.ListIndexOf or CallKind.ListIndexOfRun => EmitListIndexOf(c, info.Kind == CallKind.ListIndexOfRun),
             CallKind.ListAddRange => EmitListAddRange(c),

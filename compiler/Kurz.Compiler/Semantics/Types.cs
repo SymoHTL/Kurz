@@ -118,6 +118,16 @@ public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArg
     public override int GetHashCode() => HashCode.Combine(Symbol.Name, TypeArguments.Count);
 }
 
+/// <summary>A <c>class</c> (K1): a reference to a counted instance with identity (K3), one type per declaration.</summary>
+public sealed record ClassType(ClassSymbol Symbol) : KurzType
+{
+    public override string Text => Symbol.Name;
+
+    public bool Equals(ClassType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol);
+
+    public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
+}
+
 /// <summary>An <c>enum</c> (D12), one type per declaration.</summary>
 public sealed record EnumType(EnumSymbol Symbol) : KurzType
 {
@@ -419,6 +429,7 @@ public static class Types
             (MapType x, MapType y) => Same(x.Key, y.Key) && Same(x.Value, y.Value),
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (ClassType x, ClassType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
             (HasherType x, HasherType y) => x.Kind == y.Kind,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),

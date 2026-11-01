@@ -145,6 +145,8 @@ internal sealed class Layout(IrModule module)
             {
                 DataType d when d.Symbol.IsGeneric && related.Contains(d.Symbol) => $"a generic data type in a relation of inheritance, `{d}` (D6, T19)",
                 DataType d when d.Symbol.IsGeneric && recursive.Contains(d.Symbol) => $"a generic data type that holds a value of its own type, `{d}` (D1, T19)",
+                DataType d when IsBlock(d) && Fields(d).Any(f => HoldsInstance(f, [])) => $"an instance of a class held by `{d}`, a data value laid out as a block, which is never freed (section 3, R3)",
+                ClassType c => c.Symbol.Fields.Select(f => Inner(type, f.Type)).FirstOrDefault(r => r is not null),
                 DataType d => Fields(d).Select(f => Inner(type, f)).FirstOrDefault(r => r is not null),
                 UnionType u => u.Cases.Where(c => c is not VoidType).Select(c => Inner(type, c)).FirstOrDefault(r => r is not null),
                 ListType l => Inner(type, l.Element),
@@ -159,6 +161,17 @@ internal sealed class Layout(IrModule module)
         }
     }
 
+    /// <summary>Whether a value of the type holds an instance of a class: the instance itself, or a field, a case, an item, a key or a value that does.</summary>
+    private static bool HoldsInstance(KurzType type, HashSet<DataSymbol> seen) => type switch
+    {
+        ClassType => true,
+        DataType d => seen.Add(d.Symbol) && Fields(d).Any(f => HoldsInstance(f, seen)),
+        UnionType u => u.Cases.Any(c => HoldsInstance(c, seen)),
+        ListType l => HoldsInstance(l.Element, seen),
+        MapType m => HoldsInstance(m.Key, seen) || HoldsInstance(m.Value, seen),
+        _ => false,
+    };
+
     /// <summary>
     /// The refusal of a part of <paramref name="whole"/>: a vector is a variable's, a parameter's or a result's alone, and the type that
     /// holds one in a field, a case, an item or an entry is <c>not supported</c>, since its block is not aligned to the vector's size (R18).
@@ -168,7 +181,7 @@ internal sealed class Layout(IrModule module)
     /// <summary>
     /// The <c>null</c> of a <c>T?</c> whose <c>T</c> is held through an address, an address no value of <c>T</c> has, as Rust lays out
     /// <c>Option&lt;Box&lt;T&gt;&gt;</c> and <c>Option&lt;Vec&lt;T&gt;&gt;</c> (section 4, the owner, 2026-10-30, "Rust's niche"): a block's is the
-    /// address 0, and a list's the address 1, since a list without items is the address 0; a C function's is the address 0, which no
+    /// address 0, as an instance's is, as Rust lays out <c>Option&lt;Rc&lt;T&gt;&gt;</c>, and a list's the address 1, since a list without items is the address 0; a C function's is the address 0, which no
     /// function has, as Rust lays out <c>Option&lt;extern "C" fn()&gt;</c> (R17); a function value's is the pair of no code and no
     /// environment, the address 0 in its code, which no function value has, as Rust lays out <c>Option&lt;fn()&gt;</c> (section 4, the
     /// owner, 2026-10-30, "Nullable form, as Option", whose cost names "a <c>null</c> niche in a function value"; that the niche is the
@@ -178,6 +191,7 @@ internal sealed class Layout(IrModule module)
     {
         ListType => "inttoptr (i64 1 to ptr)",
         DataType d when IsBlock(d) => "null",
+        ClassType => "null",
         CFunctionType => "null",
         FunctionType => "zeroinitializer",
         _ => null,
@@ -193,6 +207,8 @@ internal sealed class Layout(IrModule module)
         {
             case DataType d when IsBlock(d):
                 return "ptr";
+            case ClassType:
+                return "ptr"; // K2: an instance is the address of its block
             case UnionType u when Niche(u) is not null:
                 return NicheIr(u);
             case DataType d:
@@ -230,6 +246,21 @@ internal sealed class Layout(IrModule module)
         return name;
     }
 
+    /// <summary>
+    /// The IR type of the block of an instance of a class, as Rust lays out an <c>RcBox</c> (section 3): the count of the references
+    /// that hold it, the count of the weak ones, one for all the strong ones together, then the fields in their order (K1).
+    /// </summary>
+    public string ClassBlock(ClassSymbol symbol)
+    {
+        var name = $"%\"c.{symbol.Name}\"";
+        if (defined.Add(name))
+        {
+            module.Global($"{name} = type {{ i64, i64{string.Concat(symbol.Fields.Select(f => ", " + Ir(f.Type)))} }}");
+        }
+
+        return name;
+    }
+
     /// <summary>The width of a union's tag in bits: what the largest number among its cases needs.</summary>
     public int TagBits(UnionType union)
     {
@@ -245,6 +276,8 @@ internal sealed class Layout(IrModule module)
             case VoidType:
                 return (0, 1);
             case DataType d when IsBlock(d):
+                return (8, 8);
+            case ClassType:
                 return (8, 8);
             case UnionType u when Niche(u) is not null:
                 return Types.NonNull(u) is FunctionType ? (16, 8) : (8, 8);

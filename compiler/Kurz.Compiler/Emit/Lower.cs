@@ -87,6 +87,7 @@ internal static class Lower
         {
             ListType or MapType => "M9",
             DataType => "D1",
+            ClassType => "K1",
             UnionType => "D9",
             FunctionType => "F11",
             _ => null,

@@ -250,6 +250,11 @@ public sealed partial class Emitter
     /// </summary>
     private string CollectionPlace(Expression receiver)
     {
+        if (InstanceFieldPlace(receiver) is { } field)
+        {
+            return field; // K2: a field of an instance, which holds its list or map as a variable does
+        }
+
         var members = new List<MemberAccess>();
         var target = Unwrap(receiver);
         while (target is MemberAccess m)

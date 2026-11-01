@@ -627,6 +627,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
     [Theory]
     [InlineData("xs = [Vector128.Create(1, 2, 3, 4)]\nprint(xs.Count)\n", 1, "a value of type `List<Vector128<int>>` (M9)")]
     [InlineData("data P(Vector128<int> V)\n\np = P(Vector128.Create(1, 2, 3, 4))\nprint(p.V.GetElement(0))\n", 3, "a value of type `P` (D1)")]
+    [InlineData("class P(Vector128<int> V)\n\np = P(Vector128.Create(1, 2, 3, 4))\nprint(p.V.GetElement(0))\n", 3, "a value of type `P` (K1)")]
     [InlineData("v = Vector128.Create(1, 2, 3, 4)\nf = () => v.GetElement(1)\nprint(f())\n", 2, "a lambda that reads a variable of type `Vector128<int>`, whose environment is not aligned to it (R18)")]
     public void A_vector_held_in_a_value_of_another_type_is_not_supported_at_its_line(string text, int line, string message)
     {
@@ -634,6 +635,15 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
         Assert.Null(compilation.Program);
         var d = Assert.Single(compilation.Diagnostics.Items);
         Assert.Equal((DiagnosticKind.NotSupported, line, message), (d.Kind, d.Line, d.Message));
+    }
+
+    [Fact]
+    public void A_guarded_block_in_a_method_reads_and_changes_the_fields_of_its_instance()
+    {
+        // K7 with R18: the block's function takes the address of the method's `this` as it takes a variable's, by its name and through `this`
+        const string text = "class Acc(mut int Total) {\n    pub int Add(Vector128<int> v) {\n        if X86.Sse41.IsSupported {\n            Total = Total + X86.Sse41.Extract(v, 2)\n            this.Total = this.Total + 1\n            return Total\n        }\n\n        return -1\n    }\n}\n\na = Acc(10)\nprint(a.Add(Vector128.Create(1, 2, 3, 4)))\nprint(a.Total)\n";
+        Assert.Contains(Functions(Ir(text)), f => f.Key.Contains(".guarded.", StringComparison.Ordinal) && f.Value.Body.Contains("extractelement <4 x i32>", StringComparison.Ordinal));
+        Ran(BuildAndRun(text, ListTests.Fenced, "intrinsic-method"), 0, ["14", "14"], "");
     }
 
     private static void Ran((int Code, IReadOnlyList<string> Output, string Error) run, int code, string[] lines, string error)
