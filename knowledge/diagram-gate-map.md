@@ -301,6 +301,8 @@ flowchart TD
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
         a title or description the title gate refuses, an option it does not know.
+        --delete-branch gives every open pull request on a merged branch the merged pull request's base,
+        and deletes the branch only when the list read again holds none; a deletion by hand skips it: HAZARD issue 14.
         A merge by the button or gh pr merge still meets M1, but not the head pin, the auto-merge check,
         the comparison with the live rules, or the re-check of the title gate and of the answered findings
         at the moment of the merge: HAZARD issue 14"]

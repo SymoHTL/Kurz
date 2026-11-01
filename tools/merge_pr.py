@@ -7,6 +7,8 @@ skips what only this tool adds (HAZARD #14).
   merge_pr.py <pr> <full head sha> --over-red <pr>@<full head sha>=<check>[,<check>]
   merge_pr.py --assert-settings      the live ruleset equals tools/ruleset.json and is active
   merge_pr.py --apply-settings       create or update that ruleset (owner-approved, once)
+  merge_pr.py --delete-branch <merged pr> [--dry-run]
+                                     retarget the open pull requests whose base is its branch, then delete it
 
 A merge needs: the exact head that was looked at; an open pull request into the default branch that
 is not a Draft, not behind its base (at the review cap the refusal says whether the round converged
@@ -51,15 +53,26 @@ combined status drops it (knowledge/the-combined-status-drops-the-creator.md). B
 checks are pinned to the app every workflow run of this repository reports as, so `review` proves
 that a workflow run of this repository posted it, not which one (HAZARD #11).
 
+--delete-branch deletes the head branch of a merged pull request through the forge. The forge closes
+every open pull request whose base is a branch deleted outside its own merge flow
+(knowledge/a-deleted-branch-closes-the-pull-requests-on-it.md), so every such pull request first gets
+the merged pull request's base as its own, which keeps a chain in its order, and the list is read
+again: a pull request that still has the branch as its base refuses the deletion. A pull request
+that is not merged, a branch of another repository, and a branch that holds commits the merge did
+not take are refused; a branch that is already deleted is no error. The branch's head and each old
+base are printed before the first write, so that each write is undone by one command.
+
 A write whose answer cannot be read, that ran out of time, or that ended in an answer nobody
 expected may have landed. It is never reported as refused: the state is read back, the ruleset is
 restored and read back, and the exit code says what is known.
 
-Exit codes: 0 merged (or dry run that would merge, or settings as expected); 1 refused; 2 usage;
+Exit codes: 0 merged (or dry run that would merge, or settings as expected, or the branch deleted
+or already deleted); 1 refused; 2 usage;
 3 GATE NOT RESTORED: the ruleset was not read back as active and may still be off, so read it back
 and switch it on by hand; it outranks every other code, and the lines above it say what became of
 the merge; 4 merge state unknown, look at the pull request
-before doing anything else; 5 settings: nothing wrong in what this token could read, and at least
+before doing anything else (for --delete-branch: the bases or the branch are not known, look at the
+pull requests it named and at the branch); 5 settings: nothing wrong in what this token could read, and at least
 one setting NOT CHECKED; 6 merged over red, but the record of the waiver could not be posted: post
 it on the pull request by hand."""
 import contextlib
@@ -69,6 +82,7 @@ import os
 import re
 import sys
 import time
+from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
@@ -418,6 +432,92 @@ def merge(repo, number, sha, pr, waived, states, threads):
     return code
 
 
+GONE = re.compile(r"\(HTTP 404\)")  # how gh ends a read of a reference that does not exist
+
+
+def stacked_on(repo, branch):
+    """The open pull requests whose base is `branch`, as the forge lists them."""
+    return kit.gh_pages(f"repos/{repo}/pulls?state=open&base={quote(branch)}&per_page=100")
+
+
+def delete_branch(repo, number, dry_run=False):
+    """Delete the head branch of the merged pull request `number`, after each open pull request whose
+    base it is has the merged pull request's base as its own (the docstring above). What fails before
+    the first write escapes as a refusal; what fails after it is read back here, and the exit code
+    says what is known."""
+    pr = kit.gh_json(f"repos/{repo}/pulls/{number}")
+    branch, target, merged_head = pr["head"]["ref"], pr["base"]["ref"], pr["head"]["sha"]
+    if pr.get("merged") is not True:
+        print(f"REFUSED: pull request #{number} is not merged: its branch {branch} is not deleted. Merge it with the merge tool first")
+        return 1
+    home, here = (pr["head"].get("repo") or {}).get("full_name"), pr["base"]["repo"]["full_name"]
+    if home != here:
+        print(f"REFUSED: the branch {branch} of pull request #{number} is in {home or 'a repository that is gone'}, not in {here}: nothing is deleted. "
+              f"The branch is for its own repository to delete")
+        return 1
+    ref = f"repos/{repo}/git/ref/heads/{quote(branch)}"
+    try:
+        at = kit.gh_json(ref)["object"]["sha"]
+    except kit.Refused as e:
+        if not GONE.search(str(e)):
+            raise
+        print(f"branch {branch} is already deleted")
+        return 0
+    if at != merged_head:
+        print(f"REFUSED: branch {branch} is at {at}, and pull request #{number} merged {merged_head}: "
+              f"the branch holds commits the merge did not take, and it is not deleted. Read them with `git fetch origin {branch}` "
+              f"and `git log {merged_head}..{at}`, and take them to a pull request of their own or ask the owner")
+        return 1
+    stacked = stacked_on(repo, branch)
+    print(f"branch {branch} is at {at}; to put it back: git push origin {at}:refs/heads/{branch}")
+    for p in stacked:
+        print(f"branch {branch} is the base of open pull request #{p['number']} \"{p['title']}\": it is retargeted to {target} first; "
+              f"to undo, while {branch} exists: gh api -X PATCH repos/{repo}/pulls/{p['number']} -f base={branch}")
+        capped = kit.review_rounds([label["name"] for label in p["labels"]]) >= kit.ROUND_CAP
+        if not p["draft"] or capped:
+            print(f"  pull request #{p['number']} is {'at its review cap' if capped else 'Ready'}: a change of base starts no review run, "
+                  f"and its diff against {target} has had no review")
+    if stacked:
+        print(f"a pull request on {branch} may be another session's: tell its owner that its base is {target}")
+    if dry_run:
+        print(f"dry run: would retarget {len(stacked)} pull requests to {target} and delete branch {branch}")
+        return 0
+    for p in stacked:
+        try:
+            send(f"repos/{repo}/pulls/{p['number']}", {"base": target}, method="PATCH")
+        except ANSWER_ERRORS as e:  # no further write in a state nobody has read
+            print(f"the change of base of pull request #{p['number']} failed: {type(e).__name__}: {e}")
+            break
+    try:
+        left = stacked_on(repo, branch)
+    except ANSWER_ERRORS as e:
+        print(f"the read-back of the pull requests on {branch} failed: {type(e).__name__}: {e}")
+        print(f"BASES UNKNOWN: look at the pull requests named above before anything else; branch {branch} is not deleted")
+        return 4
+    for p in left:
+        print(f"REFUSED: pull request #{p['number']} still has the base {branch}: the branch {branch} is not deleted. "
+              f"Run the command again; where a change of base was refused, the refusal above says why")
+    if left:
+        return 1
+    try:
+        send(f"repos/{repo}/git/refs/heads/{quote(branch)}", {}, method="DELETE")
+        print(f"deleted branch {branch} (it was at {at})")
+        return 0
+    except ANSWER_ERRORS as e:  # a deletion whose answer is missing may have landed: the branch is read back
+        print(f"deleting branch {branch} failed: {type(e).__name__}: {e}")
+    try:
+        kit.gh_json(ref)
+    except ANSWER_ERRORS as e:
+        if isinstance(e, kit.Refused) and GONE.search(str(e)):
+            print(f"read back: branch {branch} IS deleted (it was at {at})")
+            return 0
+        print(f"the read-back of branch {branch} failed: {type(e).__name__}: {e}")
+        print(f"BRANCH STATE UNKNOWN: look at branch {branch} before anything else")
+        return 4
+    print(f"REFUSED: branch {branch} still exists: the pull requests on it have the base {target}")
+    return 1
+
+
 def thread_reasons(threads, changed_since, moved=lambda comment: False, capped=False):
     """What the threads of a pull request hold against a merge: any unresolved thread, and any
     review finding that was resolved without its answer (tools/pr_gates.py); `moved` reads a reply
@@ -463,11 +563,26 @@ def arguments(argv):
     return int(positional[0]), positional[1], waiver
 
 
+def deletion(argv):
+    """(pull request, dry run) of a --delete-branch call, or None when the call is not understood: the
+    flag first, one number, and nothing else but --dry-run."""
+    if argv[:1] != ["--delete-branch"] or len(argv) not in (2, 3) or not argv[1].isdigit() or argv[2:] not in ([], ["--dry-run"]):
+        return None
+    return int(argv[1]), argv[2:] == ["--dry-run"]
+
+
 USAGE = ("usage: merge_pr.py <pr> <full head sha> [--dry-run] [--over-red <pr>@<full head sha>=<check>[,<check>]]\n"
-         "       merge_pr.py --assert-settings | --apply-settings   (alone: a settings call takes no other argument)")
+         "       merge_pr.py --assert-settings | --apply-settings   (alone: a settings call takes no other argument)\n"
+         "       merge_pr.py --delete-branch <merged pr> [--dry-run]")
 
 
 def run(argv):
+    if "--delete-branch" in argv:
+        understood = deletion(argv)
+        if not understood:
+            print(USAGE)
+            return 2
+        return delete_branch(kit.repo(), *understood)
     if "--assert-settings" in argv or "--apply-settings" in argv:
         if len(argv) != 1:  # `--apply-settings --dry-run` would write
             print(USAGE)
@@ -1101,6 +1216,170 @@ def self_test():
     cases.append(("flip: a second reading that finds many threads changed names the first ten by id, whole, and counts the rest",
                   len(named) == 1 and "t00, t01, t02, t03, t04, t05, t06, t07, t08, t09 and 2 more" in named[0] and "t10" not in named[0],
                   named))
+
+    # --delete-branch, against a forge that answers from the captures of 2026-11-01: pull request 184, whose branch is the
+    # base of the open pull request 185, the branch at 184's head, the merged pull request 188 and gh's error for its
+    # deleted branch
+    open_base, on_it, branch_ref = load("pull-request-base-of-a-stack.json"), load("pulls-on-a-branch.json"), load("git-ref.json")
+    merged_gone = load("pull-request-merged.json")
+    with open(os.path.join(fixtures, "gh-ref-not-found.txt"), encoding="utf-8") as f:
+        not_found = f.read().strip()
+    merged_base = dict(open_base, merged=True)  # edited: merged, as a deletion needs
+    stacked_branch = open_base["head"]["ref"]
+
+    class Stack:
+        """A forge with one pull request, its head branch and the open pull requests on that branch; it records
+        every call, and what was printed before the first write. `fail` names the calls that raise (a refusal,
+        or no answer where `unanswered` names it), `lands` the failed writes that took effect all the same,
+        and `ignore` makes a change of base that the forge answers and does not make."""
+
+        def __init__(self, pr, stacked, exists=True, at=None, fail=(), lands=(), unanswered=(), ignore=False):
+            self.pr, self.exists, self.at = pr, exists, at or branch_ref["object"]["sha"]
+            self.stacked = json.loads(json.dumps(stacked))
+            self.fail, self.lands, self.unanswered, self.ignore = set(fail), set(lands), set(unanswered), ignore
+            self.calls, self.before, self.printed = [], None, None
+
+        def error(self, what, path):
+            if what in self.unanswered:
+                return kit.Unanswered(f"gh api {path}: no answer within 120 s")
+            return kit.Refused(f"`gh api {path}` exited 1: gh: Validation Failed (HTTP 422)")
+
+        def gh_json(self, path):
+            if path.endswith(f"/pulls/{self.pr['number']}"):
+                self.calls.append(("pr",))
+                return self.pr
+            again = any(c[0] == "delete" for c in self.calls)
+            self.calls.append(("ref",))
+            if not again and "ref-first" in self.fail:
+                raise kit.Refused(f"`gh api {path}` exited 1: gh: API rate limit exceeded (HTTP 403)")
+            if again and "ref-again" in self.fail:
+                raise self.error("ref-again", path)
+            if not self.exists:
+                raise kit.Refused(f"`gh api {path}` exited 1: {not_found}")
+            return dict(branch_ref, object=dict(branch_ref["object"], sha=self.at))
+
+        def gh_pages(self, path):
+            again = any(c[0] == "list" for c in self.calls)
+            self.calls.append(("list",))
+            if not again and "list-first" in self.fail:
+                raise kit.Refused(f"`gh api {path}` exited 1: gh: API rate limit exceeded (HTTP 403)")
+            if again and "list-again" in self.fail:
+                raise self.error("list-again", path)
+            base = re.search(r"[?&]base=([^&]+)", path).group(1)
+            return [p for p in self.stacked if p["base"]["ref"] == base]
+
+        def send(self, path, payload, method="PUT"):
+            if self.before is None:
+                self.before = self.printed.getvalue()
+            what, name = ("patch" if method == "PATCH" else "delete"), path.rsplit("/", 1)[-1]
+            self.calls.append((what, name, payload.get("base")))
+            landed = what not in self.fail or what in self.lands
+            if landed and what == "patch" and not self.ignore:
+                next(p for p in self.stacked if str(p["number"]) == name)["base"]["ref"] = payload["base"]
+            if landed and what == "delete":
+                self.exists = False
+            if what in self.fail:
+                raise self.error(what, path)
+            return {} if what == "delete" else next(p for p in self.stacked if str(p["number"]) == name)
+
+    def stack(pr=None, stacked=None, command=None, **how):
+        """delete_branch against a Stack, or `command` through run, as the tool is called."""
+        fake, g = Stack(pr or merged_base, on_it if stacked is None else stacked, **how), globals()
+        saved = g["send"], kit.gh_json, kit.gh_pages, kit.repo
+        g["send"], kit.gh_json, kit.gh_pages, kit.repo = fake.send, fake.gh_json, fake.gh_pages, (lambda: "o/r")
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as printed:
+                fake.printed = printed
+                code = attempt(run, command) if command else attempt(delete_branch, "o/r", fake.pr["number"])
+        finally:
+            g["send"], kit.gh_json, kit.gh_pages, kit.repo = saved
+        fake.out = printed.getvalue()
+        fake.writes = [c for c in fake.calls if c[0] in ("patch", "delete")]
+        return code, fake
+
+    code, f = stack()
+    case("delete: the branch is deleted after the pull request on it has the merged pull request's base, and the list is read again first",
+         len(on_it) == 1 and on_it[0]["base"]["ref"] == stacked_branch
+         and (code, f.calls[2:]) == (0, [("list",), ("patch", "185", "main"), ("list",), ("delete", stacked_branch, None)])
+         and f"deleted branch {stacked_branch}" in f.out, (code, f.calls, f.out))
+    case("delete: before the first write the branch's head, each pull request on it with its undo, and its owner's notice are printed",
+         f.before is not None and f"branch {stacked_branch} is at {branch_ref['object']['sha']}; to put it back: git push origin" in f.before
+         and f"open pull request #185 \"{on_it[0]['title']}\": it is retargeted to main first" in f.before
+         and f"gh api -X PATCH repos/o/r/pulls/185 -f base={stacked_branch}" in f.before
+         and "may be another session's: tell its owner that its base is main" in f.before, f.before)
+    case("delete: a Draft on the branch below its review cap is not named as unreviewed", "has had no review" not in f.out, f.out)
+    code, f = stack(pr=open_base)
+    case("delete: a pull request that is not merged is refused, and nothing is listed or written",
+         open_base["merged"] is False and (code, f.calls) == (1, [("pr",)]) and f"pull request #184 is not merged: its branch {stacked_branch} is not deleted. Merge it with the merge tool first" in f.out,
+         (code, f.calls, f.out))
+    code, f = stack(pr=merged_gone, stacked=[], exists=False)
+    case("delete: a branch the forge no longer has is already deleted, no error, and nothing is written",
+         merged_gone["merged"] is True and "(HTTP 404)" in not_found and code == 0 and not f.writes
+         and f"branch {merged_gone['head']['ref']} is already deleted" in f.out, (code, f.calls, f.out))
+    code, f = stack(at="0" * 40)
+    case("delete: a branch that holds commits the merge did not take is refused, and nothing is written",
+         (code, f.writes) == (1, []) and "holds commits the merge did not take" in f.out
+         and f"`git log {merged_base['head']['sha']}..{'0' * 40}`" in f.out, (code, f.calls, f.out))
+    code, f = stack(fail={"ref-first"})
+    case("delete: a first read of the branch that fails but for a 404 is a refusal, not a deleted branch, and nothing is written",
+         isinstance(code, kit.Refused) and "(HTTP 403)" in str(code) and not f.writes and "already deleted" not in f.out, (code, f.calls, f.out))
+    code, f = stack(fail={"list-first"})
+    case("delete: a first list of the pull requests on the branch that fails is a refusal, and nothing is written",
+         isinstance(code, kit.Refused) and "(HTTP 403)" in str(code) and not f.writes and f.before is None, (code, f.calls, f.out))
+    forked = dict(merged_base, head=dict(merged_base["head"], repo=dict(merged_base["head"]["repo"], full_name="someone/Kurz")))  # edited: a fork
+    code, f = stack(pr=forked)
+    case("delete: a branch of another repository is refused, and nothing of it is read or written",
+         (code, f.calls) == (1, [("pr",)]) and f"is in someone/Kurz, not in {merged_base['base']['repo']['full_name']}: nothing is deleted. "
+         "The branch is for its own repository to delete" in f.out, (code, f.calls, f.out))
+    code, f = stack(ignore=True)
+    case("delete: a pull request that still has the branch as its base after the change refuses the deletion",
+         (code, f.writes) == (1, [("patch", "185", "main")]) and f"pull request #185 still has the base {stacked_branch}" in f.out
+         and "Run the command again" in f.out,
+         (code, f.calls, f.out))
+    two = on_it + [dict(on_it[0], number=186)]  # edited: a second pull request on the branch
+    code, f = stack(stacked=two, fail={"patch"})
+    case("delete: a refused change of base sends no further write, and the branch is not deleted",
+         (code, f.writes) == (1, [("patch", "185", "main")]) and "#185 still has the base" in f.out and "#186 still has the base" in f.out,
+         (code, f.calls, f.out))
+    code, f = stack(fail={"patch", "list-again"}, unanswered={"patch", "list-again"})
+    case("delete: bases not known after a write are exit 4, and the branch is not deleted",
+         (code, f.writes) == (4, [("patch", "185", "main")]) and "BASES UNKNOWN" in f.out, (code, f.calls, f.out))
+    code, f = stack(fail={"delete"}, lands={"delete"}, unanswered={"delete"})
+    case("delete: a deletion whose answer is missing is read back, and a branch the forge no longer has is deleted",
+         code == 0 and f"read back: branch {stacked_branch} IS deleted" in f.out, (code, f.calls, f.out))
+    code, f = stack(fail={"delete"})
+    case("delete: a deletion the forge refused is read back, and a branch that still exists is refused",
+         (code, f.exists) == (1, True) and f"branch {stacked_branch} still exists" in f.out, (code, f.calls, f.out))
+    code, f = stack(fail={"delete", "ref-again"}, lands={"delete"}, unanswered={"delete", "ref-again"})
+    case("delete: a deletion whose answer and read-back are both missing is exit 4",
+         code == 4 and "BRANCH STATE UNKNOWN" in f.out, (code, f.calls, f.out))
+    code, f = stack(pr=dict(merged_base, base=dict(merged_base["base"], ref="trunk")))  # edited: a chain, merged into another branch
+    case("delete: a chain keeps its order: the pull request on the branch gets the merged pull request's base, not main",
+         ("patch", "185", "trunk") in f.writes and code == 0, (code, f.calls))
+    code, f = stack(stacked=[dict(on_it[0], draft=False)])  # edited: Ready
+    case("delete: a Ready pull request on the branch is named, since a change of base starts no review of its new diff",
+         code == 0 and "pull request #185 is Ready: a change of base starts no review run, and its diff against main has had no review" in f.before,
+         (code, f.before))
+    code, f = stack(stacked=[dict(on_it[0], labels=[{"name": f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"}])])  # edited: at the cap
+    case("delete: a Draft on the branch at its review cap is named, since a change of base starts no review of its new diff",
+         code == 0 and "pull request #185 is at its review cap: a change of base starts no review run" in f.before, (code, f.before))
+    code, f = stack(command=["--delete-branch", "184", "--dry-run"])
+    case("delete: a dry run, called as the command, prints what it would do and writes nothing",
+         (code, f.writes) == (0, []) and f"dry run: would retarget 1 pull requests to main and delete branch {stacked_branch}" in f.out,
+         (code, f.calls, f.out))
+    case("call: --delete-branch takes one pull request, and --dry-run",
+         [attempt(deletion, a) for a in (["--delete-branch", "184"], ["--delete-branch", "184", "--dry-run"])] == [(184, False), (184, True)])
+    case("call: --delete-branch with anything else is not understood",
+         [attempt(deletion, a) for a in (["--delete-branch"], ["--delete-branch", "x"], ["--delete-branch", "184", sha],
+                                         ["184", "--delete-branch"], ["--delete-branch", "184", "--dry-run", "--dry-run"])] == [None] * 5)
+    asked.clear()
+    saved, kit.repo = kit.repo, no_forge
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            got = attempt(run, ["--delete-branch", "184", "--over-red", spec])
+    finally:
+        kit.repo = saved
+    case("call: a --delete-branch call that is not understood is usage, and asks the forge nothing", (got, asked) == (2, []), (got, asked))
     return kit.report(cases)
 
 

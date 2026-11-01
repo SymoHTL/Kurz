@@ -73,6 +73,22 @@ tools/fixtures/ (GitHub, repository SymoHTL/Kurz; captured 2026-10-01 unless a l
                         its events, the one `labeled` event with its actor and its label. The self-test
                         of tools/quality_evidence.py relabels these three and pull-request.json with the
                         logins and associations its cases need, and says so
+  pull-request-base-of-a-stack.json
+                        gh api repos/SymoHTL/Kurz/pulls/184 (2026-11-01, 22:38 UTC): an open Draft whose
+                        head branch, source-raw-literal, is the base of pull request 185
+  pulls-on-a-branch.json
+                        gh api "repos/SymoHTL/Kurz/pulls?state=open&base=source-raw-literal&per_page=100"
+                        (the same moment): the one open pull request on that branch, 185, as the list
+                        endpoint sends it
+  git-ref.json          gh api repos/SymoHTL/Kurz/git/ref/heads/source-raw-literal (the same moment): the
+                        branch at the head of pull-request-base-of-a-stack.json. The self-test of
+                        tools/merge_pr.py edits that pull request to merged, and says so
+  pull-request-merged.json
+                        gh api repos/SymoHTL/Kurz/pulls/188 (the same moment): a merged pull request,
+                        whose branch record-packages had been deleted
+  gh-ref-not-found.txt  what gh printed on its error output for
+                        gh api repos/SymoHTL/Kurz/git/ref/heads/record-packages (the same moment), the
+                        branch of pull-request-merged.json, exit 1
 
 tools/review/fixtures/ (Claude CLI 2.1.283; the flags are in knowledge/claude-cli-headless-answer.md.
 The CLI's answers are kept as the CLI printed them, on one line.)
