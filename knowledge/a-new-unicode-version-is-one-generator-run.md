@@ -23,19 +23,26 @@ cannot be fetched, since then nothing was compared.
 2. Fetch the three files of the new version from `https://www.unicode.org/Public/<version>/ucd/`
    and take the SHA-256 of each.
 3. Put the version in `VERSION` and the three hashes in `FILES` of `tools/unicode_tables.py`, then
-   run `py -3 tools/unicode_tables.py`. It writes the file and prints every mapping and every code
+   run `py -3 tools/unicode_tables.py` (`python3` outside Windows, as in CI). It writes the file and prints every mapping and every code
    point of Cased and Case_Ignorable that changed, as `lower U+XXXX: old -> new`.
-4. The pull request lists those lines in its description, and needs no question to the owner, as
-   Rust takes a new version as no breaking change (section 12, "PR, no question"). The tool
-   refuses a mapping that leaves its plane, one past the first two planes and a run of more than
-   256 code points, the shapes Rust's tables cannot hold either: such a refusal is a change of
-   the tables' form, and a question for a design round before it is a line of code.
+4. The pull request lists those lines in its description, and needs no question to the owner
+   (section 12, "PR, no question"), as Rust takes a new version as no breaking change: the
+   documentation of `char::UNICODE_VERSION`, read on 2026-11-01, says that the behaviour of some
+   methods of `char` and `str` changes over time, as the standard library takes each new version,
+   and that "This is *not* considered to be
+   a breaking change". The tool refuses a mapping that leaves its plane, a mapping past the first
+   two planes and a run that spans more than 256 code points, the forms its tables do not hold:
+   such a refusal is a change of the tables' form, and a question for a design round before it is
+   a line of code.
 5. The suite's `CaseTests` reads the new tables on its own, and the record's sizes (section 12)
    are measured again where the counts of `CaseTables.cs` grew.
 
 The tool keeps each fetched file in the system's temporary directory under its hash and reads it
-from there while the hash holds, so the gate fetches once per machine. A file served with another
-hash is refused, not read: a version's files do not change once Unicode publishes them.
+from there while the hash holds: a machine fetches the three files, about 3.4 MB, again only when
+its temporary directory has lost them, while the container of the `gates` job starts empty and
+fetches them on every run, so that an outage of unicode.org turns every run of the job PARTLY,
+and red. A file served with another hash is refused, not read: the tool holds each file to the
+hash it pins, whatever unicode.org serves.
 
 ## Where the tables come from, and how they were checked
 

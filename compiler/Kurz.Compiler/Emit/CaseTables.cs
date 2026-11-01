@@ -3,8 +3,8 @@ namespace Kurz.Compiler.Emit;
 
 /// <summary>
 /// X3: the case tables of Unicode's full mappings and of the two properties Final_Sigma reads, of the version Rust's stable
-/// <c>char::UNICODE_VERSION</c> pins, in the runs Rust's <c>core::unicode::conversions</c> holds them in, for every code
-/// point above ASCII.
+/// <c>char::UNICODE_VERSION</c> pins, in the runs Rust's <c>core::unicode::conversions</c> holds them in: the mappings of
+/// every code point above ASCII, and the properties of every code point, ASCII among them.
 /// </summary>
 internal static class CaseTables
 {
@@ -66,8 +66,8 @@ internal static class CaseTables
     ];
 
     /// <summary>
-    /// The lowercase mappings to two or three code points, four numbers each: the code point and the code points it gives, a zero after
-    /// the last.
+    /// The lowercase mappings to two or three code points, four numbers each: the code point and the code points it gives, the fourth
+    /// number zero where the mapping gives two.
     /// </summary>
     public static readonly int[] LowerMultis =
     [

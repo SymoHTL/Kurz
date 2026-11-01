@@ -1179,6 +1179,24 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 18)], Errors(find + "void Show(string v) {\n    print(v)\n}\n\nShow(Find(1))"));
         Assert.Equal([(ErrorIds.AmbiguousCall, 22)], Errors(find + "void Show(long v) {\n    print(v)\n}\n\nvoid Show(double v) {\n    print(v)\n}\n\nShow(Find(1))"));
 
+        // O4 (the owner, 2026-10-10): a union that names no case of the call beyond its success is a type the success converts to, so
+        // the call unwraps there, at a parameter as at a variable, and the other cases leave the function or are unlisted at the top
+        var either = "void Show(int | string v) {\n    print(v)\n}\n\n";
+        Clean(find + either + "int | NotFound | Rejected Twice(int id) {\n    Show(Find(id))\n    int | string w = Find(id)\n    print(w)\n    return 2\n}\n\nx = Twice(1) else {\n    else => 0\n}\nprint(x)");
+        Assert.Equal([(ErrorIds.UnlistedCase, 18)], Errors(find + either + "Show(Find(1))"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 14)], Errors(find + "int | string w = Find(1)\nprint(w)"));
+
+        // F13 with O4 (the owner, 2026-10-31, "Exact fit first"): the success's exact fit wins over a union that keeps the cases with a
+        // widening; two that keep them, neither exactly, are ambiguous
+        Assert.Equal([(ErrorIds.UnlistedCase, 22)], Errors(find + "void Show(int v) {\n    print(v)\n}\n\nvoid Show(long | NotFound | Rejected v) {\n    print(v)\n}\n\nShow(Find(1))"));
+        Assert.Equal([(ErrorIds.AmbiguousCall, 22)], Errors(find + "void Show(long | NotFound | Rejected v) {\n    print(v)\n}\n\nvoid Show(double | NotFound | Rejected v) {\n    print(v)\n}\n\nShow(Find(1))"));
+
+        // O4 (the owner, 2026-10-31, "Keep, infer T = int"): a written union that holds a type parameter keeps the cases it names, and the
+        // type parameter is the success; a list literal passed to a parameter takes the parameter's item type (M11) and keeps them
+        Clean(find + "void Show<T>(T | NotFound | Rejected v) {\n    print(\"kept\")\n}\n\nShow(Find(1))");
+        Assert.Equal("List<int>", TypeOf(find + "List<T> Wrap<T>(T | NotFound | Rejected v) => List<T>()\n\nxs = Wrap(Find(1))\nprint(xs)", "xs"));
+        Clean(find + "void Show(List<int | NotFound | Rejected> xs) {\n    print(xs)\n}\n\nShow([Find(1), Find(2)])");
+
         // T27 with O4 (the owner, 2026-10-31, "Unwrap: T = int"): a type parameter the call infers takes the success, so the subject is an
         // `int` whose `else` arm nothing reaches; one a type argument writes as a union keeps the cases
         var same = "T Same<T>(T x) => x\n\n";
@@ -2938,6 +2956,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.TrimStartAscii('a'))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToLowerAscii(1))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToUpper(1))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToUpperAscii(\"x\"))"));
 
         // X6: two forms, `Join<T>(string separator, List<T> values)` and `Join<T>(char separator, List<T> values)`; values that are no
         // list give `T` nothing to infer from in either form (T27), so the call fits neither, `argument-mismatch` (F13), as a separator

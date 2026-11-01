@@ -54,7 +54,7 @@ expects it (V12).
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
 | `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
 | `reversed-range` | C8, M9 | a range between literals whose end lies below its start, in a `for` loop or as the part of a list |
-| `ambiguous-call` | F13 | a call that fits more than one function, none of them exactly |
+| `ambiguous-call` | F13, O4 | a call that fits more than one function, none of them exactly; two functions that both keep the cases of a call passed to them, neither exactly (O4) |
 | `cannot-infer` | T27, F7, M11, X6 | a call of a generic function whose type arguments are neither written nor inferable from its arguments, two instances of different classes with one base in one parameter's positions included, and a list literal where no list type stands whose items give no one type, `[]` and `[1, "a"]` among them (M11), `string.Join(",", [])` too (X6) |
 | `equal-by-unknown` | K15 | an `equal by` clause that names something that is not a field of the class |
 | `equals-method` | K5 | a method named `Equals` or `GetHashCode` on a class, at the method; the message points to `equal by` (K8) |
