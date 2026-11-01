@@ -34,7 +34,7 @@ public sealed partial class Emitter
     /// <summary>Whether a value of the type holds the block of a list, of a map, of a string or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or HasherType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
@@ -202,6 +202,12 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is ClassType)
+        {
+            fn.Emit($"call void {RetainInstance()}(ptr {value})");
+            return;
+        }
+
         if (type is PrimitiveType { Kind: Primitive.String })
         {
             if (!IsLiteral(value))
@@ -234,6 +240,12 @@ public sealed partial class Emitter
         if (type is HandleType)
         {
             fn.Emit($"call void {ReleaseHandle()}(ptr {value})");
+            return;
+        }
+
+        if (type is ClassType c)
+        {
+            fn.Emit($"call void {ReleaseInstance(c.Symbol)}(ptr {value})");
             return;
         }
 
@@ -1142,8 +1154,9 @@ public sealed partial class Emitter
     /// <summary>
     /// X8: the helper of <c>Sort</c>, which sorts the <c>%a1</c> items at <c>%a0</c> and keeps equal items in their order: a merge sort, as
     /// Rust's stable sort is one. A short list is sorted by insertion alone; a longer one in runs of <see cref="ShortRun"/> items, sorted by
-    /// insertion, then merged in pairs of runs twice as long each time (<see cref="Merge"/>), with a buffer of half the items, the most the
-    /// shorter run of a pair holds. A buffer the system refuses raises <c>allocation-failed</c> (M9).
+    /// insertion, then merged in pairs of runs twice as long each time (<see cref="Merge"/>), with a buffer of half the items, rounded up,
+    /// as Rust's stable sort asks for at the least (<c>driftsort_main</c>), which holds the shorter run of a pair. A buffer the system
+    /// refuses raises <c>allocation-failed</c> (M9).
     /// </summary>
     private string StableSort(SortOf s) => Helper($"sort.stable.{s.Key}", "void", ["ptr", "i64"], () =>
     {
@@ -1155,7 +1168,8 @@ public sealed partial class Emitter
         fn.Emit($"call void {insertion}(ptr %a0, i64 %a1)");
         fn.Return(null);
         fn.Block(runs);
-        var bytes = fn.Value($"mul i64 {fn.Value("lshr i64 %a1, 1")}, {fn.Value($"ptrtoint ptr {SortAt(s.Item, "null", "1")} to i64")}");
+        var half = fn.Value($"sub i64 %a1, {fn.Value("lshr i64 %a1, 1")}");
+        var bytes = fn.Value($"mul i64 {half}, {fn.Value($"ptrtoint ptr {SortAt(s.Item, "null", "1")} to i64")}");
         var buffer = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {bytes})");
 
         // each run sorted by insertion

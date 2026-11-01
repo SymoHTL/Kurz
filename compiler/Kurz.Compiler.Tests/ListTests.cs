@@ -2181,6 +2181,199 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[3]",
     ];
 
+    // instances of classes (chapter 7): a method that changes its fields by their names and through `this`, a second reference, a
+    // list and an instance read from fields while a method replaces them, also inside one interpolation, a nullable field, an
+    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, and a chain of 1000 links
+    // made and let go of, which the release frees off its work list
+    private const string Classes = """
+        class Counter(mut int Count, string Name) {
+            pub void Add(int n) {
+                Count = Count + n
+                this.Count = this.Count + 1
+            }
+
+            pub string Text() => "{Name}={Count}"
+        }
+
+        class Holder(mut List<string> Items, mut Counter? Current) {
+            pub void Replace() {
+                Items = List<string>()
+                Items.Add("new")
+                Current = null
+            }
+
+            pub int Size() => Items.Count
+        }
+
+        class Link(int V, Link? Next)
+
+        class Note(mut string Title, mut Map<string, int> Counts) {
+            pub void Reset() {
+                Title = "{Title}!"
+                Counts = Map<string, int>()
+            }
+
+            pub void Mark() {
+                Counts["m"] = 2
+            }
+        }
+
+        data Pair(Counter Left, int Right)
+
+        int Sum(Link? head) {
+            mut total = 0
+            mut cur = head
+            while cur != null {
+                total = total + cur.V
+                cur = cur.Next
+            }
+
+            return total
+        }
+
+        string Touch(Holder x) {
+            x.Replace()
+            return "t"
+        }
+
+        string Clear(Note n) {
+            n.Reset()
+            return "r"
+        }
+
+        c = Counter(0, "c")
+        c.Add(2)
+        print(c)
+        alias = c
+        alias.Count = 10
+        print(c.Count)
+        h = Holder(List<string>(), Counter(5, "k"))
+        h.Items.Add("a")
+        items = h.Items
+        kept = h.Current
+        h.Replace()
+        print(items)
+        print(h.Items)
+        print(h.Size())
+        print(kept?.Name ?? "gone")
+        print(h.Current?.Name ?? "gone")
+        h.Items.Add("b")
+        print("{h.Items} {Touch(h)} {h.Items}")
+        p = Pair(Counter(1, "p"), 2)
+        p.Left.Add(1)
+        print(p)
+        bump = () => c.Add(1)
+        bump()
+        bump()
+        print(c)
+        mut cs = List<Counter>()
+        cs.Add(Counter(1, "a"))
+        cs.Add(c)
+        cs[0].Add(1)
+        print(cs)
+        mut Link? links = null
+        for i in 0..<1000 {
+            links = Link(i, links)
+        }
+
+        print(Sum(links))
+        links = null
+        print(alias)
+        note = Note("{c.Count}n", Map<string, int>())
+        note.Counts["a"] = 1
+        print("{note.Title} {note.Counts} {Clear(note)} {note.Title} {note.Counts}")
+        note.Mark()
+        print(note.Counts)
+        """;
+
+    private static readonly string[] ClassesPrint =
+    [
+        "c=3",
+        "10", // K3: one instance through two references
+        "[a]", // the list the variable took a count of, which the field let go of
+        "[new]",
+        "1",
+        "k",
+        "gone",
+        "[new, b] t [new]", // the first hole took a count of the list the call replaced (K2)
+        "Pair { Left = p=3, Right = 2 }",
+        "c=14",
+        "[a=3, c=14]",
+        "499500",
+        "c=14",
+        "14n [a: 1] r 14n! []", // the string and the map the first holes took a count of, which the call replaced (K2)
+        "[m: 2]",
+    ];
+
+    // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
+    // over, a `return` and a `break` and a `continue` that leave a block, a call's result nothing holds, a `data` value's field, a
+    // lambda's environment and a list's item, each holding a chain of links
+    private const string ClassRounds = """
+        class Link(int V, Link? Next)
+
+        class Box(mut List<int> Xs, mut Link? Chain) {
+            pub void Fill(int n) {
+                for i in 0..<n {
+                    Xs.Add(i)
+                    Chain = Link(i, Chain)
+                }
+            }
+
+            pub int Count() => Xs.Count
+        }
+
+        data Pair(Box Left, int Right)
+
+        Box Make(int n) {
+            b = Box(List<int>(), null)
+            b.Fill(n)
+            return b
+        }
+
+        int Early(int n) {
+            b = Make(n)
+            if n > 0 {
+                return b.Count()
+            }
+
+            return 0
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(100)
+            a.Chain = Link(0, null)
+            p = Pair(Make(100), 1)
+            for j in 0..<3 {
+                c = Make(100)
+                if j == 1 {
+                    continue
+                }
+
+                total = total + c.Count()
+            }
+
+            for x in 0..<5 {
+                d = Make(100)
+                total = total + d.Count() - 100
+                if x == 2 {
+                    break
+                }
+            }
+
+            Make(100)
+            h = () => a.Count()
+            mut bs = List<Box>()
+            bs.Add(Make(100))
+            total = total + Early(100) + p.Left.Count() + h() + bs[0].Count() - 400
+        }
+
+        print(round)
+        print(total)
+        """;
+
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
     // of maps whose entry is written over, a map of strings whose value and key a write over a key lets go of, and entries kept, made
@@ -2300,9 +2493,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>The runtime and the standard library of this machine's target with each file's text edited where <paramref name="edits"/> names its path; each text it replaces is there.</summary>
-    internal static CheckedRuntime Edited(params (string Path, string Old, string New)[] edits)
+    internal static CheckedRuntime Edited(params (string Path, string Old, string New)[] edits) => EditedFor(Builder.HostTarget!.Value, edits);
+
+    /// <summary>As <see cref="Edited"/>, the runtime and the standard library of <paramref name="target"/>.</summary>
+    private static CheckedRuntime EditedFor(Target target, (string Path, string Old, string New)[] edits)
     {
-        var target = Builder.HostTarget!.Value;
         var files = Runtime.Files.Select(f =>
         {
             var text = Encoding.UTF8.GetString(f.Bytes);
@@ -2430,23 +2625,138 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static readonly (string Path, string Old, string New) KeptNone = ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0");
 
     /// <summary>
-    /// The edits that make the allocator take every block from pages of its own and make them unreachable when the block is freed, so
-    /// that a read or a write of a freed block ends the process with the system's signal; nothing is used again. The thread keeps no
-    /// freed block: a kept block stays readable so that a request can take it, so the fence gives every block back to the system.
+    /// The runtime of this machine's target whose `Memory` and `Resize` count the bytes the system gives, by a `Memory` and by the
+    /// growth of a `Resize`, none of them counted back by `Release`, and whose `Memory` refuses a request that takes them past
+    /// <paramref name="limit"/>; a `Resize` is counted and not refused, since `Reallocate` takes a kept block after a refused one.
     /// </summary>
-    private static (string Path, string Old, string New)[] Fence => Builder.HostTarget == Target.Windows
-        ?
+    private static CheckedRuntime Taking(long limit) => Edited(
+        (TargetFile, "pub byte* Memory(long bytes) {", $$"""
+            thread static mut long taken = 0
+
+            pub byte* Memory(long bytes) {
+                mut long total = 0
+                raw {
+                    total = taken + bytes
+                }
+
+                if total > {{limit}} {
+                    return null
+                }
+
+                byte* p = Granted(bytes)
+                if p != null {
+                    raw {
+                        taken = total
+                    }
+                }
+
+                return p
+            }
+
+            byte* Granted(long bytes) {
+            """),
+        (TargetFile, "pub byte* Resize(byte* p, long bytes, long grown) {", """
+            pub byte* Resize(byte* p, long bytes, long grown) {
+                byte* q = Resized(p, bytes, grown)
+                if q != null {
+                    raw {
+                        taken = taken + grown - bytes
+                    }
+                }
+
+                return q
+            }
+
+            byte* Resized(byte* p, long bytes, long grown) {
+            """));
+
+    /// <summary>The line the fenced allocator's `Free` writes to the error stream before it ends the process (<see cref="Fence"/>).</summary>
+    private const string FreeSizeLine = "fence: Free was given a size other than its block was allocated with\n";
+
+    /// <summary>
+    /// The edits that make the allocator take every block from pages of its own, which end at a page the system makes inaccessible,
+    /// as Electric Fence places a block by default, and make them unreachable when the block is freed, so that a write past a
+    /// block's end and a read or a write of a freed block end the process with the system's signal; nothing is used again. A block
+    /// ends where its size rounded up to 16 ends, so that its address stays a multiple of 16, as the allocation entry gives it: a
+    /// write past the size asked for that stays within that rounding is not seen by the page after it. The block's header holds the
+    /// size the allocation asked for, and `Free` holds the size it is given against it: another size writes
+    /// <see cref="FreeSizeLine"/> to the error stream and ends the process as a write past the block's end does. The check at `Free`
+    /// sees a size written by hand whose block is too small within the rounding, as HMAC-SHA256's state made 1288 bytes where its
+    /// code writes 1296, seen only by the `Free` of 1312 bytes against the 1304 asked for, and so 264 where the form of pull request
+    /// 159 writes 272, the mutation its judge named. The thread keeps no freed block: a kept block stays readable so that a request can take it, so the fence gives
+    /// every block back to the system; and the target's `Resize` grows none, since a block grown in place would reach past the page
+    /// after its end.
+    /// </summary>
+    private static (string Path, string Old, string New)[] Fence => FenceOf(Builder.HostTarget!.Value);
+
+    /// <summary>The edits of <see cref="Fence"/> for the runtime of <paramref name="target"/>.</summary>
+    private static (string Path, string Old, string New)[] FenceOf(Target target)
+    {
+        var file = $"runtime/{Runtime.Directory(target)}/{Runtime.Directory(target)}.kz";
+        (string Path, string Old, string New)[] allocator =
         [
             ("std/std.kz", "if size > 262144 {", "if size >= 0 {"),
             ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0"),
-            (TargetFile, "VirtualFree(Ptr<void>(p), 0, 32768)", "VirtualFree(Ptr<void>(p), ulong(bytes), 16384)"), // MEM_DECOMMIT: the pages stay reserved
-        ]
-        :
-        [
-            ("std/std.kz", "if size > 262144 {", "if size >= 0 {"),
-            ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0"),
-            (TargetFile, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p), bytes, 0)"), // PROT_NONE: the pages stay mapped
+            // the size the allocation asked for, in the header's second word, which only a kept block uses
+            ("std/std.kz", "            if p != null {\n                p = p + 16\n", "            if p != null {\n                *Ptr<long>(p + 8) = size\n                p = p + 16\n"),
+            ("std/std.kz", "                moved = p\n", "                *Ptr<long>(block + 8) = grown\n                moved = p\n"),
+            ("std/std.kz", "            long bytes = *Ptr<long>(block)\n",
+                "            long bytes = *Ptr<long>(block)\n" +
+                "            if *Ptr<long>(block + 8) != size {\n" +
+                $"                string line = \"{FreeSizeLine.Replace("\n", "\\n", StringComparison.Ordinal)}\"\n" +
+                $"                sys.Write(2, line.Pointer, {Encoding.UTF8.GetByteCount(FreeSizeLine)})\n" +
+                "                block[bytes] = 1\n" + // the first byte of the page after the block's end
+                "            }\n\n"),
         ];
+        return target == Target.Windows
+            ?
+            [
+                .. allocator,
+                // the block's pages, by the one call of MEM_COMMIT | MEM_RESERVE that `Memory` makes, in the 65536 bytes a reservation is
+                // placed in at a time, whose rest after them no other reservation can take, so that it is not accessible; where the pages
+                // fill whole pieces of 65536, MEM_RESERVE and PAGE_NOACCESS for them and one page after them, then MEM_COMMIT and
+                // PAGE_READWRITE for the block's
+                (file, "        p = Ptr<byte>(VirtualAlloc(null, ulong(bytes), 12288, 4))",
+                    "        long pages = (bytes + 4095) / 4096 * 4096\n" +
+                    "        mut byte* start = null\n" +
+                    "        if pages % 65536 != 0 {\n" +
+                    "            start = Ptr<byte>(VirtualAlloc(null, ulong(pages), 12288, 4))\n" +
+                    "        } else {\n" +
+                    "            start = Ptr<byte>(VirtualAlloc(null, ulong(pages + 4096), 8192, 1))\n" +
+                    "            if start != null && VirtualAlloc(Ptr<void>(start), ulong(pages), 4096, 4) == null {\n" +
+                    "                start = null\n" +
+                    "            }\n" +
+                    "        }\n\n" +
+                    "        if start != null {\n" +
+                    "            p = start + pages - bytes\n" +
+                    "        }"),
+                (file, "VirtualFree(Ptr<void>(p), 0, 32768)", "VirtualFree(Ptr<void>(p), ulong(bytes), 16384)"), // MEM_DECOMMIT: the pages stay reserved
+            ]
+            :
+            [
+                .. allocator,
+                // the block's pages and one page after them, which `mprotect` makes inaccessible (PROT_NONE)
+                (file, "pub byte* Memory(long bytes) {",
+                    "pub byte* Memory(long bytes) {\n" +
+                    "    long pages = (bytes + 4095) / 4096 * 4096\n" +
+                    "    mut byte* p = Mapped(pages + 4096)\n" +
+                    "    raw {\n" +
+                    "        if p != null {\n" +
+                    "            if mprotect(Ptr<void>(p + pages), 4096, 0) == 0 {\n" +
+                    "                p = p + pages - bytes\n" +
+                    "            } else {\n" +
+                    "                p = null\n" +
+                    "            }\n" +
+                    "        }\n" +
+                    "    }\n\n" +
+                    "    return p\n" +
+                    "}\n\n" +
+                    "byte* Mapped(long bytes) {"),
+                // PROT_NONE from the first of the block's pages: the pages stay mapped
+                (file, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 0)"),
+                (file, "pub byte* Resize(byte* p, long bytes, long grown) {", "pub byte* Resize(byte* p, long bytes, long grown) {\n    return null\n}\n\nbyte* Resized(byte* p, long bytes, long grown) {"),
+            ];
+    }
 
     private static readonly Lazy<CheckedRuntime> FencedRuntime = new(() => Edited(Fence));
 
@@ -2548,10 +2858,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, fenced, "string-pieces-fenced"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
         Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
+        Ran(BuildAndRun(ClassRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "class-rounds-fenced"), 0, ["20", "4000"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -2564,6 +2876,51 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Crashed(BuildAndRun("print(1)\n", Edited([.. Fence, ("runtime/common/runtime.kz", start, start + write)]), "list-fence-control"));
         const string large = "    byte* p = Allocate(300000)\n    raw {\n        std.Free(p, 300000)\n        p[0] = 1\n    }\n";
         Crashed(BuildAndRun("print(1)\n", Edited([.. Fence, ("runtime/common/runtime.kz", start, start + large)]), "list-fence-control-large"));
+
+        // and a write one byte past a block's end, of a block within a page, of one over many pages and of one whose pages fill 65536
+        // bytes, for which the fence on Windows reserves a page more, ends the process; a `Free`
+        // given 8 bytes more or 8 bytes less than the block was allocated with writes its line and ends the process as such a write
+        // does, as does the `Free` of a block `Reallocate` grew in place given the size before, and `Reallocate` given another size
+        // than the block's, whose `Free` of it holds it; and a write past a block that `Reallocate` gave as a new one, a block that
+        // starts at its page among them
+        CheckedRuntime Starting(string code) => Edited([.. Fence, ("runtime/common/runtime.kz", start, start + "    raw {\n" + code + "    }\n")]);
+        const string allocated = "        byte* p = Allocate(16)\n";
+        const string larger = "        byte* p = Allocate(300000)\n";
+        const string inPlace = "        byte* p = std.Reallocate(Allocate(20), 20, 24)\n";
+        Crashed(BuildAndRun("print(1)\n", Starting(allocated + "        p[16] = 1\n"), "list-fence-past-end"));
+        Crashed(BuildAndRun("print(1)\n", Starting(larger + "        p[300000] = 1\n"), "list-fence-past-end-large"));
+        Crashed(BuildAndRun("print(1)\n", Starting("        byte* p = Allocate(65520)\n        p[65520] = 1\n"), "list-fence-past-end-whole"));
+        Crashed(BuildAndRun("print(1)\n", Starting("        byte* p = std.Reallocate(Allocate(16), 16, 300000)\n        p[300000] = 1\n"), "list-fence-past-end-moved"));
+        Crashed(BuildAndRun("print(1)\n", Starting("        byte* p = std.Reallocate(Allocate(4080), 4080, 300000)\n        p[300000] = 1\n"), "list-fence-past-end-grown"));
+        FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(allocated + "        std.Free(p, 24)\n"), "list-fence-free-more"));
+        FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(allocated + "        std.Free(p, 8)\n"), "list-fence-free-less"));
+        FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(inPlace + "        std.Free(p, 20)\n"), "list-fence-free-before-growth"));
+        FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(allocated + "        std.Reallocate(p, 8, 300000)\n"), "list-fence-reallocate-less"));
+        // the positive control: the last byte of each block written, each freed with its own size, a block grown in place freed with
+        // the grown size, and a block grown into a new one freed with its size, runs
+        Ran(BuildAndRun("print(1)\n", Starting(
+            "        byte* a = Allocate(16)\n        a[15] = 1\n        std.Free(a, 16)\n" +
+            "        byte* b = Allocate(300000)\n        b[299999] = 1\n        std.Free(b, 300000)\n" +
+            "        byte* e = Allocate(65520)\n        e[65519] = 1\n        std.Free(e, 65520)\n" +
+            "        byte* c = std.Reallocate(Allocate(20), 20, 24)\n        c[23] = 1\n        std.Free(c, 24)\n" +
+            "        byte* d = std.Reallocate(Allocate(16), 16, 300000)\n        d[299999] = 1\n        std.Free(d, 300000)\n"), "list-fence-within"), 0, ["1"], "");
+    }
+
+    /// <summary>The run ended as the fenced allocator's `Free` ends it for a size other than the block's: its line, then the system's signal, before the program printed.</summary>
+    private static void FreedWithAnotherSize((int Code, IReadOnlyList<string> Output, string Error) run)
+    {
+        Assert.True(run.Code is not 0 and not 1, $"exit {run.Code}");
+        Assert.Empty(run.Output);
+        Assert.Equal(FreeSizeLine, run.Error);
+    }
+
+    [Fact]
+    public void The_fenced_allocator_checks_clean_for_every_target()
+    {
+        foreach (var target in new[] { Target.Linux, Target.Windows })
+        {
+            Assert.NotEmpty(EditedFor(target, FenceOf(target)).Std.Statements);
+        }
     }
 
     [Fact]
@@ -2572,6 +2929,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Rounds, Budget(), "list-rounds"), 0, ["3000", "12003000"], "");
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
         Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
+        Ran(BuildAndRun(ClassRounds, Budget(), "class-rounds"), 0, ["3000", "600000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -2590,6 +2948,28 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var full = BuildAndRun(maps, Budget(), "map-rounds-held");
         Assert.Equal(1, full.Code);
         Assert.StartsWith("error: allocation-failed (", full.Error, StringComparison.Ordinal);
+
+        // and the rounds' boxes, each with a chain of 1000 links, all held: about 100 megabytes
+        var boxes = BuildAndRun(ClassRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    all.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "class-rounds-held");
+        Assert.Equal(1, boxes.Code);
+        Assert.StartsWith("error: allocation-failed (", boxes.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_chain_of_a_million_instances_is_freed_off_the_work_list_where_a_recursive_walk_of_it_overflows_the_stack()
+    {
+        // section 3 with the owner's answer of 2026-11-01, "Iterative, never crashes": the last count of a link that a release lets go
+        // of waits on its class's work list, so no release calls itself once for each link
+        const string chain = "class Link(int V, Link? Next)\n\nLink? Build(int n) {\n    mut Link? head = null\n    for i in 0..<n {\n        head = Link(i, head)\n    }\n\n    return head\n}\n\nmut Link? all = Build(1000000)\nprint(all?.V ?? -1)\nall = null\nprint(\"freed\")\n";
+        Ran(BuildAndRun(chain, toolchain.Runtime, "class-chain-freed"), 0, ["999999", "freed"], "");
+
+        // the positive control: a function that walks the same chain by calling itself for each link ends with `stack-overflow`
+        var walked = BuildAndRun(chain.Replace("print(\"freed\")", "print(Depth(Build(1000000)))", StringComparison.Ordinal) + "\nint Depth(Link? l) {\n    if l == null {\n        return 0\n    }\n\n    return 1 + Depth(l.Next)\n}\n", toolchain.Runtime, "class-chain-walked");
+        Assert.NotEqual(0, walked.Code);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.StartsWith("error: stack-overflow", walked.Error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
+        }
     }
 
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
@@ -2686,6 +3066,29 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var over = BuildAndRun(fill.Replace("0..<2097152 {", "0..<2097153 {", StringComparison.Ordinal), Bytes(), "list-grown-over");
         Assert.Equal(1, over.Code);
         Assert.StartsWith("error: allocation-failed (", over.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_block_of_more_than_262144_bytes_that_outgrows_its_room_takes_a_kept_block_before_the_targets_Resize()
+    {
+        // the owner, 2026-11-01, "Kept block first": a list of 2^21 `long`s made and dropped for 20 rounds, its block growing from
+        // 262176 bytes with its header to 16777248, the bytes the system gives counted with none given back. On Linux the first round
+        // takes 17825824 bytes, the mebibyte the small blocks are carved from among them; in the second the block of 8388640 takes
+        // the kept one of 16777248, which it uses at least half of, and the growths below it, too small for it, take 4194336 by
+        // `Resize`; the third takes 1048608 and the fourth 262176 so, and each round after them none, its growths all served by kept
+        // blocks, 23330944 bytes in all. Grown by `Resize` before the kept blocks, each round takes 16777248 bytes again, past the
+        // 24 mebibytes in its second, and the first `Memory` of the third is refused. On Windows, whose `Resize` gives none, each growth
+        // of the first round takes a block of its own, 34341088 bytes with the first mebibyte by the sizes above, and each round after it
+        // the kept blocks of its sizes, within 40 mebibytes
+        const string fill = "long Fill(int n) {\n    mut xs = List<long>()\n    mut i = 0\n    while i < n {\n        xs.Add(long(i))\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 20 {\n    round = round + 1\n    total = total + Fill(2097152)\n}\nprint(total)\n";
+        long limit = Builder.HostTarget == Target.Windows ? 41943040 : 25165824;
+        Ran(BuildAndRun(fill, Taking(limit), "list-grown-kept"), 0, ["41943040"], "");
+
+        // the positive control: the same lists, all of them held, take memory of their own in the second round, past the limit, and a
+        // `Memory` after it is refused
+        var held = BuildAndRun("mut all = List<List<long>>()\nmut round = 0\nwhile round < 20 {\n    round = round + 1\n    mut xs = List<long>()\n    mut i = 0\n    while i < 2097152 {\n        xs.Add(long(i))\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n", Taking(limit), "list-grown-kept-held");
+        Assert.Equal(1, held.Code);
+        Assert.StartsWith("error: allocation-failed (", held.Error, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -2789,13 +3192,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_sort_whose_buffer_or_keys_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
         // M9, X8: the runtime's `Allocate` refusing 1000 to 4095 bytes (<see cref="RefusingSmallBlocks"/>): a stable sort of 300 `long`
-        // items asks for a buffer of half of them, 150 of 8 bytes, and `SortBy` of 100 items with `long` keys for the pairs of a key and
-        // a position, 100 of 16 bytes; an unstable sort asks for nothing
+        // items asks for a buffer of half of them, 150 of 8 bytes, and one of 301 items for half of them rounded up, 151 of 8 bytes, as
+        // Rust's stable sort asks for at the least; `SortBy` of 100 items with `long` keys for the pairs of a key and a position, 100 of
+        // 16 bytes; an unstable sort asks for nothing
         var refusing = RefusingSmallBlocks;
         const string list = "mut xs = List<long>()\nfor i in 0..<300 {\n    xs.Add(long(299 - i))\n}\n\n";
         const string sort = list + "xs.Sort()\nprint(xs[0])\n";
         Ran(BuildAndRun(sort, refusing, "sort-refused"), 1, [], "error: allocation-failed (1200 bytes)\n");
         Ran(BuildAndRun(sort, toolchain.Runtime, "sort-granted"), 0, ["0"], ""); // the positive control
+        const string odd = "mut xs = List<long>()\nfor i in 0..<301 {\n    xs.Add(long(300 - i))\n}\n\nxs.Sort()\nprint(xs[0])\n";
+        Ran(BuildAndRun(odd, refusing, "sort-refused-odd"), 1, [], "error: allocation-failed (1208 bytes)\n");
+        Ran(BuildAndRun(odd, toolchain.Runtime, "sort-granted-odd"), 0, ["0"], "");
         const string keys = list + "mut ys = xs[0..<100]\nys.SortBy(y => y * 2)\nprint(ys[0])\n";
         Ran(BuildAndRun(keys, refusing, "keys-refused"), 1, [], "error: allocation-failed (1600 bytes)\n");
         Ran(BuildAndRun(keys, toolchain.Runtime, "keys-granted"), 0, ["200"], "");
@@ -2920,6 +3327,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(program.ToString(), Fenced, "utf8-table-fenced"), 0, lines, "");
     }
 
+    /// <summary>
+    /// What .NET's decoder reads of <paramref name="bytes"/>: "ok", or the count of the bytes in front of the first sequence it cannot
+    /// read, which is Rust's `valid_up_to`, what `string.FromUtf8` puts into `InvalidUtf8`.
+    /// </summary>
+    private static string Valid(byte[] bytes) =>
+        System.Text.Unicode.Utf8.ToUtf16(bytes, new char[bytes.Length], out var read, out _, replaceInvalidSequences: false)
+            == System.Buffers.OperationStatus.Done
+            ? "ok"
+            : read.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     [Fact]
     public void FromUtf8_finds_the_first_sequence_that_is_not_UTF_8_wherever_it_stands_among_the_words_its_ASCII_skip_reads()
     {
@@ -2930,12 +3347,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // end, a letter of three bytes, or nothing, and 20 bytes of ASCII after the first two and the letter: so the first byte of
         // 128 or more stands among the first 16 bytes, in the first word of a pair, in the second, past the last pair and among the
         // bytes read one at a time after it. What each case gives is what .NET's decoder reads of the same bytes, the count of the
-        // bytes in front of the first sequence it cannot read, which is Rust's `valid_up_to`.
-        static string Valid(byte[] bytes) =>
-            System.Text.Unicode.Utf8.ToUtf16(bytes, new char[bytes.Length], out var read, out _, replaceInvalidSequences: false)
-                == System.Buffers.OperationStatus.Done
-                ? "ok"
-                : read.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // bytes in front of the first sequence it cannot read, which is Rust's `valid_up_to` (<see cref="Valid"/>).
 
         // the positive control: the decoder reads as Rust 1.82's `str::from_utf8` read these on 2026-10-29 (the table above)
         Assert.Equal("1", Valid([0x61, 0xE2, 0x82, 0x61]));
@@ -3036,6 +3448,148 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    [Fact]
+    public void FromUtf8_reads_a_letter_with_three_bytes_after_it_in_place_as_it_reads_one_nearer_the_end()
+    {
+        // T15: a letter with three bytes after it is read in place, its bytes held to the ranges `Utf8Sequence` holds them to, and a
+        // letter nearer the end through `Utf8Sequence`. Each case is a first byte of 128 to 255, a second byte at an end of the ranges
+        // a second byte takes (127, 128, 143, 144, 159, 160, 191, 192), a third byte that continues a sequence or does not (128, 127,
+        // 192) and a fourth (191, 192), with two bytes of ASCII after them, so that the letter has three bytes after it; then the same
+        // first three bytes, the first two and the first alone at the end of the bytes, nearer it. What each case gives is what .NET's
+        // decoder reads of the same bytes (<see cref="Valid"/>).
+        byte[] seconds = [127, 128, 143, 144, 159, 160, 191, 192];
+        byte[] thirds = [128, 127, 192];
+        byte[] fourths = [191, 192];
+        var cases = new List<byte[]>();
+        for (var first = 128; first < 256; first++)
+        {
+            foreach (var second in seconds)
+            {
+                foreach (var third in thirds)
+                {
+                    foreach (var fourth in fourths)
+                    {
+                        cases.Add([(byte)first, second, third, fourth, 65, 65]);
+                    }
+                }
+            }
+        }
+
+        for (var first = 128; first < 256; first++)
+        {
+            foreach (var second in seconds)
+            {
+                foreach (var third in thirds)
+                {
+                    cases.Add([(byte)first, second, third]);
+                }
+
+                cases.Add([(byte)first, second]);
+            }
+
+            cases.Add([(byte)first]);
+        }
+
+        string[] lines = [.. cases.Select(Valid)];
+
+        // the floor: 10368 cases. With three bytes after the letter, 24 are UTF-8 whole, the letters of four bytes whose third byte
+        // continues them and whose fourth is 191; nearer the end, 450, the letters of two bytes that end the bytes or stand before
+        // 127, and of three bytes that end them
+        Assert.Equal(10368, lines.Length);
+        Assert.Equal(24, lines[..6144].Count(l => l == "ok"));
+        Assert.Equal(450, lines[6144..].Count(l => l == "ok"));
+
+        const string text = """
+            void Show(Bytes b) {
+                match string.FromUtf8(b) {
+                    InvalidUtf8 e => print(e.At)
+                    else => print("ok")
+                }
+            }
+
+            mut seconds = Bytes()
+            seconds.Add(127)
+            seconds.Add(128)
+            seconds.Add(143)
+            seconds.Add(144)
+            seconds.Add(159)
+            seconds.Add(160)
+            seconds.Add(191)
+            seconds.Add(192)
+            mut thirds = Bytes()
+            thirds.Add(128)
+            thirds.Add(127)
+            thirds.Add(192)
+            mut fourths = Bytes()
+            fourths.Add(191)
+            fourths.Add(192)
+            for first in 128..<256 {
+                for s in 0..<seconds.Count {
+                    for t in 0..<thirds.Count {
+                        for u in 0..<fourths.Count {
+                            mut b = Bytes()
+                            b.Add(byte(first))
+                            b.Add(seconds[s])
+                            b.Add(thirds[t])
+                            b.Add(fourths[u])
+                            b.Add(65)
+                            b.Add(65)
+                            Show(b)
+                        }
+                    }
+                }
+            }
+
+            for first in 128..<256 {
+                for s in 0..<seconds.Count {
+                    for t in 0..<thirds.Count {
+                        mut b = Bytes()
+                        b.Add(byte(first))
+                        b.Add(seconds[s])
+                        b.Add(thirds[t])
+                        Show(b)
+                    }
+
+                    mut c = Bytes()
+                    c.Add(byte(first))
+                    c.Add(seconds[s])
+                    Show(c)
+                }
+
+                mut d = Bytes()
+                d.Add(byte(first))
+                Show(d)
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "utf8-letters"), 0, lines, "");
+        Ran(BuildAndRun(text, Fenced, "utf8-letters-fenced"), 0, lines, "");
+
+        // no letter is read in place where fewer than three bytes follow it: under the fence a part of 4064 bytes ends where its
+        // page ends, below the page of the part freed before it, as above, and its last three bytes are a letter of three bytes,
+        // whose read in place would read the byte past the part
+        const string edge = """
+            mut source = Bytes()
+            while source.Count < 4061 {
+                source.Add(65)
+            }
+
+            source.Add(226)
+            source.Add(130)
+            source.Add(172)
+            mut freed = source[0..<4064]
+            held = source[0..<4064]
+            freed = Bytes()
+            print(freed.Count)
+            match string.FromUtf8(held) {
+                string s => print(s.Bytes.Count)
+                InvalidUtf8 e => print(e.At)
+            }
+
+            """;
+        Ran(BuildAndRun(edge, Fenced, "utf8-letters-edge-fenced"), 0, ["0", "4064"], "");
     }
 
     /// <summary>

@@ -29,6 +29,12 @@ public enum CallKind
     /// <summary>A data value made by the type's name (D2); <see cref="CallInfo.Data"/> is the type.</summary>
     DataNew,
 
+    /// <summary>An instance of a class made by the class's name, its primary constructor or the empty one (K1, K14); <see cref="CallInfo.Target"/> is the class type.</summary>
+    ClassNew,
+
+    /// <summary>A method of a class (K7), on the value before the dot, or on <c>this</c> where the call names the method alone; <see cref="CallInfo.Function"/> is the method picked (F13).</summary>
+    Method,
+
     /// <summary>A list's <c>Add</c> (M9).</summary>
     ListAdd,
 
@@ -254,6 +260,9 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// <c>args</c>, the program's arguments without its name, which the top-level code sees (S13); null in a file that is no program's
@@ -368,6 +377,33 @@ public sealed class SemanticModel
     internal void RecordDataType(TypeDeclaration declaration, DataSymbol symbol) => dataTypes[declaration] = symbol;
 
     internal void RecordChainMember(MemberAccess access, KurzType member) => chainMembers[access] = member;
+
+    /// <summary>The symbol of a class of the file (K1).</summary>
+    public ClassSymbol ClassOf(TypeDeclaration declaration) => classes.TryGetValue(declaration, out var c) ? c : throw Missing($"class `{declaration.Name}`", declaration.Line);
+
+    /// <summary>The classes of the file, in the order they are declared.</summary>
+    public IEnumerable<ClassSymbol> Classes => classes.Values;
+
+    /// <summary>The variable that holds a method's instance, <c>this</c> (K7).</summary>
+    public VariableSymbol ThisOf(FunctionSymbol method) => receivers.TryGetValue(method, out var v) ? v : throw Missing($"`this` of `{method.Name}`", method.Line);
+
+    /// <summary>
+    /// Inside a method, a name that means a field of its instance (K7): a read, a <see cref="NameExpression"/>, or an assignment, an
+    /// <see cref="AssignOrDeclare"/>, with the variable <c>this</c> it goes through; a <see cref="ThisExpression"/> is <c>this</c> itself.
+    /// </summary>
+    public bool IsImplicitField(object node, out VariableSymbol thisVariable, out FieldSymbol? field)
+    {
+        var found = implicitFields.TryGetValue(node, out var entry);
+        thisVariable = entry.This;
+        field = entry.Field;
+        return found;
+    }
+
+    internal void RecordClass(TypeDeclaration declaration, ClassSymbol symbol) => classes[declaration] = symbol;
+
+    internal void RecordThis(FunctionSymbol method, VariableSymbol thisVariable) => receivers[method] = thisVariable;
+
+    internal void RecordImplicitField(object node, VariableSymbol thisVariable, FieldSymbol? field) => implicitFields[node] = (thisVariable, field!);
 
     private static InvalidOperationException Missing(string what, int line) =>
         new($"the checker did not read the {what} at line {line}: the model is read for a program the checker read without an error and without `not supported`");

@@ -23,8 +23,11 @@ deleted them again. The third-time rule makes that a command.
    `dotnet Kurz.Compiler.Tests/bin/Release/net10.0/Kurz.Compiler.Tests.dll <file> --fenced`,
    with `--grant <name>` for each grant the program needs (`raw` for a `raw` block). It prints
    what the program wrote, what it wrote on its error stream and `exit <code>`.
-3. Read the code: a read or a write of a freed block ends the program on the system's signal,
-   `exit 139` on Linux (128 and SIGSEGV), and on Windows a code other than 0 and 1, which no run recorded; a clean program prints
+3. Read the code: a read or a write of a freed block, and a write past the end of a block's size rounded up to 16, end the
+   program on the system's signal,
+   `exit 139` on Linux (128 and SIGSEGV), and on Windows a code other than 0 and 1, which no run recorded; a `Free` given another
+   size than its block was allocated with ends it so after the line `fence: Free was given a size other than its block was
+   allocated with` on its error stream; a clean program prints
    what it prints without the flag. Run it again without `--fenced` as the control: a program that
    ends the same way there fails for another reason.
 4. The command's own exit code is 0 where the program was built and ran, whatever the program's,

@@ -164,6 +164,7 @@ public sealed partial class Checker
         PrimitiveType { Kind: Primitive.String } => Holding.Counted,
         PrimitiveType => Holding.Nothing,
         ListType or MapType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
+        ClassType => Holding.Counted, // K2: an instance is a counted reference (section 3)
         UnionType u => Worst(u.Cases.Select(c => Holds(c, seen))),
         DataType d => seen.Contains(d.Symbol) ? Holding.Counted : HoldsFields(d, seen),
         TypeParameterType => Holding.Unknown,
@@ -691,6 +692,11 @@ public sealed partial class Checker
         {
             fields.Insert(0, m);
             root = Unwrap(m.Target);
+        }
+
+        if (members.Count == 0 && (RunsThroughInstance(fields) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null)))
+        {
+            return WrittenThroughInstance(a, index, fields); // K2: a collection a field of an instance holds
         }
 
         if (members.Count > 0 || root is not NameExpression name || !model.IsVariable(name))

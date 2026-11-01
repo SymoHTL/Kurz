@@ -1,0 +1,6 @@
+// expect: error intrinsic-unguarded at 6
+// rules: R18
+
+v = Vector128.Create(1, 2, 3, 4)
+// an intrinsic that no test of its class's `IsSupported` guards, outside a `raw` block, is intrinsic-unguarded (R18)
+print(X86.Sse41.Extract(v, 2))
