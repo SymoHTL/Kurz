@@ -1903,21 +1903,30 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The global that holds the case table of one direction (X3), written once into a program that changes case by Unicode's mapping in
-    /// that direction: four counts, of the runs, the mappings to several code points and the ranges of Cased and Case_Ignorable, then
-    /// those numbers of <see cref="CaseTables"/> in that order, as the standard library's <c>CaseMapped</c> reads them. Only lowering reads
-    /// the ranges, for the final sigma, so the table of uppercasing holds none.
+    /// that direction, as the standard library's <c>CaseMapped</c> reads it: four counts of 32 bits, of the blocks of deltas, the mappings
+    /// to several code points and the ranges of Cased and Case_Ignorable; the index of the levels, a byte for each block of 32 code points
+    /// of the first two planes; the deltas, 16 bits each; then the mappings to several code points and the ranges, 32 bits each, from
+    /// <see cref="CaseTables"/>. Only lowering reads the ranges, for the final sigma, so the table of uppercasing holds none. The fields
+    /// stand without padding, and the global at a multiple of 4, so that each number stands at a multiple of its size.
     /// </summary>
     private string CaseTable(bool upper)
     {
         var name = upper ? "@\"case.upper\"" : "@\"case.lower\"";
         if (helpers.Add(name))
         {
-            var runs = upper ? CaseTables.UpperRuns : CaseTables.LowerRuns;
+            var index = upper ? CaseTables.UpperIndex : CaseTables.LowerIndex;
+            var deltas = upper ? CaseTables.UpperDeltas : CaseTables.LowerDeltas;
             var multis = upper ? CaseTables.UpperMultis : CaseTables.LowerMultis;
             var cased = upper ? [] : CaseTables.Cased;
             var ignorable = upper ? [] : CaseTables.CaseIgnorable;
-            int[] words = [runs.Length / 4, multis.Length / 4, cased.Length / 2, ignorable.Length / 2, .. runs, .. multis, .. cased, .. ignorable];
-            module.Global($"{name} = private unnamed_addr constant [{words.Length} x i32] [{string.Join(", ", words.Select(w => $"i32 {w}"))}]");
+            int[] counts = [deltas.Length / 32, multis.Length / 4, cased.Length / 2, ignorable.Length / 2];
+            int[] rest = [.. multis, .. cased, .. ignorable];
+            var type = $"<{{ [4 x i32], [{index.Length} x i8], [{deltas.Length} x i16], [{rest.Length} x i32] }}>";
+            var value = $"<{{ [4 x i32] [{string.Join(", ", counts.Select(w => $"i32 {w}"))}], " +
+                $"[{index.Length} x i8] [{string.Join(", ", index.Select(w => $"i8 {unchecked((sbyte)w)}"))}], " +
+                $"[{deltas.Length} x i16] [{string.Join(", ", deltas.Select(w => $"i16 {unchecked((short)w)}"))}], " +
+                $"[{rest.Length} x i32] [{string.Join(", ", rest.Select(w => $"i32 {w}"))}] }}>";
+            module.Global($"{name} = private unnamed_addr constant {type} {value}, align 4");
         }
 
         return name;

@@ -516,14 +516,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
   library's `UnicodeCase`, which copies the bytes before the first code point that changes into a block of the
-  input's size and looks up and writes the code points after them one at a time, Latin-1 by Rust's rules without
-  the table, up to one whose mapping outgrows the block, from which it sizes the rest in a walk, grows the block
-  once and writes the rest in a second walk, with the table of the
+  input's size, changes the run of ASCII after them 16 bytes at a time, as Rust's `convert_while_ascii`, and looks
+  up and writes the code points after it one at a time, Latin-1 by Rust's rules without the table and a code point
+  of two bytes on a path of its own, up to one whose mapping outgrows the block, from which it sizes the rest in a
+  walk, grows the block once and writes the rest in a second walk, with the table of the
   direction the emitter writes into the program once, `case.lower` or `case.upper`, from `Emit/CaseTables.cs`, which
   `tools/unicode_tables.py` generates from the Unicode Character Database of the version Rust's stable pins and the
-  gate `unicode-tables` holds to that database: the runs of code points with one delta and a step of 1 or 2, found by
-  a binary search, the mappings to two or three code points, and for lowering the ranges of Cased and
-  Case_Ignorable, which a capital sigma reads for Final_Sigma, as Rust's `to_lowercase` and `to_uppercase` (X3); and
+  gate `unicode-tables` holds to that database: the levels of the deltas, an index of one byte for each block of 32
+  code points of the first two planes and a delta of 16 bits for each code point of each distinct block, as .NET's
+  `CharUnicodeInfo` holds its mappings, the mappings to two or three code points, found by a binary search, and for
+  lowering the ranges of Cased and Case_Ignorable, which a capital sigma reads for Final_Sigma, with the results of
+  Rust's `to_lowercase` and `to_uppercase` (X3); and
   `s.ToLowerAscii()` and `s.ToUpperAscii()`, which change the letters `A` to `Z` or `a` to `z` and no other byte, as Rust's
   `to_ascii_lowercase` (X3); `s.Substring(startIndex, length)`, whose cut the standard library's `SubstringCut` reads,
   `index-out-of-range` where it reaches outside the string, read first, and else `not-char-boundary` where its start or
@@ -546,8 +549,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
   or a change of case that changes nothing gives the string itself, held once more; `CaseTests` holds `ToLower` and
-  `ToUpper` of every code point of the first two planes to `CaseTables`, read without the standard library's search,
-  and the final sigma and the mappings to several code points to fixed lines, each program a test build, which clang
+  `ToUpper` of every code point of the first two planes, alone and in a text, to `CaseTables`, read without the
+  standard library's lookup, the final sigma and the mappings to several code points to fixed lines, and lines
+  around the walks' own paths to Rust's results under a standard library that ends the process where a string's
+  count passes its room, each program a test build, which clang
   builds at `-O0`, so that a literal input runs the standard library's walk as any string's does; `PieceTests` holds the
   trims, `Split`, `Replace`, `string.Join` and the ASCII changes of case (X3 to X6) to what .NET's members of the same
   strings give where the rules read as they do, and to the rules written out where they do not: the ASCII trims, over
