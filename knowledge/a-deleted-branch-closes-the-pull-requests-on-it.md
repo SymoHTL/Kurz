@@ -26,7 +26,7 @@ branch of pull request 184.
 
 The forge's documentation says that when a head branch is deleted after its pull request has been
 merged, the forge gives every open pull request on that branch the merged pull request's base (the
-page "Creating and deleting branches within your repository", below the steps of a deletion on the
+page "Creating and deleting branches within your repository", below its instructions for a deletion on the
 web). The deletion by `git push origin --delete` on 2026-11-01 got no such change: the forge closed
 pull request 192. Which ways of deleting get it was not seen here:
 
