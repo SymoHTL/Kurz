@@ -207,25 +207,44 @@ pub void Free(byte* p, long size) {
 // A block the allocation entry gave for `size` bytes, grown to `grown` bytes with the bytes it holds, as
 // Rust's `GlobalAlloc::realloc`: a block of more than 262144 bytes is itself where its header names
 // room enough, as a kept block given out whole may, as glibc's `realloc` leaves a mapped chunk that
-// holds the size, else grown by the target's `Resize`, which can grow it without a copy, as the C
-// library's `realloc` grows a block it mapped; else, and where `Resize` gives null, a new block with the
-// bytes copied and the old one freed. Null where the system refuses, the block then left as it was.
+// holds the size, else the kept block `Reused` gives for the grown size, the bytes copied into it and
+// the old block freed (the owner, 2026-11-01, "Kept block first"), else grown by the target's `Resize`,
+// which can grow it without a copy, as the C library's `realloc` grows a block it mapped; else, and
+// where `Resize` gives null, a new block with the bytes copied and the old one freed. Null where the
+// system refuses, the block then left as it was.
 pub byte* Reallocate(byte* p, long size, long grown) {
     if size > 262144 {
         long bytes = (grown + 15) / 16 * 16 + 16
         mut byte* moved = null
+        mut bool copied = false
         raw {
             byte* block = p - 16
             long room = *Ptr<long>(block)
             if bytes <= room {
                 moved = p
             } else {
-                byte* q = sys.Resize(block, room, bytes)
-                if q != null {
-                    *Ptr<long>(q) = bytes
-                    moved = q + 16
+                byte* reused = Reused(bytes)
+                if reused != null {
+                    mut long i = 0
+                    while i < size {
+                        reused[16 + i] = p[i]
+                        i = i + 1
+                    }
+
+                    moved = reused + 16
+                    copied = true
+                } else {
+                    byte* q = sys.Resize(block, room, bytes)
+                    if q != null {
+                        *Ptr<long>(q) = bytes
+                        moved = q + 16
+                    }
                 }
             }
+        }
+
+        if copied {
+            Free(p, size)
         }
 
         if moved != null {
