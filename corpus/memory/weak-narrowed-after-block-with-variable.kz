@@ -1,0 +1,21 @@
+// expect: error nullable-unchecked at 16
+// rules: N9
+
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+void Show(Pet pet) {
+    if pet.Keeper != null {
+        if pet.Keeper.Name != "" {
+            name = pet.Keeper.Name
+            if name == "x" {
+                return
+            }
+        }
+
+        print(pet.Keeper.Name)
+    }
+}
+
+o = Owner("Ann")
+Show(Pet(o))

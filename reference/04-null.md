@@ -687,7 +687,13 @@ the field cannot use it); a path with a `weak` reference anywhere in it, the ref
 2026-10-10, against narrowing such a field by the assignment as a `mut` field is, after which
 nothing strong need hold the target). The narrowing lasts only up to the
 next call and the next assignment, in the order the program runs them: a test directly followed by
-the use is fine, and a second use after a call takes a variable of its own. A call is every
+the use is fine, and a second use after a call takes a variable of its own. A path with a `weak`
+reference in it stops being narrowed at two more ends, since a count let go of there runs code the
+function does not see and can free the target: the end of a statement or of a condition in which a
+call ran, and the end of a block that declares a variable; a use after such an end takes a variable
+of its own too, so a test after a call in the same condition does not narrow the block (§4, the
+owner, 2026-11-01, "Those ends stop narrowing", against a narrowed read that checks the target and
+ends the program with an error at run time where it was freed since the test). A call is every
 expression that runs code the function does not see: a call of a function or a method, a
 constructor, an interpolation or `print` of a class instance (its `Text()`, A5), and `==` on class
 instances that name their fields (K5). A declaration is not an assignment; an assignment into any
@@ -767,6 +773,44 @@ p = Pet(o)
 if p.Keeper != null {
     print(p.Keeper.Name)
 }
+```
+
+Case: [memory/weak-narrowed-after-call-in-condition.kz](../corpus/memory/weak-narrowed-after-call-in-condition.kz)
+```kurz
+class Owner(string Name)
+class Pet(mut weak Owner? Keeper)
+
+bool Keep(Pet pet, Owner o) {
+    pet.Keeper = o
+    return true
+}
+
+p = Pet(null)
+if Keep(p, Owner("Ann")) && p.Keeper != null {
+    print(p.Keeper.Name)
+}
+```
+
+Case: [memory/weak-narrowed-after-block-with-variable.kz](../corpus/memory/weak-narrowed-after-block-with-variable.kz)
+```kurz
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+void Show(Pet pet) {
+    if pet.Keeper != null {
+        if pet.Keeper.Name != "" {
+            name = pet.Keeper.Name
+            if name == "x" {
+                return
+            }
+        }
+
+        print(pet.Keeper.Name)
+    }
+}
+
+o = Owner("Ann")
+Show(Pet(o))
 ```
 
 Case: [null/narrowed-field-by-assignment.kz](../corpus/null/narrowed-field-by-assignment.kz)
