@@ -31,7 +31,7 @@ public sealed partial class Emitter
         return (own[slot - inherited].Default ?? throw new InvalidOperationException($"the field {slot} of `{symbol.Name}` has no argument and no default"), dataOwners[symbol]);
     }
 
-    /// <summary>A data value of these field values: a plain value built in registers, or a block from the allocator that starts with the number of its type.</summary>
+    /// <summary>A data value of these field values: a plain value built in registers, or a block from the allocator that starts with its one count, then the number of its type.</summary>
     private string Make(DataType type, List<string> values)
     {
         var fields = Layout.Fields(type);
@@ -39,7 +39,8 @@ public sealed partial class Emitter
         {
             var block = layout.Block(type.Symbol);
             var p = Allocate(block);
-            fn.Emit($"store i32 {Number(layout.Number(type))}, ptr {p}");
+            fn.Emit($"store i64 1, ptr {p}");
+            fn.Emit($"store i32 {Number(layout.Number(type))}, ptr {fn.Value($"getelementptr {block}, ptr {p}, i32 0, i32 1")}");
             for (var i = 0; i < fields.Count; i++)
             {
                 fn.Emit($"store {Ir(fields[i])} {values[i]}, ptr {FieldPointer(block, p, i)}");
@@ -63,7 +64,7 @@ public sealed partial class Emitter
         return value;
     }
 
-    /// <summary>Memory for a value of the IR type, from the runtime's allocator, which nothing frees (the reference counting of section 3 is not emitted).</summary>
+    /// <summary>Memory for a value of the IR type, from the runtime's allocator, which the value's last count gives back to <c>Free</c> (section 3).</summary>
     private string Allocate(string irType)
     {
         var end = fn.Value($"getelementptr {irType}, ptr null, i32 1");
@@ -71,9 +72,13 @@ public sealed partial class Emitter
         return fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {size})");
     }
 
-    /// <summary>The address of field <paramref name="index"/> in a block: the number of the value's type comes first.</summary>
+    /// <summary>The address of field <paramref name="index"/> in a block: the count and the number of the value's type come first.</summary>
     private string FieldPointer(string block, string pointer, int index) =>
-        fn.Value($"getelementptr {block}, ptr {pointer}, i32 0, i32 {Number(index + 1)}");
+        fn.Value($"getelementptr {block}, ptr {pointer}, i32 0, i32 {Number(index + 2)}");
+
+    /// <summary>The number of the type a block of the type or of a type derived from it holds, which follows its count.</summary>
+    private string BlockNumber(string pointer, DataSymbol symbol) =>
+        fn.Value($"load i32, ptr {fn.Value($"getelementptr {layout.Block(symbol)}, ptr {pointer}, i32 0, i32 1")}");
 
     /// <summary>D1: a field of a data value, read from the plain value or from the block.</summary>
     private string Field(string value, DataType type, int index)
@@ -86,8 +91,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// D5: a copy of the value with the fields replaced, the values read in the order written after the value; a block is copied
-    /// whole, as the type of the value it holds, so that a derived value stays one. The copy holds its replaced fields' values and,
-    /// a plain value, the lists of the fields it keeps once more.
+    /// whole, as the type of the value it holds, so that a derived value stays one. The copy holds its replaced fields' values and
+    /// the counted values of the fields it keeps once more: a block's copy lets go of the value of a replaced field it took a count of.
     /// </summary>
     private string EmitWith(WithExpression w)
     {
@@ -104,7 +109,7 @@ public sealed partial class Emitter
             var copy = CopyBlock(value, type.Symbol);
             foreach (var (index, v) in replaced)
             {
-                fn.Emit($"store {Ir(fields[index])} {v}, ptr {FieldPointer(layout.Block(type.Symbol), copy, index)}");
+                Store(v, fields[index], FieldPointer(layout.Block(type.Symbol), copy, index));
             }
 
             return copy;
@@ -126,7 +131,10 @@ public sealed partial class Emitter
         return value;
     }
 
-    /// <summary>A new block with the bytes of a block of the type or of a type derived from it, as long as the block of the type it holds.</summary>
+    /// <summary>
+    /// A new block with the bytes of a block of the type or of a type derived from it, as long as the block of the type it holds, whose
+    /// one count the caller holds and which holds a count of each counted value in its fields.
+    /// </summary>
     private string CopyBlock(string pointer, DataSymbol symbol)
     {
         var name = Helper($"copy.{symbol.Name}", "ptr", ["ptr"], () =>
@@ -139,19 +147,114 @@ public sealed partial class Emitter
                 var end = fn.Value($"getelementptr {block}, ptr null, i32 1");
                 var size = fn.Value($"ptrtoint ptr {end} to i64");
                 fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {copy}, ptr %a0, i64 {size}, i1 false)");
+                fn.Emit($"store i64 1, ptr {copy}");
+                var types = Layout.Fields(new DataType(derived, []));
+                for (var i = 0; i < types.Count; i++)
+                {
+                    if (Counted(types[i]))
+                    {
+                        Retain(fn.Value($"load {Ir(types[i])}, ptr {FieldPointer(block, copy, i)}"), types[i]);
+                    }
+                }
+
                 fn.Return($"ptr {copy}");
             });
         });
         return fn.Value($"call ptr {name}(ptr {pointer})");
     }
 
+    /// <summary>The type at the top of the relation of inheritance the type is in, or the type itself: the family whose blocks one helper counts and ends.</summary>
+    private static DataSymbol Family(DataSymbol symbol) => symbol.Base is { } b ? Family(b) : symbol;
+
     /// <summary>
-    /// In a helper over a block of the type: a branch on the number the block starts with to the code for each type the block may
-    /// hold, the type and those derived from it; another number is no block of the type.
+    /// One more holder of a block of the type or of a type derived from it: its count raised, except in the one value of a type
+    /// without fields, a constant whose count carries the highest bit, held for ever (D8), as a literal's count of bytes carries its
+    /// mark (section 4), which a family tests for only where one of its types has no fields.
+    /// </summary>
+    private string RetainBlock(DataSymbol symbol)
+    {
+        var family = Family(symbol);
+        return Helper($"retain.block.{Lower.Mangle(new DataType(family, []))}", "void", ["ptr"], () =>
+        {
+            var count = fn.Value("load i64, ptr %a0");
+            HeldForEver(family, count);
+            fn.Emit($"store i64 {fn.Value($"add i64 {count}, 1")}, ptr %a0");
+            fn.Return(null);
+        });
+    }
+
+    /// <summary>
+    /// One holder less of a block of the type or of a type derived from it, the constant of a type without fields left as it is
+    /// (<see cref="RetainBlock"/>). The last puts the block on its family's work list, as the last count of an instance does
+    /// (<see cref="ReleaseInstance"/>), so that a chain of any length is freed with no deeper stack than the nesting of the types in it
+    /// (section 4, a reading of the owner's answer on classes, 2026-11-01, "Iterative, never crashes").
+    /// </summary>
+    private string ReleaseBlock(DataSymbol symbol)
+    {
+        var family = Family(symbol);
+        var name = Lower.Mangle(new DataType(family, []));
+        return Helper($"release.block.{name}", "void", ["ptr"], () =>
+        {
+            var list = WorkList($"block.{name}", () => DropBlock(family));
+            var count = fn.Value("load i64, ptr %a0");
+            HeldForEver(family, count);
+            var left = fn.Value($"sub i64 {count}, 1");
+            fn.Emit($"store i64 {left}, ptr %a0");
+            var last = fn.Label("last");
+            var held = fn.Label("held");
+            fn.CondBranch(fn.Value($"icmp eq i64 {left}, 0"), last, held);
+            fn.Block(last);
+            Enlist(list);
+            fn.Block(held);
+            fn.Return(null);
+        });
+    }
+
+    /// <summary>In a helper over a block of the family: the return where the count read carries the mark of the constant held for ever, if a type of the family has no fields.</summary>
+    private void HeldForEver(DataSymbol family, string count)
+    {
+        if (!layout.Derived(family).Any(d => Layout.Fields(new DataType(d, [])).Count == 0))
+        {
+            return;
+        }
+
+        var constant = fn.Label("constant");
+        var counted = fn.Label("counted");
+        fn.CondBranch(fn.Value($"icmp slt i64 {count}, 0"), constant, counted);
+        fn.Block(constant);
+        fn.Return(null);
+        fn.Block(counted);
+    }
+
+    /// <summary>
+    /// The end of a block of the family whose last count was let go of: by the number of the type it holds, the counted values in its
+    /// fields let go of in their order, as Rust drops a value's fields, then the block given back to <c>Free</c> with that type's size.
+    /// </summary>
+    private string DropBlock(DataSymbol family) => Helper($"drop.block.{Lower.Mangle(new DataType(family, []))}", "void", ["ptr"], () =>
+        ByNumber("%a0", family, held =>
+        {
+            var block = layout.Block(held);
+            var types = Layout.Fields(new DataType(held, []));
+            for (var i = 0; i < types.Count; i++)
+            {
+                if (Counted(types[i]))
+                {
+                    Release(fn.Value($"load {Ir(types[i])}, ptr {FieldPointer(block, "%a0", i)}"), types[i]);
+                }
+            }
+
+            var end = fn.Value($"getelementptr {block}, ptr null, i32 1");
+            fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {fn.Value($"ptrtoint ptr {end} to i64")})");
+            fn.Return(null);
+        }));
+
+    /// <summary>
+    /// In a helper over a block of the type: a branch on the number the block holds after its count to the code for each type the
+    /// block may hold, the type and those derived from it; another number is no block of the type.
     /// </summary>
     private void ByNumber(string pointer, DataSymbol symbol, Action<DataSymbol> each)
     {
-        var number = fn.Value($"load i32, ptr {pointer}");
+        var number = BlockNumber(pointer, symbol);
         var derived = layout.Derived(symbol);
         var labels = derived.Select(d => fn.Label("kind")).ToList();
         var other = fn.Label("other");
@@ -169,7 +272,7 @@ public sealed partial class Emitter
     /// <summary>Whether the block holds a value of the type or of a type derived from it (C4, D6).</summary>
     private string HoldsDerived(string pointer, DataSymbol symbol)
     {
-        var number = fn.Value($"load i32, ptr {pointer}");
+        var number = BlockNumber(pointer, symbol);
         var result = "false";
         foreach (var d in layout.Derived(symbol))
         {
@@ -184,7 +287,7 @@ public sealed partial class Emitter
     /// M4: an assignment into a path of a <c>mut</c> variable, short for nested <c>with</c>: the value is read first, then the path in
     /// the variable as the value left it (the owner, 2026-10-24, "Value first"); each data value on the path changes in place, a plain
     /// value in its variable or its field, and a block after it was copied into the place that held it, since another variable may
-    /// hold the same block. The field lets go of its old value, unless the field is in a block copied here, whose old block keeps it.
+    /// hold the same block. The field lets go of its old value, of which a block copied here took a count.
     /// </summary>
     private void EmitPathAssignment(Assignment a)
     {
@@ -197,37 +300,31 @@ public sealed partial class Emitter
         }
 
         var value = Convert(Owned(a.Value), TypeOf(a.Value), TypeOf(a.Target), a.Value.Line);
-        var (place, type, copied) = WritablePath((NameExpression)target, members);
-        if (copied)
-        {
-            fn.Emit($"store {Ir(type)} {value}, ptr {place}");
-        }
-        else
-        {
-            Store(value, type, place);
-        }
+        var (place, type) = WritablePath((NameExpression)target, members);
+        Store(value, type, place);
     }
 
     /// <summary>
     /// M4: the place at the end of a path of fields from the <c>mut</c> variable <paramref name="root"/>, read as the code before it left
     /// the variable, and the type there: each data value on the path is changed in place, a plain value in its variable or its field,
-    /// and a block after it was copied into the place that held it, since another variable may hold the same block; whether one was.
+    /// and a block after it was copied into the place that held it, since another variable may hold the same block, the place letting
+    /// go of the block it held.
     /// </summary>
-    private (string Place, KurzType Type, bool Copied) WritablePath(NameExpression root, List<MemberAccess> members)
+    private (string Place, KurzType Type) WritablePath(NameExpression root, List<MemberAccess> members)
     {
         var variable = Model.VariableOf(root);
         var place = Place(variable, root.Line);
         var type = Sub(variable.Type);
-        var copied = false;
         foreach (var m in members)
         {
             var data = (DataType)type;
             var index = Layout.FieldIndex(data, m.Member);
             if (layout.IsBlock(data))
             {
-                copied = true;
-                var copy = CopyBlock(fn.Value($"load ptr, ptr {place}"), data.Symbol);
+                var old = fn.Value($"load ptr, ptr {place}");
+                var copy = CopyBlock(old, data.Symbol);
                 fn.Emit($"store ptr {copy}, ptr {place}");
+                Release(old, data);
                 place = FieldPointer(layout.Block(data.Symbol), copy, index);
             }
             else
@@ -238,15 +335,15 @@ public sealed partial class Emitter
             type = Layout.Fields(data)[index];
         }
 
-        return (place, type, copied);
+        return (place, type);
     }
 
     /// <summary>
     /// M5, M9: the place of the list or the map at the end of <paramref name="receiver"/>, a <c>mut</c> variable or a path of fields from
     /// one (M4), the room of its case where the checker read the variable or the last field known not null (N3), for a write that copies
-    /// a block other values hold before it writes (M3). A list or a map in a block this copied is held by the block it was copied from
-    /// too, which counts it once for both and never lets go of it (section 3), so it takes a count of its own here: the write then copies
-    /// it, and the value the old block holds stays as it was.
+    /// a block other values hold before it writes (M3). A list or a map in a block this copied is held by the copy and by every holder of
+    /// the block it was copied from, each with a count of its own: the write copies it while another one holds it, and the value the old
+    /// block holds stays as it was.
     /// </summary>
     private string CollectionPlace(Expression receiver)
     {
@@ -268,14 +365,8 @@ public sealed partial class Emitter
             return NarrowedPlace((NameExpression)target);
         }
 
-        var (path, stored, copied) = WritablePath((NameExpression)target, members);
-        var (place, type) = NarrowedPlace(path, stored, TypeOf(receiver), receiver.Line);
-        if (copied)
-        {
-            Retain(fn.Value($"load {Ir(type)}, ptr {place}"), type);
-        }
-
-        return place;
+        var (path, stored) = WritablePath((NameExpression)target, members);
+        return NarrowedPlace(path, stored, TypeOf(receiver), receiver.Line).Place;
     }
 
     // ---- equality (D3, D15) and text (A3, A4) ----------------------------------------------------
@@ -412,7 +503,7 @@ public sealed partial class Emitter
         {
             case DataType d when layout.IsBlock(d):
                 {
-                    var same = fn.Value($"icmp eq i32 {fn.Value("load i32, ptr %a0")}, {fn.Value("load i32, ptr %a1")}");
+                    var same = fn.Value($"icmp eq i32 {BlockNumber("%a0", d.Symbol)}, {BlockNumber("%a1", d.Symbol)}");
                     var fields = fn.Label("fields");
                     var differ = fn.Label("differ");
                     fn.CondBranch(same, fields, differ);

@@ -870,12 +870,15 @@ outside `raw` shows (section 5, round 19; D10), and the owner kept it as describ
 2026-10-23 ("As built"). A `data` type with neither a base nor a type derived from it, and that
 holds no value of its own type through its fields, is a plain value of its fields whatever its
 size, where D10 names small values. One with a base, a type derived from it or a value of its own
-type in a field is a pointer to a block that holds the number of the value's own type, then its
-fields, the base's first, so that a block of a derived type reads as one of its base (D6, D7).
+type in a field is a pointer to a block that holds the count of the values that hold it, 8 bytes,
+the number of the value's own type, then its fields, the base's first, so that a block of a derived
+type reads as one of its base (D6, D7); the count in front of the number is the owner's answer of
+2026-11-01 ("Implements section 3"), which the layout kept on 2026-10-23 predates.
 `with` and an assignment into a path through such a value copy the block before the write, so that
-no other variable sees it (D4, M4), and so does a `mut` member of a list or a map in a field of such a
-value, where the list or the map the copy holds takes a count of its own, so that the write copies it
-too and the block it was copied from keeps it as it was (M3, M5, M9). Pinned by
+no other variable sees it (D4, M4): the copy takes a count of each counted value in its fields, and
+the place that held the block lets go of it. So does a `mut` member of a list or a map in a field of
+such a value, whose write copies the list or the map while the block it was copied from holds it too,
+which keeps it as it was (M3, M5, M9). Pinned by
 `DataTests.A_copy_by_with_of_a_derived_value_through_its_base_keeps_its_type_and_leaves_the_original`,
 `DataTests.An_assignment_into_a_path_through_a_block_copies_the_block_so_that_another_variable_keeps_its_value`,
 `DataTests.A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value`
@@ -911,8 +914,8 @@ made (the owner, 2026-10-25, "Copied"), and no state
 outside a function holds a list or a string, which R13 refuses, so a callee reaches a list or a
 string its caller lent it through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
-Counted are a list, a string, a function value, an instance of a class, a plain `data` value that holds
-one of them in a field and a union with a case that holds one. A string made while the program runs holds a block
+Counted are a list, a string, a function value, an instance of a class, a value of a block type, a plain
+`data` value that holds one of them in a field and a union with a case that holds one. A string made while the program runs holds a block
 of `std/` in front of its bytes, laid out as the block of a list of bytes: the count of the values that
 hold it, 8 bytes, then the count of its bytes, which `string.FromRaw` writes, and the room
 `string.Allocate` gave, 4 bytes each, so that `s.Bytes` and a string of a list of bytes share the
@@ -958,9 +961,39 @@ freed block inaccessible, twenty rounds of instances through every way out of a 
 within the sixteen pieces, the same instances all kept not, and a chain of a million instances freed
 where a function that walks it by calling itself overflows the stack. A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
 and a raise end the process with their error line, and no count is lowered there.
-A value of a block type is never freed, and the lists and strings it holds are never let go of: the
-memory of such a value, which the answer of 2026-10-23 leaves ungiven back (below), is read to hold
-the lists and strings in its fields, a reading of this directory, not a decision. Pinned by
+A value of a block type is counted as an instance is, by the count in front of its type's number
+(section 4, the owner, 2026-11-01, "Implements section 3", as Rust's `Rc` holds its count in front of
+its value). Its last count lets go of the counted values in its fields in their order, as Rust drops a
+value's fields, by the number of the type the block holds, so that a derived value lets go of its own
+fields too, and gives the block back to `Free` with that type's size. A block whose last count another
+release lets go of waits on the work list of its family, the type at the top of its relation of
+inheritance, as an instance waits on its class's, and the same release works it off, so that a chain
+of any length is freed with no stack deeper than the nesting of the types in it (a reading of the
+owner's answer on classes of 2026-11-01, "Iterative, never crashes"). An instance of a class a block
+holds is let go of with the block. The one value of a type without fields is a constant of the module,
+which nothing writes, whose count carries the highest bit, held for ever, as a literal's count of bytes
+carries its mark, and the change of a count in a family with such a type tests that bit first, which a
+family without one does not *(assumed: the constant and its mark, an implementation choice, as the
+owner's answer of 2026-11-01 records it)*. The cost is 8 bytes in each block and the change of the
+count at each copy and at each end of a holder, the user time the table shows, beside the system time
+that giving a program pages it never gave back took: measured on 2026-11-01 under Linux, the median of
+five runs of each program, before the change and after it, the programs of issue 180, which make and
+drop 1000 and 4000 trees of 2047 nodes, and binary-trees at depth 16:
+
+| program | peak memory | wall | user | system |
+|---|---|---|---|---|
+| 1000 trees | 64.4 MiB, 12.5 MiB | 46 ms, 46 ms | 27 ms, 46 ms | 17 ms, 0 ms |
+| 4000 trees | 251.7 MiB, 12.5 MiB | 149 ms, 140 ms | 94 ms, 139 ms | 54 ms, 0 ms |
+| binary-trees, depth 16 | 459.1 MiB, 12.5 MiB | 271 ms, 240 ms | 188 ms, 238 ms | 87 ms, 2 ms |
+
+Pinned by `ListTests`: rounds of values of block types through every way out of a block, 3000 within
+the sixteen pieces, and the same with a tree of 1023 nodes kept each round not, and twenty under the
+allocator that makes every freed block inaccessible; rounds of instances of a class held by blocks, the
+same three ways, the instances kept in a list beside the blocks the second; a chain of a million values
+freed where a function that walks it by calling itself overflows the stack; and an instance that lets go
+of another class's and a block that lets go of another family's, which share one flag of a release under
+way. By `DataTests`: the constant and its mark, and no test of the mark in a family without such a type.
+Pinned by
 `ListTests`: the values the counting keeps apart, the name an arm binds among them, strings in every
 place the lists' programs hold a list, one made in a `raw` block among them, a function value
 and a `data` value that holds one read beside a call that replaces them, the function value a call
@@ -1028,16 +1061,14 @@ derived from it (D6, T19) or that holds a value of its own type (D1, T19), `Size
 command line, the environment or the clock in a build for Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
-An instance of a class held by a value of a block type, at any depth, is `not supported` where the
-type is laid out: such a value is never freed (below), and neither would be the instance, which R3's
-`weak` reference then never sees `null` (section 3). The reference counting of section 3 is emitted for
-lists, strings, maps, the environments of lambdas, instances of classes and the values that hold them
-(above) and for nothing else: memory a value of a block type takes is never
-given back, the lists and strings it holds among it (above), so a program that makes such values
-without end runs out of memory and ends with `allocation-failed`; a plain value and a union take
-none of their own (the owner, 2026-10-23, "Accept, documented", which named strings beside them,
-before the answers of 2026-10-29 above). The corpus runner lists every case the checker reads in
-full and the emitter does not emit, 3 of the 299 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 37 the
+The reference counting of section 3 is emitted for lists, strings, maps, the environments of lambdas,
+instances of classes, values of block types and the values that hold them (above), and a plain value and
+a union take no count of their own. Retired by the owner's answer of 2026-11-01 ("Implements section 3"):
+the answer of 2026-10-23 ("Accept, documented"), under which the memory of a value of a block type was
+never given back. The `not supported` of an instance of a class such a value holds gave that as its
+one reason, and it is lifted on 2026-11-01, since the end of a block lets go of every counted field it
+holds *(assumed: a decision of the compiler, which no answer of the owner names)*. The corpus runner
+lists every case the checker reads in full and the emitter does not emit, 3 of the 299 cases that expect a run, and on Windows the 13 of files besides, with the words the emitter says, and refuses a stale entry; the 37 the
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there

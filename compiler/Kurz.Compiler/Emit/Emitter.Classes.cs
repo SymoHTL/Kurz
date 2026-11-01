@@ -19,8 +19,12 @@ public sealed partial class Emitter
 {
     private readonly Dictionary<ClassSymbol, Unit> classOwners = new(ReferenceEqualityComparer.Instance);
 
-    // each class whose instances are released: the helper that ends one, and its work list (the owner, 2026-11-01, "Iterative, never crashes")
+    // each class whose instances are released, and each family of data types whose blocks are: the helper that ends one, and its work
+    // list (the owner, 2026-11-01, "Iterative, never crashes")
     private readonly List<(string Drop, string List)> released = [];
+
+    // whether the module declares the flag of a release under way, which every work list shares
+    private bool releasing;
 
     /// <summary>K1: an instance with both counts at one and each field holding the argument bound to it or its default.</summary>
     private string EmitClassNew(CallExpression c, CallInfo info)
@@ -166,32 +170,56 @@ public sealed partial class Emitter
     /// </summary>
     private string ReleaseInstance(ClassSymbol symbol) => Helper($"release.class.{symbol.Name}", "void", ["ptr"], () =>
     {
-        if (released.Count == 0)
-        {
-            module.Global("@\"kz.releasing\" = internal thread_local global i1 false");
-        }
-
-        var list = $"@\"pending.class.{symbol.Name}\"";
-        module.Global($"{list} = internal thread_local global ptr null");
-        released.Add((DropInstance(symbol), list));
+        var list = WorkList($"class.{symbol.Name}", () => DropInstance(symbol));
         var strong = fn.Value($"sub i64 {fn.Value("load i64, ptr %a0")}, 1");
         fn.Emit($"store i64 {strong}, ptr %a0");
         var last = fn.Label("last");
         var held = fn.Label("held");
         fn.CondBranch(fn.Value($"icmp eq i64 {strong}, 0"), last, held);
         fn.Block(last);
+        Enlist(list);
+        fn.Block(held);
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// The work list of the values the helper <paramref name="drop"/> makes ends, a global of the thread's own, which <see cref="EmitDrain"/>
+    /// works off; the module declares the flag of a release under way with the first list, once whatever helper the drop makes first.
+    /// </summary>
+    private string WorkList(string name, Func<string> drop)
+    {
+        if (!releasing)
+        {
+            releasing = true;
+            module.Global("@\"kz.releasing\" = internal thread_local global i1 false");
+        }
+
+        var list = $"@\"pending.{name}\"";
+        module.Global($"{list} = internal thread_local global ptr null");
+        released.Add((drop(), list));
+        return list;
+    }
+
+    /// <summary>
+    /// In a release helper, the value <c>%a0</c> whose last count was let go of put on its work list, linked through that count at its
+    /// start, which is no count from there on, and, unless a release is already working the lists off, the lists worked off
+    /// (<see cref="EmitDrain"/>); then the return.
+    /// </summary>
+    private void Enlist(string list)
+    {
         fn.Emit($"store ptr {fn.Value($"load ptr, ptr {list}")}, ptr %a0");
         fn.Emit($"store ptr %a0, ptr {list}");
         var drain = fn.Label("drain");
-        fn.CondBranch(fn.Value("load i1, ptr @\"kz.releasing\""), held, drain);
+        var waits = fn.Label("waits");
+        fn.CondBranch(fn.Value("load i1, ptr @\"kz.releasing\""), waits, drain);
         fn.Block(drain);
         fn.Emit("store i1 true, ptr @\"kz.releasing\"");
         fn.Emit("call void @\"kz.drain\"()");
         fn.Emit("store i1 false, ptr @\"kz.releasing\"");
         fn.Return(null);
-        fn.Block(held);
+        fn.Block(waits);
         fn.Return(null);
-    });
+    }
 
     /// <summary>
     /// The end of an instance whose last strong count was let go of: its fields let go of in their order, as Rust drops them, and then
@@ -224,9 +252,10 @@ public sealed partial class Emitter
     });
 
     /// <summary>
-    /// The function that works the lists off: each instance on a class's list is taken off, its strong count set back to 0, and
-    /// ended (<see cref="DropInstance"/>), which may put more instances on the lists, until every list is empty. Emitted after the
-    /// last function, when every class whose instances are released is known; it calls only the helpers made with them.
+    /// The function that works the lists off: each instance on a class's list, and each block on its family's, is taken off, its
+    /// count set back to 0, and ended (<see cref="DropInstance"/>, <see cref="DropBlock"/>), which may put more on the lists, until
+    /// every list is empty. Emitted after the last function, when every class whose instances are released and every family whose
+    /// blocks are is known; it calls only the helpers made with them.
     /// </summary>
     private void EmitDrain()
     {
