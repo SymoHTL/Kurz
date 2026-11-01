@@ -1233,7 +1233,9 @@ D12): it is checked in each copy, and where it has no arm for the kind of a copy
 the call that made the copy is the compile error `kind-not-read`, which names the generic function,
 the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
 error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
-same error)*
+same error)* A generic function that reads its type, and one that passes its type parameter to such
+a function, is checked only in the copies that calls make: an error in it shows at its first copy,
+and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
