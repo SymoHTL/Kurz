@@ -1,0 +1,13 @@
+// expect: output
+// | a
+// | b
+// rules: F17
+
+print("a")
+if args.Count > 0 {
+    return 3
+}
+if args.Count > 1 {
+    return
+}
+print("b")

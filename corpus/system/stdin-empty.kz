@@ -1,0 +1,23 @@
+// expect: output
+// | end
+// | 0
+// | 0
+// rules: S22
+
+match Stdin.ReadLine() {
+    string line => print(line)
+    null => print("end")
+    IoError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+
+void | IoError Rest() {
+    all = Stdin.ReadAll()
+    print(all.Count)
+    mut into = Bytes()
+    print(Stdin.Read(mut into, 16))
+}
+
+Rest() else {
+    IoError e => print(e)
+}

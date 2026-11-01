@@ -164,7 +164,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    if (IsUnreadName(n.Name))
+                    if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line))
                     {
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
@@ -1081,7 +1081,7 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (IsUnreadName(n.Name))
+            if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line))
             {
                 CheckArgumentsLoosely(c);
                 return Typed.Error;

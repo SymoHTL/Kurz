@@ -1,0 +1,13 @@
+// expect: output
+// | invalid input: printf
+// | 0
+// rules: S21
+
+match Command.New("printf").Arg("a\0b").Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => {
+        print(e)
+        print(e.Code)
+    }
+    ExitError e => print(e)
+}

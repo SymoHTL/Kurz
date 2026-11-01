@@ -598,3 +598,42 @@ int Twice(int n) => n * 2
 f = (int n) => Twice(n)
 print(f(4))
 ```
+
+### F17 (decided, §12) A top-level `return` with a value
+
+A `return` with a value among the top-level statements, `return 2`, ends the program with that value as
+its exit code, and the end of the top-level code, and a bare `return` among its statements, end it with
+0, whether or not a `return` with a value stands beside them (§12, the owner, 2026-11-01, "Top-level
+return n + Exit" and "0, silently"). The value is an `int`, and a value of another type is
+`type-mismatch`. *(assumed, §12: the type)*
+
+No case for a code other than 0: a case that expects output ends with 0.
+
+Case: [functions/top-level-return.kz](../corpus/functions/top-level-return.kz)
+```kurz
+print("a")
+if args.Count == 0 {
+    return 0
+}
+print("b")
+```
+
+Case: [functions/top-level-return-end.kz](../corpus/functions/top-level-return-end.kz)
+```kurz
+print("a")
+if args.Count > 0 {
+    return 3
+}
+if args.Count > 1 {
+    return
+}
+print("b")
+```
+
+Case: [functions/top-level-return-mismatch.kz](../corpus/functions/top-level-return-mismatch.kz)
+```kurz
+print("a")
+if args.Count == 0 {
+    return "stop"
+}
+```
