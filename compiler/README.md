@@ -507,7 +507,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   values)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
-  library's `UnicodeCase`, a first walk that counts the bytes and a second that writes them, with the table of the
+  library's `UnicodeCase`, which copies the bytes before the first code point that changes into a block of the
+  input's size and looks up and writes the code points after them one at a time, Latin-1 by Rust's rules without
+  the table, up to one whose mapping outgrows the block, from which it sizes the rest in a walk, grows the block
+  once and writes the rest in a second walk, with the table of the
   direction the emitter writes into the program once, `case.lower` or `case.upper`, from `Emit/CaseTables.cs`, which
   `tools/unicode_tables.py` generates from the Unicode Character Database of the version Rust's stable pins and the
   gate `unicode-tables` holds to that database: the runs of code points with one delta and a step of 1 or 2, found by
@@ -905,8 +908,16 @@ it was given. The runtime makes every string it makes in such a block, through `
 the block over (R15, the owner, 2026-10-29, "string.Allocate, take over"); the text the emitted code
 makes of a value, for a `print` or a hole of a string, is a temporary of its statement, an
 interpolation of one hole of a string takes a count of the string, a new value as Rust's `format!`
-makes one (the owner, 2026-10-29, "New value, as format!"), and the helper that makes the text of a
-list or of a `data` value lets go of each text it joined. The environment of a lambda that reads variables starts with the
+makes one (the owner, 2026-10-29, "New value, as format!"), an interpolation of more pieces, or of one integer, writes
+them into one block of their bytes together, as Rust's `format!` writes into one `String`, an
+integer's digits in place, counted first, with no text of their own, and pieces of no bytes
+together are the empty string with no block; the text of a `data` value, of a map's entry and of
+an `IoError`, an `EnvError` and a `HexError` is written into one block the same way, as Rust's
+`Debug` writes a value's parts into one `String`, and the helper that makes the text of a
+list or of a `data` value lets go of each text it joined after its block is written. The runtime
+writes an integer's digits four and two at a time from a table of the pairs 00 to 99, as Rust's
+`Display` of an integer does, counts them as Rust's `ilog10` does, and the text of a negative
+integer is one block, its `-` and then its digits. The environment of a lambda that reads variables starts with the
 count of the function values that hold it, 8 bytes, and the address of the function that lets go
 of it, then holds each value the lambda read, counted once more where its type is counted; it is
 counted as a list's block is, and at zero the values it holds are let go of and it goes back to

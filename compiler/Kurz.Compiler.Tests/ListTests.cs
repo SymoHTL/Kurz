@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Text;
@@ -11,7 +12,8 @@ namespace Kurz.Compiler.Tests;
 /// a block nothing holds, which the allocator gives out again, and a lambda's environment as it frees a list's block (the owner,
 /// 2026-10-25, "Pair + heap env"), and a string's block, which a literal does not have (the owner, 2026-10-29, "Bit in the count"
 /// and "string.Allocate, take over"), no block is read after it is freed, the number `allocation-failed`
-/// reports past the limit and for a refused growth, and what the emitter says `not supported` to; what the checker refuses of a
+/// reports past the limit and for a refused growth, an integer's digits in every text that holds them, against what .NET writes (A2),
+/// and what the emitter says `not supported` to; what the checker refuses of a
 /// read beside a `mut` call (M7) the corpus pins.
 /// </summary>
 public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -322,7 +324,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // strings in variables, fields, a `with`, a path assignment, an arm's name while the arm changes the subject's variable, a
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
-    // parameters of a call, an interpolation, the text of a value laid out as a block, literals, a string made in a `raw` block,
+    // parameters of a call, an interpolation, one of several texts in one block that a variable holds past its statement, one of no
+    // bytes, the empty string with no block, and a hole of it, integers whose digits the block takes in place, the text of a value
+    // laid out as a block, literals, a string made in a `raw` block,
     // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
     // nullable variable known not null, an `Add` through the place of one, the item `?[` reads, a list without items in a nullable
     // variable, a `match` with a `null` arm on one whose arm changes it, a nullable parameter read in the arm of its case and after
@@ -334,6 +338,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         data Leaf
         data Node(string Label, Node | Leaf Next)
         data Contact(string? Email)
+        data Reading(long Low, ulong High, List<int> Xs, double D)
 
         string Same(string s) => s
 
@@ -449,6 +454,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Show(Made(15), Same(Made(16)))
         e = ""
         print("{Made(17)}{e}{Made(18)}")
+        joined = "<{Made(40)}|{e}|{Made(41)}>"
+        blank = "{e}{e}"
+        print("{joined}{blank}[{blank}]")
+        raw {
+            print(blank.Pointer == "".Pointer)
+        }
+        long smallest = -9223372036854775807 - 1
+        ulong largest = 18446744073709551615
+        print("{smallest}|{largest}|{byte(255)}|{-7}|{0}:{Made(42)}")
+        print(Reading(smallest, largest, [-1, 22], 2.5))
         node = Node(Made(19), Node(Made(20), Leaf))
         print(node)
         print(Raw(1))
@@ -548,6 +563,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "n15",
         "n16",
         "n17n18",
+        "<n40||n41>[]", // texts in one block, which the variable takes over from the statement, and the empty string as a hole
+        "true", // pieces of no bytes together are the empty string, the constant of no bytes, with no block
+        "-9223372036854775808|18446744073709551615|255|-7|0:n42", // digits written in the block, a `-` before a negative number's
+        "Reading { Low = -9223372036854775808, High = 18446744073709551615, Xs = [-1, 22], D = 2.5 }", // a value's text in one block
         "Node { Label = n19, Next = Node { Label = n20, Next = Leaf } }", // strings a value laid out as a block holds
         "1!",
         "2",
@@ -587,6 +606,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // them, which shares their block, and a part of them; each other string of 1024 bytes, joined from halves the join lets go of
     private const string StringRounds = """
         data Pair(string A, int B)
+        data Wrap(Pair P, List<int> Xs)
 
         string Make(int n) {
             mut s = "x"
@@ -608,11 +628,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         void Drop(int n) => Make(n)
 
+        mut big = List<int>()
+        for n in 0..<1000 {
+            big.Add(n)
+        }
+
         mut round = 0
         mut total = 0
         while round < 3000 {
             round = round + 1
             a = Make(10)
+            w = Wrap(Pair("a", 1), big)
+            wrapped = "{w}"
             mut b = a
             b = "{b}!"
             p = Pair(Make(10), 1)
@@ -641,7 +668,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             bb = Make(12).Bytes
             tt = string.FromUtf8Lossy(bb)
             pp = bb[0..<4000]
-            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096 + bb.Count - 4096 + tt.Bytes.Count - 4096 + pp.Count - 4000
+            total = total + Early(10) + q.A.Bytes.Count + b.Bytes.Count - a.Bytes.Count + hs[0]() + hs[1]() + ss[0].Bytes.Count - 4096 + lone.Bytes.Count - 4096 + bb.Count - 4096 + tt.Bytes.Count - 4096 + pp.Count - 4000 + wrapped.Bytes.Count - 4931
         }
         print(round)
         print(total)
@@ -2439,6 +2466,72 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
+    }
+
+    [Fact]
+    public void An_integer_shows_the_digits_dotnet_writes_in_a_print_a_hole_a_list_and_a_data_value()
+    {
+        // both signs of every length, each side of each power of ten, the ends of the range, and a xorshift sequence whose groups of
+        // four and of two digits take every pair of the runtime's table
+        var longs = new List<long> { long.MinValue, long.MaxValue, 0 };
+        for (var p = 1L; ; p *= 10)
+        {
+            longs.AddRange([p - 1, p, p + 1, -p, 1 - p, p * 9]);
+            if (p > long.MaxValue / 10)
+            {
+                break;
+            }
+        }
+
+        var ulongs = new List<ulong> { ulong.MaxValue, 0 };
+        for (var p = 1UL; ; p *= 10)
+        {
+            ulongs.AddRange([p - 1, p, p + 1]);
+            if (p <= ulong.MaxValue / 9)
+            {
+                ulongs.Add(p * 9);
+            }
+
+            if (p > ulong.MaxValue / 10)
+            {
+                break;
+            }
+        }
+
+        var x = 88172645463325252UL;
+        for (var i = 0; i < 400; i++)
+        {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            longs.Add((long)x >> (int)(x % 61));
+            ulongs.Add(x >> (int)(x % 61));
+        }
+
+        static string Literal(long v) => v == long.MinValue ? "-9223372036854775807 - 1" : v.ToString(CultureInfo.InvariantCulture);
+        var text = $$"""
+            data Pair(long L, ulong U)
+
+            List<long> ls = [{{string.Join(", ", longs.Select(Literal))}}]
+            List<ulong> us = [{{string.Join(", ", ulongs.Select(u => u.ToString(CultureInfo.InvariantCulture)))}}]
+            for v in ls {
+                print(v)
+                print("<{v}>")
+                print([v])
+                print(Pair(v, 0))
+            }
+            for u in us {
+                print(u)
+                print("<{u}>")
+                print([u])
+                print(Pair(0, u))
+            }
+            """;
+        string[] Shown(string digits, string pair) => [digits, $"<{digits}>", $"[{digits}]", $"Pair {{ {pair} }}"];
+        var lines = longs.SelectMany(v => Shown(v.ToString(CultureInfo.InvariantCulture), $"L = {v.ToString(CultureInfo.InvariantCulture)}, U = 0"))
+            .Concat(ulongs.SelectMany(u => Shown(u.ToString(CultureInfo.InvariantCulture), $"L = 0, U = {u.ToString(CultureInfo.InvariantCulture)}")))
+            .ToArray();
+        Ran(BuildAndRun(text, toolchain.Runtime, "integer-texts"), 0, lines, "");
     }
 
     [Fact]
