@@ -8,7 +8,7 @@ metadata:
 The emitter of pull request 63 counts the holders of a list's block, and a value read from a
 variable, a field or an item is borrowed: no count is raised for the read, since the place still
 holds one (`compiler/README.md`, the counting paragraph). A borrow is sound only while nothing can
-change the place it came from. Four shapes in which something could reached `main`:
+change the place it came from. Five shapes in which something could reached `main`:
 
 - **Inside one expression.** `G(xs, F(mut xs))`: `G`'s first argument is read as a borrowed
   pointer, then `F` runs and gives `xs` a new block, and `G` receives a freed one. The emitter held
@@ -33,7 +33,7 @@ change the place it came from. Four shapes in which something could reached `mai
   at the cap; the owner answered on 2026-10-25 that it is a compile error, `changed-while-held`, as
   Rust's E0506, and since pull request 65 the walk counts an assignment, a `mut` method and a `mut`
   argument in a statement of the arm's block, nested statements among them.
-- **Inside an interpolation.** Pull request 78 counted strings and freed them at zero, and a hole of a
+- **Inside an interpolation (two shapes).** Pull request 78 counted strings and freed them at zero, and a hole of a
   string was the string itself, read without a count: the walk of M7 gave an interpolation's holes
   nothing it held, on the reading that each hole is made text where it stands, which no type but a
   string breaks. `"{s}{F(mut s)}"`, with a string of 524288 bytes made while the program runs and an

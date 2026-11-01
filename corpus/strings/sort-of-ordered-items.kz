@@ -1,0 +1,40 @@
+// expect: output
+// | [Low, Mid, High]
+// | [A, b, c]
+// | [1s, 1min, 1h]
+// | [-1, 2, 3000000000]
+// | [NaN, -1.5, 2]
+// | [null, a, b]
+// | Bo
+// | Cy
+// | Ann
+// rules: X8
+
+enum Level { High = 5, Low = -1, Mid = 0 }
+data Person(string Name, string? Nick)
+
+// an enum that numbers its values sorts by its numbers, not by its places (D18)
+mut levels = [Level.High, Level.Low, Level.Mid]
+levels.Sort()
+print(levels)
+mut letters = ['c', 'A', 'b']
+letters.SortUnstable()
+print(letters)
+mut waits = [1h, 1s, 1min]
+waits.Sort()
+print(waits)
+mut longs = [3000000000L, -1L, 2L]
+longs.Sort()
+print(longs)
+float zero = float(0.0)
+mut floats = [float(2.0), zero / zero, float(-1.5)]
+floats.Sort()
+print(floats)
+mut List<string?> names = ["b", null, "a"]
+names.Sort()
+print(names)
+mut people = [Person("Ann", "z"), Person("Bo", null), Person("Cy", "a")]
+people.SortBy(p => p.Nick)
+for p in people {
+    print(p.Name)
+}

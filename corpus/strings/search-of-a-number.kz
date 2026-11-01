@@ -1,0 +1,5 @@
+// expect: error argument-mismatch at 5
+// rules: X1
+
+s = "ab"
+print(s.Contains(5))

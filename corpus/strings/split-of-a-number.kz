@@ -1,0 +1,5 @@
+// expect: error argument-mismatch at 5
+// rules: X5
+
+s = "a,b"
+print(s.Split(5))

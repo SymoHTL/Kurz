@@ -33,7 +33,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Part of the method | Implemented here as |
 |---|---|
 | `CLAUDE.md`: rules with gates | [CLAUDE.md](../CLAUDE.md). |
-| Knowledge store, index, lint with floor and self-test | `knowledge/`, `INDEX.md`, `tools/lint_knowledge.py` (gate `knowledge`). The same lint reads the findings of the research entries (`knowledge/what-developers-dislike-in-*.md` and `knowledge/what-goose-does-for-speed.md`): a section of `kurz-design.md` that a verdict cites and the record does not have, a finding that Kurz repeats or leaves open, or that an answer settled, which cites no section, a finding with no verdict, and fewer research entries than their floor. It sees the citation, not what the section says; that a change to the record names the finding it meets is the review rule "design record" (node B4 of `knowledge/diagram-design-change-playbook.md`). |
+| Knowledge store, index, lint with floor and self-test | `knowledge/`, `INDEX.md`, `tools/lint_knowledge.py` (gate `knowledge`). The same lint reads the findings of the research entries (`knowledge/what-developers-dislike-in-*.md` and `knowledge/what-goose-does-for-speed.md`) and fails on what the docstring of `tools/lint_knowledge.py` lists for them, among them a section of `kurz-design.md` that a verdict cites and the record does not have, and a finding that Kurz repeats or leaves open, or that an answer settled, which cites no section. It sees the citation, not what the section says; that a change to the record names the finding it meets is the review rule "design record" (node B4 of `knowledge/diagram-design-change-playbook.md`). |
 | Routing and the memory audit | Rules in `CLAUDE.md`. No audit tool is part of this repository, and nothing here forces the wrap-up (HAZARD #6). |
 | Zero findings on the store | Zero findings above low: `tools/pr_gates.py findings` (gate `pr-findings`) reads the review threads, and a thread on anything but tool, workflow and hook code is answered only by changing the file. A low finding opens no thread and holds no merge (below), so a low on a knowledge entry or a guide can reach `main` and is fixed later. After the fix push, `tools/pr_gates.py resolve --head <the pushed commit>` lists the reviewer's threads whose files all changed since the finding's commit and the rest with the reason, and `--go` resolves the former (`knowledge/resolve-what-the-edit-answered.md`); `--head` refuses the run while the forge still shows the old head (`knowledge/the-pull-request-shows-the-old-head-after-a-push.md`). |
 | Skills | `.claude/skills/change-walk` and `.claude/skills/design-round`. |
@@ -44,7 +44,7 @@ The numbers that show the bar working are in [quality-bar-evidence.md](quality-b
 | Test-quality clauses | The "Tests" section of `CLAUDE.md`, cut down to what a tree of tools can break; see "Not implemented". |
 | Automated reviewer | `tools/review/review.py`, `.review/review-rules.yaml`, `.github/workflows/review.yml`. |
 | Server-side merge checks | A repository ruleset, defined in `tools/ruleset.json`, asserted on every gates run (gate `merge-checks`). A change to that file is red in `merge-checks` until the owner applies it to the live ruleset (`merge_pr.py --apply-settings`); from then on every other open pull request is red until it takes the change from `main`. |
-| Reading the review before merging, threads, one push per round | `tools/merge_pr.py` checks them at the moment of the merge; the round discipline is a rule in `CLAUDE.md`. The owner's cap of one review round per pull request (2026-10-22; three from 2026-10-21) is the reviewer's: it labels each round before its first pass and ends a run at the cap before any pass; at the cap `tools/merge_pr.py` and the gate `pr-findings` accept a finding moved to the collection ticket (the gates job reads the ticket with `issues: read`), and the labels a person can change and a second issue with the collection label are HAZARD #41. |
+| Reading the review before merging, threads, one push per round | `tools/merge_pr.py` checks them at the moment of the merge; the round discipline is a rule in `CLAUDE.md`. The owner's cap of one review round per pull request (2026-10-22; three from 2026-10-21) is the reviewer's: it labels each round before its first pass and ends a run at the cap that has a file to review before any pass, while a run there that the replay cache answers whole completes and is no round (the owner, 2026-11-01); at the cap `tools/merge_pr.py` and the gate `pr-findings` accept a finding moved to the collection ticket (the gates job reads the ticket with `issues: read`), and the labels a person can change and a second issue with the collection label are HAZARD #41. |
 | Gate-flip | `tools/merge_pr.py --over-red`. The owner's approval is per pull request and head, with one standing case: at the review cap, for the head the round at the cap reviewed when that round completed, it covers `review`, and `gates` when `pr-findings` is its one FAIL (`CLAUDE.md`, the over-red rule). |
 | CI triage | The "CI" section of `CLAUDE.md`. |
 | Agent operations (isolation, notes file, owner queue, worktrees) | Outside this repository. Nothing here depends on it. |
@@ -132,6 +132,16 @@ What is specific to this repository:
 - **A batch at the pass cap counts as reviewed, and the review says so.** After five passes that
   still found something above low, the review completes: the status reads "NOT converged on N
   files" and a note names them. Their files are not stored, so the next run reads them again.
+- **A long line is sent in parts** (#128). A line over `LONG_LINE` (4000) characters is sent as
+  its first 500 characters and about 1500 on each side of each sentence in which it differs from
+  its pair, the removed line of its run that shares the most text with it, sentence by sentence,
+  and at least half of the shorter line; a
+  context line as its first and its last 500. A run of at least 500 characters left out is a
+  marker that names its length, and the prompt says what a marker is. Only text that is equal in
+  a line and its pair is left out, so a pair that is wrong sends more and hides no change, and an
+  added line with no pair is sent whole. The log line of a run and of `--plan`, the state comment
+  and the audit note say how many characters of how many lines were left out. The cost the owner
+  accepted (#39, comment 6542727045): a finding that needs a far part of a long line is not made.
 - **Passes run in rounds.** Every batch is read once before any is read twice. The first version,
   until 2026-10-02, gave each batch all its passes in turn, which on a large diff spends the budget on the first
   batches and never reads the last ones (`knowledge/what-a-review-pass-costs.md`).
@@ -190,9 +200,12 @@ changes in the same pull request.
 - **The clauses about browser tests** (clicks that prove reachability, render-time assertions,
   option order, teardown filters, geometry probes) and the build-time confidentiality gates for
   telemetry. There is no user interface and no telemetry.
-- **Ratchets and convention tests over product code.** There is no product code. The one
-  convention here is over the tools themselves: every decision tool has a self-test and a
-  recorded red proof.
+- **Ratchets over product code, and convention tests beyond one.** No ratchet runs. One
+  convention test reads the compiler's sources,
+  `CheckerTests.The_checker_and_the_emitter_read_a_null_arm_through_one_test` (gate
+  `compiler-tests`), red where a line that tests a `null` arm against a subject's cases does not
+  go through `Types.NullArmReachesNothing`. Beside it stands a convention over the tools, not over
+  product code: every decision tool has a self-test and a recorded red proof.
 - **A scheduled job that asserts the merge settings.** The assertion runs with every gates run
   instead. The bypass list and the auto-merge switch need a token the job does not have; the job
   prints NOT CHECKED for both and the gate ends PARTLY, as "Gates" above describes. A local run

@@ -1,0 +1,11 @@
+// expect: output
+// | wö
+// | hä
+// | true
+// rules: X2
+
+// h is one byte, ä two, the comma and the space one each, w one, ö two: 11 bytes in all
+s = "hä, wörld"
+print(s.Substring(5, 3))
+print(s.Substring(0, 3))
+print(s.Substring(11, 0) == "")

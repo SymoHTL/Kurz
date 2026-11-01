@@ -1,0 +1,16 @@
+// expect: output
+// | the union
+// | a long: 5
+// rules: O4
+
+void Show(long n) {
+    print("a long: {n}")
+}
+
+void Show(long | ParseError x) {
+    print("the union")
+}
+
+// the union is the call's whole type, so the function that takes it is the exact fit
+Show(long.Parse("1"))
+Show(5L)

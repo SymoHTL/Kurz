@@ -1,0 +1,83 @@
+// expect: output
+// | -128
+// | too small
+// | 0
+// | too small
+// | 65535
+// | too large
+// | -9223372036854775808
+// | 18446744073709551615
+// | too large
+// | invalid digit
+// | empty
+// | invalid digit
+// | invalid digit
+// | invalid digit
+// | invalid digit
+// rules: X7
+
+// each integer type reads its own range: a number past it is `too large`, below it `too small`
+match sbyte.Parse("-128") {
+    sbyte n => print(n)
+    ParseError e => print(e)
+}
+match sbyte.Parse("-129") {
+    sbyte n => print(n)
+    ParseError e => print(e)
+}
+match byte.Parse("-0") {
+    byte n => print(n)
+    ParseError e => print(e)
+}
+match byte.Parse("-1") {
+    byte n => print(n)
+    ParseError e => print(e)
+}
+match ushort.Parse("65535") {
+    ushort n => print(n)
+    ParseError e => print(e)
+}
+match int.Parse("2147483648") {
+    int n => print(n)
+    ParseError e => print(e)
+}
+match long.Parse("-9223372036854775808") {
+    long n => print(n)
+    ParseError e => print(e)
+}
+match ulong.Parse("18446744073709551615") {
+    ulong n => print(n)
+    ParseError e => print(e)
+}
+match ulong.Parse("18446744073709551616") {
+    ulong n => print(n)
+    ParseError e => print(e)
+}
+// a byte the form does not take is read before the range, whitespace alone is `empty`, and a sign with no digits is
+// `invalid digit`
+match long.Parse("99999999999999999999x") {
+    long n => print(n)
+    ParseError e => print(e)
+}
+match int.Parse("\t\r\n") {
+    int n => print(n)
+    ParseError e => print(e)
+}
+match long.Parse("-") {
+    long n => print(n)
+    ParseError e => print(e)
+}
+match long.Parse("+") {
+    long n => print(n)
+    ParseError e => print(e)
+}
+// a NUL is no whitespace, where .NET's `Parse` takes NUL characters after the digits
+match int.Parse("5\0") {
+    int n => print(n)
+    ParseError e => print(e)
+}
+// whitespace stands before the sign and after the digits alone
+match int.Parse("- 5") {
+    int n => print(n)
+    ParseError e => print(e)
+}

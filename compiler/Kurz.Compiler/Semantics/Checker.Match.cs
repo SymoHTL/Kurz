@@ -128,7 +128,7 @@ public sealed partial class Checker
 
                         if (!cases.Any(c => IsCaseOf(value.Type, c)))
                         {
-                            Report(ErrorIds.TypeMismatch, arm.Line, $"a `{value.Type}` is no value of `{subjectType}` (C9, T1)");
+                            Report(ErrorIds.TypeMismatch, arm.Line, $"{Types.A(value.Type)} is no value of `{subjectType}` (C9, T1)");
                             armWrong = true;
                         }
                         else if (covered.Any(c => IsCaseOf(value.Type, c)))
@@ -172,7 +172,7 @@ public sealed partial class Checker
                 {
                     case ExpressionStatement es:
                         {
-                            var t = CheckExpression(es.Expression, expected, keepCases: expected is UnionType);
+                            var t = CheckExpression(es.Expression, expected, keepCases: Types.KeepsCases(expected));
                             if (Types.IsVoid(t.Type))
                             {
                                 Report(ErrorIds.Syntax, es.Line, "a call with a `void` success used as a value (O10)");
@@ -273,7 +273,7 @@ public sealed partial class Checker
             {
                 if (!Types.Assignable(type, expected))
                 {
-                    Report(Types.MismatchId(type, expected), armLine, $"the arm is a `{type}` where a `{expected}` is required (C9, T1)");
+                    ReportMismatch(type, expected, armLine, $"the arm is {Types.A(type)} where {Types.A(expected)} is required", "C9");
                 }
             }
 
@@ -285,7 +285,7 @@ public sealed partial class Checker
         {
             if (!Types.Same(type, first))
             {
-                Report(ErrorIds.TypeMismatch, armLine, $"the arm is a `{type}` where the arms above are `{first}`: the arms of a `match` used as a value have one type (C9)");
+                Report(ErrorIds.TypeMismatch, armLine, $"the arm is {Types.A(type)} where the arms above are `{first}`: the arms of a `match` used as a value have one type (C9)");
                 return Types.Error;
             }
         }
@@ -383,8 +383,11 @@ public sealed partial class Checker
                     throw new InvalidOperationException(arm.Pattern.GetType().Name);
             }
 
-            CheckElseArmBody(arm.Body, success);
-            reaching.Add(frame.Known);
+            if (CheckElseArmBody(arm.Body, success) == Flow.Completes)
+            {
+                reaching.Add(frame.Known); // an arm that returns or throws reaches nothing after the call (N3)
+            }
+
             PopScope();
         }
 
@@ -441,24 +444,26 @@ public sealed partial class Checker
     /// O5: what an arm does; in a block, its last statement. With a success that is not <c>void</c> the
     /// arm recovers with a value, returns or throws; a last statement that does none of these and can
     /// complete leaves the call without a value, text no rule gives a meaning (E4). The bare <c>throw</c>
-    /// of O7 stands in the arm's last statement, not in the statements before it.
+    /// of O7 stands in the arm's last statement, not in the statements before it. The arm ends where
+    /// every path leaves it.
     /// </summary>
-    private void CheckElseArmBody(Statement body, KurzType success)
+    private Flow CheckElseArmBody(Statement body, KurzType success)
     {
+        var flow = Flow.Completes;
         var wasInElseArm = inElseArm;
         inElseArm = true;
         switch (body)
         {
             case ExpressionStatement es when !Types.IsVoid(success):
                 {
-                    var t = CheckExpression(es.Expression, success, keepCases: success is UnionType);
+                    var t = CheckExpression(es.Expression, success, keepCases: Types.KeepsCases(success));
                     if (Types.IsVoid(t.Type) && !Types.IsError(success)) // after a call that did not type, the success may be `void`, and the arm a statement (O10, E1)
                     {
                         Report(ErrorIds.Syntax, es.Line, "a call with a `void` success used as a value (O10)");
                     }
                     else if (!t.IsError && !Types.IsError(success) && !Types.Assignable(t.Type, success))
                     {
-                        Report(Types.MismatchId(t.Type, success), es.Line, $"the arm recovers with a `{t.Type}` where the success is a `{success}` (O5, T1)");
+                        ReportMismatch(t.Type, success, es.Line, $"the arm recovers with {Types.A(t.Type)} where the success is {Types.A(success)}", "O5");
                     }
 
                     break;
@@ -477,12 +482,19 @@ public sealed partial class Checker
                 {
                     if (i == b.Statements.Count - 1)
                     {
-                        CheckElseArmBody(b.Statements[i], success);
+                        if (CheckElseArmBody(b.Statements[i], success) == Flow.Ends)
+                        {
+                            flow = Flow.Ends;
+                        }
                     }
                     else
                     {
                         inElseArm = false;
-                        CheckStatement(b.Statements[i]);
+                        if (CheckStatement(b.Statements[i]) == Flow.Ends)
+                        {
+                            flow = Flow.Ends;
+                        }
+
                         inElseArm = true;
                     }
                 }
@@ -492,7 +504,8 @@ public sealed partial class Checker
                 PopScope();
                 break;
             default:
-                if (CheckStatement(body) == Flow.Completes && !Types.IsVoid(success) && !Types.IsError(success))
+                flow = CheckStatement(body);
+                if (flow == Flow.Completes && !Types.IsVoid(success) && !Types.IsError(success))
                 {
                     Report(ErrorIds.Syntax, body.Line, "an arm of `else` recovers with a value of the success type, returns or throws; a statement that completes does none (O5)");
                 }
@@ -501,5 +514,6 @@ public sealed partial class Checker
         }
 
         inElseArm = wasInElseArm;
+        return flow;
     }
 }

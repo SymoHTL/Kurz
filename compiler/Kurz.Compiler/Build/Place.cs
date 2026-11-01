@@ -110,7 +110,10 @@ public sealed class Place : IDisposable
         }
     }
 
-    /// <summary>Removes every place under <paramref name="root"/> whose lock this call can take and whose lock file holds the mark: the places a run cut short left.</summary>
+    /// <summary>
+    /// Removes every place under <paramref name="root"/> whose lock this call can take and whose lock file holds the mark: the places a
+    /// run cut short left. A link among them is passed over, never followed.
+    /// </summary>
     public static void RemoveLeft(string root)
     {
         ArgumentNullException.ThrowIfNull(root);
@@ -129,6 +132,11 @@ public sealed class Place : IDisposable
             bool left;
             try
             {
+                if (File.GetAttributes(place).HasFlag(FileAttributes.ReparsePoint))
+                {
+                    continue; // no command made a link, and a removal through it would empty the directory it names
+                }
+
                 using var lockFile = Open(Path.Combine(place, LockName), create: false);
                 left = Lock(lockFile, wait: false) && Marked(lockFile);
             }

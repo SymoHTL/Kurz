@@ -383,6 +383,9 @@ void Show(void | NotFound v) {
 Show(NotFound)
 ```
 
+`string.Join` writes the text of each item of its list, so a list whose items have none is `no-text`
+there as well, as X6 says with its case.
+
 ### A8 (assumed, §8) The text of the remaining values
 
 A `float` shows what a `double` shows (A4), in the sense of A11. A `decimal` shows the digits it

@@ -214,3 +214,42 @@ a = Sha256.New()
 b = Sha256.New()
 print(a == b)
 ```
+
+### H7 (decided, §12) `Hex.Decode`
+
+`Hex.Decode(s)` reads the hexadecimal digits of a string back into its bytes and gives
+`Bytes | HexError` (O1). `data HexError(HexKind Kind, int At)` with `enum HexKind { OddLength, InvalidDigit }`
+holds none of the input: `At` is the position of the first character that is not a digit, counted in
+bytes (X2), and the text of the error is the words of its kind in lower case and its position,
+`invalid digit at 3` (§12, the owner, 2026-10-31, "Without input"). The digits are read in upper and
+lower case, with no `0x` and no whitespace, as the `hex` crate's `decode`; a string of an odd length is
+`OddLength`, with `At` its length, the length being read before the digits, so that `"0xf"` is
+`odd length at 3`; and `HexError` and `HexKind` are types every file sees, as
+`ParseError` is (X7), so that a file's own declaration of one is `redeclared` (V9) *(assumed, §12: the digits read and the two names, defaults of the question; the
+odd length, not put to the owner)*.
+
+Case: [hashing/hex-decode.kz](../corpus/hashing/hex-decode.kz)
+```kurz
+void Show(string s) {
+    match Hex.Decode(s) {
+        Bytes b => print(b)
+        HexError e => print(e)
+    }
+}
+
+Show("0001abFF")
+Show("abc")
+Show("0xff")
+// an odd length and a character that is no digit: the length is read first
+Show("0xf")
+Show("")
+// a letter of two bytes is an even length, and its first byte is no digit
+Show("ä")
+```
+
+Case: [hashing/hex-kind-redeclared.kz](../corpus/hashing/hex-kind-redeclared.kz)
+```kurz
+enum HexKind { Lost }
+
+print(1)
+```

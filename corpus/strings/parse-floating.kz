@@ -1,0 +1,68 @@
+// expect: output
+// | 1
+// | 12
+// | invalid digit
+// | 100000
+// | invalid digit
+// | invalid digit
+// | NaN
+// | invalid digit
+// | invalid digit
+// | -0
+// | 0
+// | 5E-324
+// | 9007199254740992
+// | -Infinity
+// | 16777216
+// | Infinity
+// | 1.0000001
+// | 1
+// | 1.0000000000000002
+// rules: X7
+
+void ShowDouble(string s) {
+    match double.Parse(s) {
+        double d => print(d)
+        ParseError e => print(e)
+    }
+}
+
+void ShowFloat(string s) {
+    match float.Parse(s) {
+        float f => print(f)
+        ParseError e => print(e)
+    }
+}
+
+// a `,` after the first digit, as many as stand, and none before it
+ShowDouble("1,")
+ShowDouble("1,,2")
+ShowDouble(",5")
+// a point with a digit beside it, and an exponent with a digit after its sign
+ShowDouble("1.e5")
+ShowDouble(".")
+ShowDouble("1e")
+// a sign before the words, and no `Inf`
+ShowDouble("-NaN")
+ShowDouble("Inf")
+// a NUL after the number, as Rust reads it
+ShowDouble("1.5\0")
+// below the smallest `double` a zero with the sign, and the nearest `double`, ties to the even one
+ShowDouble("-1e-999")
+ShowDouble("2.4703282292062327e-324")
+ShowDouble("2.4703282292062328e-324")
+ShowDouble("9007199254740993")
+ShowDouble("-1e999")
+// a `float` is rounded once, from the digits: the last number stands just above a halfway point of two `float` values,
+// and its nearest `double` is that point
+ShowFloat("16777217")
+ShowFloat("3.4028236e38")
+ShowFloat("1.00000005960464477539062501")
+// the halfway point 1 + 2^-53 ties to the even `double`, and a digit that is not 0 past the 768th rounds it up
+mut digits = "1.00000000000000011102230246251565404236316680908203125"
+ShowDouble(digits)
+for i in 0..<746 {
+    digits = "{digits}0"
+}
+
+ShowDouble("{digits}1")

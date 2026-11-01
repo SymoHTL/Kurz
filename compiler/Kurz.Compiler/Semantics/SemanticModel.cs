@@ -29,6 +29,12 @@ public enum CallKind
     /// <summary>A data value made by the type's name (D2); <see cref="CallInfo.Data"/> is the type.</summary>
     DataNew,
 
+    /// <summary>An instance of a class made by the class's name, its primary constructor or the empty one (K1, K14); <see cref="CallInfo.Target"/> is the class type.</summary>
+    ClassNew,
+
+    /// <summary>A method of a class (K7), on the value before the dot, or on <c>this</c> where the call names the method alone; <see cref="CallInfo.Function"/> is the method picked (F13).</summary>
+    Method,
+
     /// <summary>A list's <c>Add</c> (M9).</summary>
     ListAdd,
 
@@ -53,7 +59,7 @@ public enum CallKind
     /// <summary><c>string.FromUtf8(b)</c> (T15), a string of the bytes or the case <c>InvalidUtf8</c>.</summary>
     FromUtf8,
 
-    /// <summary><c>string.FromUtf8Lossy(b)</c> (T15), a string of the bytes with U+FFFD for each sequence that is not UTF-8.</summary>
+    /// <summary><c>string.FromUtf8Lossy(b)</c> (T15), a string of the bytes with U+FFFD for each maximal part of a sequence that is not UTF-8, as Rust counts them.</summary>
     FromUtf8Lossy,
 
     /// <summary><c>Plan.From(n)</c> (D18), the value of the <c>enum</c> whose number is <c>n</c> or the case <c>Invalid</c>; <see cref="CallInfo.Target"/> is the enum.</summary>
@@ -61,6 +67,51 @@ public enum CallKind
 
     /// <summary>A list's <c>Clear</c> (M9).</summary>
     ListClear,
+
+    /// <summary>A list's <c>IndexOf(item)</c> (X9).</summary>
+    ListIndexOf,
+
+    /// <summary>A list's <c>IndexOf(value)</c> of a run of items, a list of its own type (X9).</summary>
+    ListIndexOfRun,
+
+    /// <summary>A list's <c>AddRange(collection)</c> (X9).</summary>
+    ListAddRange,
+
+    /// <summary>A list's <c>Reverse()</c> (X9).</summary>
+    ListReverse,
+
+    /// <summary>A list's <c>Sort()</c>, in place and stable (X8).</summary>
+    ListSort,
+
+    /// <summary>A list's <c>SortUnstable()</c> (X8).</summary>
+    ListSortUnstable,
+
+    /// <summary>A list's <c>SortBy(keySelector)</c>, by a key made once for each item (X8).</summary>
+    ListSortBy,
+
+    /// <summary>A string's <c>Contains</c>, <c>StartsWith</c>, <c>EndsWith</c> or <c>IndexOf</c>, of a <c>string</c> or of a <c>char</c>, which the argument's type names (X1).</summary>
+    StringSearch,
+
+    /// <summary>A string's <c>Trim</c>, <c>TrimStart</c>, <c>TrimEnd</c>, <c>TrimAscii</c>, <c>TrimStartAscii</c> or <c>TrimEndAscii</c>, or <c>Trim(c)</c>, <c>TrimStart(c)</c> or <c>TrimEnd(c)</c> of a <c>char</c> (X4).</summary>
+    StringTrim,
+
+    /// <summary>A string's <c>Split(separator)</c>, of a <c>string</c> or of a <c>char</c>, which the argument's type names (X5).</summary>
+    StringSplit,
+
+    /// <summary>A string's <c>Replace</c> of a <c>string</c> by a <c>string</c>, of a <c>char</c> by a <c>string</c> or of a <c>char</c> by a <c>char</c>, which the arguments' types name (X5).</summary>
+    StringReplace,
+
+    /// <summary>A string's <c>ToLower</c>, <c>ToUpper</c>, <c>ToLowerAscii</c> or <c>ToUpperAscii</c> (X3).</summary>
+    StringCase,
+
+    /// <summary>A string's <c>Substring(startIndex, length)</c> (X2).</summary>
+    StringSubstring,
+
+    /// <summary><c>long.Parse(s)</c>, or the same call on another number type, the number or the case <c>ParseError</c> (X7).</summary>
+    Parse,
+
+    /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text, with a <c>string</c> or a <c>char</c> separator, which the argument's type names (X6).</summary>
+    StringJoin,
 
     /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>
     MapContainsKey,
@@ -140,6 +191,9 @@ public enum CallKind
     /// <summary><c>Hex.Encode(bytes)</c> (H2).</summary>
     HexEncode,
 
+    /// <summary><c>Hex.Decode(s)</c> (H7), the bytes of the digits or the case <c>HexError</c>.</summary>
+    HexDecode,
+
     /// <summary><c>Sha256.New()</c>, <c>Md5.New()</c> or <c>Crc32.New()</c> (H3); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
     HasherNew,
 
@@ -206,10 +260,13 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
-    /// <c>args</c>, the program's arguments without its name, which the top-level code sees (S13), and the line of its first read; null
-    /// in a file that is no program's top-level code.
+    /// <c>args</c>, the program's arguments without its name, which the top-level code sees (S13); null in a file that is no program's
+    /// top-level code.
     /// </summary>
     public VariableSymbol? Arguments { get; private set; }
 
@@ -320,6 +377,33 @@ public sealed class SemanticModel
     internal void RecordDataType(TypeDeclaration declaration, DataSymbol symbol) => dataTypes[declaration] = symbol;
 
     internal void RecordChainMember(MemberAccess access, KurzType member) => chainMembers[access] = member;
+
+    /// <summary>The symbol of a class of the file (K1).</summary>
+    public ClassSymbol ClassOf(TypeDeclaration declaration) => classes.TryGetValue(declaration, out var c) ? c : throw Missing($"class `{declaration.Name}`", declaration.Line);
+
+    /// <summary>The classes of the file, in the order they are declared.</summary>
+    public IEnumerable<ClassSymbol> Classes => classes.Values;
+
+    /// <summary>The variable that holds a method's instance, <c>this</c> (K7).</summary>
+    public VariableSymbol ThisOf(FunctionSymbol method) => receivers.TryGetValue(method, out var v) ? v : throw Missing($"`this` of `{method.Name}`", method.Line);
+
+    /// <summary>
+    /// Inside a method, a name that means a field of its instance (K7): a read, a <see cref="NameExpression"/>, or an assignment, an
+    /// <see cref="AssignOrDeclare"/>, with the variable <c>this</c> it goes through; a <see cref="ThisExpression"/> is <c>this</c> itself.
+    /// </summary>
+    public bool IsImplicitField(object node, out VariableSymbol thisVariable, out FieldSymbol? field)
+    {
+        var found = implicitFields.TryGetValue(node, out var entry);
+        thisVariable = entry.This;
+        field = entry.Field;
+        return found;
+    }
+
+    internal void RecordClass(TypeDeclaration declaration, ClassSymbol symbol) => classes[declaration] = symbol;
+
+    internal void RecordThis(FunctionSymbol method, VariableSymbol thisVariable) => receivers[method] = thisVariable;
+
+    internal void RecordImplicitField(object node, VariableSymbol thisVariable, FieldSymbol? field) => implicitFields[node] = (thisVariable, field!);
 
     private static InvalidOperationException Missing(string what, int line) =>
         new($"the checker did not read the {what} at line {line}: the model is read for a program the checker read without an error and without `not supported`");

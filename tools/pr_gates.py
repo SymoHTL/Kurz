@@ -41,8 +41,10 @@ resolve   not a gate: the session's step after its fix push. Every unresolved th
 cap       not a gate: the session's walk of a pull request at the review cap, which sessions took by
           hand for every pull request at the cap from 2026-10-21 until it became this command
           (2026-10-29). It refuses below the cap, with no or several open collection tickets, with
-          an open finding made on another commit than the head, and with a thread in which a person
-          wrote; it prints the section of the collection ticket (the head, the day of the round,
+          an open finding made on another commit than the head, with a thread in which a person
+          wrote anything but a move, and with --go where the section it would post has no reading
+          (no --analysis FILE, or a blank one); it prints the section of the collection ticket (the
+          head, the day of the round,
           every open finding with the address of its thread, the session's reading from
           --analysis FILE, the low findings with the addresses of their comments, whose count must be
           the one the reviewer's notes name), and with --go posts it as a comment on the ticket,
@@ -61,6 +63,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import urllib.parse
 
@@ -431,7 +434,8 @@ def cap_walk(repo, number, go, analysis="", get=None, pages=None, send=None):
     plan was printed. Refused before any write: a pull request below the cap, none or several open
     collection tickets, an open finding made on another commit than the head the pull request shows
     (a finding of an earlier round, or a head that moved after the round at the cap, the owner's to
-    decide), and a thread in which a person wrote other than a move (read first). A section that is on
+    decide), a thread in which a person wrote other than a move (read first), and with `go` a section
+    to post with no reading, since a posted section is never written again. A section that is on
     the ticket, as a comment or in its body as the walks by hand wrote it, is not posted again, and a
     thread that a reply already moved gets no second one, so a walk that stopped is run again."""
     get, send = get or kit.gh_json, send or kit.gh_send
@@ -463,6 +467,9 @@ def cap_walk(repo, number, go, analysis="", get=None, pages=None, send=None):
     if posted:
         print(f"cap: the section is on #{ticket['number']} already: {posted}")
     else:
+        if go and not analysis.strip():
+            raise kit.Refused("no reading: --analysis FILE holds what the code at the head shows, and a posted section "
+                              "is not written again")
         section = cap_section(number, head, rounds, found, analysis, low_links(repo, number, head, pages))
         print(section)  # in the log before the write that can be refused
         if go:
@@ -497,12 +504,14 @@ def cap_command(repo, number, go, reading=None, get=None, pages=None, send=None)
     """The exit code of the cap command: 0 when the walk ended with every finding thread resolved, or
     printed its plan; 1 when it was refused, the reading (a file) or a read of the forge or a write
     failed, a thread is still open, or the run was interrupted. What was written before a failure
-    stands, and the walk skips it when run again."""
+    stands, a write cut off before its answer may have landed, and the walk skips what is there when
+    run again."""
     try:
         done = cap_walk(repo, number, go, kit.read(reading) if reading else "", get, pages, send)
     except BaseException as e:  # whatever failed, an interrupt too: the lines printed above are what was written
         print(f"ERROR: cap stopped: {type(e).__name__}: {e}. What is printed above as posted, replied or resolved "
-              "stands; run the walk again, it skips what is there")
+              "stands, and a write in flight when it stopped may have landed too; run the walk again, it reads the "
+              "ticket and the threads and skips what is there")
         print(LIMIT)
         return 1
     print(LIMIT)
@@ -1316,16 +1325,36 @@ def self_test():
             out, printed, log, reads = walk(False, thread=silent)
             cases.append(("cap: a post of the reviewer that names no file is listed with its address",
                           out is True and f"- a post of the reviewer that names no file {opening.get('url')}\n" in printed, printed[:600]))
-            get, pages, send, log, reads = walking(rounds=kit.ROUND_CAP - 1)
-            refused_code = quietly(lambda: cap_command("o/n", 82, True, None, get, pages, send))
-            get, pages, send, log, reads = walking(flips=False)
-            open_code = quietly(lambda: cap_command("o/n", 82, True, None, get, pages, send))
-            get, pages, send, log, reads = walking()
-            done_code = quietly(lambda: cap_command("o/n", 82, True, None, get, pages, send))
+            unread = []
+            for blank in ("", " \n"):
+                get, pages, send, log, reads = walking()
+                out, printed = quietly(lambda: cap_walk("o/n", 82, True, blank, get, pages, send))
+                unread.append((out, log))
+            cases.append(("cap: with --go a section with no reading, or a blank one, is refused before anything is written",
+                          all(type(out) is kit.Refused and "no reading" in str(out) and log == [] for out, log in unread), repr(unread)))
+            with tempfile.TemporaryDirectory() as scratch:
+                reading = os.path.join(scratch, "reading.md")
+                with open(reading, "w", encoding="utf-8") as f:
+                    f.write("What the code at that head shows.\n")
+                get, pages, send, log, reads = walking(rounds=kit.ROUND_CAP - 1)
+                refused_code = quietly(lambda: cap_command("o/n", 82, True, reading, get, pages, send))
+                get, pages, send, log, reads = walking(flips=False)
+                open_code = quietly(lambda: cap_command("o/n", 82, True, reading, get, pages, send))
+                get, pages, send, log, reads = walking()
+                done_code = quietly(lambda: cap_command("o/n", 82, True, reading, get, pages, send))
+                get, pages, send, log, reads = walking()
+
+                def cut(method, path, payload):
+                    send(method, path, payload)  # the post lands, and its answer never comes
+                    raise TimeoutError("no answer")
+                cut_code = quietly(lambda: cap_command("o/n", 82, True, reading, get, pages, cut))
             cases.append(("cap: the command ends 1 on a refusal and on a thread still open, 0 when every finding thread is resolved, and prints the known limit",
                           [refused_code[0], open_code[0], done_code[0]] == [1, 1, 0] and "cap stopped" in refused_code[1]
                           and all("re-run the gates after resolving" in printed for _, printed in (refused_code, done_code)),
                           repr((refused_code, open_code[0], done_code[0]))))
+            cases.append(("cap: a write cut off before its answer is named as one that may have landed, and the walk as the way on",
+                          cut_code[0] == 1 and [w[0] for w in log] == ["post"]
+                          and "a write in flight when it stopped may have landed too; run the walk again" in cut_code[1], repr((cut_code, log))))
         finally:
             time.sleep = saved_sleep
     return kit.report(cases)

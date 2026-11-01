@@ -27,9 +27,18 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     [GeneratedRegex(@"^  at <unknown> \(0x[0-9a-f]+\)$")]
     private static partial Regex Unknown();
 
-    /// <summary>An error stream cut where its trace starts: its lines up to the last that is no frame and no cut, and the lines after it.</summary>
-    internal static (string Error, IReadOnlyList<string> Trace) Split(string all)
+    /// <summary>
+    /// An error stream cut where its trace starts: after <paramref name="error"/>, the text the caller expects, where the stream starts
+    /// with it; else its lines up to the last that is no frame and no cut, which takes a line of a frame's form at the end of a thrown
+    /// text into the trace, and the lines after it.
+    /// </summary>
+    internal static (string Error, IReadOnlyList<string> Trace) Split(string all, string? error = null)
     {
+        if (error is not null && all.StartsWith(error, StringComparison.Ordinal))
+        {
+            return (error, Toolchain.Lines(all[error.Length..]));
+        }
+
         var lines = Toolchain.Lines(all);
         var first = lines.Count;
         while (first > 0 && (Frame().IsMatch(lines[first - 1]) || Cut().IsMatch(lines[first - 1])))
@@ -55,20 +64,20 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
 
         Assert.NotEmpty(trace);
         var cut = Cut().IsMatch(trace[^1]);
-        var frames = trace.Take(cut ? trace.Count - 1 : trace.Count).Select(l => Frame().Match(l)).ToList();
-        Assert.All(frames, m => Assert.True(m.Success && m.Groups["place"].Success == lines, $"not a frame {(lines ? "with" : "without")} a line: {m.Value}"));
+        var frames = trace.Take(cut ? trace.Count - 1 : trace.Count).Select(l => (Line: l, Match: Frame().Match(l))).ToList();
+        Assert.All(frames, f => Assert.True(f.Match.Success && f.Match.Groups["place"].Success == lines, $"not a frame {(lines ? "with" : "without")} a line: {f.Line}"));
         if (cut)
         {
             Assert.Equal(100, frames.Count);
         }
         else
         {
-            Assert.Equal("main", frames[^1].Groups["name"].Value);
+            Assert.Equal("main", frames[^1].Match.Groups["name"].Value);
         }
 
         if (lines)
         {
-            Assert.Equal(place, frames[0].Groups["place"].Value);
+            Assert.Equal(place, frames[0].Match.Groups["place"].Value);
         }
     }
 
@@ -84,6 +93,17 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     }
 
     private const string Down = "int Down(int n) {\n    if n == 0 {\n        return 1 / n\n    }\n\n    return Down(n - 1) + 1\n}\n\nprint(Down(3))\n";
+
+    [Fact]
+    public void A_thrown_text_whose_last_line_has_a_frames_form_stays_whole_where_the_caller_names_the_text()
+    {
+        const string error = "error: thrown at program.kz:3:\n  at Fail in program.kz:9\n";
+        const string all = error + "  at Fail in program.kz:3\n  at main in program.kz:5\n";
+        var (cut, trace) = Split(all, error);
+        Assert.Equal(error, cut);
+        Assert.Equal(["  at Fail in program.kz:3", "  at main in program.kz:5"], trace);
+        Assert.Equal("error: thrown at program.kz:3:\n", Split(all).Error); // the positive control: the walk back takes that line
+    }
 
     [Fact]
     public void A_raise_writes_the_frames_from_the_one_that_raised_to_main_innermost_first_with_their_lines()
@@ -157,7 +177,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     {
         var text = $"int Deep(int n) {{\n    if n == 0 {{\n        return 1 / n\n    }}\n\n    return Deep(n - 1) + 1\n}}\n\nprint(Deep({depth}))\n";
         var run = Toolchain.Run(Build(text, $"trace-cut-{depth}"), null);
-        var (error, trace) = Split(run.Error);
+        var (error, trace) = Split(run.Error, "error: divide-by-zero at program.kz:3\n");
         Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
         if (!OperatingSystem.IsLinux())
         {
@@ -187,7 +207,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
             var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], refused, testBuild: true);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var run = Toolchain.Run(toolchain.Build(compilation.Program, $"trace-cut-without-pages-{depth}"), null);
-            var (error, trace) = Split(run.Error);
+            var (error, trace) = Split(run.Error, "error: divide-by-zero at program.kz:3\n");
             Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
             if (!OperatingSystem.IsLinux())
             {
@@ -215,9 +235,10 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     public void Kurz_trace_set_to_0_switches_the_trace_off_and_every_other_value_leaves_it_on(string? value, bool on)
     {
         var run = Toolchain.Run(Build(Down, $"trace-variable-{(value is null ? "absent" : value.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + value)}"), value);
-        var (error, trace) = Split(run.Error);
+        var (error, trace) = Split(run.Error, "error: divide-by-zero at program.kz:3\n");
         Assert.Equal((1, "error: divide-by-zero at program.kz:3\n"), (run.Code, error));
         Assert.Equal(on && OperatingSystem.IsLinux() ? 5 : 0, trace.Count);
+        Assert.All(trace, l => Assert.True(Frame().IsMatch(l) || Cut().IsMatch(l), $"no frame and no cut: {l}"));
     }
 
     [Fact]
@@ -264,7 +285,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
             return;
         }
 
-        var (error, trace) = Split(run.Error);
+        var (error, trace) = Split(run.Error, "error: stack-overflow at program.kz:2\n");
         Assert.Equal((1, "error: stack-overflow at program.kz:2\n"), (run.Code, error));
         AssertOverflowTrace(trace, "  at Down in program.kz:2");
 
@@ -288,11 +309,11 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
             return;
         }
 
-        var (error, trace) = Split(release.Error);
+        var (error, trace) = Split(release.Error, "error: stack-overflow (no line tables: build with --lines)\n");
         Assert.Equal((1, "error: stack-overflow (no line tables: build with --lines)\n"), (release.Code, error));
         AssertOverflowTrace(trace, "  at Down");
 
-        (error, trace) = Split(lines.Error);
+        (error, trace) = Split(lines.Error, "error: stack-overflow at program.kz:2\n");
         Assert.Equal((1, "error: stack-overflow at program.kz:2\n"), (lines.Code, error));
         AssertOverflowTrace(trace, "  at Down in program.kz:2");
     }
@@ -366,18 +387,108 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
         Assert.Equal("  at Down in program.kz:3", Split(Toolchain.Run(built, null).Error).Trace[0]);
 
         // the symbol table taken out of the file (its type set to SHT_NULL): no frame has a name, and each is its address
-        var nameless = Path.Combine(toolchain.Directory, "trace-nameless");
-        File.Copy(built, nameless, overwrite: true);
-        Patch(nameless, ".symtab", (bytes, header) => BitConverter.TryWriteBytes(bytes.AsSpan(header + 4, 4), 0));
+        var nameless = Variant(built, "trace-nameless", ".symtab", (bytes, header) => BitConverter.TryWriteBytes(bytes.AsSpan(header + 4, 4), 0));
         var unknown = Split(Toolchain.Run(nameless, null).Error).Trace;
         Assert.True(unknown.Count >= 6, string.Join("\n", unknown)); // the runtime's frames, Down's four and main's, and the C library's start
         Assert.All(unknown, l => Assert.Matches(Unknown(), l));
 
         // the line tables taken out (their section renamed): every frame is named and has no line
-        var lineless = Path.Combine(toolchain.Directory, "trace-lineless");
-        File.Copy(built, lineless, overwrite: true);
-        Patch(lineless, ".debug_line", (bytes, header) => bytes[NameAt(bytes, header) + 1] = (byte)'_');
+        var lineless = Variant(built, "trace-lineless", ".debug_line", (bytes, header) => bytes[NameAt(bytes, header) + 1] = (byte)'_');
         Assert.Equal(["  at Down", "  at Down", "  at Down", "  at Down", "  at main"], Split(Toolchain.Run(lineless, null).Error).Trace);
+    }
+
+    [Fact]
+    public void A_program_whose_file_another_process_holds_open_for_writing_does_not_start_and_its_run_has_no_trace()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the trace of Linux
+        }
+
+        // the cause of the empty traces of #156: a file a process holds open for writing does not start while it does, and a child
+        // started from this process holds each descriptor this one had open at the fork, up to the child's exec. Here the child opens
+        // the file itself (`exec 3>>`, which changes no byte) and keeps it open while it waits, so that this process never holds it
+        var program = Build(Down, "trace-held");
+        var info = new ProcessStartInfo("sh", ["-c", "exec 3>>\"$0\" && echo open && exec sleep 60", program]) { UseShellExecute = false, RedirectStandardOutput = true };
+        using var holder = Process.Start(info)!;
+        try
+        {
+            Assert.Equal("open", holder.StandardOutput.ReadLine());
+            var run = Toolchain.Run(program, null);
+            Assert.Equal(-1, run.Code);
+            Assert.EndsWith("Text file busy", run.Error);
+            Assert.Empty(Split(run.Error).Trace);
+        }
+        finally
+        {
+            holder.Kill();
+            holder.WaitForExit();
+        }
+
+        // the positive control: with the child ended no process holds the file, and the program starts and writes its trace
+        Assert.Equal("  at Down in program.kz:3", Split(Toolchain.Run(program, null).Error).Trace[0]);
+    }
+
+    [Fact]
+    public void A_variant_starts_while_other_threads_start_processes()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the variants of the file's reader on Linux
+        }
+
+        // a hundred variants, each run as it is written, while two threads start processes as the other tests' builds and runs do:
+        // this process holds no descriptor of a variant, so no child holds one, and every variant starts. The floor: the threads
+        // started processes while the variants ran
+        var built = Build(Down, "trace-starting");
+        using var stop = new CancellationTokenSource();
+        var starts = 0;
+        var starters = Enumerable.Range(0, 2).Select(_ => new Thread(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                if (Processes.Capture("true", [], null, TimeSpan.FromSeconds(30)).Code == 0)
+                {
+                    Interlocked.Increment(ref starts);
+                }
+            }
+        }) { IsBackground = true }).ToList();
+        List<string> refused;
+        int beside;
+        try
+        {
+            starters.ForEach(t => t.Start());
+            var before = Volatile.Read(ref starts);
+            refused = Enumerable.Range(0, 100)
+                .Select(_ => Toolchain.Run(Variant(built, "trace-starting-variant", ".symtab", (_, _) => { }), null))
+                .Where(r => r.Code == -1).Select(r => r.Error).ToList();
+            beside = Volatile.Read(ref starts) - before;
+        }
+        finally
+        {
+            stop.Cancel();
+            starters.Where(t => t.IsAlive).ToList().ForEach(t => t.Join());
+        }
+
+        Assert.True(beside > 0, "no process started beside the variants");
+        Assert.True(refused.Count == 0, $"{refused.Count} of 100 variants did not start, the first so: {refused.FirstOrDefault()}");
+    }
+
+    /// <summary>
+    /// A copy of the build <paramref name="built"/> named <paramref name="name"/>, beside the builds, with the header of its section
+    /// <paramref name="section"/> changed as <paramref name="change"/> does, which <c>cp</c> writes from a file of the changed bytes:
+    /// a file a process holds open for writing does not start (<c>ETXTBSY</c>, "Text file busy"), and a child another test starts
+    /// from this process holds each of its descriptors from the fork to the exec, so that a copy this process wrote itself did not
+    /// start now and then, and its run had no trace (#156).
+    /// </summary>
+    private string Variant(string built, string name, string section, Action<byte[], int> change)
+    {
+        var bytes = Path.Combine(toolchain.Directory, name + ".bytes");
+        File.Copy(built, bytes, overwrite: true);
+        Patch(bytes, section, change);
+        var variant = Path.Combine(toolchain.Directory, name);
+        Assert.Equal((0, "", ""), Processes.Capture("cp", [bytes, variant], null, TimeSpan.FromSeconds(30)));
+        return variant;
     }
 
     /// <summary>Changes the header of the section named <paramref name="section"/> of an ELF file, or its name, as <paramref name="change"/> does.</summary>

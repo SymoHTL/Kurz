@@ -1,0 +1,33 @@
+// expect: output
+// | 20
+// | none
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+T Same<T>(T x) => x
+
+// a type parameter the call infers is no written union, so the call unwraps: `T` is `int`, and the match lists no `NotFound`
+int | NotFound Doubled(int id) {
+    mut doubled = 0
+    match Same(Find(id)) {
+        int n => doubled = n * 2
+    }
+    return doubled
+}
+
+match Doubled(1) {
+    int n => print(n)
+    NotFound => print("none")
+}
+match Doubled(2) {
+    int n => print(n)
+    NotFound => print("none")
+}

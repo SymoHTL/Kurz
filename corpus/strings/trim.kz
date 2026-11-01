@@ -1,0 +1,20 @@
+// expect: output
+// | true
+// | true
+// | true
+// | true
+// | a
+// | axx
+// | xxa
+// | true
+// rules: X4
+
+s = "\u00A0 a b\t\n"
+print(s.Trim() == "a b")
+print(s.TrimAscii() == "\u00A0 a b")
+print(s.TrimStart() == "a b\t\n")
+print(s.TrimEndAscii() == "\u00A0 a b")
+print("xxaxx".Trim('x'))
+print("xxaxx".TrimStart('x'))
+print("xxaxx".TrimEnd('x'))
+print("xxx".Trim('x') == "")

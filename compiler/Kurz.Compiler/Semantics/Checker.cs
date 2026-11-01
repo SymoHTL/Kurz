@@ -7,11 +7,11 @@ namespace Kurz.Compiler.Semantics;
 
 /// <summary>
 /// The checker: names, scopes and types of a program the parser read without an error, against the
-/// rules of chapters 1 to 3, 5, 6, 8, 9 and 10 of the reference and the raw forms of chapter 11, with
-/// the grants a program is given (R7). It reports the compile errors of
+/// rules of chapters 1 to 3, 5 to 10 of the reference, the raw forms of chapter 11 and its cycle rule
+/// judged by types, with the grants a program is given (R7). It reports the compile errors of
 /// the error table those chapters name, each at the line E1 gives it, and <c>not supported</c>
-/// for a construct it does not read, at the construct's line and nothing else: a class and the
-/// other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c>, and
+/// for a construct it does not read, at the construct's line and nothing else: the parts of a class
+/// <see cref="UnreadClassPart"/> names and the other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c>, and
 /// the rest of the list in the section "What the checker does not read" of <c>compiler/README.md</c>,
 /// which is the one complete list. A value of a construct it does not read has the error type, about
 /// which nothing is reported, so that the one line of the construct carries the one diagnostic
@@ -143,6 +143,9 @@ public sealed partial class Checker
 
         public bool IsTopLevel { get; init; }
 
+        /// <summary>K7: the class whose method this frame checks, with its instance as <c>this</c>; a lambda inside the method finds it through <see cref="Outer"/>.</summary>
+        public ClassSymbol? Class { get; init; }
+
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
 
@@ -190,6 +193,14 @@ public sealed partial class Checker
 
     private void Report(string id, int line, string message) => Add(Diagnostic.Error(id, line, message));
 
+    /// <summary>
+    /// A value of <paramref name="from"/> where <paramref name="to"/> is required: the id <see cref="Types.MismatchId"/> gives, and
+    /// <paramref name="text"/> with the rules it cites, <paramref name="rule"/> where the place has one, then the rule of that id
+    /// (<see cref="Types.MismatchRule"/>).
+    /// </summary>
+    private void ReportMismatch(KurzType from, KurzType to, int line, string text, string? rule = null) =>
+        Report(Types.MismatchId(from, to), line, $"{text} ({(rule is null ? "" : rule + ", ")}{Types.MismatchRule(from, to)})");
+
     private void NotSupported(int line, string construct) => Add(Diagnostic.NotSupported(line, construct));
 
     /// <summary>Diagnostics of what follows go into a list of their own until <see cref="Pop"/>.</summary>
@@ -214,10 +225,12 @@ public sealed partial class Checker
 
     private void Run(ProgramSyntax program)
     {
-        // T15, D18, S1, C6: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From`
-        // returns besides its value, of the case a call on a file returns where it failed and of the entry of a loop over a map, declared
-        // before the file's own types, so that a declaration of their names is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union,
-        // as Rust" and "Built-in, no fields", and 2026-10-30, "A value, as C#"; section 12, the owner, 2026-10-29, "One union, as Rust")
+        // T15, D18, S1, C6, X7, H7: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From`
+        // returns besides its value, of the case a call on a file returns where it failed, of the entry of a loop over a map and of the cases
+        // a number type's `Parse` and `Hex.Decode` return where they read nothing, declared before the file's own types, so that a
+        // declaration of their names is `redeclared` (V9; section 4, the owner, 2026-10-29, "Union, as Rust" and "Built-in, no fields", and
+        // 2026-10-30, "A value, as C#"; section 12, the owner, 2026-10-29, "One union, as Rust", and 2026-10-31, "Without input"; for `Entry`
+        // an assumption of section 4, C6, and for the four names of X7 and H7 an assumption of section 12)
         foreach (var s in BuiltInTypes.Statements)
         {
             DeclareType((TypeDeclaration)s);
@@ -258,6 +271,12 @@ public sealed partial class Checker
             ResolveData(symbol);
         }
 
+        foreach (var symbol in classDeclared)
+        {
+            ResolveClass(symbol); // K1
+        }
+
+        CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -265,17 +284,21 @@ public sealed partial class Checker
             ResolveSignature(f);
         }
 
+        ResolveMethods(); // K7
         RefuseModifiedFunctions();
         CheckDuplicateFunctions();
         CheckStates();
         CheckEnumNumbers();
         CheckDefaults();
+        CheckClassDefaults();
         CollectReserved(program.Statements);
 
         foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
         {
             Unread(f, () => CheckFunctionBody(f));
         }
+
+        CheckMethodBodies(); // K7
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
@@ -328,6 +351,19 @@ public sealed partial class Checker
 
     /// <summary>A type's name the checker does not read: a type of chapter 7, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
+
+    /// <summary>R18: a name under which the intrinsics and their vector types stand (section 13, the owner, 2026-11-01), which the checker
+    /// does not read: where no declaration gives the name, it is <c>not supported</c>.</summary>
+    private bool UnreadIntrinsic(string name, int line)
+    {
+        if (name is not ("X86" or "Arm" or "Vector128" or "Vector256"))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"CPU intrinsics and their vector types, `{name}` (R18)");
+        return true;
+    }
 
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
     private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
@@ -401,6 +437,12 @@ public sealed partial class Checker
                 DeclareEnum(d);
             }
 
+            return;
+        }
+
+        if (d.Kind == TypeDeclarationKind.Class && !clash)
+        {
+            DeclareClass(d); // K1: chapter 7
             return;
         }
 
@@ -531,9 +573,17 @@ public sealed partial class Checker
                     continue;
                 }
 
-                if (!Types.Assignable(typed.Type, Types.Int) || typed.Constant is not IntegerConstant number)
+                if (!Types.Assignable(typed.Type, Types.Int))
                 {
-                    Report(Types.MismatchId(typed.Type, Types.Int), value.Number.Line, $"the number of `{value.Name}` is a `{typed.Type}` where an `int` is required (D20, T1)");
+                    ReportMismatch(typed.Type, Types.Int, value.Number.Line, $"the number of `{value.Name}` is {Types.A(typed.Type)} where an `int` is required", "D20");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                if (typed.Constant is not IntegerConstant number)
+                {
+                    // a constant of a type an `int` holds is an integer wherever T6 folds it: no program reaches this
+                    Report(ErrorIds.EnumNumber, value.Number.Line, $"the number of `{value.Name}` is a constant expression of type `int`: a literal, or literals that T6 folds (D20)");
                     symbol.Refused = true;
                     continue;
                 }
@@ -840,7 +890,7 @@ public sealed partial class Checker
         {
             if (n.TypeArguments.Count != 2)
             {
-                Report(n.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, n.Line, "`Map` takes two type arguments (M9, T17)");
+                Report(n.TypeArguments.Count == 0 ? ErrorIds.CannotInfer : ErrorIds.Syntax, n.Line, "`Map` takes two type arguments (M9, T17; E4 for another count)");
                 return Types.Error;
             }
 
@@ -900,6 +950,17 @@ public sealed partial class Checker
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
+        if (classes.TryGetValue(n.Name, out var classSymbol))
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (K1, T19)");
+                return Types.Error;
+            }
+
+            return new ClassType(classSymbol); // K1
+        }
+
         if (enums.TryGetValue(n.Name, out var enumSymbol))
         {
             if (n.TypeArguments.Count > 0)
@@ -912,6 +973,11 @@ public sealed partial class Checker
         }
 
         if (IsUnreadType(n.Name))
+        {
+            return Types.Error;
+        }
+
+        if (UnreadIntrinsic(n.Name, n.Line))
         {
             return Types.Error;
         }
@@ -951,7 +1017,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1143,7 +1209,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(t.Type, type))
         {
-            Report(Types.MismatchId(t.Type, type), value.Line, $"the default is a `{t.Type}` where a `{type}` is required (T1)");
+            ReportMismatch(t.Type, type, value.Line, $"the default is {Types.A(t.Type)} where {Types.A(type)} is required");
         }
     }
 
@@ -1190,7 +1256,7 @@ public sealed partial class Checker
         {
             // F2 writes the body as `=> expression` and F4 gives a `void` function no value: a value standing there is text no rule
             // gives a meaning, E4's `syntax` (the reading in compiler/README.md); a call or a postfix `else` is what such a body is
-            var t = CheckExpression(body, returnType is UnionType ? returnType : null, keepCases: returnType is UnionType);
+            var t = CheckExpression(body, returnType is UnionType ? returnType : null, keepCases: Types.KeepsCases(returnType));
             if (!Types.IsVoid(t.Type) && !t.IsError && Unwrap(body) is not CallExpression and not ElseExpression && !Types.Assignable(t.Type, returnType))
             {
                 Report(ErrorIds.Syntax, line, "the expression body of a `void` function is a call or a call with `else` (E4, F2, F4)");
@@ -1199,7 +1265,7 @@ public sealed partial class Checker
             return;
         }
 
-        var typed = CheckExpression(body, returnType, keepCases: returnType is UnionType);
+        var typed = CheckExpression(body, returnType, keepCases: Types.KeepsCases(returnType));
         if (typed.IsError || Types.IsError(returnType))
         {
             return;
@@ -1211,7 +1277,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(typed.Type, returnType))
         {
-            Report(Types.MismatchId(typed.Type, returnType), body.Line, $"the body is a `{typed.Type}` where the result is a `{returnType}` (F2, T1)"); // E1: at the value's line, as for every value that does not fit
+            ReportMismatch(typed.Type, returnType, body.Line, $"the body is {Types.A(typed.Type)} where the result is {Types.A(returnType)}", "F2"); // E1: at the value's line, as for every value that does not fit
         }
     }
 
@@ -1290,29 +1356,34 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name)
+        || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>
-    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c> and <c>Map</c> (M9), the types of
-    /// files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), and the hashes' (H1 to H4).
+    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
+    /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), and the hashes' (H1 to H4).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name);
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
     /// (T15), <c>Invalid</c>, the case of an enum's <c>From</c> that is no value of it (D18), and <c>IoError</c> with its <c>IoKind</c>, the
-    /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux (S1; section 12, the owner,
-    /// 2026-10-29, "One union, as Rust"), <c>EnvError</c> with its <c>EnvKind</c>, the case of a read of a variable of the environment that
-    /// gave no string, in the form of <c>IoError</c> (S14; section 12, the owner, 2026-10-30, "An outcome, as Rust"), and <c>Entry</c>, the
-    /// entry of a loop over a map, a value as C#'s <c>KeyValuePair</c> is one (C6;
-    /// section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies by <c>with</c> as every data type
-    /// (section 4, the owner, 2026-10-30, "Both, as a data type").
+    /// case of a call on a file or a socket that failed, whose kinds are Rust's for the error numbers of Linux, beside them
+    /// <c>WriteZero</c> and <c>InvalidData</c>, which no number gives, and <c>Other</c> for a number none of them has, the number 0
+    /// where the error is not the system's (S1; section 12, the owner, 2026-10-29, "One union, as Rust"), <c>EnvError</c> with its
+    /// <c>EnvKind</c>, the case of a read of a variable of the environment that gave no string, in the form of <c>IoError</c> (S14;
+    /// section 12, the owner, 2026-10-30, "An outcome, as Rust"), and <c>Entry</c>, the entry of a loop over a map, a value as C#'s
+    /// <c>KeyValuePair</c> is one (C6; section 4, the owner, 2026-10-30, "A value, as C#"), which a program makes by its name and copies
+    /// by <c>with</c> as every data type
+    /// (section 4, the owner, 2026-10-30, "Both, as a data type"), and <c>ParseError</c> with its <c>ParseKind</c>, the case of a number
+    /// type's <c>Parse</c> that is no number (X7), and <c>HexError</c> with its <c>HexKind</c>, the case of <c>Hex.Decode</c> that gives no
+    /// bytes (H7; section 12, the owner, 2026-10-31, "Without input").
     /// </summary>
-    private static readonly ProgramSyntax BuiltInTypes = Parser.Parse(
+    private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
         SourceText.FromString(
             "<built-in>",
             """
@@ -1329,8 +1400,21 @@ public sealed partial class Checker
             enum EnvKind { NotPresent, NotUnicode }
             data EnvError(EnvKind Kind, string Name)
             data Entry<K, V>(K Key, V Value)
-            """),
-        new DiagnosticBag());
+            enum ParseKind { Empty, InvalidDigit, TooLarge, TooSmall }
+            data ParseError(ParseKind Kind)
+            enum HexKind { OddLength, InvalidDigit }
+            data HexError(HexKind Kind, int At)
+            """));
+
+    /// <summary>The tree of the built-in types, which reads clean and holds type declarations alone, or the compiler's defect.</summary>
+    private static ProgramSyntax BuiltIn(SourceText text)
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(text, diagnostics);
+        return diagnostics.Items.Count == 0 && tree.Statements.All(s => s is TypeDeclaration)
+            ? tree
+            : throw new InvalidOperationException("the text of the built-in types does not read as type declarations");
+    }
 
     private void PushScope() => frame.Scope = new Scope { Parent = frame.Scope };
 
@@ -1667,7 +1751,7 @@ public sealed partial class Checker
         }
         else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Bool } && !Unchecked(t, condition.Line, "as a condition"))
         {
-            Report(ErrorIds.TypeMismatch, condition.Line, $"a condition is a `bool`, not a `{t.Type}` (C3)");
+            Report(ErrorIds.TypeMismatch, condition.Line, $"a condition is a `bool`, not {Types.A(t.Type)} (C3)");
         }
     }
 
@@ -1704,11 +1788,11 @@ public sealed partial class Checker
         if (Redeclares(v.Name, v.Line))
         {
             DeclareUnreadable(v.Name, VariableKind.Local, v.Line, v); // bound before the value is read: the uses of a redeclared name, in the value too, carry no further error (E1)
-            CheckExpression(v.Value, declared, keepCases: declared is UnionType);
+            CheckExpression(v.Value, declared, keepCases: Types.KeepsCases(declared));
             return;
         }
 
-        var t = CheckExpression(v.Value, declared, keepCases: declared is UnionType);
+        var t = CheckExpression(v.Value, declared, keepCases: Types.KeepsCases(declared));
         var type = declared ?? t.Type;
         if (Types.IsVoid(t.Type))
         {
@@ -1717,7 +1801,7 @@ public sealed partial class Checker
         }
         else if (declared is not null && !Types.Assignable(t.Type, declared))
         {
-            Report(Types.MismatchId(t.Type, declared), v.Value.Line, $"a `{t.Type}` where a `{declared}` is required (T1)");
+            ReportMismatch(t.Type, declared, v.Value.Line, $"{Types.A(t.Type)} where {Types.A(declared)} is required");
         }
 
         Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
@@ -1737,8 +1821,15 @@ public sealed partial class Checker
             return;
         }
 
+        if (variable is null && ImplicitField(a.Name) is { } implicitField)
+        {
+            AssignImplicitField(a, implicitField); // K7: the field of `this`
+            return;
+        }
+
         if (variable is not null)
         {
+            EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
             RequireRawForState(variable, a.Line);
             if (captured)
             {
@@ -1753,14 +1844,14 @@ public sealed partial class Checker
                 changes[a] = new Change(variable, a.Name, a.Line, $"an assignment changes `{a.Name}`"); // M7, in an arm inside an expression
             }
 
-            var value = CheckExpression(a.Value, variable.Type, keepCases: variable.Type is UnionType);
+            var value = CheckExpression(a.Value, variable.Type, keepCases: Types.KeepsCases(variable.Type));
             if (Types.IsVoid(value.Type))
             {
                 Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
             }
             else if (!Types.Assignable(value.Type, variable.Type))
             {
-                Report(Types.MismatchId(value.Type, variable.Type), a.Value.Line, $"a `{value.Type}` where a `{variable.Type}` is required (T1)");
+                ReportMismatch(value.Type, variable.Type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(variable.Type)} is required");
             }
 
             variable.Changed = true;
@@ -1836,6 +1927,14 @@ public sealed partial class Checker
             return;
         }
 
+        if (RunsThroughInstance(members) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null))
+        {
+            AssignThroughInstance(a, members); // K1, K2: a field of an instance
+            return;
+        }
+
+        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
+
         KurzType current;
         VariableSymbol? changed = null;
         if (root is NameExpression name)
@@ -1901,7 +2000,7 @@ public sealed partial class Checker
                 }
                 else
                 {
-                    Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is written through a `{current}` without a check (N2)");
+                    Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is written through {Types.A(current)} without a check (N2)");
                 }
 
                 current = Types.Error;
@@ -1936,7 +2035,7 @@ public sealed partial class Checker
             changes[a] = new Change(changed, path, a.Line, $"an assignment changes `{path}`"); // M7, in an arm inside an expression
         }
 
-        var value = CheckExpression(a.Value, Types.IsError(current) ? Untyped(a.Value) : current, keepCases: current is UnionType);
+        var value = CheckExpression(a.Value, Types.IsError(current) ? Untyped(a.Value) : current, keepCases: Types.KeepsCases(current));
         if (last is null || Types.IsError(current) || value.IsError)
         {
             return;
@@ -1948,7 +2047,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, current))
         {
-            Report(Types.MismatchId(value.Type, current), a.Value.Line, $"a `{value.Type}` where a `{current}` is required (T1)");
+            ReportMismatch(value.Type, current, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(current)} is required");
         }
 
         Assigned(through, current, value); // N7, N9: a path of `data` fields is narrowed by its assignment as a variable is
@@ -1993,7 +2092,8 @@ public sealed partial class Checker
     /// <summary>
     /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
     /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
-    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is.
+    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is (C6, proposed:
+    /// section 4 gives the form over a map alone).
     /// </summary>
     private void CheckForIn(ForInStatement f)
     {
@@ -2026,7 +2126,7 @@ public sealed partial class Checker
 
         if (f.Second is not null && value is null && !Types.IsError(element))
         {
-            this.Report(ErrorIds.TypeMismatch, f.Collection.Line, $"two names walk the entries of a map, not a `{model.TypeOf(f.Collection).Type}` (C6)");
+            this.Report(ErrorIds.TypeMismatch, f.Collection.Line, $"two names walk the entries of a map, not {Types.A(model.TypeOf(f.Collection).Type)} (C6)");
             element = Types.Error;
         }
 
@@ -2042,7 +2142,7 @@ public sealed partial class Checker
 
         KurzType Report(int line, KurzType type)
         {
-            this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not a `{type}` (C6, C8)");
+            this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not {Types.A(type)} (C6, C8)");
             return Types.Error;
         }
     }
@@ -2093,7 +2193,7 @@ public sealed partial class Checker
             return;
         }
 
-        var value = CheckExpression(r.Value, expected, keepCases: expected is UnionType);
+        var value = CheckExpression(r.Value, expected, keepCases: Types.KeepsCases(expected));
         if (value.IsError || Types.IsError(expected))
         {
             return;
@@ -2105,7 +2205,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, expected))
         {
-            Report(Types.MismatchId(value.Type, expected), r.Value.Line, $"a `{value.Type}` is returned where the result is a `{expected}` (F3, T1)"); // E1: at the value's line, as for every value that does not fit
+            ReportMismatch(value.Type, expected, r.Value.Line, $"{Types.A(value.Type)} is returned where the result is {Types.A(expected)}", "F3"); // E1: at the value's line, as for every value that does not fit
         }
     }
 

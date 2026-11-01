@@ -68,9 +68,11 @@ flowchart TD
         whose digest is stale: a number, the generated date or the TTL edited by hand
         (a recomputed digest passes: HAZARD issue 18); fewer entries than the floor;
         in the research entries, a finding with no verdict, two, or one in no word of its entry,
-        a section of the design record a verdict cites that the record does not have, a repeated,
+        a verdict under no finding, a section of the design record a verdict cites that the record
+        does not have, a range of sections written with a dash, which the lint does not read, a repeated,
         open or answered finding that cites none (not what the section says: a judgment step),
-        an entry with no finding, fewer research entries than their floor"]
+        an entry with no finding, findings with no record, or a record with no section, to look their
+        sections up in, fewer research entries than their floor"]
         G9["reference: a rule without id, status or the record section it cites;
         a decided, assumed or proposed rule with neither a case nor a reason;
         a case on an open rule; a sample that differs from its corpus file;
@@ -113,7 +115,8 @@ flowchart TD
         release build with and without --lines, with KURZ_TRACE=0, inside the runtime, and a fault outside the
         guard page that the system ends, a trace cut where the reader could not map its pages with a count other than one line a frame, and on a count
         past the cut that reads the file at every frame, whose
-        release run with --lines outlasts the 30 seconds of a run; the build command's lines and refusals; and the refused write and the refused allocation,
+        release run with --lines outlasts the 30 seconds of a run (seen 2026-10-29: 288 seconds, the comment in TraceTests);
+        the build command's lines and refusals; and the refused write and the refused allocation,
         each with its error line; DataTests, red on a tag wider or narrower than the largest type number among the
         cases needs, two layouts for one union, a value that does not come back out of a union, a block not copied
         before a write, a path assignment that does not evaluate its value first, a static of a type with a base laid
@@ -148,7 +151,8 @@ flowchart TD
         the largest int of bytes (lowered to 20) that is not read whole or one byte more that is, on a read or a
         write in the wrong direction that is not error 9, on a file or a directory whose mode is not 0666 or 0777
         less the umask, on a descriptor opened without close-on-exec, on a directory
-        created again that fails, on the text of an error without a path, on an address read otherwise than Rust
+        created again that fails, or one created under a file whose error is not NotADirectory, on the text of an
+        error without a path, on an address read otherwise than Rust
         reads it, a scope id and a port with a sign among them, on a bind of IPv6's loopback that does not give
         what the machine's kernel gives, the bound address where it holds `::1` and its error elsewhere, on a listener on IPv6's wildcard that a connection of IPv4 does not
         reach where the kernel's dual stack is on, on a write to a connection whose peer closed it that is not
@@ -156,6 +160,13 @@ flowchart TD
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
         no program of them"]
+        G11["unicode-tables: compiler/Kurz.Compiler/Emit/CaseTables.cs is not what tools/unicode_tables.py writes from
+        the Unicode Character Database of the version it pins (`VERSION`), Rust's pin on 2026-10-31; a file of the
+        database whose SHA-256 is not the pinned one; a table with fewer entries than its floor; PARTLY, which is red,
+        where a file cannot be fetched from unicode.org or its download is cut off, since nothing was compared. A
+        fetched file is kept under its hash in the system's temporary directory and read again while the hash holds,
+        and fetched again where it cannot be read. Not seen: a move of Rust's pin away from the tool's version
+        (HAZARD issue 143)"]
         G4["ci-config: a pinned fact of a workflow changed. All four workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
@@ -211,8 +222,8 @@ flowchart TD
         that links an open issue labelled review-leftovers, the collection ticket; the gate reads that list only
         at the cap, and the resolve command resolves a thread whose replies all move it (self-tests).
         The cap command of tools/pr_gates.py takes that walk: the section as a comment on the ticket, the replies,
-        the resolutions, and a refusal below the cap, of an open finding of another head and of a thread a person
-        wrote in (self-tests).
+        the resolutions, and refuses, before any write, what knowledge/the-walk-at-the-cap-is-a-command.md lists
+        (self-tests).
         The gates job reads that list with issues: read, the one grant of its token beyond the tree and the
         pull request (ci-config pins the grant); a refused read fails the gate closed.
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]
@@ -258,7 +269,8 @@ flowchart TD
         finding it meets nor says it meets none (node B4 of the design playbook; the citations are G3's).
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).
         The reviewer is a model that is given one batch of the diff: it can miss a defect, it cannot
-        see a file outside its batch, and a breach it rates low opens no thread and holds no merge.
+        see a file outside its batch nor the part of a line over 4000 characters that its batch leaves out,
+        and a breach it rates low opens no thread and holds no merge.
         A rule that names a review rule as its gate has this much; the rest of it is a judgment step"]
         R6["what runs: the workflow file, the reviewer and the rules of the default branch; ci-config pins
         that nothing of the pull request is checked out, and that the job skips the Ready event of a head
@@ -268,10 +280,12 @@ flowchart TD
         HAZARD issue 11"]
         R7["review rounds, the owner's cap of one (2026-10-22; three from 2026-10-21): a round is a run that labelled the pull request;
         a run with files to review, in CI or off the pipeline, puts review-round-n on before its first pass,
-        a round whatever follows, and the count is the highest n (kit.review_rounds); at one every run ends
+        a round whatever follows, and the count is the highest n (kit.review_rounds); at one every run with a file
+        the replay cache does not answer ends
         before any pass as cap, in CI with the status review at error naming the cap, on the head the round at the cap
-        reviewed too. The end is inside the job: a job its if skips reports success.
-        Red: self-tests (the count, the label before the first pass, the end and its status).
+        reviewed too; a run there whose every file replays makes no pass, puts no label on and completes,
+        in CI with review at success: no round (the owner, 2026-11-01). The end is inside the job: a job its if skips reports success.
+        Red: self-tests (the count, the label before the first pass, the end and its status, the run that only replays).
         A label taken off or put on by hand, a second issue with the collection label, two runs that start
         at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
     end
@@ -280,7 +294,9 @@ flowchart TD
         gates and review green on the head, branch up to date,
         no force push, no deletion, nobody bypasses"]
         M2["merge_pr.py: refuses a head other than the one named, a Draft,
-        a branch behind its base, armed auto-merge, an unanswered finding (at the review cap a finding
+        a branch behind its base (at the review cap the refusal says, from the review status of the head,
+        whether the round converged on every file, and where it did not or the status does not show it,
+        that taking main costs a paid round and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
         moved to the collection ticket is answered, R7 and G8),
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
@@ -299,7 +315,8 @@ flowchart TD
         approval of 2026-10-21, which holds for the cap of one since 2026-10-22, is given for the head the round at the cap reviewed, when that round completed,
         for review and for gates when pr-findings is its one FAIL, conditions the caller reads (judgment
         step). The tool refuses a branch behind its base (M2), so when main moves after the round at the cap
-        the branch is brought up to date as a new head, which only the owner's approval of that head merges"]
+        the branch is brought up to date as a new head, which only the owner's approval of that head merges
+        over red; a new head the replay cache answers whole is green and needs none (R7)"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
     end
@@ -340,6 +357,8 @@ flowchart TD
   `compiler/global.json` changes the SDK: G10, whose command reads it from inside `compiler/`, and C1, whose SDK
   step installs it. A lock file, `compiler/Directory.Packages.props`, `compiler/Directory.Build.props` or
   `compiler/NuGet.config` changes what the gate restores or builds: G10 and C1.
+- `tools/unicode_tables.py` changes (the version, a hash, the form of the tables, a floor), or
+  `compiler/Kurz.Compiler/Emit/CaseTables.cs` does, or how `tools/gates.py` runs the tool: G11.
 - `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.
 - `tools/lint_reference.py` changes a check: G9 and X2. The emitter emits more of the corpus, or the runner's
   lists change: G10 and X2.

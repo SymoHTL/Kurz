@@ -36,7 +36,24 @@ public sealed partial class Emitter
             CallKind.ListWhere => EmitListWhere(c, info),
             CallKind.FromRaw => EmitListFromRaw(c, info),
             CallKind.DataNew => EmitConstruction(c, info),
+            CallKind.ClassNew => EmitClassNew(c, info),
+            CallKind.Method => EmitMethodCall(c, info),
             CallKind.ListClear => EmitListClear(c),
+            CallKind.ListIndexOf or CallKind.ListIndexOfRun => EmitListIndexOf(c, info.Kind == CallKind.ListIndexOfRun),
+            CallKind.ListAddRange => EmitListAddRange(c),
+            CallKind.ListReverse => EmitListReverse(c),
+            CallKind.ListSort => EmitListSort(c, stable: true),
+            CallKind.ListSortUnstable => EmitListSort(c, stable: false),
+            CallKind.ListSortBy => EmitListSortBy(c, info),
+            CallKind.StringSearch => EmitStringSearch(c),
+            CallKind.StringTrim => EmitStringTrim(c),
+            CallKind.StringSplit => EmitStringSplit(c),
+            CallKind.StringReplace => EmitStringReplace(c, info),
+            CallKind.StringCase => EmitStringCase(c),
+            CallKind.StringSubstring => EmitStringSubstring(c, info),
+            CallKind.Parse => EmitParse(c, info),
+            CallKind.HexDecode => EmitHexDecode(c, info),
+            CallKind.StringJoin => EmitStringJoin(c, info),
             CallKind.MapRemove => EmitMapRemove(c),
             CallKind.MapContainsKey => EmitMapContainsKey(c),
             CallKind.MapClear => EmitMapClear(c),
@@ -353,7 +370,7 @@ public sealed partial class Emitter
 
     /// <summary>R14: the bytes a value of a number, <c>bool</c>, <c>char</c>, a string or a pointer takes; the layout of a data value and of a union is the compiler's, which a program does not read.</summary>
     private static string SizeOf(KurzType type, int line) => type is DataType or UnionType
-        ? throw Unsupported(line, $"the size of a `{type}` (R14)")
+        ? throw Unsupported(line, $"the size of {Types.A(type)} (R14)")
         : Number(Lower.Size(type));
 
     /// <summary>R14: <c>Ptr&lt;T&gt;(x)</c> of a pointer is the same address, and of a <c>long</c> the address the number holds.</summary>
@@ -389,6 +406,15 @@ public sealed partial class Emitter
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {count})");
         fn.Unreachable();
         fn.Block(fits);
+        return TakenOver(pointer, count);
+    }
+
+    /// <summary>
+    /// The string of the <paramref name="count"/> bytes at <paramref name="pointer"/>, in a block <c>string.Allocate</c> gave, which it
+    /// takes over, its count of bytes marked in its highest bit as a string that holds a block (R15, T15).
+    /// </summary>
+    private string TakenOver(string pointer, string count)
+    {
         fn.Emit($"call void {StdFunction("StringTakeOver")}(ptr {pointer}, i64 {count})"); // the count in the block, which `s.Bytes` shares (T15)
         var withPointer = fn.Value($"insertvalue %kz.str undef, ptr {pointer}, 0");
         return fn.Value($"insertvalue %kz.str {withPointer}, i64 {fn.Value($"or i64 {count}, -9223372036854775808")}, 1");

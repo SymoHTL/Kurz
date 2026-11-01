@@ -1,0 +1,18 @@
+// expect: output
+// | [null, null, 1, 3]
+// | Cy
+// | Ann
+// | Bo
+// rules: X8
+
+data Person(string Name, int? Age)
+
+// `null` before every value, as C# and Rust order it
+mut List<int?> xs = [3, null, 1, null]
+xs.Sort()
+print(xs)
+mut people = [Person("Ann", 31), Person("Bo", 40), Person("Cy", null)]
+people.SortBy(p => p.Age)
+for p in people {
+    print(p.Name)
+}

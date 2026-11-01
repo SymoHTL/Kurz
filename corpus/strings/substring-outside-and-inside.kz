@@ -1,0 +1,6 @@
+// expect: throws index-out-of-range at 6
+// rules: X2
+
+// the start, 2, falls inside `ä`, and the end, 7, past the string's 3 bytes: the bounds are read first
+s = "hä"
+print(s.Substring(2, 5))

@@ -136,4 +136,4 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 23. Too many ways to write one thing
 
 - Evidence (an article, the last resort): "What’s coming in C# 12? Devs debate whether it's too much or not enough" (https://www.devclass.com/development/2023/05/30/whats-coming-in-c-12-devs-debate-whether-its-too-much-or-not-enough/1630606): "Another common complaint is that C# risks becoming too complex, or may already be."
-- Kurz: answered: "Grant for keywords", section 9 of the record. Before the answers: OPEN.
+- Kurz: answered: "Printed counts", section 1 of the record, and "Grant for keywords", section 9. Before the answers: OPEN.

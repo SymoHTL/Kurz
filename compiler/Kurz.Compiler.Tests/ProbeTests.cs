@@ -47,11 +47,18 @@ public sealed class ProbeTests : IDisposable
         var (code, lines) = Probed("print(missing)\n");
         Assert.Equal(1, code);
         Assert.Single(lines);
-        Assert.Contains("missing", lines[0], StringComparison.Ordinal);
+        Assert.StartsWith("1: error unknown-name: ", lines[0], StringComparison.Ordinal);
 
         var output = new StringWriter();
         Assert.Equal(2, Probe.Run(["--budget"], output));
         Assert.Contains("`--budget`", output.ToString(), StringComparison.Ordinal);
+        foreach (var arguments in new[] { new[] { "program.kz", "--grant" }, ["program.kz", "--grant", "--fenced"] })
+        {
+            var grant = new StringWriter();
+            Assert.Equal(2, Probe.Run(arguments, grant));
+            Assert.Equal("probe: `--grant` needs a name" + Environment.NewLine, grant.ToString());
+        }
+
         Assert.Equal(2, Probe.Run([], new StringWriter()));
         var missing = new StringWriter();
         Assert.Equal(2, Probe.Run(["no-such-program.kz"], missing));

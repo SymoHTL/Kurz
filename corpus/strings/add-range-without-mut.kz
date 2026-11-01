@@ -1,0 +1,6 @@
+// expect: error mut-required at 5
+// rules: X9
+
+xs = [1]
+xs.AddRange([2])
+print(xs)

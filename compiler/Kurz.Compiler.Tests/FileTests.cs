@@ -11,14 +11,17 @@ namespace Kurz.Compiler.Tests;
 /// holds it lets go of it, which a process allowed few descriptors shows over many opens, and so do the calls that open a file or a
 /// directory for themselves (S5, S6, S8); a copy of a file holds the one file (S5); a read into a list another value holds copies the
 /// list first, and a count and a <c>max</c> past the largest <c>int</c> raise <c>allocation-failed</c> before the read (S3); a whole
-/// file a list holds is read whole, and one byte more raises <c>allocation-failed</c> (S6); a read of a file opened to write and a write
+/// file a list holds is read whole, and one byte more raises <c>allocation-failed</c>, and a whole file is read into room for the size
+/// the system names for it without its list grown, and whole where that size is short, long or a failure, the room it asks for at
+/// once is what a refusal names, and the list has room for the file's size (S6); a read of a file opened to write and a write
 /// of one opened to read are the system's error 9, a file and a directory take 0666 and 0777 less the <c>umask</c>, and a descriptor is
 /// opened close-on-exec (S2, S8); a directory that exists is created again without an error, and one under a file is not (S8); the text
 /// of an error without a path (S1); a socket is opened close-on-exec, a listener reuses its address, an address is read at its last
 /// colon, a literal of IPv6 binds where the machine has its loopback, and a connection <c>Accept</c> gave names its listener's address
-/// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c> is the kind <c>Other</c>, through a runtime whose lookup gives
-/// that result, while the error of the system a lookup names is held by no test, since nothing makes <c>getaddrinfo</c> fail so on
-/// demand; and a build for Windows says <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
+/// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c>, or with <c>EAI_SYSTEM</c> while <c>errno</c> holds 0, is the kind
+/// <c>Other</c>, and one that fails with <c>EAI_SYSTEM</c> while <c>errno</c> holds 13 the error of that number, each through a runtime
+/// whose lookup gives that result; and a build for Windows says
+/// <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
 /// the runtime of this machine and under the fenced allocator of <see cref="ListTests.Fenced"/>, where no other runtime is named; on
 /// Windows each is held to the build's refusal instead.
 /// </summary>
@@ -212,6 +215,158 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // the positive control: a byte more than the list holds
         Ran(whole.Replace("    f.Close()\n", "    f.Write(\"x\".Bytes)\n    f.Close()\n", StringComparison.Ordinal), "file-limit-past", [], code: 1, error: "error: allocation-failed (21 bytes)\n", runtimes: [limited]);
+
+        // five bytes more: the room made for the size the system names is no more than the list holds, so the read takes the 20 bytes
+        // and the byte after them, and the error names the 21 bytes
+        Ran(whole.Replace("    f.Close()\n", "    f.Write(\"vwxyz\".Bytes)\n    f.Close()\n", StringComparison.Ordinal), "file-limit-five-past", [], code: 1, error: "error: allocation-failed (21 bytes)\n", runtimes: [limited]);
+
+        // a file the system names no size for, `/proc/self/stat`, of a few hundred bytes: its pieces stop at the 20 bytes the list holds,
+        // and the byte after them raises the same error
+        const string unsized = """
+            void | IoError Unsized() {
+                bytes = File.ReadAll("/proc/self/stat")
+                print(bytes.Count)
+            }
+
+            Unsized() else {
+                IoError e => print(e)
+            }
+
+            """;
+        Ran(unsized, "file-limit-unsized", [], code: 1, error: "error: allocation-failed (21 bytes)\n", runtimes: [limited]);
+    }
+
+    [Fact]
+    public void A_whole_file_whose_room_the_system_refuses_raises_allocation_failed_with_the_bytes_of_that_one_request()
+    {
+        // M9: the system of this runtime refuses every mapping of more than a mebibyte; a file of 1572864 bytes, which the shell writes
+        // before the run, asks the allocator for its size and the 16 bytes of the list's counts at once, 1572880 bytes, which it refuses
+        const string whole = """
+            void | IoError Whole() {
+                bytes = File.ReadAll("refused.bin")
+                print(bytes.Count)
+            }
+
+            Whole() else {
+                IoError e => print(e)
+            }
+
+            """;
+        var small = ListTests.Edited(("runtime/linux/linux.kz", "pub byte* Memory(long bytes) {\n", "pub byte* Memory(long bytes) {\n    if bytes > 1048576 {\n        return null\n    }\n\n"));
+        Ran(whole, "file-refused", [], setup: "head -c 1572864 /dev/zero > refused.bin", code: 1, error: "error: allocation-failed (1572880 bytes)\n", runtimes: [small]);
+
+        // a file of more bytes than a list holds, with the largest `int` lowered to 1200000 in the library's text: the room the read asks
+        // for is the 1200000 bytes the list holds and the 16 bytes of its counts, 1200016 bytes, which the same system refuses
+        var smallLimited = ListTests.Edited(("std/std.kz", "2147483647", "1200000"), ("runtime/linux/linux.kz", "pub byte* Memory(long bytes) {\n", "pub byte* Memory(long bytes) {\n    if bytes > 1048576 {\n        return null\n    }\n\n"));
+        Ran(whole, "file-refused-past", [], setup: "head -c 2097152 /dev/zero > refused.bin", code: 1, error: "error: allocation-failed (1200016 bytes)\n", runtimes: [smallLimited]);
+
+        // the positive control: a file of 1048000 bytes, whose room the system gives
+        Ran(whole, "file-granted", ["1048000"], setup: "head -c 1048000 /dev/zero > refused.bin", runtimes: [small]);
+    }
+
+    [Fact]
+    public void The_list_a_whole_file_is_read_into_has_room_for_its_size_and_8_bytes_at_least()
+    {
+        // the room made for the size: an `Add` to the list of a file of 100003 bytes grows it, as one to Rust's `Vec` after
+        // `try_reserve_exact` does, and five to the list of a file of 3 bytes do not, since a list of bytes takes 8 bytes of room at least,
+        // as `Grown` gives it, where Rust's `try_reserve_exact` gives the 3 alone; under the library that ends the process with the exit
+        // code 70 where an `Add` would grow a block a list has; the files are written by the shell, since a list made by `Add`s grows
+        const string room = """
+            void | IoError Room() {
+                mut small = File.ReadAll("small.bin")
+                print(small.Count)
+                for i in 0..<5 {
+                    small.Add(byte(i))
+                }
+
+                print(small.Count)
+                mut large = File.ReadAll("large.bin")
+                print(large.Count)
+                large.Add(byte(1))
+                print(large.Count)
+            }
+
+            Room() else {
+                IoError e => print(e)
+            }
+
+            """;
+        const string files = "head -c 3 /dev/zero > small.bin && head -c 100003 /dev/zero > large.bin";
+        var noAddGrows = ListTests.Edited(("std/std.kz", "    long grown = Grown(room, item)\n    long bytes = 16 + grown * item\n    byte* p = Reallocate(", "    sys.Exit(70)\n    long grown = Grown(room, item)\n    long bytes = 16 + grown * item\n    byte* p = Reallocate("));
+        Ran(room, "file-room-ended", ["3", "8", "100003"], setup: files, code: 70, runtimes: [noAddGrows]);
+
+        // the positive control: the same program under the runtime
+        Ran(room, "file-room", ["3", "8", "100003", "100004"], setup: files, runtimes: [toolchain.Runtime]);
+    }
+
+    /// <summary>The library whose read into a list of bytes ends the process with the exit code 70 where it would grow a block the list has (S3, S6).</summary>
+    private static CheckedRuntime NoReadGrows => ListTests.Edited(("std/std.kz", "    long size = 16 + grown\n", "    if block != null {\n        sys.Exit(70)\n    }\n\n    long size = 16 + grown\n"));
+
+    private const string Sizes = """
+        void | IoError Sizes() {
+            for n in [1, 7, 8, 9, 11, 8191, 8192, 8193, 100003, 1048579] {
+                mut b = Bytes()
+                for i in 0..<n {
+                    b.Add(byte(i % 251))
+                }
+
+                File.WriteAll("sized.bin", b)
+                back = File.ReadAll("sized.bin")
+                print("{back.Count} {back == b}")
+            }
+
+            File.Delete("sized.bin")
+            stat = File.ReadAll("/proc/self/stat")
+            print(stat.Count > 0)
+        }
+
+        Sizes() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    private static readonly string[] SizesRead = ["1 true", "7 true", "8 true", "9 true", "11 true", "8191 true", "8192 true", "8193 true", "100003 true", "1048579 true", "true"];
+
+    [Fact]
+    public void A_whole_file_is_read_into_room_for_the_size_the_system_names_for_it_and_its_list_never_grows()
+    {
+        // S6, as Rust's `fs::read`: the room for the file's size is made before the first read, and a list full at that size reads one
+        // byte, which tells the end of the file, so that no list grows, under the library that ends the process where one would; a file
+        // the system names no size for, `/proc/self/stat`, takes 8192 bytes of room first, which its few hundred bytes do not fill
+        Ran(Sizes, "file-sizes", SizesRead, runtimes: [toolchain.Runtime, ListTests.Fenced, NoReadGrows]);
+
+        // the positive control: a read that grows the list it reads into ends there under that library
+        const string grows = """
+            void | IoError Grows() {
+                File.WriteAll("grows.bin", "abcdefghij".Bytes)
+                f = File.Open("grows.bin")
+                File.Delete("grows.bin")
+                mut buffer = Bytes()
+                print(f.Read(mut buffer, 8))
+                print(f.Read(mut buffer, 2))
+                f.Close()
+            }
+
+            Grows() else {
+                IoError e => print(e)
+            }
+
+            """;
+        Ran(grows, "file-read-grows", ["8", "2"], runtimes: [toolchain.Runtime]);
+        Ran(grows, "file-read-grows-ended", ["8"], code: 70, runtimes: [NoReadGrows]);
+    }
+
+    [Fact]
+    public void A_whole_file_is_read_whole_where_the_size_the_system_names_is_short_long_or_a_failure()
+    {
+        // the sizes the system names 3 bytes short and 3 bytes long: a list full at the short size reads one byte, which the file has, adds
+        // it and grows on, as Rust's `read_to_end` appends its probe and grows its `Vec`; a list made for the long size reads what the file
+        // has; and a size the system fails to give, the error 9, is no size, as Rust's `fs::read` takes `metadata().ok()`: the files of the
+        // sizes above, which every one of them reads byte for byte
+        static CheckedRuntime Named(string by) => ListTests.Edited(("runtime/linux/linux.kz", "                result = *Ptr<long>(status + 48)\n", $"                result = *Ptr<long>(status + 48) {by}\n"));
+        var failing = ListTests.Edited(("runtime/linux/linux.kz", "            result = Checked(long(fstat(fd, Ptr<void>(status))))\n", "            result = -9\n"));
+        Ran(Sizes, "file-sizes-named", SizesRead, runtimes: [Named("- 3"), Named("+ 3"), failing]);
     }
 
     [Fact]
@@ -380,18 +535,24 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        Assert.Equal([true, true, true], CloseOnExec(toolchain.Runtime, "socket-cloexec"));
+        if (CloseOnExec(toolchain.Runtime, "socket-cloexec") is { } with) // null on Windows, where the build refuses the program
+        {
+            Assert.Equal([true, true, true], with);
+        }
 
         // the positive control: the runtime's socket and accept without `SOCK_CLOEXEC`
         var without = ListTests.Edited(("runtime/linux/linux.kz", "int fd = socket(family, 524289, 0)", "int fd = socket(family, 1, 0)"), ("runtime/linux/linux.kz", "accept4(fd, null, null, 524288)", "accept4(fd, null, null, 0)"));
-        Assert.Equal([false, false, false], CloseOnExec(without, "socket-cloexec-without"));
+        if (CloseOnExec(without, "socket-cloexec-without") is { } withoutFlag)
+        {
+            Assert.Equal([false, false, false], withoutFlag);
+        }
 
-        List<bool> CloseOnExec(CheckedRuntime runtime, string name)
+        List<bool>? CloseOnExec(CheckedRuntime runtime, string name)
         {
             if (Builder.HostTarget == Target.Windows)
             {
                 RefusedOnWindows(Compile(flags, toolchain.Runtime));
-                return runtime == toolchain.Runtime ? [true, true, true] : [false, false, false];
+                return null;
             }
 
             var compilation = Compile(flags, runtime);
@@ -433,7 +594,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void An_address_is_a_host_and_a_port_after_its_last_colon_and_a_lookup_that_fails_is_not_found()
+    public void An_address_is_a_host_and_a_port_after_its_last_colon_and_a_lookup_that_finds_no_host_is_not_found()
     {
         // a port as Rust reads a `u16`, `+` and zeros in front taken; a host that is no literal looked up, `127.1` by the C library's
         // reading of a number, the empty one failing with `EAI_NONAME`, which names no error of the system; a NUL byte `InvalidInput`, as in a path (S9)
@@ -457,7 +618,11 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(text, "socket-addresses", ["bound", "bound", "bound", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "InvalidInput 0", "NotFound 0", "InvalidInput 0"]);
+    }
 
+    [Fact]
+    public void A_lookup_that_fails_otherwise_than_finding_no_host_is_the_kind_Other_or_the_error_of_the_number_in_errno()
+    {
         // a lookup that fails with `EAI_AGAIN` (-3), a failure the resolver calls temporary, or `EAI_FAIL` (-4), one of the name server,
         // which no name server gives on demand, through a runtime whose lookup gives that result: `Other`, with the number 0 (S9)
         const string lookup = "int looked = getaddrinfo(text, null, Ptr<void>(held + 64), Ptr<void>(held + 112))";
@@ -467,6 +632,17 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var failing = ListTests.Edited(("runtime/linux/linux.kz", lookup, $"int looked = {result}"));
             Ran(failed, $"socket-lookup-{name}", ["Other 0"], runtimes: [failing]);
         }
+
+        // a lookup that fails with `EAI_SYSTEM` (-11) while `errno` holds 0: the error of the number 0, `Other`, as S9 gives such a
+        // lookup the number in `errno` and S1 gives `Other` to a number of no kind, where the 0 was read as a descriptor, the bind's
+        // check of it closing standard input and the connection made on it
+        var system = ListTests.Edited(("runtime/linux/linux.kz", lookup, "*__errno_location() = 0\n            int looked = -11"));
+        const string both = failed + "match TcpStream.Connect(\"name.invalid:80\") {\n    TcpStream => print(\"connected\")\n    IoError e => print(\"{e.Kind} {e.Code}\")\n}\n";
+        Ran(both, "socket-lookup-system", ["Other 0", "Other 0"], runtimes: [system]);
+
+        // with `errno` holding 13, `EACCES`: the error of that number, `PermissionDenied`, as S1 gives it after Rust's `decode_error_kind`
+        var denied = ListTests.Edited(("runtime/linux/linux.kz", lookup, "*__errno_location() = 13\n            int looked = -11"));
+        Ran(both, "socket-lookup-errno", ["PermissionDenied 13", "PermissionDenied 13"], runtimes: [denied]);
     }
 
     /// <summary>

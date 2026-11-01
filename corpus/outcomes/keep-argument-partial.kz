@@ -1,0 +1,22 @@
+// expect: error type-mismatch at 22
+// rules: O4
+
+data NotFound
+
+// `Invalid` is the case of an enum's `From` that every file sees without declaring it (D18)
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    print(found)
+}
+
+// the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+Report(Find(1))

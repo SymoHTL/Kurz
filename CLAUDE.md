@@ -136,6 +136,8 @@ Each line names a trap; its evidence is in the entry it links.
    (`gh workflow run review.yml`), and the run the forge starts by itself when a session marks a
    pull request Ready or pushes to a Ready one; the Ready run alone is skipped when the head
    carries the label `reviewed-<its sha>`, which a completed off-pipeline review of that head adds.
+   A run whose every file replays from the cache makes no pass and spends nothing (the rule "A pull
+   request gets at most one review round").
    A run in CI starts without a question to the owner: the question before every run, set on
    2026-10-02, was retired by the owner on 2026-10-07 after it had stalled every round; the bill
    is counted before the run and named in the report after it. A run off the pipeline spends the
@@ -211,16 +213,20 @@ Each line names a trap; its evidence is in the entry it links.
   `credential`: the owner fixes the secret. `budget`: run it again; what the run found is posted
   and what converged is replayed, so the next run continues. `base`: the pull request does not
   target `main`, so a status on its head would vouch for a diff nobody reviewed; retarget it, or
-  review it off the pipeline. `cap`: the pull request had its one review round; no run follows,
-  and the rule "A pull request gets at most one review round" says what does. `rules`,
+  review it off the pipeline. `cap`: the pull request had its one review round, and this head has a
+  file the cache does not answer; no run follows, and the rule "A pull request gets at most one
+  review round" says what does. `rules`,
   `oversized`, `empty`, `bad-diff`: the line says what to do. A run that labelled the pull
   request is a round whatever kind it ends with (that rule), so running it again after any of
   them, `budget`, `usage-limit`, `head-moved` and the reviewer's own defects among them, takes the
   one round, and after it no run follows.
   `judgment step`
 - A branch behind `main` fails what `main` already fixed: update the branch before debugging. At
-  the review cap the update is a new head outside the cap's approval: ask the owner first.
-  `judgment step`
+  the review cap the update is a new head outside the cap's approval: ask the owner first, unless
+  the cache answers the new head whole (the rule "A pull request gets at most one review round"
+  says when). The dry run of the merge tool at the head the round reviewed says, in its refusal of
+  the branch behind `main`, whether the round converged on every file (that rule). Gate:
+  `self-tests` for what the refusal says (`merge_pr.taking_main`); the rest is a `judgment step`.
 
 ## Architecture
 
@@ -338,6 +344,15 @@ Gate: review rule "rules for sessions".
   the walk counts) for the shapes those tests hold; a borrowing construct no program reaches, and a
   change the walk does not count: review rule "compiler".
 
+- **The case tables are generated, never edited.** `compiler/Kurz.Compiler/Emit/CaseTables.cs` is what
+  `tools/unicode_tables.py` writes from the Unicode Character Database of the version Rust's stable
+  release pins, each of its three files fetched and checked by its SHA-256 (section 12 of the design
+  record: the owner, 2026-10-31, "Rust's pin" and "Generated, as Rust"); a newer version comes in by a
+  pull request that runs the tool and lists the mappings it prints, with no question to the owner
+  ([knowledge/a-new-unicode-version-is-one-generator-run.md](knowledge/a-new-unicode-version-is-one-generator-run.md)).
+  Gate: `unicode-tables`, which ends PARTLY, and so red, where a file cannot be fetched; that the tool's
+  version is still the one Rust's stable release pins is read by nobody but a reader: HAZARD (#143).
+
 ### A public repository
 
 - **Future plans stay out**: what gets built when, steps, milestones, schedules, the order in
@@ -400,10 +415,11 @@ Gate: review rule "rules for sessions".
   follows (a pass, a limit, a cut-off, a failure); a dry run, `--plan` and a run that ends before
   the label (closed, the secret missing, nothing to review, the cap) put none on. The count is the
   highest `n`, the rounds before the cap count, and the rounds a pull request had before the labels
-  are counted by one label put on by hand. At one every further run ends before its first pass
+  are counted by one label put on by hand. At one every further run with a file to review ends before its first pass
   as `REVIEW DID NOT COMPLETE (cap)`, in CI with the status `review` at `error`, naming the cap; on
   the head the round at the cap reviewed that error takes the place of the round's status, so at the
-  cap no run is started (no Draft and Ready, no dispatch, no push). What the round at the cap left open
+  cap no run is started (no Draft and Ready, no dispatch, no push), but for a head the cache answers
+  whole (below). What the round at the cap left open
   goes on the collection ticket, the open issue labelled `review-leftovers`: one section per pull
   request, with the head the findings were made on, the links of its threads and the link of its
   lows on the `review-lows` issue; every open thread gets a reply that links the ticket and is
@@ -411,10 +427,30 @@ Gate: review rule "rules for sessions".
   `change-walk` has the walk (section 3, item 8), and `py -3 tools/pr_gates.py cap --pr N --analysis <file>`
   takes it: the section as a comment on the ticket, the replies and the resolutions
   ([knowledge/the-walk-at-the-cap-is-a-command.md](knowledge/the-walk-at-the-cap-is-a-command.md)).
-  Gate: `self-tests` (the count, the label before
-  the first pass, the end at the cap and its status; the move to the collection ticket in
+  One head is no round (the owner, 2026-11-01, "Free replay isn't a round"): a run whose every file
+  replays from the cache, each diff block byte-identical to one a converged review stored under the
+  same reviewer, rules, title and description, makes no pass, puts no label on and completes, in CI
+  with `review` at `success`, so its head merges on its own green checks with no approval over red.
+  A push of a merge of `main` at the cap is such a head when the merge changes no file of the pull
+  request's diff and none of `tools/review/review.py`, `tools/kit.py` and `.review/review-rules.yaml`,
+  the round converged on every file, and the title and the description are as the round read them
+  (an edit of either turns the replay off); the walk at the cap is taken first, at the head the
+  round reviewed. A run with one file the cache does not answer still ends as `cap` before any pass,
+  and its head needs the owner's approval as any other
+  ([knowledge/a-review-the-cache-answers-is-no-round.md](knowledge/a-review-the-cache-answers-is-no-round.md)).
+  A pull request at its cap whose round did not converge on a file cannot take `main` for free:
+  taking `main` moves it outside the cap's approval, since the cache stores no file of a batch that
+  did not converge (pull request 181,
+  [knowledge/a-round-that-did-not-converge-makes-main-a-round.md](knowledge/a-round-that-did-not-converge-makes-main-a-round.md)).
+  The merge tool's refusal of a branch behind `main` at the cap says whether the round converged on
+  every file of the head, from the head's `review` status. Where it did not, or where the status does
+  not show it, the refusal says that taking `main` costs a paid round and that the merge needs the
+  owner's choice. Gate: `self-tests` (the count, the label before
+  the first pass, the end at the cap and its status, the run at the cap that only replays; the move to the collection ticket in
   `pr-findings`, in the resolve command, in the cap command and in the merge tool, whose wiring of it is
-  `merge_pr.held_by`); the reading the section carries and starting no run at the cap are a `judgment step`; a
+  `merge_pr.held_by`; a section posted with no reading, which the cap command refuses; the merge tool's refusal of a
+  branch behind `main` at the cap, `merge_pr.taking_main`); what the reading says,
+  starting no run at the cap and the rest of the check that a head replays (what `main` changed) are a `judgment step`; a
   label taken off or put on by hand, a second open issue that carries the label, two runs of one
   pull request that start at the same moment, and a dry run, which puts on no label: HAZARD (#41).
   The gates job lists the ticket with `issues: read`, which `ci-config` pins.
@@ -450,7 +486,8 @@ Gate: review rule "rules for sessions".
   A push that is needed anyway fixes the lows of its pull request too. A pull request needs no
   further round once a round reports nothing above low; a head that then takes `main` is a new
   head without a `review` status, and the run that posts one is a paid round like any other
-  (Tests, item 6). Gate: `self-tests` for where the reviewer posts them; that they get fixed is a
+  (Tests, item 6), unless the cache answers every file of it (the rule "A pull request gets at most
+  one review round"). Gate: `self-tests` for where the reviewer posts them; that they get fixed is a
   `judgment step`.
 - **No workflow-skip literal** in a title, a description or a commit message. Gate: `pr-title`,
   and the pre-push hook for commit messages. `pr-title` cannot report a literal in the head
@@ -499,6 +536,7 @@ Gate: review rule "rules for sessions".
 | workflow facts, the image the `gates` job runs in, named by its digest, with the facts of its Dockerfile, and the LLVM major of that image and of the Windows job's install, held to the compiler's (`ci-config`) | wrap-up (#6) |
 | store shape, expiring numbers, generated numbers that match their digest, and the sections of the design record the research findings cite (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, every corpus case the compiler emits builds and runs as its header says, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
+| the case tables of X3 are what the pinned version of the Unicode Character Database gives (`unicode-tables`) | that the pinned version is still the one Rust's stable release pins (#143) |
 | the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, and the expectations of the corpus cases the compiler does not emit, being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |

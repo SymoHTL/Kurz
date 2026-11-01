@@ -1,0 +1,24 @@
+// expect: output
+// | [0, 1, 171, 255]
+// | odd length at 3
+// | invalid digit at 1
+// | odd length at 3
+// | []
+// | invalid digit at 0
+// rules: H7
+
+void Show(string s) {
+    match Hex.Decode(s) {
+        Bytes b => print(b)
+        HexError e => print(e)
+    }
+}
+
+Show("0001abFF")
+Show("abc")
+Show("0xff")
+// an odd length and a character that is no digit: the length is read first
+Show("0xf")
+Show("")
+// a letter of two bytes is an even length, and its first byte is no digit
+Show("ä")

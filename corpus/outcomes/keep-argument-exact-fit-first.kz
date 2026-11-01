@@ -1,0 +1,37 @@
+// expect: output
+// | the success
+// | done
+// | none
+// rules: O4, F13
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(int n) {
+    print("the success")
+}
+
+void Show(long | NotFound x) {
+    print("the union")
+}
+
+// `Show(int)` fits the success exactly, and the union needs a widening: the exact fit runs, and `NotFound` leaves `Shown`
+int | NotFound Shown(int id) {
+    Show(Find(id))
+    return 0
+}
+
+match Shown(1) {
+    int n => print("done")
+    NotFound => print("none")
+}
+match Shown(2) {
+    int n => print("done")
+    NotFound => print("none")
+}

@@ -250,6 +250,11 @@ public sealed partial class Emitter
     /// </summary>
     private string CollectionPlace(Expression receiver)
     {
+        if (InstanceFieldPlace(receiver) is { } field)
+        {
+            return field; // K2: a field of an instance, which holds its list or map as a variable does
+        }
+
         var members = new List<MemberAccess>();
         var target = Unwrap(receiver);
         while (target is MemberAccess m)
@@ -385,7 +390,7 @@ public sealed partial class Emitter
                 }
 
             default:
-                throw Unsupported(line, $"`==` on a `{type}`");
+                throw Unsupported(line, $"`==` on {Types.A(type)}");
         }
     }
 
@@ -476,11 +481,17 @@ public sealed partial class Emitter
                 case DataType d when IsEnvError(d):
                     EnvErrorText(d); // S14: its words and its name, in the form of an `IoError`'s
                     break;
+                case DataType d when IsParseError(d):
+                    ParseErrorText(d); // X7: its words alone, as it holds none of the input
+                    break;
+                case DataType d when IsHexError(d):
+                    HexErrorText(d); // H7: its words and its position
+                    break;
                 case DataType d:
                     fn.Return($"%kz.str {RecordText(d, Layout.Fields(d).Select((_, i) => fn.Value($"extractvalue {Ir(d)} %a0, {Number(i)}")).ToList(), line)}");
                     break;
                 case UnionType u when u.Cases.Any(c => c is VoidType):
-                    throw new InvalidOperationException($"the text of a `{u}` at line {line}: a success without a value has none, `no-text`, which the checker reports (A7)");
+                    throw new InvalidOperationException($"the text of {Types.A(u)} at line {line}: a success without a value has none, `no-text`, which the checker reports (A7)");
                 case UnionType u:
                     ByCase(Tag("%a0", u), u, u.Cases, c =>
                     {
@@ -552,7 +563,7 @@ public sealed partial class Emitter
         return fn.Value($"load {Ir(union)}, ptr {slot}");
     }
 
-    /// <summary>A3: `Name { Field = text, ... }`, or the name alone for a type without fields; the texts it joined on the way are let go of.</summary>
+    /// <summary>A3: `Name { Field = text, ... }`, or the name alone for a type without fields, its pieces in one block (<see cref="Joined"/>).</summary>
     private string RecordText(DataType type, List<string> values, int line)
     {
         var fields = type.Symbol.Fields;
@@ -561,27 +572,31 @@ public sealed partial class Emitter
             return StringValue(type.Symbol.Name);
         }
 
-        var text = StringValue($"{type.Symbol.Name} {{ ");
+        var pieces = new List<InterpolationPiece>();
         var types = Layout.Fields(type);
         for (var i = 0; i < fields.Count; i++)
         {
-            text = Joined(text, StringValue($"{(i == 0 ? string.Empty : ", ")}{fields[i].Name} = "));
-            var piece = TextOf(values[i], types[i], line);
-            text = Joined(text, piece);
-            if (MakesText(types[i]))
-            {
-                Release(piece, Types.String);
-            }
+            var before = i == 0 ? $"{type.Symbol.Name} {{ " : ", ";
+            pieces.Add(LiteralPiece($"{before}{fields[i].Name} = "));
+            pieces.Add(PieceOf(values[i], types[i], line));
         }
 
-        return Joined(text, StringValue(" }"));
+        pieces.Add(LiteralPiece(" }"));
+        return Joined(pieces);
     }
 
-    /// <summary>The runtime's <c>Concat</c> of the two texts, after which the first, a text the caller held, is let go of.</summary>
-    private string Joined(string first, string second)
+    /// <summary>
+    /// The pieces in one block (<see cref="InOneBlock"/>), as Rust's <c>Debug</c> writes a value's parts into one <c>String</c>, after
+    /// which each text of them the caller held is let go of.
+    /// </summary>
+    private string Joined(List<InterpolationPiece> pieces)
     {
-        var joined = fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {first}, %kz.str {second})");
-        Release(first, Types.String);
+        var joined = InOneBlock(pieces);
+        foreach (var piece in pieces.Where(p => p.Held))
+        {
+            Release(piece.Value, Types.String);
+        }
+
         return joined;
     }
 

@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 6
+// rules: X9
+
+mut fs = List<() => int>()
+fs.Add(() => 1)
+print(fs.IndexOf(() => 1))

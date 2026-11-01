@@ -1187,11 +1187,36 @@ print(Take([]))
 
 Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)
 
+Case: [outcomes/keep-argument-generic-union.kz](../corpus/outcomes/keep-argument-generic-union.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report<T>(T | NotFound found) {
+    match found {
+        NotFound => print("none")
+        else => print("found")
+    }
+}
+
+// `T | NotFound` names a case of the call beyond its success, so it keeps the cases, and `T` is `int`
+Report(Find(1))
+Report(Find(2))
+```
+
 ### T18 (assumed, §4) Operators
 
 `+ - * / %` on numbers, `== != < <= > >=` for comparison, on two strings as T32 says, and `&& || !` on `bool`, with the
 meaning and the precedence they have in C#. Integer division drops the fraction, toward zero. An
-operand narrower than `int` is promoted to `int` first, as C# does (T28).
+operand narrower than `int` is promoted to `int` first, as C# does (T28). An operator on two values
+it does not take, `<` on two `bool`s among them, as C#'s `<` takes none (CS0019), is `type-mismatch`
+*(assumed, §4: the meaning the operators have in C#)*.
 
 Case: [types/arithmetic.kz](../corpus/types/arithmetic.kz)
 ```kurz
@@ -1201,6 +1226,12 @@ print(-7 / 2)
 print(7 % 3)
 print(1 < 2 && 2 < 3)
 print(!(1 == 1) || 3 >= 3)
+```
+
+Case: [types/compare-bools.kz](../corpus/types/compare-bools.kz)
+```kurz
+// `<` orders no `bool`, as in C#
+print(true < false)
 ```
 
 ### T28 (decided, §4) Arithmetic and shifts on types narrower than `int`

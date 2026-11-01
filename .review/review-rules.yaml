@@ -5,7 +5,9 @@
 # What the reviewer is given, and nothing else (no repository, no tools): the matching sections, the
 # title, the description, the list of every file the pull request changes with its status, the
 # findings already reported, and ONE batch of the diff. It sees the text of the files in its batch only. A rule may ask whether a file
-# is on the list; a rule that needs the text of a file outside the batch cannot be written here.
+# is on the list; a rule that needs the text of a file outside the batch cannot be written here. A line over 4000 characters is
+# sent in parts, its start and the text around the sentences that changed, and a marker names what is left out (#128): a rule
+# that needs the rest of such a line is judged on the parts sent.
 sections:
   - name: every pull request
     always: true

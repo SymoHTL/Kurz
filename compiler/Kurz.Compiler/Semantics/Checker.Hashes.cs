@@ -23,7 +23,9 @@ public sealed partial class Checker
     /// H1 to H4: a function of <c>Sha256</c>, <c>Md5</c>, <c>Crc32</c>, <c>Hmac</c>, <c>Hex</c> or <c>FixedTime</c>, a type and a verb (section
     /// 12, the owner, 2026-10-31, "`Sha256.Hash(b)`"): a digest is <c>Bytes</c> and the CRC a <c>uint</c> ("`Bytes`, CRC32 a `uint`"), a
     /// hasher's <c>New</c> ("Yes, as Rust"), <c>Hex.Encode</c> ("`Hex.Encode(b)`, lower case"), and the check of a tag and the comparison
-    /// in fixed time ("Verify + fixed-time equal"). Every call of a function of <c>Md5</c> is the lint <c>md5-insecure</c> (H5).
+    /// in fixed time ("Verify + fixed-time equal"), and <c>Hex.Decode</c>, the bytes of a string's digits or the case <c>HexError</c>, an
+    /// outcome (O1; H7, "Without input"), whose parameter takes the name of C#'s <c>Convert.FromHexString</c>. Every call of a function
+    /// of <c>Md5</c> is the lint <c>md5-insecure</c> (H5).
     /// </summary>
     private Typed CheckHashFunction(string type, MemberAccess m, CallExpression c)
     {
@@ -39,6 +41,7 @@ public sealed partial class Checker
             ("Hmac", "NewSha256") => (CallKind.HmacNew, [Bytes("key")], hasher!),
             ("Hmac", "VerifySha256") => (CallKind.HmacVerify, [Bytes("key"), Bytes("message"), Bytes("tag")], Types.Bool),
             ("Hex", "Encode") => (CallKind.HexEncode, [Bytes("bytes")], Types.String),
+            ("Hex", "Decode") => (CallKind.HexDecode, [new Slot("s", Types.String, false, false, false)], new UnionType([bytes, new DataType(dataTypes["HexError"], [])])),
             ("FixedTime", "Equal") => (CallKind.FixedTimeEqual, [Bytes("a"), Bytes("b")], Types.Bool),
             _ => null,
         };
@@ -84,7 +87,7 @@ public sealed partial class Checker
         };
         if (method is not { } f)
         {
-            Report(ErrorIds.UnknownName, m.Line, $"a `{hasher}` has no member `{m.Member}` (H3, V10)");
+            Report(ErrorIds.UnknownName, m.Line, $"{Types.A(hasher)} has no member `{m.Member}` (H3, V10)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }

@@ -118,6 +118,16 @@ public sealed record DataType(DataSymbol Symbol, IReadOnlyList<KurzType> TypeArg
     public override int GetHashCode() => HashCode.Combine(Symbol.Name, TypeArguments.Count);
 }
 
+/// <summary>A <c>class</c> (K1): a reference to a counted instance with identity (K3), one type per declaration.</summary>
+public sealed record ClassType(ClassSymbol Symbol) : KurzType
+{
+    public override string Text => Symbol.Name;
+
+    public bool Equals(ClassType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol);
+
+    public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
+}
+
 /// <summary>An <c>enum</c> (D12), one type per declaration.</summary>
 public sealed record EnumType(EnumSymbol Symbol) : KurzType
 {
@@ -145,7 +155,7 @@ public sealed record HandleType(Handle Kind) : KurzType
     public override string Text => Kind.ToString();
 }
 
-/// <summary>The hashers of the standard library, each a name every file sees (H3).</summary>
+/// <summary>The hashers of the standard library, each a name every file sees (H1, H3).</summary>
 public enum Hasher
 {
     Sha256,
@@ -155,8 +165,9 @@ public enum Hasher
 }
 
 /// <summary>
-/// A hasher (H3): the state of a hash over a message taken in pieces, a value that a copy goes on from where it stood, as a list's
-/// copy does, laid out as a list of bytes (design record, section 12, "Yes, as Rust"). Its text is the name of its type (H6).
+/// A hasher (H3): the state of a hash over a message taken in pieces (design record, section 12, the owner, 2026-10-31, "Yes, as
+/// Rust"), a value that a copy goes on from where it stood, as a list's copy does (H6, assumed), laid out as a list of bytes (the
+/// emitter's choice). Its text is the name of its type (H6).
 /// </summary>
 public sealed record HasherType(Hasher Kind) : KurzType
 {
@@ -284,6 +295,20 @@ public static class Types
     }
 
     /// <summary>
+    /// O4: whether a call keeps every case of its result where this type is written for its value, a variable's, a parameter's, a
+    /// field's, a list's item type or a result: a union, with or without a <c>null</c> beside its cases, that names a case of the
+    /// call's <paramref name="whole"/> result beyond its success (the owner, 2026-10-10, for a variable; 2026-10-31, for a parameter, "Keep,
+    /// like a variable", a constructor's field, "Keep, as any parameter", a list literal's items, "Keep, as the item type", and a
+    /// written union that holds a type parameter, "Keep, infer T = int"; at the other places the reading section 5 marks as assumed), or any union while that result is not read yet; a <c>T?</c> of one type is no list of cases (N8),
+    /// and a union that names none of the call's other cases, <c>int | string</c> for an <c>int | NotFound</c> call, is a type the
+    /// success converts to (D9), so the call stands for its success there, as for any other such type. The one test of every place
+    /// that keeps a call's cases.
+    /// </summary>
+    public static bool KeepsCases(KurzType? written, KurzType? whole = null) =>
+        written is UnionType && (NonNull(written) ?? written) is UnionType kept
+        && (whole is not UnionType u || u.Cases.Skip(1).Any(c => kept.Cases.Any(w => Same(w, c))));
+
+    /// <summary>
     /// N1: whether a <c>null</c> arm over a subject of these cases is an arm no value reaches: none of them is <c>null</c>, a pointer, which
     /// takes <c>null</c> itself (section 3), or a type parameter, which a nullable type can fill (N11). The one test of the checker, which
     /// reads such an arm with no diagnostic, and of the emitter, which branches past it, so that the two cannot read it apart.
@@ -387,6 +412,7 @@ public static class Types
             (MapType x, MapType y) => Same(x.Key, y.Key) && Same(x.Value, y.Value),
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (ClassType x, ClassType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
             (HasherType x, HasherType y) => x.Kind == y.Kind,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
@@ -555,6 +581,31 @@ public static class Types
 
         return ErrorIds.TypeMismatch;
     }
+
+    /// <summary>
+    /// The rule a message of the id <see cref="MismatchId"/> gives cites, as its summary names them: N2, T7 for an integer type and T29
+    /// for a time type, T23 or T1.
+    /// </summary>
+    public static string MismatchRule(KurzType from, KurzType to) => MismatchId(from, to) switch
+    {
+        ErrorIds.NullableUnchecked => "N2",
+        ErrorIds.NarrowingConversion => IsInteger(from) ? "T7" : "T29",
+        ErrorIds.SignMix => "T23",
+        _ => "T1",
+    };
+
+    /// <summary>
+    /// A name in code with its article, as a text writes it (E2 leaves the text free): "an `int`" before a vowel letter, "a `uint`"
+    /// before a <c>u</c>, which the names of the built-in types say as a consonant, and "a `string`" before the rest.
+    /// </summary>
+    public static string A(object name)
+    {
+        var text = name.ToString() ?? "";
+        return (text.Length > 0 && text[0] is 'a' or 'e' or 'i' or 'o' or 'A' or 'E' or 'I' or 'O' ? "an `" : "a `") + text + "`";
+    }
+
+    /// <summary>A count with its noun, as a text writes it: "1 argument", "0 parameters".</summary>
+    public static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
 
     /// <summary>
     /// The common type of two integer operands under <c>+ - * / %</c>, the comparisons and

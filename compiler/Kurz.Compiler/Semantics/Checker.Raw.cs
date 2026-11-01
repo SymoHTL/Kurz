@@ -164,6 +164,7 @@ public sealed partial class Checker
         PrimitiveType { Kind: Primitive.String } => Holding.Counted,
         PrimitiveType => Holding.Nothing,
         ListType or MapType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
+        ClassType => Holding.Counted, // K2: an instance is a counted reference (section 3)
         UnionType u => Worst(u.Cases.Select(c => Holds(c, seen))),
         DataType d => seen.Contains(d.Symbol) ? Holding.Counted : HoldsFields(d, seen),
         TypeParameterType => Holding.Unknown,
@@ -211,7 +212,7 @@ public sealed partial class Checker
         switch (Holds(pointee, []))
         {
             case Holding.Counted:
-                Report(ErrorIds.CountedPointee, line, $"{what} takes a type that holds no counted reference, and a `{pointee}` holds one (R10)");
+                Report(ErrorIds.CountedPointee, line, $"{what} takes a type that holds no counted reference, and {Types.A(pointee)} holds one (R10)");
                 return Types.Error;
             case Holding.Unknown:
                 NotSupported(line, "a pointer to a type that holds a type parameter (R10, T19)");
@@ -301,7 +302,7 @@ public sealed partial class Checker
 
         if (pointer.Type is not PointerType p)
         {
-            Report(ErrorIds.TypeMismatch, line, $"{form} reads or writes through a pointer, and a `{pointer.Type}` is none (R10)");
+            Report(ErrorIds.TypeMismatch, line, $"{form} reads or writes through a pointer, and {Types.A(pointer.Type)} is none (R10)");
             return Types.Error;
         }
 
@@ -333,7 +334,7 @@ public sealed partial class Checker
         var pointee = ThroughPointer(target, i.Line, "an index");
         if (!index.IsError && !IsOffset(index.Type))
         {
-            Report(ErrorIds.TypeMismatch, i.Line, $"an index through a pointer is an `int` or a `long`, not a `{index.Type}` (R10)");
+            Report(ErrorIds.TypeMismatch, i.Line, $"an index through a pointer is an `int` or a `long`, not {Types.A(index.Type)} (R10)");
             return Typed.Error;
         }
 
@@ -455,7 +456,7 @@ public sealed partial class Checker
                 return new Typed(Types.Bool);
             }
 
-            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` compares two pointers of one pointee type, not a `{left.Type}` and a `{right.Type}` (R10, T1)");
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` compares two pointers of one pointee type, not {Types.A(left.Type)} and {Types.A(right.Type)} (R10, T1)");
             return new Typed(Types.Bool);
         }
 
@@ -475,7 +476,7 @@ public sealed partial class Checker
         };
         if (shape is null || (shape == "difference" && !Types.Same(lp!, rp!)))
         {
-            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes a pointer and an `int` or a `long`, or two pointers of one pointee type, not a `{left.Type}` and a `{right.Type}` (R10, T1)");
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes a pointer and an `int` or a `long`, or two pointers of one pointee type, not {Types.A(left.Type)} and {Types.A(right.Type)} (R10, T1)");
             return Typed.Error;
         }
 
@@ -539,7 +540,7 @@ public sealed partial class Checker
                     Add(d);
                 }
 
-                Report(ErrorIds.NullableUnchecked, a.Line, $"an entry is written into a `{target.Type}` without a check (N2)");
+                Report(ErrorIds.NullableUnchecked, a.Line, $"an entry is written into {Types.A(target.Type)} without a check (N2)");
                 CheckLoosely(index.Index, a.Value);
                 return;
             }
@@ -562,7 +563,7 @@ public sealed partial class Checker
                     Add(d);
                 }
 
-                Report(ErrorIds.NullableUnchecked, a.Line, $"an item is written into a `{target.Type}` without a check (N2)");
+                Report(ErrorIds.NullableUnchecked, a.Line, $"an item is written into {Types.A(target.Type)} without a check (N2)");
                 CheckLoosely(index.Index, a.Value);
                 return;
             }
@@ -584,7 +585,7 @@ public sealed partial class Checker
             model.RecordType(index, new Typed(current));
             if (!offset.IsError && !IsOffset(offset.Type))
             {
-                Report(ErrorIds.TypeMismatch, index.Line, $"an index through a pointer is an `int` or a `long`, not a `{offset.Type}` (R10)");
+                Report(ErrorIds.TypeMismatch, index.Line, $"an index through a pointer is an `int` or a `long`, not {Types.A(offset.Type)} (R10)");
                 current = Types.Error;
             }
         }
@@ -622,7 +623,7 @@ public sealed partial class Checker
             current = Types.Error;
         }
 
-        var value = CheckExpression(a.Value, Types.IsError(current) ? null : current, keepCases: current is UnionType);
+        var value = CheckExpression(a.Value, Types.IsError(current) ? null : current, keepCases: Types.KeepsCases(current));
         if (Types.IsError(current) || value.IsError)
         {
             return;
@@ -634,7 +635,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, current))
         {
-            Report(Types.MismatchId(value.Type, current), a.Value.Line, $"a `{value.Type}` where a `{current}` is required (T1)");
+            ReportMismatch(value.Type, current, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(current)} is required");
         }
     }
 
@@ -671,7 +672,7 @@ public sealed partial class Checker
         var position = CheckExpression(index.Index, Types.Int);
         if (!position.IsError && !Types.IsInteger(position.Type))
         {
-            Report(ErrorIds.TypeMismatch, index.Line, $"an index is an integer, not a `{position.Type}` (M9, T2)");
+            Report(ErrorIds.TypeMismatch, index.Line, $"an index is an integer, not {Types.A(position.Type)} (M9, T2)");
         }
 
         CheckWrittenValue(a, index, list.Element);
@@ -693,6 +694,11 @@ public sealed partial class Checker
             root = Unwrap(m.Target);
         }
 
+        if (members.Count == 0 && (RunsThroughInstance(fields) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null)))
+        {
+            return WrittenThroughInstance(a, index, fields); // K2: a collection a field of an instance holds
+        }
+
         if (members.Count > 0 || root is not NameExpression name || !model.IsVariable(name))
         {
             NotSupported(a.Line, unread);
@@ -701,7 +707,7 @@ public sealed partial class Checker
         }
 
         var (variable, captured) = Lookup(name.Name);
-        if (ThroughNullable(variable!, fields, "an assignment into a path through a nullable field (N3, M4)"))
+        if (ThroughNullable(variable!, fields, "an assignment into a path through a nullable variable or field (N3, M4)"))
         {
             CheckLoosely(index.Index, a.Value);
             return false;
@@ -736,7 +742,7 @@ public sealed partial class Checker
     private void CheckWrittenValue(Assignment a, IndexExpression index, KurzType type)
     {
         model.RecordType(index, new Typed(type));
-        var value = CheckExpression(a.Value, type, keepCases: type is UnionType);
+        var value = CheckExpression(a.Value, type, keepCases: Types.KeepsCases(type));
         if (value.IsError)
         {
             return;
@@ -748,7 +754,7 @@ public sealed partial class Checker
         }
         else if (!Types.Assignable(value.Type, type))
         {
-            Report(Types.MismatchId(value.Type, type), a.Value.Line, $"a `{value.Type}` where a `{type}` is required (T1)");
+            ReportMismatch(value.Type, type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(type)} is required");
         }
     }
 
@@ -774,7 +780,7 @@ public sealed partial class Checker
             return new Typed(pointer);
         }
 
-        Report(ErrorIds.TypeMismatch, c.Line, $"`Ptr<T>(x)` takes a pointer or a `long`, not a `{source.Type}` (R14, T1)");
+        Report(ErrorIds.TypeMismatch, c.Line, $"`Ptr<T>(x)` takes a pointer or a `long`, not {Types.A(source.Type)} (R14, T1)");
         return Typed.Error;
     }
 
@@ -1302,14 +1308,14 @@ public sealed partial class Checker
         {
             if (type is not null && !Types.IsError(type) && !takes(type))
             {
-                Report(ErrorIds.AsmOperand, o.Line, $"a `{type}` does not go into a register of the class `{registerClass}` (R11)");
+                Report(ErrorIds.AsmOperand, o.Line, $"{Types.A(type)} does not go into a register of the class `{registerClass}` (R11)");
                 return;
             }
         }
 
         if (inType is not null && outType is not null && !Types.IsError(inType) && !Types.IsError(outType) && !Types.Same(inType, outType) && !(SameWidth(inType, outType)))
         {
-            Report(ErrorIds.AsmOperand, o.Line, $"`{o.Word}` takes a `{inType}` in and a `{outType}` out, and two types of one register are one type, or integers or pointers of one width (R11)");
+            Report(ErrorIds.AsmOperand, o.Line, $"`{o.Word}` takes {Types.A(inType)} in and {Types.A(outType)} out, and two types of one register are one type, or integers or pointers of one width (R11)");
         }
     }
 
@@ -1708,7 +1714,7 @@ public sealed partial class Checker
 
         if (declared is not null && !Types.IsError(declared) && Holds(declared, []) != Holding.Nothing)
         {
-            Report(ErrorIds.StaticState, v.Line, $"{what} holds what a pointer points to, and a `{declared}` holds a counted reference (R13, R10)");
+            Report(ErrorIds.StaticState, v.Line, $"{what} holds what a pointer points to, and {Types.A(declared)} holds a counted reference (R13, R10)");
             CheckLoosely(values);
             return Types.Error;
         }
@@ -1727,7 +1733,7 @@ public sealed partial class Checker
         readingConstant = true;
         stateRead = false;
         Push();
-        var value = CheckExpression(v.Value, declared, keepCases: declared is UnionType);
+        var value = CheckExpression(v.Value, declared, keepCases: Types.KeepsCases(declared));
         var captured = Pop(commit: false);
         readingConstant = reading;
         if (stateRead)
@@ -1755,7 +1761,7 @@ public sealed partial class Checker
 
         if (Holds(type, []) != Holding.Nothing)
         {
-            Report(ErrorIds.StaticState, v.Line, $"{what} holds what a pointer points to, and a `{type}` holds a counted reference (R13, R10)");
+            Report(ErrorIds.StaticState, v.Line, $"{what} holds what a pointer points to, and {Types.A(type)} holds a counted reference (R13, R10)");
             return Types.Error;
         }
 
@@ -1766,7 +1772,7 @@ public sealed partial class Checker
 
         if (!Types.Assignable(value.Type, type))
         {
-            Report(Types.MismatchId(value.Type, type), v.Value.Line, $"a `{value.Type}` where a `{type}` is required (T1)");
+            ReportMismatch(value.Type, type, v.Value.Line, $"{Types.A(value.Type)} where {Types.A(type)} is required");
             return type;
         }
 
@@ -1848,7 +1854,7 @@ public sealed partial class Checker
             symbol.ReturnType = Resolve(f.ReturnType);
             if (Crosses(symbol.ReturnType) == Crossing.No && !Types.IsVoid(symbol.ReturnType))
             {
-                Report(ErrorIds.NativeType, f.Line, $"a `{symbol.ReturnType}` cannot cross to C (R16)");
+                Report(ErrorIds.NativeType, f.Line, $"{Types.A(symbol.ReturnType)} cannot cross to C (R16)");
             }
 
             unread |= Crosses(symbol.ReturnType) == Crossing.Unknown;
@@ -1872,7 +1878,7 @@ public sealed partial class Checker
                 }
                 else if (Crosses(type) == Crossing.No)
                 {
-                    Report(ErrorIds.NativeType, p.Line, $"a `{type}` cannot cross to C (R16)");
+                    Report(ErrorIds.NativeType, p.Line, $"{Types.A(type)} cannot cross to C (R16)");
                 }
 
                 unread |= Crosses(type) == Crossing.Unknown;
@@ -2007,7 +2013,7 @@ public sealed partial class Checker
         }
         else if (Crosses(t.Type) == Crossing.No)
         {
-            Report(ErrorIds.NativeType, a.Line, $"a `{t.Type}` cannot cross to C (R16)");
+            Report(ErrorIds.NativeType, a.Line, $"{Types.A(t.Type)} cannot cross to C (R16)");
         }
         else if (Crosses(t.Type) == Crossing.Unknown)
         {

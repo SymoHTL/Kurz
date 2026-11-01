@@ -1,0 +1,37 @@
+// expect: output
+// | 42
+// | 5
+// | empty
+// | invalid digit
+// | too large
+// | too small
+// | TooSmall
+// | 1.5
+// | Infinity
+// rules: X7
+
+void Show(string s) {
+    match long.Parse(s) {
+        long n => print(n)
+        ParseError e => print(e)
+    }
+}
+
+Show("42")
+Show("+5")
+Show("")
+Show("4x")
+Show("9223372036854775808")
+Show("-9223372036854775809")
+match byte.Parse("-1") {
+    byte b => print(b)
+    ParseError e => print(e.Kind)
+}
+match double.Parse("1.5") {
+    double d => print(d)
+    ParseError e => print(e)
+}
+match double.Parse("1e999") {
+    double d => print(d)
+    ParseError e => print(e)
+}

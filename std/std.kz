@@ -1,10 +1,12 @@
 // The standard library's Kurz code (design record, section 2; the owner, 2026-10-24, "A std/ directory
 // now"), which the compiler compiles with every program, as it compiles the runtime: the allocator of
-// section 3, the blocks of a list and of a string, and the hashes of section 12. It takes its memory from the system through the
-// runtime's boundary call, reached as the folder `sys`, the directory of the target the program is
-// built for, and the runtime reaches it as the folder `std`, through its allocation entry, `Allocate`
-// (the owner, 2026-10-24, "As built"; compiler/README.md, "The runtime"). The emitted code calls the
-// functions of a list's block and of a string's.
+// section 3, the blocks of a list and of a string, the searches of a string and of a list of bytes, the
+// trimming, the splitting, the replacing, the joining and the change of ASCII case of a string, and the
+// hashes of section 12. It takes its memory from the system through the runtime's boundary call, reached
+// as the folder `sys`, the directory of the target the program is built for, and the runtime reaches it
+// as the folder `std`, through its allocation entry, `Allocate` (the owner, 2026-10-24, "As built";
+// compiler/README.md, "The runtime"). The emitted code calls the functions of a list's block and of a
+// string's.
 use sys
 
 // The memory the allocator carves blocks from, and the bytes left behind it, of each thread (R13).
@@ -205,25 +207,44 @@ pub void Free(byte* p, long size) {
 // A block the allocation entry gave for `size` bytes, grown to `grown` bytes with the bytes it holds, as
 // Rust's `GlobalAlloc::realloc`: a block of more than 262144 bytes is itself where its header names
 // room enough, as a kept block given out whole may, as glibc's `realloc` leaves a mapped chunk that
-// holds the size, else grown by the target's `Resize`, which can grow it without a copy, as the C
-// library's `realloc` grows a block it mapped; else, and where `Resize` gives null, a new block with the
-// bytes copied and the old one freed. Null where the system refuses, the block then left as it was.
+// holds the size, else the kept block `Reused` gives for the grown size, the bytes copied into it and
+// the old block freed (the owner, 2026-11-01, "Kept block first"), else grown by the target's `Resize`,
+// which can grow it without a copy, as the C library's `realloc` grows a block it mapped; else, and
+// where `Resize` gives null, a new block with the bytes copied and the old one freed. Null where the
+// system refuses, the block then left as it was.
 pub byte* Reallocate(byte* p, long size, long grown) {
     if size > 262144 {
         long bytes = (grown + 15) / 16 * 16 + 16
         mut byte* moved = null
+        mut bool copied = false
         raw {
             byte* block = p - 16
             long room = *Ptr<long>(block)
             if bytes <= room {
                 moved = p
             } else {
-                byte* q = sys.Resize(block, room, bytes)
-                if q != null {
-                    *Ptr<long>(q) = bytes
-                    moved = q + 16
+                byte* reused = Reused(bytes)
+                if reused != null {
+                    mut long i = 0
+                    while i < size {
+                        reused[16 + i] = p[i]
+                        i = i + 1
+                    }
+
+                    moved = reused + 16
+                    copied = true
+                } else {
+                    byte* q = sys.Resize(block, room, bytes)
+                    if q != null {
+                        *Ptr<long>(q) = bytes
+                        moved = q + 16
+                    }
                 }
             }
+        }
+
+        if copied {
+            Free(p, size)
         }
 
         if moved != null {
@@ -455,7 +476,7 @@ pub byte* ListCopy(byte* block, long item, mut long asked) {
 }
 
 // The address the next item goes to, in a block with room for it, whose count of items it raises by
-// one. The count is read as a `uint`, which it never exceeds, so that the item's offset widens without
+// one. The count, never negative, is read as a `uint`, so that the item's offset widens without
 // a sign: in a loop of `Add`s the count the `Add` before stored is then read back by a plain load, not a
 // sign-extending one (`EmitterTests` pins the widening).
 pub byte* ListPush(byte* block, long item) {
@@ -537,11 +558,25 @@ pub byte* BytesReserve(byte* block, long more, mut long asked) {
     return p
 }
 
-// The bytes the next read of a whole file asks for (S6): the room a list of bytes has after its own,
-// else `piece` more, as Rust's `read_to_end` reads into the room its `Vec` has before it grows it, and
-// no more than the largest `int` of items leaves, so that a file a list holds is read whole; 0 for a
-// list that holds that many.
-pub long BytesPiece(byte* block, long piece) {
+// The room a read of a whole file makes before its first read (S6): the size the system names for the
+// open file, as Rust's `fs::read` reserves the size the file's metadata gives, no more than the largest
+// `int` of items, so that a larger file is read up to the list's limit and the byte after it raises
+// `allocation-failed` (M9). A size of 0, and a failure, below 0, make no room, as no size does in Rust's.
+pub long BytesHint(long size) {
+    if size > 2147483647 {
+        return 2147483647
+    }
+
+    return size
+}
+
+// The bytes the next read of a whole file asks for (S6): the room a list of bytes has after its own;
+// 0 for a list full at `hint`, the size `BytesHint` gave, as Rust's `read_to_end` reads a probe
+// into a buffer of its own where its `Vec` is full at the room it started with, so that a file of that
+// size is read without the list grown; else `piece` more, as Rust's `read_to_end` reads into the room
+// its `Vec` has before it grows it, and no more than the largest `int` of items leaves, so that a file
+// a list holds is read whole; 0 for a list that holds that many.
+pub long BytesPiece(byte* block, long piece, long hint) {
     mut long count = 0
     mut long room = 0
     raw {
@@ -553,6 +588,10 @@ pub long BytesPiece(byte* block, long piece) {
 
     if room > count {
         return room - count
+    }
+
+    if hint > 0 && count == hint {
+        return 0
     }
 
     if piece > 2147483647 - count {
@@ -592,6 +631,101 @@ pub void ListClear(byte* block) {
         if block != null {
             *Ptr<int>(block + 8) = 0
         }
+    }
+}
+
+// For an `AddRange` (X9): a block with room for `more` items of `item` bytes after its own that no
+// other list value holds, as Rust's `Vec::reserve` makes room before `extend_from_slice` copies: the
+// block itself where it has the room and no other value holds it; a block no other value holds grown by
+// `Reallocate`; else a new block with its items, the old block held by one value less (M3), never freed
+// here, whose caller counts the copied items' own blocks. A new or grown block has the room of the old
+// one where that holds `more` items after them, else the larger of the room a full block grows to and
+// the count and `more`. A count and `more` past the largest `int` give null with `asked` set to the
+// bytes of that many items, as an `Add` past it does (M9); a block the system refuses gives null with
+// `asked` set to the bytes asked for.
+pub byte* ListReserve(byte* block, long more, long item, mut long asked) {
+    mut long count = 0
+    mut long room = 0
+    mut bool shared = false
+    raw {
+        if block != null {
+            count = long(*Ptr<int>(block + 8))
+            room = long(*Ptr<int>(block + 12))
+            shared = *Ptr<long>(block) > 1
+        }
+    }
+
+    if count + more > 2147483647 {
+        asked = (count + more) * item
+        return null
+    }
+
+    if !shared && room - count >= more {
+        return block
+    }
+
+    mut long grown = room
+    if room - count < more {
+        grown = Grown(room, item)
+        if grown < count + more {
+            grown = count + more
+        }
+    }
+
+    long bytes = 16 + grown * item
+    if block != null && !shared {
+        byte* q = Reallocate(block, 16 + room * item, bytes)
+        raw {
+            if q == null {
+                asked = bytes
+            } else {
+                *Ptr<int>(q + 12) = int(grown)
+            }
+        }
+
+        return q
+    }
+
+    mut byte* p = null
+    raw {
+        p = Allocate(bytes)
+        if p == null {
+            asked = bytes
+        } else {
+            *Ptr<long>(p) = 1
+            *Ptr<int>(p + 8) = int(count)
+            *Ptr<int>(p + 12) = int(grown)
+            long n = count * item
+            mut long i = 0
+            while i < n {
+                p[16 + i] = block[16 + i]
+                i = i + 1
+            }
+        }
+    }
+
+    if p != null && shared {
+        raw {
+            *Ptr<long>(block) = *Ptr<long>(block) - 1
+        }
+    }
+
+    return p
+}
+
+// The `count` items of `item` bytes at `items` put after the items of a block with room for them,
+// whose count of items it raises by `count` (X9); the caller counts the items' own blocks.
+pub void ListAppend(byte* block, byte* items, long count, long item) {
+    raw {
+        long at = 16 + long(*Ptr<int>(block + 8)) * item
+        long n = count * item
+        mut long i = 0
+        while i < n {
+            block[at + i] = items[i]
+            i = i + 1
+        }
+
+        *Ptr<int>(block + 8) = *Ptr<int>(block + 8) + int(count)
     }
 }
 
@@ -682,7 +816,7 @@ pub byte* ListString(byte* block) {
 // of its bytes and the count of bytes it has room for, 4 bytes each, and from its 16th byte the bytes.
 // A string value is the address of its bytes and their count, whose highest bit marks a string that
 // holds such a block; a literal and the empty string hold none and are never freed (design record,
-// section 3). A string never changes, so no write copies a block; the emitted code counts the values
+// section 4). A string never changes, so no write copies a block; the emitted code counts the values
 // that hold one, and a list value that holds one copies it before it writes, as for any block other
 // values hold (M3).
 
@@ -753,9 +887,2473 @@ pub void StringFree(byte* bytes) {
     Free(bytes - 16, 16 + room)
 }
 
-// The block of a map (M9). A map value is the address of its block, null for a map without entries,
-// which takes no block. A block holds the count of the map values that hold it, 8 bytes, the count of
-// its entries and the count of slots it has room for, a power of two from 8, 4 bytes each, the two keys
+// The place, 0 to 7 from the word's first address, of the first byte that the mask of `Find`'s test flags:
+// its lowest set bit, isolated, stands at bit 8k+7, and a multiply moves the byte k of a table of the numbers
+// 7 down to 0 into the top byte. A byte below the first byte of 0 is never flagged, since no borrow reaches
+// it; a byte above it may be, so only the lowest flag counts.
+long FirstFlag(ulong mask) => long((((mask & (0UL -% mask)) >> 7) *% 0x0001020304050607UL) >> 56)
+
+// The searches of a string and of a list of bytes (X1, X9), over the bytes of each, as Rust's
+// `str::find` searches a string's: the position of the first `m` bytes at `needle` among the `n` bytes
+// at `hay`, or -1 where they stand nowhere there; an `m` of 0 is found at 0. More bytes take the two-way
+// search of `TwoWay`, which reads no byte of `hay` more than a bounded number of times, so that no input
+// makes a search slower than linear. One byte is looked for among fewer than 16 bytes byte by byte, as
+// Rust's `memchr` of a slice looks among fewer than two words, so that no read passes the `n` bytes; among
+// 16 and more, the first 16 bytes are read as two words at any address (`WordAt`), then two words of 8
+// bytes at a time from the address at or below the 16th byte that is a multiple of 8, and the bytes left
+// after them as the last two words of `hay`, whose bytes before that point hold no such byte. Each word
+// is put through an exclusive or with the byte repeated in its every byte, which leaves a byte of 0 where
+// the byte stands, and tested for a byte of 0 as Rust's `contains_zero_byte` tests, `(x -
+// 0x0101010101010101) & ~x & 0x8080808080808080`, and the place comes from the mask (`FirstFlag`).
+// Rust's `memchr` reads byte by byte up to the first multiple of 8 and from the two words that hold the
+// byte: on the commas of a `Split` that stand every 7.5 bytes that form took 7% more time than a loop of
+// one byte at a time, 99.91 ms against 92.97, and this one takes 2% less, 91.44; it finds a byte at the
+// end of 1 MiB in 6.28 ms, where Rust's `str::find` takes 6.77 (issue #157, 2026-11-01, best of 9).
+pub long Find(byte* hay, long n, byte* needle, long m) {
+    if m == 0 {
+        return 0
+    }
+
+    if m > n {
+        return -1
+    }
+
+    if m > 1 {
+        return TwoWay(hay, n, needle, m)
+    }
+
+    mut long found = -1
+    raw {
+        byte b = needle[0]
+        if n < 16 {
+            mut long i = 0
+            while i < n && hay[i] != b {
+                i = i + 1
+            }
+
+            if i < n {
+                found = i
+            }
+        } else {
+            ulong low = 0x0101010101010101UL
+            ulong high = 0x8080808080808080UL
+            ulong repeated = ulong(b) *% low
+            ulong u = WordAt(hay) ^ repeated
+            ulong v = WordAt(hay + 8) ^ repeated
+            ulong mu = (u -% low) & ~u & high
+            ulong mv = (v -% low) & ~v & high
+            if mu != 0 {
+                found = FirstFlag(mu)
+            } else if mv != 0 {
+                found = 8 + FirstFlag(mv)
+            } else {
+                mut long i = 16 - (long(hay + 16) & 7)
+                mut bool hit = false
+                while i <= n - 16 {
+                    ulong x = *Ptr<ulong>(hay + i) ^ repeated
+                    ulong y = *Ptr<ulong>(hay + i + 8) ^ repeated
+                    ulong mx = (x -% low) & ~x & high
+                    ulong my = (y -% low) & ~y & high
+                    if (mx | my) != 0 {
+                        if mx != 0 {
+                            found = i + FirstFlag(mx)
+                        } else {
+                            found = i + 8 + FirstFlag(my)
+                        }
+
+                        hit = true
+                        break
+                    }
+
+                    i = i + 16
+                }
+
+                if !hit {
+                    ulong x = WordAt(hay + n - 16) ^ repeated
+                    ulong y = WordAt(hay + n - 8) ^ repeated
+                    ulong mx = (x -% low) & ~x & high
+                    ulong my = (y -% low) & ~y & high
+                    if mx != 0 {
+                        found = n - 16 + FirstFlag(mx)
+                    } else if my != 0 {
+                        found = n - 8 + FirstFlag(my)
+                    }
+                }
+            }
+        }
+    }
+
+    return found
+}
+
+// Whether the `m` bytes at `needle` stand at the position `at` among the `n` bytes at `hay`: false
+// for a position below 0 and one after which fewer than `m` bytes stand (X1).
+pub bool BytesAt(byte* hay, long n, byte* needle, long m, long at) {
+    if at < 0 || at > n - m {
+        return false
+    }
+
+    mut bool same = true
+    raw {
+        mut long i = 0
+        while i < m {
+            if hay[at + i] != needle[i] {
+                same = false
+                break
+            }
+
+            i = i + 1
+        }
+    }
+
+    return same
+}
+
+// The UTF-8 bytes of the code point `point` written at `bytes`, one to four, as `TextOfChar` writes
+// them: their count. A `char` searched for is searched for as these bytes (X1).
+pub long Utf8(uint point, byte* bytes) {
+    mut long count = 4
+    if point < 128 {
+        count = 1
+    } else if point < 2048 {
+        count = 2
+    } else if point < 65536 {
+        count = 3
+    }
+
+    raw {
+        if count == 1 {
+            bytes[0] = byte(point)
+        } else if count == 2 {
+            bytes[0] = byte(192 | (point >> 6))
+            bytes[1] = byte(128 | (point & 63))
+        } else if count == 3 {
+            bytes[0] = byte(224 | (point >> 12))
+            bytes[1] = byte(128 | ((point >> 6) & 63))
+            bytes[2] = byte(128 | (point & 63))
+        } else {
+            bytes[0] = byte(240 | (point >> 18))
+            bytes[1] = byte(128 | ((point >> 12) & 63))
+            bytes[2] = byte(128 | ((point >> 6) & 63))
+            bytes[3] = byte(128 | (point & 63))
+        }
+    }
+
+    return count
+}
+
+// The start of the maximal suffix of the `m` bytes at `x` under the order of bytes, or under its
+// reverse where `greater` is set, as Crochemore and Perrin compute it, with its period in `period`.
+long MaximalSuffix(byte* x, long m, bool greater, mut long period) {
+    mut long start = 0
+    mut long other = 1
+    mut long offset = 0
+    period = 1
+    raw {
+        while other + offset < m {
+            byte a = x[other + offset]
+            byte b = x[start + offset]
+            if (a < b && !greater) || (a > b && greater) {
+                other = other + offset + 1
+                offset = 0
+                period = other - start
+            } else if a == b {
+                if offset + 1 == period {
+                    other = other + offset + 1
+                    offset = 0
+                } else {
+                    offset = offset + 1
+                }
+            } else {
+                start = other
+                other = other + 1
+                offset = 0
+                period = 1
+            }
+        }
+    }
+
+    return start
+}
+
+// The two-way search of Crochemore and Perrin, as Rust's `TwoWaySearcher` runs it, for `m` bytes,
+// from 2 to `n`. The needle is cut at its critical position, the later start of its two maximal
+// suffixes. A window of `hay` is compared right of the cut first, and a mismatch there moves the
+// window past it; then left of the cut, and a mismatch there moves the window by the period. Where
+// the part left of the cut repeats at the period, the search remembers how much of the needle the last
+// move kept matched and compares it no more; else it moves by more than either part. A set of the low
+// six bits of the needle's bytes, of its first period where it repeats, moves the window by the whole
+// needle where its last byte is none of them. Each move goes on to the next window with `continue`, and
+// a match leaves the loop with `break`, as `next` of Rust's searcher continues its loop and returns, so
+// that a move tests nothing but that the next window still fits.
+long TwoWay(byte* hay, long n, byte* needle, long m) {
+    mut long periodLess = 0
+    mut long periodGreater = 0
+    long critLess = MaximalSuffix(needle, m, false, mut periodLess)
+    long critGreater = MaximalSuffix(needle, m, true, mut periodGreater)
+    mut long crit = critGreater
+    mut long period = periodGreater
+    if critLess > critGreater {
+        crit = critLess
+        period = periodLess
+    }
+
+    mut bool periodic = period + crit <= m
+    mut ulong set = 0UL
+    mut long found = -1
+    raw {
+        mut long k = 0
+        while periodic && k < crit {
+            if needle[k] != needle[period + k] {
+                periodic = false
+            }
+
+            k = k + 1
+        }
+
+        mut long setEnd = m
+        if periodic {
+            setEnd = period
+        }
+
+        mut long s = 0
+        while s < setEnd {
+            set = set | 1UL << int(needle[s] & 63)
+            s = s + 1
+        }
+
+        if !periodic {
+            period = crit
+            if m - crit > period {
+                period = m - crit
+            }
+
+            period = period + 1
+        }
+
+        mut long position = 0
+        mut long memory = 0
+        long last = n - m
+        byte* ends = hay + m - 1
+        while position <= last {
+            byte tail = ends[position]
+            if ((set >> int(tail & 63)) & 1UL) == 0UL {
+                position = position + m
+                memory = 0
+                continue
+            }
+
+            mut long i = crit
+            if periodic && memory > i {
+                i = memory
+            }
+
+            while i < m && needle[i] == hay[position + i] {
+                i = i + 1
+            }
+
+            if i < m {
+                position = position + i - crit + 1
+                memory = 0
+                continue
+            }
+
+            mut long j = crit
+            mut long low = 0
+            if periodic {
+                low = memory
+            }
+
+            while j > low && needle[j - 1] == hay[position + j - 1] {
+                j = j - 1
+            }
+
+            if j > low {
+                position = position + period
+                if periodic {
+                    memory = m - period
+                }
+
+                continue
+            }
+
+            found = position
+            break
+        }
+    }
+
+    return found
+}
+
+// The trimming, the splitting, the replacing, the joining and the change of ASCII case of a string (X3,
+// X4, X5, X6), over its bytes, as Rust's `str` methods work on a string's bytes. A trim gives the positions of the
+// part it keeps, of which the emitted code makes a string: the string itself where it keeps every byte,
+// the bytes in place where the string holds no block, a literal, whose bytes are never freed, else a
+// copy (`StringOf`). The others give the bytes of a new string's block, or the block of a list of
+// strings, and count what they make before they make it, as Rust's `join` sums the lengths before it
+// copies, so that each block is asked for once.
+
+// The count of a string value's bytes with the mark of a string that holds a block in its highest bit,
+// as a string value is laid out (T15).
+long Marked(long count) {
+    return count | (-9223372036854775807 - 1)
+}
+
+// The `count` bytes at `from` written at `to`.
+void Copy(byte* to, byte* from, long count) {
+    raw {
+        mut long i = 0
+        while i < count {
+            to[i] = from[i]
+            i = i + 1
+        }
+    }
+}
+
+// The length of the character of Unicode's White_Space that starts at `at` among the `n` bytes at
+// `bytes`, as Rust's `char::is_whitespace` reads it: the tab, the line feed, the vertical tab, the form
+// feed, the carriage return, the space, U+0085, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F,
+// U+205F and U+3000; where `ascii` is set, of ASCII's whitespace, the five of Rust's
+// `u8::is_ascii_whitespace`, which leave out the vertical tab (X4). 0 where none starts there.
+long WhiteAt(byte* bytes, long n, long at, bool ascii) {
+    mut long length = 0
+    raw {
+        int b = int(bytes[at])
+        if b == 32 || b == 9 || b == 10 || b == 12 || b == 13 || (b == 11 && !ascii) {
+            length = 1
+        } else if !ascii && b == 194 && at + 1 < n {
+            int c = int(bytes[at + 1])
+            if c == 133 || c == 160 {
+                length = 2
+            }
+        } else if !ascii && b >= 225 && b <= 227 && at + 2 < n {
+            int c = int(bytes[at + 1])
+            int d = int(bytes[at + 2])
+            if b == 225 && c == 154 && d == 128 {
+                length = 3
+            } else if b == 226 && c == 128 && ((d >= 128 && d <= 138) || d == 168 || d == 169 || d == 175) {
+                length = 3
+            } else if b == 226 && c == 129 && d == 159 {
+                length = 3
+            } else if b == 227 && c == 128 && d == 128 {
+                length = 3
+            }
+        }
+    }
+
+    return length
+}
+
+// The length of the character of `WhiteAt` that ends at `end` among the bytes at `bytes`, and starts no
+// earlier than `start`; 0 where none ends there. A byte below 128 is a character of its own and a byte
+// from 192 starts one, so the bytes of a whole character that end at `end` start where it starts.
+long WhiteBefore(byte* bytes, long start, long end, bool ascii) {
+    mut long length = 0
+    mut long k = 1
+    while k <= 3 && end - k >= start {
+        if WhiteAt(bytes, end, end - k, ascii) == k {
+            length = k
+            break
+        }
+
+        k = k + 1
+    }
+
+    return length
+}
+
+// `s.TrimStart()` and `s.TrimStartAscii()` (X4): the position of the first byte after the whitespace that
+// starts the `n` bytes at `bytes`, as Rust's `trim_start` and `trim_ascii_start`.
+pub long TrimStart(byte* bytes, long n, bool ascii) {
+    mut long at = 0
+    while at < n {
+        long length = WhiteAt(bytes, n, at, ascii)
+        if length == 0 {
+            break
+        }
+
+        at = at + length
+    }
+
+    return at
+}
+
+// `s.TrimEnd()` and `s.TrimEndAscii()` (X4): the position after the last byte before the whitespace that
+// ends the bytes from `start` to `end` at `bytes`, as Rust's `trim_end` and `trim_ascii_end`.
+pub long TrimEnd(byte* bytes, long start, long end, bool ascii) {
+    mut long at = end
+    while at > start {
+        long length = WhiteBefore(bytes, start, at, ascii)
+        if length == 0 {
+            break
+        }
+
+        at = at - length
+    }
+
+    return at
+}
+
+// `s.Trim(c)` (X4): the position of the first byte after the repeats of the `m` bytes at `run`, the UTF-8
+// bytes of a character, that start the `n` bytes at `bytes`, as Rust's `trim_start_matches(c)`.
+pub long RunStart(byte* bytes, long n, byte* run, long m) {
+    mut long at = 0
+    while BytesAt(bytes, n, run, m, at) {
+        at = at + m
+    }
+
+    return at
+}
+
+// `s.Trim(c)` (X4): the position after the last byte before the repeats of the `m` bytes at `run` that end
+// the bytes from `start` to `end` at `bytes`, as Rust's `trim_end_matches(c)`.
+pub long RunEnd(byte* bytes, long start, long end, byte* run, long m) {
+    mut long at = end
+    while at - m >= start && BytesAt(bytes, end, run, m, at - m) {
+        at = at - m
+    }
+
+    return at
+}
+
+// A new string's block with a copy of the `count` bytes at `bytes`, held by one string value: the address
+// of its bytes; null with `asked` set where the system refuses (M9).
+pub byte* StringOf(byte* bytes, long count, mut long asked) {
+    byte* text = StringBlock(count)
+    if text == null {
+        asked = 16 + count
+        return null
+    }
+
+    Copy(text, bytes, count)
+    StringTakeOver(text, count)
+    return text
+}
+
+// `s.Split(separator)` (X5): the block of a new list of the pieces of the `n` bytes at `bytes` between the
+// `m` bytes at `separator`, from the left, an empty piece kept, as Rust's `split`, each a string laid out
+// as a string value is, 16 bytes, which the list holds. A piece is the string itself, held once more,
+// where the separator stands nowhere or is empty (the owner, 2026-10-31, "No piece, no change"); an empty
+// piece holds no bytes; a piece of a string that holds no block, a literal, is its bytes in place, which
+// are never freed; else it is a copy (`StringOf`). `block` says whether the string holds one. Null with
+// `asked` set where the system refuses, after the blocks made for the list are given back, and for more
+// pieces than the largest `int`, with `asked` set to the bytes of their list (M9).
+pub byte* Split(byte* bytes, long n, bool block, byte* separator, long m, mut long asked) {
+    mut long count = 1
+    raw {
+        mut long at = 0
+        while m > 0 && at <= n {
+            long found = Find(bytes + at, n - at, separator, m)
+            if found < 0 {
+                break
+            }
+
+            count = count + 1
+            at = at + found + m
+        }
+    }
+
+    byte* items = ListAllocate(count, 16, mut asked)
+    if items == null {
+        return null
+    }
+
+    mut long made = 0
+    raw {
+        mut long start = 0
+        while made < count {
+            mut long end = n
+            if made < count - 1 {
+                end = start + Find(bytes + start, n - start, separator, m)
+            }
+
+            long length = end - start
+            mut byte* piece = bytes + start
+            mut long marked = length
+            if length == n && block {
+                StringRetain(bytes)
+                marked = Marked(n)
+            } else if length > 0 && block {
+                piece = StringOf(bytes + start, length, mut asked)
+                if piece == null {
+                    break
+                }
+
+                marked = Marked(length)
+            }
+
+            *Ptr<long>(items + made * 16) = long(piece)
+            *Ptr<long>(items + made * 16 + 8) = marked
+            made = made + 1
+            start = end + m
+        }
+    }
+
+    if made == count {
+        return ListTakeOver(items, count)
+    }
+
+    raw {
+        mut long i = 0
+        while i < made {
+            if *Ptr<long>(items + i * 16 + 8) < 0 {
+                byte* piece = Ptr<byte>(*Ptr<long>(items + i * 16))
+                if StringRelease(piece) {
+                    StringFree(piece)
+                }
+            }
+
+            i = i + 1
+        }
+
+        ListFree(items - 16, 16)
+    }
+
+    return null
+}
+
+// `s.Replace(old, replacement)` (X5): the bytes of a new string's block, the `n` bytes at `bytes` with each
+// `m` bytes at `old`, found from the left, none overlapping the one before, replaced by the `k` bytes at
+// `replacement`, as Rust's `replace`, with their count in `made`. `made` is -1 where the string stays as
+// it is, for an empty `old` (the owner, 2026-10-31, "No piece, no change") and for one found nowhere, and 0
+// for an empty result, each with null. More bytes than the largest `int` give null with `asked` set to
+// their count, as a string past it does (T15); a block the system refuses gives null with `asked` set to
+// the bytes asked for. A caller reads `asked` first: where it is set, `made` is -1 and means nothing.
+pub byte* Replace(byte* bytes, long n, byte* old, long m, byte* replacement, long k, mut long made, mut long asked) {
+    made = -1
+    mut long count = 0
+    raw {
+        mut long at = 0
+        while m > 0 && at <= n {
+            long found = Find(bytes + at, n - at, old, m)
+            if found < 0 {
+                break
+            }
+
+            count = count + 1
+            at = at + found + m
+        }
+    }
+
+    if count == 0 {
+        return null
+    }
+
+    long size = n + count * (k - m)
+    if size > 2147483647 {
+        asked = size
+        return null
+    }
+
+    if size == 0 {
+        made = 0
+        return null
+    }
+
+    byte* text = StringBlock(size)
+    if text == null {
+        asked = 16 + size
+        return null
+    }
+
+    raw {
+        mut long at = 0
+        mut long to = 0
+        mut long found = Find(bytes, n, old, m)
+        while found >= 0 {
+            Copy(text + to, bytes + at, found)
+            Copy(text + to + found, replacement, k)
+            to = to + found + k
+            at = at + found + m
+            found = Find(bytes + at, n - at, old, m)
+        }
+
+        Copy(text + to, bytes + at, n - at)
+    }
+
+    StringTakeOver(text, size)
+    made = size
+    return text
+}
+
+// `string.Join(separator, values)` (X6): the bytes of a new string's block with the `count` texts at
+// `texts`, each laid out as a string value is, 16 bytes, and the `m` bytes at `separator` between two of
+// them, as Rust's `join`, with their count in `made`: 0, with null, for an empty result. More bytes than
+// the largest `int` give null with `asked` set to their count (T15); a block the system refuses gives null
+// with `asked` set to the bytes asked for.
+pub byte* Join(byte* texts, long count, byte* separator, long m, mut long made, mut long asked) {
+    made = 0
+    if count == 0 {
+        return null
+    }
+
+    mut long size = m * (count - 1)
+    raw {
+        mut long i = 0
+        while i < count {
+            size = size + (*Ptr<long>(texts + i * 16 + 8) & 9223372036854775807)
+            i = i + 1
+        }
+    }
+
+    if size > 2147483647 {
+        asked = size
+        return null
+    }
+
+    if size == 0 {
+        return null
+    }
+
+    byte* text = StringBlock(size)
+    if text == null {
+        asked = 16 + size
+        return null
+    }
+
+    raw {
+        mut long to = 0
+        mut long i = 0
+        while i < count {
+            if i > 0 {
+                Copy(text + to, separator, m)
+                to = to + m
+            }
+
+            long length = *Ptr<long>(texts + i * 16 + 8) & 9223372036854775807
+            Copy(text + to, Ptr<byte>(*Ptr<long>(texts + i * 16)), length)
+            to = to + length
+            i = i + 1
+        }
+    }
+
+    StringTakeOver(text, size)
+    made = size
+    return text
+}
+
+// `s.ToLowerAscii()` and `s.ToUpperAscii()` (X3): the bytes of a new string's block, the `n` bytes at
+// `bytes` with `A` to `Z` lowered, or `a` to `z` raised where `upper` is set, every other byte as it is, as
+// Rust's `to_ascii_lowercase` and `to_ascii_uppercase`. Null where no byte changes, for the string as it
+// is, and null with `asked` set where the system refuses.
+pub byte* AsciiCase(byte* bytes, long n, bool upper, mut long asked) {
+    mut int low = 65
+    if upper {
+        low = 97
+    }
+
+    mut bool changes = false
+    raw {
+        mut long i = 0
+        while i < n {
+            int b = int(bytes[i])
+            if b >= low && b < low + 26 {
+                changes = true
+                break
+            }
+
+            i = i + 1
+        }
+    }
+
+    if !changes {
+        return null
+    }
+
+    byte* text = StringBlock(n)
+    if text == null {
+        asked = 16 + n
+        return null
+    }
+
+    raw {
+        mut long i = 0
+        while i < n {
+            int b = int(bytes[i])
+            if b >= low && b < low + 26 {
+                text[i] = byte(b ^ 32)
+            } else {
+                text[i] = bytes[i]
+            }
+
+            i = i + 1
+        }
+    }
+
+    StringTakeOver(text, n)
+    return text
+}
+
+// `s.ToLower()` and `s.ToUpper()` (X3): the bytes of a new string's block, the `n` bytes at `bytes` with each
+// code point changed by Unicode's full mapping, as Rust's `to_lowercase` and `to_uppercase`, and their number
+// in `made`. `table` is the emitter's table of the direction (`CaseMapped`). The bytes before the first code
+// point that changes are copied as they are into a block of the input's size, as Rust's `convert_while_ascii`
+// takes `Vec::with_capacity(slice.len())` for `to_lowercase` and `to_uppercase`, and the code points after them
+// are looked up and written one at a time, as Rust's walk of the rest pushes them, up to one whose mapping makes
+// more bytes than the block has room for: from that one on, `CaseWalk` sizes the rest, the block is grown once
+// by `Reallocate`, and `CaseWalk` writes the rest, each walk looking those code points up again. Null where no
+// code point changes, for the string as it is, and null with `asked` set where the system refuses.
+pub byte* UnicodeCase(byte* bytes, long n, bool upper, int* table, mut long made, mut long asked) {
+    mut long at = 0
+    mut long width = 0
+    mut int c = 0
+    mut int first = 0
+    mut int second = 0
+    mut int third = 0
+    while at < n {
+        c = CaseCodeAt(bytes, at, mut width)
+        second = 0
+        third = 0
+        if c < 128 {
+            first = CaseAscii(c, upper)
+        } else if c < 256 {
+            first = CaseLatin(c, upper, mut second)
+        } else {
+            first = CaseOf(bytes, n, at, c, upper, table, mut second, mut third)
+        }
+
+        if first != c || second != 0 {
+            break
+        }
+
+        at = at + width
+    }
+
+    if at == n {
+        return null
+    }
+
+    mut long room = n
+    mut byte* text = StringBlock(room)
+    if text == null {
+        asked = 16 + room
+        return null
+    }
+
+    Copy(text, bytes, at)
+    mut long length = at
+    while at < n {
+        mut long size = CaseWrite(first, null, 0)
+        if second != 0 {
+            size = size + CaseWrite(second, null, 0)
+        }
+
+        if third != 0 {
+            size = size + CaseWrite(third, null, 0)
+        }
+
+        if length + size > room {
+            // the rest sized and written by `CaseWalk`, the block grown once to hold it
+            long rest = CaseWalk(bytes, n, at, upper, table, null)
+            byte* grown = CaseGrow(text, room, length + rest)
+            if grown == null {
+                StringFree(text)
+                asked = 16 + length + rest
+                return null
+            }
+
+            text = grown
+            room = length + rest
+            raw {
+                CaseWalk(bytes, n, at, upper, table, text + length)
+            }
+
+            length = room
+            break
+        }
+
+        length = length + CaseWrite(first, text, length)
+        if second != 0 {
+            length = length + CaseWrite(second, text, length)
+        }
+
+        if third != 0 {
+            length = length + CaseWrite(third, text, length)
+        }
+
+        at = at + width
+        if at < n {
+            c = CaseCodeAt(bytes, at, mut width)
+            second = 0
+            third = 0
+            if c < 128 {
+                first = CaseAscii(c, upper)
+            } else if c < 256 {
+                first = CaseLatin(c, upper, mut second)
+            } else {
+                first = CaseOf(bytes, n, at, c, upper, table, mut second, mut third)
+            }
+        }
+    }
+
+    StringTakeOver(text, length)
+    made = length
+    return text
+}
+
+// The block of the string bytes at `text`, which has room for `room` bytes, grown by `Reallocate` to room for
+// `grown`, its bytes kept: the address of the bytes, null where the system refuses, the block then left as it was.
+byte* CaseGrow(byte* text, long room, long grown) {
+    mut byte* moved = null
+    raw {
+        byte* block = Reallocate(text - 16, 16 + room, 16 + grown)
+        if block != null {
+            *Ptr<int>(block + 12) = int(grown)
+            moved = block + 16
+        }
+    }
+
+    return moved
+}
+
+// The first code point Unicode's full mapping of one direction gives the code point `c` above Latin-1, which
+// starts at `at` among the `n` bytes at `bytes`, with the second and the third in `second` and `third`
+// (`CaseMapped`). A
+// capital sigma lowers to the final form where it ends a word (`CaseFinalSigma`), the one mapping of Unicode's
+// that reads the characters around it and no language.
+int CaseOf(byte* bytes, long n, long at, int c, bool upper, int* table, mut int second, mut int third) {
+    if upper || c != 931 {
+        return CaseMapped(c, upper, table, mut second, mut third)
+    }
+
+    if CaseFinalSigma(bytes, n, at, table) {
+        return 962
+    }
+
+    return 963
+}
+
+// The number of bytes `UnicodeCase` makes of the `n` bytes at `bytes` from `from` on, written to `out` where it
+// is not null.
+long CaseWalk(byte* bytes, long n, long from, bool upper, int* table, byte* out) {
+    mut long at = from
+    mut long length = 0
+    while at < n {
+        mut long width = 0
+        int c = CaseCodeAt(bytes, at, mut width)
+        mut int second = 0
+        mut int third = 0
+        mut int first = 0
+        if c < 128 {
+            first = CaseAscii(c, upper)
+        } else if c < 256 {
+            first = CaseLatin(c, upper, mut second)
+        } else {
+            first = CaseOf(bytes, n, at, c, upper, table, mut second, mut third)
+        }
+
+        length = length + CaseWrite(first, out, length)
+        if second != 0 {
+            length = length + CaseWrite(second, out, length)
+        }
+
+        if third != 0 {
+            length = length + CaseWrite(third, out, length)
+        }
+
+        at = at + width
+    }
+
+    return length
+}
+
+// The code point whose UTF-8 starts at `at` among the bytes at `bytes`, and the number of its bytes in
+// `width`. A string holds valid UTF-8 (T15), so the bytes after the first are there.
+int CaseCodeAt(byte* bytes, long at, mut long width) {
+    mut int c = 0
+    raw {
+        int b = int(bytes[at])
+        if b < 128 {
+            c = b
+            width = 1
+        } else if b < 224 {
+            c = ((b & 31) << 6) | (int(bytes[at + 1]) & 63)
+            width = 2
+        } else if b < 240 {
+            c = ((b & 15) << 12) | ((int(bytes[at + 1]) & 63) << 6) | (int(bytes[at + 2]) & 63)
+            width = 3
+        } else {
+            c = ((b & 7) << 18) | ((int(bytes[at + 1]) & 63) << 12) | ((int(bytes[at + 2]) & 63) << 6) | (int(bytes[at + 3]) & 63)
+            width = 4
+        }
+    }
+
+    return c
+}
+
+// The number of bytes of the code point `c` in UTF-8, written to `out` from `at` where `out` is not null.
+long CaseWrite(int c, byte* out, long at) {
+    mut long width = 4
+    if c < 128 {
+        width = 1
+    } else if c < 2048 {
+        width = 2
+    } else if c < 65536 {
+        width = 3
+    }
+
+    if out != null {
+        raw {
+            if width == 1 {
+                out[at] = byte(c)
+            } else if width == 2 {
+                out[at] = byte(192 | (c >> 6))
+                out[at + 1] = byte(128 | (c & 63))
+            } else if width == 3 {
+                out[at] = byte(224 | (c >> 12))
+                out[at + 1] = byte(128 | ((c >> 6) & 63))
+                out[at + 2] = byte(128 | (c & 63))
+            } else {
+                out[at] = byte(240 | (c >> 18))
+                out[at + 1] = byte(128 | ((c >> 12) & 63))
+                out[at + 2] = byte(128 | ((c >> 6) & 63))
+                out[at + 3] = byte(128 | (c & 63))
+            }
+        }
+    }
+
+    return width
+}
+
+// The ASCII code point `c` in one direction, its letters changed: what `CaseMapped` gives it, and what the walks
+// take before they call `CaseOf`, which stays a call (knowledge/a-helper-of-several-callers-stays-a-call.md).
+int CaseAscii(int c, bool upper) {
+    if upper && c >= 97 && c <= 122 {
+        return c - 32
+    }
+
+    if !upper && c >= 65 && c <= 90 {
+        return c + 32
+    }
+
+    return c
+}
+
+// The first code point Unicode's full mapping of one direction gives the code point `c` of Latin-1 above ASCII,
+// from 128 to 255, and the second in `second`, as Rust's `conversions::to_lower` and `to_upper` give them without
+// their table: lowered, U+00C0 to U+00DE but U+00D7 32 up; raised, U+00B5 into U+039C, U+00DF into two `S`,
+// U+00E0 to U+00FE but U+00F7 32 down and U+00FF into U+0178; every other code point itself. What `CaseMapped`
+// gives it, and what the walks take before they call `CaseOf`.
+int CaseLatin(int c, bool upper, mut int second) {
+    if !upper {
+        if c >= 192 && c <= 222 && c != 215 {
+            return c + 32
+        }
+
+        return c
+    }
+
+    if c >= 224 && c <= 254 && c != 247 {
+        return c - 32
+    }
+
+    if c == 181 {
+        return 924
+    }
+
+    if c == 223 {
+        second = 83
+        return 83
+    }
+
+    if c == 255 {
+        return 376
+    }
+
+    return c
+}
+
+// The first code point Unicode's full mapping of one direction gives `c`, and the second and the third in
+// `second` and `third`, 0 where there are none, as Rust's `conversions::to_lower` and `to_upper` look them up:
+// ASCII by its letters; above it, the run of `table` that holds `c`, found by a binary search, where `c` is a
+// code point of the run's step, else the mapping to several code points, found by a second search, else `c`
+// itself. `table` holds four counts, of the runs, of those mappings and of the ranges of Cased and
+// Case_Ignorable, then the runs, four numbers each (the first and the last code point, the step, 1 or 2, and
+// the delta), the mappings, four each (the code point and the code points it gives, 0 after the last), and the
+// ranges, two each (`CaseIn`).
+int CaseMapped(int c, bool upper, int* table, mut int second, mut int third) {
+    if c < 128 {
+        return CaseAscii(c, upper)
+    }
+
+    if c < 256 {
+        return CaseLatin(c, upper, mut second)
+    }
+
+    mut int result = c
+    raw {
+        long runs = long(table[0])
+        mut long low = 0
+        mut long high = runs
+        mut bool found = false
+        while low < high {
+            long middle = (low + high) / 2
+            long run = 4 + 4 * middle
+            if c < table[run] {
+                high = middle
+            } else if c > table[run + 1] {
+                low = middle + 1
+            } else {
+                if table[run + 2] == 1 || (c - table[run]) % 2 == 0 {
+                    result = c + table[run + 3]
+                    found = true
+                }
+
+                break
+            }
+        }
+
+        if !found {
+            long multis = 4 + 4 * runs
+            low = 0
+            high = long(table[1])
+            while low < high {
+                long middle = (low + high) / 2
+                long entry = multis + 4 * middle
+                if c < table[entry] {
+                    high = middle
+                } else if c > table[entry] {
+                    low = middle + 1
+                } else {
+                    result = table[entry + 1]
+                    second = table[entry + 2]
+                    third = table[entry + 3]
+                    break
+                }
+            }
+        }
+    }
+
+    return result
+}
+
+// Whether `c` is in a property of `table` (`CaseMapped`): the ranges of Cased where `ignorable` is false, of
+// Case_Ignorable where it is set, found by a binary search.
+bool CaseIn(int c, int* table, bool ignorable) {
+    mut bool found = false
+    raw {
+        mut long start = 4 + 4 * long(table[0]) + 4 * long(table[1])
+        mut long high = long(table[2])
+        if ignorable {
+            start = start + 2 * high
+            high = long(table[3])
+        }
+
+        mut long low = 0
+        while low < high {
+            long middle = (low + high) / 2
+            long range = start + 2 * middle
+            if c < table[range] {
+                high = middle
+            } else if c > table[range + 1] {
+                low = middle + 1
+            } else {
+                found = true
+                break
+            }
+        }
+    }
+
+    return found
+}
+
+// Whether the capital sigma whose two bytes start at `at` among the `n` bytes at `bytes` ends a word, as
+// Rust's `map_uppercase_sigma` reads Unicode's Final_Sigma: past the case-ignorable characters, a cased one
+// before it and none after it.
+bool CaseFinalSigma(byte* bytes, long n, long at, int* table) {
+    mut long end = at
+    mut bool before = false
+    while end > 0 {
+        mut long start = end - 1
+        raw {
+            while start > 0 && (int(bytes[start]) & 192) == 128 {
+                start = start - 1
+            }
+        }
+
+        mut long width = 0
+        int c = CaseCodeAt(bytes, start, mut width)
+        if !CaseIn(c, table, true) {
+            before = CaseIn(c, table, false)
+            break
+        }
+
+        end = start
+    }
+
+    if !before {
+        return false
+    }
+
+    mut long next = at + 2
+    while next < n {
+        mut long width = 0
+        int c = CaseCodeAt(bytes, next, mut width)
+        if !CaseIn(c, table, true) {
+            return !CaseIn(c, table, false)
+        }
+
+        next = next + width
+    }
+
+    return true
+}
+
+// Where `s.Substring(startIndex, length)` cannot cut the string whose bytes are at `bytes`, `count` of
+// them (X2): -2 where the part reaches outside the string, a `startIndex` or a `length` below 0 among
+// them, which is read first; else the position, the start before the end, that falls inside a code
+// point, on a byte of the form 10xxxxxx, which a UTF-8 sequence has after its first byte alone (T15), as
+// Rust's `&s[a..b]` reads a cut; and -1 where the cut stands.
+pub long SubstringCut(byte* bytes, long count, long startIndex, long length) {
+    if startIndex < 0 || length < 0 || startIndex > count || length > count - startIndex {
+        return -2
+    }
+
+    long end = startIndex + length
+    mut long inside = -1
+    raw {
+        if startIndex < count && (int(bytes[startIndex]) & 192) == 128 {
+            inside = startIndex
+        } else if end < count && (int(bytes[end]) & 192) == 128 {
+            inside = end
+        }
+    }
+
+    return inside
+}
+
+// Whether the byte `b` is whitespace around a number (X7): the tab, the line feed, the vertical tab, the
+// form feed, the carriage return and the space, as C#'s `NumberStyles.Integer` takes them.
+bool NumberWhite(int b) {
+    return b == 32 || (b >= 9 && b <= 13)
+}
+
+// An integer read from the `count` bytes at `text` in C#'s Integer style with the invariant culture (X7):
+// whitespace around it, a leading `+` or `-`, and one decimal digit or more. `most` is the largest value
+// of the type and `least` the magnitude of its smallest, 0 for an unsigned type, so that `-0` reads as 0
+// and `-1` lies below the range. -1 with the number in `magnitude`, or -2 with its magnitude there where
+// a leading `-` was read, `"-0"` among them, whose magnitude is 0; else the index of the failure's `ParseKind`: 0, `Empty`, where the bytes hold nothing
+// but whitespace; 1, `InvalidDigit`, where a byte stands that the form does not take, or no digit,
+// which is read before the range, as C#'s `Parse` reads the whole string before it reports an overflow;
+// 2, `TooLarge`, and 3, `TooSmall`, where the number lies past the largest or below the smallest value.
+// Each digit is checked against the range before it is added, as Rust's `from_str_radix` checks its
+// multiplication, so that no arithmetic leaves the range of a `ulong`.
+pub int ParseInteger(byte* text, long count, ulong most, ulong least, mut ulong magnitude) {
+    magnitude = 0
+    mut long at = 0
+    mut bool negative = false
+    mut bool past = false
+    mut long start = 0
+    raw {
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+
+        if at == count {
+            return 0
+        }
+
+        if text[at] == 43 {
+            at = at + 1
+        } else if text[at] == 45 {
+            negative = true
+            at = at + 1
+        }
+
+        mut ulong limit = most
+        if negative {
+            limit = least
+        }
+
+        start = at
+        while at < count && text[at] >= 48 && text[at] <= 57 {
+            ulong digit = ulong(int(text[at]) - 48)
+            if !past {
+                if magnitude > limit / 10 || (magnitude == limit / 10 && digit > limit % 10) {
+                    past = true
+                } else {
+                    magnitude = magnitude * 10 + digit
+                }
+            }
+
+            at = at + 1
+        }
+
+        if at > start {
+            while at < count && NumberWhite(int(text[at])) {
+                at = at + 1
+            }
+        }
+    }
+
+    if at == start || at != count {
+        return 1
+    }
+
+    if past && negative {
+        return 3
+    }
+
+    if past {
+        return 2
+    }
+
+    if negative {
+        return -2
+    }
+
+    return -1
+}
+
+// Whether the `length` bytes at `p` spell, in any case, the lower-case ASCII letters packed in `word`, the
+// first in its highest byte: `Infinity` and `NaN`, as C#'s `Parse` reads them with the invariant culture (X7).
+bool Spells(byte* p, ulong word, int length) {
+    mut int i = 0
+    raw {
+        while i < length {
+            if (int(p[i]) | 32) != int((word >> ((length - 1 - i) * 8)) & 255UL) {
+                return false
+            }
+
+            i = i + 1
+        }
+    }
+
+    return true
+}
+
+// A floating-point number read from the `count` bytes at `text` in C#'s invariant form (X7): whitespace
+// around it, a leading `+` or `-`, then digits, with `,` anywhere after the first of them before the point, a
+// point and the digits after it, one digit at least, and an `e` or `E` with a sign and one digit or more; or
+// the words `Infinity` and `NaN` in any case after the sign, as C#'s `double.Parse` reads them with the
+// invariant culture. 0, `Empty`, where the bytes hold whitespace alone; 1, `InvalidDigit`, for any other form;
+// 2 for `Infinity` and 3 for `NaN`; else -1, with the sign in `negative`, the first 19 significant digits in
+// `mantissa`, the power of ten they stand at in `exponent`, and in `many` whether a digit that is not 0 follows
+// them, as Rust's `parse_number` reads the digits; for the slow path, where the digits start and end, `from`
+// and `to`, and the written exponent, `power`, whose digits stop counting past 65536, as Rust's stop.
+int ScanFloating(byte* text, long count, mut bool negative, mut ulong mantissa, mut long exponent, mut bool many, mut long from, mut long to, mut long power) {
+    mut long at = 0
+    mut int taken = 0
+    mut bool digits = false
+    mut bool point = false
+    raw {
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+
+        if at == count {
+            return 0
+        }
+
+        if text[at] == 43 {
+            at = at + 1
+        } else if text[at] == 45 {
+            negative = true
+            at = at + 1
+        }
+
+        from = at
+        while at < count {
+            int b = int(text[at])
+            if b >= 48 && b <= 57 {
+                digits = true
+                if taken == 0 && b == 48 {
+                    if point {
+                        exponent = exponent - 1
+                    }
+                } else if taken < 19 {
+                    mantissa = mantissa * 10UL + ulong(b - 48)
+                    taken = taken + 1
+                    if point {
+                        exponent = exponent - 1
+                    }
+                } else {
+                    many = many || b != 48
+                    if !point {
+                        exponent = exponent + 1
+                    }
+                }
+            } else if b == 46 && !point {
+                point = true
+            } else if b != 44 || !digits || point {
+                break
+            }
+
+            at = at + 1
+        }
+
+        to = at
+        if !digits {
+            if point {
+                return 1
+            }
+
+            mut int kind = 1
+            if count - at >= 8 && Spells(text + at, 0x696E66696E697479UL, 8) {
+                kind = 2
+                at = at + 8
+            } else if count - at >= 3 && Spells(text + at, 0x6E616EUL, 3) {
+                kind = 3
+                at = at + 3
+            }
+
+            while at < count && NumberWhite(int(text[at])) {
+                at = at + 1
+            }
+
+            if kind == 1 || at != count {
+                return 1
+            }
+
+            return kind
+        }
+
+        if at < count && (text[at] == 101 || text[at] == 69) {
+            at = at + 1
+            mut bool down = false
+            if at < count && text[at] == 43 {
+                at = at + 1
+            } else if at < count && text[at] == 45 {
+                down = true
+                at = at + 1
+            }
+
+            long start = at
+            while at < count && text[at] >= 48 && text[at] <= 57 {
+                if power < 65536 {
+                    power = power * 10 + long(int(text[at]) - 48)
+                }
+
+                at = at + 1
+            }
+
+            if at == start {
+                return 1
+            }
+
+            if down {
+                power = -power
+            }
+
+            exponent = exponent + power
+        }
+
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+    }
+
+    if at != count {
+        return 1
+    }
+
+    return -1
+}
+
+// `double.Parse` (X7): -1 with the bits of the `double` nearest to the number the `count` bytes at `text`
+// hold, ties to even, as Rust's `f64::from_str` and .NET Core 3.0's `double.Parse` round it, an infinity past
+// the largest and a zero below the smallest, each with the number's sign, and for `NaN`, with a sign or
+// without, the NaN C# reads; else the index of the failure's `ParseKind`, 0 or 1 (`ScanFloating`). `digits` is
+// the 768 bytes of the slow path, which the emitted code keeps on its stack, as Rust keeps its `Decimal`, and
+// `fives` the table of the 128-bit powers of five Eisel-Lemire takes, two words for each power from 5^-342 to
+// 5^308, the high one first, which the compiler writes into the program, as Rust's `POWER_OF_FIVE_128`.
+pub int ParseDouble(byte* text, long count, byte* digits, ulong* fives, mut ulong bits) {
+    mut bool negative = false
+    mut ulong mantissa = 0UL
+    mut long exponent = 0
+    mut bool many = false
+    mut long from = 0
+    mut long to = 0
+    mut long power = 0
+    int read = ScanFloating(text, count, mut negative, mut mantissa, mut exponent, mut many, mut from, mut to, mut power)
+    if read == 0 || read == 1 {
+        return read
+    }
+
+    mut ulong sign = 0UL
+    if negative {
+        sign = 9223372036854775808UL
+    }
+
+    if read == 3 {
+        bits = 0xFFF8000000000000UL
+        return -1
+    }
+
+    if read == 2 {
+        bits = sign | 0x7FF0000000000000UL
+        return -1
+    }
+
+    // Clinger's fast path, as Rust's `try_fast_path`: a significand of 53 bits at most times or over a power of
+    // ten a `double` holds exactly, 10^22 at most, rounds once; a power up to 10^37 is moved into the
+    // significand first where it stays within 53 bits
+    if !many && exponent >= -22 && exponent <= 37 && mantissa <= 9007199254740992UL {
+        mut ulong whole = mantissa
+        mut long ten = exponent
+        if ten > 22 {
+            ulong moved = TenPower(int(ten - 22))
+            if whole <= 9007199254740992UL / moved {
+                whole = whole * moved
+                ten = 22
+            }
+        }
+
+        if ten <= 22 {
+            mut double value = double(whole)
+            if ten < 0 {
+                value = value / DoublePower(int(-ten))
+            } else {
+                value = value * DoublePower(int(ten))
+            }
+
+            raw {
+                bits = sign | *Ptr<ulong>(&value)
+            }
+
+            return -1
+        }
+    }
+
+    mut ulong f = 0UL
+    int e = Nearest(mantissa, exponent, many, text, from, to, power, digits, fives, false, mut f)
+    bits = sign | f | (ulong(e) << 52)
+    return -1
+}
+
+// `float.Parse` (X7), as `ParseDouble` reads a `double`, with the bits of the `float` nearest to the number,
+// rounded once, from its digits.
+pub int ParseFloat(byte* text, long count, byte* digits, ulong* fives, mut uint bits) {
+    mut bool negative = false
+    mut ulong mantissa = 0UL
+    mut long exponent = 0
+    mut bool many = false
+    mut long from = 0
+    mut long to = 0
+    mut long power = 0
+    int read = ScanFloating(text, count, mut negative, mut mantissa, mut exponent, mut many, mut from, mut to, mut power)
+    if read == 0 || read == 1 {
+        return read
+    }
+
+    mut uint sign = 0U
+    if negative {
+        sign = 2147483648U
+    }
+
+    if read == 3 {
+        bits = 0xFFC00000U
+        return -1
+    }
+
+    if read == 2 {
+        bits = sign | 0x7F800000U
+        return -1
+    }
+
+    // Clinger's fast path for a `float`: 24 bits and 10^10, a power up to 10^17 moved into the significand
+    if !many && exponent >= -10 && exponent <= 17 && mantissa <= 16777216UL {
+        mut ulong whole = mantissa
+        mut long ten = exponent
+        if ten > 10 {
+            ulong moved = TenPower(int(ten - 10))
+            if whole <= 16777216UL / moved {
+                whole = whole * moved
+                ten = 10
+            }
+        }
+
+        if ten <= 10 {
+            mut float value = float(whole)
+            if ten < 0 {
+                value = value / FloatPower(int(-ten))
+            } else {
+                value = value * FloatPower(int(ten))
+            }
+
+            raw {
+                bits = sign | *Ptr<uint>(&value)
+            }
+
+            return -1
+        }
+    }
+
+    mut ulong f = 0UL
+    int e = Nearest(mantissa, exponent, many, text, from, to, power, digits, fives, true, mut f)
+    bits = sign | uint(f | (ulong(e) << 23))
+    return -1
+}
+
+// 10^k as a `double`, k from 0 to 22, each exact.
+double DoublePower(int k) => match k {
+    0 => 1.0
+    1 => 10.0
+    2 => 100.0
+    3 => 1000.0
+    4 => 10000.0
+    5 => 100000.0
+    6 => 1000000.0
+    7 => 10000000.0
+    8 => 100000000.0
+    9 => 1000000000.0
+    10 => 10000000000.0
+    11 => 100000000000.0
+    12 => 1000000000000.0
+    13 => 10000000000000.0
+    14 => 100000000000000.0
+    15 => 1000000000000000.0
+    16 => 10000000000000000.0
+    17 => 100000000000000000.0
+    18 => 1000000000000000000.0
+    19 => 10000000000000000000.0
+    20 => 100000000000000000000.0
+    21 => 1000000000000000000000.0
+    else => 10000000000000000000000.0
+}
+
+// 10^k as a `float`, k from 0 to 10, each exact.
+float FloatPower(int k) => match k {
+    0 => 1f
+    1 => 10f
+    2 => 100f
+    3 => 1000f
+    4 => 10000f
+    5 => 100000f
+    6 => 1000000f
+    7 => 10000000f
+    8 => 100000000f
+    9 => 1000000000f
+    else => 10000000000f
+}
+
+// 10^k, k from 0 to 15.
+ulong TenPower(int k) {
+    mut ulong p = 1UL
+    mut int i = 0
+    while i < k {
+        p = p * 10UL
+        i = i + 1
+    }
+
+    return p
+}
+
+// The significand of the floating-point number nearest to `mantissa` times 10^`exponent`, ties to even, without
+// its first bit, in `f`, and its biased exponent returned, the format's largest for an infinity: Eisel-Lemire
+// on the 19 digits, and where it cannot settle the rounding, or where digits that are not 0 follow them and
+// `mantissa + 1` would round otherwise, the slow path over every digit, as Rust's `dec2flt`. A `double` where
+// `single` is false, a `float` where it is true.
+int Nearest(ulong mantissa, long exponent, bool many, byte* text, long from, long to, long power, byte* digits, ulong* fives, bool single, mut ulong f) {
+    mut int e = Lemire(exponent, mantissa, fives, single, mut f)
+    if many && e >= 0 {
+        mut ulong g = 0UL
+        int above = Lemire(exponent, mantissa + 1UL, fives, single, mut g)
+        if above != e || g != f {
+            e = -1
+        }
+    }
+
+    if e < 0 {
+        e = Slow(text, from, to, power, digits, single, mut f)
+    }
+
+    return e
+}
+
+// The count of the zero bits above the first bit that is set, of a number that is not 0.
+int LeadingZeros(ulong w) {
+    mut int n = 0
+    mut ulong v = w
+    if v >> 32 == 0UL {
+        n = n + 32
+        v = v << 32
+    }
+
+    if v >> 48 == 0UL {
+        n = n + 16
+        v = v << 16
+    }
+
+    if v >> 56 == 0UL {
+        n = n + 8
+        v = v << 8
+    }
+
+    if v >> 60 == 0UL {
+        n = n + 4
+        v = v << 4
+    }
+
+    if v >> 62 == 0UL {
+        n = n + 2
+        v = v << 2
+    }
+
+    if v >> 63 == 0UL {
+        n = n + 1
+    }
+
+    return n
+}
+
+// The 128-bit product of two 64-bit numbers, from the products of their 32-bit halves: the low 64 bits
+// returned, the high 64 into `high`.
+ulong Product(ulong a, ulong b, mut ulong high) {
+    ulong a0 = a & 4294967295UL
+    ulong a1 = a >> 32
+    ulong b0 = b & 4294967295UL
+    ulong b1 = b >> 32
+    ulong b00 = a0 * b0
+    ulong mid1 = a1 * b0 + (b00 >> 32)
+    ulong mid2 = a0 * b1 + (mid1 & 4294967295UL)
+    high = a1 * b1 + (mid1 >> 32) + (mid2 >> 32)
+    return (mid2 << 32) | (b00 & 4294967295UL)
+}
+
+// Eisel-Lemire (Lemire, "Number Parsing at a Gigabyte per Second", 2021), as Rust's `compute_float`: the
+// significand without its first bit in `f` and the biased exponent returned, of the floating-point number
+// nearest to `w` times 10^`q`, ties to even, from the product of `w` and the 128-bit power of five of `q` in
+// `fives` (`ParseDouble`); -1 where that product cannot settle the rounding. A `double` where `single` is false,
+// a `float` where it is true.
+int Lemire(long q, ulong w, ulong* fives, bool single, mut ulong f) {
+    mut int explicit = 52
+    mut int minimum = -1023
+    mut int infinite = 2047
+    mut long smallest = -342
+    mut long largest = 308
+    mut long evenLow = -4
+    mut long evenHigh = 23
+    if single {
+        explicit = 23
+        minimum = -127
+        infinite = 255
+        smallest = -65
+        largest = 38
+        evenLow = -17
+        evenHigh = 10
+    }
+
+    f = 0UL
+    if w == 0UL || q < smallest {
+        return 0
+    }
+
+    if q > largest {
+        return infinite
+    }
+
+    int lz = LeadingZeros(w)
+    ulong v = w << lz
+    // the product to explicit + 3 bits, as Rust's `compute_product_approx`: a second product, with the low
+    // half of the power, where the first leaves those bits all set
+    int row = int(q) + 342
+    mut ulong upperFive = 0UL
+    mut ulong lowerFive = 0UL
+    raw {
+        upperFive = fives[2 * row]
+        lowerFive = fives[2 * row + 1]
+    }
+
+    ulong mask = 0xFFFFFFFFFFFFFFFFUL >> (explicit + 3)
+    mut ulong high = 0UL
+    mut ulong low = Product(v, upperFive, mut high)
+    if (high & mask) == mask {
+        mut ulong second = 0UL
+        Product(v, lowerFive, mut second)
+        low = low +% second
+        if second > low {
+            high = high + 1UL
+        }
+    }
+
+    // the product may lie a unit too low only outside 5^-27 to 5^55, where it is not exact
+    if low == 0xFFFFFFFFFFFFFFFFUL && (q < -27 || q > 55) {
+        return -1
+    }
+
+    int upper = int(high >> 63)
+    mut ulong m = high >> (upper + 64 - explicit - 3)
+    mut int power = (((int(q) * 217706) >> 16) + 63) + upper - lz - minimum
+    if power <= 0 {
+        // a number below the smallest normal one: shifted into place and rounded, the smallest normal one where
+        // the rounding carries
+        if -power + 1 >= 64 {
+            return 0
+        }
+
+        m = m >> (-power + 1)
+        m = m + (m & 1UL)
+        m = m >> 1
+        f = m & ((1UL << explicit) - 1UL)
+        if m >= 1UL << explicit {
+            return 1
+        }
+
+        return 0
+    }
+
+    // a tie, which 5^q of 64 bits alone makes exact, rounds to the even significand
+    if low <= 1UL && q >= evenLow && q <= evenHigh && (m & 3UL) == 1UL && (m << (upper + 64 - explicit - 3)) == high {
+        m = m ^ 1UL
+    }
+
+    m = m + (m & 1UL)
+    m = m >> 1
+    if m >= 2UL << explicit {
+        m = 1UL << explicit
+        power = power + 1
+    }
+
+    if power >= infinite {
+        return infinite
+    }
+
+    f = m & ((1UL << explicit) - 1UL)
+    return power
+}
+
+// Rust's `parse_long_mantissa`, Nigel Tao's simple decimal conversion: the digits between `from` and `to` as a
+// decimal of up to 768 digits in `d`, shifted by powers of two until it lies in [1/2, 1), then by the bits of
+// the significand, and rounded, ties to even, the digits past the 768th counted as one that is not 0; the
+// significand without its first bit in `f` and the biased exponent returned, as `Lemire` gives them.
+int Slow(byte* text, long from, long to, long power, byte* d, bool single, mut ulong f) {
+    mut int explicit = 52
+    mut int minimum = -1023
+    mut int infinite = 2047
+    if single {
+        explicit = 23
+        minimum = -127
+        infinite = 255
+    }
+
+    f = 0UL
+    mut int n = 0
+    mut int point = 0
+    mut bool truncated = false
+    ReadDigits(text, from, to, power, d, mut n, mut point, mut truncated)
+    if n == 0 || point < -324 {
+        return 0
+    }
+
+    if point >= 310 {
+        return infinite
+    }
+
+    mut int exp2 = 0
+    while point > 0 {
+        int shift = Shift(point)
+        RightShift(d, mut n, mut point, mut truncated, shift)
+        if point < -2047 {
+            return 0
+        }
+
+        exp2 = exp2 + shift
+    }
+
+    while point <= 0 {
+        mut int shift = 0
+        if point == 0 {
+            mut int first = 0
+            raw {
+                first = int(d[0])
+            }
+
+            if first >= 5 {
+                break
+            }
+
+            shift = 1
+            if first < 2 {
+                shift = 2
+            }
+        } else {
+            shift = Shift(-point)
+        }
+
+        LeftShift(d, mut n, mut point, mut truncated, shift)
+        if point > 2047 {
+            return infinite
+        }
+
+        exp2 = exp2 - shift
+    }
+
+    exp2 = exp2 - 1
+    while minimum + 1 > exp2 {
+        mut int shift = minimum + 1 - exp2
+        if shift > 60 {
+            shift = 60
+        }
+
+        RightShift(d, mut n, mut point, mut truncated, shift)
+        exp2 = exp2 + shift
+    }
+
+    if exp2 - minimum >= infinite {
+        return infinite
+    }
+
+    LeftShift(d, mut n, mut point, mut truncated, explicit + 1)
+    mut ulong m = RoundDecimal(d, n, point, truncated)
+    if m >= 1UL << (explicit + 1) {
+        RightShift(d, mut n, mut point, mut truncated, 1)
+        exp2 = exp2 + 1
+        m = RoundDecimal(d, n, point, truncated)
+        if exp2 - minimum >= infinite {
+            return infinite
+        }
+    }
+
+    mut int e = exp2 - minimum
+    if m < 1UL << explicit {
+        e = e - 1
+    }
+
+    f = m & ((1UL << explicit) - 1UL)
+    return e
+}
+
+// Rust's `get_shift`: a shift of the decimal by powers of two that moves its point by `n` digits at most.
+int Shift(int n) => match n {
+    0 => 0
+    1 => 3
+    2 => 6
+    3 => 9
+    4 => 13
+    5 => 16
+    6 => 19
+    7 => 23
+    8 => 26
+    9 => 29
+    10 => 33
+    11 => 36
+    12 => 39
+    13 => 43
+    14 => 46
+    15 => 49
+    16 => 53
+    17 => 56
+    18 => 59
+    else => 60
+}
+
+// The digits between `from` and `to`, past a `,` and the point, as Rust's `parse_decimal` reads them: in `d`
+// the significant ones, from the first that is not 0 to the last that is not 0, 768 at most, with `truncated`
+// where more stand; in `n` their count; in `point` the power of ten the number is 0.d times, the written
+// exponent `power` among it, held within 100000 either way.
+void ReadDigits(byte* text, long from, long to, long power, byte* d, mut int n, mut int point, mut bool truncated) {
+    mut long at = from
+    mut long read = 0
+    mut long last = 0
+    mut long place = power
+    mut bool before = true
+    raw {
+        while at < to {
+            int b = int(text[at])
+            if b == 46 {
+                before = false
+            } else if b != 44 {
+                if read == 0 && b == 48 {
+                    if !before {
+                        place = place - 1
+                    }
+                } else {
+                    if read < 768 {
+                        d[read] = byte(b - 48)
+                    }
+
+                    read = read + 1
+                    if b != 48 {
+                        last = read
+                    }
+
+                    if before {
+                        place = place + 1
+                    }
+                }
+            }
+
+            at = at + 1
+        }
+    }
+
+    truncated = last > 768
+    n = 768
+    if last < 768 {
+        n = int(last)
+    }
+
+    if place > 100000 {
+        place = 100000
+    } else if place < -100000 {
+        place = -100000
+    }
+
+    point = int(place)
+}
+
+// Rust's `Decimal::round`: the integer part of the decimal, rounded half to even, the digits past the 768th
+// counted as one that is not 0; all bits set where it has more than 18 digits.
+ulong RoundDecimal(byte* d, int n, int point, bool truncated) {
+    if n == 0 || point < 0 {
+        return 0UL
+    }
+
+    if point > 18 {
+        return 0xFFFFFFFFFFFFFFFFUL
+    }
+
+    mut ulong m = 0UL
+    mut bool up = false
+    raw {
+        mut int i = 0
+        while i < point {
+            m = m * 10UL
+            if i < n {
+                m = m + ulong(d[i])
+            }
+
+            i = i + 1
+        }
+
+        if point < n {
+            up = d[point] >= 5
+            if d[point] == 5 && point + 1 == n {
+                up = truncated || (point != 0 && (int(d[point - 1]) & 1) != 0)
+            }
+        }
+    }
+
+    if up {
+        m = m + 1UL
+    }
+
+    return m
+}
+
+// Rust's `Decimal::left_shift`: the decimal times 2^`shift`, `shift` from 1 to 60, from its last digit to its
+// first, the digits it adds counted first; a digit that is not 0 past the 768th sets `truncated`.
+void LeftShift(byte* d, mut int n, mut int point, mut bool truncated, int shift) {
+    if n == 0 {
+        return
+    }
+
+    int added = NewDigits(d, n, shift)
+    mut int read = n
+    mut int write = n + added
+    mut ulong carry = 0UL
+    raw {
+        while read != 0 {
+            read = read - 1
+            write = write - 1
+            carry = carry + (ulong(d[read]) << shift)
+            ulong quotient = carry / 10UL
+            ulong remainder = carry - 10UL * quotient
+            if write < 768 {
+                d[write] = byte(remainder)
+            } else if remainder > 0UL {
+                truncated = true
+            }
+
+            carry = quotient
+        }
+
+        while carry > 0UL {
+            write = write - 1
+            ulong quotient = carry / 10UL
+            ulong remainder = carry - 10UL * quotient
+            if write < 768 {
+                d[write] = byte(remainder)
+            } else if remainder > 0UL {
+                truncated = true
+            }
+
+            carry = quotient
+        }
+    }
+
+    n = n + added
+    if n > 768 {
+        n = 768
+    }
+
+    point = point + added
+    Trim(d, mut n)
+}
+
+// Rust's `number_of_digits_decimal_left_shift`: the digits a left shift by `shift` adds, one fewer where the
+// decimal's digits lie below those of 5^`shift`.
+int NewDigits(byte* d, int n, int shift) {
+    int a = ShiftDigits(shift)
+    int start = a & 2047
+    int end = ShiftDigits(shift + 1) & 2047
+    int added = a >> 11
+    mut int i = 0
+    raw {
+        while i < end - start {
+            if i >= n {
+                return added - 1
+            }
+
+            int five = FiveDigit(start + i)
+            if int(d[i]) != five {
+                if int(d[i]) < five {
+                    return added - 1
+                }
+
+                return added
+            }
+
+            i = i + 1
+        }
+    }
+
+    return added
+}
+
+// The decimal digit at `at` of the digits `FiveDigits` holds, one after another.
+int FiveDigit(int at) => int((FiveDigits(at / 16) >> ((15 - at % 16) * 4)) & 15UL)
+
+// Rust's `Decimal::right_shift`: the decimal over 2^`shift`, `shift` from 1 to 60, from its first digit to its
+// last; a digit that is not 0 past the 768th sets `truncated`, and a decimal whose point falls below -2047 is 0.
+void RightShift(byte* d, mut int n, mut int point, mut bool truncated, int shift) {
+    mut int read = 0
+    mut int write = 0
+    mut ulong carry = 0UL
+    raw {
+        while (carry >> shift) == 0UL {
+            if read < n {
+                carry = 10UL * carry + ulong(d[read])
+                read = read + 1
+            } else if carry == 0UL {
+                return
+            } else {
+                while (carry >> shift) == 0UL {
+                    carry = carry * 10UL
+                    read = read + 1
+                }
+
+                break
+            }
+        }
+
+        point = point - read + 1
+        if point < -2047 {
+            n = 0
+            point = 0
+            truncated = false
+            return
+        }
+
+        ulong mask = (1UL << shift) - 1UL
+        while read < n {
+            byte digit = byte(carry >> shift)
+            carry = 10UL * (carry & mask) + ulong(d[read])
+            read = read + 1
+            d[write] = digit
+            write = write + 1
+        }
+
+        while carry > 0UL {
+            byte digit = byte(carry >> shift)
+            carry = 10UL * (carry & mask)
+            if write < 768 {
+                d[write] = digit
+                write = write + 1
+            } else if digit > 0 {
+                truncated = true
+            }
+        }
+    }
+
+    n = write
+    Trim(d, mut n)
+}
+
+// The decimal without the zeros after its last digit that is not 0.
+void Trim(byte* d, mut int n) {
+    raw {
+        while n != 0 && d[n - 1] == 0 {
+            n = n - 1
+        }
+    }
+}
+
+// The next digit at `at` or after it and before `to`, past a `,` and the point, with `at` moved after it; -1
+// where none is left.
+int NextDigit(byte* text, long to, mut long at) {
+    raw {
+        while at < to {
+            int b = int(text[at])
+            at = at + 1
+            if b >= 48 && b <= 57 {
+                return b - 48
+            }
+        }
+    }
+
+    return -1
+}
+
+// `decimal.Parse` (X7): -1 with the `decimal` the `count` bytes at `text` hold in its two words, `low`, the low
+// 64 bits of its integer, and `high`, its high 32 bits with System.Decimal's flags above them, the scale in
+// bits 48 to 55 and the sign in bit 63; else the index of the failure's `ParseKind`. The form is C#'s `Number`
+// style with the invariant culture without its trailing sign: whitespace around the number, a leading `+` or
+// `-`, digits with `,` anywhere after the first of them before the point, a point and the digits after it, one
+// digit at least. The digits that fit in 96 bits at a scale of 28 at most are taken, and the number is rounded
+// at the first digit that does not fit, half to even, every digit after it counted, as C#'s `decimal.Parse`
+// rounds it (Number.NumberToDecimal); past the range after the rounding it is 2, `TooLarge`, or 3, `TooSmall`,
+// where it is below 0. A zero keeps its scale, 28 at most, and its sign (§12, the owner, 2026-10-31, "-0.00,
+// keep the sign").
+pub int ParseDecimal(byte* text, long count, mut ulong low, mut ulong high) {
+    mut long at = 0
+    mut bool negative = false
+    mut long first = -1
+    mut long to = 0
+    mut long e = 0
+    mut long fraction = 0
+    mut bool digits = false
+    mut bool point = false
+    raw {
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+
+        if at == count {
+            return 0
+        }
+
+        if text[at] == 43 {
+            at = at + 1
+        } else if text[at] == 45 {
+            negative = true
+            at = at + 1
+        }
+
+        // `e` counts the significant digits before the point, or else, below 0, the zeros after it before the
+        // first digit that is not 0, as the scale of .NET's number buffer counts them
+        while at < count {
+            int b = int(text[at])
+            if b >= 48 && b <= 57 {
+                digits = true
+                if point {
+                    fraction = fraction + 1
+                }
+
+                if first < 0 && b == 48 {
+                    if point {
+                        e = e - 1
+                    }
+                } else {
+                    if first < 0 {
+                        first = at
+                    }
+
+                    if !point {
+                        e = e + 1
+                    }
+                }
+            } else if b == 46 && !point {
+                point = true
+            } else if b != 44 || !digits || point {
+                break
+            }
+
+            at = at + 1
+        }
+
+        to = at
+        while at < count && NumberWhite(int(text[at])) {
+            at = at + 1
+        }
+    }
+
+    if !digits || at != count {
+        return 1
+    }
+
+    mut ulong sign = 0UL
+    if negative {
+        sign = 9223372036854775808UL
+    }
+
+    if first < 0 {
+        mut long scale = fraction
+        if scale > 28 {
+            scale = 28
+        }
+
+        low = 0UL
+        high = sign | (ulong(scale) << 48)
+        return -1
+    }
+
+    mut int failed = 2
+    if negative {
+        failed = 3
+    }
+
+    if e > 29 {
+        return failed
+    }
+
+    // the digits into 64 bits while the scale stays within 28, then into 96 bits while they fit, the integer
+    // digits all, the first digit left over in `c`, as Number.NumberToDecimal takes them
+    mut long position = first
+    mut int c = NextDigit(text, to, mut position)
+    mut ulong lo = 0UL
+    while e > -28 {
+        e = e - 1
+        lo = lo * 10UL + ulong(c)
+        c = NextDigit(text, to, mut position)
+        if lo >= 1844674407370955161UL {
+            break
+        }
+
+        if c < 0 {
+            while e > 0 {
+                e = e - 1
+                lo = lo * 10UL
+                if lo >= 1844674407370955161UL {
+                    break
+                }
+            }
+
+            break
+        }
+    }
+
+    mut ulong hi = 0UL
+    while (e > 0 || (c >= 0 && e > -28)) && (hi < 429496729UL || (hi == 429496729UL && (lo < 0x9999999999999999UL || (lo == 0x9999999999999999UL && c <= 5)))) {
+        ulong part = (lo & 4294967295UL) * 10UL
+        ulong carried = (lo >> 32) * 10UL + (part >> 32)
+        lo = (part & 4294967295UL) + (carried << 32)
+        hi = (carried >> 32) + hi * 10UL
+        if c >= 0 {
+            lo = lo +% ulong(c)
+            if lo < ulong(c) {
+                hi = hi + 1UL
+            }
+
+            c = NextDigit(text, to, mut position)
+        }
+
+        e = e - 1
+    }
+
+    // half to even: a 5 with nothing but zeros after it rounds to the even number
+    if c >= 5 {
+        mut bool up = true
+        if c == 5 && (lo & 1UL) == 0UL {
+            mut bool zeros = true
+            c = NextDigit(text, to, mut position)
+            while c >= 0 && zeros {
+                zeros = c == 0
+                c = NextDigit(text, to, mut position)
+            }
+
+            up = !zeros
+        }
+
+        if up {
+            lo = lo +% 1UL
+            if lo == 0UL {
+                hi = hi + 1UL
+                if hi == 4294967296UL {
+                    // past 96 bits: the number one digit shorter, 2^96 / 10 rounded
+                    lo = 0x999999999999999AUL
+                    hi = 429496729UL
+                    e = e + 1
+                }
+            }
+        }
+    }
+
+    if e > 0 {
+        return failed
+    }
+
+    if e <= -29 {
+        lo = 0UL
+        hi = 0UL
+        e = -28
+    }
+
+    low = lo
+    high = sign | (ulong(-e) << 48) | hi
+    return -1
+}
+
+// For a left shift by `shift` bits, 1 to 60, the count of digits it adds, or one more than it adds
+// where the digits of the number lie below those of 5^shift, in bits 11 up, and where the digits of
+// 5^shift start in the sequence of `FiveDigits`, in bits 0 to 10, as Rust's `number_of_digits_decimal_left_shift`.
+// A shift of 60 reads the start of entry 61 as the end of its digits, Rust's 0x051C, 1308; the count of 19 in
+// bits 11 up of entry 61 belongs to 5^61, which no shift reads.
+int ShiftDigits(int shift) => match shift {
+    0 => 0
+    1 => 2048
+    2 => 2049
+    3 => 2051
+    4 => 4102
+    5 => 4105
+    6 => 4109
+    7 => 6162
+    8 => 6167
+    9 => 6173
+    10 => 8228
+    11 => 8235
+    12 => 8243
+    13 => 8252
+    14 => 10310
+    15 => 10320
+    16 => 10331
+    17 => 12391
+    18 => 12403
+    19 => 12416
+    20 => 14478
+    21 => 14492
+    22 => 14507
+    23 => 14523
+    24 => 16588
+    25 => 16605
+    26 => 16623
+    27 => 18690
+    28 => 18709
+    29 => 18729
+    30 => 20798
+    31 => 20819
+    32 => 20841
+    33 => 20864
+    34 => 22936
+    35 => 22960
+    36 => 22985
+    37 => 25059
+    38 => 25085
+    39 => 25112
+    40 => 27188
+    41 => 27216
+    42 => 27245
+    43 => 27275
+    44 => 29354
+    45 => 29385
+    46 => 29417
+    47 => 31498
+    48 => 31531
+    49 => 31565
+    50 => 33648
+    51 => 33683
+    52 => 33719
+    53 => 33756
+    54 => 35842
+    55 => 35880
+    56 => 35919
+    57 => 38007
+    58 => 38047
+    59 => 38088
+    60 => 40178
+    61 => 40220
+    else => 0
+}
+
+// The decimal digits of 5^1 to 5^61 one after another, 1351 of them, sixteen to a word, one to
+// four bits, the first in the highest four: the hexadecimal digits of each word are the decimal ones. A
+// left shift reads the 1308 digits of 5^1 to 5^60, as Rust's `TABLE_POW5` holds them; the 43 of 5^61
+// after them are read by no shift.
+ulong FiveDigits(int word) => match word {
+    0 => 0x5251256253125156
+    1 => 0x2578125390625195
+    2 => 0x3125976562548828
+    3 => 0x1252441406251220
+    4 => 0x7031256103515625
+    5 => 0x3051757812515258
+    6 => 0x7890625762939453
+    7 => 0x1253814697265625
+    8 => 0x1907348632812595
+    9 => 0x3674316406254768
+    10 => 0x3715820312523841
+    11 => 0x8579101562511920
+    12 => 0x9289550781255960
+    13 => 0x4644775390625298
+    14 => 0x0232238769531251
+    15 => 0x4901161193847656
+    16 => 0x2574505805969238
+    17 => 0x2812537252902984
+    18 => 0x6191406251862645
+    19 => 0x1492309570312593
+    20 => 0x1322574615478515
+    21 => 0x6254656612873077
+    22 => 0x3925781252328306
+    23 => 0x4365386962890625
+    24 => 0x1164153218269348
+    25 => 0x1445312558207660
+    26 => 0x9134674072265625
+    27 => 0x2910383045673370
+    28 => 0x3613281251455191
+    29 => 0x5228366851806640
+    30 => 0x6257275957614183
+    31 => 0x4259033203125363
+    32 => 0x7978807091712951
+    33 => 0x6601562518189894
+    34 => 0x0354585647583007
+    35 => 0x8125909494701772
+    36 => 0x9282379150390625
+    37 => 0x4547473508864641
+    38 => 0x1895751953125227
+    39 => 0x3736754432320594
+    40 => 0x7875976562511368
+    41 => 0x6837721616029739
+    42 => 0x3798828125568434
+    43 => 0x1886080801486968
+    44 => 0x9941406252842170
+    45 => 0x9430404007434844
+    46 => 0x9707031251421085
+    47 => 0x4715202003717422
+    48 => 0x4853515625710542
+    49 => 0x7357601001858711
+    50 => 0x2426757812535527
+    51 => 0x1367880050092935
+    52 => 0x5621337890625177
+    53 => 0x6356839400250464
+    54 => 0x6778106689453125
+    55 => 0x8881784197001252
+    56 => 0x3233890533447265
+    57 => 0x6254440892098500
+    58 => 0x6261616945266723
+    59 => 0x6328125222044604
+    60 => 0x9250313080847263
+    61 => 0x3361816406251110
+    62 => 0x2230246251565404
+    63 => 0x2363166809082031
+    64 => 0x2555511151231257
+    65 => 0x8270211815834045
+    66 => 0x4101562527755575
+    67 => 0x6156289135105907
+    68 => 0x9170227050781251
+    69 => 0x3877787807814456
+    70 => 0x7552953958511352
+    71 => 0x5390625693889390
+    72 => 0x3907228377647697
+    73 => 0x9255676269531253
+    74 => 0x4694469519536141
+    75 => 0x8882384896278381
+    76 => 0x3476562517347234
+    77 => 0x7597680709441192
+    78 => 0x4481391906738281
+    79 => 0x2586736173798840
+    80 => 0x3547205962240695
+    81 => 0x9533691406254336
+    82 => 0x8086899420177360
+    83 => 0x2981120347976684
+    84 => 0x5703125000000000
+    else => 0
+}
+
+// The block of a map (M9). A map value is the address of its block, null for a map that holds none: one
+// that never took one, and one whose `Clear` let go of a block other values held; the `Remove` of its last
+// entry and the `Clear` of a block it alone held keep the block, its count of entries 0. A block holds
+// the count of the map values that hold it, 8 bytes, the count of its entries and the count of slots it
+// has room for, a power of two from 8, 4 bytes each, the two keys
 // of its hash, 8 bytes each, the count of slots without an entry that entries can still take before the
 // block grows, 4 bytes, and 12 bytes unused, from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
@@ -1179,7 +3777,9 @@ pub ulong HashEnd(byte* state) {
 
 // SipHash-1-3 of the `count` bytes at `bytes` under the keys `key0` and `key1`, the hash Rust's
 // `HashMap` takes by default: one round for each word of eight bytes, read with its first byte lowest,
-// and three after the last word, which holds the bytes left and the count in its highest byte.
+// and three after the last word, which holds the bytes left and the count in its highest byte. A whole
+// word is read in one load and the bytes left four, two and one at a time, as Rust's `SipHasher13`
+// reads them (`load_int_le` and `u8to64_le`).
 ulong SipHash13(ulong key0, ulong key1, byte* bytes, long count) {
     mut ulong v0 = key0 ^ 8317987319222330741UL
     mut ulong v1 = key1 ^ 7237128888997146477UL
@@ -1187,20 +3787,10 @@ ulong SipHash13(ulong key0, ulong key1, byte* bytes, long count) {
     mut ulong v3 = key1 ^ 8387220255154660723UL
     long whole = count / 8 * 8
     mut long at = 0
-    while at <= whole {
+    while at < whole {
         mut ulong word = 0
-        mut int n = 8
-        if at == whole {
-            word = ulong(count) << 56
-            n = int(count - whole)
-        }
-
-        mut int k = 0
         raw {
-            while k < n {
-                word = word | ulong(bytes[at + long(k)]) << (8 * k)
-                k = k + 1
-            }
+            word = WordAt(bytes + at)
         }
 
         v3 = v3 ^ word
@@ -1209,11 +3799,54 @@ ulong SipHash13(ulong key0, ulong key1, byte* bytes, long count) {
         at = at + 8
     }
 
+    mut ulong last = ulong(count) << 56
+    raw {
+        last = last | SipTail(bytes + whole, count - whole)
+    }
+
+    v3 = v3 ^ last
+    SipRound(mut v0, mut v1, mut v2, mut v3)
+    v0 = v0 ^ last
     v2 = v2 ^ 255UL
     SipRound(mut v0, mut v1, mut v2, mut v3)
     SipRound(mut v0, mut v1, mut v2, mut v3)
     SipRound(mut v0, mut v1, mut v2, mut v3)
     return v0 ^ v1 ^ v2 ^ v3
+}
+
+// The 8 bytes at `p` as a word, the first byte lowest, at any address: LLVM joins the bytes into one
+// load, which a read through a `Ptr<ulong>` is not, since LLVM takes that one to be at a multiple of 8.
+pub ulong WordAt(byte* p) {
+    mut ulong word = 0
+    raw {
+        word = ulong(p[0]) | ulong(p[1]) << 8 | ulong(p[2]) << 16 | ulong(p[3]) << 24 | ulong(p[4]) << 32 | ulong(p[5]) << 40 | ulong(p[6]) << 48 | ulong(p[7]) << 56
+    }
+
+    return word
+}
+
+// The `n` bytes at `p`, fewer than 8, as a word, the first byte lowest: four, two and one at a time, as
+// Rust's `u8to64_le` reads them.
+ulong SipTail(byte* p, long n) {
+    mut ulong word = 0
+    mut long i = 0
+    raw {
+        if n >= 4 {
+            word = ulong(p[0]) | ulong(p[1]) << 8 | ulong(p[2]) << 16 | ulong(p[3]) << 24
+            i = 4
+        }
+
+        if n - i >= 2 {
+            word = word | (ulong(p[i]) | ulong(p[i + 1]) << 8) << int(8 * i)
+            i = i + 2
+        }
+
+        if i < n {
+            word = word | ulong(p[i]) << int(8 * i)
+        }
+    }
+
+    return word
 }
 
 // One round of SipHash over its four words.
@@ -1285,13 +3918,12 @@ pub byte* HasherOwned(byte* block, mut long asked) {
     return p
 }
 
-// SHA-256's state at `s`, 616 bytes: the eight words of the hash (0), the count of bytes added (32), the
-// block of 64 bytes being filled (40), the 64 words of the message schedule (104) and the 64 words of
-// FIPS 180-4's constants K (360). MD5's, 408 bytes: its four words A, B, C and D (0), the count of bytes
-// added (16), the block being filled (24), RFC 1321's 64 words T (88) and the 16 shifts of its rounds,
-// four for each round (344).
+// SHA-256's state at `s`, 104 bytes: the eight words of the hash (0), the count of bytes added (32) and the
+// block of 64 bytes being filled (40). MD5's, 88 bytes: its four words A, B, C and D (0), the count of bytes
+// added (16) and the block being filled (24). The rounds take their constants in the code, so that a state
+// holds no table.
 
-// The state of a new hasher of SHA-256 at `s`: FIPS 180-4's initial hash (5.3.3) and K (4.2.2).
+// The state of a new hasher of SHA-256 at `s`: FIPS 180-4's initial hash (5.3.3).
 void Sha256Start(byte* s) {
     raw {
         uint* hash = Ptr<uint>(s)
@@ -1304,96 +3936,68 @@ void Sha256Start(byte* s) {
         hash[6] = 0x1f83d9ab
         hash[7] = 0x5be0cd19
         *Ptr<long>(s + 32) = 0
-        uint* k = Ptr<uint>(s + 360)
-        k[0] = 0x428a2f98
-        k[1] = 0x71374491
-        k[2] = 0xb5c0fbcf
-        k[3] = 0xe9b5dba5
-        k[4] = 0x3956c25b
-        k[5] = 0x59f111f1
-        k[6] = 0x923f82a4
-        k[7] = 0xab1c5ed5
-        k[8] = 0xd807aa98
-        k[9] = 0x12835b01
-        k[10] = 0x243185be
-        k[11] = 0x550c7dc3
-        k[12] = 0x72be5d74
-        k[13] = 0x80deb1fe
-        k[14] = 0x9bdc06a7
-        k[15] = 0xc19bf174
-        k[16] = 0xe49b69c1
-        k[17] = 0xefbe4786
-        k[18] = 0x0fc19dc6
-        k[19] = 0x240ca1cc
-        k[20] = 0x2de92c6f
-        k[21] = 0x4a7484aa
-        k[22] = 0x5cb0a9dc
-        k[23] = 0x76f988da
-        k[24] = 0x983e5152
-        k[25] = 0xa831c66d
-        k[26] = 0xb00327c8
-        k[27] = 0xbf597fc7
-        k[28] = 0xc6e00bf3
-        k[29] = 0xd5a79147
-        k[30] = 0x06ca6351
-        k[31] = 0x14292967
-        k[32] = 0x27b70a85
-        k[33] = 0x2e1b2138
-        k[34] = 0x4d2c6dfc
-        k[35] = 0x53380d13
-        k[36] = 0x650a7354
-        k[37] = 0x766a0abb
-        k[38] = 0x81c2c92e
-        k[39] = 0x92722c85
-        k[40] = 0xa2bfe8a1
-        k[41] = 0xa81a664b
-        k[42] = 0xc24b8b70
-        k[43] = 0xc76c51a3
-        k[44] = 0xd192e819
-        k[45] = 0xd6990624
-        k[46] = 0xf40e3585
-        k[47] = 0x106aa070
-        k[48] = 0x19a4c116
-        k[49] = 0x1e376c08
-        k[50] = 0x2748774c
-        k[51] = 0x34b0bcb5
-        k[52] = 0x391c0cb3
-        k[53] = 0x4ed8aa4a
-        k[54] = 0x5b9cca4f
-        k[55] = 0x682e6ff3
-        k[56] = 0x748f82ee
-        k[57] = 0x78a5636f
-        k[58] = 0x84c87814
-        k[59] = 0x8cc70208
-        k[60] = 0x90befffa
-        k[61] = 0xa4506ceb
-        k[62] = 0xbef9a3f7
-        k[63] = 0xc67178f2
     }
 }
 
+// The word of the four bytes at `p`, the highest first, as SHA-256 reads a word (FIPS 180-4, 3.1), read a
+// byte at a time, which LLVM joins into one load of four bytes at any address.
+uint BigEndianWord(byte* p) {
+    mut uint word = 0
+    raw {
+        word = uint(p[0]) << 24 | uint(p[1]) << 16 | uint(p[2]) << 8 | uint(p[3])
+    }
+
+    return word
+}
+
+// The word of the schedule of a round t from round 16 on (FIPS 180-4, 6.2.2, step 1), of the words `w16`,
+// `w15`, `w7` and `w2` of the rounds t - 16, t - 15, t - 7 and t - 2.
+uint Sha256Word(uint w16, uint w15, uint w7, uint w2) {
+    uint small0 = (w15 >> 7 | w15 << 25) ^ (w15 >> 18 | w15 << 14) ^ w15 >> 3
+    uint small1 = (w2 >> 17 | w2 << 15) ^ (w2 >> 19 | w2 << 13) ^ w2 >> 10
+    return w16 +% small0 +% w7 +% small1
+}
+
+// One round of SHA-256 (FIPS 180-4, 6.2.2, step 3) with its constant `k` and its word `w`, on the working
+// variables in the order a to h that the round gives them: T1 is added to d, which is the next round's e,
+// and T1 + T2 is written to h, which is the next round's a. The next round takes the eight in the order
+// h, a, b, c, d, e, f, g, so that they move by the names of the call, where `sha2` writes the copies
+// `h = g` to `b = a`, which LLVM turns into the same renaming.
+void Sha256Round(uint a, uint b, uint c, mut uint d, uint e, uint f, uint g, mut uint h, uint k, uint w) {
+    uint big1 = (e >> 6 | e << 26) ^ (e >> 11 | e << 21) ^ (e >> 25 | e << 7)
+    uint choose = (e & f) ^ (~e & g)
+    uint first = big1 +% choose +% k +% w +% h
+    uint big0 = (a >> 2 | a << 30) ^ (a >> 13 | a << 19) ^ (a >> 22 | a << 10)
+    uint majority = (a & b) ^ (a & c) ^ (b & c)
+    d = d +% first
+    h = first +% big0 +% majority
+}
+
 // One block of 64 bytes at `p` through the 64 rounds of SHA-256 into the hash at `s` (FIPS 180-4,
-// 6.2.2), each word of the block read with its highest byte first.
+// 6.2.2), in the form of RustCrypto's `sha2` 0.11.1 without the CPU's instructions (`soft/unroll.rs`):
+// the 16 words of the block, each read with its highest byte first, before the first round; the 64 rounds
+// written out, each with its constant K (4.2.2) in the code, as `sha2` gives it on x86; and the word of
+// the schedule of a round from round 16 on written in place of the word of the round 16 before it, so
+// that the schedule is 16 words and takes no room in the state.
 void Sha256Block(byte* s, byte* p) {
     raw {
         uint* hash = Ptr<uint>(s)
-        uint* w = Ptr<uint>(s + 104)
-        uint* k = Ptr<uint>(s + 360)
-        mut int t = 0
-        while t < 16 {
-            w[t] = uint(p[4 * t]) << 24 | uint(p[4 * t + 1]) << 16 | uint(p[4 * t + 2]) << 8 | uint(p[4 * t + 3])
-            t = t + 1
-        }
-
-        while t < 64 {
-            uint x = w[t - 15]
-            uint y = w[t - 2]
-            uint small0 = (x >> 7 | x << 25) ^ (x >> 18 | x << 14) ^ x >> 3
-            uint small1 = (y >> 17 | y << 15) ^ (y >> 19 | y << 13) ^ y >> 10
-            w[t] = small1 +% w[t - 7] +% small0 +% w[t - 16]
-            t = t + 1
-        }
-
+        mut uint w0 = BigEndianWord(p)
+        mut uint w1 = BigEndianWord(p + 4)
+        mut uint w2 = BigEndianWord(p + 8)
+        mut uint w3 = BigEndianWord(p + 12)
+        mut uint w4 = BigEndianWord(p + 16)
+        mut uint w5 = BigEndianWord(p + 20)
+        mut uint w6 = BigEndianWord(p + 24)
+        mut uint w7 = BigEndianWord(p + 28)
+        mut uint w8 = BigEndianWord(p + 32)
+        mut uint w9 = BigEndianWord(p + 36)
+        mut uint w10 = BigEndianWord(p + 40)
+        mut uint w11 = BigEndianWord(p + 44)
+        mut uint w12 = BigEndianWord(p + 48)
+        mut uint w13 = BigEndianWord(p + 52)
+        mut uint w14 = BigEndianWord(p + 56)
+        mut uint w15 = BigEndianWord(p + 60)
         mut uint a = hash[0]
         mut uint b = hash[1]
         mut uint c = hash[2]
@@ -1402,24 +4006,118 @@ void Sha256Block(byte* s, byte* p) {
         mut uint f = hash[5]
         mut uint g = hash[6]
         mut uint h = hash[7]
-        t = 0
-        while t < 64 {
-            uint big1 = (e >> 6 | e << 26) ^ (e >> 11 | e << 21) ^ (e >> 25 | e << 7)
-            uint choose = (e & f) ^ (~e & g)
-            uint first = h +% big1 +% choose +% k[t] +% w[t]
-            uint big0 = (a >> 2 | a << 30) ^ (a >> 13 | a << 19) ^ (a >> 22 | a << 10)
-            uint majority = (a & b) ^ (a & c) ^ (b & c)
-            h = g
-            g = f
-            f = e
-            e = d +% first
-            d = c
-            c = b
-            b = a
-            a = first +% big0 +% majority
-            t = t + 1
-        }
-
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x428a2f98, w0)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x71374491, w1)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0xb5c0fbcf, w2)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0xe9b5dba5, w3)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x3956c25b, w4)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x59f111f1, w5)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x923f82a4, w6)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0xab1c5ed5, w7)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0xd807aa98, w8)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x12835b01, w9)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x243185be, w10)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x550c7dc3, w11)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x72be5d74, w12)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x80deb1fe, w13)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x9bdc06a7, w14)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0xc19bf174, w15)
+        w0 = Sha256Word(w0, w1, w9, w14)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0xe49b69c1, w0)
+        w1 = Sha256Word(w1, w2, w10, w15)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0xefbe4786, w1)
+        w2 = Sha256Word(w2, w3, w11, w0)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x0fc19dc6, w2)
+        w3 = Sha256Word(w3, w4, w12, w1)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x240ca1cc, w3)
+        w4 = Sha256Word(w4, w5, w13, w2)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x2de92c6f, w4)
+        w5 = Sha256Word(w5, w6, w14, w3)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x4a7484aa, w5)
+        w6 = Sha256Word(w6, w7, w15, w4)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x5cb0a9dc, w6)
+        w7 = Sha256Word(w7, w8, w0, w5)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x76f988da, w7)
+        w8 = Sha256Word(w8, w9, w1, w6)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x983e5152, w8)
+        w9 = Sha256Word(w9, w10, w2, w7)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0xa831c66d, w9)
+        w10 = Sha256Word(w10, w11, w3, w8)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0xb00327c8, w10)
+        w11 = Sha256Word(w11, w12, w4, w9)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0xbf597fc7, w11)
+        w12 = Sha256Word(w12, w13, w5, w10)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0xc6e00bf3, w12)
+        w13 = Sha256Word(w13, w14, w6, w11)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0xd5a79147, w13)
+        w14 = Sha256Word(w14, w15, w7, w12)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x06ca6351, w14)
+        w15 = Sha256Word(w15, w0, w8, w13)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x14292967, w15)
+        w0 = Sha256Word(w0, w1, w9, w14)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x27b70a85, w0)
+        w1 = Sha256Word(w1, w2, w10, w15)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x2e1b2138, w1)
+        w2 = Sha256Word(w2, w3, w11, w0)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x4d2c6dfc, w2)
+        w3 = Sha256Word(w3, w4, w12, w1)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x53380d13, w3)
+        w4 = Sha256Word(w4, w5, w13, w2)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x650a7354, w4)
+        w5 = Sha256Word(w5, w6, w14, w3)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x766a0abb, w5)
+        w6 = Sha256Word(w6, w7, w15, w4)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x81c2c92e, w6)
+        w7 = Sha256Word(w7, w8, w0, w5)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x92722c85, w7)
+        w8 = Sha256Word(w8, w9, w1, w6)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0xa2bfe8a1, w8)
+        w9 = Sha256Word(w9, w10, w2, w7)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0xa81a664b, w9)
+        w10 = Sha256Word(w10, w11, w3, w8)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0xc24b8b70, w10)
+        w11 = Sha256Word(w11, w12, w4, w9)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0xc76c51a3, w11)
+        w12 = Sha256Word(w12, w13, w5, w10)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0xd192e819, w12)
+        w13 = Sha256Word(w13, w14, w6, w11)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0xd6990624, w13)
+        w14 = Sha256Word(w14, w15, w7, w12)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0xf40e3585, w14)
+        w15 = Sha256Word(w15, w0, w8, w13)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x106aa070, w15)
+        w0 = Sha256Word(w0, w1, w9, w14)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x19a4c116, w0)
+        w1 = Sha256Word(w1, w2, w10, w15)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x1e376c08, w1)
+        w2 = Sha256Word(w2, w3, w11, w0)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x2748774c, w2)
+        w3 = Sha256Word(w3, w4, w12, w1)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x34b0bcb5, w3)
+        w4 = Sha256Word(w4, w5, w13, w2)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x391c0cb3, w4)
+        w5 = Sha256Word(w5, w6, w14, w3)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x4ed8aa4a, w5)
+        w6 = Sha256Word(w6, w7, w15, w4)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x5b9cca4f, w6)
+        w7 = Sha256Word(w7, w8, w0, w5)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x682e6ff3, w7)
+        w8 = Sha256Word(w8, w9, w1, w6)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x748f82ee, w8)
+        w9 = Sha256Word(w9, w10, w2, w7)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x78a5636f, w9)
+        w10 = Sha256Word(w10, w11, w3, w8)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x84c87814, w10)
+        w11 = Sha256Word(w11, w12, w4, w9)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x8cc70208, w11)
+        w12 = Sha256Word(w12, w13, w5, w10)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x90befffa, w12)
+        w13 = Sha256Word(w13, w14, w6, w11)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0xa4506ceb, w13)
+        w14 = Sha256Word(w14, w15, w7, w12)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0xbef9a3f7, w14)
+        w15 = Sha256Word(w15, w0, w8, w13)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0xc67178f2, w15)
         hash[0] = hash[0] +% a
         hash[1] = hash[1] +% b
         hash[2] = hash[2] +% c
@@ -1451,8 +4149,7 @@ void Sha256Close(byte* s, byte* out) {
     Sha256Start(s)
 }
 
-// The state of a new hasher of MD5 at `s`: RFC 1321's initial words (3.3), T (3.4) and the shifts of its
-// four rounds.
+// The state of a new hasher of MD5 at `s`: RFC 1321's initial words (3.3).
 void Md5Start(byte* s) {
     raw {
         uint* words = Ptr<uint>(s)
@@ -1461,130 +4158,137 @@ void Md5Start(byte* s) {
         words[2] = 0x98badcfe
         words[3] = 0x10325476
         *Ptr<long>(s + 16) = 0
-        uint* t = Ptr<uint>(s + 88)
-        t[0] = 0xd76aa478
-        t[1] = 0xe8c7b756
-        t[2] = 0x242070db
-        t[3] = 0xc1bdceee
-        t[4] = 0xf57c0faf
-        t[5] = 0x4787c62a
-        t[6] = 0xa8304613
-        t[7] = 0xfd469501
-        t[8] = 0x698098d8
-        t[9] = 0x8b44f7af
-        t[10] = 0xffff5bb1
-        t[11] = 0x895cd7be
-        t[12] = 0x6b901122
-        t[13] = 0xfd987193
-        t[14] = 0xa679438e
-        t[15] = 0x49b40821
-        t[16] = 0xf61e2562
-        t[17] = 0xc040b340
-        t[18] = 0x265e5a51
-        t[19] = 0xe9b6c7aa
-        t[20] = 0xd62f105d
-        t[21] = 0x02441453
-        t[22] = 0xd8a1e681
-        t[23] = 0xe7d3fbc8
-        t[24] = 0x21e1cde6
-        t[25] = 0xc33707d6
-        t[26] = 0xf4d50d87
-        t[27] = 0x455a14ed
-        t[28] = 0xa9e3e905
-        t[29] = 0xfcefa3f8
-        t[30] = 0x676f02d9
-        t[31] = 0x8d2a4c8a
-        t[32] = 0xfffa3942
-        t[33] = 0x8771f681
-        t[34] = 0x6d9d6122
-        t[35] = 0xfde5380c
-        t[36] = 0xa4beea44
-        t[37] = 0x4bdecfa9
-        t[38] = 0xf6bb4b60
-        t[39] = 0xbebfbc70
-        t[40] = 0x289b7ec6
-        t[41] = 0xeaa127fa
-        t[42] = 0xd4ef3085
-        t[43] = 0x04881d05
-        t[44] = 0xd9d4d039
-        t[45] = 0xe6db99e5
-        t[46] = 0x1fa27cf8
-        t[47] = 0xc4ac5665
-        t[48] = 0xf4292244
-        t[49] = 0x432aff97
-        t[50] = 0xab9423a7
-        t[51] = 0xfc93a039
-        t[52] = 0x655b59c3
-        t[53] = 0x8f0ccc92
-        t[54] = 0xffeff47d
-        t[55] = 0x85845dd1
-        t[56] = 0x6fa87e4f
-        t[57] = 0xfe2ce6e0
-        t[58] = 0xa3014314
-        t[59] = 0x4e0811a1
-        t[60] = 0xf7537e82
-        t[61] = 0xbd3af235
-        t[62] = 0x2ad7d2bb
-        t[63] = 0xeb86d391
-        uint* shifts = Ptr<uint>(s + 344)
-        shifts[0] = 7
-        shifts[1] = 12
-        shifts[2] = 17
-        shifts[3] = 22
-        shifts[4] = 5
-        shifts[5] = 9
-        shifts[6] = 14
-        shifts[7] = 20
-        shifts[8] = 4
-        shifts[9] = 11
-        shifts[10] = 16
-        shifts[11] = 23
-        shifts[12] = 6
-        shifts[13] = 10
-        shifts[14] = 15
-        shifts[15] = 21
     }
 }
 
-// One block of 64 bytes at `p` through the 64 steps of MD5 into the words at `s` (RFC 1321, 3.4), each
-// word of the block read with its lowest byte first.
+// The word of the four bytes at `p`, the lowest first, as MD5 reads a word (RFC 1321, 2), read a byte at a
+// time, which LLVM joins into one load of four bytes at any address.
+uint LittleEndianWord(byte* p) {
+    mut uint word = 0
+    raw {
+        word = uint(p[0]) | uint(p[1]) << 8 | uint(p[2]) << 16 | uint(p[3]) << 24
+    }
+
+    return word
+}
+
+// A step of each of MD5's four rounds (RFC 1321, 3.4) on a, b, c and d in the order the step gives them,
+// with its word `m`, its constant `t` and its shift `r`: the new value of a, as `md-5`'s `op_f` to `op_i`
+// give it. F and G add their two terms one at a time where RFC 1321 joins them with an or: the same
+// number, since the two share no bit, and the form LLVM makes of `op_f` and `op_g` where it knows that a
+// parameter holds no undefined bits (`noundef`), which the IR of Kurz does not say; with the or written
+// here, LLVM keeps an or of the two terms in the sum, one step longer on the path from b to the next step.
+uint Md5F(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
+    uint sum = a +% m +% t +% (b & c) +% (~b & d)
+    return (sum << r | sum >> (32 - r)) +% b
+}
+
+uint Md5G(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
+    uint sum = a +% m +% t +% (b & d) +% (c & ~d)
+    return (sum << r | sum >> (32 - r)) +% b
+}
+
+uint Md5H(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
+    uint sum = (b ^ c ^ d) +% a +% m +% t
+    return (sum << r | sum >> (32 - r)) +% b
+}
+
+uint Md5I(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
+    uint sum = (c ^ (b | ~d)) +% a +% m +% t
+    return (sum << r | sum >> (32 - r)) +% b
+}
+
+// One block of 64 bytes at `p` through the 64 steps of MD5 into the words at `s` (RFC 1321, 3.4), in the
+// form of RustCrypto's `md-5` 0.11.0 (`compress/soft.rs`): the 16 words of the block, each read with its
+// lowest byte first, before the first step; and the 64 steps written out, each with its word, its constant
+// T and its shift in the code.
 void Md5Block(byte* s, byte* p) {
     raw {
         uint* words = Ptr<uint>(s)
-        uint* t = Ptr<uint>(s + 88)
-        uint* shifts = Ptr<uint>(s + 344)
+        uint m0 = LittleEndianWord(p)
+        uint m1 = LittleEndianWord(p + 4)
+        uint m2 = LittleEndianWord(p + 8)
+        uint m3 = LittleEndianWord(p + 12)
+        uint m4 = LittleEndianWord(p + 16)
+        uint m5 = LittleEndianWord(p + 20)
+        uint m6 = LittleEndianWord(p + 24)
+        uint m7 = LittleEndianWord(p + 28)
+        uint m8 = LittleEndianWord(p + 32)
+        uint m9 = LittleEndianWord(p + 36)
+        uint m10 = LittleEndianWord(p + 40)
+        uint m11 = LittleEndianWord(p + 44)
+        uint m12 = LittleEndianWord(p + 48)
+        uint m13 = LittleEndianWord(p + 52)
+        uint m14 = LittleEndianWord(p + 56)
+        uint m15 = LittleEndianWord(p + 60)
         mut uint a = words[0]
         mut uint b = words[1]
         mut uint c = words[2]
         mut uint d = words[3]
-        mut int i = 0
-        while i < 64 {
-            mut uint f = 0
-            mut int g = 0
-            if i < 16 {
-                f = (b & c) | (~b & d)
-                g = i
-            } else if i < 32 {
-                f = (d & b) | (~d & c)
-                g = (5 * i + 1) % 16
-            } else if i < 48 {
-                f = b ^ c ^ d
-                g = (3 * i + 5) % 16
-            } else {
-                f = c ^ (b | ~d)
-                g = 7 * i % 16
-            }
-
-            uint m = uint(p[4 * g]) | uint(p[4 * g + 1]) << 8 | uint(p[4 * g + 2]) << 16 | uint(p[4 * g + 3]) << 24
-            uint sum = f +% a +% t[i] +% m
-            int r = int(shifts[i / 16 * 4 + i % 4])
-            a = d
-            d = c
-            c = b
-            b = b +% (sum << r | sum >> (32 - r))
-            i = i + 1
-        }
-
+        a = Md5F(a, b, c, d, m0, 0xd76aa478, 7)
+        d = Md5F(d, a, b, c, m1, 0xe8c7b756, 12)
+        c = Md5F(c, d, a, b, m2, 0x242070db, 17)
+        b = Md5F(b, c, d, a, m3, 0xc1bdceee, 22)
+        a = Md5F(a, b, c, d, m4, 0xf57c0faf, 7)
+        d = Md5F(d, a, b, c, m5, 0x4787c62a, 12)
+        c = Md5F(c, d, a, b, m6, 0xa8304613, 17)
+        b = Md5F(b, c, d, a, m7, 0xfd469501, 22)
+        a = Md5F(a, b, c, d, m8, 0x698098d8, 7)
+        d = Md5F(d, a, b, c, m9, 0x8b44f7af, 12)
+        c = Md5F(c, d, a, b, m10, 0xffff5bb1, 17)
+        b = Md5F(b, c, d, a, m11, 0x895cd7be, 22)
+        a = Md5F(a, b, c, d, m12, 0x6b901122, 7)
+        d = Md5F(d, a, b, c, m13, 0xfd987193, 12)
+        c = Md5F(c, d, a, b, m14, 0xa679438e, 17)
+        b = Md5F(b, c, d, a, m15, 0x49b40821, 22)
+        a = Md5G(a, b, c, d, m1, 0xf61e2562, 5)
+        d = Md5G(d, a, b, c, m6, 0xc040b340, 9)
+        c = Md5G(c, d, a, b, m11, 0x265e5a51, 14)
+        b = Md5G(b, c, d, a, m0, 0xe9b6c7aa, 20)
+        a = Md5G(a, b, c, d, m5, 0xd62f105d, 5)
+        d = Md5G(d, a, b, c, m10, 0x02441453, 9)
+        c = Md5G(c, d, a, b, m15, 0xd8a1e681, 14)
+        b = Md5G(b, c, d, a, m4, 0xe7d3fbc8, 20)
+        a = Md5G(a, b, c, d, m9, 0x21e1cde6, 5)
+        d = Md5G(d, a, b, c, m14, 0xc33707d6, 9)
+        c = Md5G(c, d, a, b, m3, 0xf4d50d87, 14)
+        b = Md5G(b, c, d, a, m8, 0x455a14ed, 20)
+        a = Md5G(a, b, c, d, m13, 0xa9e3e905, 5)
+        d = Md5G(d, a, b, c, m2, 0xfcefa3f8, 9)
+        c = Md5G(c, d, a, b, m7, 0x676f02d9, 14)
+        b = Md5G(b, c, d, a, m12, 0x8d2a4c8a, 20)
+        a = Md5H(a, b, c, d, m5, 0xfffa3942, 4)
+        d = Md5H(d, a, b, c, m8, 0x8771f681, 11)
+        c = Md5H(c, d, a, b, m11, 0x6d9d6122, 16)
+        b = Md5H(b, c, d, a, m14, 0xfde5380c, 23)
+        a = Md5H(a, b, c, d, m1, 0xa4beea44, 4)
+        d = Md5H(d, a, b, c, m4, 0x4bdecfa9, 11)
+        c = Md5H(c, d, a, b, m7, 0xf6bb4b60, 16)
+        b = Md5H(b, c, d, a, m10, 0xbebfbc70, 23)
+        a = Md5H(a, b, c, d, m13, 0x289b7ec6, 4)
+        d = Md5H(d, a, b, c, m0, 0xeaa127fa, 11)
+        c = Md5H(c, d, a, b, m3, 0xd4ef3085, 16)
+        b = Md5H(b, c, d, a, m6, 0x04881d05, 23)
+        a = Md5H(a, b, c, d, m9, 0xd9d4d039, 4)
+        d = Md5H(d, a, b, c, m12, 0xe6db99e5, 11)
+        c = Md5H(c, d, a, b, m15, 0x1fa27cf8, 16)
+        b = Md5H(b, c, d, a, m2, 0xc4ac5665, 23)
+        a = Md5I(a, b, c, d, m0, 0xf4292244, 6)
+        d = Md5I(d, a, b, c, m7, 0x432aff97, 10)
+        c = Md5I(c, d, a, b, m14, 0xab9423a7, 15)
+        b = Md5I(b, c, d, a, m5, 0xfc93a039, 21)
+        a = Md5I(a, b, c, d, m12, 0x655b59c3, 6)
+        d = Md5I(d, a, b, c, m3, 0x8f0ccc92, 10)
+        c = Md5I(c, d, a, b, m10, 0xffeff47d, 15)
+        b = Md5I(b, c, d, a, m1, 0x85845dd1, 21)
+        a = Md5I(a, b, c, d, m8, 0x6fa87e4f, 6)
+        d = Md5I(d, a, b, c, m15, 0xfe2ce6e0, 10)
+        c = Md5I(c, d, a, b, m6, 0xa3014314, 15)
+        b = Md5I(b, c, d, a, m13, 0x4e0811a1, 21)
+        a = Md5I(a, b, c, d, m4, 0xf7537e82, 6)
+        d = Md5I(d, a, b, c, m11, 0xbd3af235, 10)
+        c = Md5I(c, d, a, b, m2, 0x2ad7d2bb, 15)
+        b = Md5I(b, c, d, a, m9, 0xeb86d391, 21)
         words[0] = words[0] +% a
         words[1] = words[1] +% b
         words[2] = words[2] +% c
@@ -1710,7 +4414,7 @@ void HashPad(byte* s, bool md5) {
 
 // A new hasher of SHA-256 (H3): the block of its state; null, with `asked` set, where the system refuses.
 pub byte* Sha256New(mut long asked) {
-    byte* block = ByteBlock(616, mut asked)
+    byte* block = ByteBlock(104, mut asked)
     if block != null {
         Sha256Start(block + 16)
     }
@@ -1748,13 +4452,13 @@ pub byte* Sha256Hash(byte* message, mut long asked) {
 
     Sha256Update(block, message)
     byte* digest = Sha256Finish(block, mut asked)
-    Free(block, 632)
+    Free(block, 120)
     return digest
 }
 
 // A new hasher of MD5 (H3), as `Sha256New` makes one of SHA-256.
 pub byte* Md5New(mut long asked) {
-    byte* block = ByteBlock(408, mut asked)
+    byte* block = ByteBlock(88, mut asked)
     if block != null {
         Md5Start(block + 16)
     }
@@ -1788,7 +4492,7 @@ pub byte* Md5Hash(byte* message, mut long asked) {
 
     Md5Update(block, message)
     byte* digest = Md5Finish(block, mut asked)
-    Free(block, 424)
+    Free(block, 104)
     return digest
 }
 
@@ -1877,9 +4581,9 @@ pub uint Crc32Hash(byte* message, mut long asked) {
     return c
 }
 
-// HMAC-SHA256's state at `s`, 1296 bytes (RFC 2104): the key K0 (0), 64 bytes, the state of the inner
-// hash, which has taken K0 ^ ipad (64), and the state of the outer hash, which `HmacClose` starts (680)
-// and whose block of 64 bytes being filled, at 720, nothing reads between two calls of it.
+// HMAC-SHA256's state at `s`, 272 bytes (RFC 2104): the key K0 (0), 64 bytes, the state of the inner
+// hash, which has taken K0 ^ ipad (64), and the state of the outer hash, which `HmacClose` starts (168)
+// and whose block of 64 bytes being filled, at 208, nothing reads between two calls of it.
 
 // The state of a new hasher of HMAC-SHA256 at `s` on the `n` bytes of the key at `key`: K0 is the key,
 // or SHA-256 of a key longer than a block of 64 bytes, with zeros after it to 64 bytes.
@@ -1887,7 +4591,7 @@ void HmacStart(byte* s, byte* key, long n) {
     raw {
         mut long i = 0
         if n > 64 {
-            byte* outer = s + 680
+            byte* outer = s + 168
             Sha256Start(outer)
             HashFeed(outer, key, n, false)
             Sha256Close(outer, s)
@@ -1910,7 +4614,7 @@ void HmacStart(byte* s, byte* key, long n) {
 
 // The inner hash of the state at `s` started over on K0 ^ ipad, K0 with every byte xored with 0x36.
 void HmacKeyed(byte* s) {
-    byte* pad = s + 720
+    byte* pad = s + 208
     raw {
         mut long i = 0
         while i < 64 {
@@ -1924,10 +4628,11 @@ void HmacKeyed(byte* s) {
 }
 
 // The tag of the message of the state at `s`, SHA-256 of K0 ^ opad, K0 with every byte xored with 0x5C,
-// and of the inner hash's digest, written at `out`, 32 bytes; the inner hash then starts over on K0.
+// and of the inner hash's digest, written at `out`, 32 bytes; the inner hash then starts over on K0 ^ ipad,
+// as `HmacKeyed` starts it.
 void HmacClose(byte* s, byte* out) {
-    byte* outer = s + 680
-    byte* pad = s + 720
+    byte* outer = s + 168
+    byte* pad = s + 208
     raw {
         mut long i = 0
         while i < 64 {
@@ -1947,7 +4652,7 @@ void HmacClose(byte* s, byte* out) {
 // A new hasher of HMAC-SHA256 on the bytes of the list `key` (H3), as `Sha256New` makes one of SHA-256; the
 // null block of an empty list is a key of no bytes, of which `ListCount` gives 0 and `HmacStart` reads none.
 pub byte* HmacNew(byte* key, mut long asked) {
-    byte* block = ByteBlock(1296, mut asked)
+    byte* block = ByteBlock(272, mut asked)
     if block != null {
         HmacStart(block + 16, ListItems(key), long(ListCount(key)))
     }
@@ -1982,7 +4687,7 @@ pub byte* HmacSha256(byte* key, byte* message, mut long asked) {
 
     HmacUpdate(block, message)
     byte* digest = HmacFinish(block, mut asked)
-    Free(block, 1312)
+    Free(block, 288)
     return digest
 }
 
@@ -2062,4 +4767,73 @@ pub byte* HexEncode(byte* message, mut long asked) {
 
     StringTakeOver(text, size)
     return text
+}
+
+// The value of the hexadecimal digit `b`, 0 to 15, in upper or lower case, or -1 for a byte that is no
+// digit (H7), as the `hex` crate's `val` reads one.
+int HexValue(int b) {
+    if b >= 48 && b <= 57 {
+        return b - 48
+    }
+
+    if b >= 65 && b <= 70 {
+        return b - 55
+    }
+
+    if b >= 97 && b <= 102 {
+        return b - 87
+    }
+
+    return -1
+}
+
+// The bytes the hexadecimal digits of the `count` bytes at `text` give (H7): -1 with a new list of
+// `count / 2` bytes in `made`, two digits for each byte, the higher half first, null for no bytes, as the
+// `hex` crate's `decode`; else the position `HexError` holds, with null in `made`: `count` where it is
+// odd, read before the digits, and else the position of the first byte that is no digit; and -1 with
+// null in `made` and `asked` set where the system refuses.
+pub long HexDecode(byte* text, long count, mut byte* made, mut long asked) {
+    made = null
+    if count % 2 != 0 {
+        return count
+    }
+
+    if count == 0 {
+        return -1
+    }
+
+    long size = count / 2
+    byte* list = ByteBlock(size, mut asked)
+    if list == null {
+        return -1
+    }
+
+    mut long bad = -1
+    raw {
+        mut long at = 0
+        while at < count {
+            int high = HexValue(int(text[at]))
+            int low = HexValue(int(text[at + 1]))
+            if high < 0 {
+                bad = at
+                break
+            }
+
+            if low < 0 {
+                bad = at + 1
+                break
+            }
+
+            list[16 + at / 2] = byte(high << 4 | low)
+            at = at + 2
+        }
+    }
+
+    if bad >= 0 {
+        Free(list, 16 + size)
+        return bad
+    }
+
+    made = list
+    return -1
 }

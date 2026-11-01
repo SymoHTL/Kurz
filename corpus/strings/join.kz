@@ -1,0 +1,11 @@
+// expect: output
+// | a, b, c
+// | 1-2-3
+// | true
+// | a/b
+// rules: X6
+
+print(string.Join(", ", ["a", "b", "c"]))
+print(string.Join("-", [1, 2, 3]))
+print(string.Join(", ", List<string>()) == "")
+print(string.Join('/', ["a", "b"]))
