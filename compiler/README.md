@@ -893,7 +893,7 @@ it was given. The runtime makes every string it makes in such a block, through `
 the block over (R15, the owner, 2026-10-29, "string.Allocate, take over"); the text the emitted code
 makes of a value, for a `print` or a hole of a string, is a temporary of its statement, an
 interpolation of one hole of a string takes a count of the string, a new value as Rust's `format!`
-makes one (the owner, 2026-10-29, "New value, as format!"), an interpolation of more pieces writes
+makes one (the owner, 2026-10-29, "New value, as format!"), an interpolation of more pieces, or of one integer, writes
 them into one block of their bytes together, as Rust's `format!` writes into one `String`, an
 integer's digits in place, counted first, with no text of their own, and pieces of no bytes
 together are the empty string with no block, and the helper that makes the text of a
