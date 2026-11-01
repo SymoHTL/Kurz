@@ -1236,8 +1236,10 @@ is not held to name every kind or end in an `else` arm, unlike one on a union or
 D12): it is checked in each copy, and where it has no arm for the kind of a copy's type argument,
 the call that made the copy is the compile error `kind-not-read`, which names the generic function,
 the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
-error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
-same error)* A generic function that reads its type, and one that passes its type parameter to such
+error"). *(assumed, §4: the id; that `T.Fields` and `T.Make` in a copy whose type is not a `data` type are the
+same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no type, and any other
+argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
+fields gives its value)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
@@ -1301,6 +1303,47 @@ Case: [types/type-make.kz](../corpus/types/type-make.kz)
 data Point(int X, int Y)
 
 T Zero<T>() => T.Make(f => 0)
+
+print(Zero<Point>())
+```
+
+Case: [types/type-make-get.kz](../corpus/types/type-make-get.kz)
+```kurz
+data Order(string Id, int Count)
+data Label(string Name, string Tag)
+data Empty
+
+T Remake<T>(T value) => T.Make(f => f.Get(value))
+
+T Names<T>() => T.Make(f => "{f.Name}!")
+
+T Lazy<T>() => T.Make(f => (() => f.Name)())
+
+void Twin<T>(T value) {
+    for g in T.Fields {
+        print("{g.Name}: {T.Make(f => f.Get(value))}")
+    }
+}
+
+print(Remake(Order("a1", 3)))
+print(Remake(Empty))
+print(Names<Label>())
+print(Lazy<Label>())
+Twin(Order("b2", 4))
+```
+
+Case: [types/type-make-kind-not-read.kz](../corpus/types/type-make-kind-not-read.kz)
+```kurz
+T Zero<T>() => T.Make(f => 0)
+
+print(Zero<int>())
+```
+
+Case: [types/type-make-form.kz](../corpus/types/type-make-form.kz)
+```kurz
+data Point(int X, int Y)
+
+T Zero<T>() => T.Make((int f) => 0)
 
 print(Zero<Point>())
 ```

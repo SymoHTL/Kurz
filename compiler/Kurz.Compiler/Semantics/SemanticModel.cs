@@ -256,6 +256,7 @@ public sealed class SemanticModel
     private readonly HashSet<FunctionSymbol> readers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Expression, MatchArm> kindArms = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ForInStatement, IReadOnlyList<Block>> passes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<CallExpression, CallExpression?> made = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
@@ -329,6 +330,13 @@ public sealed class SemanticModel
     /// <summary>T33: the passes of a loop over <c>T.Fields</c> in a copy, a copy of its body for each field in order, which a code generator reads in place of the loop; null for any other loop.</summary>
     public IReadOnlyList<Block>? PassesOf(ForInStatement loop) => passes.GetValueOrDefault(loop);
 
+    /// <summary>
+    /// T33: whether the call is a <c>T.Make(f => ...)</c> in a copy, and the call of the type's primary constructor it became, with one
+    /// argument for each field in order, which a code generator reads in place of it; null as that call where the type has no fields,
+    /// whose value is the constant the call's type holds.
+    /// </summary>
+    public bool IsMade(CallExpression call, out CallExpression? construction) => made.TryGetValue(call, out construction);
+
     /// <summary>Whether the checker read the call.</summary>
     public bool HasCall(CallExpression call) => calls.ContainsKey(call);
 
@@ -401,6 +409,8 @@ public sealed class SemanticModel
     internal void RecordKindArm(Expression subject, MatchArm arm) => kindArms[subject] = arm;
 
     internal void RecordPasses(ForInStatement loop, IReadOnlyList<Block> blocks) => passes[loop] = blocks;
+
+    internal void RecordMade(CallExpression call, CallExpression? construction) => made[call] = construction;
 
     internal void RecordAssignment(AssignOrDeclare assignment, VariableSymbol variable) => assignments[assignment] = variable;
 

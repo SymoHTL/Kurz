@@ -13,6 +13,11 @@ public sealed partial class Emitter
     /// <summary>The value of a call, null for a <c>void</c> one; of a call whose result is a union and that stands for its success, the success, with every other case leaving the function (O2, O3).</summary>
     private string? EmitCall(CallExpression c)
     {
+        if (Model.IsMade(c, out var construction))
+        {
+            return construction is null ? null : EmitCall(construction); // T33: `T.Make` is the constructor's call it became; a type with no fields, its constant
+        }
+
         var info = Model.CallOf(c);
         var result = Sub(info.Result);
         var value = info.Kind switch
