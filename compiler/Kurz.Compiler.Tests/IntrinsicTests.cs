@@ -638,11 +638,35 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
     }
 
     [Fact]
-    public void A_guarded_block_in_a_method_reads_and_changes_the_fields_of_its_instance()
+    public void A_guarded_block_in_a_method_reads_and_changes_the_fields_of_its_instance_and_a_method_it_calls_is_copied_for_its_sets()
     {
-        // K7 with R18: the block's function takes the address of the method's `this` as it takes a variable's, by its name and through `this`
-        const string text = "class Acc(mut int Total) {\n    pub int Add(Vector128<int> v) {\n        if X86.Sse41.IsSupported {\n            Total = Total + X86.Sse41.Extract(v, 2)\n            this.Total = this.Total + 1\n            return Total\n        }\n\n        return -1\n    }\n}\n\na = Acc(10)\nprint(a.Add(Vector128.Create(1, 2, 3, 4)))\nprint(a.Total)\n";
-        Assert.Contains(Functions(Ir(text)), f => f.Key.Contains(".guarded.", StringComparison.Ordinal) && f.Value.Body.Contains("extractelement <4 x i32>", StringComparison.Ordinal));
+        // K7 with R18: the block's function takes the address of the method's `this` as it takes a variable's, by its name and through
+        // `this`; the method it calls is compiled again for its sets, named by its class and its sets, and reads its own `this`
+        const string text = """
+            class Acc(mut int Total) {
+                pub int Add(Vector128<int> v) {
+                    if X86.Sse41.IsSupported {
+                        Total = Total + X86.Sse41.Extract(v, 2)
+                        this.Total = this.Total + Lane(v)
+                        return Total
+                    }
+
+                    return -1
+                }
+
+                pub int Lane(Vector128<int> v) => v.GetElement(0) + Total - Total
+            }
+
+            a = Acc(10)
+            print(a.Add(Vector128.Create(1, 2, 3, 4)))
+            print(a.Total)
+
+            """;
+        var functions = Functions(Ir(text));
+        var block = Assert.Single(functions, f => f.Key.StartsWith("f.Acc.Add.guarded.", StringComparison.Ordinal)).Value;
+        Assert.Contains("extractelement <4 x i32>", block.Body, StringComparison.Ordinal);
+        Assert.Contains("call i32 @\"f.Acc.Lane.12.for.X86.Sse41\"", block.Body, StringComparison.Ordinal);
+        Assert.Contains("\"target-features\"=\"+sse,+sse2,+sse3,+sse4.1,+ssse3\"", functions["f.Acc.Lane.12.for.X86.Sse41"].Header, StringComparison.Ordinal);
         Ran(BuildAndRun(text, ListTests.Fenced, "intrinsic-method"), 0, ["14", "14"], "");
     }
 
