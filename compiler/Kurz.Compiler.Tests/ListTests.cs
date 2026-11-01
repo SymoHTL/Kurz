@@ -2430,6 +2430,52 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static readonly (string Path, string Old, string New) KeptNone = ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0");
 
     /// <summary>
+    /// The runtime of this machine's target whose `Memory` and `Resize` count the bytes the system gives, by a `Memory` and by the
+    /// growth of a `Resize`, none of them counted back by `Release`, and whose `Memory` refuses a request that takes them past
+    /// <paramref name="limit"/>; a `Resize` is counted and not refused, since `Reallocate` takes a kept block after a refused one.
+    /// </summary>
+    private static CheckedRuntime Taking(long limit) => Edited(
+        (TargetFile, "pub byte* Memory(long bytes) {", $$"""
+            thread static mut long taken = 0
+
+            pub byte* Memory(long bytes) {
+                mut long total = 0
+                raw {
+                    total = taken + bytes
+                }
+
+                if total > {{limit}} {
+                    return null
+                }
+
+                byte* p = Granted(bytes)
+                if p != null {
+                    raw {
+                        taken = total
+                    }
+                }
+
+                return p
+            }
+
+            byte* Granted(long bytes) {
+            """),
+        (TargetFile, "pub byte* Resize(byte* p, long bytes, long grown) {", """
+            pub byte* Resize(byte* p, long bytes, long grown) {
+                byte* q = Resized(p, bytes, grown)
+                if q != null {
+                    raw {
+                        taken = taken + grown - bytes
+                    }
+                }
+
+                return q
+            }
+
+            byte* Resized(byte* p, long bytes, long grown) {
+            """));
+
+    /// <summary>
     /// The edits that make the allocator take every block from pages of its own and make them unreachable when the block is freed, so
     /// that a read or a write of a freed block ends the process with the system's signal; nothing is used again. The thread keeps no
     /// freed block: a kept block stays readable so that a request can take it, so the fence gives every block back to the system.
@@ -2686,6 +2732,29 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var over = BuildAndRun(fill.Replace("0..<2097152 {", "0..<2097153 {", StringComparison.Ordinal), Bytes(), "list-grown-over");
         Assert.Equal(1, over.Code);
         Assert.StartsWith("error: allocation-failed (", over.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_block_of_more_than_262144_bytes_that_outgrows_its_room_takes_a_kept_block_before_the_targets_Resize()
+    {
+        // the owner, 2026-11-01, "Kept block first": a list of 2^21 `long`s made and dropped for 20 rounds, its block growing from
+        // 262176 bytes with its header to 16777248, the bytes the system gives counted with none given back. On Linux the first round
+        // takes 17825824 bytes, the mebibyte the small blocks are carved from among them; in the second the block of 8388640 takes
+        // the kept one of 16777248, which it uses at least half of, and the growths below it, too small for it, take 4194336 by
+        // `Resize`; the third takes 1048608 and the fourth 262176 so, and each round after them none, its growths all served by kept
+        // blocks, 23330944 bytes in all. Grown by `Resize` before the kept blocks, each round takes 16777248 bytes again, past the
+        // 24 mebibytes in its second, and the first `Memory` of the third is refused. On Windows, whose `Resize` gives none, each growth
+        // of the first round takes a block of its own, 34341088 bytes with the first mebibyte by the sizes above, and each round after it
+        // the kept blocks of its sizes, within 40 mebibytes
+        const string fill = "long Fill(int n) {\n    mut xs = List<long>()\n    mut i = 0\n    while i < n {\n        xs.Add(long(i))\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 20 {\n    round = round + 1\n    total = total + Fill(2097152)\n}\nprint(total)\n";
+        long limit = Builder.HostTarget == Target.Windows ? 41943040 : 25165824;
+        Ran(BuildAndRun(fill, Taking(limit), "list-grown-kept"), 0, ["41943040"], "");
+
+        // the positive control: the same lists, all of them held, take memory of their own in the second round, past the limit, and a
+        // `Memory` after it is refused
+        var held = BuildAndRun("mut all = List<List<long>>()\nmut round = 0\nwhile round < 20 {\n    round = round + 1\n    mut xs = List<long>()\n    mut i = 0\n    while i < 2097152 {\n        xs.Add(long(i))\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n", Taking(limit), "list-grown-kept-held");
+        Assert.Equal(1, held.Code);
+        Assert.StartsWith("error: allocation-failed (", held.Error, StringComparison.Ordinal);
     }
 
     [Theory]

@@ -355,9 +355,11 @@ blocks, where a request of the class takes it first, and a larger one to the fro
 thread keeps where they take no more than 32 mebibytes with it, else to the system through the
 target's `Release`; the mebibytes a thread carved from and the blocks it keeps stay its own. `Reallocate` grows a block with
 its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes stays where it is where its
-header names room enough, as a kept block given out whole can, else grows through the target's
-`Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
-with its bytes copied and the old one freed. A target's directory gives
+header names room enough, as a kept block given out whole can, else moves into the smallest kept
+block that holds the grown block and that the grown block takes at least half of, its bytes copied
+and the old block freed (record, section 2: the owner, 2026-11-01, "Kept block first"), else grows
+through the target's `Resize`, which can grow it without a copy, else, and where `Resize` gives null,
+into a new block with its bytes copied and the old one freed. A target's directory gives
 `Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Random`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` keeping the count and the addresses of the arguments (S13), setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
 `Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap`, `Resize` calling `mremap`,
