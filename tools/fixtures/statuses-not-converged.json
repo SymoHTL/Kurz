@@ -1,0 +1,35 @@
+[
+ {
+  "url": "https://api.github.com/repos/SymoHTL/Kurz/statuses/7c696f83b042d1779247f88c146507c99aef1dc0",
+  "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+  "id": 57789689348,
+  "node_id": "SC_kwDOU3tPGc8AAAANdIiuBA",
+  "state": "success",
+  "description": "review completed, NOT converged on 1 files: 56 new findings (2 high, 24 medium, 30 low), 8 batches, 28 passes, $7.50",
+  "target_url": "https://github.com/SymoHTL/Kurz/actions/runs/41335471527",
+  "context": "review",
+  "created_at": "2026-11-01T18:27:53Z",
+  "updated_at": "2026-11-01T18:27:53Z",
+  "creator": {
+   "login": "github-actions[bot]",
+   "id": 41898282,
+   "node_id": "MDM6Qm90NDE4OTgyODI=",
+   "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+   "html_url": "https://github.com/apps/github-actions",
+   "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+   "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+   "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+   "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+   "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+   "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+   "type": "Bot",
+   "user_view_type": "public",
+   "site_admin": false
+  }
+ }
+]
