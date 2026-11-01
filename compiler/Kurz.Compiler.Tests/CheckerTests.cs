@@ -3171,4 +3171,33 @@ public sealed class CheckerTests
         // carries nothing more where a list is required
         Assert.Equal([(ErrorIds.UnknownName, 7)], Errors("List<T> Wrap<T>(T item) {\n    mut xs = List<T>()\n    xs.Add(item)\n    return xs\n}\n\nList<int> ys = Wrap(nope)\nprint(ys.Count)"));
     }
+
+    [Theory]
+    [InlineData("void Show<T>(T value) {\n    for f in T.Fields {\n        print(f.Name)\n    }\n}\n\nShow(1)", "2: reading a type in generic code, `T.Fields` (T33)")]
+    [InlineData("void Show<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\nShow<int>()", "2: reading a type in generic code, `T.Kind` (T33)")]
+    [InlineData("data P(int X)\n\nT Zero<T>() => T.Make(f => 0)\n\nprint(Zero<P>())", "3: reading a type in generic code, `T.Make` (T33)")]
+    [InlineData("print(TypeKind.Data)", "1: reading a type in generic code, `TypeKind` (T33)")]
+    [InlineData("void Show(TypeKind k) {\n}\n\nprint(1)", "1: reading a type in generic code, `TypeKind` (T33)")]
+    public void Reading_a_type_in_generic_code_is_not_supported_where_it_stands(string program, string expected) =>
+        // T33: a member of a type parameter that reads its type, at a member and at a member's call, and `TypeKind` as a value and as a type (E1)
+        Assert.Equal([expected], NotSupported(program));
+
+    [Fact]
+    public void A_member_named_as_a_type_reading_keeps_its_meaning_on_a_name_that_is_no_type_parameter()
+    {
+        // T33 reads the members of a type parameter alone: an enum's own value `Kind` stays a value of the enum
+        Clean("enum Shape { Kind, Fields }\n\nprint(Shape.Kind)");
+    }
+
+    [Fact]
+    public void A_file_s_own_TypeKind_is_redeclared()
+    {
+        // T33 with V9: a type, a function, a variable and a parameter of the name are each refused where they are declared, while a
+        // field takes the name
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("enum TypeKind { Data }\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("int TypeKind() => 1\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("string TypeKind = \"a\"\nprint(TypeKind)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("void Show(int TypeKind) {\n    print(TypeKind)\n}\n\nShow(1)"));
+        Assert.Empty(Errors("data Found(int TypeKind)\n\nprint(Found(1).TypeKind)"));
+    }
 }

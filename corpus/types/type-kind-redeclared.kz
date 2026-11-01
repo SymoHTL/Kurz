@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: T33
+
+enum TypeKind { Data }
+
+print(1)

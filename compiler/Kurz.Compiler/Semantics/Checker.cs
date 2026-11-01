@@ -339,6 +339,35 @@ public sealed partial class Checker
     /// <summary>A type's name the checker does not read: a type of chapter 7, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
 
+    /// <summary>T33: the name of the kinds of type, <c>TypeKind</c>, which every file sees (section 4, assumed with the owner's answer
+    /// "Kinds + parts" of 2026-11-01), so that a file's own declaration of it is <c>redeclared</c> (V9).</summary>
+    private static bool IsTypeKindName(string name) => name == "TypeKind";
+
+    /// <summary>T33: reading a type in generic code, which the checker does not read: a use of <see cref="IsTypeKindName"/> is <c>not supported</c>.</summary>
+    private bool UnreadTypeKind(string name, int line)
+    {
+        if (!IsTypeKindName(name))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"reading a type in generic code, `{name}` (T33)");
+        return true;
+    }
+
+    /// <summary>T33: a member of a type parameter that reads its type, <c>T.Kind</c>, <c>T.Fields</c>, <c>T.Make</c> and the parts beyond the
+    /// fields, which the checker does not read: it is <c>not supported</c>.</summary>
+    private bool UnreadTypeMember(string name, string member, int line)
+    {
+        if (TypeParameter(name) is null || member is not ("Kind" or "Fields" or "Make" or "Values" or "Item" or "Key" or "Value" or "Inner" or "Cases"))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"reading a type in generic code, `{name}.{member}` (T33)");
+        return true;
+    }
+
     /// <summary>R18: a name under which the intrinsics and their vector types stand (section 13, the owner, 2026-11-01), which the checker
     /// does not read: where no declaration gives the name, it is <c>not supported</c>.</summary>
     private bool UnreadIntrinsic(string name, int line)
@@ -947,7 +976,7 @@ public sealed partial class Checker
             return Types.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line))
+        if (UnreadIntrinsic(n.Name, n.Line) || UnreadTypeKind(n.Name, n.Line))
         {
             return Types.Error;
         }
@@ -987,7 +1016,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsTypeKindName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1326,7 +1355,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsTypeKindName(name);
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
