@@ -2207,6 +2207,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         class Link(int V, Link? Next)
 
+        class Note(mut string Title, mut Map<string, int> Counts) {
+            pub void Reset() {
+                Title = "{Title}!"
+                Counts = Map<string, int>()
+            }
+        }
+
         data Pair(Counter Left, int Right)
 
         int Sum(Link? head) {
@@ -2223,6 +2230,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         string Touch(Holder x) {
             x.Replace()
             return "t"
+        }
+
+        string Clear(Note n) {
+            n.Reset()
+            return "r"
         }
 
         c = Counter(0, "c")
@@ -2263,6 +2275,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(Sum(links))
         links = null
         print(alias)
+        note = Note("{c.Count}n", Map<string, int>())
+        note.Counts["a"] = 1
+        print("{note.Title} {note.Counts} {Clear(note)} {note.Title} {note.Counts}")
         """;
 
     private static readonly string[] ClassesPrint =
@@ -2280,6 +2295,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[a=3, c=14]",
         "499500",
         "c=14",
+        "14n [a: 1] r 14n! []", // the string and the map the first holes took a count of, which the call replaced (K2)
     ];
 
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned

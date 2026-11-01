@@ -2887,27 +2887,65 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.StaticState, 3)], Errors("class C(int N)\n\nstatic mut C? shared = null\nprint(1)", grants: "raw"));
     }
 
+    [Fact]
+    public void A_method_is_checked_as_a_function_and_a_field_as_a_variable_of_its_class()
+    {
+        // K1: `void` is no type of a field; K7: a method has a body; T19: a class takes no type arguments (E4)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("class C(void N)\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C(int N) {\n    pub int Get()\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("class C(int N)\n\nprint(C<int>(1).N)"));
+        // O10: a `void` method's call assigned to a field, by its name and through the instance
+        Assert.Equal([(ErrorIds.Syntax, 6)], Errors("class C(mut int N) {\n    pub void Go() {\n    }\n\n    pub void Set() {\n        N = Go()\n    }\n}\n\nC(1).Set()"));
+        Assert.Equal([(ErrorIds.Syntax, 7)], Errors("class C(mut int N) {\n    pub void Go() {\n    }\n}\n\nc = C(1)\nc.N = c.Go()"));
+        // F13: two methods with the same parameter types; F3: the end of a method reached without a `return`
+        Assert.Equal([(ErrorIds.DuplicateFunction, 3)], Errors("class C(int N) {\n    pub int Get() => N\n    pub int Get() => 1\n}\n\nprint(C(1).N)"));
+        Clean("class C(int N) {\n    pub int Get() => N\n    pub int Get(int k) => N + k\n}\n\nprint(C(1).Get(2))");
+        Assert.Equal([(ErrorIds.MissingReturn, 2)], Errors("class C(int N) {\n    pub int Get() {\n        if N > 0 {\n            return 1\n        }\n    }\n}\n\nprint(C(1).Get())"));
+        // V9: a variable of a method named as a field; V10: a member and a method the class does not have
+        Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int N) {\n    pub int Get() {\n        int N = 2\n        return N\n    }\n}\n\nprint(C(1).Get())"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int N)\n\nprint(C(1).M)"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int N)\n\nprint(C(1).M())"));
+        // F11: a lambda changes no field of what it captured, by the field's name inside a method or through the instance
+        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N) {\n    pub void Later() {\n        f = () => {\n            N = 1\n        }\n        f()\n    }\n}\n\nC(0).Later()"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N)\n\nc = C(0)\nf = () => { c.N = 1 }\nf()\nprint(c.N)"));
+        Clean("class C(mut int N) {\n    pub void Add() {\n        N = N + 1\n    }\n}\n\nc = C(0)\nf = () => c.Add()\nf()\nprint(c.N)");
+    }
+
     [Theory]
-    [InlineData("class Box<T>(T Item)\n\nprint(1)")]
-    [InlineData("class A\nclass B : A\n\nprint(1)")]
-    [InlineData("class K(int Id) equal by Id\n\nprint(1)")]
-    [InlineData("class C {\n    pub static int Step = 1\n}\n\nprint(1)")]
-    [InlineData("class C {\n    mut int n = 0\n}\n\nprint(1)")]
-    [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)")]
-    [InlineData("class C(int N) {\n    pub virtual int Get() => N\n}\n\nprint(C(1).Get())")]
-    [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))")]
-    [InlineData("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nprint(1)")]
-    [InlineData("class C(int N)\n\na = C(1)\nprint(a == a)")]
-    [InlineData("class C(int N)\n\nm = Map<C, int>()\nprint(m.Count)")]
-    [InlineData("class C(int N) {\n    pub int Get() => N\n}\n\nc = C(1)\nf = c.Get\nprint(f())")]
-    [InlineData("class Button(string Name, mut () => void OnClick)\n\nprint(1)")]
-    [InlineData("data W<T>(W<() => int>? Inner, T V)\nclass C(W<int>? N)\n\nprint(1)")]
-    public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program)
+    [InlineData("class Box<T>(T Item)\n\nprint(1)", "1: a generic class (T19, chapter 7)")]
+    [InlineData("class A\nclass B : A\n\nprint(1)", "2: a base class or an interface after `:` (K6, K10)")]
+    [InlineData("class K(int Id) equal by Id\n\nprint(1)", "1: `equal by` (K8)")]
+    [InlineData("class C {\n    pub static int Step = 1\n}\n\nprint(1)", "2: a `static` field (K18)")]
+    [InlineData("class C {\n    mut int n = 0\n}\n\nprint(1)", "2: a field declared in the body of a class (K7, K14)")]
+    [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)", "2: a constructor declared in the body of a class (K14)")]
+    [InlineData("class C(int N) {\n    pub virtual int Get() => N\n}\n\nprint(C(1).Get())", "2: the modifier `virtual` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    pub static int Make() => 1\n}\n\nprint(1)", "2: the modifier `static` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    pub override string Text() => \"c\"\n}\n\nprint(1)", "2: the modifier `override` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    prot int Get() => N\n}\n\nprint(1)", "2: the modifier `prot` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    extern \"C\" long Twice(long x) {\n        return x * 2\n    }\n}\n\nprint(1)", "2: the modifier `extern` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))", "2: a method with type parameters of its own (section 4, T19)")]
+    [InlineData("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\nclass Pet(List<weak Owner?> Keepers)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class C(int N)\n\na = C(1)\nprint(a == a)", "4: `==` on a `C`: the equality of a class instance (K4) is not read (D3, M9)")]
+    [InlineData("class C(int N)\n\nxs = [C(1)]\nprint(xs == xs)", "4: `==` on a `List<C>`: its items: the equality of an instance of `C` (K4) is not read (D3, M9)")]
+    [InlineData("class C(int N)\ndata P(C Item)\n\np = P(C(1))\nprint(p == p)", "5: `==` on a `P`: its field `Item`: the equality of an instance of `C` (K4) is not read (D3, M9)")]
+    [InlineData("class C(int N)\n\nm = Map<C, int>()\nprint(m.Count)", "3: a map with keys of type `C`: the equality of an instance of `C` and its hash (K4, K12) are not read (M9)")]
+    [InlineData("class C(int N)\ndata K(C Item)\n\nm = Map<K, int>()\nprint(m.Count)", "4: a map with keys of type `K`: its field `Item`: the equality of an instance of `C` and its hash (K4, K12) are not read (M9)")]
+    [InlineData("class C(int N) {\n    pub int Get() => N\n}\n\nc = C(1)\nf = c.Get\nprint(f())", "6: a method as a value, named without a call (K7, F11)")]
+    [InlineData("class Button(string Name, mut () => void OnClick)\n\nprint(1)", "1: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
+    [InlineData("data W<T>(W<() => int>? Inner, T V)\nclass C(W<int>? N)\n\nprint(1)", "2: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
+    [InlineData("data Pos(int X)\nclass P(mut Pos At)\n\np = P(Pos(0))\np.At.X = 1\nprint(p.At.X)", "5: an assignment into a value held by a field of an instance (K2, M4)")]
+    [InlineData("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag(List<int>()))\np.B.Items.Add(1)\nprint(p.B.Items.Count)", "5: a `mut` method on a value held by a field of an instance (K2, M5)")]
+    public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
         // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields and constructors in the body (K7, K14, K18),
-        // `virtual` methods and methods with type parameters, `weak` (R3), `==` and a key (K4, K12), a method as a value, and a field
-        // of function type, whose cycle R9 judges by the lambdas of the program
-        Assert.Single(NotSupported(program));
+        // a method that is `static`, `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` at any depth (R3), `==`
+        // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
+        // the program, and an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5)
+        Assert.Equal([expected], NotSupported(program));
     }
 
     // ---- what the checker does not read ---------------------------------------------------------------------

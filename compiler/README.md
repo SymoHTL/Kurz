@@ -938,7 +938,7 @@ count of the function values that hold it, 8 bytes, and the address of the funct
 of it, then holds each value the lambda read, counted once more where its type is counted; it is
 counted as a list's block is, and at zero the values it holds are let go of and it goes back to
 `Free` (section 4, "Pair + heap env"). An instance of a class is counted as a list is, and a read of
-a list, a string, a map, a function value or an instance from a field of an instance takes a count of
+a list, a string, a map or an instance from a field of an instance takes a count of
 its own, a temporary of the region, since a call can assign a `mut` field through another reference
 while the expression still uses what it read (K2, K9), which neither M7 nor a parameter's borrow sees; a
 read of an instance from a variable or a parameter is borrowed, as a list's is, which M7 holds for it,
