@@ -3282,10 +3282,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // M9 (the owner, 2026-10-30, "Rust's full path"): each `getrandom` of the runtime is a system call of a number the kernel does
         // not have, 100000, which it refuses with ENOSYS (seen on x86_64), as a kernel before 3.17 refuses `getrandom`; the keys come
-        // from `/dev/urandom`
+        // from `/dev/urandom`; the runtime declares `syscall` for the lock of a file's reader (S16)
         (string Path, string Old, string New)[] enosys =
         [
-            (TargetFile, "    long getrandom(byte* bytes, long count, uint options)\n", "    long getrandom(byte* bytes, long count, uint options)\n    long syscall(long number, ...)\n"),
             (TargetFile, "getrandom(bytes, count, 4)", "syscall(100000, bytes, count, 4)"),
             (TargetFile, "getrandom(bytes, count, 1)", "syscall(100000, bytes, count, 1)"),
         ];

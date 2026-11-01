@@ -22,7 +22,7 @@ internal static class SyntaxPrinter
         ExpressionStatement e => Print(e.Expression),
         IfStatement i => $"(if {Print(i.Condition)} {Print(i.Then)}{(i.Else is null ? "" : " else " + Print(i.Else))})",
         WhileStatement w => $"(while {Print(w.Condition)} {Print(w.Body)})",
-        ForInStatement f => $"(for {f.Variable}{(f.Second is null ? "" : ", " + f.Second.Name)} in {Print(f.Collection)} {Print(f.Body)})",
+        ForInStatement f => $"(for {f.Variable}{(f.Second is null ? "" : ", " + f.Second.Name)} in {Print(f.Collection)} {Print(f.Body)}{(f.Arms is null ? "" : " else " + Arms(f.Arms))})",
         MatchStatement m => $"(match {Print(m.Subject)} {Arms(m.Arms)})",
         BreakStatement => "(break)",
         ContinueStatement => "(continue)",

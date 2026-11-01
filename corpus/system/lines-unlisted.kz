@@ -1,0 +1,14 @@
+// expect: error unlisted-case at 7
+// rules: S16
+
+// the read's `InvalidUtf8` can leave the function through the loop, and its return type does not list it
+int | IoError Count(File f) {
+    mut count = 0
+    for line in f.Lines() {
+        count = count + 1
+    }
+
+    return count
+}
+
+print(1)

@@ -47,6 +47,7 @@ extern "C" {
     int getaddrinfo(byte* host, byte* service, void* hints, void* list)
     void freeaddrinfo(void* list)
     long getrandom(byte* bytes, long count, uint options)
+    long syscall(long number, ...)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -1787,6 +1788,30 @@ pub long ReadFile(int fd, byte* bytes, long count) {
     }
 
     return Checked(result)
+}
+
+// The thread put to sleep while the lock word of a file at `word` holds `expected`, by `futex` (202)
+// with `FUTEX_WAIT_PRIVATE` (128) and no time limit, as Rust's `futex_wait` puts it to sleep: 0, or the
+// failure, which the caller does not read, since it tries the lock again after every wake (S16).
+pub long LockWait(int* word, int expected) {
+    mut long result = 0
+    raw {
+        result = syscall(202, word, long(128), long(expected), long(0))
+    }
+
+    return result
+}
+
+// One thread that sleeps on the lock word of a file at `word` woken, by `futex` (202) with
+// `FUTEX_WAKE_PRIVATE` (129), as Rust's `futex_wake` wakes one: the count woken, or the failure, which
+// the caller does not read (S16).
+pub long LockWake(int* word) {
+    mut long result = 0
+    raw {
+        result = syscall(202, word, long(129), long(1))
+    }
+
+    return result
 }
 
 // The `count` bytes at `bytes` written to the file `fd`, `write` called again with the rest where it

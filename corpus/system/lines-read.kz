@@ -1,0 +1,31 @@
+// expect: output
+// | a
+// | b
+// | 
+// | c
+// | 3
+// | true
+// rules: S16
+
+void | IoError | InvalidUtf8 Show() {
+    // `\n` and `\r\n` end a line, and the last line needs no line break
+    File.WriteAll("lines-read.txt", "a\nb\r\n\r\nc".Bytes)
+    f = File.Open("lines-read.txt")
+    for line in f.Lines() {
+        print(line)
+    }
+
+    // a lone `\r` stays in its line, and a final `\n` gives no empty line after it
+    File.WriteAll("lines-read.txt", "x\ry\n".Bytes)
+    g = File.Open("lines-read.txt")
+    File.Delete("lines-read.txt")
+    for line in g.Lines() {
+        print(line.Bytes.Count)
+        print(line.Contains('\r'))
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}

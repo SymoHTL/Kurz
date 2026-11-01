@@ -1,0 +1,34 @@
+// expect: output
+// | one
+// | 4
+// | two
+// | three
+// | four
+// | 0
+// rules: S16
+
+void | IoError | InvalidUtf8 Show() {
+    File.WriteAll("lines-break.txt", "one\ntwo\nthree\nfour\n".Bytes)
+    f = File.Open("lines-break.txt")
+    File.Delete("lines-break.txt")
+    for line in f.Lines() {
+        print(line)
+        break
+    }
+
+    // the file stays open, and a `Read` takes the bytes the loop left in its buffer first
+    mut buffer = Bytes()
+    print(f.Read(mut buffer, 4))
+    print(string.FromUtf8(buffer).Trim())
+    // a second loop goes on where the `Read` stopped
+    for line in f.Lines() {
+        print(line)
+    }
+
+    print(f.Read(mut buffer, 4))
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}

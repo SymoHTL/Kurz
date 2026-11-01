@@ -161,6 +161,9 @@ public enum CallKind
     /// <summary>A file's, a listener's or a stream's <c>Close()</c> (S5, S9).</summary>
     FileClose,
 
+    /// <summary>A file's <c>Lines()</c>, the collection of a <c>for</c> loop (S16).</summary>
+    FileLines,
+
     /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
     TcpBind,
 

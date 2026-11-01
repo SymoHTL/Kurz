@@ -58,6 +58,11 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckFileMethod(HandleType handle, MemberAccess m, CallExpression c)
     {
+        if (m.Member == "Lines" && handle.Kind == Handle.File)
+        {
+            return CheckLines(c);
+        }
+
         var bytes = new ListType(Types.Byte);
         var listener = handle.Kind == Handle.TcpListener;
         (CallKind Kind, List<Slot> Slots, KurzType Success)? method = m.Member switch
@@ -82,6 +87,29 @@ public sealed partial class Checker
 
         var candidate = new Candidate { Slots = f.Slots, Result = Types.Union([f.Success, IoError]) };
         return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
+    }
+
+    /// <summary>
+    /// S16: <c>f.Lines()</c>, which stands as the collection of a <c>for</c> loop alone (section 12, the owner, 2026-11-01, "Loop source
+    /// only"): there its result is the loop's outcome, <c>void</c> with the cases a pull fails with, <c>IoError</c> and <c>InvalidUtf8</c>,
+    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else it is text no rule gives a meaning, E4's <c>syntax</c>.
+    /// </summary>
+    private Typed CheckLines(CallExpression c)
+    {
+        if (!ReferenceEquals(c, loopSource))
+        {
+            Report(ErrorIds.Syntax, c.Line, "`f.Lines()` stands as the collection of a `for` loop alone (S16)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, "`Lines`"))
+        {
+            return Typed.Error;
+        }
+
+        var candidate = new Candidate { Slots = [], Result = Types.Union([Types.Void, IoError, new DataType(dataTypes["InvalidUtf8"], [])]) };
+        return Record(c, CallKind.FileLines, Call([candidate], c, null, out var picked), picked);
     }
 
     // ---- the command line and the environment (chapter 13) -----------------------------------------------

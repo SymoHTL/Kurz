@@ -312,7 +312,6 @@ public sealed partial class Emitter
         var union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
         var value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
         var success = union.Cases[0];
-        var rest = union.Cases.Skip(1).ToList();
         var tag = Tag(value, union);
         var slot = asValue && success is not VoidType ? fn.Alloca(Ir(success), "recovered") : null;
         var done = fn.Label("recovered");
@@ -331,9 +330,24 @@ public sealed partial class Emitter
 
         fn.Branch(done);
         fn.Block(cases);
+        ElseArms(e.Arms, value, union, slot, done, e.Line);
+        fn.Block(done);
+        return slot is null ? null : fn.Value($"load {Ir(success)}, ptr {slot}");
+    }
+
+    /// <summary>
+    /// O5: the arms of an <c>else</c> over the union's value, whose case is not its success, of a call or of a loop's collection (S16): each
+    /// arm takes the cases its pattern takes and recovers into <paramref name="slot"/>, returns or throws, and goes on at
+    /// <paramref name="done"/>; a case no arm takes leaves the function (O2, O3).
+    /// </summary>
+    private void ElseArms(IReadOnlyList<MatchArm> arms, string value, UnionType union, string? slot, string done, int line)
+    {
+        var success = union.Cases[0];
+        var rest = union.Cases.Skip(1).ToList();
+        var tag = Tag(value, union);
         var taken = new List<KurzType>();
         var hasElse = false;
-        foreach (var arm in e.Arms)
+        foreach (var arm in arms)
         {
             var body = fn.Label("arm");
             var next = fn.Label("next");
@@ -373,11 +387,8 @@ public sealed partial class Emitter
         }
         else
         {
-            Leave(value, union, left, e.Line);
+            Leave(value, union, left, line);
         }
-
-        fn.Block(done);
-        return slot is null ? null : fn.Value($"load {Ir(success)}, ptr {slot}");
     }
 
     /// <summary>O5: what an arm of <c>else</c> does; in a block, its last statement: the value it recovers with, or what it does.</summary>

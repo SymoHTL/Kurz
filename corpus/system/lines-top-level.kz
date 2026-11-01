@@ -1,0 +1,10 @@
+// expect: error unlisted-case at 8
+// rules: S16
+
+f = File.Open("lines-top-level.txt") else {
+    IoError => throw
+}
+// top-level code has no caller: the loop's failures are handled in an `else` after it
+for line in f.Lines() {
+    print(line)
+}
