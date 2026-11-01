@@ -5,7 +5,7 @@ The errors the corpus cases expect. An id is what a corpus header names: `// exp
 raises when it runs (E3). The two tables share one namespace of ids. An id that no case can expect stands in its rule and not
 here: `invalid-source` (L1), since the tools read every case as UTF-8, and `files-not-allowed`,
 `network-not-allowed` and `env-not-allowed` (S12), since a case is a program and no package, and
-`invalid-argument` (S13), since a case gives its program no argument; the three exceptions are
+`invalid-argument` (S13), since a case gives its program no argument, and `ambiguous-name` (F10), since it takes two folders and a case is a single file; the three exceptions are
 `print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21), `allocation-failed`
 (O11), which has its row by the owner's choice (§6, 2026-10-23), and `random-failed` (M9), which has
 its row by the owner's choice (§4, 2026-10-30), and each says in it why no case expects it. The lint
