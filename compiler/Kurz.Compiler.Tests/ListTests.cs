@@ -2859,6 +2859,54 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
+        // a key of `SortBy` that changes the list it sorts through the instance whose field holds it, by a replacement, by an `Add` and
+        // from inside a method, and of strings, whose items the replaced block lets go of: the list read is held across the keys and the
+        // change stands (section 12, the owner, 2026-11-01, "Change stands, as C#"); a key that changes nothing sorts
+        const string sortByChange = """
+            class Bag(mut List<int> Items) {
+                pub int Reset(int x) {
+                    Items = [0]
+                    return x
+                }
+
+                pub int Push(int x) {
+                    Items.Add(x * 10)
+                    return x
+                }
+
+                pub void SortMe() {
+                    Items.SortBy(x => Reset(x))
+                }
+            }
+
+            class Names(mut List<string> Items) {
+                pub string Reset(string x) {
+                    Items = ["z"]
+                    return x
+                }
+            }
+
+            b = Bag([3, 1, 2])
+            b.Items.SortBy(x => b.Reset(x))
+            print(b.Items.Count)
+            print(b.Items[0])
+            c = Bag([3, 1, 2])
+            c.Items.SortBy(x => c.Push(x))
+            print(c.Items.Count)
+            print(c.Items[0])
+            print(c.Items[5])
+            d = Bag([3, 1, 2])
+            d.SortMe()
+            print(d.Items[0])
+            n = Names(["c", "a", "b"])
+            n.Items.SortBy(x => n.Reset(x))
+            print(n.Items[0])
+            e = Bag([3, 1, 2])
+            e.Items.SortBy(x => 0 - x)
+            print(e.Items[0])
+
+            """;
+        Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "3"], "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");

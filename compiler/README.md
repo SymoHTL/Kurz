@@ -672,7 +672,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   median of three, insertion below 21 items and a heapsort past twice the base-2 logarithm of the count
   in splits; and `SortBy` the key of each item made once, in order, kept with the item's position in a
   pair, the pairs sorted by the quicksort and the items moved where they say, as Rust's
-  `sort_by_cached_key`; a buffer or a block of pairs the system refuses ends the program with
+  `sort_by_cached_key`, the list held by a count of its own while the keys are made, so that a key
+  which changes it through an instance whose field holds it leaves its change standing and the sort of
+  the list it read is dropped, as C#'s `List.Sort` sorts the list it read while the field holds another
+  (section 12, the owner, 2026-11-01, "Change stands, as C#", #39, comment 6562795140), at one count
+  for each call; a buffer or a block of pairs the system refuses ends the program with
   `allocation-failed` (M9); `SortTests` holds `Sort` and `SortUnstable` to .NET's `OrderBy` over 300
   generated lists of each of five item types, `int`, `byte`, `double`, `string` and `int?`, the unstable
   sort of `double` items with `-0` read as `0`, and `SortBy` of the `int` lists by an `int`, a `string` and
