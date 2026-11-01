@@ -1187,8 +1187,8 @@
   {"tool": "tools/review/review.py", "anchor": "converged: {'no' if capped else 'yes'}{limited}; {cut}; \"", "replacement": "converged: {'no' if capped else 'yes'}{limited}; \"", "expect": "run: the audit note and the state comment name what was left out"},
   {"tool": "tools/review/review.py", "anchor": "{no:>5} + {line_parts(new, spans_of[('+', j)], left) if ('+', j) in spans_of else new}", "replacement": "{no:>5} + {new if ('+', j) in spans_of else new}", "expect": "run: --plan counts the batches of the cut text, and the run gives the model those batches"},
   {"tool": "tools/review/review.py", "anchor": "            out.append(MARKER.format(a - at))", "replacement": "            out.append(MARKER.format(a - at - 1))", "expect": "long line: a changed line and its removed form are sent in parts that join back into them"},
-  {"tool": "tools/unicode_tables.py", "anchor": "        if len(f) > 4 and f[4]:", "replacement": "        if False:", "expect": "a conditional mapping is left out"},
-  {"tool": "tools/unicode_tables.py", "anchor": "        if lo != (cp,):", "replacement": "        if True:", "expect": "an identity in SpecialCasing keeps the simple mapping"},
+  {"tool": "tools/unicode_tables.py", "anchor": "        if len(f) > 4 and f[4]:", "replacement": "        if False:", "expect": "a mapping under Final_Sigma is left out"},
+  {"tool": "tools/unicode_tables.py", "anchor": "        if lo != (cp,):", "replacement": "        if True:", "expect": "an identity with no simple mapping is no mapping"},
   {"tool": "tools/unicode_tables.py", "anchor": "    return ({k: v for k, v in lower.items() if k > 0x7F}", "replacement": "    return ({k: v for k, v in lower.items()}", "expect": "ASCII is left out"},
   {"tool": "tools/unicode_tables.py", "anchor": "            if last and last[3] == run[3] and run[0] == run[1]", "replacement": "            if False and last and last[3] == run[3] and run[0] == run[1]", "expect": "make a run of step 2"},
   {"tool": "tools/unicode_tables.py", "anchor": " and (last[0] == last[1] or last[2] == 2):", "replacement": ":", "expect": "does not take a code point two after it"},
@@ -1198,5 +1198,11 @@
   {"tool": "tools/unicode_tables.py", "anchor": "    if got != digest:", "replacement": "    if False:", "expect": "a file of another hash is refused"},
   {"tool": "tools/unicode_tables.py", "anchor": "        if hashlib.sha256(data).hexdigest() == digest:", "replacement": "        if True:", "expect": "a kept file of another hash is fetched again"},
   {"tool": "tools/unicode_tables.py", "anchor": "        if old == text:", "replacement": "        if True:", "expect": "a file that differs fails"},
-  {"tool": "tools/unicode_tables.py", "anchor": "        return kit.PARTLY", "replacement": "        return 0", "expect": "an unfetched file is PARTLY"}
+  {"tool": "tools/unicode_tables.py", "anchor": "        return kit.PARTLY", "replacement": "        return 0", "expect": "an unfetched file is PARTLY"},
+  {"tool": "tools/unicode_tables.py", "anchor": "        if len(f) > 4 and f[4]:", "replacement": "        if len(f) > 4 and f[4] == \"Final_Sigma\":", "expect": "a mapping of one language is left out"},
+  {"tool": "tools/unicode_tables.py", "anchor": "        if lo != (cp,):", "replacement": "        lower.pop(cp, None)\n        if lo != (cp,):", "expect": "an identity in SpecialCasing keeps the simple mapping"},
+  {"tool": "tools/unicode_tables.py", "anchor": "        if keys and plane > 1:", "replacement": "        if False:", "expect": "a mapping to one code point past the first two planes"},
+  {"tool": "tools/unicode_tables.py", "anchor": "        if keys and plane > 1:", "replacement": "        if keys and plane > 1 and any(len(mapping[k]) == 1 for k in keys):", "expect": "a mapping to several code points past the first two planes"},
+  {"tool": "tools/unicode_tables.py", "anchor": "    except (OSError, http.client.HTTPException) as e:", "replacement": "    except OSError as e:", "expect": "a download cut off is unread"},
+  {"tool": "tools/unicode_tables.py", "anchor": "    except OSError:  # no kept file", "replacement": "    except FileNotFoundError:  # no kept file", "expect": "a kept file that cannot be read is fetched again"}
 ]

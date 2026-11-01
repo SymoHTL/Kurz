@@ -533,7 +533,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
   or a change of case that changes nothing gives the string itself, held once more; `CaseTests` holds `ToLower` and
   `ToUpper` of every code point of the first two planes to `CaseTables`, read without the standard library's search,
-  and the final sigma and the mappings to several code points to fixed lines; `PieceTests` holds the
+  and the final sigma and the mappings to several code points to fixed lines, each program a test build, which clang
+  builds at `-O0`, so that a literal input runs the standard library's walk as any string's does; `PieceTests` holds the
   trims, `Split`, `Replace`, `string.Join` and the ASCII changes of case (X3 to X6) to what .NET's members of the same
   strings give where the rules read as they do, and to the rules written out where they do not: the ASCII trims, over
   the five whitespace characters of X4, the ASCII changes of case, over the letters `A` to `Z` and `a` to `z`, and an

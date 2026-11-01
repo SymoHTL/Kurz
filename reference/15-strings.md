@@ -90,8 +90,8 @@ stable release pins, 17.0.0, in tables generated from the database's files (§12
 2026-10-31, "Rust's pin" and "Generated, as Rust"). A capital sigma lowers to `ς` where a cased
 character stands before it and none after it, past the case-ignorable characters on either side, as
 Unicode's Final_Sigma and Rust's `to_lowercase` read it, so that `"ὈΔΥΣΣΕΎΣ".ToLower()` is
-`"ὀδυσσεύς"`; the mappings that hold for one language are left out; and `s.ToLower(1)` is
-`argument-mismatch` *(assumed, §12: the defaults of the build's product pass, not put to the owner)*.
+`"ὀδυσσεύς"`; the mappings that hold for one language are left out; and a change of case called with an
+argument, `s.ToLower(1)` among them, is `argument-mismatch` *(assumed, §12: the defaults of the build's product pass, not put to the owner)*.
 
 Case: [strings/case.kz](../corpus/strings/case.kz)
 ```kurz

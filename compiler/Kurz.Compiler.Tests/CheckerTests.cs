@@ -2956,6 +2956,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.TrimStartAscii('a'))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToLowerAscii(1))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToUpper(1))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("s = \"ab\"\nprint(s.ToUpperAscii(\"x\"))"));
 
         // X6: two forms, `Join<T>(string separator, List<T> values)` and `Join<T>(char separator, List<T> values)`; values that are no
         // list give `T` nothing to infer from in either form (T27), so the call fits neither, `argument-mismatch` (F13), as a separator

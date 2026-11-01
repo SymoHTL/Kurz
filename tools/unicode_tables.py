@@ -5,14 +5,15 @@
 
   unicode_tables.py              write compiler/Kurz.Compiler/Emit/CaseTables.cs from the database's files
                                  and print every mapping that changed against the file it replaces
-  unicode_tables.py --check      the gate: red where the file is not what the files give, naming each
-                                 mapping that differs
+  unicode_tables.py --check      the gate: red where the file is not what the files give, naming the
+                                 first 40 mappings that differ and counting the rest
   unicode_tables.py --self-test
 
 The three files are fetched from unicode.org at the pinned version and each is checked by its SHA-256
-before it is read: a file of another hash is refused (FAIL), and a file that cannot be fetched leaves
-the tables unread (PARTLY, which is red: nothing was compared). A fetched file is kept under its hash
-in the system's temporary directory, and read from there while its hash holds.
+before it is read: a file of another hash is refused (FAIL), and a file that cannot be fetched, or
+whose download is cut off, leaves the tables unread (PARTLY, which is red: nothing was compared). A
+fetched file is kept under its hash in the system's temporary directory, and read from there while its
+hash holds; a kept file that cannot be read is fetched again.
 
 What the tables hold, as Rust's generator takes them:
 - the mappings: for every code point above ASCII, UnicodeData.txt's simple lowercase and uppercase
@@ -22,13 +23,14 @@ What the tables hold, as Rust's generator takes them:
   language are left out, as "no culture" (section 4) says;
 - the runs of the mappings to one code point, per plane, in Rust's two passes: consecutive code points
   with one delta make a run of step 1, and lone code points two apart with one delta a run of step 2,
-  each run at most 256 code points; every mapping stays in its plane, and only the first two planes
-  hold mappings;
+  each run spanning at most 256 code points from its first to its last; every mapping stays in its
+  plane, and only the first two planes hold mappings, to one code point or to several;
 - the mappings to two or three code points, padded with zeros;
 - the ranges of Cased and Case_Ignorable from DerivedCoreProperties.txt, ASCII among them, which
   Rust's `is_cased` and `is_case_ignorable` take from the same properties.
 A table with fewer entries than its floor is refused, so that a file read as empty is never a table."""
 import hashlib
+import http.client
 import os
 import re
 import sys
@@ -60,15 +62,17 @@ def fetch(name, version=VERSION, digest=None, opener=urllib.request.urlopen, cac
     ValueError; one that cannot be fetched raises Unread."""
     digest = digest or FILES[name]
     kept = os.path.join(cache or tempfile.gettempdir(), f"kurz-ucd-{digest}.txt")
-    if os.path.exists(kept):
+    try:
         with open(kept, "rb") as f:
             data = f.read()
         if hashlib.sha256(data).hexdigest() == digest:
             return data.decode("utf-8")
+    except OSError:  # no kept file, or one that cannot be read: fetched again
+        pass
     try:
         with opener(SOURCE.format(version=version, name=name), timeout=60) as r:
             data = r.read()
-    except OSError as e:
+    except (OSError, http.client.HTTPException) as e:
         raise Unread(f"{name}: could not be fetched: {e}") from None
     got = hashlib.sha256(data).hexdigest()
     if got != digest:
@@ -115,8 +119,11 @@ def tables(mapping):
     """(runs, multis) of one direction: runs as (first, last, step, delta), multis as (key, a, b, c)."""
     runs, multis = [], []
     for plane in range(17):
+        keys = sorted(k for k in mapping if k >> 16 == plane)
+        if keys and plane > 1:
+            raise ValueError(f"plane {plane}: a mapping past the first two planes")
         singles = []
-        for key in sorted(k for k in mapping if k >> 16 == plane):
+        for key in keys:
             out = mapping[key]
             if any(c >> 16 != plane for c in out):
                 raise ValueError(f"U+{key:04X}: a mapping that leaves its plane")
@@ -124,8 +131,6 @@ def tables(mapping):
                 singles.append([key, key, 1, out[0] - key])
             else:
                 multis.append((key,) + out + (0,) * (3 - len(out)))
-        if singles and plane > 1:
-            raise ValueError(f"plane {plane}: a mapping past the first two planes")
         joined = []
         for run in singles:
             if joined and joined[-1][3] == run[3] and run[0] - joined[-1][1] == 1:
@@ -141,7 +146,7 @@ def tables(mapping):
                 stepped.append(run)
         for first, end, _, _ in stepped:
             if end - first > 255:
-                raise ValueError(f"U+{first:04X}: a run of more than 256 code points")
+                raise ValueError(f"U+{first:04X}: a run that spans more than 256 code points")
         runs += [tuple(r) for r in stepped]
     return runs, multis
 
@@ -188,7 +193,7 @@ def generate(unicode_data, special_casing, properties, floors=FLOORS):
 
 SUMMARIES = {
     "LowerRuns": "The runs of the lowercase mappings to one code point, four numbers each: the first and the last code point, the step, 1 or 2, and the delta every code point of the run takes, a code point between them that the step skips taking none.",
-    "LowerMultis": "The lowercase mappings to two or three code points, four numbers each: the code point and the code points it gives, a zero after the last.",
+    "LowerMultis": "The lowercase mappings to two or three code points, four numbers each: the code point and the code points it gives, the fourth number zero where the mapping gives two.",
     "UpperRuns": "The runs of the uppercase mappings to one code point, as <see cref=\"LowerRuns\"/> holds the lowercase ones.",
     "UpperMultis": "The uppercase mappings to two or three code points, as <see cref=\"LowerMultis\"/> holds the lowercase ones.",
     "Cased": "The ranges of the property Cased, the first and the last code point of each, in order.",
@@ -210,8 +215,8 @@ def render(arrays):
         "",
         "/// <summary>",
         "/// X3: the case tables of Unicode's full mappings and of the two properties Final_Sigma reads, of the version Rust's stable",
-        "/// <c>char::UNICODE_VERSION</c> pins, in the runs Rust's <c>core::unicode::conversions</c> holds them in, for every code",
-        "/// point above ASCII.",
+        "/// <c>char::UNICODE_VERSION</c> pins, in the runs Rust's <c>core::unicode::conversions</c> holds them in: the mappings of",
+        "/// every code point above ASCII, and the properties of every code point, ASCII among them.",
         "/// </summary>",
         "internal static class CaseTables",
         "{",
@@ -326,17 +331,19 @@ def self_test():
         except Exception as e:
             return e
 
-    data = "\n".join([ud("0041", lower="0061"), ud("00C0", lower="00E0"), ud("00E0", upper="00C0"), ud("0130", lower="0069"),
-                      ud("00DF"), ud("01C5", upper="01C4", lower="01C6"), ud("03A3", lower="03C3")])
+    data = "\n".join([ud("0041", lower="0061"), ud("00C0", lower="00E0"), ud("00CC", lower="00EC"), ud("00E0", upper="00C0"),
+                      ud("0130", lower="0069"), ud("00DF"), ud("01C5", upper="01C4", lower="01C6"), ud("03A3", lower="03C3")])
     special = "\n".join(["# a comment", "00DF; 00DF; 0053 0073; 0053 0053; # SHARP S", "0130; 0069 0307; 0130; 0130; # I WITH DOT",
-                         "03A3; 03C2; 03A3; 03A3; Final_Sigma; # SIGMA", "0049; 0131; 0049; 0049; tr Not_Before_Dot; # I",
-                         "01C5; 01C6; 01C5; 01C4; # DZ WITH CARON"])
+                         "03A3; 03C2; 03A3; 03A3; Final_Sigma; # SIGMA", "00CC; 0069 0307 0300; 00CC; 00CC; lt; # I WITH GRAVE",
+                         "01C5; 01C5; 01C5; 01C4; # DZ WITH CARON"])
     lower, upper = mappings(data, special)
     cases.append(("mappings: UnicodeData's simple mapping", lower.get(0xC0) == (0xE0,) and upper.get(0xE0) == (0xC0,), (lower, upper)))
     cases.append(("mappings: SpecialCasing's mapping without a condition takes the place of the simple one",
                   lower.get(0x130) == (0x69, 0x307) and upper.get(0xDF) == (0x53, 0x53), (lower, upper)))
-    cases.append(("mappings: a conditional mapping is left out", lower.get(0x3A3) == (0x3C3,) and 0x49 not in lower, lower))
-    cases.append(("mappings: an identity in SpecialCasing keeps the simple mapping", lower.get(0x1C5) == (0x1C6,) and 0xDF not in lower, lower))
+    cases.append(("mappings: a mapping under Final_Sigma is left out", lower.get(0x3A3) == (0x3C3,), lower))
+    cases.append(("mappings: a mapping of one language is left out", lower.get(0xCC) == (0xEC,), lower))
+    cases.append(("mappings: an identity in SpecialCasing keeps the simple mapping", lower.get(0x1C5) == (0x1C6,), lower))
+    cases.append(("mappings: an identity with no simple mapping is no mapping", 0xDF not in lower, lower))
     cases.append(("mappings: ASCII is left out", 0x41 not in lower, lower))
 
     def runs_of(mapping):
@@ -356,7 +363,13 @@ def self_test():
     out = got(lambda: tables({0xFFFF: (0x10000,)}))
     cases.append(("tables: a mapping that leaves its plane is refused", isinstance(out, ValueError), out))
     out = got(lambda: tables({cp: (cp + 1,) for cp in range(0x1000, 0x1000 + 257)}))
-    cases.append(("tables: a run of more than 256 code points is refused", isinstance(out, ValueError), out))
+    cases.append(("tables: a run that spans more than 256 code points is refused", isinstance(out, ValueError), out))
+    out = got(lambda: tables({0x20000: (0x20001,)}))
+    cases.append(("tables: a mapping to one code point past the first two planes is refused",
+                  isinstance(out, ValueError) and "first two planes" in str(out), out))
+    out = got(lambda: tables({0x20000: (0x20041, 0x20042)}))
+    cases.append(("tables: a mapping to several code points past the first two planes is refused",
+                  isinstance(out, ValueError) and "first two planes" in str(out), out))
     props = "0041..005A    ; Cased # L&\n0061..007A ; Cased\n00AA ; Cased\n00AB ; Other\n0027 ; Case_Ignorable # Po"
     cases.append(("ranges: adjacent ranges merge and other properties stay out",
                   ranges(props, "Cased") == [(0x41, 0x5A), (0x61, 0x7A), (0xAA, 0xAA)] and ranges("0041..0042 ; Cased\n0043 ; Cased", "Cased") == [(0x41, 0x43)],
@@ -409,6 +422,18 @@ def self_test():
 
         out = got(lambda: fetch("SpecialCasing.txt", digest="1" * 64, opener=closed, cache=cache))
         cases.append(("fetch: a file that cannot be fetched is unread", isinstance(out, Unread), out))
+
+        class CutOff(Answer):
+            def read(self):
+                raise http.client.IncompleteRead(b"0041;A;")
+
+        out = got(lambda: fetch("SpecialCasing.txt", digest="2" * 64, opener=lambda url, timeout: CutOff(body), cache=cache))
+        cases.append(("fetch: a download cut off is unread", isinstance(out, Unread), out))
+        other = b"0042;B;Lu;0;L;;;;;N;;;;0062;\n"
+        other_digest = hashlib.sha256(other).hexdigest()
+        os.makedirs(os.path.join(cache, f"kurz-ucd-{other_digest}.txt"))
+        out = got(lambda: fetch("UnicodeData.txt", digest=other_digest, opener=lambda url, timeout: Answer(other), cache=cache))
+        cases.append(("fetch: a kept file that cannot be read is fetched again", out == other.decode(), out))
 
         texts = {"UnicodeData.txt": data, "SpecialCasing.txt": special, "DerivedCoreProperties.txt": props}
         os.makedirs(os.path.join(cache, os.path.dirname(OUT)))
