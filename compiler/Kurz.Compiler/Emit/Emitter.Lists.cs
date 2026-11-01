@@ -914,9 +914,12 @@ public sealed partial class Emitter
     /// keys, and by their positions where two keys are equal, so that items of equal keys keep their order, without a buffer
     /// (<see cref="UnstableSort"/>); then the items moved where the pairs say, through the place of the list as <c>Sort</c> takes it, and
     /// the keys let go of. An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
-    /// <c>allocation-failed</c> (M9). The list is read without a count of its own while the keys are made: a key that reads it is the
-    /// checker's <c>changed-while-held</c> (M7), a lambda changes nothing it captures (F11), and a copy of the list a lambda holds keeps
-    /// the block shared, so that the sort copies it (M3).
+    /// <c>allocation-failed</c> (M9). The list is read with a count of its own while the keys are made: a lambda changes no variable it
+    /// captures (F11), but a key can change the list through an instance whose field holds it (K2), and the change then copies the
+    /// block (M3) or replaces it while the keys go on reading this one. Where the place holds another block after the keys, the change
+    /// stands and the sort of a list nobody holds is dropped, as C#'s <c>List.Sort</c> sorts the list it read while the field holds
+    /// another (section 12, the owner, 2026-11-01, "Change stands, as C#", #39); a key that reads the list is the checker's
+    /// <c>changed-while-held</c> (M7), and a copy of the list a lambda holds keeps the block shared, so that the sort copies it (M3).
     /// </summary>
     private string? EmitListSortBy(CallExpression c, CallInfo info)
     {
@@ -941,6 +944,10 @@ public sealed partial class Emitter
             var environment = fn.Value("extractvalue %kz.fn %a1, 1");
             var at = fn.Alloca("i64", "at");
             fn.Emit($"store i64 0, ptr {at}");
+
+            // the list read is held across the keys: a key can change it through an instance whose field holds it (K2), and the
+            // change then copies the block (M3) or replaces it while the keys go on reading this one
+            Retain(block, list);
             EachItem(block, list.Element, item =>
             {
                 var i = fn.Value($"load i64, ptr {at}");
@@ -951,6 +958,14 @@ public sealed partial class Emitter
             });
             var move = fn.Label("move");
             var release = fn.Label("release");
+
+            // where the place holds another block, a key changed the list: the change stands and the sort of a list nobody holds is
+            // dropped (the owner, 2026-11-01, "Change stands, as C#")
+            var kept = fn.Value($"icmp eq ptr {fn.Value("load ptr, ptr %a0")}, {block}");
+            Release(block, list);
+            var sortable = fn.Label("sortable");
+            fn.CondBranch(kept, sortable, release);
+            fn.Block(sortable);
             fn.CondBranch(fn.Value($"icmp sge i32 {count}, 2"), move, release);
             fn.Block(move);
             fn.Emit($"call void {UnstableSort(sorted)}(ptr {pairs}, i64 {n}, i64 {SortLimit(n)})");

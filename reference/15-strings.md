@@ -586,6 +586,10 @@ does not order, a nullable form of one it orders aside, is `type-mismatch`, as `
 nullable items, and a nullable key, sort with `null` before every value, as C#'s
 `Comparer<T>.Default` and Rust's ordering of `Option`, though `<` takes no nullable operand (§12, the
 owner, 2026-10-31, "Null first, as C#/Rust").
+A key that changes the list it sorts, through an instance whose field holds the list (K2), leaves its
+change standing, and the sort of the list as it was read is dropped, as C#'s `List.Sort` sorts the list
+it read while the field holds another (§12, the owner, 2026-11-01, "Change stands, as C#", #39, comment
+6562795140).
 
 Case: [strings/sort.kz](../corpus/strings/sort.kz)
 ```kurz
@@ -637,6 +641,34 @@ one.SortBy(x => Key(x))
 print(one)
 mut empty = List<int>()
 empty.SortBy(x => Key(x))
+```
+
+Case: [strings/sortby-key-changes-list.kz](../corpus/strings/sortby-key-changes-list.kz)
+```kurz
+class Bag(mut List<int> Items) {
+    pub int Reset(int x) {
+        Items = [0]
+        return x
+    }
+
+    pub int Push(int x) {
+        Items.Add(x * 10)
+        return x
+    }
+}
+
+// a key that replaces the list: the change stands, and the sort of the list it read is dropped
+b = Bag([3, 1, 2])
+b.Items.SortBy(x => b.Reset(x))
+print(b.Items)
+// a key that adds to the list: the adds stand, and the list is not sorted
+c = Bag([3, 1, 2])
+c.Items.SortBy(x => c.Push(x))
+print(c.Items)
+// a key that changes nothing sorts
+d = Bag([3, 1, 2])
+d.Items.SortBy(x => x)
+print(d.Items)
 ```
 
 Case: [strings/sort-of-bools.kz](../corpus/strings/sort-of-bools.kz)
