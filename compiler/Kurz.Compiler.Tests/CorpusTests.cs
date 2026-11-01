@@ -59,10 +59,7 @@ public sealed class CorpusTests
     /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct; an entry whose case cites a rule outside the checker is redundant and refused.</summary>
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
-        ["classes/print-without-text.kz"] = "a class (chapter 7)",
-        ["strings/join-no-text.kz"] = "a class (chapter 7)",
-        ["types/generic-cannot-infer-classes.kz"] = "classes (chapter 7)",
-        ["values/mut-method-through-field.kz"] = "a class (chapter 7)",
+        ["types/generic-cannot-infer-classes.kz"] = "a base class (K6)",
         ["values/text-more.kz"] = "a flags type (D13)",
     };
 
