@@ -1221,9 +1221,10 @@ fields in the order of their declaration, unrolled in each copy: `f.Name` is a c
 `T.Make(f => ...)` makes a value of a `data` type: it is unrolled into one call of the type's
 primary constructor, with one argument for each field in order, so that its constraints are checked
 as at any construction. Passing a type argument grants its reading, whatever package declared the
-type. The fields read are the primary constructor's (D14), never those the body declares (§4, the
-owner, 2026-11-01, "Kinds + parts", "for f in T.Fields", "T.Make(f => ...)" and "Type arg grants
-read"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+type. `T.Fields` holds the primary constructor's fields (D14), then the `pub` fields the body
+declares (F9, D16), in the order of their declaration, and never a field the body keeps private;
+`T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
+"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
