@@ -82,6 +82,7 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
+        EndChangeableNarrowing(); // N9: a call can assign a `mut` field through another reference (K2)
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
@@ -106,6 +107,18 @@ public sealed partial class Checker
                         var value = Narrowed(n, new Typed(variable.Type)); // N3: a nullable C function known not null (R17)
                         model.RecordType(n, value);
                         return CallValue(value.Type, c);
+                    }
+
+                    if (ImplicitMethods(n.Name) is { } methods)
+                    {
+                        return CallImplicitMethod(methods, n, c, expected); // K7: a method of `this`
+                    }
+
+                    if (ImplicitField(n.Name) is { } implicitField)
+                    {
+                        var field = ReadImplicitField(n, implicitField);
+                        model.RecordType(n, field);
+                        return CallValue(field.Type, c); // F11: a field of function type
                     }
 
                     if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
@@ -153,6 +166,11 @@ public sealed partial class Checker
                     if (dataTypes.TryGetValue(n.Name, out var data))
                     {
                         return CheckConstruction(data, c, expected);
+                    }
+
+                    if (classes.TryGetValue(n.Name, out var classSymbol))
+                    {
+                        return CheckClassConstruction(classSymbol, c, expected); // K1
                     }
 
                     if (enums.ContainsKey(n.Name))
@@ -358,6 +376,10 @@ public sealed partial class Checker
         else if (!t.IsError && !HasText(t.Type))
         {
             Report(ErrorIds.NoText, c.Line, $"{Types.A(t.Type)} has no text to print (A4, A7, A10)");
+        }
+        else if (PrivateText(t.Type, c.Line))
+        {
+            // A9, A15: reported
         }
         else if (HoldsRaw(t.Type, []))
         {
@@ -838,6 +860,8 @@ public sealed partial class Checker
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or HandleType or HasherType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
+            case ClassType:
+                return (false, $"the equality of an instance of `{type}` and its hash (K4, K12) are not read");
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path, cut)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
@@ -942,6 +966,8 @@ public sealed partial class Checker
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or CFunctionType or HandleType or HasherType:
                 return (true, $"`==` takes no `{type}`");
+            case ClassType:
+                return (false, $"the equality of an instance of `{type}` (K4) is not read");
             case ListType l:
                 return HeldEquality(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
@@ -1012,6 +1038,8 @@ public sealed partial class Checker
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or CFunctionType or HandleType or HasherType or VoidType:
                 return (true, $"`==` takes no `{item}`");
+            case ClassType:
+                return (false, $"the equality of an instance of `{item}` (K4) is not read");
             default:
                 return (false, $"`==` on {Types.A(item)} is not read");
         }
@@ -1156,7 +1184,8 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
+            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name)
+                || (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
                 CheckArgumentsLoosely(c);
@@ -1169,6 +1198,11 @@ public sealed partial class Checker
         {
             CheckArgumentsLoosely(c);
             return Typed.Error;
+        }
+
+        if (target.Type is ClassType classType)
+        {
+            return CallMethod(classType, m, c, null); // K7
         }
 
         if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Contains" or "StartsWith" or "EndsWith" or "IndexOf")
@@ -1576,6 +1610,11 @@ public sealed partial class Checker
             return;
         }
 
+        if (MutReceiverThroughInstance(receiver, members, line, what))
+        {
+            return; // K2, M5: a `mut` field of an instance
+        }
+
         if (root is not NameExpression name)
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and only a value reachable through a `mut` variable changes (M5)");
@@ -1680,7 +1719,11 @@ public sealed partial class Checker
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected) => ResolveCall(candidates, c, expected, out _);
 
     /// <summary>As above, with the function picked, or null where the call is wrong.</summary>
-    private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function)
+    private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function) =>
+        ResolveCall(candidates, c, expected, out function, CallKind.Function);
+
+    /// <summary>As above, recorded as a call of <paramref name="kind"/>: of a function, or of a method of a class (K7).</summary>
+    private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function, CallKind kind)
     {
         var typeArguments = c.TypeArguments.Select(Resolve).ToList(); // once: an error in one is one diagnostic, whatever the number of overloads (E1)
         var list = new List<Candidate>();
@@ -1704,7 +1747,7 @@ public sealed partial class Checker
             list.Add(candidate);
         }
 
-        var typed = Record(c, CallKind.Function, Call(list, c, expected, out var picked), picked);
+        var typed = Record(c, kind, Call(list, c, expected, out var picked), picked);
         function = typed.IsError ? null : picked?.Function;
         return typed;
     }

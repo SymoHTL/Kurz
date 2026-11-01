@@ -164,6 +164,7 @@ public sealed partial class Checker
         PrimitiveType { Kind: Primitive.String } => Holding.Counted,
         PrimitiveType => Holding.Nothing,
         ListType or MapType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
+        ClassType => Holding.Counted, // K2: an instance is a counted reference (section 3)
         UnionType u => Worst(u.Cases.Select(c => Holds(c, seen))),
         DataType d => seen.Contains(d.Symbol) ? Holding.Counted : HoldsFields(d, seen),
         TypeParameterType => Holding.Unknown,
