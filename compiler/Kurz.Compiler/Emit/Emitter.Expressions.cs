@@ -183,18 +183,18 @@ public sealed partial class Emitter
     // ---- strings and members ---------------------------------------------------------------------
 
     /// <summary>
-    /// L6: the texts of the segments, copied into one block that holds their bytes together (<see cref="InOneBlock"/>); each text a hole
-    /// made is a temporary of the region, and so is the block.
+    /// L6: the pieces of the segments, written into one block that holds their bytes together (<see cref="InOneBlock"/>); each text a
+    /// hole made is a temporary of the region, and so is the block.
     /// </summary>
     private string EmitInterpolation(StringLiteral s)
     {
-        var pieces = new List<string>();
+        var pieces = new List<InterpolationPiece>();
         foreach (var segment in s.Segments)
         {
             pieces.Add(segment switch
             {
-                TextSegment t => StringValue(t.Text),
-                HoleSegment h => Text(EmitExpression(h.Expression), TypeOf(h.Expression), h.Expression.Line),
+                TextSegment t => new InterpolationPiece(StringValue(t.Text), null),
+                HoleSegment h => Hole(h.Expression),
                 _ => throw new InvalidOperationException(segment.GetType().Name),
             });
         }
@@ -204,35 +204,91 @@ public sealed partial class Emitter
         // value, as format!")
         if (s.Segments is [HoleSegment { Expression: var only }] && TypeOf(only) is PrimitiveType { Kind: Primitive.String })
         {
-            Retain(pieces[0], Types.String);
-            return Temp(pieces[0], Types.String);
+            Retain(pieces[0].Value, Types.String);
+            return Temp(pieces[0].Value, Types.String);
         }
 
-        return pieces.Count switch
+        return pieces switch
         {
-            0 => StringValue(string.Empty),
-            1 => pieces[0],
+            [] => StringValue(string.Empty),
+            [{ Signed: null } text] => text.Value,
             _ => Temp(InOneBlock(pieces), Types.String),
         };
     }
 
     /// <summary>
-    /// The texts in one block of <c>string.Allocate</c> that holds their bytes together, each copied in after the one before, as Rust's
-    /// <c>format!</c> writes its pieces into one <c>String</c> and C#'s interpolation into one buffer, with no text made of the texts
-    /// before the last; more bytes than the largest <c>int</c> end the process with the count asked for (T15).
+    /// A piece of an interpolation: a text, or an integer whose digits the block takes without a text of their own, as a 64-bit value
+    /// and whether it is signed.
     /// </summary>
-    private string InOneBlock(List<string> texts)
+    private sealed record InterpolationPiece(string Value, bool? Signed);
+
+    /// <summary>The piece of a hole: an integer as its 64-bit value, every other value as its text (<see cref="Text"/>).</summary>
+    private InterpolationPiece Hole(Expression e)
     {
-        // the count of a text's bytes, without the highest bit, which marks a text that holds a block (T15)
-        var counts = texts.Select(t => fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {t}, 1")}, 9223372036854775807")).ToList();
+        var value = EmitExpression(e);
+        var type = TypeOf(e);
+        if (type is PrimitiveType p && Types.IsInteger(p))
+        {
+            var signed = Types.IsSigned(type);
+            return new InterpolationPiece(Resize(value, type, signed ? Types.Long : Types.ULong), signed);
+        }
+
+        return new InterpolationPiece(Text(value, type, e.Line), null);
+    }
+
+    /// <summary>
+    /// The pieces in one block of <c>string.Allocate</c> that holds their bytes together, each written after the one before, as Rust's
+    /// <c>format!</c> writes its pieces into one <c>String</c> and C#'s interpolation into one buffer, with no text made of the pieces
+    /// before the last: a text copied, and an integer's digits counted first and written in place by the runtime's
+    /// <c>WriteDigits</c>, a <c>-</c> before those of a negative one, as its text has them (A2), so that no text of it is made, as Rust's
+    /// <c>Display</c> of an integer writes its digits into the buffer it was given; more bytes than the largest <c>int</c> end the
+    /// process with the count asked for (T15).
+    /// </summary>
+    private string InOneBlock(List<InterpolationPiece> pieces)
+    {
+        var counts = new List<string>();
+        var digits = new List<(string Magnitude, string Count, string? Negative)>();
+        foreach (var piece in pieces)
+        {
+            if (piece.Signed is null)
+            {
+                // the count of a text's bytes, without the highest bit, which marks a text that holds a block (T15)
+                counts.Add(fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {piece.Value}, 1")}, 9223372036854775807"));
+                digits.Add((string.Empty, string.Empty, null));
+                continue;
+            }
+
+            // the magnitude of a negative number as an unsigned one, which holds that of the smallest `long`
+            var negative = piece.Signed.Value ? fn.Value($"icmp slt i64 {piece.Value}, 0") : null;
+            var magnitude = negative is null ? piece.Value : fn.Value($"select i1 {negative}, i64 {fn.Value($"sub i64 0, {piece.Value}")}, i64 {piece.Value}");
+            var count = fn.Value($"call i64 {RuntimeFunction("DigitCount")}(i64 {magnitude})");
+            counts.Add(negative is null ? count : fn.Value($"add i64 {count}, {fn.Value($"zext i1 {negative} to i64")}"));
+            digits.Add((magnitude, count, negative));
+        }
+
         var total = counts.Aggregate((sum, count) => fn.Value($"add i64 {sum}, {count}"));
         var bytes = fn.Value($"call ptr {RuntimeFunction("AllocateString")}(i64 {total})");
         module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
         var at = "0";
-        for (var i = 0; i < texts.Count; i++)
+        for (var i = 0; i < pieces.Count; i++)
         {
             var to = fn.Value($"getelementptr i8, ptr {bytes}, i64 {at}");
-            fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {to}, ptr {fn.Value($"extractvalue %kz.str {texts[i]}, 0")}, i64 {counts[i]}, i1 false)");
+            if (pieces[i].Signed is null)
+            {
+                fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {to}, ptr {fn.Value($"extractvalue %kz.str {pieces[i].Value}, 0")}, i64 {counts[i]}, i1 false)");
+            }
+            else if (digits[i].Negative is { } negative)
+            {
+                // the `-` written where a number that is not negative writes its first digit over it
+                fn.Emit($"store i8 45, ptr {to}");
+                var after = fn.Value($"getelementptr i8, ptr {to}, i64 {fn.Value($"zext i1 {negative} to i64")}");
+                fn.Emit($"call void {RuntimeFunction("WriteDigits")}(ptr {after}, i64 {digits[i].Magnitude}, i32 {fn.Value($"trunc i64 {digits[i].Count} to i32")})");
+            }
+            else
+            {
+                fn.Emit($"call void {RuntimeFunction("WriteDigits")}(ptr {to}, i64 {digits[i].Magnitude}, i32 {fn.Value($"trunc i64 {digits[i].Count} to i32")})");
+            }
+
             at = fn.Value($"add i64 {at}, {counts[i]}");
         }
 
