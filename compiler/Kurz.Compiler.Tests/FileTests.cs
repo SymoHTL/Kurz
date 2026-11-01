@@ -964,4 +964,77 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         RefusedOnWindows(Compile(text, Builder.CheckRuntime(Target.Windows)));
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
+
+    [Fact]
+    public void A_build_for_windows_says_not_supported_at_each_setter_and_at_the_second_form_of_connect()
+    {
+        // S11 with S9: each new call is the first call on a socket the build reaches, so the refusal names its line
+        string[] texts = [
+            "void | IoError Bound(TcpStream? s) {\n    if s != null {\n        s.SetReadTimeout(1s)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
+            "void | IoError Bound(TcpStream? s) {\n    if s != null {\n        s.SetWriteTimeout(null)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
+            "print(1)\nmatch TcpStream.Connect(\"127.0.0.1:1\", 1s) {\n    TcpStream => print(\"connected\")\n    IoError e => print(e)\n}\n",
+        ];
+        foreach (var (text, line) in texts.Zip([3, 3, 2]))
+        {
+            var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
+            RefusedOnWindows(refused);
+            Assert.Equal(line, Assert.Single(refused.Diagnostics.Items).Line);
+            Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
+        }
+    }
+
+    [Fact]
+    public void A_call_whose_time_ran_out_or_was_refused_names_its_address_in_its_text()
+    {
+        // S1 with S9: the text of each new failure, the words of its kind and the address of its stream, which a stream that `Accept` gave
+        // takes from its listener and one that `Connect` made from its argument, written here as ADDRESS
+        const string text = """
+            void | IoError Texts() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                address = "127.0.0.1:{listener.Port}"
+                client = TcpStream.Connect(address)
+                server = listener.Accept()
+                server.SetReadTimeout(50ms)
+                mut buffer = Bytes()
+                match server.Read(mut buffer, 1) {
+                    int => print("read")
+                    IoError e => print(e)
+                }
+
+                server.SetWriteTimeout(0s) else {
+                    IoError e => print(e)
+                }
+
+                mut held = List<TcpStream>()
+                mut waiting = true
+                while waiting {
+                    match TcpStream.Connect(address, 100ms) {
+                        TcpStream s => held.Add(s)
+                        IoError e => {
+                            print("{e}".Replace(address, "ADDRESS"))
+                            waiting = false
+                        }
+                    }
+                }
+
+                match TcpStream.Connect(address, 0s) {
+                    TcpStream => print("connected")
+                    IoError e => print("{e}".Replace(address, "ADDRESS"))
+                }
+
+                server.Close()
+                server.SetWriteTimeout(1s) else {
+                    IoError e => print(e)
+                }
+
+                client.Close()
+            }
+
+            Texts() else {
+                IoError e => print(e)
+            }
+
+            """;
+        Ran(text, "socket-time-texts", ["timed out: 127.0.0.1:0", "invalid input: 127.0.0.1:0", "timed out: ADDRESS", "invalid input: ADDRESS", "other (os error 9): 127.0.0.1:0"]);
+    }
 }

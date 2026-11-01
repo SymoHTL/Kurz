@@ -1969,6 +1969,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "c.SetReadTimeout(50)", StringComparison.Ordinal)));
         Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
         Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
+
+        // F13: the misfit names both forms of `Connect`, each with why it does not fit
+        var (diagnostics, _) = Check(Program.Replace("TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)", "TcpStream.Connect(l.Port)", StringComparison.Ordinal));
+        var misfit = Assert.Single(diagnostics.Items, d => d.Id == ErrorIds.ArgumentMismatch);
+        Assert.Equal(3, misfit.Line);
+        Assert.StartsWith("the call fits none of the forms of `Connect` (F13):", misfit.Message, StringComparison.Ordinal);
+        Assert.Contains(" Connect(string address)`: ", misfit.Message, StringComparison.Ordinal);
+        Assert.Contains(" Connect(string address, duration timeout)`: ", misfit.Message, StringComparison.Ordinal);
     }
 
     [Fact]
