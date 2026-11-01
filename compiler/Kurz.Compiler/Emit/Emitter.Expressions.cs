@@ -182,19 +182,21 @@ public sealed partial class Emitter
 
     // ---- strings and members ---------------------------------------------------------------------
 
-    /// <summary>L6: the texts of the segments, joined by the runtime's <c>Concat</c>; each text a hole or a join made is a temporary of the region.</summary>
+    /// <summary>
+    /// L6: the texts of the segments, copied into one block that holds their bytes together (<see cref="InOneBlock"/>); each text a hole
+    /// made is a temporary of the region, and so is the block.
+    /// </summary>
     private string EmitInterpolation(StringLiteral s)
     {
-        string? result = null;
+        var pieces = new List<string>();
         foreach (var segment in s.Segments)
         {
-            var piece = segment switch
+            pieces.Add(segment switch
             {
                 TextSegment t => StringValue(t.Text),
                 HoleSegment h => Text(EmitExpression(h.Expression), TypeOf(h.Expression), h.Expression.Line),
                 _ => throw new InvalidOperationException(segment.GetType().Name),
-            };
-            result = result is null ? piece : Temp(fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {result}, %kz.str {piece})"), Types.String);
+            });
         }
 
         // one hole of a string is the string itself, and the interpolation a new value with a count of its own, as Rust's `format!`
@@ -202,11 +204,39 @@ public sealed partial class Emitter
         // value, as format!")
         if (s.Segments is [HoleSegment { Expression: var only }] && TypeOf(only) is PrimitiveType { Kind: Primitive.String })
         {
-            Retain(result!, Types.String);
-            return Temp(result!, Types.String);
+            Retain(pieces[0], Types.String);
+            return Temp(pieces[0], Types.String);
         }
 
-        return result ?? StringValue(string.Empty);
+        return pieces.Count switch
+        {
+            0 => StringValue(string.Empty),
+            1 => pieces[0],
+            _ => Temp(InOneBlock(pieces), Types.String),
+        };
+    }
+
+    /// <summary>
+    /// The texts in one block of <c>string.Allocate</c> that holds their bytes together, each copied in after the one before, as Rust's
+    /// <c>format!</c> writes its pieces into one <c>String</c> and C#'s interpolation into one buffer, with no text made of the texts
+    /// before the last; more bytes than the largest <c>int</c> end the process with the count asked for (T15).
+    /// </summary>
+    private string InOneBlock(List<string> texts)
+    {
+        // the count of a text's bytes, without the highest bit, which marks a text that holds a block (T15)
+        var counts = texts.Select(t => fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {t}, 1")}, 9223372036854775807")).ToList();
+        var total = counts.Aggregate((sum, count) => fn.Value($"add i64 {sum}, {count}"));
+        var bytes = fn.Value($"call ptr {RuntimeFunction("AllocateString")}(i64 {total})");
+        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+        var at = "0";
+        for (var i = 0; i < texts.Count; i++)
+        {
+            var to = fn.Value($"getelementptr i8, ptr {bytes}, i64 {at}");
+            fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {to}, ptr {fn.Value($"extractvalue %kz.str {texts[i]}, 0")}, i64 {counts[i]}, i1 false)");
+            at = fn.Value($"add i64 {at}, {counts[i]}");
+        }
+
+        return TakenOver(bytes, total);
     }
 
     /// <summary>
