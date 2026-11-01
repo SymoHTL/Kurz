@@ -1,0 +1,18 @@
+// expect: output
+// | a-b
+// | 0
+// | 0
+// rules: S17, S18
+
+void | IoError | ExitError | InvalidUtf8 Show() {
+    out = Command.New("printf").Args(["%s-%s", "a"]).Arg("b").Output()
+    print(string.FromUtf8(out.Stdout))
+    print(out.Status.Code)
+    print(out.Stderr.Count)
+}
+
+Show() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}

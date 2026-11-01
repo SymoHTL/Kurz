@@ -1,0 +1,27 @@
+// expect: output
+// | exit status 3: sh
+// | 3
+// | null
+// | false
+// | out
+// | err
+// rules: S18
+
+void | InvalidUtf8 Show(ExitError e) {
+    print(e)
+    print(e.Output.Status.Code)
+    print(e.Output.Status.Signal)
+    print(e.Output.Status.Success)
+    print(string.FromUtf8(e.Output.Stdout))
+    print(string.FromUtf8(e.Output.Stderr))
+}
+
+match Command.New("sh").Args(["-c", "printf out; printf err >&2; exit 3"]).Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => print(e)
+    ExitError e => {
+        Show(e) else {
+            InvalidUtf8 u => print(u)
+        }
+    }
+}

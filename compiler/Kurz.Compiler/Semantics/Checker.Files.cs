@@ -93,6 +93,13 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckEnvironmentFunction(MemberAccess m, CallExpression c)
     {
+        if (m.Member == "Exit")
+        {
+            NotSupported(m.Line, "`Environment.Exit`, the exit code (S23)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
         (CallKind Kind, List<Slot> Slots, KurzType Result)? function = m.Member switch
         {
             "Args" => (CallKind.EnvironmentArgs, [], new ListType(Types.String)),

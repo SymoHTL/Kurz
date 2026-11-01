@@ -1,0 +1,24 @@
+// expect: output
+// | [a]
+// | [b]
+// | [x]
+// | []
+// rules: S17
+
+void | IoError | ExitError | InvalidUtf8 Show() {
+    base = Command.New("printf").Arg("[%s]")
+    a = base.Arg("a")
+    b = base.Arg("b")
+    mut c = base
+    c = c.Arg("x")
+    print(string.FromUtf8(a.Output().Stdout))
+    print(string.FromUtf8(b.Output().Stdout))
+    print(string.FromUtf8(c.Output().Stdout))
+    print(string.FromUtf8(base.Output().Stdout))
+}
+
+Show() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}

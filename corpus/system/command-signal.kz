@@ -1,0 +1,17 @@
+// expect: output
+// | signal 15: sh
+// | 143
+// | 15
+// | false
+// rules: S18
+
+match Command.New("sh").Args(["-c", "kill -TERM $$"]).Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => print(e)
+    ExitError e => {
+        print(e)
+        print(e.Output.Status.Code)
+        print(e.Output.Status.Signal)
+        print(e.Output.Status.Success)
+    }
+}

@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 6
+// rules: F17
+
+print("a")
+if args.Count == 0 {
+    return "stop"
+}

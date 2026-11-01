@@ -1,0 +1,21 @@
+// expect: output
+// | signal 9: sleep
+// | 137
+// | 9
+// rules: S19
+
+void | IoError | ExitError Run() {
+    child = Command.New("sleep").Arg("10").Spawn()
+    child.Kill()
+    child.Wait()
+    print("not reached")
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => {
+        print(e)
+        print(e.Output.Status.Code)
+        print(e.Output.Status.Signal)
+    }
+}

@@ -352,6 +352,27 @@ public sealed partial class Checker
         return true;
     }
 
+    /// <summary>S17 to S22, A17: the names of processes, of standard input and of standard error, which every file sees (section 12, the
+    /// owner, 2026-11-01), so that a file's own declaration of one is <c>redeclared</c> (V9).</summary>
+    private static bool IsProcessName(string name) =>
+        name is "Command" or "ChildProcess" or "ProcessOutput" or "ExitStatus" or "Stdio" or "ExitError" or "Stdin" or "eprint";
+
+    /// <summary>S17 to S22, A17: a name of <see cref="IsProcessName"/>, which the checker does not read: a use of one is <c>not supported</c>.</summary>
+    private bool UnreadProcessName(string name, int line)
+    {
+        if (!IsProcessName(name))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"processes, standard input and standard error, `{name}` (S17 to S22, A17)");
+        return true;
+    }
+
+    /// <summary>S23: a call of <c>Environment.Exit</c>, after which no path goes on (section 12).</summary>
+    private bool IsExit(Expression e) =>
+        e is CallExpression { Callee: MemberAccess { Target: NameExpression { Name: "Environment" }, Member: "Exit" } } && Lookup("Environment").Variable is null;
+
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
     private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
 
@@ -947,7 +968,7 @@ public sealed partial class Checker
             return Types.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line))
+        if (UnreadIntrinsic(n.Name, n.Line) || UnreadProcessName(n.Name, n.Line))
         {
             return Types.Error;
         }
@@ -987,7 +1008,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1326,7 +1347,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name);
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
@@ -1495,7 +1516,7 @@ public sealed partial class Checker
                 return Flow.Completes;
             case ExpressionStatement e:
                 CheckExpressionStatement(e);
-                return Flow.Completes;
+                return IsExit(e.Expression) ? Flow.Ends : Flow.Completes; // S23: no path goes on after `Environment.Exit`, as after a `throw`
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
@@ -2103,6 +2124,13 @@ public sealed partial class Checker
 
     private void CheckReturn(ReturnStatement r)
     {
+        if (frame.IsTopLevel && r.Value is not null)
+        {
+            NotSupported(r.Line, "a `return` with a value among the top-level statements, the program's exit code (F17)");
+            CheckExpression(r.Value, null);
+            return;
+        }
+
         var expected = frame.ReturnType;
         if (expected is null)
         {
