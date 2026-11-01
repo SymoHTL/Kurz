@@ -224,7 +224,9 @@ Each line names a trap; its evidence is in the entry it links.
 - A branch behind `main` fails what `main` already fixed: update the branch before debugging. At
   the review cap the update is a new head outside the cap's approval: ask the owner first, unless
   the cache answers the new head whole (the rule "A pull request gets at most one review round"
-  says when). `judgment step`
+  says when). The dry run of the merge tool at the head the round reviewed says, in its refusal of
+  the branch behind `main`, whether the round converged on every file (that rule). Gate:
+  `self-tests` for what the refusal says (`merge_pr.taking_main`); the rest is a `judgment step`.
 
 ## Architecture
 
@@ -436,11 +438,19 @@ Gate: review rule "rules for sessions".
   round reviewed. A run with one file the cache does not answer still ends as `cap` before any pass,
   and its head needs the owner's approval as any other
   ([knowledge/a-review-the-cache-answers-is-no-round.md](knowledge/a-review-the-cache-answers-is-no-round.md)).
-  Gate: `self-tests` (the count, the label before
+  A pull request at its cap whose round did not converge on a file cannot take `main` for free:
+  taking `main` moves it outside the cap's approval, since the cache stores no file of a batch that
+  did not converge (pull request 181,
+  [knowledge/a-round-that-did-not-converge-makes-main-a-round.md](knowledge/a-round-that-did-not-converge-makes-main-a-round.md)).
+  The merge tool's refusal of a branch behind `main` at the cap says whether the round converged on
+  every file of the head, from the head's `review` status. Where it did not, or where the status does
+  not show it, the refusal says that taking `main` costs a paid round and that the merge needs the
+  owner's choice. Gate: `self-tests` (the count, the label before
   the first pass, the end at the cap and its status, the run at the cap that only replays; the move to the collection ticket in
   `pr-findings`, in the resolve command, in the cap command and in the merge tool, whose wiring of it is
-  `merge_pr.held_by`; a section posted with no reading, which the cap command refuses); what the reading says,
-  starting no run at the cap and the check that a head replays are a `judgment step`; a
+  `merge_pr.held_by`; a section posted with no reading, which the cap command refuses; the merge tool's refusal of a
+  branch behind `main` at the cap, `merge_pr.taking_main`); what the reading says,
+  starting no run at the cap and the rest of the check that a head replays (what `main` changed) are a `judgment step`; a
   label taken off or put on by hand, a second open issue that carries the label, two runs of one
   pull request that start at the same moment, and a dry run, which puts on no label: HAZARD (#41).
   The gates job lists the ticket with `issues: read`, which `ci-config` pins.
