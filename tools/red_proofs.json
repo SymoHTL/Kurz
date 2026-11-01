@@ -1190,11 +1190,7 @@
   {"tool": "tools/unicode_tables.py", "anchor": "        if len(f) > 4 and f[4]:", "replacement": "        if False:", "expect": "a mapping under Final_Sigma is left out"},
   {"tool": "tools/unicode_tables.py", "anchor": "        if lo != (cp,):", "replacement": "        if True:", "expect": "an identity with no simple mapping is no mapping"},
   {"tool": "tools/unicode_tables.py", "anchor": "    return ({k: v for k, v in lower.items() if k > 0x7F}", "replacement": "    return ({k: v for k, v in lower.items()}", "expect": "ASCII is left out"},
-  {"tool": "tools/unicode_tables.py", "anchor": "            if last and last[3] == run[3] and run[0] == run[1]", "replacement": "            if False and last and last[3] == run[3] and run[0] == run[1]", "expect": "make a run of step 2"},
-  {"tool": "tools/unicode_tables.py", "anchor": " and (last[0] == last[1] or last[2] == 2):", "replacement": ":", "expect": "does not take a code point two after it"},
   {"tool": "tools/unicode_tables.py", "anchor": "            if any(c >> 16 != plane for c in out):", "replacement": "            if False:", "expect": "a mapping that leaves its plane is refused"},
-  {"tool": "tools/unicode_tables.py", "anchor": "            if end - first > 255:", "replacement": "            if False:", "expect": "more than 256 code points is refused"},
-  {"tool": "tools/unicode_tables.py", "anchor": "            if end - first > 255:", "replacement": "            if end - first > 254:", "expect": "a run that spans 256 code points is one run"},
   {"tool": "tools/unicode_tables.py", "anchor": "        if len(out[name]) // WIDTH[name] < floor:", "replacement": "        if False:", "expect": "a table below its floor is refused"},
   {"tool": "tools/unicode_tables.py", "anchor": "    if got != digest:", "replacement": "    if False:", "expect": "a file of another hash is refused"},
   {"tool": "tools/unicode_tables.py", "anchor": "        if hashlib.sha256(data).hexdigest() == digest:", "replacement": "        if True:", "expect": "a kept file of another hash is fetched again"},
@@ -1205,5 +1201,12 @@
   {"tool": "tools/unicode_tables.py", "anchor": "        if keys and plane > 1:", "replacement": "        if False:", "expect": "a mapping to one code point past the first two planes"},
   {"tool": "tools/unicode_tables.py", "anchor": "        if keys and plane > 1:", "replacement": "        if keys and plane > 1 and any(len(mapping[k]) == 1 for k in keys):", "expect": "a mapping to several code points past the first two planes"},
   {"tool": "tools/unicode_tables.py", "anchor": "    except (OSError, http.client.HTTPException) as e:", "replacement": "    except OSError as e:", "expect": "a download cut off is unread"},
-  {"tool": "tools/unicode_tables.py", "anchor": "    except OSError:  # no kept file", "replacement": "    except FileNotFoundError:  # no kept file", "expect": "a kept file that cannot be read is fetched again"}
+  {"tool": "tools/unicode_tables.py", "anchor": "    except OSError:  # no kept file", "replacement": "    except FileNotFoundError:  # no kept file", "expect": "a kept file that cannot be read is fetched again"},
+  {"tool": "tools/unicode_tables.py", "anchor": "delta = (out[0] - cp) % 65536", "replacement": "delta = (out[0] - cp + 1) % 65536", "expect": "a code point's delta is the difference"},
+  {"tool": "tools/unicode_tables.py", "anchor": "        if number == len(deltas) // BLOCK:", "replacement": "        if True:", "expect": "blocks alike share one number"},
+  {"tool": "tools/unicode_tables.py", "anchor": "                block.append(MARK)", "replacement": "                block.append(0)", "expect": "is marked and held among the multis"},
+  {"tool": "tools/unicode_tables.py", "anchor": "                if delta == MARK:", "replacement": "                if False:", "expect": "a delta of 32768"},
+  {"tool": "tools/unicode_tables.py", "anchor": "    if len(numbers) > 256:", "replacement": "    if len(numbers) > 257:", "expect": "more than 256 distinct blocks"},
+  {"tool": "tools/unicode_tables.py", "anchor": "    if len(numbers) > 256:", "replacement": "    if len(numbers) > 255:", "expect": "256 distinct blocks are numbered"},
+  {"tool": "tools/unicode_tables.py", "anchor": "    if read != mapping:", "replacement": "    if False:", "expect": "levels that do not give the mapping"}
 ]

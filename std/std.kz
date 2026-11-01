@@ -1516,34 +1516,63 @@ pub byte* AsciiCase(byte* bytes, long n, bool upper, mut long asked) {
 // in `made`. `table` is the emitter's table of the direction (`CaseMapped`). The bytes before the first code
 // point that changes are copied as they are into a block of the input's size, as Rust's `convert_while_ascii`
 // takes `Vec::with_capacity(slice.len())` for `to_lowercase` and `to_uppercase`, and the code points after them
-// are looked up and written one at a time, as Rust's walk of the rest pushes them, up to one whose mapping makes
-// more bytes than the block has room for: from that one on, `CaseWalk` sizes the rest, the block is grown once
-// by `Reallocate`, and `CaseWalk` writes the rest, each walk looking those code points up again. Null where no
-// code point changes, for the string as it is, and null with `asked` set where the system refuses.
-pub byte* UnicodeCase(byte* bytes, long n, bool upper, int* table, mut long made, mut long asked) {
+// are looked up and written one at a time, as Rust's walk of the rest pushes them: a byte of ASCII as one byte,
+// as `String::push` writes a code point of one byte, and any other code point's mapping, up to three code points
+// in one number as Rust's `[char; 3]` holds them (`CaseMapped`), the room left read first only where it is below
+// 12 bytes, three code points of four. The run of ASCII after the copied bytes goes 16 bytes at a time, as
+// `convert_while_ascii` converts the leading run, and a code point of two bytes takes a path that Rust's walk
+// does not have, named where it stands. From a code point whose mapping makes more bytes than the block has room
+// for, `CaseWalk` sizes the rest, the block is grown once by `Reallocate`, and `CaseWalk` writes the rest, each
+// walk looking those code points up again. Null where no code point changes, for the string as it is, and null
+// with `asked` set where the system refuses.
+pub byte* UnicodeCase(byte* bytes, long n, bool upper, byte* table, mut long made, mut long asked) {
+    // the direction read once, before the walks: the first ASCII letter it changes, as `AsciiCase` reads it, and
+    // the code point whose mapping reads the letters around it, the capital sigma where lowering and none where
+    // raising. Rust's `to_lowercase` and `to_uppercase` are two functions, so neither reads a direction; here, in
+    // a program that lowers and raises, this function stays one call with `upper` a value, and walks that test it
+    // measured slower (issue 157, item 6: in such a program the lowering of a Cyrillic text took 122 ms with
+    // `upper` tested in the walks and 95 ms with the direction read here)
+    mut int low = 65
+    mut int sigma = 931
+    if upper {
+        low = 97
+        sigma = -1
+    }
+
     mut long at = 0
     mut long width = 0
-    mut int c = 0
-    mut int first = 0
-    mut int second = 0
-    mut int third = 0
-    while at < n {
-        c = CaseCodeAt(bytes, at, mut width)
-        second = 0
-        third = 0
-        if c < 128 {
-            first = CaseAscii(c, upper)
-        } else if c < 256 {
-            first = CaseLatin(c, upper, mut second)
-        } else {
-            first = CaseOf(bytes, n, at, c, upper, table, mut second, mut third)
-        }
+    raw {
+        while at < n {
+            int b = int(bytes[at])
+            if b < 128 {
+                if b >= low && b < low + 26 {
+                    break
+                }
 
-        if first != c || second != 0 {
-            break
-        }
+                at = at + 1
+            } else {
+                int c = CaseCodeAt(bytes, at, mut width)
+                mut long mapped = 0
+                if c < 256 {
+                    mapped = CaseLatin(c, upper)
+                } else {
+                    // the delta read here and `CaseOf` called for a mapping to several code points and the capital
+                    // sigma alone, so that the cheap case is no call (knowledge/a-helper-of-several-callers-stays-a-call.md)
+                    int delta = CaseDelta(c, table)
+                    if delta != 32768 && c != sigma {
+                        mapped = long((c & -65536) | ((c + delta) & 65535))
+                    } else {
+                        mapped = CaseOf(bytes, n, at, c, upper, table)
+                    }
+                }
 
-        at = at + width
+                if mapped != long(c) {
+                    break
+                }
+
+                at = at + width
+            }
+        }
     }
 
     if at == n {
@@ -1559,58 +1588,127 @@ pub byte* UnicodeCase(byte* bytes, long n, bool upper, int* table, mut long made
 
     Copy(text, bytes, at)
     mut long length = at
-    while at < n {
-        mut long size = CaseWrite(first, null, 0)
-        if second != 0 {
-            size = size + CaseWrite(second, null, 0)
-        }
-
-        if third != 0 {
-            size = size + CaseWrite(third, null, 0)
-        }
-
-        if length + size > room {
-            // the rest sized and written by `CaseWalk`, the block grown once to hold it
-            long rest = CaseWalk(bytes, n, at, upper, table, null)
-            byte* grown = CaseGrow(text, room, length + rest)
-            if grown == null {
-                StringFree(text)
-                asked = 16 + length + rest
-                return null
+    mut bool full = false
+    raw {
+        // the leading run of ASCII 16 bytes at a time, as Rust's `convert_while_ascii` converts it: the room left
+        // is the input's left, since no code point before this one changed its size. `CaseAscii` takes `upper`
+        // here, not `low`: so the 16 bytes are changed as one vector, and with `low` they were not (the ASCII text
+        // took 5.7 ms with `upper` and 25.7 ms with `low`)
+        while at + 16 <= n {
+            mut int high = 0
+            mut long j = 0
+            while j < 16 {
+                high = high | int(bytes[at + j])
+                j = j + 1
             }
 
-            text = grown
-            room = length + rest
-            raw {
-                CaseWalk(bytes, n, at, upper, table, text + length)
+            if high >= 128 {
+                break
             }
 
-            length = room
-            break
+            j = 0
+            while j < 16 {
+                text[length + j] = byte(CaseAscii(int(bytes[at + j]), upper))
+                j = j + 1
+            }
+
+            at = at + 16
+            length = length + 16
         }
 
-        length = length + CaseWrite(first, text, length)
-        if second != 0 {
-            length = length + CaseWrite(second, text, length)
-        }
+        while at < n {
+            int b = int(bytes[at])
+            if b < 128 {
+                if length == room {
+                    full = true
+                    break
+                }
 
-        if third != 0 {
-            length = length + CaseWrite(third, text, length)
-        }
+                mut int x = b
+                if b >= low && b < low + 26 {
+                    x = b ^ 32
+                }
 
-        at = at + width
-        if at < n {
-            c = CaseCodeAt(bytes, at, mut width)
-            second = 0
-            third = 0
-            if c < 128 {
-                first = CaseAscii(c, upper)
-            } else if c < 256 {
-                first = CaseLatin(c, upper, mut second)
+                text[length] = byte(x)
+                length = length + 1
+                at = at + 1
+            } else if b < 224 && room - length >= 12 {
+                // a code point of two bytes, U+0080 to U+07FF, read, looked up and written here, and its mapping
+                // written in two bytes where it is one code point of two bytes. Rust's walk takes every code point
+                // alike, decoded by its width and pushed by `String::push`, which reads the width again; this path
+                // measured faster (issue 157, item 6: the lowering of a Cyrillic text took 95 ms in that walk and
+                // 71 ms with this path). Taken while 12 bytes of room are left, room for any mapping.
+                int c = ((b & 31) << 6) | (int(bytes[at + 1]) & 63)
+                mut long mapped = 0
+                if c < 256 {
+                    mapped = CaseLatin(c, upper)
+                } else {
+                    int delta = CaseDelta(c, table)
+                    if delta != 32768 && c != sigma {
+                        mapped = long((c + delta) & 65535)
+                    } else {
+                        mapped = CaseOf(bytes, n, at, c, upper, table)
+                    }
+                }
+
+                if mapped >= 128 && mapped < 2048 {
+                    text[length] = byte(192 | int(mapped >> 6))
+                    text[length + 1] = byte(128 | int(mapped & 63))
+                    length = length + 2
+                } else {
+                    length = length + CasePut(mapped, text, length)
+                }
+
+                at = at + 2
             } else {
-                first = CaseOf(bytes, n, at, c, upper, table, mut second, mut third)
+                int c = CaseCodeAt(bytes, at, mut width)
+                mut long mapped = 0
+                if c < 256 {
+                    mapped = CaseLatin(c, upper)
+                } else {
+                    // the delta read here and `CaseOf` called for a mapping to several code points and the capital
+                    // sigma alone, so that the cheap case is no call (knowledge/a-helper-of-several-callers-stays-a-call.md)
+                    int delta = CaseDelta(c, table)
+                    if delta != 32768 && c != sigma {
+                        mapped = long((c & -65536) | ((c + delta) & 65535))
+                    } else {
+                        mapped = CaseOf(bytes, n, at, c, upper, table)
+                    }
+                }
+
+                if room - length < 12 && length + CasePut(mapped, null, 0) > room {
+                    full = true
+                    break
+                }
+
+                if mapped < 2097152 {
+                    length = length + CaseWrite(int(mapped), text, length)
+                } else {
+                    length = length + CasePut(mapped, text, length)
+                }
+
+                at = at + width
             }
         }
+    }
+
+    if full {
+        // the rest sized and written by `CaseWalk`, the block grown once to hold it
+        long rest = CaseWalk(bytes, n, at, upper, table, null)
+        byte* grown = CaseGrow(text, room, length + rest)
+        if grown == null {
+            StringFree(text)
+            asked = 16 + length + rest
+            return null
+        }
+
+        text = grown
+        room = length + rest
+        raw {
+            CaseWalk(bytes, n, at, upper, table, text + length)
+        }
+
+        length = room
     }
 
     StringTakeOver(text, length)
@@ -1633,14 +1731,13 @@ byte* CaseGrow(byte* text, long room, long grown) {
     return moved
 }
 
-// The first code point Unicode's full mapping of one direction gives the code point `c` above Latin-1, which
-// starts at `at` among the `n` bytes at `bytes`, with the second and the third in `second` and `third`
-// (`CaseMapped`). A
-// capital sigma lowers to the final form where it ends a word (`CaseFinalSigma`), the one mapping of Unicode's
-// that reads the characters around it and no language.
-int CaseOf(byte* bytes, long n, long at, int c, bool upper, int* table, mut int second, mut int third) {
+// The mapping of one direction of the code point `c` above Latin-1, which starts at `at` among the `n` bytes at
+// `bytes`, up to three code points in one number (`CaseMapped`). A capital sigma lowers to the final form where
+// it ends a word (`CaseFinalSigma`), the one mapping of Unicode's that reads the characters around it and no
+// language.
+long CaseOf(byte* bytes, long n, long at, int c, bool upper, byte* table) {
     if upper || c != 931 {
-        return CaseMapped(c, upper, table, mut second, mut third)
+        return CaseMapped(c, upper, table)
     }
 
     if CaseFinalSigma(bytes, n, at, table) {
@@ -1652,32 +1749,22 @@ int CaseOf(byte* bytes, long n, long at, int c, bool upper, int* table, mut int 
 
 // The number of bytes `UnicodeCase` makes of the `n` bytes at `bytes` from `from` on, written to `out` where it
 // is not null.
-long CaseWalk(byte* bytes, long n, long from, bool upper, int* table, byte* out) {
+long CaseWalk(byte* bytes, long n, long from, bool upper, byte* table, byte* out) {
     mut long at = from
     mut long length = 0
     while at < n {
         mut long width = 0
         int c = CaseCodeAt(bytes, at, mut width)
-        mut int second = 0
-        mut int third = 0
-        mut int first = 0
+        mut long mapped = 0
         if c < 128 {
-            first = CaseAscii(c, upper)
+            mapped = long(CaseAscii(c, upper))
         } else if c < 256 {
-            first = CaseLatin(c, upper, mut second)
+            mapped = CaseLatin(c, upper)
         } else {
-            first = CaseOf(bytes, n, at, c, upper, table, mut second, mut third)
+            mapped = CaseOf(bytes, n, at, c, upper, table)
         }
 
-        length = length + CaseWrite(first, out, length)
-        if second != 0 {
-            length = length + CaseWrite(second, out, length)
-        }
-
-        if third != 0 {
-            length = length + CaseWrite(third, out, length)
-        }
-
+        length = length + CasePut(mapped, out, length)
         at = at + width
     }
 
@@ -1742,6 +1829,21 @@ long CaseWrite(int c, byte* out, long at) {
     return width
 }
 
+// The number of bytes of the up to three code points of `mapped` (`CaseMapped`) in UTF-8, written to `out` from
+// `at` where `out` is not null.
+long CasePut(long mapped, byte* out, long at) {
+    mut long length = CaseWrite(int(mapped & 2097151), out, at)
+    long rest = mapped >> 21
+    if rest != 0 {
+        length = length + CaseWrite(int(rest & 2097151), out, at + length)
+        if rest >> 21 != 0 {
+            length = length + CaseWrite(int(rest >> 21), out, at + length)
+        }
+    }
+
+    return length
+}
+
 // The ASCII code point `c` in one direction, its letters changed: what `CaseMapped` gives it, and what the walks
 // take before they call `CaseOf`, which stays a call (knowledge/a-helper-of-several-callers-stays-a-call.md).
 int CaseAscii(int c, bool upper) {
@@ -1756,22 +1858,22 @@ int CaseAscii(int c, bool upper) {
     return c
 }
 
-// The first code point Unicode's full mapping of one direction gives the code point `c` of Latin-1 above ASCII,
-// from 128 to 255, and the second in `second`, as Rust's `conversions::to_lower` and `to_upper` give them without
-// their table: lowered, U+00C0 to U+00DE but U+00D7 32 up; raised, U+00B5 into U+039C, U+00DF into two `S`,
-// U+00E0 to U+00FE but U+00F7 32 down and U+00FF into U+0178; every other code point itself. What `CaseMapped`
-// gives it, and what the walks take before they call `CaseOf`.
-int CaseLatin(int c, bool upper, mut int second) {
+// The mapping of one direction of the code point `c` of Latin-1 above ASCII, from 128 to 255, in one number
+// (`CaseMapped`), as Rust's `conversions::to_lower` and `to_upper` give it without their table: lowered, U+00C0
+// to U+00DE but U+00D7 32 up; raised, U+00B5 into U+039C, U+00DF into two `S`, U+00E0 to U+00FE but U+00F7 32
+// down and U+00FF into U+0178; every other code point itself. What `CaseMapped` gives it, and what the walks
+// take before they call `CaseOf`.
+long CaseLatin(int c, bool upper) {
     if !upper {
         if c >= 192 && c <= 222 && c != 215 {
-            return c + 32
+            return long(c + 32)
         }
 
-        return c
+        return long(c)
     }
 
     if c >= 224 && c <= 254 && c != 247 {
-        return c - 32
+        return long(c - 32)
     }
 
     if c == 181 {
@@ -1779,74 +1881,60 @@ int CaseLatin(int c, bool upper, mut int second) {
     }
 
     if c == 223 {
-        second = 83
-        return 83
+        return long(83) | (long(83) << 21)
     }
 
     if c == 255 {
         return 376
     }
 
-    return c
+    return long(c)
 }
 
-// The first code point Unicode's full mapping of one direction gives `c`, and the second and the third in
-// `second` and `third`, 0 where there are none, as Rust's `conversions::to_lower` and `to_upper` look them up:
-// ASCII by its letters; above it, the run of `table` that holds `c`, found by a binary search, where `c` is a
-// code point of the run's step, else the mapping to several code points, found by a second search, else `c`
-// itself. `table` holds four counts, of the runs, of those mappings and of the ranges of Cased and
-// Case_Ignorable, then the runs, four numbers each (the first and the last code point, the step, 1 or 2, and
-// the delta), the mappings, four each (the code point and the code points it gives, 0 after the last), and the
-// ranges, two each (`CaseIn`).
-int CaseMapped(int c, bool upper, int* table, mut int second, mut int third) {
+// The mapping of one direction of `c`, up to three code points in one number, the first in its lowest 21 bits,
+// the second in the next 21 and the third above them, 0 for one that is not there, as Rust's
+// `conversions::to_lower` and `to_upper` give a `[char; 3]`: ASCII by its letters, the rest of Latin-1 by
+// `CaseLatin`, and above it by the levels of `table`, the form of .NET's `CharUnicodeInfo.ToLower`, which reads a
+// code point's delta in one index and one block. Rust looks such a code point up by two binary searches, over
+// its plane's runs and then over its mappings to several code points, both of which a code point that does not
+// change fails; the levels measured faster with the same results (issue 157, item 6: the lowering of a Cyrillic
+// text took 353 ms in Rust's walk with Rust's searches and 122 ms with the levels), and the owner's answer of
+// 2026-11-01, "Allow, faster wins", takes such a form. The database maps no code point past the first two planes,
+// and a code point maps within its plane (`tools/unicode_tables.py` refuses both), so its delta is added to its
+// lowest 16 bits. A delta of 32768 marks a mapping to several code points, found by a binary search of those
+// mappings. `table` holds four counts of 32 bits, of the blocks of deltas, of the mappings to several code points
+// and of the ranges of Cased and Case_Ignorable; then the index, a byte for each block of 32 code points, the
+// number of its 32 deltas; then the deltas, 16 bits each; then the mappings, four numbers of 32 bits each (the
+// code point and the code points it gives, 0 after the last), and the ranges, two each (`CaseIn`).
+long CaseMapped(int c, bool upper, byte* table) {
     if c < 128 {
-        return CaseAscii(c, upper)
+        return long(CaseAscii(c, upper))
     }
 
     if c < 256 {
-        return CaseLatin(c, upper, mut second)
+        return CaseLatin(c, upper)
     }
 
-    mut int result = c
+    int delta = CaseDelta(c, table)
+    if delta != 32768 {
+        return long((c & -65536) | ((c + delta) & 65535))
+    }
+
+    mut long result = long(c)
     raw {
-        long runs = long(table[0])
+        int* multis = Ptr<int>(table + 4112 + 64 * long(*Ptr<int>(table)))
         mut long low = 0
-        mut long high = runs
-        mut bool found = false
+        mut long high = long(*Ptr<int>(table + 4))
         while low < high {
             long middle = (low + high) / 2
-            long run = 4 + 4 * middle
-            if c < table[run] {
+            long entry = 4 * middle
+            if c < multis[entry] {
                 high = middle
-            } else if c > table[run + 1] {
+            } else if c > multis[entry] {
                 low = middle + 1
             } else {
-                if table[run + 2] == 1 || (c - table[run]) % 2 == 0 {
-                    result = c + table[run + 3]
-                    found = true
-                }
-
+                result = long(multis[entry + 1]) | (long(multis[entry + 2]) << 21) | (long(multis[entry + 3]) << 42)
                 break
-            }
-        }
-
-        if !found {
-            long multis = 4 + 4 * runs
-            low = 0
-            high = long(table[1])
-            while low < high {
-                long middle = (low + high) / 2
-                long entry = multis + 4 * middle
-                if c < table[entry] {
-                    high = middle
-                } else if c > table[entry] {
-                    low = middle + 1
-                } else {
-                    result = table[entry + 1]
-                    second = table[entry + 2]
-                    third = table[entry + 3]
-                    break
-                }
             }
         }
     }
@@ -1854,25 +1942,42 @@ int CaseMapped(int c, bool upper, int* table, mut int second, mut int third) {
     return result
 }
 
+// The delta of the code point `c` above Latin-1 in the levels of `table` (`CaseMapped`), 0 past the first two
+// planes, which the database does not map.
+int CaseDelta(int c, byte* table) {
+    if c >= 131072 {
+        return 0
+    }
+
+    mut int delta = 0
+    raw {
+        long block = long(table[16 + long(c >> 5)])
+        delta = int(*Ptr<ushort>(table + 4112 + 64 * block + 2 * long(c & 31)))
+    }
+
+    return delta
+}
+
 // Whether `c` is in a property of `table` (`CaseMapped`): the ranges of Cased where `ignorable` is false, of
 // Case_Ignorable where it is set, found by a binary search.
-bool CaseIn(int c, int* table, bool ignorable) {
+bool CaseIn(int c, byte* table, bool ignorable) {
     mut bool found = false
     raw {
-        mut long start = 4 + 4 * long(table[0]) + 4 * long(table[1])
-        mut long high = long(table[2])
+        int* ranges = Ptr<int>(table + 4112 + 64 * long(*Ptr<int>(table)) + 16 * long(*Ptr<int>(table + 4)))
+        mut long start = 0
+        mut long high = long(*Ptr<int>(table + 8))
         if ignorable {
-            start = start + 2 * high
-            high = long(table[3])
+            start = 2 * high
+            high = long(*Ptr<int>(table + 12))
         }
 
         mut long low = 0
         while low < high {
             long middle = (low + high) / 2
             long range = start + 2 * middle
-            if c < table[range] {
+            if c < ranges[range] {
                 high = middle
-            } else if c > table[range + 1] {
+            } else if c > ranges[range + 1] {
                 low = middle + 1
             } else {
                 found = true
@@ -1887,7 +1992,7 @@ bool CaseIn(int c, int* table, bool ignorable) {
 // Whether the capital sigma whose two bytes start at `at` among the `n` bytes at `bytes` ends a word, as
 // Rust's `map_uppercase_sigma` reads Unicode's Final_Sigma: past the case-ignorable characters, a cased one
 // before it and none after it.
-bool CaseFinalSigma(byte* bytes, long n, long at, int* table) {
+bool CaseFinalSigma(byte* bytes, long n, long at, byte* table) {
     mut long end = at
     mut bool before = false
     while end > 0 {
