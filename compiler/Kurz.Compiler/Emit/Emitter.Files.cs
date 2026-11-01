@@ -528,16 +528,14 @@ public sealed partial class Emitter
             if (values[i] == "Other")
             {
                 // the system's number after the words, as Rust's text writes it (the owner, 2026-10-29, "Number for Other")
-                var code = fn.Value($"sext i32 {fn.Value($"extractvalue {Ir(error)} %a0, 1")} to i64");
-                var number = fn.Value($"call %kz.str {RuntimeFunction("TextOfLong")}(i64 {code})");
-                var numbered = fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue("other (os error ")}, %kz.str {number})");
-                Release(number, Types.String);
-                var words = Joined(numbered, StringValue(")"));
+                var code = NumberPiece(fn.Value($"sext i32 {fn.Value($"extractvalue {Ir(error)} %a0, 1")} to i64"), true);
                 fn.CondBranch(empty, alone, joined);
                 fn.Block(alone);
+                var words = Joined([LiteralPiece("other (os error "), code, LiteralPiece(")")]);
                 fn.Return($"%kz.str {words}");
                 fn.Block(joined);
-                fn.Return($"%kz.str {Joined(Joined(words, StringValue(": ")), path)}");
+                var named = Joined([LiteralPiece("other (os error "), code, LiteralPiece("): "), TextPiece(path)]);
+                fn.Return($"%kz.str {named}");
                 continue;
             }
 
@@ -545,7 +543,8 @@ public sealed partial class Emitter
             fn.Block(alone);
             fn.Return($"%kz.str {StringValue(Words(values[i]))}");
             fn.Block(joined);
-            fn.Return($"%kz.str {fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue(Words(values[i]) + ": ")}, %kz.str {path})")}");
+            var text = Joined([LiteralPiece(Words(values[i]) + ": "), TextPiece(path)]);
+            fn.Return($"%kz.str {text}");
         }
 
         fn.Block(other);
@@ -698,7 +697,8 @@ public sealed partial class Emitter
         for (var i = 0; i < values.Count; i++)
         {
             fn.Block(labels[i]);
-            fn.Return($"%kz.str {fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {StringValue(Words(values[i]) + ": ")}, %kz.str {name})")}");
+            var text = Joined([LiteralPiece(Words(values[i]) + ": "), TextPiece(name)]);
+            fn.Return($"%kz.str {text}");
         }
 
         fn.Block(other);

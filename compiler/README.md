@@ -911,8 +911,13 @@ interpolation of one hole of a string takes a count of the string, a new value a
 makes one (the owner, 2026-10-29, "New value, as format!"), an interpolation of more pieces, or of one integer, writes
 them into one block of their bytes together, as Rust's `format!` writes into one `String`, an
 integer's digits in place, counted first, with no text of their own, and pieces of no bytes
-together are the empty string with no block, and the helper that makes the text of a
-list or of a `data` value lets go of each text it joined. The environment of a lambda that reads variables starts with the
+together are the empty string with no block; the text of a `data` value, of a map's entry and of
+an `IoError`, an `EnvError` and a `HexError` is written into one block the same way, as Rust's
+`Debug` writes a value's parts into one `String`, and the helper that makes the text of a
+list or of a `data` value lets go of each text it joined after its block is written. The runtime
+writes an integer's digits four and two at a time from a table of the pairs 00 to 99, as Rust's
+`Display` of an integer does, counts them as Rust's `ilog10` does, and the text of a negative
+integer is one block, its `-` and then its digits. The environment of a lambda that reads variables starts with the
 count of the function values that hold it, 8 bytes, and the address of the function that lets go
 of it, then holds each value the lambda read, counted once more where its type is counted; it is
 counted as a list's block is, and at zero the values it holds are let go of and it goes back to
