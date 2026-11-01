@@ -34,6 +34,21 @@ instance stays the same either, because another reference to it can exist.
 
 Case: [classes/mut-field.kz](../corpus/classes/mut-field.kz)
 
+Case: [functions/capture-changes-instance.kz](../corpus/functions/capture-changes-instance.kz)
+```kurz
+class Counter(mut int Count) {
+    pub void Add(int n) {
+        Count = Count + n
+    }
+}
+
+c = Counter(0)
+bump = () => c.Add(1)
+bump()
+bump()
+print(c.Count)
+```
+
 ### K3 (decided, §4) References with identity
 
 Assigning a class instance does not copy it. Both variables refer to the same instance.
