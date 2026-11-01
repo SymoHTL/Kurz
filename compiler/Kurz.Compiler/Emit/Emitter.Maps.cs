@@ -715,20 +715,7 @@ public sealed partial class Emitter
             fn.Emit($"store i64 0, ptr {at}");
             EachEntry("%a0", type, (k, v) =>
             {
-                var keyText = TextOf(k, type.Key, line);
-                var text = fn.Value($"call %kz.str {RuntimeFunction("Concat")}(%kz.str {keyText}, %kz.str {StringValue(": ")})");
-                if (MakesText(type.Key))
-                {
-                    Release(keyText, Types.String);
-                }
-
-                var valueText = TextOf(v, type.Value, line);
-                text = Joined(text, valueText);
-                if (MakesText(type.Value))
-                {
-                    Release(valueText, Types.String);
-                }
-
+                var text = Joined([PieceOf(k, type.Key, line), LiteralPiece(": "), PieceOf(v, type.Value, line)]);
                 var i = fn.Value($"load i64, ptr {at}");
                 fn.Emit($"store %kz.str {text}, ptr {fn.Value($"getelementptr %kz.str, ptr {buffer}, i64 {i}")}");
                 fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {at}");
