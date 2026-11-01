@@ -1,0 +1,20 @@
+// expect: output
+// | Ann
+// | gone
+// rules: R3
+
+class Owner(string Name)
+
+weak Owner? Remember(weak Owner? r) {
+    return r
+}
+
+string NameOf(weak Owner? r) {
+    return r?.Name ?? "gone"
+}
+
+o = Owner("Ann")
+weak Owner? a = Remember(o)
+print(NameOf(a))
+weak Owner? b = Remember(Owner("Bob"))
+print(NameOf(b))

@@ -5,8 +5,24 @@
 There are no lifetimes, no borrow annotations and no garbage collector. The compiler inserts
 reference counts and removes most of them at compile time.
 
-No case: what a program prints of it, when a `weak` reference finds its instance freed, the
-cases of R3 show.
+An instance whose last count ends lets go of the instances its fields hold through a work list,
+not by a call for each, so a chain of any length is freed without exhausting the stack: a million
+links are freed as two are (§3, the owner, 2026-11-01, "Iterative, never crashes", against a
+release that calls itself for each nested instance, as Rust's drop glue does, under which a long
+chain ends the program with `stack-overflow`).
+
+Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
+```kurz
+class Link(int Value, Link? Next)
+
+mut Link? head = null
+for i in 0..<1000000 {
+    head = Link(i, head)
+}
+print(head?.Value ?? -1)
+head = null
+print("freed")
+```
 
 ### R2 (decided, §3) A possible reference cycle is an error
 
@@ -99,6 +115,17 @@ the `o` that is declared at the top level keeps `Ann` alive while `p.Keeper` is 
 record marks the lifetimes as assumed: proposed on 2026-10-03, against releasing a variable after
 its last use, which would free `Ann` before the print)*
 
+A read of a `weak T?` place, a field, a variable or an item, gives a strong `T?`, which holds the
+target as a temporary does, to the end of its statement, and longer where the read is stored:
+`k = p.Keeper` keeps the target alive while `k` lives, and a `T?` parameter takes the read as it
+is (§3, the owner, 2026-11-01, "A strong T?, held", against a read that stays `weak T?` until
+`?.`, `??`, a test or a member makes a `T?` of it, as Rust's `Weak::upgrade` gives one).
+
+A `weak T?` type stands wherever a type stands: a field, a list's item, a variable, a parameter, a
+return type, a map's value and a union's case (§3, the owner, 2026-11-01, "Anywhere a type
+stands", against a field and a list's item alone). What a nullable type written as a case of a
+union is stays open (§14), a `weak T?` among them.
+
 Case: [memory/weak-back-pointer.kz](../corpus/memory/weak-back-pointer.kz)
 ```kurz
 class Customer(string Name, mut List<Order> Orders)
@@ -134,6 +161,39 @@ p = Pet(o)
 if p.Keeper != null {
     print(p.Keeper.Name)
 }
+```
+
+Case: [memory/weak-read-holds.kz](../corpus/memory/weak-read-holds.kz)
+```kurz
+class Owner(string Name)
+class Home(mut Owner Resident)
+class Pet(weak Owner? Keeper)
+
+h = Home(Owner("Ann"))
+p = Pet(h.Resident)
+k = p.Keeper
+h.Resident = Owner("Bob")
+print(k?.Name ?? "gone")
+print(p.Keeper?.Name ?? "gone")
+```
+
+Case: [memory/weak-anywhere.kz](../corpus/memory/weak-anywhere.kz)
+```kurz
+class Owner(string Name)
+
+weak Owner? Remember(weak Owner? r) {
+    return r
+}
+
+string NameOf(weak Owner? r) {
+    return r?.Name ?? "gone"
+}
+
+o = Owner("Ann")
+weak Owner? a = Remember(o)
+print(NameOf(a))
+weak Owner? b = Remember(Owner("Bob"))
+print(NameOf(b))
 ```
 
 ### R4 (decided, §3) Where `weak` is enough

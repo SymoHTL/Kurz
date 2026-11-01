@@ -1,0 +1,15 @@
+// expect: error nullable-unchecked at 14
+// rules: N9
+
+class Owner(string Name)
+class Pet(mut weak Owner? Keeper)
+
+bool Keep(Pet pet, Owner o) {
+    pet.Keeper = o
+    return true
+}
+
+p = Pet(null)
+if Keep(p, Owner("Ann")) && p.Keeper != null {
+    print(p.Keeper.Name)
+}
