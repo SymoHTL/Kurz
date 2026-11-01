@@ -326,8 +326,9 @@ the time of a stream's reads and of its writes, taking a `duration`, `null` for 
 too, as Rust's `connect_timeout` refuses a zero `Duration` (§12, the owner, 2026-11-01, "Same:
 InvalidInput", against the 5 seconds of the first form and against no bound). *(assumed, §12: the
 parameter a `duration?`; the time of the second form of `Connect` a `duration`; a positive time under
-1 microsecond rounded up to 1 microsecond, as Rust's setters round it, and a time past the largest
-that `SO_RCVTIMEO` and `SO_SNDTIMEO` hold bounded by that largest, as Rust bounds it; a setter giving
+1 microsecond rounded up to 1 microsecond, as Rust's setters round it, and a time whose seconds pass
+the largest `time_t` bounded by `time_t::MAX` seconds, as Rust bounds it (checked 2026-11-01: `set_timeout`
+in `library/std/src/sys/net/connection/socket/unix.rs` of Rust's master branch); a setter giving
 `void | IoError`; and `TimedOut` for the `EAGAIN` with which a call on a blocking socket returns when
 its time runs out, the one exception to the kinds of Rust's mapping, every other `EAGAIN` keeping
 `WouldBlock`)* The socket options `SO_RCVTIMEO` and
