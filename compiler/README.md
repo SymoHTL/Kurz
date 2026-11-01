@@ -611,7 +611,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   lays out `Option<Rc<T>>` (N1); and a `weak T?`, the address alone too, which holds the instance's weak
   count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
   and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
-  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3). The
+  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
+  two instances, by their addresses where a field is `mut` or `weak` (K4), by the fields an `equal by`
+  names, in its order (K5, K8, K15), and else field by field as a `data` value compares (K4, D3), in a
+  function per class that gives true for one address before it reads a field. The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), their text, the text of the case's value
@@ -727,7 +730,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   feeds each field to one hasher, and compared by `==` (D3), lists by their counts and items, their
   `double` and `float` items, and the values of their `double?` and `float?` items, as C#'s `Equals`
   compares them and hashed as a `double` key is (section 4, the owner, 2026-10-30, "Equals inside
-  data/keys", "As plain double").
+  data/keys", "As plain double"). A key that is an instance is hashed by its address where `==`
+  compares the addresses, and else, laid out as a `data` value is, by the hashes of the fields `==` compares (K4,
+  K5, K12).
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
   no entry since the block was made or cleared, 128 for one whose entry was removed, else 7 bits of its
   entry's hash, bits 56 to 62; a lookup reads the control bytes of a group of 8 slots as one word and
@@ -1113,6 +1118,11 @@ ask about it.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).
   Pinned by the classes' program of `ListTests`.
+- K4 with K1: a class with no field compares every two of its instances equal, as a `data` type with no
+  field does, since none of its fields is `mut` or `weak` *(assumed)*; and `==` and the hash of a chain of
+  instances recurse, a call per link, so that a chain long enough ends the program with the stack's
+  overflow, as Rust's derived `PartialEq` and `Hash` on an `Rc` chain do *(assumed)*. Pinned by the
+  equality program of `ListTests`.
 
 ## What the compiler says about a program
 
@@ -1288,8 +1298,8 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7 and K9, for a class with its primary constructor or none,
-its fields, its methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12 and K15, for a class with its primary constructor or none,
+its fields, its methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5) and its cycle rule judged by the types of the fields (R2, R4), and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
@@ -1328,7 +1338,8 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, and
+`naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`,
+`equal-by-unknown`, `equals-method`, `mutable-key`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -1341,15 +1352,15 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
-(K6, K10), `equal by` (K8), a field, a constructor or a type declared in its body (K7, K14, K18), a method that is
+(K6, K10), a field, a constructor or a type declared in its body (K7, K14, K18), a method that is
 `static`, `virtual`, `override`, `prot` or `extern` or that has type parameters of its own (K7,
 section 4), each of which leaves the class and every value of it unread, and of a class it reads, a
 field of a function type, whose cycle R9 judges by the lambdas of the program (R9), a method as a
 value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)`, the field named alone inside a
-method, `Pos.Items.Add(1)`, among them (K2, M4, M5), and `==`
-on two instances or on values that hold one, and an instance as a key of a map, at any depth (K4,
-K12); of chapter 4, a nullable `void` and a
+method, `Pos.Items.Add(1)`, among them (K2, M4, M5), an `equal by` that names a `weak` field, which
+section 14 leaves open (K8, R3), and a key type that holds, at any depth, an instance of a class whose
+`equal by` names a `mut` field, where whether `mutable-key` reaches it is open (K12, section 14); of chapter 4, a nullable `void` and a
 nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` to a member or an
 item of a pointer, a C function type or `void`, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,

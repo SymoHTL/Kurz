@@ -1402,7 +1402,7 @@ public sealed partial class Checker
                 // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
-                ClassType => (false, $"the equality of a class instance (K4) is not read"),
+                ClassType => HeldEquality(left.Type, [], [], []),
                 DataType => HeldEquality(left.Type, [], [], []) ?? HeldEquality(right.Type, [], [], []),
                 // two values of a union, as the union the other side goes to: by the case, then by the value (section 4, the owner,
                 // 2026-10-30, "Case and value, as Rust"); a union beside a value of one of its cases is no such pair, as Rust refuses
@@ -1417,6 +1417,11 @@ public sealed partial class Checker
                 case (false, var why):
                     NotSupported(b.Line, $"`{op}` on {Types.A(left.Type)}: {why} (D3, M9)");
                     return new Typed(Types.Bool);
+            }
+
+            if (ok && ComparesByClause(left.Type, new HashSet<object>(ReferenceEqualityComparer.Instance)))
+            {
+                EndChangeableNarrowing(); // N9: `==` on instances of a class that names its fields is a call (K5)
             }
         }
 
@@ -1442,6 +1447,21 @@ public sealed partial class Checker
         };
         return new Typed(Types.Bool, result is null ? null : new BoolConstant(result.Value));
     }
+
+    /// <summary>
+    /// N9 with K5: whether <c>==</c> on two values of the type compares instances of a class that names its fields, which N9 counts
+    /// among the calls: the instances themselves, or instances the values hold where they compare by their fields or their items.
+    /// </summary>
+    private bool ComparesByClause(KurzType type, HashSet<object> seen) => type switch
+    {
+        ClassType c => seen.Add(c.Symbol) && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))),
+        ListType l => ComparesByClause(l.Element, seen),
+        UnionType u => u.Cases.Any(x => ComparesByClause(x, seen)),
+        DataType d => seen.Add(d.Symbol)
+            && (d.Symbol.Fields.Any(f => ComparesByClause(SubstituteData(d, f.Type), seen))
+                || dataTypes.Values.Where(x => x.Base == d.Symbol).Any(x => ComparesByClause(new DataType(x, x.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen))),
+        _ => false,
+    };
 
     private static bool? Compare(TokenKind op, int comparison, bool known) => !known ? null : op switch
     {

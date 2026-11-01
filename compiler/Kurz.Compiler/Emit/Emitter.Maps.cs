@@ -55,7 +55,15 @@ public sealed partial class Emitter
                     return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {bytes}, i64 {count})");
                 }
 
-            case DataType or ListType or UnionType:
+            case ClassType c when c.Symbol.ComparesByIdentity:
+                {
+                    // K4: an instance that compares by identity hashes its address, which its count keeps while it is a key
+                    var slot = fn.Alloca("i64", "key");
+                    fn.Emit($"store i64 {fn.Value($"ptrtoint ptr {key} to i64")}, ptr {slot}");
+                    return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
+                }
+
+            case DataType or ListType or UnionType or ClassType:
                 {
                     var name = Helper($"hash.{Lower.Mangle(type)}", "i64", ["ptr", Ir(type)], () => HashBody(type));
                     return fn.Value($"call i64 {name}(ptr {block}, {Ir(type)} {key})");
@@ -99,9 +107,9 @@ public sealed partial class Emitter
     };
 
     /// <summary>
-    /// The helper of the hash of a <c>data</c> value, a list or a union, the map's block in <c>%a0</c> and the value in <c>%a1</c>: the
-    /// SipHash-1-3 of words, one for each field's hash, each item's hash, or the union's tag and its value's hash, and first the number of
-    /// the type a block holds, as <see cref="EqualBody"/> compares them (D3, D15).
+    /// The helper of the hash of a <c>data</c> value, a list, a union or an instance that compares by its fields, the map's block in
+    /// <c>%a0</c> and the value in <c>%a1</c>: the SipHash-1-3 of words, one for each field's hash, each item's hash, or the union's tag
+    /// and its value's hash, and first the number of the type a block holds, as <see cref="EqualBody"/> compares them (D3, D15, K5).
     /// </summary>
     private void HashBody(KurzType type)
     {
@@ -158,6 +166,16 @@ public sealed partial class Emitter
 
                     break;
                 }
+
+            case ClassType c:
+                foreach (var field in c.Symbol.FieldsThatCount)
+                {
+                    // K5: the hash of the fields that count, so that two instances equal by them have one hash
+                    var pointer = InstanceFieldPointer(c.Symbol, "%a1", c.Symbol.Fields.IndexOf(field));
+                    Add(KeyHash("%a0", fn.Value($"load {Ir(field.Type)}, ptr {pointer}"), field.Type));
+                }
+
+                break;
         }
 
         fn.Return($"i64 {End()}");

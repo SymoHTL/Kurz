@@ -2413,6 +2413,70 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "Gus",
     ];
 
+    // K4, K5, K8 with K12: instances compared by identity, by content and by the fields a clause names, in a list, a data value, a
+    // nullable value and a chain, and kept as map keys: a key equal to one the map holds replaces its value and is let go of
+    private const string Equality = """
+        class Point(int X, int Y)
+        class Box(mut int N)
+        class User(int Id, mut string Name) equal by Id
+        class Link(int V, Link? Next)
+        class Mark
+        data Pair(Point A, Box B)
+
+        a = Point(1, 2)
+        print(a == Point(1, 2))
+        print(a != Point(2, 1))
+        b = Box(1)
+        c = b
+        print("{b == Box(1)} {b == c}")
+        u = User(1, "a")
+        print(u == User(1, "b"))
+        u.Name = "c"
+        print(u == User(2, "c"))
+        print(Link(1, Link(2, null)) == Link(1, Link(2, null)))
+        print(Link(1, Link(2, null)) == Link(1, null))
+        print([Point(1, 2), Point(3, 4)] == [Point(1, 2), Point(3, 4)])
+        print(Pair(a, b) == Pair(Point(1, 2), c))
+        print(Pair(a, b) == Pair(a, Box(1)))
+        Point? n = null
+        print("{n == a} {Mark() == Mark()}")
+        mut m = Map<Point, string>()
+        m[Point(1, 2)] = "one"
+        m[Point(1, 2)] = "uno"
+        m[Point(2, 1)] = "two"
+        print("{m.Count} {m[a] ?? "-"} {m[Point(9, 9)] ?? "-"}")
+        mut boxes = Map<Box, int>()
+        boxes[b] = 1
+        boxes[Box(1)] = 2
+        print("{boxes.Count} {boxes[c] ?? 0}")
+        mut users = Map<User, string>()
+        users[u] = "first"
+        users[User(1, "z")] = "second"
+        print("{users.Count} {users[User(1, "q")] ?? "-"}")
+        mut links = Map<Link, int>()
+        links[Link(1, Link(2, null))] = 3
+        print(links[Link(1, Link(2, null))] ?? 0)
+        """;
+
+    private static readonly string[] EqualityPrint =
+    [
+        "true",
+        "true",
+        "false true", // K4: a class with a `mut` field compares by identity
+        "true", // K5: by the field the clause names
+        "false",
+        "true", // a chain compares link by link
+        "false",
+        "true",
+        "true",
+        "false",
+        "false true", // a class with no fields: every instance has the same content *(assumed)*
+        "2 uno -",
+        "2 1", // a key that compares by identity hashes its address
+        "1 second",
+        "3",
+    ];
+
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
     // over, a `return` and a `break` and a `continue` that leave a block, a call's result nothing holds, a `data` value's field, a
     // lambda's environment and a list's item, each holding a chain of links
@@ -2885,6 +2949,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Weak, toolchain.Runtime, "weak-values"), 0, WeakPrint, "");
+        Ran(BuildAndRun(Equality, toolchain.Runtime, "class-equality"), 0, EqualityPrint, "");
     }
 
     [Fact]
@@ -2969,6 +3034,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
+        Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
         // a release under way stands once in the program
         Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");

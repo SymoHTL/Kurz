@@ -2976,10 +2976,37 @@ public sealed class CheckerTests
         Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nvoid Show(Pet p) {\n    if p.Keeper != null {\n        if p.Keeper.Name == \"x\" {\n            return\n        }\n\n        print(p.Keeper.Name)\n    }\n}\n\no = Owner(\"Ann\")\nShow(Pet(o))");
     }
 
+    [Fact]
+    public void Two_instances_compare_by_identity_by_content_or_by_the_fields_a_clause_names()
+    {
+        // K4: by identity where a field is `mut`, by content where none is, and so in a list, a data value, a nullable value and a key;
+        // K5, K8, K15: by the fields an `equal by` names, a `mut` one among them (K12); a field without `==` in a class that compares by
+        // content is `type-mismatch`, as in a data value (D3), and in one that compares by identity or by its clause it counts for nothing
+        Clean("class C(mut int N)\n\na = C(1)\nprint(a == C(1))\nprint(a != a)");
+        Clean("class C(int N)\ndata P(C Item)\n\nxs = [C(1)]\nC? n = null\nprint(xs == [C(1)])\nprint(P(C(1)) == P(C(2)))\nprint(n == C(1))");
+        Clean("class Link(int V, Link? Next)\n\nprint(Link(1, Link(2, null)) == Link(1, null))");
+        Clean("class C(int N)\nclass Box(mut int N)\ndata K(C Item)\n\nmut m = Map<C, int>()\nm[C(1)] = 1\nmut b = Map<Box, int>()\nb[Box(1)] = 2\nmut k = Map<K, int>()\nk[K(C(1))] = 3\nprint(m.Count + b.Count + k.Count)");
+        Clean("class User(int Id, mut string Name, Map<string, int> Seen) equal by Id\n\nmut m = Map<User, int>()\nm[User(1, \"a\", Map<string, int>())] = 1\nprint(m.Count)");
+        Clean("class Tag(mut string Name, mut Map<string, int> Seen) equal by Name\n\nprint(Tag(\"a\", Map<string, int>()) == Tag(\"a\", Map<string, int>()))");
+        Clean("class Box(mut Map<string, int> Seen)\n\nb = Box(Map<string, int>())\nprint(b == b)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("class C(Map<string, int> M)\n\nc = C(Map<string, int>())\nprint(c == c)"));
+        // K15: a name that is no field; K5: a method named `Equals` or `GetHashCode`, at the method; K12: the key type itself
+        Assert.Equal([(ErrorIds.EqualByUnknown, 1)], Errors("class Key(int Id) equal by Id, Code\n\nprint(Key(1) == Key(1))"));
+        Assert.Equal([(ErrorIds.EqualsMethod, 2), (ErrorIds.EqualsMethod, 3)], Errors("class User(int Id) {\n    pub bool Equals(User other) => Id == other.Id\n    pub int GetHashCode() => Id\n}\n\nprint(User(1) == User(1))"));
+        Assert.Equal([(ErrorIds.MutableKey, 3)], Errors("class Tag(mut string Name) equal by Name\n\nmut m = Map<Tag, int>()\nm[Tag(\"a\")] = 1\nprint(m.Count)"));
+        Clean("class Tag(mut string Name, string Kind) equal by Kind\n\nmut m = Map<Tag, int>()\nm[Tag(\"a\", \"k\")] = 1\nprint(m.Count)");
+        // N9 with K5: `==` on instances of a class that names its fields ends what is known of a path through a `mut` field; on
+        // instances that compare by content it does not
+        const string holder = "class Node(int V)\nclass Holder(mut Node? Head)\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\na = K(1)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\na = [K(1)]\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
+        Clean(holder + "class K(int Id)\n\na = K(1)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}");
+    }
+
     [Theory]
     [InlineData("class Box<T>(T Item)\n\nprint(1)", "1: a generic class (T19, chapter 7)")]
     [InlineData("class A\nclass B : A\n\nprint(1)", "2: a base class or an interface after `:` (K6, K10)")]
-    [InlineData("class K(int Id) equal by Id\n\nprint(1)", "1: `equal by` (K8)")]
+    [InlineData("class Owner(string Name)\nclass Pet(string Name, weak Owner? Keeper) equal by Keeper\n\nprint(1)", "2: `equal by` that names the `weak` field `Keeper`, which section 14 of the record leaves open (K8, R3)")]
     [InlineData("class C {\n    pub static int Step = 1\n}\n\nprint(1)", "2: a `static` field (K18)")]
     [InlineData("class C {\n    mut int n = 0\n}\n\nprint(1)", "2: a field declared in the body of a class (K7, K14)")]
     [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)", "2: a constructor declared in the body of a class (K14)")]
@@ -2995,11 +3022,9 @@ public sealed class CheckerTests
     [InlineData("class A(int N)\nclass B(int N)\nclass Pet(weak (A | B)? Keeper)\n\nprint(1)", "3: `weak` before `A | B`, which the checker does not read as a class (R5, T19, D9)")]
     [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: a `weak` reference as a parameter or the result of a function type (R3)")]
     [InlineData("class Owner(string Name)\n\nm = Map<string, weak Owner?>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
-    [InlineData("class C(int N)\n\na = C(1)\nprint(a == a)", "4: `==` on a `C`: the equality of a class instance (K4) is not read (D3, M9)")]
-    [InlineData("class C(int N)\n\nxs = [C(1)]\nprint(xs == xs)", "4: `==` on a `List<C>`: its items: the equality of an instance of `C` (K4) is not read (D3, M9)")]
-    [InlineData("class C(int N)\ndata P(C Item)\n\np = P(C(1))\nprint(p == p)", "5: `==` on a `P`: its field `Item`: the equality of an instance of `C` (K4) is not read (D3, M9)")]
-    [InlineData("class C(int N)\n\nm = Map<C, int>()\nprint(m.Count)", "3: a map with keys of type `C`: the equality of an instance of `C` and its hash (K4, K12) are not read (M9)")]
-    [InlineData("class C(int N)\ndata K(C Item)\n\nm = Map<K, int>()\nprint(m.Count)", "4: a map with keys of type `K`: its field `Item`: the equality of an instance of `C` and its hash (K4, K12) are not read (M9)")]
+    [InlineData("class Tag(mut string Name) equal by Name\ndata K(Tag Item)\n\nm = Map<K, int>()\nprint(m.Count)", "4: a map with keys of type `K`: its field `Item`: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
+    [InlineData("class Tag(mut string Name) equal by Name\n\nm = Map<Tag?, int>()\nprint(m.Count)", "3: a map with keys of type `Tag?`: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
+    [InlineData("class Tag(mut string Name) equal by Name\n\nm = Map<List<Tag>, int>()\nprint(m.Count)", "3: a map with keys of type `List<Tag>`: its items: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
     [InlineData("class C(int N) {\n    pub int Get() => N\n}\n\nc = C(1)\nf = c.Get\nprint(f())", "6: a method as a value, named without a call (K7, F11)")]
     [InlineData("class Button(string Name, mut () => void OnClick)\n\nprint(1)", "1: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
     [InlineData("data W<T>(W<() => int>? Inner, T V)\nclass C(W<int>? N)\n\nprint(1)", "2: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
@@ -3010,11 +3035,11 @@ public sealed class CheckerTests
     [InlineData("class C(int N) {\n    class D(int M)\n}\n\nprint(C(1).N)", "2: a type declared in the body of a class (K7)")]
     public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
-        // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields and constructors in the body (K7, K14, K18),
+        // generic classes (T19), bases and interfaces (K6, K10), fields and constructors in the body (K7, K14, K18),
         // a method that is `static`, `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` (R3) in a type argument of a
         // data type, a function type or a map, before a type parameter or a union of classes, or as a case of a union, whose
-        // nullable cases are open (section 14), `==`
-        // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
+        // nullable cases are open (section 14), `equal by` that names a `weak` field and a key type that holds a class whose `equal by`
+        // names a `mut` field, both open (section 14; K8, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5), the field named alone
         // inside a method among them, and a type declared in the body (K7)
         Assert.Equal([expected], NotSupported(program));

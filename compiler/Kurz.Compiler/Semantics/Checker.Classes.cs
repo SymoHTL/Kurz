@@ -7,15 +7,16 @@ namespace Kurz.Compiler.Semantics;
 /// Chapter 7: a <c>class</c> with its primary constructor or none, its fields with and without <c>mut</c> (K1), its methods (K7, K9),
 /// <c>this</c>, the visibility of its members (F9), its text (A4, A5, A9, A15), the instance as a reference with identity whose
 /// <c>mut</c> fields change through every reference (K2, K3), the narrowing of a path through such a field (N9), and the cycle rule
-/// judged by the types of the fields (R2, R4). What else a class can write, a base or an interface, <c>equal by</c>, a field or a
-/// constructor in its body, a <c>static</c>, <c>virtual</c>, <c>override</c> or <c>prot</c> member, type parameters, and a field
-/// that holds a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c>, and so are <c>==</c>
-/// on two instances (K4) and an instance in a map's key (K12) (<c>compiler/README.md</c>).
+/// judged by the types of the fields (R2, R4), and its equality and hash, by identity or by content (K4) or by the fields an
+/// <c>equal by</c> clause names (K5, K8, K12, K15). What else a class can write, a base or an interface, a field or a constructor in its
+/// body, a <c>static</c>, <c>virtual</c>, <c>override</c> or <c>prot</c> member, type parameters, and a field that holds a function value,
+/// whose cycle R9 judges by the lambdas of the program, is <c>not supported</c> (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
     private readonly Dictionary<string, ClassSymbol> classes = new(StringComparer.Ordinal);
     private readonly List<ClassSymbol> classDeclared = [];
+    private readonly HashSet<ClassSymbol> classesCompared = new(ReferenceEqualityComparer.Instance); // K4: the classes a walk of `==` is inside of
 
     /// <summary>
     /// K1, K7: a class the checker reads is declared with its methods; one that writes what the checker does not read is <c>not
@@ -61,11 +62,6 @@ public sealed partial class Checker
         if (d.Bases.Count > 0)
         {
             return (d.Bases[0].Line, "a base class or an interface after `:` (K6, K10)");
-        }
-
-        if (d.EqualBy.Count > 0)
-        {
-            return (d.Line, "`equal by` (K8)");
         }
 
         foreach (var member in d.Members ?? [])
@@ -172,6 +168,27 @@ public sealed partial class Checker
             if (symbol.Field(name) is not null)
             {
                 Report(ErrorIds.Redeclared, methods[0].Line, $"`{name}` is a field of `{symbol.Name}` already (V9)");
+            }
+
+            if (name is "Equals" or "GetHashCode")
+            {
+                Report(ErrorIds.EqualsMethod, methods[0].Line, $"a method of a class is named `{name}`: `==` and the hash of an instance are K4's, or come from the fields an `equal by` clause names, `equal by Id` (K5, K8)");
+            }
+        }
+
+        foreach (var name in d.EqualBy)
+        {
+            if (symbol.Field(name) is not { } field)
+            {
+                Report(ErrorIds.EqualByUnknown, d.Line, $"`{name}` is no field of `{symbol.Name}`: `equal by` names fields of the class (K15)");
+            }
+            else if (field.Type is WeakRefType)
+            {
+                NotSupported(d.Line, $"`equal by` that names the `weak` field `{name}`, which section 14 of the record leaves open (K8, R3)");
+            }
+            else if (!symbol.EqualBy.Contains(field))
+            {
+                symbol.EqualBy.Add(field);
             }
         }
     }
