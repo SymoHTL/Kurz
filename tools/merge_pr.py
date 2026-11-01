@@ -9,7 +9,9 @@ skips what only this tool adds (HAZARD #14).
   merge_pr.py --apply-settings       create or update that ruleset (owner-approved, once)
 
 A merge needs: the exact head that was looked at; an open pull request into the default branch that
-is not a Draft, not behind its base and has no auto-merge armed; every review thread resolved, and
+is not a Draft, not behind its base (at the review cap the refusal says whether the round converged
+on every file of the head, and so what taking the base costs: taking_main) and has no auto-merge
+armed; every review thread resolved, and
 resolved by the edit or, on tool, workflow or hook code, the reply that answers it, or, on a pull
 request at the owner's cap of review rounds (kit.ROUND_CAP), the reply that moves it to the collection ticket
 (tools/pr_gates.py);
@@ -102,20 +104,21 @@ def required(rules):
 STATUS_POSTERS = {15368: "github-actions[bot]"}
 
 
-def head_states(repo, head, contexts):
+def head_states(repo, head, contexts, told=None):
     """The state of every required context on one head, from its check runs and its list of
-    statuses (context_states)."""
+    statuses (context_states, which fills `told`)."""
     runs = kit.gh_json(f"repos/{repo}/commits/{head}/check-runs?per_page=100")["check_runs"]
     statuses = kit.gh_json(f"repos/{repo}/commits/{head}/statuses?per_page=100")
-    return context_states(contexts, runs, statuses)
+    return context_states(contexts, runs, statuses, told)
 
 
-def context_states(contexts, check_runs, statuses):
+def context_states(contexts, check_runs, statuses, told=None):
     """{context: success | failed | skipped | running | absent} on one head. A context that both a
     check run and a commit status report must be green in both. The newest check run of a name
     counts, and only one from the app pinned for that context; of the statuses of the context from
     the login that app posts as (STATUS_POSTERS) the newest counts, and a newer one from another
-    creator is ignored: with the ruleset off, this reading is all that holds a check nobody waived."""
+    creator is ignored: with the ruleset off, this reading is all that holds a check nobody waived.
+    A dict passed as `told` gets the status that counts, by context, for what its description says."""
     states = {}
     for ctx, app in contexts.items():
         seen = []
@@ -129,8 +132,38 @@ def context_states(contexts, check_runs, statuses):
         if posts:
             post = max(posts, key=lambda s: s["id"])
             seen.append({"success": "success", "pending": "running"}.get(post["state"], "failed"))
+            if told is not None:
+                told[ctx] = post
         states[ctx] = next((s for s in ("running", "failed", "skipped") if s in seen), "success" if seen else "absent")
     return states
+
+
+# The description of the status `review` that tools/review/review.py posts when a run completed: "review completed:
+# <summary>" when every batch converged, "review completed, NOT converged on <N> files: <summary>" when one stopped at
+# the pass cap. The cache stores only the files of a batch that converged, so it answers no file of the second kind.
+ROUND_TOLD = re.compile(r"review completed(?:, NOT converged on (\d+) files)?: ")
+OWNERS_CHOICE = "costs a paid round, and the merge needs the owner's choice: a paid round, over red at the new head, or hold"
+
+
+def taking_main(rounds, post, base):
+    """What a pull request at the review cap pays to take `base`, from the status `review` that counts on its
+    head (`post`, as context_states tells it, or None), or None below the cap. Taking `base` is no round only
+    where the round converged on every file (CLAUDE.md, the rule "A pull request gets at most one review
+    round"); a head the status does not show so, read in neither form, pending, failed or with no status, is
+    not known to have converged and is told what one that did not converge is told: unchecked never looks clean."""
+    if rounds < kit.ROUND_CAP:
+        return None
+    read = ROUND_TOLD.match(post.get("description") or "") if post and post["state"] == "success" else None
+    if read and read.group(1) is None:
+        return (f"the round at the cap converged on every file of this head: a merge of {base} replays from the cache, "
+                f"as no round, where {base} changed none of the pull request's files and none of the reviewer's code and rules "
+                f"and the title and the description are as the round read them, and is a paid round otherwise "
+                f"(knowledge/a-review-the-cache-answers-is-no-round.md)")
+    if read:
+        return (f"the round at the cap did not converge on {read.group(1)} files of this head, which its note "
+                f"\"Automated review did not converge\" names and the cache does not answer: taking {base} {OWNERS_CHOICE}")
+    what = f"review is {post['state']}: {(post.get('description') or '')[:100]!r}" if post else "no review status from its poster"
+    return f"whether the round at the cap converged on every file of this head is not known ({what}): taking {base} {OWNERS_CHOICE}"
 
 
 def parse_waiver(spec):
@@ -138,9 +171,10 @@ def parse_waiver(spec):
     return (int(m.group(1)), m.group(2), [j.strip() for j in m.group(3).split(",")]) if m else None
 
 
-def decide(number, sha, pr, default_branch, states, thread_errors, behind_by, waiver):
+def decide(number, sha, pr, default_branch, states, thread_errors, behind_by, waiver, costs=None):
     """(verdict, reasons, waived): verdict is merge, over-red or refuse; waived is what the waiver
-    really covered, as [(check, state)]."""
+    really covered, as [(check, state)]. `costs` is what taking the base costs at the review cap
+    (taking_main), told with the refusal of a branch behind it."""
     reasons = []
     if not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
         return "refuse", ["need the full 40-character head sha"], []
@@ -155,7 +189,7 @@ def decide(number, sha, pr, default_branch, states, thread_errors, behind_by, wa
     if pr.get("auto_merge"):
         reasons.append("auto-merge is armed: it would fire on whatever the head is")
     if behind_by:
-        reasons.append(f"the branch is {behind_by} commits behind {default_branch}: update it and let the checks run")
+        reasons.append(f"the branch is {behind_by} commits behind {default_branch}: {costs or 'update it and let the checks run'}")
     reasons += thread_errors
     if not states:
         reasons.append("the ruleset names no required checks: nothing would be verified")
@@ -466,12 +500,14 @@ def run(argv):
     head, default_branch = pr["head"]["sha"], info["default_branch"]
     settings, notes = settings_errors(ruleset(), info, kit.gh_json(f"repos/{repo}/rules/branches/{default_branch}"),
                                       kit.gh_json(f"repos/{repo}/rulesets"), lambda rid: kit.gh_json(f"repos/{repo}/rulesets/{rid}"))
-    states = head_states(repo, head, required(ruleset()))
+    told = {}
+    states = head_states(repo, head, required(ruleset()), told)
     threads = pr_gates.fetch_threads(repo, number)
     changed = lambda path, at: pr_gates.blob_at(repo, path, at) != pr_gates.blob_at(repo, path, head)
     behind = kit.gh_json(f"repos/{repo}/compare/{pr['base']['ref']}...{head}")["behind_by"]
     rounds, held = held_by(repo, pr, threads, changed, settings, notes)
-    verdict, reasons, waived = decide(number, sha, pr, default_branch, states, held, behind, waiver)
+    verdict, reasons, waived = decide(number, sha, pr, default_branch, states, held, behind, waiver,
+                                      taking_main(rounds, told.get("review"), default_branch))
     print(f"{repo}#{number} at {head[:8]}: " + ", ".join(f"{c}={s}" for c, s in states.items()) + f"; {len(threads)} threads; behind by {behind}"
           f"; {rounds} review rounds (the cap is {kit.ROUND_CAP})")
     for n in notes:
@@ -590,8 +626,8 @@ def self_test():
     ready["base"]["ref"] = "main"
     green = {"gates": "success", "review": "success"}
 
-    def verdict(states=green, threads=(), behind=0, waiver=None, given=sha, **change):
-        return decide(number, given, {**ready, **change}, "main", states, list(threads), behind, parse_waiver(waiver) if waiver else None)
+    def verdict(states=green, threads=(), behind=0, waiver=None, given=sha, costs=None, **change):
+        return decide(number, given, {**ready, **change}, "main", states, list(threads), behind, parse_waiver(waiver) if waiver else None, costs)
 
     case("decide: all green merges", verdict()[0] == "merge", verdict())
     case("decide: a short sha is refused, and told why", verdict(given=sha[:12])[1] == ["need the full 40-character head sha"], verdict(given=sha[:12]))
@@ -600,6 +636,55 @@ def self_test():
     case("decide: a closed pull request is refused", verdict(state="closed")[0] == "refuse")
     case("decide: armed auto-merge is refused", verdict(auto_merge={"merge_method": "squash"})[0] == "refuse")
     case("decide: a branch behind its base is refused", verdict(behind=2)[0] == "refuse")
+
+    # what taking main costs at the review cap, from the review status of the head: the real one of the round of pull
+    # request 181, which did not converge on one file, and the real one of pull request 22, which converged, edited
+    # into the statuses whose round is not known
+    unconverged, converged = load("statuses-not-converged.json"), load("statuses.json")
+    told, told_too = {}, {}
+    context_states(R, [], unconverged, told)
+    context_states(R, [], converged, told_too)
+    old = verdict(behind=2)[1]
+    case("taking main: below the cap a branch behind its base is told to update it, as before",
+         taking_main(kit.ROUND_CAP - 1, told.get("review"), "main") is None and old == ["the branch is 2 commits behind main: update it and let the checks run"], old)
+    got = taking_main(kit.ROUND_CAP, told.get("review"), "main")
+    refused = verdict(behind=2, costs=got)[1]
+    case("taking main: the real status of a round that did not converge on one file says that taking main costs a paid round and the owner's choice",
+         len(unconverged) >= 1 and "did not converge on 1 files" in (got or "") and (got or "").endswith(f"taking main {OWNERS_CHOICE}")
+         and refused == [f"the branch is 2 commits behind main: {got}"], (got, refused))
+    got = taking_main(kit.ROUND_CAP, told_too.get("review"), "main")
+    case("taking main: the real status of a round that converged names the conditions of a replay and the entry, and no cost or choice",
+         len(converged) >= 1 and "converged on every file" in (got or "") and "a-review-the-cache-answers-is-no-round.md" in (got or "")
+         and OWNERS_CHOICE not in (got or ""), got)
+    done = (told_too.get("review") or {"context": "review", "state": "success", "description": "review completed: x"})
+    unknown = {"no status": None, "error": dict(done, state="error"), "pending": dict(done, state="pending"),
+               "success": dict(done, description="review did not complete: cap: 1 review rounds reached, the cap is 1")}
+    got = {name: taking_main(kit.ROUND_CAP, post, "main") for name, post in unknown.items()}
+    case("taking main: a head not known to have converged is told what a round that did not converge is told, with the state read",
+         all("is not known" in (text or "") and (text or "").endswith(f"taking main {OWNERS_CHOICE}") and ("no review status" if name == "no status" else f"review is {name}") in text
+             for name, text in got.items()), got)
+    writer = "f\"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: {summary}\""
+    rendered = [f"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: s" for capped in ([], ["a", "b"])]
+    case("taking main: the reviewer writes the description this tool reads, in both forms",
+         writer in kit.read(os.path.join(os.path.dirname(os.path.abspath(__file__)), "review", "review.py"))
+         and [m and m.group(1) for m in map(ROUND_TOLD.match, rendered)] == [None, "2"] and ROUND_TOLD.match(rendered[0]), rendered)
+
+    # the refusal as the tool prints it, against a forge that answers from the captures: a pull request at the cap whose
+    # round did not converge on one file, its branch two commits behind main
+    capped = dict(ready, labels=[{"name": f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"}])
+    answers = [("graphql", {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}}),
+               ("--paginate", [[]]), ("/compare/", {"behind_by": 2}), ("/check-runs?", load("check-runs.json")), ("/statuses?", unconverged),
+               (f"/pulls/{number}", capped), ("/rules/branches/", live), ("/rulesets/", full), ("/rulesets", listed)]
+    saved, out = (kit.repo, kit.gh_json), io.StringIO()
+    kit.repo, kit.gh_json = (lambda: "o/r"), (lambda *args: next((a for k, a in answers if k in args[0]), info))
+    try:
+        with contextlib.redirect_stdout(out):
+            code = attempt(run, [str(number), sha, "--dry-run"])
+    finally:
+        kit.repo, kit.gh_json = saved
+    case("run: at the cap a branch behind main is refused with what taking main costs, read from the review status of its head",
+         code == 1 and "REFUSED: the branch is 2 commits behind main: the round at the cap did not converge on 1 files" in out.getvalue(),
+         (code, out.getvalue()))
     case("decide: another base branch is refused", decide(number, sha, ready, "trunk", green, [], 0, None)[0] == "refuse")
     case("decide: an unresolved thread is refused", verdict(threads=["1 unresolved threads"])[0] == "refuse")
     case("decide: no required checks is refused", verdict(states={})[0] == "refuse")

@@ -2806,11 +2806,157 @@ public sealed class CheckerTests
         Assert.EndsWith(cited, message, StringComparison.Ordinal);
     }
 
+    // ---- classes (chapter 7; R2 and R4 judged by the types of the fields) ---------------------------------------------
+
+    [Fact]
+    public void A_class_has_the_fields_of_its_primary_constructor_and_methods_and_its_instance_is_a_reference()
+    {
+        // K1, K2, K7, K9: the fields of the primary constructor, `mut` where written, changed through every reference, an immutable
+        // variable's among them; a method reads and changes them by their names and through `this`, and `Text()` gives the text (A5)
+        Clean("class Counter(mut int Count, string Name) {\n    pub void Add(int n) {\n        Count = Count + n\n        this.Count = this.Count + 1\n    }\n\n    pub string Text() => \"{Name} {Count}\"\n}\n\nc = Counter(0, \"a\")\nc.Add(2)\nc.Count = 5\nprint(c)\nprint(\"{c}\")");
+        Assert.Equal("Counter", TypeOf("class Counter(mut int Count)\n\nc = Counter(0)\nprint(c.Count)", "c"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 4)], Errors("class Counter(int Count)\n\nc = Counter(0)\nc.Count = 1"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("class Counter(int Count) {\n    pub void Reset() {\n        Count = 0\n    }\n}\n\nprint(Counter(1).Count)"));
+        Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Box(List<int> Items)\n\nb = Box(List<int>())\nb.Items.Add(1)"));
+        Clean("class Box(mut List<int> Items)\n\nb = Box(List<int>())\nb.Items.Add(1)\nprint(b.Items.Count)");
+    }
+
+    [Fact]
+    public void A_name_in_a_class_is_its_own_and_a_method_is_private_without_pub()
+    {
+        // V9 with K7: two fields of one name, a field and a method of one name, and a parameter of a method named as a field are
+        // `redeclared`; F9: a method without `pub` is its class's own, and so is a `Text()` without it, which `print` cannot call (A9, A15)
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("class P(int X, int X)\n\nprint(P(1, 2).X)"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("class P(int X) {\n    pub int X() => 1\n}\n\nprint(P(1).X)"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("class P(int X) {\n    pub int Twice(int X) => X * 2\n}\n\nprint(P(1).Twice(2))"));
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class P(int X) {\n    int Secret() => X\n}\n\nprint(P(1).Secret())"));
+        Clean("class P(int X) {\n    int Secret() => X\n\n    pub int Shown() => Secret()\n}\n\nprint(P(1).Shown())");
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class P(int X) {\n    string Text() => \"p\"\n}\n\nprint(P(1))"));
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class P(int X) {\n    string Text() => \"p\"\n}\n\nprint([P(1)])"));
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("data W<T>(W<P>? Inner, T V)\nclass P(int X) {\n    string Text() => \"p\"\n}\n\nprint(W<int>(null, 1))"));
+        // the walks of what a value holds end on a data type that holds itself with other type arguments (D1)
+        Assert.Empty(Errors("data Node<T>(int V, Node<List<T>>? Next)\n\nn = Node<int>(1, null)\nprint(\"{n}\")\nprint(n)"));
+        Assert.Equal([(ErrorIds.NoText, 3)], Errors("class P(int X)\n\nprint(P(1))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(this)"));
+    }
+
+    [Fact]
+    public void A_mut_marker_on_a_method_of_a_class_is_syntax()
+    {
+        // K9 gives the marker to the methods of values (M5); a method of a class changes its instance without one (E4)
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C(mut int N) {\n    pub mut void Add() {\n        N = N + 1\n    }\n}\n\nC(0).Add()"));
+        Clean("class C(mut int N) {\n    pub void Add() {\n        N = N + 1\n    }\n}\n\nC(0).Add()");
+    }
+
+    [Fact]
+    public void A_path_through_a_mut_field_of_an_instance_stays_narrowed_up_to_the_next_call_or_assignment()
+    {
+        // N9: a test narrows it, and a call, `print` and an interpolation of an instance among them (A5), or an assignment ends that; an
+        // assignment of a value without `null` narrows it again; a field without `mut` stays narrowed, and a lambda knows nothing of such a path
+        Clean("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    print(a.E.Bytes.Count)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class A(mut string? E)\n\nvoid Log() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Log()\n    print(a.E.Bytes.Count)\n}"));
+        Clean("class A(string? E)\n\nvoid Log() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Log()\n    print(a.E.Bytes.Count)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    print(1)\n    print(a.E.Bytes.Count)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors("class A(mut string? E) {\n    pub string Text() => \"a\"\n}\n\na = A(\"x\")\nif a.E != null {\n    s = \"{a}\"\n    print(a.E.Bytes.Count + s.Bytes.Count)\n}"));
+        Clean("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    n = a.E.Bytes.Count\n    s = \"{n}\"\n    print(a.E.Bytes.Count + s.Bytes.Count)\n}");
+        Clean("class A(mut string? E)\n\nmut a = A(null)\na.E = \"x\"\nprint(a.E.Bytes.Count)");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    f = () => a.E.Bytes.Count\n    print(f())\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors("class A(mut string? E) {\n    pub int Size() {\n        if E != null {\n            n = E.Bytes.Count\n            Touch()\n            return n + E.Bytes.Count\n        }\n\n        return 0\n    }\n\n    void Touch() {\n    }\n}\n\nprint(A(null).Size())"));
+    }
+
+    [Fact]
+    public void A_class_that_reaches_itself_through_strong_fields_with_a_mut_field_on_the_path_is_a_reference_cycle()
+    {
+        // R2, R4: judged by the types of the fields, once for each ring, at the class of the ring declared first; through a list, a map's
+        // value and a data value; a ring without a `mut` field is no cycle
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class Node(mut List<Node> Children)\n\nprint(Node(List<Node>()).Children.Count)"));
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class A(string N, mut List<B> Bs)\nclass B(A Owner)\n\nprint(A(\"a\", List<B>()).N)"));
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class A(mut B? Next)\nclass B(mut C? Next)\nclass C(A? Back)\n\nprint(A(null).Next == null)"));
+        Assert.Equal([(ErrorIds.ReferenceCycle, 2)], Errors("data Box(A Item)\nclass A(mut Map<string, Box> Boxes)\n\nprint(A(Map<string, Box>()).Boxes.Count)"));
+        // a data type met again is read through the type arguments its fields reach: `W<int>` holds a `W<A>`, which holds an `A`
+        Assert.Equal([(ErrorIds.ReferenceCycle, 2)], Errors("data W<T>(W<A>? Inner, T V)\nclass A(mut W<int>? N)\n\nprint(A(null).N == null)"));
+        Clean("class Link(int V, Link? Next)\n\nprint(Link(1, Link(2, null)).Next?.V ?? 0)");
+        Clean("class A(B? Next)\nclass B(mut int N, C? Next)\nclass C(int V)\n\nprint(A(null).Next == null)");
+    }
+
+    [Fact]
+    public void An_instance_is_a_counted_reference_that_no_pointer_and_no_state_outside_a_function_holds()
+    {
+        // R10, R13 with K2: an instance holds counted references as a list does
+        Assert.Equal([(ErrorIds.CountedPointee, 3)], Errors("class C(int N)\n\nC* p = null\nprint(p == null)"));
+        Assert.Equal([(ErrorIds.StaticState, 3)], Errors("class C(int N)\n\nstatic mut C? shared = null\nprint(1)", grants: "raw"));
+    }
+
+    [Fact]
+    public void A_method_is_checked_as_a_function_and_a_field_as_a_variable_of_its_class()
+    {
+        // K1: `void` is no type of a field; K7: a method has a body; T19: a class takes no type arguments (E4)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("class C(void N)\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C(int N) {\n    pub int Get()\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("class C(int N)\n\nprint(C<int>(1).N)"));
+        // O10: a `void` method's call assigned to a field, by its name and through the instance
+        Assert.Equal([(ErrorIds.Syntax, 6)], Errors("class C(mut int N) {\n    pub void Go() {\n    }\n\n    pub void Set() {\n        N = Go()\n    }\n}\n\nC(1).Set()"));
+        Assert.Equal([(ErrorIds.Syntax, 7)], Errors("class C(mut int N) {\n    pub void Go() {\n    }\n}\n\nc = C(1)\nc.N = c.Go()"));
+        // F13: two methods with the same parameter types; F3: the end of a method reached without a `return`
+        Assert.Equal([(ErrorIds.DuplicateFunction, 3)], Errors("class C(int N) {\n    pub int Get() => N\n    pub int Get() => 1\n}\n\nprint(C(1).N)"));
+        Clean("class C(int N) {\n    pub int Get() => N\n    pub int Get(int k) => N + k\n}\n\nprint(C(1).Get(2))");
+        Assert.Equal([(ErrorIds.MissingReturn, 2)], Errors("class C(int N) {\n    pub int Get() {\n        if N > 0 {\n            return 1\n        }\n    }\n}\n\nprint(C(1).Get())"));
+        // V9: a variable of a method named as a field; V10: a member and a method the class does not have
+        Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int N) {\n    pub int Get() {\n        int N = 2\n        return N\n    }\n}\n\nprint(C(1).Get())"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int N)\n\nprint(C(1).M)"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int N)\n\nprint(C(1).M())"));
+        // F11: a lambda changes no field of what it captured, by the field's name inside a method or through the instance
+        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N) {\n    pub void Later() {\n        f = () => {\n            N = 1\n        }\n        f()\n    }\n}\n\nC(0).Later()"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N)\n\nc = C(0)\nf = () => { c.N = 1 }\nf()\nprint(c.N)"));
+        Clean("class C(mut int N) {\n    pub void Add() {\n        N = N + 1\n    }\n}\n\nc = C(0)\nf = () => c.Add()\nf()\nprint(c.N)");
+        // K2 with M4, M5: an item or an entry written into a collection a field holds, as a `mut` method on the field is
+        Clean("class Note(mut Map<string, int> Counts, mut List<int> Xs) {\n    pub void Mark() {\n        Counts[\"a\"] = 1\n        this.Xs[0] = 2\n    }\n}\n\nn = Note(Map<string, int>(), [1])\nn.Mark()\nn.Counts[\"b\"] = 2\nn.Xs[0] = 3\nprint(n.Counts)");
+        Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Note(Map<string, int> Counts)\n\nn = Note(Map<string, int>())\nn.Counts[\"a\"] = 1"));
+        Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Box(List<int> Xs)\n\nb = Box([1])\nb.Xs[0] = 2"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class Box(mut List<int> Xs)\n\nb = Box([1])\nf = () => { b.Xs[0] = 2 }\nf()"));
+        Assert.Equal(["5: an assignment into a value held by a field of an instance (K2, M4)"], NotSupported("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag([1]))\np.B.Items[0] = 2"));
+    }
+
+    [Theory]
+    [InlineData("class Box<T>(T Item)\n\nprint(1)", "1: a generic class (T19, chapter 7)")]
+    [InlineData("class A\nclass B : A\n\nprint(1)", "2: a base class or an interface after `:` (K6, K10)")]
+    [InlineData("class K(int Id) equal by Id\n\nprint(1)", "1: `equal by` (K8)")]
+    [InlineData("class C {\n    pub static int Step = 1\n}\n\nprint(1)", "2: a `static` field (K18)")]
+    [InlineData("class C {\n    mut int n = 0\n}\n\nprint(1)", "2: a field declared in the body of a class (K7, K14)")]
+    [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)", "2: a constructor declared in the body of a class (K14)")]
+    [InlineData("class C(int N) {\n    pub virtual int Get() => N\n}\n\nprint(C(1).Get())", "2: the modifier `virtual` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    pub static int Make() => 1\n}\n\nprint(1)", "2: the modifier `static` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    pub override string Text() => \"c\"\n}\n\nprint(1)", "2: the modifier `override` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    prot int Get() => N\n}\n\nprint(1)", "2: the modifier `prot` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    extern \"C\" long Twice(long x) {\n        return x * 2\n    }\n}\n\nprint(1)", "2: the modifier `extern` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))", "2: a method with type parameters of its own (section 4, T19)")]
+    [InlineData("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\nclass Pet(List<weak Owner?> Keepers)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class C(int N)\n\na = C(1)\nprint(a == a)", "4: `==` on a `C`: the equality of a class instance (K4) is not read (D3, M9)")]
+    [InlineData("class C(int N)\n\nxs = [C(1)]\nprint(xs == xs)", "4: `==` on a `List<C>`: its items: the equality of an instance of `C` (K4) is not read (D3, M9)")]
+    [InlineData("class C(int N)\ndata P(C Item)\n\np = P(C(1))\nprint(p == p)", "5: `==` on a `P`: its field `Item`: the equality of an instance of `C` (K4) is not read (D3, M9)")]
+    [InlineData("class C(int N)\n\nm = Map<C, int>()\nprint(m.Count)", "3: a map with keys of type `C`: the equality of an instance of `C` and its hash (K4, K12) are not read (M9)")]
+    [InlineData("class C(int N)\ndata K(C Item)\n\nm = Map<K, int>()\nprint(m.Count)", "4: a map with keys of type `K`: its field `Item`: the equality of an instance of `C` and its hash (K4, K12) are not read (M9)")]
+    [InlineData("class C(int N) {\n    pub int Get() => N\n}\n\nc = C(1)\nf = c.Get\nprint(f())", "6: a method as a value, named without a call (K7, F11)")]
+    [InlineData("class Button(string Name, mut () => void OnClick)\n\nprint(1)", "1: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
+    [InlineData("data W<T>(W<() => int>? Inner, T V)\nclass C(W<int>? N)\n\nprint(1)", "2: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
+    [InlineData("data Pos(int X)\nclass P(mut Pos At)\n\np = P(Pos(0))\np.At.X = 1\nprint(p.At.X)", "5: an assignment into a value held by a field of an instance (K2, M4)")]
+    [InlineData("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag(List<int>()))\np.B.Items.Add(1)\nprint(p.B.Items.Count)", "5: a `mut` method on a value held by a field of an instance (K2, M5)")]
+    public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
+    {
+        // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields and constructors in the body (K7, K14, K18),
+        // a method that is `static`, `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` at any depth (R3), `==`
+        // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
+        // the program, and an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5)
+        Assert.Equal([expected], NotSupported(program));
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
-    [InlineData("class Counter(mut int Count)\n\nc = Counter(0)\nprint(c)", "1: a class (chapter 7)")]
-    [InlineData("class Account(mut string? Email)\n\nAccount? Load(int id) => null\n\nvoid Touch() {\n}\n\na = Load(1)\nif a?.Email != null {\n    Touch()\n    print(a?.Email.Bytes.Count)\n}", "1: a class (chapter 7)")] // N9: the checker narrows no path through a class instance, and a `weak` path runs through one (R5)
     [InlineData("interface Shape {\n    int Area()\n}", "1: an interface (K6, K10)")]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read)", "1: a flags type (D13)")]
     [InlineData("data User(List<int> Items)\n\nUser? Find() => null\n\nprint(Find()?.Items[0])", "5: an index after `?.` or `?[` (N5)")]
@@ -3079,9 +3225,9 @@ public sealed class CheckerTests
     [Fact]
     public void A_value_the_checker_could_not_type_carries_no_further_error()
     {
-        // E1: one defect, one diagnostic; a class instance's fields and members are its chapter's business; a list, a function or a data type
-        // with an error inside it is the error type as a whole, so one unknown element type is one error
-        var (diagnostics, _) = Check("class Counter(mut int Count) {\n    pub void Add() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nc.Count = 2\nc.Add()\nprint(c.Count)");
+        // E1: one defect, one diagnostic; the fields and members of an instance of a class the checker does not read are its chapter's business; a
+        // list, a function or a data type with an error inside it is the error type as a whole, so one unknown element type is one error
+        var (diagnostics, _) = Check("class Counter(mut int Count) {\n    pub virtual void Add() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nc.Count = 2\nc.Add()\nprint(c.Count)");
         Assert.DoesNotContain(diagnostics.Items, d => d.IsError);
         Assert.Single(diagnostics.Items, d => !d.IsError);
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("xs = List<Nope>()\nList<int> ys = xs\nprint(ys.Count)"));

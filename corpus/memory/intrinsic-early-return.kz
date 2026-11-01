@@ -1,0 +1,13 @@
+// expect: output
+// | 3
+// rules: R18
+
+int Third(Vector128<int> lanes) {
+    if !X86.Sse41.IsSupported {
+        return lanes.GetElement(2)
+    }
+    // the rest of the block after a test turned around whose block always leaves is guarded (R18)
+    return X86.Sse41.Extract(lanes, 2)
+}
+
+print(Third(Vector128.Create(1, 2, 3, 4)))

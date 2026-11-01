@@ -628,7 +628,7 @@ C#'s `Equals` (§4). A class instance is a key as K12 says: `mutable-key` where 
 union's and a function type's among them (N1), so `map[key]` and `Remove(key)` give `V?` for every `V`
 (§4, the owner, 2026-10-30, "Nullable form, as Option"), a `V` that is nullable already giving that type,
 in which a missing entry and an entry that holds `null` read alike and `ContainsKey` alone tells them
-apart, called while the entry stands, before a `Remove` takes it out (N11; §4, the owner, 2026-10-30, "Flatten, as C#"). A key of a nullable type, with
+apart, called before a `Remove(key)`, whose result does not (N11; §4, the owner, 2026-10-30, "Flatten, as C#"). A key of a nullable type, with
 `null` among its keys, compares as `==` compares two nullable values (N10), `null` equal to `null` alone
 and two values as their type compares as a key *(assumed, §4: for the nullable types beside `double?` and
 `float?`)*, and a `double?` or a `float?` key compares its value as a `double` key does. `xs == ys` on two
@@ -638,7 +638,7 @@ lists of items `==` does not take are `type-mismatch`. Items of a nullable type 
 two nullable values (N10) *(assumed, §4: for the nullable types beside `double?` and `float?`)*, and the
 values of `double?` and `float?` items by IEEE's `==`, as Rust's `Vec<Option<f64>>` compares. A list held
 in a `data` value under `==` compares its `double` and `float` items, and the values of its `double?` and
-`float?` items, as C#'s `Equals` does (D3), and so does a list in a key. A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10), taken when a thread's first map takes its first block, at that map's first write *(assumed, §4: the
+`float?` items, as C#'s `Equals` does (D3), and so does a list in a key. A key's hash is a fast hash without keys until one insert's probe passes the bound, and from then on SipHash-1-3 under keys drawn from the system's randomness, the map moving its entries under that hash one time, as .NET's `Dictionary<string, ...>` switches to a randomized hash (M10; §4, the owner, 2026-11-01, "Switch, as .NET", which replaces "SipHash, random keys" of 2026-10-30) *(assumed, §4: the fast hash, foldhash 0.2.0's `fast::FixedState`; the bound, more than 512 slots of the groups one insert's lookup of its key passes; a switch per map; every type of key)*. The keys are taken when a thread's first map takes its first block, at that map's first write, though a map hashes with them only after a switch *(assumed, §4: the
 moment)*, from the sources Rust's standard library takes them from: on Linux from `getrandom` with `GRND_INSECURE`, or `GRND_NONBLOCK` where the kernel refuses that flag, and from `/dev/urandom` where the system refuses `getrandom` or its pool is not ready, and on Windows from `ProcessPrng`, as Rust 1.82 takes them there, which does not fail (§4, the owner, 2026-10-30, "ProcessPrng, as Rust 1.82"; `random-failed` where its library or the call is missing, on a system older than Windows 8 or Windows Server 2008 R2, the floor Microsoft's page of the call names, assumed there); on Linux, where none of them gives the bytes, where Rust panics, the program ends there with `random-failed` (§4, the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path"), whose line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (O11) *(assumed, §4: the id, the name the question gave as an example, and the shape of its line)*. `Count` is
 the number of a map's entries, an `int`; `ContainsKey(key)` is a `bool`; `Remove(key)`, a `mut` method,
 takes the key's entry out of the map and gives its value, or `null` where there is none, of the type
@@ -1042,9 +1042,11 @@ print(k == Wrap<Wrap<int>>(Wrap<int>(5)))
 
 A map has no order a program may rely on. A `for` loop over it (C6) and its text (A6) yield the
 entries in the order of the map's storage, which can differ between runs and versions, as the
-documentation of C#'s `Dictionary` leaves its order undefined. Two runs of one program can print
-the same map differently, and do as a rule, since the hash of a map's keys takes keys drawn from the
-system's randomness, as Rust's `HashMap` takes them (§4, the owner, 2026-10-30).
+documentation of C#'s `Dictionary` leaves its order undefined. A map gives its entries in the same
+order in every run of one build until it switches to SipHash-1-3 under keys drawn from the system's
+randomness, where an insert's probe passed the bound (M9), and a switched map's order can differ
+between runs; a program still may rely on no order of a map (§4, the owner, 2026-11-01, "Switch, as
+.NET").
 
 No case: no order can be expected, so a case can show a map of one entry only, which the case of
 A6 does.
@@ -1054,7 +1056,7 @@ A6 does.
 `[1, 2, 3]` is a list of the items between the brackets, and `[]` a list without items, as C# 12's
 collection expression writes one (§4, the owner, 2026-10-30, "[1, 2, 3], as C#"). The literal takes
 the list type where one stands, a written type, `List<int> xs = [1, 2, 3]`, or a parameter's,
-`Take([1, 2])`, and each item is read under its item type as an argument is under its parameter's: a
+`Sum([1, 2])` with `int Sum(List<int> numbers)`, and each item is read under its item type as an argument is under its parameter's: a
 literal takes it (L17), so `Bytes b = [1, 300]` is `constant-overflow`, a lambda takes its parameters
 from it (F11), and an item of another type is `type-mismatch` (T1). The list type stands wherever a
 type is expected, as L17 reads it for a number literal, but for the other operand of `==` (below):
@@ -1076,7 +1078,8 @@ not a literal, `[x]`, gives `T` the type of that item, as any other argument doe
 nothing and takes the list type the other arguments give, `Pair(1L, [])` a `List<long>`, so that where no
 other argument gives `T`, `Take([])` with `Take<T>(List<T> xs)` and `Pick([], [])` are `cannot-infer`, as
 `x = []` is *(assumed, §4: the items read as arguments of the parameter, of which `[]` has none, "From its
-items")*.
+items"; one `cannot-infer` at each empty literal, so two on the line of `Pick([], [])`, each literal a
+defect of its own under E1)*.
 
 A comma after the last item is accepted, `[1, 2,]` (§4, the owner, 2026-10-30, "Accept, as C# 12
 and Rust"); a line break inside the brackets continues the statement (L4), and where no `(` or `[` is
@@ -1212,7 +1215,7 @@ List<long> Made() {
 
 List<long>? Missing(bool b) => null
 
-List<long> Arm(int x) {
+List<long> Branch(int x) {
     return match x {
         1 => [8]
         else => [5, 6]
@@ -1226,7 +1229,7 @@ print(xs)
 ys = Missing(true) ?? [4]
 List<long> zs = ys
 print(zs)
-print(Arm(2))
+print(Branch(2))
 (int) => List<long> f = n => [7]
 print(f(1))
 ```

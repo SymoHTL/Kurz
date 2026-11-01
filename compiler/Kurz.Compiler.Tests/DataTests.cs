@@ -289,6 +289,7 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("data Outer<T>(Outer<Map<int, int>>? O, T V)\n\nm = Map<Outer<int>, int>()\nprint(m)\n", 3, "a generic data type that holds a value of its own type, `Outer<int>` (D1, T19)")] // whatever its type arguments: the checker's walk of a key reads no `Map` behind it (M9)
     [InlineData("data Outer<T>(Outer<Map<int, int>>? O, T V)\n\nn = Outer<int>(null, 1)\nprint(n == n)\n", 3, "a generic data type that holds a value of its own type, `Outer<int>` (D1, T19)")] // nor its walk of `==` (D3)
     [InlineData("data Thing(int A)\ndata Box<T>(T V) : Thing\ndata Bag(Box<int> Weight)\n\nBag Empty() => Empty()\n\nEmpty()\n", 5, "a generic data type in a relation of inheritance, `Box<int>` (D6, T19)")] // the field of the type a called function returns, at that function
+    [InlineData("class C(int N)\ndata Leaf\ndata Tree(C Item, Tree | Leaf Next)\n\nprint(Tree(C(1), Leaf).Item.N)\n", 5, "an instance of a class held by `Tree`, a data value laid out as a block, which is never freed (section 3, R3)")] // K2 with D1: such a value is never given back
     public void What_the_emitter_does_not_lay_out_is_not_supported_at_its_line(string text, int line, string message)
     {
         var compilation = Compile(text);
