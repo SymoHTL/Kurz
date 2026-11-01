@@ -238,24 +238,11 @@ pub string TextOfLong(long value) {
 
 // The text of an unsigned integer (A2): its decimal digits.
 pub string TextOfULong(ulong value) {
-    mut long count = 1
-    mut ulong rest = value / 10
-    while rest > 0 {
-        count = count + 1
-        rest = rest / 10
-    }
-
+    long count = DigitCount(value)
     mut string text = ""
     raw {
         byte* p = string.Allocate(count)
-        mut ulong v = value
-        mut long i = count - 1
-        while i >= 0 {
-            p[i] = byte(v % 10 + 48)
-            v = v / 10
-            i = i - 1
-        }
-
+        WriteDigits(p, value, int(count))
         text = string.FromRaw(p, count)
     }
 
@@ -837,8 +824,9 @@ string DecimalText(bool negative, ulong digits, int power, int precision) {
     return text
 }
 
-// The `count` decimal digits of `value` at `p`, the last one at `p + count - 1`.
-void WriteDigits(byte* p, ulong value, int count) {
+// The `count` decimal digits of `value` at `p`, the last one at `p + count - 1`, which an interpolation
+// writes an integer's digits into its block with (L6).
+pub void WriteDigits(byte* p, ulong value, int count) {
     mut ulong v = value
     mut long i = long(count) - 1
     raw {
@@ -2249,8 +2237,8 @@ int Bits(ulong value) {
     return n + int(v)
 }
 
-// The count of decimal digits of a number, 1 for 0.
-long DigitCount(ulong value) {
+// The count of decimal digits of a number, 1 for 0, which an interpolation counts an integer's with (L6).
+pub long DigitCount(ulong value) {
     mut long count = 1
     mut ulong rest = value / 10
     while rest > 0 {
