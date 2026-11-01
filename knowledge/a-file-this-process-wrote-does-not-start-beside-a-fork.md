@@ -18,7 +18,8 @@ their own threads at the same time. Now and then a variant did not start:
 This is item 4 of #156, seen in the CI runs 41246453494 and 41325216976. Item 5, a "Text file busy"
 in a local run of `TraceTests` on 2026-10-30, has the same cause by elimination. That run recorded
 no file name, so no log shows which file was refused; #156 records a test that could not start the
-executable it had built, the refusal of a start that the paragraph after the list describes. A write
+executable it had built, the refusal of a start that the paragraph "Linux refuses to start a file"
+below describes. A write
 of a file that is running gets `ETXTBSY` too, but in the writer (`open(2)`): a refused write of a
 variant is an exception of the test host in `File.Copy` or `File.WriteAllBytes`, and a refused write
 of a build is a failed build, so neither is a run that did not start. A probe of 2026-11-01 on Linux
