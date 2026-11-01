@@ -16,8 +16,16 @@ their own threads at the same time. Now and then a variant did not start:
 - the test's split of the error stream found no frame in that text, so the trace was empty.
 
 This is item 4 of #156, seen in the CI runs 41246453494 and 41325216976. Item 5, a "Text file busy"
-in a local run of `TraceTests`, has the same shape: the variants are the only files the suite
-writes in its own process and runs.
+in a local run of `TraceTests` on 2026-10-30, has the same cause by elimination: that run recorded
+no file name, so no log shows which file was refused. Linux refuses a file with `ETXTBSY` only
+while a description of it is open for writing, and the trace tests of that day (`main` at 7b398b2)
+ran two kinds of file:
+
+- the builds, written by clang and by the linker its driver starts and waits for, while
+  `Processes.Capture` waits for clang to end before the test runs the build;
+- the two variants, which the test host wrote itself with `File.Copy` and `File.WriteAllBytes`.
+
+What the elimination leaves open is a writer of a build that outlives clang, of which none is known.
 
 Linux refuses to run a file while any open file description of it is open for writing. .NET opens
 its files with `O_CLOEXEC`, but a child that another thread forks in that time holds a copy of
