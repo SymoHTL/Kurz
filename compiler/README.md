@@ -783,8 +783,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
-  holds its state, of a fixed count for each type (616 bytes for SHA-256, 408 for MD5, 1028 for CRC-32's register and
-  table, 1296 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
+  holds its state, of a fixed count for each type (104 bytes for SHA-256, 88 for MD5, 1028 for CRC-32's register and
+  table, 272 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
   the hasher's place, a `mut` variable or a path of fields from one (M5), copy it where another value holds it, as a
   list is copied before a write (M3), and store the block back. `Finish` gives a new block of the digest, or the
   CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
