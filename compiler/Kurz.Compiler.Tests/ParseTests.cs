@@ -523,6 +523,140 @@ public sealed class ParseTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
+    /// X7, at the bounds of the parse's two faster paths: <c>double.Parse</c> and <c>float.Parse</c> give what .NET's <c>Parse</c> of the
+    /// type gives (<see cref="Floating"/>) for every count of digits from 1 to 24 with the point at every place and with none, and with 19
+    /// zeros before them, which the standard library reads 8 at a time and past 19 digits reads the first 19 of again; for a byte that is
+    /// no digit, one below <c>0</c>, one above <c>9</c>, a letter, a separator, a point, a byte past ASCII and a NUL, at every place of a run
+    /// of 17 digits, before the point and after it; for the forms that hold no digit, or <c>,</c> among more than 19 digits or next to
+    /// the point; and for the numbers of 19 digits a unit below, at and a unit above the halfway point between 2^63 and the next
+    /// <c>double</c>, where the low 64 bits of Eisel-Lemire's product alone tell the tie from a number above it. The <c>Parse</c> of each of
+    /// the eight integer types gives what .NET's gives (<see cref="Parsed{T}"/>) for the largest and the smallest value of each type and a
+    /// unit past them, for the numbers of 19 and 20 digits about 2^64, each as it is and with zeros before it to 19 and to 20 digits, where
+    /// the standard library adds the first 19 digits with no check and checks each one past them, with whitespace
+    /// around it, a letter after it and a sign before it; and for a byte that is no digit, one below <c>0</c>, one above <c>9</c>, a letter,
+    /// a separator, a point, a byte past ASCII and a space, at every place of a run of 8 digits and of 20. Each kind of result is taken at
+    /// least 100 times, and the program runs again under the allocator that makes every block it frees inaccessible.
+    /// </summary>
+    [Fact]
+    public void A_parse_at_the_bounds_of_its_faster_paths_gives_what_dotnet_gives()
+    {
+        var lines = new List<string>();
+        var expected = new List<string>();
+        var kinds = new Dictionary<string, int>(StringComparer.Ordinal);
+        void Floats(string s)
+        {
+            var results = new[] { Floating(s, 'd'), Floating(s, 'f') };
+            foreach (var r in results)
+            {
+                var kind = r is "empty" or "invalid digit" ? r : "number";
+                kinds[$"floating {kind}"] = kinds.GetValueOrDefault($"floating {kind}") + 1;
+            }
+
+            lines.Add($"Two({Literal(s)})");
+            expected.Add(string.Join(' ', results));
+        }
+
+        var state = 86420UL;
+        string DigitsOf(int count) => string.Concat(Enumerable.Range(0, count).Select(_ => (char)('0' + (int)(((state = Step(state)) >> 33) % 10UL))));
+        for (var count = 1; count <= 24; count++)
+        {
+            var body = DigitsOf(count);
+            Floats(body);
+            Floats(new string('0', 19) + body);
+            for (var at = 0; at <= count; at++)
+            {
+                Floats($"{body[..at]}.{body[at..]}");
+            }
+        }
+
+        foreach (var other in (string[])["/", ":", "a", ",", ".", "é", " ", "e", " ", "\0"])
+        {
+            for (var at = 0; at < 17; at++)
+            {
+                var run = DigitsOf(17);
+                var cut = run[..at] + other + run[(at + 1)..];
+                Floats(cut);
+                Floats("0." + cut);
+                Floats("1" + cut + "9");
+            }
+        }
+
+        foreach (var s in (string[])
+                 [
+                     "Infinity", "-nAn", ".", "e5", "-", "1.5.", "1,234.5", ",5", "1,,2", ".5", "5.", "1234567,12345678.5", "12345678.1234567,8", "1,.5", "1,",
+                     "1,e5", "1,234,567,890,123,456,789,012.5", "0,000,000,000,000,000,000,001.5", "000.000000000000000000001234567890123456789",
+                     "12345678901234567890123", "1234567890123456789012.345", "0.000000000000000000000000123456789012345678901", "9,999,999,999,999,999,999,999e-3",
+                     ".Infinity", "-.NaN", "9223372036854776831", "9223372036854776832", "9223372036854776833",
+                 ])
+        {
+            Floats(s);
+        }
+
+        void IntsOf(string s)
+        {
+            string[] results = [Parsed<sbyte>(s), Parsed<byte>(s), Parsed<short>(s), Parsed<ushort>(s), Parsed<int>(s), Parsed<uint>(s), Parsed<long>(s), Parsed<ulong>(s)];
+            foreach (var r in results)
+            {
+                var kind = r is "empty" or "invalid digit" or "too large" or "too small" ? r : "number";
+                kinds[$"integer {kind}"] = kinds.GetValueOrDefault($"integer {kind}") + 1;
+            }
+
+            lines.Add($"Ints({Literal(s)})");
+            expected.Add(string.Join(' ', results));
+        }
+
+        string[] bounds =
+        [
+            "127", "128", "-128", "-129", "255", "256", "32767", "32768", "-32768", "-32769", "65535", "65536", "2147483647", "2147483648",
+            "-2147483648", "-2147483649", "4294967295", "4294967296", "9223372036854775807", "9223372036854775808", "-9223372036854775808",
+            "-9223372036854775809", "18446744073709551615", "18446744073709551616", "36893488147419103232", "99999999999999999999",
+            "9999999999999999999", "10000000000000000000", "0", "-0", "-1",
+        ];
+        foreach (var bound in bounds)
+        {
+            var digits = bound.TrimStart('-');
+            var sign = bound[..^digits.Length];
+            foreach (var s in (string[])[bound, sign + digits.PadLeft(19, '0'), sign + digits.PadLeft(20, '0'), $" {bound}\t", $"{bound}x", $"+{bound}"])
+            {
+                IntsOf(s);
+            }
+        }
+
+        foreach (var other in (string[])["/", ":", "a", ",", ".", "\u00E9", "\u00A0", "e", " "])
+        {
+            foreach (var length in (int[])[8, 20])
+            {
+                for (var at = 0; at < length; at++)
+                {
+                    var run = DigitsOf(length);
+                    IntsOf(run[..at] + other + run[(at + 1)..]);
+                }
+            }
+        }
+
+        foreach (var kind in (string[])["floating number", "floating invalid digit", "integer number", "integer invalid digit", "integer too large", "integer too small"])
+        {
+            Assert.True(kinds.GetValueOrDefault(kind) >= 100, $"only {kinds.GetValueOrDefault(kind)} parses give `{kind}`");
+        }
+
+        var integers = Program[..Program.IndexOf("string Decoded(", StringComparison.Ordinal)];
+        var program = FloatingProgram + integers + """
+            void Ints(string s) {
+                print("{I8(s)} {U8(s)} {I16(s)} {U16(s)} {I32(s)} {U32(s)} {I64(s)} {U64(s)}")
+            }
+
+            """ + string.Join('\n', lines) + "\n";
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", program), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "bounds" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    /// <summary>
     /// X7: the powers of five the compiler writes into a program that parses a <c>double</c> or a <c>float</c> (<see cref="Emitter.Fives"/>)
     /// are fast_float's and Rust's: two words for each power from 5^-342 to 5^308, the first, the one of 5^0 and the last as their
     /// tables hold them; the other rows are held by the parses of the fact above that reach them.

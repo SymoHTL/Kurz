@@ -529,11 +529,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `index-out-of-range` where it reaches outside the string, read first, and else `not-char-boundary` where its start or
   then its end falls on a byte of the form 10xxxxxx, the runtime's `NotCharBoundary` writing the position on the line
   below the error line, as Rust's `&s[a..b]` reads a cut (X2, X10); an integer type's `Parse(s)`, which the standard
-  library's `ParseInteger` reads in C#'s Integer style, checking each digit against the type's range before it adds it,
-  as Rust's `from_str_radix` checks its multiplication, and reading a byte the form does not take before the range, as
-  C#'s `Parse` does, and whose case `ParseError` writes the words of its kind (X7); `double.Parse(s)` and `float.Parse(s)`,
+  library's `ParseInteger` reads in C#'s Integer style, adding the first 19 digits with no check, which a `ulong`
+  holds, as Rust's `from_str_radix` adds unchecked where the count of the digits proves that the type holds them, and
+  holding the number to the type's range once after them, then checking each digit past them against the range before
+  it adds it, as Rust checks its multiplication where the count does not prove it, and reading a byte the form does not
+  take before the range, as C#'s `Parse` does, and whose case `ParseError` writes the words of its kind (X7); `double.Parse(s)` and `float.Parse(s)`,
   which the standard library's `ParseDouble` and `ParseFloat` read as Rust's `parse` reads an `f64` and an `f32`, the
-  digits scanned once, then Clinger's fast path, Eisel-Lemire's with the 128-bit powers of five the emitter computes
+  digits read 8 at a time, as Rust's `try_parse_digits` reads them, with .NET's `,` among those before the point, and
+  past 19 digits the first 19 read again, as Rust's `parse_partial_number` reads them, then Clinger's fast path, Eisel-Lemire's with the 128-bit powers of five the emitter computes
   as fast_float's table holds them and writes into the program once, `parse.fives`, and the slow path over at most 768
   digits in a buffer the emitter's helper `parse.double` or `parse.float` takes on the stack, the result the nearest
   value, ties to the even one, with .NET's forms but a NUL after the number, which is `invalid digit`, as Rust reads
