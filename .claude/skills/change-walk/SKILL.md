@@ -168,10 +168,11 @@ the head that will be reviewed is a `judgment step`.
    owner, 2026-10-22; three from 2026-10-21). A round is a run that labelled the pull request: a run with files to
    review puts `review-round-<n>` on before its first pass, whatever follows; a dry run and
    `--plan` put none on. `gh pr view <N> --json labels` shows the labels, and the count is the
-   highest `n`; a second run ends before any pass as `REVIEW DID NOT COMPLETE (cap)`, and in CI
+   highest `n`; a second run with a file the cache does not answer ends before any pass as
+   `REVIEW DID NOT COMPLETE (cap)`, and in CI
    its `error` takes the place of the `review` status on its head, the head the round at the cap
    reviewed too. After that round no fix push follows, and no run is started (no Draft and
-   Ready, no dispatch):
+   Ready, no dispatch), but for sub-item 5:
    1. Read every open thread and write what the code at the reviewed head shows, grouped, in a
       file.
    2. `py -3 tools/pr_gates.py cap --pr <N> --analysis <file>` prints the section of the
@@ -184,10 +185,23 @@ the head that will be reviewed is a `judgment step`.
       finding of another head, a thread in which a person wrote anything but a move (that thread
       is read and answered first) and, with `--go`, a section with no reading.
    3. Run the failed jobs of the gates again when `pr-findings` read the threads open.
-   4. Merge at the head the round at the cap reviewed, over red where it is red (section 4, item 4).
+   4. Merge at the head the round at the cap reviewed, over red where it is red (section 4, item 4);
+      when `main` moved first, sub-item 5.
+   5. A head the cache answers whole is no round (the owner, 2026-11-01, "Free replay isn't a
+      round"): its run makes no pass, puts no label on and posts `review` at `success`, so it merges
+      green with no `--over-red`. After sub-items 1 to 3, at the reviewed head, take `main` only when
+      `git diff --name-only <the merge base the round reviewed> origin/main` names no file of the
+      pull request's diff and none of `tools/review/review.py`, `tools/kit.py` and
+      `.review/review-rules.yaml`, the round completed and its status does not say "NOT converged",
+      and the title and the description are as the round read them. A push to a Ready pull request
+      starts the run; on a Draft, `py -3 tools/review/review.py --pr <N> --plan` prints 0 batches
+      before the dispatch. A head with a file to review ends as `cap` before any pass and needs the
+      owner's approval for that head (section 4, item 4)
+      (`knowledge/a-review-the-cache-answers-is-no-round.md`).
    Gate: `pr-findings` and the merge tool read the move at the cap, and the cap command writes
-   it (`self-tests`), and `--go` refuses a section with no reading (`self-tests`); what the reading
-   says and starting no run are a `judgment step`; the labels a person can change, a second
+   it (`self-tests`), `--go` refuses a section with no reading (`self-tests`), and a run at the cap
+   that only replays completes (`self-tests`); what the reading
+   says, starting no run and the check of sub-item 5 are a `judgment step`; the labels a person can change, a second
    issue with the collection label, two runs that start at the same moment and a dry run:
    HAZARD (#41).
 
@@ -205,7 +219,8 @@ the head that will be reviewed is a `judgment step`.
    FAIL; reading those conditions is a `judgment step`, since the tool takes `--over-red` as the
    caller's statement. A round at the cap that did not complete, any other red check or gate at the
    cap, a head that took `main` after the round at the cap (a branch behind `main` at the cap is
-   brought up to date only with the owner's approval of that new head), and on any other pull
+   brought up to date only with the owner's approval of that new head, but for a head the cache
+   answers whole: section 3, item 8, sub-item 5), and on any other pull
    request a check that is red or missing for a cause outside the change: stop and ask the owner. Only
    with the owner's approval for this pull request and this head:
    `py -3 tools/merge_pr.py <N> <sha> --over-red <N>@<sha>=<check>[,<check>]`. The tool switches
