@@ -336,7 +336,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var program = Emit(Program);
         Assert.Contains("icmp eq ptr", program.Ir, StringComparison.Ordinal);
         Assert.Contains("inttoptr (i64 1 to ptr)", program.Ir, StringComparison.Ordinal);
-        Assert.Contains("type { i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its type's number, `Value` and `Next`
+        Assert.Contains("type { i64, i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its count, its type's number, `Value` and `Next`
         Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "null-niche")), 0, ["[]", "null", "[0, 1]", "false", "null", "2", "0", "5"], string.Empty);
     }

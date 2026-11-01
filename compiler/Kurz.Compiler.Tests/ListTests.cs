@@ -2374,6 +2374,159 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(total)
         """;
 
+    // values of data types laid out as blocks made and let go of through every way out of a block, as the lists' rounds take them: a
+    // variable, a variable assigned over, a `return`, a `break` and a `continue` that leave a block, a call's result nothing holds,
+    // the body of a `void` function, a lambda's environment, a list's item written over, a map's value written over, a plain value's
+    // field, a `with` of a block and of a plain value, a path assignment through a block, a union's case, a derived value through its
+    // base, the one value of a type without fields, and the string and the list a block holds
+    private const string DataRounds = """
+        data Shape
+        data Circle(string Name, List<int> Rs) : Shape
+        data Dot : Shape
+        data Tree(int V, Tree? Left, Tree? Right)
+        data Pair(Tree Left, int Right)
+
+        Tree Make(int depth) {
+            if depth == 0 {
+                return Tree(0, null, null)
+            }
+
+            return Tree(depth, Make(depth - 1), Make(depth - 1))
+        }
+
+        int Count(Tree t) {
+            mut n = 1
+            if t.Left != null {
+                n = n + Count(t.Left)
+            }
+
+            if t.Right != null {
+                n = n + Count(t.Right)
+            }
+
+            return n
+        }
+
+        int Early(int depth) {
+            t = Make(depth)
+            if depth > 0 {
+                return Count(t)
+            }
+
+            return 0
+        }
+
+        void Drop(int depth) => Make(depth)
+
+        Shape Pick(int i) {
+            if i % 3 == 0 {
+                return Dot
+            }
+
+            if i % 3 == 1 {
+                return Circle("c{i}", [i, i + 1])
+            }
+
+            return Shape
+        }
+
+        int Size(Shape s) => match s {
+            Circle c => c.Rs.Count
+            Dot => 0
+            Shape => 1
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(5)
+            mut b = Make(5)
+            b = Make(4)
+            p = Pair(Make(4), 1)
+            for j in 0..<3 {
+                c = Make(3)
+                if j == 1 {
+                    continue
+                }
+
+                total = total + Count(c)
+            }
+
+            for x in 0..<5 {
+                d = Make(3)
+                total = total + Count(d) - 15
+                if x == 2 {
+                    break
+                }
+            }
+
+            Make(4)
+            Drop(4)
+            h = () => Count(a)
+            mut ts = List<Tree>()
+            ts.Add(Make(3))
+            ts.Add(Make(2))
+            ts[0] = ts[1]
+            mut m = Map<int, Tree>()
+            m[1] = Make(3)
+            m[1] = Make(2)
+            w = a with { V = 9 }
+            mut q = Make(7)
+            q.Left = Make(2)
+            Tree | Shape u = Make(2)
+            s = Pick(round)
+            k = Pair(Make(2), 2) with { Left = Make(1) }
+            total = total + Early(4) + Count(p.Left) + h() + Count(ts[0]) + Count(m[1] ?? a) + Count(w) + Count(q) + Size(s) + Count(b) + Count(k.Left) - 300
+            total = total + match u {
+                Tree t => Count(t)
+                Shape => 0
+            }
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // instances of a class held by data values laid out as blocks, a chain of 200 made and dropped each round, each instance holding
+    // a list
+    private const string HeldInstanceRounds = """
+        class Box(mut List<int> Xs)
+        data Tree(Box Item, Tree? Next)
+
+        Tree? Chain(int n) {
+            mut Tree? t = null
+            for i in 0..<n {
+                b = Box(List<int>())
+                b.Xs.Add(i)
+                t = Tree(b, t)
+            }
+
+            return t
+        }
+
+        int Count(Tree? t) {
+            mut Tree? at = t
+            mut n = 0
+            while at != null {
+                n = n + at.Item.Xs.Count
+                at = at.Next
+            }
+
+            return n
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            total = total + Count(Chain(200))
+        }
+
+        print(round)
+        print(total)
+        """;
+
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
     // of maps whose entry is written over, a map of strings whose value and key a write over a key lets go of, and entries kept, made
@@ -2864,6 +3017,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
         Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
         Ran(BuildAndRun(ClassRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "class-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(DataRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "data-rounds-fenced"), 0, ["20", "2181"], "");
+        Ran(BuildAndRun(HeldInstanceRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "held-instance-rounds-fenced"), 0, ["20", "4000"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -2930,6 +3085,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
         Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
         Ran(BuildAndRun(ClassRounds, Budget(), "class-rounds"), 0, ["3000", "600000"], "");
+        Ran(BuildAndRun(DataRounds, Budget(), "data-rounds"), 0, ["3000", "327000"], "");
+        Ran(BuildAndRun(HeldInstanceRounds, Budget(), "held-instance-rounds"), 0, ["3000", "600000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -2953,6 +3110,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var boxes = BuildAndRun(ClassRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    all.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "class-rounds-held");
         Assert.Equal(1, boxes.Code);
         Assert.StartsWith("error: allocation-failed (", boxes.Error, StringComparison.Ordinal);
+
+        // and the rounds' trees, each with a tree of 1023 nodes of 32 bytes, all held: about 100 megabytes
+        var trees = BuildAndRun(DataRounds.Replace("    a = Make(5)\n", "    a = Make(5)\n    all.Add(Make(9))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Tree>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "data-rounds-held");
+        Assert.Equal(1, trees.Code);
+        Assert.StartsWith("error: allocation-failed (", trees.Error, StringComparison.Ordinal);
+
+        // and the instances the trees hold, kept by a list of their boxes while each tree is dropped: about 40 megabytes
+        var instances = BuildAndRun(HeldInstanceRounds.Replace("        b.Xs.Add(i)\n", "        b.Xs.Add(i)\n        boxes.Add(b)\n", StringComparison.Ordinal).Replace("Tree? Chain(int n) {", "Tree? Chain(mut List<Box> boxes, int n) {", StringComparison.Ordinal).Replace("Count(Chain(200))", "Count(Chain(mut all, 200))", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal), Budget(), "held-instance-rounds-held");
+        Assert.Equal(1, instances.Code);
+        Assert.StartsWith("error: allocation-failed (", instances.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2970,6 +3137,34 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Assert.StartsWith("error: stack-overflow", walked.Error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
         }
+    }
+
+    [Fact]
+    public void A_chain_of_a_million_data_values_is_freed_off_the_work_list_where_a_recursive_walk_of_it_overflows_the_stack()
+    {
+        // section 4, a reading of the owner's answer on classes of 2026-11-01, "Iterative, never crashes": the last count of a link's
+        // block that a release lets go of waits on its family's work list, as an instance's does, so no release calls itself once for
+        // each link
+        const string chain = "data Link(int V, Link? Next)\n\nLink? Build(int n) {\n    mut Link? head = null\n    for i in 0..<n {\n        head = Link(i, head)\n    }\n\n    return head\n}\n\nmut Link? all = Build(1000000)\nprint(all?.V ?? -1)\nall = null\nprint(\"freed\")\n";
+        Ran(BuildAndRun(chain, toolchain.Runtime, "data-chain-freed"), 0, ["999999", "freed"], "");
+
+        // the positive control: a function that walks the same chain by calling itself for each link ends with `stack-overflow`
+        var walked = BuildAndRun(chain.Replace("print(\"freed\")", "print(Depth(Build(1000000)))", StringComparison.Ordinal) + "\nint Depth(Link? l) {\n    if l == null {\n        return 0\n    }\n\n    return 1 + Depth(l.Next)\n}\n", toolchain.Runtime, "data-chain-walked");
+        Assert.NotEqual(0, walked.Code);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.StartsWith("error: stack-overflow", walked.Error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
+        }
+    }
+
+    [Fact]
+    public void A_release_that_ends_a_value_of_another_type_shares_the_one_flag_of_a_release_under_way()
+    {
+        // an instance whose end lets go of an instance of another class, and a block whose end lets go of a block of another family:
+        // the release made while the end of another type is made declares no flag of its own, which clang refuses as a second
+        // definition of the global
+        Ran(BuildAndRun("class Link(int V, Link? Next)\n\nclass Box(Link? Chain)\n\nvoid Keep(Box b) {\n}\n\nKeep(Box(null))\nprint(1)\n", toolchain.Runtime, "release-nested-classes"), 0, ["1"], "");
+        Ran(BuildAndRun("data Inner(int V, Inner? Next)\ndata Outer(Inner I, Outer? Next)\n\nprint(Outer(Inner(1, null), null).I.V)\n", toolchain.Runtime, "release-nested-blocks"), 0, ["1"], "");
     }
 
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists

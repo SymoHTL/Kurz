@@ -133,7 +133,7 @@ public sealed partial class Emitter
 
             case DataType d when layout.IsBlock(d):
                 {
-                    Add(fn.Value($"zext i32 {fn.Value("load i32, ptr %a1")} to i64"));
+                    Add(fn.Value($"zext i32 {BlockNumber("%a1", d.Symbol)} to i64"));
                     ByNumber("%a1", d.Symbol, held =>
                     {
                         var block = layout.Block(held);

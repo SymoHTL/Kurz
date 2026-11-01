@@ -141,11 +141,12 @@ public sealed partial class Emitter
                 return "zeroinitializer"; // N1: the value of a nullable type's case `null`, of no size
             case UnitConstant when type is DataType d && layout.IsBlock(d):
                 {
-                    // D8: the one value of a type without fields, a block that is never written, since a write copies a block first
+                    // D8: the one value of a type without fields, a block that is never written, since a write copies a block first, whose
+                    // count carries the highest bit, held for ever, which a count's change tests for (RetainBlock)
                     var name = $"@\"unit.{Lower.Mangle(d)}\"";
                     if (helpers.Add(name))
                     {
-                        module.Global($"{name} = private unnamed_addr constant {layout.Block(d.Symbol)} {{ i32 {Number(layout.Number(d))} }}");
+                        module.Global($"{name} = private unnamed_addr constant {layout.Block(d.Symbol)} {{ i64 {long.MinValue.ToString(CultureInfo.InvariantCulture)}, i32 {Number(layout.Number(d))} }}");
                     }
 
                     return name;
