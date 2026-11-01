@@ -1,0 +1,5 @@
+// expect: error mut-required at 5
+// rules: X11
+
+xs = [1]
+print(xs.RemoveAt(0))

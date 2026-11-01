@@ -1629,6 +1629,82 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "false", // a `char` whose four bytes differ from the string's in the last
     ];
 
+    // `Insert` and `RemoveAt` (X11): an item inserted beside a copy, which keeps its items (M3), and one read from the list it goes into,
+    // which `Insert` holds before the list moves (M7); the item `RemoveAt` gives, kept, printed and dropped, from a list beside a copy;
+    // a list it alone holds grown by inserts at the end and at the front and emptied from its middle; through a path of fields beside a
+    // copy of the data value, with an item read from the same path; and a list of lists, whose item is a block
+    private const string Edits = """
+        data Bag(List<string> Items)
+
+        string Made(int n) => "made {n}"
+
+        mut words = [Made(1), Made(3)]
+        held = words
+        words.Insert(1, Made(2))
+        print(words)
+        print(held)
+        words.Insert(0, words[2])
+        print(words)
+        gone = words.RemoveAt(1)
+        print(gone)
+        print(words)
+        copy = words
+        print(words.RemoveAt(2))
+        print(copy)
+        words.RemoveAt(0)
+        print(words)
+        mut alone = List<string>()
+        for i in 0..<5 {
+            alone.Insert(alone.Count, Made(i))
+        }
+        for i in 0..<5 {
+            alone.Insert(0, Made(10 + i))
+        }
+        print(alone.Count)
+        print(alone[0])
+        print(alone[9])
+        mut total = 0
+        while alone.Count > 0 {
+            s = alone.RemoveAt(alone.Count / 2)
+            total = total + s.Bytes.Count
+        }
+        print(total)
+        mut bag = Bag([Made(6)])
+        other = bag
+        bag.Items.Insert(0, bag.Items[0])
+        print(bag.Items)
+        print(other.Items)
+        print(bag.Items.RemoveAt(1))
+        mut grid = [[1], [2, 3]]
+        grid.Insert(1, grid[1])
+        print(grid)
+        row = grid.RemoveAt(0)
+        print(row)
+        print(grid)
+        """;
+
+    private static readonly string[] EditsPrint =
+    [
+        "[made 1, made 2, made 3]", // inserted beside a copy, which keeps its items (M3)
+        "[made 1, made 3]",
+        "[made 3, made 1, made 2, made 3]", // the item read from the list before it moves
+        "made 1",
+        "[made 3, made 2, made 3]",
+        "made 3", // removed from a list beside a copy
+        "[made 3, made 2, made 3]",
+        "[made 2]", // an item given and dropped
+        "10",
+        "made 14",
+        "made 4",
+        "65", // five items of 6 bytes and five of 7
+        "[made 6, made 6]", // through a field, beside a copy of the data value
+        "[made 6]",
+        "made 6",
+        "[[1], [2, 3], [2, 3]]",
+        "[1]",
+        "[[2, 3], [2, 3]]",
+    ];
+
     // The sorts of X8: a list of strings sorted beside a copy, which keeps its order (M3), and one it alone holds, longer than a run,
     // sorted stable and unstable; `SortBy` with keys the call makes, strings let go of after the sort, with a key that reads a copy of
     // the list it sorts, which the lambda holds (F11), so that the sort copies its block, and on a list of one item; and a sort through a
@@ -2508,6 +2584,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, toolchain.Runtime, "map-members"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, toolchain.Runtime, "list-searches"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Edits, toolchain.Runtime, "list-edits"), 0, EditsPrint, "");
         Ran(BuildAndRun(Sorts, toolchain.Runtime, "list-sorts"), 0, SortsPrint, "");
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
@@ -2590,6 +2667,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, fenced, "map-members-fenced"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, fenced, "list-searches-fenced"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Edits, fenced, "list-edits-fenced"), 0, EditsPrint, "");
         Ran(BuildAndRun(Sorts, fenced, "list-sorts-fenced"), 0, SortsPrint, "");
         Ran(BuildAndRun(Pieces, fenced, "string-pieces-fenced"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
@@ -2914,6 +2992,32 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // made before the index is read (M4), so its `print` runs
         var text = $"int Seven() {{\n    print(7)\n    return 7\n}}\n\nmut xs = List<int>()\nxs.Add(4)\nxs.Add(5)\nxs[1] = 6\nprint(xs[1])\nxs[{index}] = Seven()\nprint(xs)\n";
         Ran(BuildAndRun(text, toolchain.Runtime, "list-write-" + name), 1, ["6", "7"], "error: index-out-of-range at program.kz:11\n");
+    }
+
+    [Theory]
+    [InlineData("Insert", "-1, 9", "minus")]
+    [InlineData("Insert", "3, 9", "past")]
+    [InlineData("Insert", "-2147483648, 9", "smallest")]
+    [InlineData("RemoveAt", "-1", "minus")]
+    [InlineData("RemoveAt", "2", "count")]
+    [InlineData("RemoveAt", "2147483647", "largest")]
+    public void An_Insert_or_a_RemoveAt_outside_the_list_raises_index_out_of_range_at_its_line(string member, string arguments, string name)
+    {
+        // X11: the call before it is the positive control, at the edge inside the list: an `Insert` at `Count`, a `RemoveAt` of the last item
+        var inside = member == "Insert" ? "xs.Insert(2, 6)\nxs.RemoveAt(2)\n" : "xs.Add(6)\nprint(xs.RemoveAt(2))\n";
+        var text = $"mut xs = List<int>()\nxs.Add(4)\nxs.Add(5)\n{inside}print(xs)\nxs.{member}({arguments})\nprint(xs)\n";
+        var printed = member == "Insert" ? new[] { "[4, 5]" } : ["6", "[4, 5]"];
+        Ran(BuildAndRun(text, toolchain.Runtime, $"list-{member.ToLowerInvariant()}-{name}"), 1, printed, "error: index-out-of-range at program.kz:7\n");
+    }
+
+    [Fact]
+    public void An_Insert_past_the_limit_reports_the_bytes_of_the_items_after_it()
+    {
+        // X11, M9: as `Add`, with the limit of the largest `int` lowered to 3 in the library's text, so that a fourth `Insert` asks for
+        // 4 times the 16 bytes of a string
+        const string text = "mut xs = List<string>()\nxs.Insert(0, \"a\")\nxs.Insert(0, \"b\")\nxs.Insert(1, \"c\")\nxs.Insert(1, \"d\")\nprint(xs)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-insert-limit"), 1, [], "error: allocation-failed (64 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-insert-below-limit"), 0, ["[b, d, c, a]"], ""); // the positive control
     }
 
     [Fact]

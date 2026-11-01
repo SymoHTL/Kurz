@@ -74,6 +74,12 @@ public enum CallKind
     /// <summary>A list's <c>Reverse()</c> (X9).</summary>
     ListReverse,
 
+    /// <summary>A list's <c>Insert(index, item)</c> (X11).</summary>
+    ListInsert,
+
+    /// <summary>A list's <c>RemoveAt(index)</c>, which gives the item it takes out (X11).</summary>
+    ListRemoveAt,
+
     /// <summary>A list's <c>Sort()</c>, in place and stable (X8).</summary>
     ListSort,
 

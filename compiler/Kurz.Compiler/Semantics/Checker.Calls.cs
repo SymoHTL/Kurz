@@ -1235,6 +1235,43 @@ public sealed partial class Checker
                         return result;
                     }
 
+                case "Insert":
+                    {
+                        // X11: C#'s names, `index` and `item`; the item stored before the list changes, as `Add` stores it (M7)
+                        if (RefusesTypeArguments(c, "`Insert`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var candidate = new Candidate { Slots = [new Slot("index", Types.Int, false, false, false), new Slot("item", list.Element, false, false, false)], Result = Types.Void };
+                        var result = Record(c, CallKind.ListInsert, Call([candidate], c, null, out var picked), picked);
+                        if (!result.IsError)
+                        {
+                            MutReceiver(c, m.Target, c.Line, "`Insert` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
+                        return result;
+                    }
+
+                case "RemoveAt":
+                    {
+                        // X11: the item taken out, as Rust's `Vec::remove` gives it and the map's `Remove` gives its value (section 12, the
+                        // owner, 2026-11-01, "C# names, RemoveAt gives item")
+                        if (RefusesTypeArguments(c, "`RemoveAt`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var candidate = new Candidate { Slots = [new Slot("index", Types.Int, false, false, false)], Result = list.Element };
+                        var result = Record(c, CallKind.ListRemoveAt, Call([candidate], c, null, out var picked), picked);
+                        if (!result.IsError)
+                        {
+                            MutReceiver(c, m.Target, c.Line, "`RemoveAt` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
+                        return result;
+                    }
+
                 case "Reverse":
                     {
                         if (RefusesTypeArguments(c, "`Reverse`"))

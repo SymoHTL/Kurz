@@ -771,6 +771,111 @@ xs.AddRange([2])
 print(xs)
 ```
 
+### X11 (decided, §12) Inserting and removing an item
+
+`xs.Insert(index, item)` puts `item` at the position `index` and moves the items from there one place on,
+and `xs.RemoveAt(index)` takes the item at `index` out of the list, moves the items after it one place
+back and gives the item, as C#'s `List.Insert` and `List.RemoveAt` name them and as Rust's `Vec::insert`
+and `Vec::remove` give it; `Insert` at `Count` appends the item, as `Add` does (§12, the owner, 2026-11-01,
+"C# names, RemoveAt gives item"). The item `RemoveAt` gives may be dropped, as the map's `Remove` gives
+one (M9), and both take the list through a `mut` variable (M5) *(assumed, §12)*. Their parameters are
+named `index` and `item`, and a `Bytes` has both, as it has the list's other members *(assumed, §12)*.
+
+Case: [strings/list-insert-remove-at.kz](../corpus/strings/list-insert-remove-at.kz)
+```kurz
+mut xs = [1, 2, 4]
+xs.Insert(2, 3)
+print(xs)
+// at `Count`, `Insert` appends
+xs.Insert(4, 5)
+print(xs)
+xs.Insert(0, 0)
+print(xs)
+// `RemoveAt` gives the item it takes out, the first and then the last
+print(xs.RemoveAt(0))
+print(xs.RemoveAt(4))
+// the item it gives may be dropped
+xs.RemoveAt(1)
+print(xs)
+mut names = List<string>()
+names.Insert(0, "a")
+print(names)
+mut b = "ac".Bytes
+b.Insert(1, byte(98))
+print(b)
+```
+
+A list whose storage another value holds is copied first, as a write copies it (M3; §12, the same
+answer). `Insert` stores its item before the list changes, as `Add` and `AddRange` store first (M7), so
+that `xs.Insert(0, xs[1])` puts the second item before the first *(assumed, §12)*.
+
+Case: [strings/list-insert-shared.kz](../corpus/strings/list-insert-shared.kz)
+```kurz
+mut xs = [1, 2]
+ys = xs
+// the item is read before the list changes, and the list another value holds is copied first
+xs.Insert(0, xs[1])
+print(xs)
+print(ys)
+mut zs = ys
+print(zs.RemoveAt(1))
+print(ys)
+print(zs)
+```
+
+An index outside the list raises `index-out-of-range`, as a list's index does (M9; §12, the same answer):
+for `Insert` an index below 0 or past `Count`, for `RemoveAt` an index below 0 or at `Count` or past it
+*(assumed, §12: below 0, as C# throws and Rust panics there)*. The index is read before the list is copied
+or grows, so that the list stays as it was, and an `Insert` past the largest `int` of items raises
+`allocation-failed`, as `Add` does (M9) *(assumed, §12)*.
+
+Case: [strings/list-insert-below-zero.kz](../corpus/strings/list-insert-below-zero.kz)
+```kurz
+mut xs = [1, 2]
+xs.Insert(0, 0)
+xs.Insert(-1, 9)
+print(xs)
+```
+
+Case: [strings/list-insert-past-count.kz](../corpus/strings/list-insert-past-count.kz)
+```kurz
+mut xs = [1, 2]
+// at `Count` the item is appended; one past it is outside the list
+xs.Insert(2, 3)
+xs.Insert(4, 9)
+print(xs)
+```
+
+Case: [strings/list-remove-at-below-zero.kz](../corpus/strings/list-remove-at-below-zero.kz)
+```kurz
+mut xs = [1, 2]
+print(xs.RemoveAt(1))
+print(xs.RemoveAt(-1))
+```
+
+Case: [strings/list-remove-at-count.kz](../corpus/strings/list-remove-at-count.kz)
+```kurz
+mut xs = [1, 2]
+print(xs.RemoveAt(1))
+// the last item is at `Count - 1`; `Count` is outside the list
+print(xs.RemoveAt(1))
+```
+
+On a list no `mut` variable holds, each is `mut-required`, as `Add` is (M5).
+
+Case: [strings/list-insert-without-mut.kz](../corpus/strings/list-insert-without-mut.kz)
+```kurz
+xs = [1]
+xs.Insert(0, 2)
+print(xs)
+```
+
+Case: [strings/list-remove-at-without-mut.kz](../corpus/strings/list-remove-at-without-mut.kz)
+```kurz
+xs = [1]
+print(xs.RemoveAt(0))
+```
+
 ### X10 (decided, §12) Where the error line of `not-char-boundary` names the position
 
 The position of the cut stands on the line below the error line, where the text of a `throw` stands

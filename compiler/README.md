@@ -652,7 +652,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   reads its argument first and holds it with a count of its own while the list makes room for all of its
   items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block and appends
   the items as they were (section 12, assumed); `Reverse()`, which swaps the items in place and copies
-  a block another value holds first (X9, M3); and `Sort()`, `SortUnstable()` and `SortBy(keySelector)`
+  a block another value holds first (X9, M3); `Insert(index, item)` and `RemoveAt(index)` (X11), which
+  read the index before the list is copied or grows and raise `index-out-of-range` outside it, `Insert`
+  holding its item before the list moves, as `Add` does, and move the items after the index by a memmove,
+  as Rust's `Vec::insert` and `Vec::remove`, `RemoveAt` giving the item it takes out and keeping the room; and `Sort()`, `SortUnstable()` and `SortBy(keySelector)`
   (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
   `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first: `Sort` a merge sort, which keeps
   equal items in their order, runs of 20 items sorted by insertion and merged in pairs through a buffer of
@@ -1242,7 +1245,7 @@ generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths non
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
@@ -1374,7 +1377,7 @@ round can ask about it by the rule's id.
   `type-mismatch` at the collection (C6, a proposal). A read of a map in the key of its own `Remove` is a
   value of its own and holds nothing of the map, so a map's methods need none of `Add`'s exception, which
   every `mut` method that stores what its argument gave before it changes its receiver takes, `AddRange`
-  among them (M7). A map that
+  and `Insert` among them (M7). A map that
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
   (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
   separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13).
