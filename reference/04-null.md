@@ -791,6 +791,28 @@ if Keep(p, Owner("Ann")) && p.Keeper != null {
 }
 ```
 
+Case: [memory/weak-narrowed-after-block-with-variable.kz](../corpus/memory/weak-narrowed-after-block-with-variable.kz)
+```kurz
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+void Show(Pet pet) {
+    if pet.Keeper != null {
+        if pet.Keeper.Name != "" {
+            name = pet.Keeper.Name
+            if name == "x" {
+                return
+            }
+        }
+
+        print(pet.Keeper.Name)
+    }
+}
+
+o = Owner("Ann")
+Show(Pet(o))
+```
+
 Case: [null/narrowed-field-by-assignment.kz](../corpus/null/narrowed-field-by-assignment.kz)
 ```kurz
 class Account(mut string? Email)

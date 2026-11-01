@@ -194,6 +194,9 @@ weak Owner? a = Remember(o)
 print(NameOf(a))
 weak Owner? b = Remember(Owner("Bob"))
 print(NameOf(b))
+mut keepers = Map<string, weak Owner?>()
+keepers["ann"] = o
+print(keepers["ann"]?.Name ?? "gone")
 ```
 
 ### R4 (decided, §3) Where `weak` is enough
