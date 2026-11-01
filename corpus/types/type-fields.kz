@@ -1,0 +1,14 @@
+// expect: output
+// | Id = a1
+// | Count = 3
+// rules: T33
+
+data Order(string Id, int Count)
+
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print("{f.Name} = {f.Get(value)}")
+    }
+}
+
+ShowFields(Order("a1", 3))

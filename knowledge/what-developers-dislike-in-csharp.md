@@ -121,7 +121,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 20. Reflection breaks trimming and native AOT
 
 - Evidence: "Fixing trim warnings - .NET" (https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/fixing-warnings): "Trim warnings indicate potential issues that could cause behavior changes or crashes after trimming." and, of the ways to fix them, "Eliminate reflection - This is always the best option if possible."
-- Kurz: AVOIDED. §2: "Compilation is whole-program." The chores C# does by reflection (mapping, validation, dependency wiring, database queries) are compile-time keywords in §9, under rule 5, "Sealed at compile time. Keyword code cannot read files, network or clock.", and rule 7, "Read-only type information." The record names no reflection at run time (a search of it for the word finds none).
+- Kurz: AVOIDED. §2: "Compilation is whole-program." The chores C# does by reflection (mapping, validation, dependency wiring, database queries) are compile-time keywords in §9, under rule 5, "Sealed at compile time. Keyword code cannot read files, network or clock.", and rule 7, "Read-only type information." The record names no reflection at run time: section 4's reading of a type in generic code happens while the program compiles, in each copy, and the word stands there for C#'s alone.
 
 ## 21. A dependency injection container fails at run time
 

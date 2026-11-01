@@ -1210,6 +1210,93 @@ Report(Find(1))
 Report(Find(2))
 ```
 
+### T33 (decided, §4) Reading a type in generic code
+
+A generic function (T19) reads the type each of its copies is made for, while the program compiles,
+through members of a type parameter, as Zig's `@typeInfo` reads a type. `T.Kind` is the kind of the
+type: a number type, `string`, `bool`, a list, a map, a nullable form, a `data` type, an `enum` or a
+union, and a `match` on it tells the kinds apart. A loop over `T.Fields` walks a `data` type's
+fields in the order of their declaration, unrolled in each copy: `f.Name` is a constant `string`,
+`f.Type` stands as a type argument, and `f.Get(value)` is the field's value, typed as the field.
+`T.Make(f => ...)` makes a value of a `data` type: it is unrolled into one call of the type's
+primary constructor, with one argument for each field in order, so that its constraints are checked
+as at any construction. Passing a type argument grants its reading, whatever package declared the
+type. The fields read are the primary constructor's (D14), never those the body declares (§4, the
+owner, 2026-11-01, "Kinds + parts", "for f in T.Fields", "T.Make(f => ...)" and "Type arg grants
+read"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+file's own `TypeKind` is `redeclared` (V9); it has a value for each number type, named as the type,
+and one for each other kind, `TypeKind.Data` and `TypeKind.String` among them; an arm of a `match`
+on `T.Kind` is checked only in the copies whose kind it names; `Kind`, `Fields` and `Make` are
+members of a type parameter alone; `f.Get(value)` reads as `value.Field`)* A `match` on `T.Kind`
+is not held to name every kind or end in an `else` arm, unlike one on a union or an `enum` (O8,
+D12): it is checked in each copy, and where it has no arm for the kind of a copy's type argument,
+the call that made the copy is the compile error `kind-not-read`, which names the generic function,
+the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
+error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
+same error)* A generic function that reads its type, and one that passes its type parameter to such
+a function, is checked only in the copies that calls make: an error in it shows at its first copy,
+and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
+
+Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
+```kurz
+data Order(string Id, int Count)
+
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print("{f.Name} = {f.Get(value)}")
+    }
+}
+
+ShowFields(Order("a1", 3))
+```
+
+Case: [types/type-kind.kz](../corpus/types/type-kind.kz)
+```kurz
+data Order(string Id, int Count)
+
+void ShowKind<T>() {
+    match T.Kind {
+        TypeKind.Data => print("data")
+        TypeKind.String => print("string")
+        else => print("other")
+    }
+}
+
+ShowKind<Order>()
+ShowKind<string>()
+ShowKind<bool>()
+```
+
+Case: [types/type-make.kz](../corpus/types/type-make.kz)
+```kurz
+data Point(int X, int Y)
+
+T Zero<T>() => T.Make(f => 0)
+
+print(Zero<Point>())
+```
+
+Case: [types/type-kind-redeclared.kz](../corpus/types/type-kind-redeclared.kz)
+```kurz
+enum TypeKind { Data }
+
+print(1)
+```
+
+Case: [types/type-kind-not-read.kz](../corpus/types/type-kind-not-read.kz)
+```kurz
+data Order(string Id)
+
+void ShowKind<T>() {
+    match T.Kind {
+        TypeKind.Data => print("data")
+    }
+}
+
+ShowKind<Order>()
+ShowKind<bool>()
+```
+
 ### T18 (assumed, §4) Operators
 
 `+ - * / %` on numbers, `== != < <= > >=` for comparison, on two strings as T32 says, and `&& || !` on `bool`, with the

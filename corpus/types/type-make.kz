@@ -1,0 +1,9 @@
+// expect: output
+// | Point { X = 0, Y = 0 }
+// rules: T33
+
+data Point(int X, int Y)
+
+T Zero<T>() => T.Make(f => 0)
+
+print(Zero<Point>())

@@ -521,7 +521,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line))
+        if (UnreadIntrinsic(n.Name, n.Line) || UnreadTypeKind(n.Name, n.Line))
         {
             return Typed.Error;
         }
@@ -539,7 +539,7 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (IsUnreadName(n.Name))
+            if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line))
             {
                 return Typed.Error;
             }
