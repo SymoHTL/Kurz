@@ -3174,13 +3174,119 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("void Show<T>(T value) {\n    for f in T.Fields {\n        print(f.Name)\n    }\n}\n\nShow(1)", "2: reading a type in generic code, `T.Fields` (T33)")]
-    [InlineData("void Show<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\nShow<int>()", "2: reading a type in generic code, `T.Kind` (T33)")]
     [InlineData("data P(int X)\n\nT Zero<T>() => T.Make(f => 0)\n\nprint(Zero<P>())", "3: reading a type in generic code, `T.Make` (T33)")]
-    [InlineData("print(TypeKind.Data)", "1: reading a type in generic code, `TypeKind` (T33)")]
-    [InlineData("void Show(TypeKind k) {\n}\n\nprint(1)", "1: reading a type in generic code, `TypeKind` (T33)")]
-    public void Reading_a_type_in_generic_code_is_not_supported_where_it_stands(string program, string expected) =>
-        // T33: a member of a type parameter that reads its type, at a member and at a member's call, and `TypeKind` as a value and as a type (E1)
+    public void Reading_a_type_by_its_fields_is_not_supported_in_a_copy(string program, string expected) =>
+        // T33: the members of a type parameter beyond `Kind`, at a member and at a member's call, in the copy the call makes (E1)
         Assert.Equal([expected], NotSupported(program));
+
+    [Fact]
+    public void TypeKind_is_a_type_every_file_sees()
+    {
+        // T33: `TypeKind` is a built-in enum, a value for each built-in type and one for each other kind
+        Clean("print(TypeKind.Data)\nprint(TypeKind.LongTimestamp)");
+        Clean("void Show(TypeKind k) {\n    print(k)\n}\n\nShow(TypeKind.Pointer)");
+    }
+
+    private const string ShowKind = "data Order(string Id)\n\nvoid ShowKind<T>() {\n    match T.Kind {\n        TypeKind.Data => print(\"data\")\n        TypeKind.Int => print(\"int\")\n    }\n}\n\n";
+
+    [Fact]
+    public void A_match_on_T_Kind_reads_in_each_copy_the_arm_of_its_kind()
+    {
+        // T33, F-R7: not held to name every kind or end in `else` (O8, D12), since each copy reads the one arm that takes its kind
+        Clean(ShowKind + "ShowKind<Order>()\nShowKind<int>()");
+    }
+
+    [Fact]
+    public void A_copy_whose_kind_no_arm_takes_is_kind_not_read_at_the_call_outside_every_copy()
+    {
+        // T33, F-R7: at the call that made the outermost copy, which the text names with the type, its kind and the function; a
+        // second call for the same type makes no copy and no second error
+        var program = ShowKind + "void Outer<U>() {\n    ShowKind<U>()\n}\n\nShowKind<Order>()\nOuter<bool>()\nShowKind<bool>()";
+        Assert.Equal([(ErrorIds.KindNotRead, 15)], Errors(program));
+        Assert.Contains("`Outer<bool>`: `bool` is of the kind `TypeKind.Bool`, which no arm of the `match` on `T.Kind` in `ShowKind` takes", Check(program).Diagnostics.Items[0].Message);
+    }
+
+    [Theory]
+    [InlineData("int", "Int")]
+    [InlineData("char", "Char")]
+    [InlineData("List<int>", "List")]
+    [InlineData("Map<string, int>", "Map")]
+    [InlineData("int?", "Nullable")]
+    [InlineData("int | string", "Union")]
+    [InlineData("Order", "Data")]
+    [InlineData("Shape", "Enum")]
+    [InlineData("(int) => int", "Function")]
+    public void T_Kind_in_a_copy_is_the_constant_of_the_kind_of_its_type(string type, string kind)
+    {
+        // T33: each copy reads its type's kind, a constant of `TypeKind`, so that a `match` on it takes the arm of that value alone
+        var program = $"data Order(string Id)\nenum Shape {{ Round }}\n\nvoid Only<T>() {{\n    match T.Kind {{\n        TypeKind.{kind} => print(1)\n    }}\n}}\n\nOnly<{type}>()";
+        Clean(program);
+    }
+
+    [Fact]
+    public void A_function_that_reads_its_type_is_checked_in_its_copies_alone()
+    {
+        // T33 (section 4, "Only per copy, as Zig"): no call, no check; each copy checks it, and a fault of its text is reported once
+        // however many copies read it, at its line
+        var program = "void Read<T>() {\n    match T.Kind {\n        else => {\n            int x = \"text\"\n            print(x)\n        }\n    }\n}\n\n";
+        Clean(program + "print(1)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors(program + "Read<int>()\nRead<bool>()"));
+    }
+
+    [Fact]
+    public void A_generic_function_that_passes_its_type_parameter_to_a_reader_is_checked_in_its_copies_alone()
+    {
+        // T33: a type argument the call writes or the checker infers that names the caller's type parameter makes the caller a reader
+        // too; a generic function that calls a reader with a type of its own is checked as any generic function
+        var reader = "void Read<T>(T value) {\n    match T.Kind {\n        else => print(value)\n    }\n}\n\n";
+        Clean(reader + "void Pass<U>(U u) {\n    Read(u)\n    int x = \"text\"\n    print(x)\n}\n\nprint(1)");
+        Clean(reader + "void Pass<U>() {\n    Read<List<U>>([])\n    int x = \"text\"\n    print(x)\n}\n\nprint(1)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors(reader + "void Fixed<U>(U u) {\n    Read(1)\n    int x = \"text\"\n    print(x)\n}\n\nprint(1)"));
+    }
+
+    [Fact]
+    public void An_arm_that_takes_another_kind_is_not_checked_in_a_copy()
+    {
+        // T33: each copy checks the arm that takes its kind alone, so that an arm can do what only its kind allows
+        var program = "void Show<T>(T value) {\n    match T.Kind {\n        TypeKind.Int => print(value + 1)\n        else => print(value)\n    }\n}\n\n";
+        Clean(program + "Show(1)\nShow(\"text\")");
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(program.Replace("TypeKind.Int", "TypeKind.String") + "Show(true)\nShow(\"text\")"));
+    }
+
+    [Fact]
+    public void T_in_a_copy_is_its_type_argument()
+    {
+        // T33: the name of the type parameter stands for the copy's type argument, in its body and its lambdas
+        Clean("int Twice<T>(T value) {\n    match T.Kind {\n        else => {\n            T held = value\n            f = (T x) => x\n            print(f(held))\n        }\n    }\n    return 2\n}\n\nprint(Twice(1))");
+    }
+
+    [Fact]
+    public void A_name_that_an_arm_of_another_copy_reads_counts_as_read()
+    {
+        // T33: a use in an arm this copy does not read counts, as a use in a branch that never runs counts in Rust; a variable no arm
+        // reads stays `unused-variable`
+        var program = "void Show<T>(T value) {\n    label = \"kind\"\n    match T.Kind {\n        TypeKind.Data => print(\"{label} {value}\")\n        else => print(value)\n    }\n}\n\nShow(5)";
+        Clean(program);
+        Assert.Equal([(ErrorIds.UnusedVariable, 2)], Errors(program.Replace("print(\"{label} {value}\")", "print(value)")));
+    }
+
+    [Fact]
+    public void The_arms_of_a_match_on_T_Kind_are_checked_as_the_arms_of_any_match()
+    {
+        // T33 with C4 and D12: in each copy, a value named twice is `unreachable-arm` and a name that is no value of `TypeKind` is
+        // `unknown-name`
+        var match = "void Show<T>() {{\n    match T.Kind {{\n        TypeKind.Int => print(1)\n        {0} => print(2)\n        else => print(3)\n    }}\n}}\n\nShow<int>()";
+        Assert.Equal([(ErrorIds.UnreachableArm, 4)], Errors(string.Format(match, "TypeKind.Int")));
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(string.Format(match, "TypeKind.Text")));
+    }
+
+    [Fact]
+    public void A_chain_of_copies_deeper_than_the_build_reads_is_not_supported_at_its_first_call()
+    {
+        // T33: a reader that calls itself for a larger type each time makes a new copy at each call, which no build could end
+        Assert.Equal(["7: a chain of more than 64 copies of generic functions that read their type, from `Deep<int>` (T33)"],
+            NotSupported("void Deep<T>() {\n    match T.Kind {\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()"));
+    }
 
     [Fact]
     public void A_member_named_as_a_type_reading_keeps_its_meaning_on_a_name_that_is_no_type_parameter()

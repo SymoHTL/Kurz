@@ -39,11 +39,14 @@ public sealed partial class Checker
         var reaching = new List<ImmutableHashSet<NullPath>>();
         var subjectPath = Types.NonNull(subjectType) is not null ? PathOf(subject) : null; // N3: a nullable variable or path of fields the arms test
         var nullNamed = false;
+        var kind = KindMatch(subject, typed); // T33: a `match` on `T.Kind` in a copy reads the one arm that takes the copy's kind
+        MatchArm? taken = null;
         foreach (var arm in arms)
         {
             PushScope();
             frame.Known = start;
             KurzType? patternType = null;
+            var (coveredBefore, literalsBefore) = (covered.Count, literals.Count);
             switch (arm.Pattern)
             {
                 case ElsePattern:
@@ -166,6 +169,20 @@ public sealed partial class Checker
             }
 
             nullNamed |= namesNull;
+            if (kind is not null)
+            {
+                var takes = taken is null && (arm.Pattern is ElsePattern || covered.Count > coveredBefore
+                    || (literals.Count > literalsBefore && literals[^1].Value == kind.Value.Constant));
+                if (!takes)
+                {
+                    CountNamesRead(arm.Body); // an arm another copy reads: what it names counts as read in this one too
+                    PopScope();
+                    continue;
+                }
+
+                taken = arm;
+            }
+
             if (isExpression)
             {
                 switch (arm.Body)
@@ -214,6 +231,19 @@ public sealed partial class Checker
 
         frame.Known = Join(reaching, start);
 
+        if (kind is { } k)
+        {
+            // T33, F-R7: not held to name every kind or end in `else`, unlike O8 and D12; a copy whose kind no arm takes stops the build
+            if (taken is null)
+            {
+                ReportKindNotRead(k.Copy, k.Type);
+                return new MatchResult(isExpression ? Types.Error : Types.Void, true, false);
+            }
+
+            model.RecordKindArm(subject, taken);
+            hasElse = true;
+        }
+
         var exhaustive = !known || hasElse || armWrong || Covers(cases, covered, literals); // an arm that named no case was reported; the match is not reported again for it (E1)
         if (!exhaustive)
         {
@@ -233,6 +263,13 @@ public sealed partial class Checker
 
         return new MatchResult(ArmsType(armTypes, expected), exhaustive, allEnd);
     }
+
+    /// <summary>T33: the subject <c>T.Kind</c> in a copy, with the copy, the type it binds to <c>T</c> and the constant of its kind; null for any other subject.</summary>
+    private (Copy Copy, KurzType Type, Constant Constant)? KindMatch(Expression subject, Typed typed) =>
+        Unwrap(subject) is MemberAccess { Target: NameExpression n, Member: "Kind", Conditional: false } && TypeParameter(n.Name) is null
+        && BoundType(n.Name) is { } bound && CurrentCopy() is { } copy && typed.Constant is { } constant
+            ? (copy, bound, constant)
+            : null;
 
     /// <summary>C4: whether an arm's type names a case: the case itself, or a data type derived from it (D6); no widening (T8) makes a case.</summary>
     private static bool IsCaseOf(KurzType type, KurzType c) => Types.Same(type, c) || (type is DataType && c is DataType && Types.Assignable(type, c));

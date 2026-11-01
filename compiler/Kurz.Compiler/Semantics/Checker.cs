@@ -152,6 +152,9 @@ public sealed partial class Checker
 
         public List<TypeParameterSymbol> TypeParameters { get; init; } = [];
 
+        /// <summary>T33: the copy whose body this is, which binds the names of its function's type parameters to its type arguments.</summary>
+        public Copy? Copy { get; init; }
+
         /// <summary>F16: the names of the top-level variables, which a top-level function neither reads nor declares.</summary>
         public HashSet<string>? Reserved { get; init; }
 
@@ -282,10 +285,16 @@ public sealed partial class Checker
         CheckDefaults();
         CollectReserved(program.Statements);
 
+        FindReaders();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
         {
-            Unread(f, () => CheckFunctionBody(f));
+            if (!readers.Contains(f))
+            {
+                CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
+            }
         }
+
+        JoinPassingReaders();
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
@@ -304,6 +313,7 @@ public sealed partial class Checker
         }
 
         ReportUnused(frame.Scope);
+        MakeCopies();
     }
 
     /// <summary>
@@ -339,27 +349,12 @@ public sealed partial class Checker
     /// <summary>A type's name the checker does not read: a type of chapter 7, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
 
-    /// <summary>T33: the name of the kinds of type, <c>TypeKind</c>, which every file sees (section 4, assumed with the owner's answer
-    /// "Kinds + parts" of 2026-11-01), so that a file's own declaration of it is <c>redeclared</c> (V9).</summary>
-    private static bool IsTypeKindName(string name) => name == "TypeKind";
-
-    /// <summary>T33: reading a type in generic code, which the checker does not read: a use of <see cref="IsTypeKindName"/> is <c>not supported</c>.</summary>
-    private bool UnreadTypeKind(string name, int line)
-    {
-        if (!IsTypeKindName(name))
-        {
-            return false;
-        }
-
-        NotSupported(line, $"reading a type in generic code, `{name}` (T33)");
-        return true;
-    }
-
-    /// <summary>T33: a member of a type parameter that reads its type, <c>T.Kind</c>, <c>T.Fields</c>, <c>T.Make</c> and the parts beyond the
-    /// fields, which the checker does not read: it is <c>not supported</c>.</summary>
+    /// <summary>T33: a member of a type parameter, or of the name a copy binds, that reads its type and that the checker does not read,
+    /// <c>T.Fields</c>, <c>T.Make</c> and the parts beyond the fields: it is <c>not supported</c>. <c>T.Kind</c> of a copy is read
+    /// (<see cref="KindOfCopy"/>).</summary>
     private bool UnreadTypeMember(string name, string member, int line)
     {
-        if (TypeParameter(name) is null || member is not ("Kind" or "Fields" or "Make" or "Values" or "Item" or "Key" or "Value" or "Inner" or "Cases"))
+        if ((TypeParameter(name) is null && BoundType(name) is null) || !IsTypeMember(member))
         {
             return false;
         }
@@ -936,6 +931,11 @@ public sealed partial class Checker
             return new HasherType(hasher);
         }
 
+        if (BoundType(n.Name) is { } bound && n.TypeArguments.Count == 0)
+        {
+            return bound; // T33: in a copy, the type argument its call gave
+        }
+
         var parameter = TypeParameter(n.Name);
         if (parameter is not null)
         {
@@ -976,7 +976,7 @@ public sealed partial class Checker
             return Types.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line) || UnreadTypeKind(n.Name, n.Line))
+        if (UnreadIntrinsic(n.Name, n.Line))
         {
             return Types.Error;
         }
@@ -1016,7 +1016,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsTypeKindName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1221,7 +1221,7 @@ public sealed partial class Checker
             return;
         }
 
-        frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel };
+        frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel, Copy = copies.GetValueOrDefault(f) };
         foreach (var (p, node) in f.Parameters.Zip(d.Parameters))
         {
             DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node);
@@ -1355,7 +1355,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsTypeKindName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
@@ -1365,7 +1365,7 @@ public sealed partial class Checker
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name);
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
@@ -1379,7 +1379,9 @@ public sealed partial class Checker
     /// by <c>with</c> as every data type
     /// (section 4, the owner, 2026-10-30, "Both, as a data type"), and <c>ParseError</c> with its <c>ParseKind</c>, the case of a number
     /// type's <c>Parse</c> that is no number (X7), and <c>HexError</c> with its <c>HexKind</c>, the case of <c>Hex.Decode</c> that gives no
-    /// bytes (H7; section 12, the owner, 2026-10-31, "Without input").
+    /// bytes (H7; section 12, the owner, 2026-10-31, "Without input"), and <c>TypeKind</c>, the kind of a type that generic code reads
+    /// (T33; section 4, assumed with the owner's answer "Kinds + parts" of 2026-11-01), a value for each built-in type named as the
+    /// type and one for each other kind.
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
         SourceText.FromString(
@@ -1402,6 +1404,10 @@ public sealed partial class Checker
             data ParseError(ParseKind Kind)
             enum HexKind { OddLength, InvalidDigit }
             data HexError(HexKind Kind, int At)
+            enum TypeKind {
+                SByte, Byte, Short, UShort, Int, UInt, Long, ULong, Float, Double, Decimal, Bool, String, Char, Duration, Timestamp,
+                LongDuration, LongTimestamp, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
+            }
             """));
 
     /// <summary>The tree of the built-in types, which reads clean and holds type declarations alone, or the compiler's defect.</summary>

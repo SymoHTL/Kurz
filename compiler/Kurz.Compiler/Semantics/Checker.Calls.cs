@@ -1875,6 +1875,10 @@ public sealed partial class Checker
         {
             var map = picked.Map.Count == 0 ? NoMap : picked.Map;
             model.RecordCall(c, new CallInfo(kind, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
+            if (kind == CallKind.Function)
+            {
+                KeepGenericCall(c, picked.Function); // T33: a call that may make a copy
+            }
         }
 
         return typed;

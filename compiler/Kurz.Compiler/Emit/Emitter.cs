@@ -234,6 +234,11 @@ public sealed partial class Emitter
                     break;
             }
         }
+
+        foreach (var copy in u.Model.Copies)
+        {
+            owners[copy] = u; // T33: a copy of a generic function that reads its type belongs to the function's file
+        }
     }
 
     /// <summary>R13: state outside a function is a global of the module, its constant initial value its initializer; <c>thread static</c> is the target's thread-local storage.</summary>

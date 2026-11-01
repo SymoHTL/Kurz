@@ -496,7 +496,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line) || UnreadTypeKind(n.Name, n.Line))
+        if (UnreadIntrinsic(n.Name, n.Line))
         {
             return Typed.Error;
         }
@@ -514,6 +514,11 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
+            if (KindOfCopy(n.Name, m.Member) is { } kind)
+            {
+                return kind; // T33: `T.Kind` in a copy, a constant
+            }
+
             if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line))
             {
                 return Typed.Error;

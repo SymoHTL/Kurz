@@ -45,7 +45,7 @@ public sealed class CorpusTests
     /// (D13, D17, D19), the body of a data type (D16),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
     /// (M6), collections between actors (M8), the texts of class instances and sets of flags (A5, A7, A9,
-    /// A10, A13, A15), the grants of files and sockets (S12), the intrinsics (R18) and the reading of a type in generic code (T33). A
+    /// A10, A13, A15), the grants of files and sockets (S12), the intrinsics (R18) and the reading of a type by its fields and its parts (T33). A
     /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header.
     /// </summary>
     private static bool OutsideTheChecker(string rule) =>

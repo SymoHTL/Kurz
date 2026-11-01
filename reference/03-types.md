@@ -1224,8 +1224,9 @@ as at any construction. Passing a type argument grants its reading, whatever pac
 type. The fields read are the primary constructor's (D14), never those the body declares (§4, the
 owner, 2026-11-01, "Kinds + parts", "for f in T.Fields", "T.Make(f => ...)" and "Type arg grants
 read"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
-file's own `TypeKind` is `redeclared` (V9); it has a value for each number type, named as the type,
-and one for each other kind, `TypeKind.Data` and `TypeKind.String` among them; an arm of a `match`
+file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
+type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
+and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
 on `T.Kind` is checked only in the copies whose kind it names; `Kind`, `Fields` and `Make` are
 members of a type parameter alone; `f.Get(value)` reads as `value.Field`)* A `match` on `T.Kind`
 is not held to name every kind or end in an `else` arm, unlike one on a union or an `enum` (O8,
@@ -1236,6 +1237,8 @@ error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `
 same error)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
+*(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
+does not read that arm)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
@@ -1281,6 +1284,42 @@ Case: [types/type-kind-redeclared.kz](../corpus/types/type-kind-redeclared.kz)
 enum TypeKind { Data }
 
 print(1)
+```
+
+Case: [types/type-kind-passed.kz](../corpus/types/type-kind-passed.kz)
+```kurz
+data Order(string Id)
+
+string Describe<T>() => match T.Kind {
+    TypeKind.Data => "Data"
+    else => "other: {T.Kind}"
+}
+
+void Show<U>(U value) {
+    print(Describe<U>())
+}
+
+Show(Order("a1"))
+Show(3)
+Show([1, 2])
+```
+
+Case: [types/type-kind-not-read-passed.kz](../corpus/types/type-kind-not-read-passed.kz)
+```kurz
+data Order(string Id)
+
+void ShowKind<T>() {
+    match T.Kind {
+        TypeKind.Data => print("data")
+    }
+}
+
+void Outer<U>() {
+    ShowKind<U>()
+}
+
+Outer<Order>()
+Outer<bool>()
 ```
 
 Case: [types/type-kind-not-read.kz](../corpus/types/type-kind-not-read.kz)
