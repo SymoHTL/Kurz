@@ -41,10 +41,10 @@ It wrote a copy of `true` with `File.Copy` and `File.WriteAllBytes` and ran it, 
 
 The gate is `compiler-tests` for `TraceTests`, in two cases:
 
-- a child holds the file of a build open for writing (opened without `O_CLOEXEC`, so that the child
-  holds it for as long as it runs), and the run is refused with an empty trace;
+- a child opens the file of a build for writing itself and keeps it open, and the run is refused
+  with an empty trace; with the child ended, the file starts and writes its trace;
 - a hundred variants run while two threads start processes, and every one starts. With the
-  variant written in the test host instead, 15 to 19 of the hundred did not start, in each of four
+  variant written in the test host instead, 10 to 19 of the hundred did not start, in each of five
   runs (2026-11-01).
 
 That no other test runs a file it wrote itself is a `judgment step`, read in review.

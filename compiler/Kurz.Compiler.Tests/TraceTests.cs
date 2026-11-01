@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
@@ -403,19 +402,18 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     {
         if (!OperatingSystem.IsLinux())
         {
-            return; // the descriptors a child inherits on Linux, and the trace of Linux
+            return; // the trace of Linux
         }
 
-        // the cause of the empty traces of #156: a child started while this process held a file open for writing holds the descriptor
-        // too, and the file does not start while it does. The descriptor here is opened without O_CLOEXEC, so that the child holds it
-        // for as long as it runs; one that .NET opens is held from the child's fork to its exec alone
+        // the cause of the empty traces of #156: a file a process holds open for writing does not start while it does, and a child
+        // started from this process holds each descriptor this one had open at the fork, up to the child's exec. Here the child opens
+        // the file itself (`exec 3>>`, which changes no byte) and keeps it open while it waits, so that this process never holds it
         var program = Build(Down, "trace-held");
-        var held = Open(program, 1, 0); // O_WRONLY, which changes no byte
-        Assert.True(held >= 0, $"open: errno {Marshal.GetLastPInvokeError()}");
-        using var holder = Process.Start(new ProcessStartInfo("sleep", ["60"]) { UseShellExecute = false })!;
+        var info = new ProcessStartInfo("sh", ["-c", "exec 3>>\"$0\" && echo open && exec sleep 60", program]) { UseShellExecute = false, RedirectStandardOutput = true };
+        using var holder = Process.Start(info)!;
         try
         {
-            Assert.Equal(0, Close(held));
+            Assert.Equal("open", holder.StandardOutput.ReadLine());
             var run = Toolchain.Run(program, null);
             Assert.Equal(-1, run.Code);
             Assert.EndsWith("Text file busy", run.Error);
@@ -454,22 +452,25 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
                     Interlocked.Increment(ref starts);
                 }
             }
-        })).ToList();
-        starters.ForEach(t => t.Start());
+        }) { IsBackground = true }).ToList();
         List<string> refused;
+        int beside;
         try
         {
+            starters.ForEach(t => t.Start());
+            var before = Volatile.Read(ref starts);
             refused = Enumerable.Range(0, 100)
                 .Select(_ => Toolchain.Run(Variant(built, "trace-starting-variant", ".symtab", (_, _) => { }), null))
                 .Where(r => r.Code == -1).Select(r => r.Error).ToList();
+            beside = Volatile.Read(ref starts) - before;
         }
         finally
         {
             stop.Cancel();
-            starters.ForEach(t => t.Join());
+            starters.Where(t => t.IsAlive).ToList().ForEach(t => t.Join());
         }
 
-        Assert.True(starts > 0, "no process started beside the variants");
+        Assert.True(beside > 0, "no process started beside the variants");
         Assert.True(refused.Count == 0, $"{refused.Count} of 100 variants did not start, the first so: {refused.FirstOrDefault()}");
     }
 
@@ -512,10 +513,4 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     }
 
     private static string Name(byte[] bytes, int at) => Encoding.ASCII.GetString(bytes, at, Array.IndexOf(bytes, (byte)0, at) - at);
-
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int Open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mode);
-
-    [DllImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static extern int Close(int descriptor);
 }
