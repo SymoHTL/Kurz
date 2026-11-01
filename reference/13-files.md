@@ -307,16 +307,17 @@ lookup that succeeds with no address, the error of the system `EAI_SYSTEM` passe
 the last address tried, and the string a connection's error names)*
 
 A read, a write and `TcpStream.Connect` on a socket wait at most 5 seconds by default, as long as a
-call of an actor waits (§6), the lookup of a name in `Connect` aside, which §14 holds open, and the time of a read and a write can be set for each socket, as
+call of an actor waits (§6), whether those 5 seconds cover the lookup of a name in `Connect` standing
+open (§14), and the time of a read and a write can be set for each socket, as
 Rust's `set_read_timeout` and `set_write_timeout` set a time for each socket (§12, the
 owner, 2026-10-30, against a timeout as an argument with no default and against a default in the
 HTTP server alone). `Connect` creates the socket such a setter would set, and another time reaches it
 through a second form that takes the time, `TcpStream.Connect(address, timeout)`, as Rust's
 `TcpStream::connect_timeout` takes it (§12, the owner, 2026-10-30, "Second form, as Rust", against a
 setting `Connect` reads before it creates the socket and against the 5 seconds alone), where Rust's
-takes one address and looks nothing up, and this form takes the name the first form takes, looks it up
-and tries its addresses in turn, as the first form's `address` reads above (§12, the owner, 2026-10-29,
-"Names too, as Rust"); how the time meets the lookup stands open (§14). A call whose time runs out
+takes one address and looks nothing up, and this form is read as taking the name the first form takes,
+looking it up and trying its addresses in turn, as the first form's `address` reads above (§12, the
+owner, 2026-10-29, "Names too, as Rust"), under the marker below; how the time meets the lookup stands open (§14). A call whose time runs out
 gives an `IoError` of the kind `TimedOut`, and `s.SetReadTimeout(d)` and `s.SetWriteTimeout(d)` set
 the time of a stream's reads and of its writes, taking a `duration`, `null` for no bound, as Rust's
 `set_read_timeout(Option<Duration>)`, with a time of zero and a negative time refused as
@@ -338,8 +339,10 @@ or an `Accept` on a blocking socket whose time is set is that case (checked 2026
 the Linux man-pages))* The socket options `SO_RCVTIMEO` and
 `SO_SNDTIMEO`, which Rust's setters set, bound a call on a blocking socket outside an actor alone, and how
 the bound holds for an actor's socket, which runs without blocking, stands open (§14). *(assumed, §12:
-the bound of `TcpStream.Connect` over every address it tries, while whether it covers the lookup
-stands open, §14)*
+one bound of `TcpStream.Connect` for the whole call, shared by every address it tries in turn and not
+given to each, while whether it covers the lookup stands open, §14; and the second form's lookup and
+its trial of the addresses, a reading of the answer's `Connect(address, timeout)`, which names the
+first form's parameter)*
 `l.Accept()` waits without a bound by default, as Rust's `TcpListener::accept` waits, and a bound
 can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", whose option read "No
 default bound on Accept. Read, write and Connect keep 5 s, and a bound can still be set on a

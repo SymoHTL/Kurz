@@ -294,7 +294,9 @@ flowchart TD
         gates and review green on the head, branch up to date,
         no force push, no deletion, nobody bypasses"]
         M2["merge_pr.py: refuses a head other than the one named, a Draft,
-        a branch behind its base, armed auto-merge, an unanswered finding (at the review cap a finding
+        a branch behind its base (at the review cap the refusal says, from the review status of the head,
+        whether the round converged on every file, and where it did not or the status does not show it,
+        that taking main costs a paid round and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
         moved to the collection ticket is answered, R7 and G8),
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
