@@ -1,8 +1,15 @@
 // expect: output
-// | true
+// | 3
 // rules: R18
 
+bool Shown(int lane) {
+    print(lane)
+    return true
+}
+
 v = Vector128.Create(1, 2, 3, 4)
-// the right side of `&&` after a test is guarded (R18)
-found = X86.Sse41.IsSupported && X86.Sse41.Extract(v, 2) == 3
-print(found || v.GetElement(2) == 3)
+// the right side of `&&` after a test is guarded, and prints the lane it extracted (R18)
+found = X86.Sse41.IsSupported && Shown(X86.Sse41.Extract(v, 2))
+if !found {
+    print(v.GetElement(2))
+}

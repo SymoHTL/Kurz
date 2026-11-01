@@ -10,9 +10,10 @@ namespace Kurz.Compiler.Emit;
 
 /// <summary>
 /// The IR of a program with its runtime, the libraries its C functions come from (R16), which the link names, whether it is a release
-/// build, which the backend optimises, and whether it carries line tables, as a test build and a release build with <c>--lines</c> do.
+/// build, which the backend optimises, whether it carries line tables, as a test build and a release build with <c>--lines</c> do, and
+/// clang's option for the CPU the build names, null for the target's baseline (section 2).
 /// </summary>
-public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, bool Release, bool Lines);
+public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, bool Release, bool Lines, string? CpuFlag = null);
 
 /// <summary>
 /// The code generator: LLVM IR, as text, for a program the checker read without an error and without <c>not supported</c>, from
@@ -46,7 +47,7 @@ public sealed partial class Emitter
     private readonly Dictionary<FunctionSymbol, string?> cLibraries = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<VariableSymbol, string> statics = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, string> instances = new(StringComparer.Ordinal);
-    private readonly Queue<(FunctionSymbol Function, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name)> pending = new();
+    private readonly Queue<(FunctionSymbol Function, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name, System.Collections.Immutable.ImmutableSortedSet<string> Features)> pending = new();
     private readonly List<IrFunction> emitted = [];
     private readonly SortedSet<string> libraries = new(StringComparer.Ordinal);
     private readonly Dictionary<DataSymbol, Unit> dataOwners = new(ReferenceEqualityComparer.Instance);
@@ -69,8 +70,9 @@ public sealed partial class Emitter
     /// </summary>
     private sealed record Unit(string Prefix, string File, ProgramSyntax Tree, SemanticModel Model, bool Runtime);
 
-    private Emitter(Unit program, Unit common, Unit sys, Unit std, bool test, bool lines, Target target)
+    private Emitter(Unit program, Unit common, Unit sys, Unit std, bool test, bool lines, Target target, Cpu cpu)
     {
+        this.cpu = cpu;
         this.program = program;
         this.common = common;
         this.sys = sys;
@@ -95,9 +97,10 @@ public sealed partial class Emitter
     /// when the program uses what the emitter does not lay out. <paramref name="checker"/> is the checker that read the program,
     /// with no error and no <c>not supported</c> among its diagnostics; <paramref name="file"/> is the name of the program's
     /// file as a compile error names it (design record, section 2), which the error line of an exception names (section 6);
-    /// <paramref name="lines"/> keeps the line tables in a release build (<c>--lines</c>), which a test build carries in any case.
+    /// <paramref name="lines"/> keeps the line tables in a release build (<c>--lines</c>), which a test build carries in any case;
+    /// <paramref name="cpu"/> is the CPU the build names (section 2), the target's baseline where it names none.
     /// </summary>
-    public static EmittedProgram? Emit(ProgramSyntax tree, Checker checker, CheckedRuntime runtime, string file, bool testBuild, DiagnosticBag diagnostics, bool lines = false)
+    public static EmittedProgram? Emit(ProgramSyntax tree, Checker checker, CheckedRuntime runtime, string file, bool testBuild, DiagnosticBag diagnostics, bool lines = false, Cpu? cpu = null)
     {
         ArgumentNullException.ThrowIfNull(tree);
         ArgumentNullException.ThrowIfNull(checker);
@@ -115,7 +118,8 @@ public sealed partial class Emitter
             new Unit("std", runtime.StdPath, runtime.Std, runtime.StdChecker.Model, true),
             testBuild,
             lines,
-            runtime.Target);
+            runtime.Target,
+            cpu ?? Cpu.Baseline);
         try
         {
             return emitter.Run();
@@ -139,6 +143,7 @@ public sealed partial class Emitter
 
     private EmittedProgram Run()
     {
+        RefuseArmTests();
         foreach (var u in units)
         {
             Register(u);
@@ -165,10 +170,7 @@ public sealed partial class Emitter
                 Declare(slot, arguments.Type);
             }
 
-            foreach (var s in program.Tree.Statements)
-            {
-                EmitStatement(s);
-            }
+            EmitStatements(program.Tree.Statements);
         });
 
         if (!fn.Terminated)
@@ -183,7 +185,8 @@ public sealed partial class Emitter
         {
             if (pending.Count > 0)
             {
-                var (function, instanceMap, name) = pending.Dequeue();
+                var (function, instanceMap, name, compiled) = pending.Dequeue();
+                features = compiled;
                 EmitFunction(function, instanceMap, name);
             }
             else
@@ -198,6 +201,11 @@ public sealed partial class Emitter
         }
 
         var main = new IrFunction("i32 @main(i32 %argc, ptr %argv)");
+        if (CpuRead() is { } read)
+        {
+            main.Emit($"call void {read}()"); // R18: the CPU's word, read once before the runtime starts, for every test that reads it
+        }
+
         main.Emit($"call void {start}(i32 %argc, ptr %argv)");
         main.Emit("call void @kz.main()");
         main.Emit($"call void {finish}()");
@@ -208,7 +216,7 @@ public sealed partial class Emitter
             module.Add(f);
         }
 
-        return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines);
+        return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines, cpu.Name is null ? null : Clang.CpuFlag(cpu.Name, cpu.X86));
     }
 
     /// <summary>The functions, the C declarations, the data types and the state outside a function of a file (R13, R16), each by its symbol.</summary>
@@ -289,6 +297,7 @@ public sealed partial class Emitter
         loops.Clear();
         regions = [];
         scopes = [];
+        outline = null; // a guarded block's function says what it stands in after it began (R18)
     }
 
     private void End() => emitted.Add(fn);
@@ -343,17 +352,21 @@ public sealed partial class Emitter
 
     // ---- functions -------------------------------------------------------------------------------
 
-    /// <summary>The IR name of a function for these type arguments, queued for emission on first use.</summary>
-    private string Instance(FunctionSymbol f, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap)
+    /// <summary>
+    /// The IR name of a function for these type arguments, queued for emission on first use: compiled for the sets of the function
+    /// being emitted, a copy where it has sets beyond the CPU's (R18), or for <paramref name="compiled"/>, none for a function value.
+    /// </summary>
+    private string Instance(FunctionSymbol f, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap, System.Collections.Immutable.ImmutableSortedSet<string>? compiled = null)
     {
         var owner = owners.TryGetValue(f, out var u) ? u : throw new InvalidOperationException($"`{f.Name}` belongs to no file of the module");
         var arguments = f.TypeParameters.Count == 0 ? string.Empty : "<" + string.Join(", ", f.TypeParameters.Select(p => Lower.Mangle(instanceMap[p]))) + ">";
-        var key = $"{owner.Prefix}.{(f.Owner is { } c ? c.Name + "." : string.Empty)}{f.Name}{arguments}.{f.Line.ToString(CultureInfo.InvariantCulture)}";
+        var sets = compiled ?? features;
+        var key = $"{owner.Prefix}.{(f.Owner is { } c ? c.Name + "." : string.Empty)}{f.Name}{arguments}.{f.Line.ToString(CultureInfo.InvariantCulture)}{FeatureSuffix(sets)}";
         if (!instances.TryGetValue(key, out var name))
         {
             name = $"@\"{key}\"";
             instances[key] = name;
-            pending.Enqueue((f, instanceMap, name));
+            pending.Enqueue((f, instanceMap, name, sets));
         }
 
         return name;
@@ -411,7 +424,7 @@ public sealed partial class Emitter
             parameters.Add(p.Mut ? $"ptr %p{i}" : $"{ParameterType(f, type)} %p{i}");
         }
 
-        Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})"), instanceMap, result);
+        Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", FeatureAttributes(features)), instanceMap, result);
         Trace(unit.Prefix.StartsWith("rt.", StringComparison.Ordinal) ? Symbol(name) : TraceName(f, instanceMap), Symbol(name), d.Line);
         if (f.Owner is not null)
         {
@@ -487,36 +500,25 @@ public sealed partial class Emitter
         if (Types.IsVoid(returnType))
         {
             Leaving(0, 0);
-            fn.Return(null);
+            ReturnRaw(null);
             return;
         }
 
         if (value is null && returnType is UnionType { Cases: [VoidType, ..] } union)
         {
             Leaving(0, 0);
-            fn.Return($"{Ir(union)} {MakeUnion(union, Types.Void, null)}");
+            ReturnRaw(MakeUnion(union, Types.Void, null));
             return;
         }
 
         var converted = Convert(value ?? throw new InvalidOperationException($"a return without a value at line {line}"), type, returnType, line);
         Leaving(0, 0);
-        fn.Return($"{Ir(returnType)} {converted}");
+        ReturnRaw(converted);
     }
 
     // ---- statements ------------------------------------------------------------------------------
 
-    private void EmitBlock(Block block) => InScope(() =>
-    {
-        foreach (var s in block.Statements)
-        {
-            if (fn.Terminated)
-            {
-                return; // what follows a return, a break or a throw never runs
-            }
-
-            EmitStatement(s);
-        }
-    });
+    private void EmitBlock(Block block) => InScope(() => EmitStatements(block.Statements));
 
     /// <summary>
     /// A type the emitter does not lay out, met anywhere inside the statement, is the one diagnostic, at the statement's line. Its
@@ -525,6 +527,12 @@ public sealed partial class Emitter
     /// </summary>
     private void EmitStatement(Statement statement)
     {
+        if (Model.GuardsAt(statement).Any(c => Known(c) == false))
+        {
+            fn.Unreachable(); // R18: a test showed a set the target cannot have, so the statement never runs
+            return;
+        }
+
         var f = fn;
         var around = f.Location;
         At(statement.Line);
@@ -690,6 +698,21 @@ public sealed partial class Emitter
 
     private void EmitIf(IfStatement i)
     {
+        if (ConstantTest(i.Condition) is bool known)
+        {
+            // R18: a test the CPU or the function's sets answer; the branch it skips is not compiled
+            if (known)
+            {
+                EmitBlock(i.Then);
+            }
+            else if (i.Else is not null)
+            {
+                EmitStatements([i.Else]);
+            }
+
+            return;
+        }
+
         var then = fn.Label("then");
         var otherwise = fn.Label("else");
         var exit = fn.Label("endif");
@@ -706,7 +729,7 @@ public sealed partial class Emitter
         if (i.Else is not null)
         {
             fn.Block(otherwise);
-            EmitStatement(i.Else);
+            EmitStatements([i.Else]); // R18: an `else if` that a test guards runs as a guarded block
             if (!fn.Terminated)
             {
                 fn.Branch(exit);
@@ -863,9 +886,10 @@ public sealed partial class Emitter
         }
     }
 
-    /// <summary>Where a variable lives: its slot in the function, or the global of state outside a function (R13).</summary>
+    /// <summary>Where a variable lives: its slot in the function, the address a guarded block's function takes of it (R18), or the global of state outside a function (R13).</summary>
     private string Place(VariableSymbol variable, int line) =>
         slots.TryGetValue(variable, out var slot) ? slot
+        : outline is not null && Captured(outline, slots, variable) is { } captured ? captured // R18: a variable of the function a guarded block stands in
         : statics.TryGetValue(variable, out var global) ? global
         : throw new InvalidOperationException($"`{variable.Name}` has no storage at {unit.File}:{line}");
 }

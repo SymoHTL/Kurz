@@ -1,8 +1,9 @@
-// expect: error intrinsic-unguarded at 7
+// expect: error argument-mismatch at 8
 // rules: R18
 
 v = Vector128.Create(1, 2, 3, 4)
+b = Vector128.Create(byte(1))
 if Arm.AdvSimd.IsSupported {
-    // the test of a class under `Arm` is `false` on x86-64 and its block is still checked: an x86 intrinsic in it is unguarded (R18)
-    print(X86.Sse41.Extract(v, 2))
+    // the test of a class under `Arm` is `false` on x86-64 and its block is still checked: a call of lanes that fit none of its functions is reported (R18)
+    print(Arm.AdvSimd.Add(v, b).GetElement(2))
 }

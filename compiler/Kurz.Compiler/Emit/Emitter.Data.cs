@@ -614,9 +614,10 @@ public sealed partial class Emitter
         }
 
         var saved = fn;
-        var (savedRegions, savedScopes) = (regions, scopes);
+        var (savedRegions, savedScopes, savedFeatures) = (regions, scopes, features);
         fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})", attributes);
         (regions, scopes) = ([], []); // a helper makes no temporary and has no variable
+        features = NoFeatures; // one helper serves every caller, so what it calls is compiled for the CPU alone (R18)
         try
         {
             body();
@@ -625,7 +626,7 @@ public sealed partial class Emitter
         finally
         {
             fn = saved;
-            (regions, scopes) = (savedRegions, savedScopes);
+            (regions, scopes, features) = (savedRegions, savedScopes, savedFeatures);
         }
 
         return name;

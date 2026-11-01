@@ -49,7 +49,9 @@ public sealed partial class Emitter
                 }
 
             case NameExpression n:
-                return Instance(Model.FunctionNameOf(n), NoMap); // R17: a function of the C calling convention as a value, its address
+                return Instance(Model.FunctionNameOf(n), NoMap, NoFeatures); // R17: a function of the C calling convention as a value, its address, never a copy (R18)
+            case MemberAccess m when Model.SupportTestOf(m) is { } tested:
+                return EmitSupportTest(tested); // R18
             case MemberAccess m when Model.IsChainMember(m, out var member):
                 return Temp(EmitChainMember(m, Sub(member), (UnionType)type), type);
             case MemberAccess m when Model.IsClockRead(m):
@@ -460,6 +462,8 @@ public sealed partial class Emitter
         var rightType = TypeOf(b.Right);
         switch (op)
         {
+            case TokenKind.AmpersandAmpersand or TokenKind.BarBar when ConstantTest(b) is bool known:
+                return known ? "true" : "false"; // R18: tests the CPU or the function's sets answer
             case TokenKind.AmpersandAmpersand or TokenKind.BarBar:
                 {
                     // T18: the right side runs only when the left leaves the answer open
@@ -471,7 +475,7 @@ public sealed partial class Emitter
                     var done = fn.Label("logic");
                     fn.CondBranch(left, isAnd ? right : done, isAnd ? done : right);
                     fn.Block(right);
-                    InRegion(() => fn.Emit($"store i1 {EmitExpression(b.Right)}, ptr {slot}")); // what the right side makes is let go of where it ran
+                    EmitLogicalRight(b.Right, slot);
 
                     fn.Branch(done);
                     fn.Block(done);

@@ -689,6 +689,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break; // D12: a value of an enum, a constant a code generator reads whole
                 case MemberAccess m when model.IsClockRead(m):
                     break; // S15: `timestamp.Now`, a read of the clock a code generator reads whole
+                case MemberAccess m when model.SupportTestOf(m) is not null:
+                    break; // R18: `X86.Sse41.IsSupported`, a test of the CPU a code generator reads whole
                 case MemberAccess m:
                     Expression(m.Target);
                     break;

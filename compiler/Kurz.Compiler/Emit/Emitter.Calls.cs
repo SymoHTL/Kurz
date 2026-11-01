@@ -18,6 +18,7 @@ public sealed partial class Emitter
         var value = info.Kind switch
         {
             CallKind.Print => EmitPrint(c),
+            CallKind.Intrinsic => EmitIntrinsic(c, info),
             CallKind.Conversion => EmitConversion(c, info.Target!),
             CallKind.Function => EmitFunctionCall(c, info),
             CallKind.CFunction => EmitCFunctionCall(c, info),

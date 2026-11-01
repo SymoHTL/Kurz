@@ -4238,12 +4238,18 @@ void Sha256Round(uint a, uint b, uint c, mut uint d, uint e, uint f, uint g, mut
 }
 
 // One block of 64 bytes at `p` through the 64 rounds of SHA-256 into the hash at `s` (FIPS 180-4,
-// 6.2.2), in the form of RustCrypto's `sha2` 0.11.1 without the CPU's instructions (`soft/unroll.rs`):
-// the 16 words of the block, each read with its highest byte first, before the first round; the 64 rounds
-// written out, each with its constant K (4.2.2) in the code, as `sha2` gives it on x86; and the word of
-// the schedule of a round from round 16 on written in place of the word of the round 16 before it, so
-// that the schedule is 16 words and takes no room in the state.
+// 6.2.2): with the SHA instructions where the CPU has them (R18), else in the form of RustCrypto's `sha2`
+// 0.11.1 without the CPU's instructions (`soft/unroll.rs`): the 16 words of the block, each read with its
+// highest byte first, before the first round; the 64 rounds written out, each with its constant K (4.2.2)
+// in the code, as `sha2` gives it on x86; and the word of the schedule of a round from round 16 on written
+// in place of the word of the round 16 before it, so that the schedule is 16 words and takes no room in
+// the state.
 void Sha256Block(byte* s, byte* p) {
+    if X86.Sha.IsSupported && X86.Sse41.IsSupported {
+        Sha256Instructions(s, p, 1)
+        return
+    }
+
     raw {
         uint* hash = Ptr<uint>(s)
         mut uint w0 = BigEndianWord(p)
@@ -4390,6 +4396,91 @@ void Sha256Block(byte* s, byte* p) {
         hash[5] = hash[5] +% f
         hash[6] = hash[6] +% g
         hash[7] = hash[7] +% h
+    }
+}
+
+// Four rounds of SHA-256 with the SHA instructions (R18), as `sha2`'s `shani` backend writes them: the four
+// words `w` with their constants `k` added, two rounds to an instruction, on the halves ABEF and CDGH.
+void Sha256FourRounds(mut Vector128<uint> abef, mut Vector128<uint> cdgh, Vector128<uint> w, Vector128<uint> k) {
+    raw {
+        Vector128<uint> words = X86.Sse2.Add(w, k)
+        cdgh = X86.Sha.Sha256TwoRounds(cdgh, abef, words)
+        abef = X86.Sha.Sha256TwoRounds(abef, cdgh, X86.Sse2.Shuffle(words, 0x0E))
+    }
+}
+
+// The next four words of SHA-256's schedule with the SHA instructions (R18), from the 16 before them, the
+// oldest four in `w0` (FIPS 180-4, 6.2.2, step 1).
+Vector128<uint> Sha256Schedule(Vector128<uint> w0, Vector128<uint> w1, Vector128<uint> w2, Vector128<uint> w3) {
+    mut Vector128<uint> next = w3
+    raw {
+        next = X86.Sha.Sha256MessageSchedule2(X86.Sse2.Add(X86.Sha.Sha256MessageSchedule1(w0, w1), X86.Ssse3.AlignRight(w3, w2, 4)), w3)
+    }
+
+    return next
+}
+
+// The `count` blocks of 64 bytes at `p` through SHA-256's rounds into the hash at `s` with the SHA
+// instructions (R18), as RustCrypto's `sha2` takes them in its `shani` backend: the hash held as the two
+// halves the instructions take, ABEF and CDGH; each block's 16 words with their bytes turned to the highest
+// first; the 16 rounds of four words written out, each with its four constants K (4.2.2) in the code, two
+// rounds to an instruction; and from the fifth round of four on, its words made from the 16 before them in
+// place of the oldest four (FIPS 180-4, 6.2.2). The caller tests the CPU for SHA and SSE4.1, which hold
+// every instruction here.
+void Sha256Instructions(byte* s, byte* p, long count) {
+    raw {
+        uint* hash = Ptr<uint>(s)
+        Vector128<byte> turn = Vector128.Create(byte(3), byte(2), byte(1), byte(0), byte(7), byte(6), byte(5), byte(4), byte(11), byte(10), byte(9), byte(8), byte(15), byte(14), byte(13), byte(12))
+        Vector128<uint> cdab = X86.Sse2.Shuffle(X86.Sse2.LoadVector128(hash), 0xB1)
+        Vector128<uint> efgh = X86.Sse2.Shuffle(X86.Sse2.LoadVector128(hash + 4), 0x1B)
+        mut Vector128<uint> abef = X86.Ssse3.AlignRight(cdab, efgh, 8)
+        mut Vector128<uint> cdgh = X86.Sse41.Blend(efgh.AsUInt16(), cdab.AsUInt16(), 0xF0).AsUInt32()
+        mut long b = 0
+        while b < count {
+            Vector128<uint> abefBefore = abef
+            Vector128<uint> cdghBefore = cdgh
+            byte* block = p + 64 * b
+            mut Vector128<uint> w0 = X86.Ssse3.Shuffle(X86.Sse2.LoadVector128(block), turn).AsUInt32()
+            mut Vector128<uint> w1 = X86.Ssse3.Shuffle(X86.Sse2.LoadVector128(block + 16), turn).AsUInt32()
+            mut Vector128<uint> w2 = X86.Ssse3.Shuffle(X86.Sse2.LoadVector128(block + 32), turn).AsUInt32()
+            mut Vector128<uint> w3 = X86.Ssse3.Shuffle(X86.Sse2.LoadVector128(block + 48), turn).AsUInt32()
+            Sha256FourRounds(mut abef, mut cdgh, w0, Vector128.Create(uint(0x428a2f98), uint(0x71374491), uint(0xb5c0fbcf), uint(0xe9b5dba5)))
+            Sha256FourRounds(mut abef, mut cdgh, w1, Vector128.Create(uint(0x3956c25b), uint(0x59f111f1), uint(0x923f82a4), uint(0xab1c5ed5)))
+            Sha256FourRounds(mut abef, mut cdgh, w2, Vector128.Create(uint(0xd807aa98), uint(0x12835b01), uint(0x243185be), uint(0x550c7dc3)))
+            Sha256FourRounds(mut abef, mut cdgh, w3, Vector128.Create(uint(0x72be5d74), uint(0x80deb1fe), uint(0x9bdc06a7), uint(0xc19bf174)))
+            w0 = Sha256Schedule(w0, w1, w2, w3)
+            Sha256FourRounds(mut abef, mut cdgh, w0, Vector128.Create(uint(0xe49b69c1), uint(0xefbe4786), uint(0x0fc19dc6), uint(0x240ca1cc)))
+            w1 = Sha256Schedule(w1, w2, w3, w0)
+            Sha256FourRounds(mut abef, mut cdgh, w1, Vector128.Create(uint(0x2de92c6f), uint(0x4a7484aa), uint(0x5cb0a9dc), uint(0x76f988da)))
+            w2 = Sha256Schedule(w2, w3, w0, w1)
+            Sha256FourRounds(mut abef, mut cdgh, w2, Vector128.Create(uint(0x983e5152), uint(0xa831c66d), uint(0xb00327c8), uint(0xbf597fc7)))
+            w3 = Sha256Schedule(w3, w0, w1, w2)
+            Sha256FourRounds(mut abef, mut cdgh, w3, Vector128.Create(uint(0xc6e00bf3), uint(0xd5a79147), uint(0x06ca6351), uint(0x14292967)))
+            w0 = Sha256Schedule(w0, w1, w2, w3)
+            Sha256FourRounds(mut abef, mut cdgh, w0, Vector128.Create(uint(0x27b70a85), uint(0x2e1b2138), uint(0x4d2c6dfc), uint(0x53380d13)))
+            w1 = Sha256Schedule(w1, w2, w3, w0)
+            Sha256FourRounds(mut abef, mut cdgh, w1, Vector128.Create(uint(0x650a7354), uint(0x766a0abb), uint(0x81c2c92e), uint(0x92722c85)))
+            w2 = Sha256Schedule(w2, w3, w0, w1)
+            Sha256FourRounds(mut abef, mut cdgh, w2, Vector128.Create(uint(0xa2bfe8a1), uint(0xa81a664b), uint(0xc24b8b70), uint(0xc76c51a3)))
+            w3 = Sha256Schedule(w3, w0, w1, w2)
+            Sha256FourRounds(mut abef, mut cdgh, w3, Vector128.Create(uint(0xd192e819), uint(0xd6990624), uint(0xf40e3585), uint(0x106aa070)))
+            w0 = Sha256Schedule(w0, w1, w2, w3)
+            Sha256FourRounds(mut abef, mut cdgh, w0, Vector128.Create(uint(0x19a4c116), uint(0x1e376c08), uint(0x2748774c), uint(0x34b0bcb5)))
+            w1 = Sha256Schedule(w1, w2, w3, w0)
+            Sha256FourRounds(mut abef, mut cdgh, w1, Vector128.Create(uint(0x391c0cb3), uint(0x4ed8aa4a), uint(0x5b9cca4f), uint(0x682e6ff3)))
+            w2 = Sha256Schedule(w2, w3, w0, w1)
+            Sha256FourRounds(mut abef, mut cdgh, w2, Vector128.Create(uint(0x748f82ee), uint(0x78a5636f), uint(0x84c87814), uint(0x8cc70208)))
+            w3 = Sha256Schedule(w3, w0, w1, w2)
+            Sha256FourRounds(mut abef, mut cdgh, w3, Vector128.Create(uint(0x90befffa), uint(0xa4506ceb), uint(0xbef9a3f7), uint(0xc67178f2)))
+            abef = X86.Sse2.Add(abef, abefBefore)
+            cdgh = X86.Sse2.Add(cdgh, cdghBefore)
+            b = b + 1
+        }
+
+        Vector128<uint> feba = X86.Sse2.Shuffle(abef, 0x1B)
+        Vector128<uint> dchg = X86.Sse2.Shuffle(cdgh, 0xB1)
+        X86.Sse2.Store(hash, X86.Sse41.Blend(feba.AsUInt16(), dchg.AsUInt16(), 0xF0).AsUInt32())
+        X86.Sse2.Store(hash + 4, X86.Ssse3.AlignRight(dchg, feba, 8))
     }
 }
 
@@ -4615,6 +4706,13 @@ void HashFeed(byte* s, byte* p, long n, bool md5) {
                 HashBlock(s, s + buffer, md5)
                 pending = 0
             }
+        }
+
+        if !md5 && X86.Sha.IsSupported && X86.Sse41.IsSupported {
+            // SHA-256's whole blocks through the SHA instructions in one run, the hash held in them between blocks (R18)
+            long whole = (n - at) / 64
+            Sha256Instructions(s, p + at, whole)
+            at = at + 64 * whole
         }
 
         while n - at >= 64 {
