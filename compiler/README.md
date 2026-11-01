@@ -950,8 +950,15 @@ lists, each read beside the change it can meet (section 4, the owner, 2026-10-30
 and maps in fields written through paths by each `mut` member, beside copies, a block's among them, and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
 since a kept block stays readable, so that a write into one freed under it ends the process; maps made and dropped through every way out of a block, removed, cleared,
 walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
-of three inputs against vectors from outside this repository; two runs of one program that print a
-map of 20 entries in two orders; the bytes of a map's first block the system refuses; `random-failed`
+of three inputs against vectors from outside this repository; the fast hash of the bytes of 41 counts
+and of 0 to 5 words against the values of foldhash 0.2.0 built from its source with the folded multiply
+of a target without a product of 128 bits; two runs of one program that print a map of 20 entries in
+one order; keys whose fast hash starts their probe at one group, of which the 520th stays on the fast
+hash and the 521st moves its map onto SipHash-1-3, two runs then printing two orders with every entry,
+so too after 1000 keys more grow the switched map, those 1521 keys in one order under a bound no probe
+passes, and 600 keys of one group as strings under the
+allocator that makes every freed block inaccessible; the maps' programs with every map moved onto
+SipHash-1-3 at its first insert, under that allocator too; the bytes of a map's first block the system refuses; `random-failed`
 at a map's first write where the target's `Random` reports a failure, and a program without a map that
 runs there; on Linux a map whose keys come from `/dev/urandom` where the system refuses `getrandom`
 with `ENOSYS`, and `random-failed` where that file is not there either;
