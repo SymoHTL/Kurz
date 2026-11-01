@@ -707,8 +707,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   compares them and hashed as a `double` key is (section 4, the owner, 2026-10-30, "Equals inside
   data/keys", "As plain double"). The hash is the fast hash, foldhash 0.2.0's `fast::FixedState` with its
   folded multiply in the crate's form for a target without a product of 128 bits (`FoldHash`, and `FoldWord` and
-  `FoldEnd` for words, as `FoldHasher`'s `write`, `write_u64` and `finish`), until one insert's probe passes more than
-  512 slots of full groups (`MapEmpty` counts them); the insert then moves every entry, one time, into a block of
+  `FoldEnd` for words, as `FoldHasher`'s `write`, `write_u64` and `finish`), until one insert's lookup of its key
+  passes more than 512 slots of groups without a slot of 255 (`MapEmpty` counts them, past a removed entry's slot
+  it takes up to the group that ends the lookup); the insert then moves every entry, one time, into a block of
   its slots under SipHash-1-3 with the block's keys, the hash Rust's `HashMap` takes by default (`MapSwitched`
   and the emitted `switch` helper, which hashes each key again and frees the old block), and the map stays on
   SipHash-1-3, as .NET's `Dictionary` switches to its randomized comparer one time (section 4, the owner,
@@ -956,7 +957,10 @@ of a target without a product of 128 bits; two runs of one program that print a 
 one order; keys whose fast hash starts their probe at one group, of which the 520th stays on the fast
 hash and the 521st moves its map onto SipHash-1-3, two runs then printing two orders with every entry,
 so too after 1000 keys more grow the switched map, those 1521 keys in one order under a bound no probe
-passes, and 600 keys of one group as strings under the
+passes, a map made before the switched one and one made after it in one order in two runs, and a copy of
+the switched map's block, which a write to a map value that shares it makes, with every entry, 512 and 520
+of them with one removed and the next added into its slot, whose lookup passes 64 groups and stays and 65
+and moves, and 600 keys of one group as strings under the
 allocator that makes every freed block inaccessible; the maps' programs with every map moved onto
 SipHash-1-3 at its first insert, under that allocator too; the bytes of a map's first block the system refuses; `random-failed`
 at a map's first write where the target's `Random` reports a failure, and a program without a map that

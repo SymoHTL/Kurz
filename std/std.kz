@@ -3465,11 +3465,14 @@ pub byte* MapCopy(byte* block, long entry, mut long asked) {
 // its control byte set to the hash's, as hashbrown's `find_insert_slot` takes it; null, with nothing
 // written, where that slot is of 255 and the block can take no more such slots, which
 // `MapGrow` then makes room for, as hashbrown's `insert` calls `reserve` where `growth_left` is 0.
-// Where the probe passed more than 512 slots of full groups, 64 groups of 8, in a block on the fast hash,
-// the block is marked, and the insert moves the map onto SipHash-1-3 (`MapTripped`, `MapSwitched`), as
-// .NET's `Dictionary` switches to a randomized hash where one insert walks more than 100 entries of a
-// chain (section 4, the owner, 2026-11-01, "Switch, as .NET"; the bound, assumed there: a table filled to
-// 7 slots of 8 passes full groups as a rule, so that 100 slots would switch maps no key was made for).
+// Where the insert's lookup of its key passed more than 512 slots, 64 groups of 8 without a slot of 255, in
+// a block on the fast hash, the block is marked, the walk the lookup pays counted as .NET counts the chain its
+// insert walks: the full groups before the slot, and where the slot is a removed entry's in a group without a
+// slot of 255, that group and those after it up to the first group with one, which ends the lookup; and the
+// insert moves the map onto SipHash-1-3 (`MapTripped`, `MapSwitched`), as .NET's `Dictionary` switches to a
+// randomized hash where one insert walks more than 100 entries of a chain (section 4, the owner, 2026-11-01,
+// "Switch, as .NET"; the bound, assumed there: a table filled to 7 slots of 8 passes full groups as a rule,
+// so that 100 slots would switch maps no key was made for).
 pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     long mask = long(MapRoom(block)) - 1
     byte* control = MapControl(block)
@@ -3499,6 +3502,27 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
             }
 
             *Ptr<int>(block + 32) = *Ptr<int>(block + 32) - 1
+        } else {
+            // the slot of a removed entry: where its group has no slot of 255, the lookup of the key passed it, and
+            // each group after it up to the first with a slot of 255, which ends the lookup, and the bound counts them
+            mut long g = i / 8 * 8
+            mut bool open = false
+            while !open {
+                mut long c = 0
+                while c < 8 {
+                    if control[g + c] == 255 {
+                        open = true
+                    }
+
+                    c = c + 1
+                }
+
+                if !open {
+                    g = at
+                    step = step + 8
+                    at = (at + step) & mask
+                }
+            }
         }
 
         if step - 8 > 512 && *Ptr<int>(block + 36) == 0 {

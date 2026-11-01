@@ -3320,6 +3320,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // two runs print two orders, and the map gives every entry, before the move and after it. 1000 keys more after the 521 grow the
         // switched map from 1024 slots to 2048, which stays on SipHash-1-3.
         var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the cases take
         var grown = keys.Concat(Enumerable.Range(1000000, 1000).Select(k => (long)k)).ToList();
         foreach (var (name, set) in new[] { ("520", keys.Take(520).ToList()), ("521", keys), ("grown", grown) })
         {
@@ -3341,10 +3342,48 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(held.First, held.Second);
         Assert.Equal("1521 1521 -1", string.Join(" ", held.First.Take(3)));
 
+        // a switch moves its own map alone (section 4, assumed there): a map of 20 keys made before the switched one and one made after
+        // it print one order in two runs, while the switched map prints two; and a write to a map value that shares the switched map's
+        // block copies the block with its hash (M3), so that the copy finds every entry and the map it was copied from keeps its count
+        var alone = RunTwice(
+            "mut before = Map<int, int>()\nfor i in 0..<20 {\n    before[i] = i\n}\n" +
+            Filled("int", keys.Select(k => k.ToString(CultureInfo.InvariantCulture))) +
+            "mut after = Map<int, int>()\nfor i in 0..<20 {\n    after[i] = i\n}\nmut twin = m\ntwin[-5] = -5\nmut kept = 0\n" +
+            "for i in 0..<keys.Count {\n    w = twin[keys[i]] ?? -1\n    if w == i {\n        kept = kept + 1\n    }\n}\n" +
+            "print(kept)\nprint(twin.Count)\nprint(m.Count)\nprint(before)\nprint(after)\n",
+            toolchain.Runtime,
+            "map-switch-alone");
+        Assert.Equal(9, alone.First.Count);
+        Assert.Equal("521 521 -1", string.Join(" ", alone.First.Take(3)));
+        Assert.NotEqual(alone.First[3], alone.Second[3]);
+        Assert.Equal("521 522 521", string.Join(" ", alone.First.Skip(4).Take(3)));
+        Assert.Equal(alone.First.Skip(7), alone.Second.Skip(7));
+        Assert.All(alone.First.Skip(7), line => Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), line.Trim('[', ']').Split(", ").Order()));
+
+        // an insert into the slot of a removed entry counts the walk its lookup of the key pays (section 4, assumed there, as .NET counts
+        // the chain its insert walks): 512 and 520 of the keys, one of them removed, which leaves the slot of a removed entry in a group
+        // with no slot of 255, and then the next key added, which takes that slot. Its lookup passes 64 groups, 512 slots, of the first
+        // map, which stays on the fast hash, and 65, 520 slots, of the second, which moves onto SipHash-1-3; each gives every entry
+        foreach (var count in new[] { 512, 520 })
+        {
+            var (first, second) = RunTwice(Removed(keys.Take(count + 1)), toolchain.Runtime, $"map-switch-removed-{count}");
+            Assert.Equal($"{count} {count} 0", string.Join(" ", first.Take(3)));
+            Assert.Equal(keys.Skip(1).Take(count).Select((k, i) => $"{k}: {i + 1}").Order(), first[3].Trim('[', ']').Split(", ").Order());
+            if (count == 512)
+            {
+                Assert.Equal(first, second);
+            }
+            else
+            {
+                Assert.NotEqual(first, second);
+            }
+        }
+
         // keys of 8 bytes hash as the word of their bytes: strings, whose blocks the move carries into the new block without a count
         // more or less, under the allocator that makes every freed block inaccessible
-        var strings = SameGroupKeys(600, k => $"k{k:D7}").Select(s => $"\"{s}\"");
-        var fenced = RunTwice(Filled("string", strings), Fenced, "map-switch-strings-fenced");
+        var strings = SameGroupKeys(600, k => $"k{k:D7}");
+        Assert.Equal(600, strings.Count); // the floor: the keys the case takes
+        var fenced = RunTwice(Filled("string", strings.Select(s => $"\"{s}\"")), Fenced, "map-switch-strings-fenced");
         Assert.Equal("600 600 -1", string.Join(" ", fenced.First.Take(3)));
         Assert.NotEqual(fenced.First, fenced.Second);
     }
@@ -3383,6 +3422,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         $"List<{type}> keys = [{string.Join(", ", keys)}]\nmut m = Map<{type}, int>()\nfor i in 0..<keys.Count {{\n    m[keys[i]] = i\n}}\n" +
         "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\n" +
         $"print(found)\nprint(m.Count)\nprint(m[{(type == "string" ? "\"\"" : "-1")}] ?? -1)\nprint(m)\n";
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> but the last into a map with its index as its value, removes the first,
+    /// puts the last in, then prints how many of the keys after the first the map gives back with their index, the map's count, the
+    /// value the removal gave, and the map.
+    /// </summary>
+    private static string Removed(IEnumerable<long> keys) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nn = keys.Count - 1\nmut m = Map<int, int>()\n" +
+        "for i in 0..<n {\n    m[keys[i]] = i\n}\nremoved = m.Remove(keys[0]) ?? -1\nm[keys[n]] = n\nmut found = 0\n" +
+        "for i in 1..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\n" +
+        "print(found)\nprint(m.Count)\nprint(removed)\nprint(m)\n";
 
     /// <summary>
     /// The first <paramref name="count"/> keys from 0 up whose fast hash has bits 3 to 9 of 0, so that their probe starts at the first
