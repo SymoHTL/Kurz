@@ -2982,6 +2982,7 @@ public sealed class CheckerTests
         // K4: by identity where a field is `mut`, by content where none is, and so in a list, a data value, a nullable value and a key;
         // K5, K8, K15: by the fields an `equal by` names, a `mut` one among them (K12); a field without `==` in a class that compares by
         // content is `type-mismatch`, as in a data value (D3), and in one that compares by identity or by its clause it counts for nothing
+        // *(assumed)*
         Clean("class C(mut int N)\n\na = C(1)\nprint(a == C(1))\nprint(a != a)");
         Clean("class C(int N)\ndata P(C Item)\n\nxs = [C(1)]\nC? n = null\nprint(xs == [C(1)])\nprint(P(C(1)) == P(C(2)))\nprint(n == C(1))");
         Clean("class Link(int V, Link? Next)\n\nprint(Link(1, Link(2, null)) == Link(1, null))");
@@ -2995,11 +2996,13 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.EqualsMethod, 2), (ErrorIds.EqualsMethod, 3)], Errors("class User(int Id) {\n    pub bool Equals(User other) => Id == other.Id\n    pub int GetHashCode() => Id\n}\n\nprint(User(1) == User(1))"));
         Assert.Equal([(ErrorIds.MutableKey, 3)], Errors("class Tag(mut string Name) equal by Name\n\nmut m = Map<Tag, int>()\nm[Tag(\"a\")] = 1\nprint(m.Count)"));
         Clean("class Tag(mut string Name, string Kind) equal by Kind\n\nmut m = Map<Tag, int>()\nm[Tag(\"a\", \"k\")] = 1\nprint(m.Count)");
-        // N9 with K5: `==` on instances of a class that names its fields ends what is known of a path through a `mut` field; on
-        // instances that compare by content it does not
+        Clean("class Key(int Id, int N) equal by Id, Id\n\nprint(Key(1, 1) == Key(1, 2))"); // a name given twice counts once *(assumed)*
+        // N9 with K5: `==` on instances of a class that names its fields, and on a list or a `data` value that holds one *(assumed)*,
+        // ends what is known of a path through a `mut` field; on instances that compare by content it does not
         const string holder = "class Node(int V)\nclass Holder(mut Node? Head)\n";
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\na = K(1)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\na = [K(1)]\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(holder + "class K(int Id) equal by Id\ndata P(K Item)\n\na = P(K(1))\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
         Clean(holder + "class K(int Id)\n\na = K(1)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}");
     }
 

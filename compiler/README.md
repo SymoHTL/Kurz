@@ -1450,6 +1450,14 @@ round can ask about it by the rule's id.
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
   (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
   separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13).
+- K4 with K5, K12 and N9: a class that compares by content and holds a field of a type `==` does not take,
+  a map among them, makes `==` on its instances, and a key of it, `type-mismatch`, as a `data` value that
+  holds one does (D3, M9), since K4 compares each field by the equality Kurz gives its type and that type
+  has none; in a class that compares by identity or by its clause such a field is not compared, and is no
+  error *(assumed)*. `==` on values that hold an instance of a class that names its fields, a list, a
+  `data` value, a union or an instance compared by content, compares that instance by its clause too, and
+  so ends a narrowing as N9's call, as `==` on the instance itself does *(assumed)*. A field named twice in
+  one `equal by` is no error and counts once *(assumed)*.
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
   checker can tell among them (D13's `match` on flags, O10's call). The checker reads these shapes
