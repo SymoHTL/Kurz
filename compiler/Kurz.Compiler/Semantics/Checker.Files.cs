@@ -48,23 +48,40 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var candidate = new Candidate { Slots = f.Slots, Result = Types.Union([f.Success, IoError]) };
-        return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
+        var result = Types.Union([f.Success, IoError]);
+        List<Candidate> candidates = [new Candidate { Slots = f.Slots, Result = result }];
+        if (f.Kind == CallKind.TcpConnect)
+        {
+            // S9: the second form, `TcpStream.Connect(address, timeout)`, as Rust's `TcpStream::connect_timeout` (section 12, the owner,
+            // 2026-10-30, "Second form, as Rust"), its time a `duration` (assumed); the emitter tells the forms apart by their slots
+            candidates = [
+                new Candidate { Slots = f.Slots, Result = result, Form = $"{result} Connect(string address)" },
+                new Candidate { Slots = [Path("address"), new Slot("timeout", Types.Duration, false, false, false)], Result = result, Form = $"{result} Connect(string address, duration timeout)" },
+            ];
+        }
+
+        return Record(c, f.Kind, Call(candidates, c, null, out var picked), picked);
     }
 
     /// <summary>
-    /// S3, S4, S5: a file's and a stream's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>, and S9: a listener's
-    /// <c>Accept()</c> and <c>Close()</c>, each with the case <c>IoError</c>.
+    /// S3, S4, S5: a file's and a stream's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>; S9: a listener's
+    /// <c>Accept()</c> and <c>Close()</c>, and a stream's <c>SetReadTimeout(timeout)</c> and <c>SetWriteTimeout(timeout)</c>, whose time is
+    /// a <c>duration?</c>, <c>null</c> for no bound, as Rust's <c>set_read_timeout(Option&lt;Duration&gt;)</c> (section 12, the owner,
+    /// 2026-11-01, Q8 (a)); each with the case <c>IoError</c>.
     /// </summary>
     private Typed CheckFileMethod(HandleType handle, MemberAccess m, CallExpression c)
     {
         var bytes = new ListType(Types.Byte);
         var listener = handle.Kind == Handle.TcpListener;
+        var stream = handle.Kind == Handle.TcpStream;
+        var timeout = new Slot("timeout", Types.Nullable(Types.Duration), false, false, false);
         (CallKind Kind, List<Slot> Slots, KurzType Success)? method = m.Member switch
         {
             "Read" when !listener => (CallKind.FileRead, [new Slot("into", bytes, true, false, false), new Slot("max", Types.Int, false, false, false)], Types.Int),
             "Write" when !listener => (CallKind.FileWrite, [new Slot("bytes", bytes, false, false, false)], Types.Void),
             "Accept" when listener => (CallKind.TcpAccept, [], Types.TcpStream),
+            "SetReadTimeout" when stream => (CallKind.TcpSetReadTimeout, [timeout], Types.Void),
+            "SetWriteTimeout" when stream => (CallKind.TcpSetWriteTimeout, [timeout], Types.Void),
             "Close" => (CallKind.FileClose, [], Types.Void),
             _ => null,
         };

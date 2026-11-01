@@ -1,0 +1,33 @@
+// expect: output
+// | TimedOut 0
+// | true
+// | true
+// rules: S9
+
+// a listener that accepts nothing: once its queue of connections that wait is full, a connection waits, and the second form of
+// `Connect` gives `TimedOut` after its time, with the number 0, since no error of the system came with it
+void | IoError Full() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    mut held = List<TcpStream>()
+
+    // the longest time a `duration` holds, about 292 years, is a bound too, which the queue's room meets at once
+    held.Add(TcpStream.Connect("127.0.0.1:{listener.Port}", 9223372036854775807ns))
+    mut timedOut = false
+    start = timestamp.Now
+    while !timedOut && held.Count < 1000 {
+        match TcpStream.Connect("127.0.0.1:{listener.Port}", 100ms) {
+            TcpStream s => held.Add(s)
+            IoError e => {
+                print("{e.Kind} {e.Code}")
+                timedOut = true
+            }
+        }
+    }
+
+    print(held.Count > 1)
+    print(timestamp.Now - start < 2s)
+}
+
+Full() else {
+    IoError e => print(e)
+}

@@ -170,11 +170,17 @@ public enum CallKind
     /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
     TcpBind,
 
-    /// <summary><c>TcpStream.Connect(address)</c> (S9).</summary>
+    /// <summary><c>TcpStream.Connect(address)</c>, or its second form <c>TcpStream.Connect(address, timeout)</c>, of two slots (S9).</summary>
     TcpConnect,
 
     /// <summary>A listener's <c>Accept()</c> (S9).</summary>
     TcpAccept,
+
+    /// <summary>A stream's <c>SetReadTimeout(timeout)</c> (S9).</summary>
+    TcpSetReadTimeout,
+
+    /// <summary>A stream's <c>SetWriteTimeout(timeout)</c> (S9).</summary>
+    TcpSetWriteTimeout,
 
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,

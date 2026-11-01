@@ -38,6 +38,9 @@ extern "C" {
     long strlen(byte* text)
     int socket(int family, int type, int protocol)
     int setsockopt(int fd, int level, int name, void* value, int length)
+    int getsockopt(int fd, int level, int name, void* value, int* length)
+    int ioctl(int fd, ulong request, ...)
+    int poll(void* fds, ulong count, int timeout)
     int bind(int fd, void* address, int length)
     int listen(int fd, int backlog)
     int getsockname(int fd, void* address, int* length)
@@ -2178,13 +2181,167 @@ pub int Variable(byte* key, mut string value) {
 // that is no host and port, or a name that gives no address, `InvalidInput` to the caller, as Rust gives
 // it, with -4099 for a lookup that fails with `EAI_AGAIN` or `EAI_FAIL`, or with `EAI_SYSTEM` while `errno`
 // holds 0, `Other`, and with -4098 for one that fails with any other error of `getaddrinfo` but `EAI_SYSTEM`,
-// `NotFound` (S9).
+// `NotFound` (S9). A connection whose bound runs out fails with -4100, `TimedOut` with the number 0, as
+// Rust's `connect_timeout` gives `TimedOut` with no error of the system.
 
 // The page of each thread that holds a call's address and what the calls of the system take by address,
 // mapped at its first use and never given back, not even when its thread ends: a literal address at its
 // byte 0, with room for one of IPv6, 28 bytes; the length `getsockname` takes at 32; the 1 that
-// `setsockopt` sets at 36; the hints for `getaddrinfo` at 64, 48 bytes; and the list it gives at 112.
+// `setsockopt` sets at 36; the 0 that `ioctl` takes at 40; the hints for `getaddrinfo` at 64, 48 bytes;
+// the list it gives at 112; the `struct timeval` of a bound at 128, 16 bytes; the `struct pollfd` of a
+// connection in progress at 144, 8 bytes; the error `SO_ERROR` gives at 152 and its length at 156; and
+// the `struct timespec` of the monotonic clock at 160, 16 bytes.
 thread static mut byte* endpoints = null
+
+// The page above, mapped where this thread has none yet: its address, or null where the system refuses it.
+byte* Endpoints() {
+    mut byte* held = null
+    raw {
+        if endpoints == null {
+            endpoints = Memory(4096)
+        }
+
+        held = endpoints
+    }
+
+    return held
+}
+
+// The bound of a read, a write and `Connect` on a socket where the program sets none, 5 seconds in
+// nanoseconds (S9).
+long DefaultBound() => 5000000000
+
+// The monotonic clock in nanoseconds, read by `clock_gettime` with `CLOCK_MONOTONIC` (1) into the page at
+// `held`, as Rust's `Instant::now` reads it; it fails only for a clock the kernel lacks, which Linux for
+// x86-64 has.
+long Monotonic(byte* held) {
+    mut long now = 0
+    raw {
+        clock_gettime(1, Ptr<void>(held + 160))
+        now = *Ptr<long>(held + 160) * 1000000000 + *Ptr<long>(held + 168)
+    }
+
+    return now
+}
+
+// The time of the monotonic clock `nanoseconds` from now, read into the page at `held`, or the largest
+// `long` where that passes it.
+long Deadline(byte* held, long nanoseconds) {
+    long now = Monotonic(held)
+    if nanoseconds > 9223372036854775807 - now {
+        return 9223372036854775807
+    }
+
+    return now + nanoseconds
+}
+
+// The time of the reads of the socket `fd`, with `option` `SO_RCVTIMEO` (20), or of its writes, with
+// `SO_SNDTIMEO` (21), of `SOL_SOCKET` (1), set to `nanoseconds`, or to no bound where `bounded` is false,
+// as Rust's `set_timeout` sets it (S9): a `struct timeval` of the whole seconds and of the microseconds
+// cut from the rest, a positive time that comes to no microsecond raised to 1, so that it never reads as
+// no bound, which the `timeval` of zeros is. A time of zero or below is -4097, `InvalidInput` with the
+// number 0, as Rust refuses a zero `Duration` before it calls the system. Rust bounds the seconds by
+// `time_t::MAX`, which a time of 64 bits in nanoseconds, at most about 292 years, never reaches. 0, or the
+// failure, `ENOMEM` (12) where the thread's page cannot be mapped.
+pub long SetTimeout(int fd, int option, long nanoseconds, bool bounded) {
+    if bounded && nanoseconds <= 0 {
+        return -4097
+    }
+
+    mut long result = -12
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return result
+        }
+
+        mut long seconds = 0
+        mut long micros = 0
+        if bounded {
+            seconds = nanoseconds / 1000000000
+            micros = nanoseconds % 1000000000 / 1000
+            if seconds == 0 && micros == 0 {
+                micros = 1
+            }
+        }
+
+        *Ptr<long>(held + 128) = seconds
+        *Ptr<long>(held + 136) = micros
+        result = Checked(long(setsockopt(fd, 1, option, Ptr<void>(held + 128), 16)))
+    }
+
+    return result
+}
+
+// The default bound set on the reads and the writes of the stream `fd`, which `Connect` or `Accept` made
+// (S9): 0, or the failure.
+long Bounded(int fd) {
+    long reads = SetTimeout(fd, 20, DefaultBound(), true)
+    if reads < 0 {
+        return reads
+    }
+
+    return SetTimeout(fd, 21, DefaultBound(), true)
+}
+
+// The connection in progress on the socket `fd` waited for until `deadline`, a time of `Monotonic`, with
+// the page at `held`, as Rust's `poll_connected` waits for it on Linux (S9): `poll` for `POLLOUT` (4) for
+// the time left in whole milliseconds, cut down, at least 1 and at most the largest `int`, made again where
+// a signal interrupted it (`EINTR`, 4) or where it gave no event, until the clock read again says the time
+// ran out; an event without `POLLERR` (8) or `POLLHUP` (16) is the connection made, and one with either is
+// the error `SO_ERROR` (4) gives. 0; -4100 where the time ran out; the failure of `poll` or of the
+// connection; or -4099, `Other` with the number 0, where `SO_ERROR` holds none, where Rust gives
+// `Uncategorized`.
+long Connected(int fd, long deadline, byte* held) {
+    mut long result = -4099
+    raw {
+        int* error = __errno_location()
+        mut bool waiting = true
+        while waiting {
+            long now = Monotonic(held)
+            if now >= deadline {
+                return -4100
+            }
+
+            mut long wait = (deadline - now) / 1000000
+            if wait == 0 {
+                wait = 1
+            }
+
+            if wait > 2147483647 {
+                wait = 2147483647
+            }
+
+            *Ptr<int>(held + 144) = fd
+            *Ptr<int>(held + 148) = 4
+            int polled = poll(Ptr<void>(held + 144), 1, int(wait))
+            if polled < 0 && *error != 4 {
+                return -long(*error)
+            }
+
+            if polled > 0 {
+                waiting = false
+            }
+        }
+
+        if (held[150] & 24) == 0 {
+            return 0
+        }
+
+        *Ptr<int>(held + 152) = 0
+        *Ptr<int>(held + 156) = 4
+        if getsockopt(fd, 1, 4, Ptr<void>(held + 152), Ptr<int>(held + 156)) != 0 {
+            return -long(*error)
+        }
+
+        int connectError = *Ptr<int>(held + 152)
+        if connectError != 0 {
+            result = -long(connectError)
+        }
+    }
+
+    return result
+}
 
 // The port written in the `count` bytes at `text`: a number from 0 to 65535 in decimal digits, after a
 // `+` that may stand first, as Rust reads a `u16`, or -1.
@@ -2251,20 +2408,29 @@ long ScopeOf(byte* text, long count) {
 // with `SOCK_CLOEXEC`, 524288, as Rust's standard library opens every descriptor close-on-exec); with
 // `listening`, bound to the address after `SO_REUSEADDR` (2, of `SOL_SOCKET`, 1) is set to 1, and
 // listening with room for 128 connections that wait, as Rust's `TcpListener::bind` sets them; else
-// connected to it, `connect` made again where a signal interrupted it (`EINTR`, 4) and a socket that is
-// connected already (`EISCONN`, 106) taken, as Rust's `connect` takes it: the descriptor, or the
-// failure with the socket closed.
-long Attempt(byte* address, int length, bool listening) {
+// connected to it by `deadline`, a time of `Monotonic`, as Rust's `connect_timeout` connects: the socket
+// opened with `SOCK_NONBLOCK` (2048), `connect` made again where a signal interrupted it (`EINTR`, 4) and
+// a socket that is connected already (`EISCONN`, 106) taken, as Rust's `connect` takes it, the socket made
+// blocking again by `ioctl` with `FIONBIO` (21537) and 0, as Rust's `set_nonblocking`, and a connection in
+// progress (`EINPROGRESS`, 115) waited for by `Connected`; then the default bound set on its reads and
+// writes (`Bounded`): the descriptor, or the failure with the socket closed.
+long Attempt(byte* address, int length, bool listening, long deadline) {
     mut long result = -1
     raw {
         int* error = __errno_location()
         int family = int(address[0]) + int(address[1]) * 256
-        int fd = socket(family, 524289, 0)
+        mut int blocking = 2048
+        if listening {
+            blocking = 0
+        }
+
+        int fd = socket(family, 524289 + blocking, 0)
         if fd < 0 {
             return -long(*error)
         }
 
         mut int done = 0
+        mut long failure = 0
         if listening {
             done = setsockopt(fd, 1, 2, Ptr<void>(endpoints + 36), 4)
             if done == 0 {
@@ -2283,10 +2449,26 @@ long Attempt(byte* address, int length, bool listening) {
             if done != 0 && *error == 106 {
                 done = 0
             }
+
+            bool progress = done != 0 && *error == 115
+            if done == 0 || progress {
+                *Ptr<int>(endpoints + 40) = 0
+                done = ioctl(fd, 21537, Ptr<void>(endpoints + 40))
+                if done == 0 && progress {
+                    failure = Connected(fd, deadline, endpoints)
+                }
+
+                if done == 0 && failure == 0 {
+                    failure = Bounded(fd)
+                }
+            }
         }
 
         if done != 0 {
-            long failure = -long(*error)
+            failure = -long(*error)
+        }
+
+        if failure != 0 {
             close(fd)
             return failure
         }
@@ -2300,15 +2482,14 @@ long Attempt(byte* address, int length, bool listening) {
 // `Attempt` on each address of `text`, a host and a port after its last `:`, NUL-ended, in which the
 // call writes a NUL over that `:` while it runs and gives it back after: the descriptor of the first
 // that binds or connects, or the failure, `ENOMEM` (12) where the thread's page cannot be mapped. The port is
-// written into each address in the order of the network, its high byte first.
-long EachAddress(byte* text, bool listening) {
+// written into each address in the order of the network, its high byte first. A connection is bounded by
+// `nanoseconds` from the moment its addresses are known, after the lookup of a name, which the bound does
+// not cover (section 14 holds that open), over every address tried: once it runs out, -4100 ends the call
+// with no other address tried.
+long EachAddress(byte* text, bool listening, long nanoseconds) {
     mut long result = -12
     raw {
-        if endpoints == null {
-            endpoints = Memory(4096)
-        }
-
-        byte* held = endpoints
+        byte* held = Endpoints()
         if held == null {
             return result
         }
@@ -2379,7 +2560,7 @@ long EachAddress(byte* text, bool listening) {
         if length > 0 {
             held[2] = portHigh
             held[3] = portLow
-            result = Attempt(held, length, listening)
+            result = Attempt(held, length, listening, Deadline(held, nanoseconds))
         } else {
             // the hints of `struct addrinfo`: `ai_socktype` at its byte 8 `SOCK_STREAM`, the family any,
             // as Rust's `LookupHost` asks; a failure other than `EAI_SYSTEM` (-11) names no error number,
@@ -2400,12 +2581,13 @@ long EachAddress(byte* text, bool listening) {
                 // each `struct addrinfo`: `ai_addrlen` at its byte 16, `ai_addr` at 24 and `ai_next` at 40
                 byte* list = Ptr<byte>(*Ptr<long>(held + 112))
                 mut byte* entry = list
+                long deadline = Deadline(held, nanoseconds)
                 result = -4097
-                while entry != null && result < 0 {
+                while entry != null && result < 0 && result != -4100 {
                     byte* address = Ptr<byte>(*Ptr<long>(entry + 24))
                     address[2] = portHigh
                     address[3] = portLow
-                    result = Attempt(address, *Ptr<int>(entry + 16), listening)
+                    result = Attempt(address, *Ptr<int>(entry + 16), listening, deadline)
                     entry = Ptr<byte>(*Ptr<long>(entry + 40))
                 }
 
@@ -2423,7 +2605,7 @@ long EachAddress(byte* text, bool listening) {
 // to `port`, read by `getsockname` as Rust's `local_addr` reads it, which the system picks for the port
 // 0; or the failure, the socket closed.
 pub long Listen(byte* text, int* port) {
-    long fd = EachAddress(text, true)
+    long fd = EachAddress(text, true, 0)
     if fd < 0 {
         return fd
     }
@@ -2443,11 +2625,24 @@ pub long Listen(byte* text, int* port) {
     return result
 }
 
-// A socket connected to the address `text` (S9): its descriptor, or the failure.
-pub long Connect(byte* text) => EachAddress(text, false)
+// A socket connected to the address `text` within the default bound (S9): its descriptor, or the failure.
+pub long Connect(byte* text) => EachAddress(text, false, DefaultBound())
+
+// A socket connected to the address `text` within `nanoseconds`, the time of the second form of `Connect`
+// (S9): its descriptor, or the failure; a time of zero or below is -4097, `InvalidInput` with the number 0,
+// as Rust's `connect_timeout` refuses a zero `Duration`.
+pub long ConnectWithin(byte* text, long nanoseconds) {
+    if nanoseconds <= 0 {
+        return -4097
+    }
+
+    return EachAddress(text, false, nanoseconds)
+}
 
 // A connection that waits on the listening socket `fd`, taken by `accept4`, close-on-exec, and made again
-// where a signal interrupted it, as Rust's `accept` takes it: its descriptor, or the failure.
+// where a signal interrupted it, as Rust's `accept` takes it, with the default bound set on its reads and
+// writes (`Bounded`), which the listener's own bound would otherwise give it, since Linux copies a
+// listener's options to the sockets it accepts: its descriptor, or the failure with the connection closed.
 pub long Accept(int fd) {
     mut long result = -1
     raw {
@@ -2458,7 +2653,32 @@ pub long Accept(int fd) {
         }
     }
 
-    return Checked(result)
+    long accepted = Checked(result)
+    if accepted < 0 {
+        return accepted
+    }
+
+    long bounded = Bounded(int(accepted))
+    if bounded < 0 {
+        raw {
+            close(int(accepted))
+        }
+
+        return bounded
+    }
+
+    return accepted
+}
+
+// The kind of a failure of a stream's read or write (S9): `TimedOut` for `EAGAIN` (11), with which a call
+// on a blocking socket returns when the time `SetTimeout` set runs out (socket(7)), where Rust gives
+// `WouldBlock`; the kind `ErrorKind` gives for every other failure. The number stays the system's, 11.
+pub IoKind StreamErrorKind(long failure) {
+    if failure == -11 {
+        return IoKind.TimedOut
+    }
+
+    return ErrorKind(failure)
 }
 
 // The kind of a failure of the calls above: the kind Rust 1.82's `decode_error_kind` gives the error
@@ -2466,7 +2686,8 @@ pub long Accept(int fd) {
 // it gives no kind, `InvalidData` for a name that is not UTF-8 (S1), `InvalidInput` for an address that
 // is no host and port or gives no address, `NotFound` for a lookup that failed with an error of `getaddrinfo`
 // other than `EAI_SYSTEM`, `EAI_AGAIN` and `EAI_FAIL`, -4098, and `Other` for one that failed with `EAI_AGAIN` or
-// `EAI_FAIL`, or with `EAI_SYSTEM` while `errno` holds 0, -4099, by the arm of a number it gives no kind (S9).
+// `EAI_FAIL`, or with `EAI_SYSTEM` while `errno` holds 0, -4099, by the arm of a number it gives no kind, and
+// `TimedOut` for a connection whose bound ran out, -4100 (S9).
 pub IoKind ErrorKind(long failure) => match -failure {
     1 => IoKind.PermissionDenied
     2 => IoKind.NotFound
@@ -2508,6 +2729,7 @@ pub IoKind ErrorKind(long failure) => match -failure {
     4096 => IoKind.InvalidData
     4097 => IoKind.InvalidInput
     4098 => IoKind.NotFound
+    4100 => IoKind.TimedOut
     else => IoKind.Other
 }
 
