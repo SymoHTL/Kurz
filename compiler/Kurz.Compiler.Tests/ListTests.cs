@@ -2305,6 +2305,83 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[m: 2]",
     ];
 
+    // `weak` references (R3): a field, a variable, a parameter, a result, a list's item and a data value's field; a target freed while
+    // weak references to it are held, whose block stays until the last of them lets go; a temporary target, null once its statement
+    // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references
+    private const string Weak = """
+        class Owner(string Name) {
+            pub string Text() => Name
+        }
+
+        class Pet(string Name, mut weak Owner? Keeper)
+
+        class Club(mut List<weak Owner?> Members)
+
+        data Tag(string Label, weak Owner? By)
+
+        weak Owner? Remember(weak Owner? w) {
+            return w
+        }
+
+        string NameOf(weak Owner? w) => w?.Name ?? "gone"
+
+        Pet Adopt() {
+            ann = Owner("Ann")
+            return Pet("Rex", ann)
+        }
+
+        o = Owner("Bob")
+        p = Pet("Tom", o)
+        print(NameOf(p.Keeper))
+        lost = Adopt()
+        print(NameOf(lost.Keeper))
+        p.Keeper = Owner("Cy")
+        print(NameOf(p.Keeper))
+        held = Remember(o)
+        print(held?.Name ?? "none")
+        p.Keeper = o
+        if p.Keeper != null {
+            print(p.Keeper.Name)
+        }
+
+        c = Club(List<weak Owner?>())
+        c.Members.Add(o)
+        c.Members.Add(Owner("Eve"))
+        c.Members.Add(null)
+        print(c.Members)
+        for m in c.Members {
+            print(m?.Name ?? "gone")
+        }
+
+        print("{p.Keeper} {c.Members[1]}")
+        t = Tag("x", o)
+        print(NameOf(t.By))
+        mut Owner? strong = Owner("Fay")
+        weak Owner? faint = strong
+        print(NameOf(faint))
+        strong = null
+        print(NameOf(faint))
+        print(strong?.Name ?? "freed")
+        """;
+
+    private static readonly string[] WeakPrint =
+    [
+        "Bob",
+        "gone", // R3: `Ann` was freed at the end of `Adopt`, and the block stayed for the weak reference to read
+        "gone", // a temporary, freed at the end of its statement
+        "Bob",
+        "Bob",
+        "[Bob, null, null]", // A4 with R3: the text of what each read gives
+        "Bob",
+        "gone",
+        "gone",
+        "Bob null",
+        "Bob",
+        "Fay",
+        "gone",
+        "freed",
+    ];
+
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
     // over, a `return` and a `break` and a `continue` that leave a block, a call's result nothing holds, a `data` value's field, a
     // lambda's environment and a list's item, each holding a chain of links
@@ -2859,6 +2936,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
+        Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
+        // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
+        // a release under way stands once in the program
+        Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");

@@ -45,7 +45,13 @@ public sealed partial class Emitter
             case NameExpression n when Model.IsVariable(n):
                 {
                     var stored = Sub(Model.VariableOf(n).Type);
-                    return HeldCopy(n, Narrowed(fn.Value($"load {Ir(stored)}, ptr {Place(Model.VariableOf(n), n.Line)}"), stored, type), type);
+                    var loaded = fn.Value($"load {Ir(stored)}, ptr {Place(Model.VariableOf(n), n.Line)}");
+                    if (stored is WeakRefType weak)
+                    {
+                        return Upgrade(loaded, weak); // R3: a strong `T?`, held to the end of the statement
+                    }
+
+                    return HeldCopy(n, Narrowed(loaded, stored, type), type);
                 }
 
             case NameExpression n:
@@ -56,12 +62,16 @@ public sealed partial class Emitter
                 return EmitNow(m.Line);
             case MemberAccess m:
                 return HeldCopy(m, EmitMember(m, type), type);
+            case CallExpression c when Model.CallOf(c).Result is WeakRefType weak:
+                return Upgrade(Temp(EmitCall(c)!, weak), weak); // R3: a `weak T?` result, read as a strong `T?`
             case CallExpression c:
                 return Temp(EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it"), type);
             case IndexExpression { Conditional: true } i:
                 return Temp(EmitConditionalIndex(i, (UnionType)type), type);
             case IndexExpression i when TypeOf(i.Target) is PointerType p:
                 return fn.Value($"load {Ir(type)}, ptr {ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index)}");
+            case IndexExpression i when TypeOf(i.Target) is ListType { Element: WeakRefType weak } list:
+                return Upgrade(EmitListIndex(i, list), weak); // R3: a strong `T?`, held to the end of the statement
             case IndexExpression i when TypeOf(i.Target) is ListType list:
                 return HeldCopy(i, EmitListIndex(i, list), type);
             case IndexExpression i when TypeOf(i.Target) is MapType map:
@@ -355,6 +365,11 @@ public sealed partial class Emitter
             case DataType d:
                 {
                     var index = Layout.FieldIndex(d, m.Member);
+                    if (Layout.Fields(d)[index] is WeakRefType weak)
+                    {
+                        return Upgrade(Field(target(), d, index), weak); // R3: a strong `T?`, held to the end of the statement
+                    }
+
                     return Narrowed(Field(target(), d, index), Layout.Fields(d)[index], type);
                 }
 
@@ -769,13 +784,19 @@ public sealed partial class Emitter
     /// integer or a <c>float</c> into a floating-point type (T23); an integer into a <c>decimal</c> (T23); a narrow time value into
     /// the wide pair (T29); a
     /// derived data value as its base (D6), the same block, and no data value as a type it does not derive from; a value into the one
-    /// case of a union it goes to (D9, T8 with D9); a union into a union (D9 with O1).
+    /// case of a union it goes to (D9, T8 with D9); a union into a union (D9 with O1); a <c>T</c>, a <c>T?</c> or <c>null</c> into a
+    /// <c>weak T?</c> (R3, <see cref="Weaken"/>), which the place holds unless <paramref name="owned"/> says the callee borrows it.
     /// </summary>
-    private string Convert(string value, KurzType from, KurzType to, int line)
+    private string Convert(string value, KurzType from, KurzType to, int line, bool owned = true)
     {
         if (Types.Same(from, to) || (from is PointerType or CFunctionType && to is PointerType or CFunctionType))
         {
             return value;
+        }
+
+        if (to is WeakRefType weak)
+        {
+            return Weaken(value, from, weak, owned); // R3: a value the place holds, unless the callee borrows it
         }
 
         if (Types.IsInteger(from) && Types.IsInteger(to))
@@ -931,6 +952,15 @@ public sealed partial class Emitter
                 return DerivedText(value, type, line);
             case ClassType c:
                 return InstanceText(value, c); // A5
+            case WeakRefType w:
+                {
+                    // A4 with R3: the text of what its read gives, the target's `Text()` or `null`
+                    var strong = Upgraded(value);
+                    var text = TextOf(strong, Types.Read(w), line);
+                    Release(strong, Types.Read(w));
+                    return text;
+                }
+
             case EnumType e:
                 return EnumText(value, e); // A4
             case NullType:

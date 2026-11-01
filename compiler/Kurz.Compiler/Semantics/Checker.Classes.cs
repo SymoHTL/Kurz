@@ -68,11 +68,6 @@ public sealed partial class Checker
             return (d.Line, "`equal by` (K8)");
         }
 
-        if ((d.PrimaryConstructor ?? []).Select(p => WeakIn(p.Type)).FirstOrDefault(w => w is not null) is { } weak)
-        {
-            return (weak.Line, "weak (R3, R5)"); // R2: a `weak` field is no strong field, so the cycle rule cannot judge a class until `weak` is read
-        }
-
         foreach (var member in d.Members ?? [])
         {
             switch (member)
@@ -95,16 +90,52 @@ public sealed partial class Checker
         return null;
     }
 
-    /// <summary>R3: the first <c>weak</c> a written type holds, at any depth.</summary>
-    private static WeakType? WeakIn(TypeSyntax? type) => type switch
+    // ---- weak (R3, R5) -----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// R3, R5: <c>weak T?</c> of a class <c>T</c>. Before a type whose values are no instances of a class it is <c>weak-value</c>, and
+    /// without its <c>?</c> <c>weak-not-nullable</c>; before a type parameter or a union of classes the checker does not read it (T19, D9).
+    /// </summary>
+    private KurzType ResolveWeak(WeakType w)
     {
-        WeakType w => w,
-        NamedType n => n.TypeArguments.Select(WeakIn).FirstOrDefault(w => w is not null),
-        NullableType n => WeakIn(n.Inner),
-        Syntax.UnionType u => u.Cases.Select(WeakIn).FirstOrDefault(w => w is not null),
-        Syntax.FunctionType f => f.Parameters.Append(f.Result).Select(WeakIn).FirstOrDefault(w => w is not null),
-        _ => null,
-    };
+        var target = Resolve(w.Inner is NullableType nullable ? nullable.Inner : w.Inner);
+        if (target is ErrorType)
+        {
+            return Types.Error;
+        }
+
+        if (target is TypeParameterType || (target is UnionType u && u.Cases.Any(c => c is ClassType)))
+        {
+            NotSupported(w.Line, $"`weak` before `{target}`, which the checker does not read as a class (R5, T19, D9)");
+            return Types.Error;
+        }
+
+        if (target is not ClassType)
+        {
+            Report(ErrorIds.WeakValue, w.Line, $"`weak` stands before `{target}`, a value and no instance of a class, which has nothing to free (R5, M1)");
+            return Types.Error;
+        }
+
+        if (w.Inner is not NullableType)
+        {
+            Report(ErrorIds.WeakNotNullable, w.Line, $"`weak {target}` is written without its `?`: a weak reference is null once its target is freed, `weak {target}?` (R5)");
+            return Types.Error;
+        }
+
+        return new WeakRefType((ClassType)target);
+    }
+
+    /// <summary>Whether one of the types is a <c>weak</c> reference, where it stands in a place the checker does not read one: said <c>not supported</c> there (R3, E1).</summary>
+    private bool WeakUnread(int line, string where, params KurzType[] types)
+    {
+        if (!types.Any(t => t is WeakRefType))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"a `weak` reference as {where} (R3)");
+        return true;
+    }
 
     /// <summary>
     /// K1: the fields of a class, those of its primary constructor in their order, <c>mut</c> where written; a field and a method of
@@ -285,7 +316,7 @@ public sealed partial class Checker
     private Typed ReadImplicitField(NameExpression n, FieldSymbol field)
     {
         model.RecordImplicitField(n, ThisVariable(), field);
-        return Narrowed(n, new Typed(field.Type)); // N3, N9
+        return Narrowed(n, new Typed(Types.Read(field.Type))); // N3, N9; R3
     }
 
     /// <summary>
@@ -331,7 +362,7 @@ public sealed partial class Checker
     {
         if (type.Symbol.Field(member) is { } field)
         {
-            return new Typed(field.Type);
+            return new Typed(Types.Read(field.Type)); // R3: a `weak` field reads as a strong `T?`
         }
 
         if (type.Symbol.Methods.ContainsKey(member))
@@ -595,33 +626,61 @@ public sealed partial class Checker
 
     /// <summary>
     /// N9: whether a path known not null runs through a <c>mut</c> field of an instance, which a call can assign through another
-    /// reference (K2), so that what is known of it lasts up to the next call and the next assignment.
+    /// reference (K2), or through a <c>weak</c> reference, whose target a call can free (R3), so that what is known of it lasts up to the
+    /// next call and the next assignment.
     /// </summary>
-    private static bool Changeable(NullPath path)
+    private static bool Changeable(NullPath path) => Steps(path).Any(s => s.Mut || s.Type is WeakRefType);
+
+    /// <summary>N9: whether a path runs through a <c>weak</c> reference, the variable itself or a field on the way.</summary>
+    private static bool ThroughWeak(NullPath path) => Steps(path).Any(s => s.Type is WeakRefType);
+
+    /// <summary>N9: the root of a path and each field it reads, with its type and whether it is a <c>mut</c> field of an instance.</summary>
+    private static IEnumerable<(KurzType Type, bool Mut)> Steps(NullPath path)
     {
         var current = path.Root.Type;
+        yield return (current, false);
         foreach (var name in path.Fields.Length == 0 ? [] : path.Fields.Split('.'))
         {
             switch (Types.NonNull(current) ?? current)
             {
                 case ClassType c when c.Symbol.Field(name) is { } field:
-                    if (field.Mut)
-                    {
-                        return true;
-                    }
-
                     current = field.Type;
+                    yield return (current, field.Mut);
                     break;
                 case DataType d when d.Symbol.Field(name) is { } field:
                     current = SubstituteData(d, field.Type);
+                    yield return (current, false);
                     break;
                 default:
-                    return false;
+                    yield break;
             }
         }
-
-        return false;
     }
+
+    // N9: the calls read so far, so that a condition knows whether one ran in it
+    private int callsRun;
+
+    /// <summary>N9: a call ran, which ends what was known of every path a call can change, and counts for the end of a condition.</summary>
+    private void CallRan()
+    {
+        callsRun++;
+        EndChangeableNarrowing();
+    }
+
+    /// <summary>
+    /// N9 (the owner, 2026-11-01, "Those ends stop narrowing"): what a condition shows where it is true and where it is false, less every
+    /// path through a <c>weak</c> reference where a call ran in it since <paramref name="callsBefore"/>: a count let go of at the end of
+    /// the condition can free the target before the block runs.
+    /// </summary>
+    private (ImmutableHashSet<NullPath> True, ImmutableHashSet<NullPath> False) ConditionTests(Expression condition, int callsBefore)
+    {
+        var (whenTrue, whenFalse) = Tests(condition);
+        return callsRun == callsBefore ? (whenTrue, whenFalse) : (Unweak(whenTrue), Unweak(whenFalse));
+    }
+
+    /// <summary>N9: what is known of paths with no <c>weak</c> reference in them, which the end of a block that declares a variable keeps.</summary>
+    private static ImmutableHashSet<NullPath> Unweak(ImmutableHashSet<NullPath> known) =>
+        known.Any(ThroughWeak) ? known.Where(p => !ThroughWeak(p)).ToImmutableHashSet() : known;
 
     /// <summary>N9: a call or an assignment ends what was known of every path through a <c>mut</c> field of an instance.</summary>
     private void EndChangeableNarrowing() => frame.Known = Unchangeable(frame.Known);
@@ -782,7 +841,7 @@ public sealed partial class Checker
     /// <summary>Whether a value of the type holds an instance of a class at any depth, outside the instances themselves.</summary>
     private static bool HoldsInstance(KurzType type, HashSet<DataSymbol> path) => type switch
     {
-        ClassType => true,
+        ClassType or WeakRefType => true,
         ListType l => HoldsInstance(l.Element, path),
         MapType m => HoldsInstance(m.Key, path) || HoldsInstance(m.Value, path),
         UnionType u => u.Cases.Any(c => HoldsInstance(c, path)),
@@ -806,6 +865,7 @@ public sealed partial class Checker
     private static ClassSymbol? PrivateTextClass(KurzType type, HashSet<DataSymbol> path) => type switch
     {
         ClassType c when c.Symbol.TextMethod is { } text && (text.Declaration!.Modifiers & Modifiers.Pub) == 0 => c.Symbol,
+        WeakRefType w => PrivateTextClass(w.Target, path), // A4 with R3: the text of what its read gives
         ListType l => PrivateTextClass(l.Element, path),
         MapType m => PrivateTextClass(m.Key, path) ?? PrivateTextClass(m.Value, path),
         UnionType u => u.Cases.Select(c => PrivateTextClass(c, path)).FirstOrDefault(c => c is not null),

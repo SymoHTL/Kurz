@@ -822,7 +822,7 @@ public sealed partial class Checker
             case Syntax.UnionType u:
                 {
                     var cases = u.Cases.Select(Resolve).ToList();
-                    if (cases.FirstOrDefault(c => Types.NonNull(c) is not null) is { } nullable)
+                    if (cases.FirstOrDefault(c => Types.NonNull(c) is not null || c is WeakRefType) is { } nullable)
                     {
                         NotSupported(u.Line, $"a nullable case of a union, `{nullable}` (N1, D9)"); // its `null` would be one of the union's cases (O1)
                         return Types.Error;
@@ -835,12 +835,16 @@ public sealed partial class Checker
                 {
                     var parameters = f.Parameters.Select(Resolve).ToList();
                     var result = Resolve(f.Result);
+                    if (WeakUnread(f.Line, "a parameter or the result of a function type", [.. parameters, result]))
+                    {
+                        return Types.Error;
+                    }
+
                     return parameters.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameters, result);
                 }
 
             case WeakType w:
-                NotSupported(w.Line, "weak (R3, R5)");
-                return Types.Error;
+                return ResolveWeak(w); // R3, R5
             case Syntax.PointerType p:
                 return PointerTo(Resolve(p.Pointee), p.Line, "a pointer"); // R10, R14
             case ExternFunctionType f:
@@ -896,6 +900,11 @@ public sealed partial class Checker
 
             var key = Resolve(n.TypeArguments[0]);
             var value = Resolve(n.TypeArguments[1]);
+            if (WeakUnread(n.Line, "a key or a value of a map", key, value))
+            {
+                return Types.Error;
+            }
+
             return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
@@ -947,6 +956,11 @@ public sealed partial class Checker
             }
 
             var arguments = n.TypeArguments.Select(Resolve).ToList();
+            if (WeakUnread(n.Line, "a type argument of a data type", [.. arguments]))
+            {
+                return Types.Error;
+            }
+
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
@@ -1421,6 +1435,11 @@ public sealed partial class Checker
     private void PopScope()
     {
         ReportUnused(frame.Scope);
+        if (frame.Scope.Variables.Count > 0)
+        {
+            frame.Known = Unweak(frame.Known); // N9: the end of a block that declares a variable lets go of counts, which can free a `weak` target
+        }
+
         frame.Scope = frame.Scope.Parent!;
     }
 
@@ -1530,9 +1549,10 @@ public sealed partial class Checker
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
+                    var calls = callsRun;
                     CheckCondition(i.Condition);
                     var start = frame.Known;
-                    var (whenTrue, whenFalse) = Tests(i.Condition);
+                    var (whenTrue, whenFalse) = ConditionTests(i.Condition, calls);
                     frame.Known = start.Union(whenTrue);
                     var then = CheckBlock(i.Then);
                     var afterThen = frame.Known;
@@ -2114,7 +2134,7 @@ public sealed partial class Checker
 
             element = t.Type switch
             {
-                ListType l => l.Element,
+                ListType l => Types.Read(l.Element), // R3
                 ErrorType or VoidType => Types.Error,
                 MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
                 MapType m => m.Key,
