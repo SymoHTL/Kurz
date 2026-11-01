@@ -167,11 +167,11 @@ variable: an assignment into a path from it (M4), a `mut` method called on it or
 (M5), and passing it as a `mut` argument (M7); the lambda holds a copy (F15), and a change to the
 copy would be lost. *(proposed: the record speaks of assigning)* A class instance is no part of the
 copy: the lambda holds a reference to the same instance, which changes through every reference
-(K2), so it may change what the instance holds, a `mut` field by an assignment, `() => c.Count = 5`,
-or through a method, `() => c.Add(1)`, while `() => c = Counter(1)` and `() => d.X = 1` with a `data`
+(K2), so it may change what the instance holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
+or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
 value `d` stay `capture-assign` (§4, the owner, 2026-11-01, "Both allowed", against a method call
 alone and against neither). An instance that a captured `data` value holds is one the lambda may
-change too, `() => d.Item.Count = 1` *(assumed, as §4 marks it)*. The result type of a function type may be `void`,
+change too, `() => { d.Item.Count = 1 }` *(assumed, as §4 marks it)*. The result type of a function type may be `void`,
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
 objected to)* A lambda whose body is a call with a `void` success, `x => print(x)`, is a lambda with
