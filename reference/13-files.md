@@ -306,9 +306,9 @@ grammar of the port and of a literal, the NUL byte, the errors of an address, `I
 lookup that succeeds with no address, the error of the system `EAI_SYSTEM` passes on, the error of
 the last address tried, and the string a connection's error names)*
 
-A read, a write and `TcpStream.Connect` on a socket wait at most 5 seconds by default, as long as a
-call of an actor waits (§6), whether those 5 seconds cover the lookup of a name in `Connect` standing
-open (§14), and the time of a read and a write can be set for each socket, as
+A read, a write and the connect of `TcpStream.Connect` on a socket wait at most 5 seconds by default,
+as long as a call of an actor waits (§6), whether those 5 seconds cover the lookup of a name in
+`Connect` too, and so bound the whole call, standing open (§14), and the time of a read and a write can be set for each socket, as
 Rust's `set_read_timeout` and `set_write_timeout` set a time for each socket (§12, the
 owner, 2026-10-30, against a timeout as an argument with no default and against a default in the
 HTTP server alone). `Connect` creates the socket such a setter would set, and another time reaches it
@@ -317,7 +317,9 @@ through a second form that takes the time, `TcpStream.Connect(address, timeout)`
 setting `Connect` reads before it creates the socket and against the 5 seconds alone), where Rust's
 takes one address and looks nothing up, and this form is read as taking the name the first form takes,
 looking it up and trying its addresses in turn, as the first form's `address` reads above (§12, the
-owner, 2026-10-29, "Names too, as Rust"), under the marker below; how the time meets the lookup stands open (§14). A call whose time runs out
+owner, 2026-10-29, "Names too, as Rust", an answer on the first form), a reading under the marker on
+the bound of `TcpStream.Connect` at the end of this rule's paragraph; how the time meets the lookup
+stands open (§14). A call whose time runs out
 gives an `IoError` of the kind `TimedOut`, and `s.SetReadTimeout(d)` and `s.SetWriteTimeout(d)` set
 the time of a stream's reads and of its writes, taking a `duration`, `null` for no bound, as Rust's
 `set_read_timeout(Option<Duration>)`, with a time of zero and a negative time refused as
@@ -326,26 +328,35 @@ the time of a stream's reads and of its writes, taking a `duration`, `null` for 
 `Socket.ReceiveTimeout`). A time of zero or below in the second form of `Connect` is `InvalidInput`
 too, as Rust's `connect_timeout` refuses a zero `Duration` (§12, the owner, 2026-11-01, "Same:
 InvalidInput", against the 5 seconds of the first form and against no bound). *(assumed, §12: the
-parameter a `duration?`; the time of the second form of `Connect` a `duration`; a positive time under
-1 microsecond rounded up to 1 microsecond, as Rust's setters round it, and a time whose seconds pass
+parameter a `duration?`; the time of the second form of `Connect` a `duration`; a time cut down to
+whole microseconds, and a positive time that would come to zero raised to 1 microsecond, as Rust's
+setters cut and raise it, and a time whose seconds pass
 the largest `time_t` bounded by `time_t::MAX` seconds, as Rust bounds it (checked 2026-11-01: `set_timeout`
 in `library/std/src/sys/net/connection/socket/unix.rs` of Rust's master branch); a setter giving
-`void | IoError`; and `TimedOut` for the `EAGAIN` with which a call on a blocking socket returns when
-its time runs out, the one exception to the kinds of Rust's mapping, every other `EAGAIN` keeping
-`WouldBlock`)* The socket options `SO_RCVTIMEO` and
+`void | IoError`; and every `EAGAIN` other than the one Q8 (a) names keeping `WouldBlock`, that one
+being the only exception to the kinds of Rust's mapping, told by what the runtime sees: socket(7)
+says that `SO_RCVTIMEO` and `SO_SNDTIMEO` make a call on a blocking socket fail with `EAGAIN` when
+their time runs out, or with `EINPROGRESS` for `connect`, so that every `EAGAIN` of a read, a write
+or an `Accept` on a blocking socket whose time is set is that case (checked 2026-11-01: socket(7) of
+the Linux man-pages); and, proposed with the product pass of the build of these bounds, a read or a
+write whose time runs out giving `TimedOut` with the number of `EAGAIN`, 11, a `Connect` whose bound
+runs out `TimedOut` with the number 0, as an error that is not the system's, and the bound of a read
+and a write holding for each call of the system, so that a `Write` of many bytes to a peer that takes
+them slowly can take longer than the bound in all, as Rust's `write_all` does)* The socket options `SO_RCVTIMEO` and
 `SO_SNDTIMEO`, which Rust's setters set, bound a call on a blocking socket outside an actor alone, and how
 the bound holds for an actor's socket, which runs without blocking, stands open (§14). *(assumed, §12:
-one bound of `TcpStream.Connect` for the whole call, shared by every address it tries in turn and not
-given to each, while whether it covers the lookup stands open, §14; and the second form's lookup and
+one bound of `TcpStream.Connect` shared by its attempts to connect to every address it tries in turn
+and not given to each, which says nothing of the lookup, open in §14, at the cost that a first
+address that never answers spends the whole bound and the later addresses are not tried; and the second form's lookup and
 its trial of the addresses, a reading of the answer's `Connect(address, timeout)`, which names the
 first form's parameter)*
 `l.Accept()` waits without a bound by default, as Rust's `TcpListener::accept` waits, and a bound
 can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", whose option read "No
 default bound on Accept. Read, write and Connect keep 5 s, and a bound can still be set on a
-listener", against the default of 5 seconds on `Accept` too). The member that sets a listener's bound,
-a setter `l.SetAcceptTimeout(d)` taking a `duration?` as the stream's setters do or a property
-`l.AcceptTimeout`, as C#'s `Socket.ReceiveTimeout`, and how the bound holds for an actor's socket
-stand open (§14).
+listener", against the default of 5 seconds on `Accept` too). A listener's bound is set by
+`l.SetAcceptTimeout(d)`, taking a `duration?` as the stream's setters do *(assumed, §12: following
+from Q8 (a), which set a property, as C#'s `Socket.ReceiveTimeout`, aside for a socket)*, and how
+the bound holds for an actor's socket stands open (§14).
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz

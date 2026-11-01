@@ -1070,13 +1070,13 @@ Where no list type stands, the items give it, as T27 infers a type parameter fro
 of a `null` that no nullable type takes (N6) *(assumed, §4: as T27 and N6 read `Pick(1, null)`)*. A
 literal of one or more literal items given to a parameter `List<T>` of a generic call gives its items to the
 literal arguments of `T` (T27), so that with `Pair<T>(T a, List<T> b)` the call `Pair(1L, [1])` makes
-`T` a `long`, and with two parameters `List<T>` the call `Pick([1], [2L])` does, as `Pick(1, 2L)` does
+`T` a `long`, and with `Both<T>(List<T> a, List<T> b)` the call `Both([1], [2L])` does, as `Pick(1, 2L)` does
 and as C# 12 infers for a collection expression and Rust for `vec![1]`; a literal with an item that is
 not a literal, `[x]`, gives `T` the type of that item, as any other argument does, and `[]` gives it
 nothing and takes the list type the other arguments give, `Pair(1L, [])` a `List<long>`, so that where no
-other argument gives `T`, `Take([])` with `Take<T>(List<T> xs)` and `Pick([], [])` are `cannot-infer`, as
+other argument gives `T`, `Take([])` with `Take<T>(List<T> xs)` and `Both([], [])` are `cannot-infer`, as
 `x = []` is *(assumed, §4: the items read as arguments of the parameter, of which `[]` has none, "From its
-items"; one `cannot-infer` at each empty literal, so two on the line of `Pick([], [])`, each literal a
+items"; one `cannot-infer` at each empty literal, so two on the line of `Both([], [])`, each literal a
 defect of its own under E1)*.
 
 A comma after the last item is accepted, `[1, 2,]` (§4, the owner, 2026-10-30, "Accept, as C# 12
@@ -1163,7 +1163,7 @@ Case: [values/list-literal-held.kz](../corpus/values/list-literal-held.kz)
 Case: [values/list-literal-inference.kz](../corpus/values/list-literal-inference.kz)
 ```kurz
 List<T> Pair<T>(T a, List<T> b) => b
-List<T> Pick<T>(List<T> a, List<T> b) => b
+List<T> Both<T>(List<T> a, List<T> b) => b
 
 r1 = Pair(1L, [1])
 List<long> y1 = r1
@@ -1171,14 +1171,14 @@ print(y1)
 r2 = Pair(1, [2L])
 List<long> y2 = r2
 print(y2)
-r3 = Pick([1], [2L])
+r3 = Both([1], [2L])
 List<long> y3 = r3
 print(y3)
 r4 = Pair(1, [2, 3])
 List<int> y4 = r4
 print(y4)
 List<long> xs = [1]
-r5 = Pick(xs, [7])
+r5 = Both(xs, [7])
 List<long> y5 = r5
 print(y5)
 byte small = 1
