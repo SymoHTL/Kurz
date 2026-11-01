@@ -746,6 +746,8 @@ public sealed class LexerTests
     [InlineData("asm(\n    \"push {{r4}}\")", "push {{r4}}")]
     [InlineData("asm(\"a\", \"b {x\", x = in(reg) 1)", "a")]
     [InlineData("asm(\"\"\"\n    nop {x}\n    \"\"\", x = in(reg) 1)", "nop {x}")]
+    [InlineData("asm(r\"mov {x}, \\1\", x = in(reg) 1)", "mov {x}, \\1")]
+    [InlineData("asm(r\"\"\"\n    nop {x}\n    \"\"\", x = in(reg) 1)", "nop {x}")]
     public void A_template_of_asm_is_read_with_no_hole(string program, string first)
     {
         // R11: a string literal that opens the arguments of `asm`, or follows such a template and a comma, is a template, whose `{name}`
