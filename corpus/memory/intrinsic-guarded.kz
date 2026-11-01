@@ -1,0 +1,10 @@
+// expect: output
+// | 3
+// rules: R18
+
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Sse41.IsSupported {
+    print(X86.Sse41.Extract(v, 2))
+} else {
+    print(v.GetElement(2))
+}
