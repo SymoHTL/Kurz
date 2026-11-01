@@ -3450,6 +3450,16 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_chain_of_as_many_copies_as_the_build_reads_is_read_and_one_more_is_not_supported()
+    {
+        // T33: the bound the text names is the one the build keeps: a chain of 64 readers, each calling the next with its type, is read
+        static string Chain(int readers) => string.Concat(Enumerable.Range(1, readers).Select(i =>
+            $"void R{i}<T>() {{\n    match T.Kind {{\n        else => {(i < readers ? $"R{i + 1}<T>()" : "print(1)")}\n    }}\n}}\n\n")) + "R1<int>()";
+        Clean(Chain(64));
+        Assert.Equal(["391: a chain of more than 64 copies of generic functions that read their type, from `R1<int>` (T33)"], NotSupported(Chain(65)));
+    }
+
+    [Fact]
     public void A_type_argument_with_no_kind_is_not_supported_at_the_call_that_writes_it()
     {
         // T33: `void` has no value of `TypeKind`, so a reader called with it, or a function that passes it on to one, is not supported
