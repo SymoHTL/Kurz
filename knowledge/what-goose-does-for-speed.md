@@ -193,7 +193,10 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
   calls" (four-program suite); "the compiler now keeps that pool's top and count in locals across
   the recursion instead of going through its header at every push" (results). Kurz: the CPU of a
   build is answered: "Build option, as Rust", section 2 of the record (Q5); "This instructs `rustc`
-  to generate code specifically for a particular processor." (rustc book). Passes of Kurz's own
+  to generate code specifically for a particular processor." (rustc book). The widest version the
+  CPU running the program supports is picked by the program's own test, in a guarded block, section
+  13 of the record ("Guarded block", 2026-11-01), once for each run of the block and not at each
+  call. Passes of Kurz's own
   above LLVM are ADOPTABLE, Q6, not asked.
 - G15, arithmetic at the operands' width. "Arithmetic runs at the operands' own width (6.2), so an
   i32 kernel uses 32-bit arithmetic" (design); "The first version of blur summed nine u8 taps in u8

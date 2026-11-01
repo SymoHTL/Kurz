@@ -1142,8 +1142,9 @@ public sealed partial class Emitter
     /// <summary>
     /// X8: the helper of <c>Sort</c>, which sorts the <c>%a1</c> items at <c>%a0</c> and keeps equal items in their order: a merge sort, as
     /// Rust's stable sort is one. A short list is sorted by insertion alone; a longer one in runs of <see cref="ShortRun"/> items, sorted by
-    /// insertion, then merged in pairs of runs twice as long each time (<see cref="Merge"/>), with a buffer of half the items, the most the
-    /// shorter run of a pair holds. A buffer the system refuses raises <c>allocation-failed</c> (M9).
+    /// insertion, then merged in pairs of runs twice as long each time (<see cref="Merge"/>), with a buffer of half the items, rounded up,
+    /// as Rust's stable sort asks for at the least (<c>driftsort_main</c>), which holds the shorter run of a pair. A buffer the system
+    /// refuses raises <c>allocation-failed</c> (M9).
     /// </summary>
     private string StableSort(SortOf s) => Helper($"sort.stable.{s.Key}", "void", ["ptr", "i64"], () =>
     {
@@ -1155,7 +1156,8 @@ public sealed partial class Emitter
         fn.Emit($"call void {insertion}(ptr %a0, i64 %a1)");
         fn.Return(null);
         fn.Block(runs);
-        var bytes = fn.Value($"mul i64 {fn.Value("lshr i64 %a1, 1")}, {fn.Value($"ptrtoint ptr {SortAt(s.Item, "null", "1")} to i64")}");
+        var half = fn.Value($"sub i64 %a1, {fn.Value("lshr i64 %a1, 1")}");
+        var bytes = fn.Value($"mul i64 {half}, {fn.Value($"ptrtoint ptr {SortAt(s.Item, "null", "1")} to i64")}");
         var buffer = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {bytes})");
 
         // each run sorted by insertion
