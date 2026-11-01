@@ -12,7 +12,8 @@ namespace Kurz.Compiler.Tests;
 /// run, which the standard library's two-way search answers as it answers a string's, and through a list of <c>int</c>'s, which is
 /// compared item by item; and the same under the allocator that makes every block it frees inaccessible. Needles of up to 12 bytes
 /// reach both cases of the two-way search, a needle whose part before its cut repeats at its period and one whose does not, each in at
-/// least 100 searches, and at least 100 stand twice in their string.
+/// least 100 searches, and at least 100 stand twice in their string. A search of one byte, which reads two words at a time as Rust's
+/// <c>memchr</c> does, finds it at every place of lists of 0 to 40 bytes and from each of the 8 places in a word a search can start at.
 /// </summary>
 public sealed class SearchTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -179,6 +180,149 @@ public sealed class SearchTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var compilation = Builder.Compile(SourceText.FromString("program.kz", Program), [], runtime, testBuild: true);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "searches" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    private const string OneByte = """
+        string Line(int length, ulong start) {
+            mut ulong state = start
+            mut string text = ""
+            mut int made = 0
+            while made < length {
+                state = state *% 6364136223846793005UL +% 1442695040888963407UL
+                int pick = int((state >> 33) % 24UL)
+                if pick == 0 {
+                    text = "{text},"
+                } else if pick < 8 {
+                    text = "{text}a"
+                } else if pick < 16 {
+                    text = "{text}ä"
+                } else {
+                    text = "{text}b"
+                }
+
+                made = made + 1
+            }
+
+            return text
+        }
+
+        List<int> targets = [0, 35, 128, 255]
+        for ti in 0..<targets.Count {
+            byte t = byte(targets[ti])
+            for n in 0..<41 {
+                int places = n + 1
+                for q in 0..<places {
+                    mut xs = List<byte>()
+                    for k in 0..<n {
+                        mut v = byte((k * 37 + 11) % 256)
+                        if v == t {
+                            v = byte((k * 37 + 12) % 256)
+                        }
+
+                        xs.Add(v)
+                    }
+
+                    if q > 0 {
+                        xs[q - 1] = t
+                    }
+
+                    print(xs.IndexOf(t) ?? -1)
+                }
+            }
+        }
+
+        mut ulong seed = 777UL
+        for r in 0..<1500 {
+            seed = seed *% 2862933555777941757UL +% 3037000493UL
+            mut line = ""
+            mut first = true
+            for piece in Line(int((seed >> 40) % 150UL), seed).Split(",") {
+                if first {
+                    line = "{piece.Bytes.Count}"
+                    first = false
+                } else {
+                    line = "{line} {piece.Bytes.Count}"
+                }
+            }
+
+            print(line)
+        }
+
+        """;
+
+    /// <summary>The string the program's <c>Line</c> makes: <paramref name="length"/> letters, one in 24 a comma, each picked by a step of the same generator.</summary>
+    private static string Line(int length, ulong start)
+    {
+        var state = start;
+        var text = new StringBuilder();
+        for (var made = 0; made < length; made++)
+        {
+            state = unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
+            var pick = (state >> 33) % 24UL;
+            text.Append(pick == 0 ? "," : pick < 8 ? "a" : pick < 16 ? "ä" : "b");
+        }
+
+        return text.ToString();
+    }
+
+    [Fact]
+    public void A_search_of_one_byte_finds_it_where_dotnet_does_in_either_word_and_at_every_alignment()
+    {
+        // X1, X9: `Find` looks for one byte as Rust's `memchr` of a slice does, byte by byte up to an address that is a multiple of 8 and
+        // then two words at a time. A list of 0 to 40 bytes, every value but the one looked for, 0, 35, 128 and 255, holds it at each
+        // place or nowhere, so that it stands in the first word of a pair, in the second, before the words and after them; and `Split` of
+        // 1500 strings of letters of one and two bytes at a comma looks for the comma from each place after one, at each of the 8 places
+        // in a word, the string's bytes standing in a block at a multiple of 8 (`StringBlock`)
+        var expected = new List<string>();
+        foreach (var t in new[] { 0, 35, 128, 255 })
+        {
+            for (var n = 0; n <= 40; n++)
+            {
+                for (var q = 0; q <= n; q++)
+                {
+                    expected.Add((q > 0 ? q - 1 : -1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+        }
+
+        var seed = 777UL;
+        var starts = new int[8];
+        for (var r = 0; r < 1500; r++)
+        {
+            seed = unchecked((seed * 2862933555777941757UL) + 3037000493UL);
+            var bytes = Encoding.UTF8.GetBytes(Line((int)((seed >> 40) % 150UL), seed));
+            var pieces = new List<int>();
+            var at = 0;
+            while (true)
+            {
+                var found = bytes.AsSpan(at).IndexOf((byte)',');
+                if (found >= 8 && found <= bytes.Length - at - 16)
+                {
+                    starts[at % 8]++; // a comma past the bytes before the first word and in a pair of words the search reads
+                }
+
+                pieces.Add(found < 0 ? bytes.Length - at : found);
+                if (found < 0)
+                {
+                    break;
+                }
+
+                at += found + 1;
+            }
+
+            expected.Add(string.Join(' ', pieces));
+        }
+
+        // the floor: each of the 8 places a search can start at in a word finds a comma through the words at least 50 times
+        Assert.True(starts.All(s => s >= 50), string.Join(", ", starts));
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", OneByte), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "search-one-byte" + suffix));
             Assert.Equal((0, ""), (code, error));
             Assert.Equal(expected, output);
         }
