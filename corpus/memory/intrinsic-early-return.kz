@@ -1,0 +1,20 @@
+// expect: output
+// | 3
+// | 3
+// rules: R18
+
+int Third(Vector128<int> lanes) {
+    if !X86.Sse41.IsSupported {
+        return lanes.GetElement(2)
+    }
+    return X86.Sse41.Extract(lanes, 2)
+}
+
+v = Vector128.Create(1, 2, 3, 4)
+print(Third(v))
+if X86.Sse41.IsSupported {
+    // the copy of `Third` compiled for SSE4.1, in which its test is `true` (R18)
+    print(Third(v))
+} else {
+    print(Third(v))
+}

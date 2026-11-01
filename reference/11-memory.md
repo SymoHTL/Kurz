@@ -947,6 +947,128 @@ void Run(extern "C" (long) => long f) {
 Run((long x) => x * 2)
 ```
 
+### R18 (decided, §13) Intrinsics
+
+An intrinsic is a function of the class of an instruction set, which the compiler turns into that
+set's instructions, `X86.Sse41.Extract(v, 2)`; the classes stand under `X86` and `Arm`, the value
+types `Vector128<T>` and `Vector256<T>` hold the lanes, and each class has `IsSupported`, which tests
+the CPU for its set (§13, the owner, 2026-11-01, "C#'s shape"). The classes and their functions take
+C#'s names, the class of x86's SHA set is `X86.Sha`, and the operations of `Vector128<T>` and
+`Vector256<T>` on their lanes, `Vector128.Create(1, 2, 3, 4)` and `v.GetElement(2)`, are no
+intrinsics and need no test *(assumed: as §13 marks them)*. The functions of `X86.Sha` are the seven
+of .NET's closed proposal, `Sha256TwoRounds` among them, on `Vector128<uint>` (§13, the owner,
+2026-11-01, "Proposal names, uint lanes"). A constant given for an intrinsic's parameter that C#
+types `byte`, the `2` of `X86.Sse41.Extract(v, 2)`, is an `int` for the pick of the function (F14)
+and has to fit the parameter's type: `X86.Sse41.Extract(v, 300)` is `constant-overflow`
+*(assumed: as §13 marks it)*.
+
+An intrinsic stands where a test of its class's `IsSupported` guards it, as a test narrows a
+nullable variable (N3), and in a `raw` block (R7) (§13, the owner, 2026-11-01, "Checker narrows"):
+in the block of `if X86.Sse41.IsSupported { }`, on the right of `X86.Sse41.IsSupported && ...`, and
+after an `if !X86.Sse41.IsSupported { }` whose block always leaves, for the rest of the block that
+holds the `if`; `!` turns a test around, so that the `else` block of `if !X86.Sse41.IsSupported { }`
+is guarded; a test of a class guards the intrinsics of the classes C# derives it from,
+`X86.Avx2.IsSupported` those of `X86.Sse41`, while the `else` block of `if X86.Sse41.IsSupported { }`
+and a test of another class guard nothing *(assumed: as §13 marks them)*. Anywhere else an intrinsic is the compile error
+`intrinsic-unguarded` *(proposed: the id)*. The compiler compiles a guarded block as a function of
+its own for the sets its tests name, and every function the block reaches by direct calls, the
+runtime's included, again for them, in which the
+tests of those sets are `true`; where the build names a CPU that has a set, its test is `true`
+everywhere (§2, §13, the owner, 2026-11-01, "Guarded block", "Copied per feature" and "Transitive,
+all").
+`IsSupported` of a set the build's target does not have is `false`, and its block is still
+checked; a case is read for x86-64 (R11), where the test of every class under `Arm` is `false`
+*(assumed: as §13 marks it)*.
+
+The checker does not read the names `X86`, `Arm`, `Vector128` and `Vector256`, and says
+`not supported` to them, so a case of this rule runs through the front end alone; what it prints
+and the error it expects are read against this rule.
+
+Case: [memory/intrinsic-guarded.kz](../corpus/memory/intrinsic-guarded.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Sse41.IsSupported {
+    print(X86.Sse41.Extract(v, 2))
+} else {
+    print(v.GetElement(2))
+}
+```
+
+Case: [memory/intrinsic-unguarded.kz](../corpus/memory/intrinsic-unguarded.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+// an intrinsic that no test of its class's `IsSupported` guards, outside a `raw` block, is intrinsic-unguarded (R18)
+print(X86.Sse41.Extract(v, 2))
+```
+
+Case: [memory/intrinsic-immediate.kz](../corpus/memory/intrinsic-immediate.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Sse41.IsSupported {
+    // the index of Extract is a `byte` in C#: the constant 300 does not fit it (R18)
+    print(X86.Sse41.Extract(v, 300))
+}
+```
+
+Case: [memory/intrinsic-in-else.kz](../corpus/memory/intrinsic-in-else.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Sse41.IsSupported {
+    print(v.GetElement(2))
+} else {
+    // the `else` block of a test guards nothing (R18)
+    print(X86.Sse41.Extract(v, 2))
+}
+```
+
+Case: [memory/intrinsic-other-class.kz](../corpus/memory/intrinsic-other-class.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Aes.IsSupported {
+    // a test of `X86.Aes` guards nothing of `X86.Sse41`, from which C# does not derive `Aes` (R18)
+    print(X86.Sse41.Extract(v, 2))
+}
+```
+
+Case: [memory/intrinsic-early-return.kz](../corpus/memory/intrinsic-early-return.kz)
+```kurz
+int Third(Vector128<int> lanes) {
+    if !X86.Sse41.IsSupported {
+        return lanes.GetElement(2)
+    }
+    return X86.Sse41.Extract(lanes, 2)
+}
+
+v = Vector128.Create(1, 2, 3, 4)
+print(Third(v))
+if X86.Sse41.IsSupported {
+    // the copy of `Third` compiled for SSE4.1, in which its test is `true` (R18)
+    print(Third(v))
+} else {
+    print(Third(v))
+}
+```
+
+Case: [memory/intrinsic-in-raw.kz](../corpus/memory/intrinsic-in-raw.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+raw {
+    // no test guards it in a `raw` block; SSE2 is in every x86-64 CPU, and a case is read for x86-64 (R11)
+    print(X86.Sse2.Add(v, v).GetElement(2))
+}
+```
+
+Case: [memory/intrinsic-other-target.kz](../corpus/memory/intrinsic-other-target.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+// a case is read for x86-64 (R11), where the test of a class under `Arm` is `false`; its block is still checked (R18)
+if Arm.AdvSimd.IsSupported {
+    print(Arm.AdvSimd.Add(v, v).GetElement(2))
+} else {
+    print(v.GetElement(2))
+}
+```
+
 ### R8 (decided, §3) Fields of interface type
 
 A `mut` field of interface type can hold any implementer, so R2 is judged with the whole program
