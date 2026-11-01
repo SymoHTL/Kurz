@@ -1792,7 +1792,8 @@ int CaseLatin(int c, bool upper, mut int second) {
 
 // The first code point Unicode's full mapping of one direction gives `c`, and the second and the third in
 // `second` and `third`, 0 where there are none, as Rust's `conversions::to_lower` and `to_upper` look them up:
-// ASCII by its letters; above it, the run of `table` that holds `c`, found by a binary search, where `c` is a
+// ASCII by its letters (`CaseAscii`), the rest of Latin-1, U+0080 to U+00FF, by Rust's rules for it without the
+// table (`CaseLatin`); from U+0100 on, the run of `table` that holds `c`, found by a binary search, where `c` is a
 // code point of the run's step, else the mapping to several code points, found by a second search, else `c`
 // itself. `table` holds four counts, of the runs, of those mappings and of the ranges of Cased and
 // Case_Ignorable, then the runs, four numbers each (the first and the last code point, the step, 1 or 2, and
