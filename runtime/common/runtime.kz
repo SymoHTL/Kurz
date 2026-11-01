@@ -431,7 +431,8 @@ pub string ListText(byte* texts, long count) {
     return text
 }
 
-// Whether two strings hold the same bytes (T18).
+// Whether two strings hold the same bytes (T18): 8 at a time, then the bytes after the last 8 one at a
+// time, where Rust's `==` of two slices of bytes compares them in one `compare_bytes`, LLVM's `memcmp`.
 pub bool Same(string first, string second) {
     long a = long(first.Bytes.Count)
     if a != long(second.Bytes.Count) {
@@ -443,6 +444,14 @@ pub bool Same(string first, string second) {
         byte* x = first.Pointer
         byte* y = second.Pointer
         mut long i = 0
+        while i + 8 <= a && same {
+            if std.WordAt(x + i) != std.WordAt(y + i) {
+                same = false
+            }
+
+            i = i + 8
+        }
+
         while i < a && same {
             if x[i] != y[i] {
                 same = false

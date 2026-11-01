@@ -3529,7 +3529,9 @@ pub ulong HashEnd(byte* state) {
 
 // SipHash-1-3 of the `count` bytes at `bytes` under the keys `key0` and `key1`, the hash Rust's
 // `HashMap` takes by default: one round for each word of eight bytes, read with its first byte lowest,
-// and three after the last word, which holds the bytes left and the count in its highest byte.
+// and three after the last word, which holds the bytes left and the count in its highest byte. A whole
+// word is read in one load and the bytes left four, two and one at a time, as Rust's `SipHasher13`
+// reads them (`load_int_le` and `u8to64_le`).
 ulong SipHash13(ulong key0, ulong key1, byte* bytes, long count) {
     mut ulong v0 = key0 ^ 8317987319222330741UL
     mut ulong v1 = key1 ^ 7237128888997146477UL
@@ -3537,20 +3539,10 @@ ulong SipHash13(ulong key0, ulong key1, byte* bytes, long count) {
     mut ulong v3 = key1 ^ 8387220255154660723UL
     long whole = count / 8 * 8
     mut long at = 0
-    while at <= whole {
+    while at < whole {
         mut ulong word = 0
-        mut int n = 8
-        if at == whole {
-            word = ulong(count) << 56
-            n = int(count - whole)
-        }
-
-        mut int k = 0
         raw {
-            while k < n {
-                word = word | ulong(bytes[at + long(k)]) << (8 * k)
-                k = k + 1
-            }
+            word = WordAt(bytes + at)
         }
 
         v3 = v3 ^ word
@@ -3559,11 +3551,54 @@ ulong SipHash13(ulong key0, ulong key1, byte* bytes, long count) {
         at = at + 8
     }
 
+    mut ulong last = ulong(count) << 56
+    raw {
+        last = last | SipTail(bytes + whole, count - whole)
+    }
+
+    v3 = v3 ^ last
+    SipRound(mut v0, mut v1, mut v2, mut v3)
+    v0 = v0 ^ last
     v2 = v2 ^ 255UL
     SipRound(mut v0, mut v1, mut v2, mut v3)
     SipRound(mut v0, mut v1, mut v2, mut v3)
     SipRound(mut v0, mut v1, mut v2, mut v3)
     return v0 ^ v1 ^ v2 ^ v3
+}
+
+// The 8 bytes at `p` as a word, the first byte lowest, at any address: LLVM joins the bytes into one
+// load, which a read through a `Ptr<ulong>` is not, since LLVM takes that one to be at a multiple of 8.
+pub ulong WordAt(byte* p) {
+    mut ulong word = 0
+    raw {
+        word = ulong(p[0]) | ulong(p[1]) << 8 | ulong(p[2]) << 16 | ulong(p[3]) << 24 | ulong(p[4]) << 32 | ulong(p[5]) << 40 | ulong(p[6]) << 48 | ulong(p[7]) << 56
+    }
+
+    return word
+}
+
+// The `n` bytes at `p`, fewer than 8, as a word, the first byte lowest: four, two and one at a time, as
+// Rust's `u8to64_le` reads them.
+ulong SipTail(byte* p, long n) {
+    mut ulong word = 0
+    mut long i = 0
+    raw {
+        if n >= 4 {
+            word = ulong(p[0]) | ulong(p[1]) << 8 | ulong(p[2]) << 16 | ulong(p[3]) << 24
+            i = 4
+        }
+
+        if n - i >= 2 {
+            word = word | (ulong(p[i]) | ulong(p[i + 1]) << 8) << int(8 * i)
+            i = i + 2
+        }
+
+        if i < n {
+            word = word | ulong(p[i]) << int(8 * i)
+        }
+    }
+
+    return word
 }
 
 // One round of SipHash over its four words.
