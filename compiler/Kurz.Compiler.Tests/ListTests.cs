@@ -2519,11 +2519,22 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             ?
             [
                 .. allocator,
-                // MEM_RESERVE and PAGE_NOACCESS for the block's pages and one page after them, then MEM_COMMIT and PAGE_READWRITE for the block's
+                // the block's pages, by the one call of MEM_COMMIT | MEM_RESERVE that `Memory` makes, in the 65536 bytes a reservation is
+                // placed in at a time, whose rest after them no other reservation can take, so that it is not accessible; where the pages
+                // fill whole pieces of 65536, MEM_RESERVE and PAGE_NOACCESS for them and one page after them, then MEM_COMMIT and
+                // PAGE_READWRITE for the block's
                 (file, "        p = Ptr<byte>(VirtualAlloc(null, ulong(bytes), 12288, 4))",
                     "        long pages = (bytes + 4095) / 4096 * 4096\n" +
-                    "        byte* start = Ptr<byte>(VirtualAlloc(null, ulong(pages + 4096), 8192, 1))\n" +
-                    "        if start != null && VirtualAlloc(Ptr<void>(start), ulong(pages), 4096, 4) != null {\n" +
+                    "        mut byte* start = null\n" +
+                    "        if pages % 65536 != 0 {\n" +
+                    "            start = Ptr<byte>(VirtualAlloc(null, ulong(pages), 12288, 4))\n" +
+                    "        } else {\n" +
+                    "            start = Ptr<byte>(VirtualAlloc(null, ulong(pages + 4096), 8192, 1))\n" +
+                    "            if start != null && VirtualAlloc(Ptr<void>(start), ulong(pages), 4096, 4) == null {\n" +
+                    "                start = null\n" +
+                    "            }\n" +
+                    "        }\n\n" +
+                    "        if start != null {\n" +
                     "            p = start + pages - bytes\n" +
                     "        }"),
                 (file, "VirtualFree(Ptr<void>(p), 0, 32768)", "VirtualFree(Ptr<void>(p), ulong(bytes), 16384)"), // MEM_DECOMMIT: the pages stay reserved
@@ -2671,7 +2682,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string large = "    byte* p = Allocate(300000)\n    raw {\n        std.Free(p, 300000)\n        p[0] = 1\n    }\n";
         Crashed(BuildAndRun("print(1)\n", Edited([.. Fence, ("runtime/common/runtime.kz", start, start + large)]), "list-fence-control-large"));
 
-        // and a write one byte past a block's end, of a block within a page and of one over many pages, ends the process; a `Free`
+        // and a write one byte past a block's end, of a block within a page, of one over many pages and of one whose pages fill 65536
+        // bytes, for which the fence on Windows reserves a page more, ends the process; a `Free`
         // given 8 bytes more or 8 bytes less than the block was allocated with writes its line and ends the process as such a write
         // does, as does the `Free` of a block `Reallocate` grew in place given the size before, and `Reallocate` given another size
         // than the block's, whose `Free` of it holds it; and a write past a block that `Reallocate` gave as a new one, a block that
@@ -2682,6 +2694,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string inPlace = "        byte* p = std.Reallocate(Allocate(20), 20, 24)\n";
         Crashed(BuildAndRun("print(1)\n", Starting(allocated + "        p[16] = 1\n"), "list-fence-past-end"));
         Crashed(BuildAndRun("print(1)\n", Starting(larger + "        p[300000] = 1\n"), "list-fence-past-end-large"));
+        Crashed(BuildAndRun("print(1)\n", Starting("        byte* p = Allocate(65520)\n        p[65520] = 1\n"), "list-fence-past-end-whole"));
         Crashed(BuildAndRun("print(1)\n", Starting("        byte* p = std.Reallocate(Allocate(16), 16, 300000)\n        p[300000] = 1\n"), "list-fence-past-end-moved"));
         Crashed(BuildAndRun("print(1)\n", Starting("        byte* p = std.Reallocate(Allocate(4080), 4080, 300000)\n        p[300000] = 1\n"), "list-fence-past-end-grown"));
         FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(allocated + "        std.Free(p, 24)\n"), "list-fence-free-more"));
@@ -2693,6 +2706,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun("print(1)\n", Starting(
             "        byte* a = Allocate(16)\n        a[15] = 1\n        std.Free(a, 16)\n" +
             "        byte* b = Allocate(300000)\n        b[299999] = 1\n        std.Free(b, 300000)\n" +
+            "        byte* e = Allocate(65520)\n        e[65519] = 1\n        std.Free(e, 65520)\n" +
             "        byte* c = std.Reallocate(Allocate(20), 20, 24)\n        c[23] = 1\n        std.Free(c, 24)\n" +
             "        byte* d = std.Reallocate(Allocate(16), 16, 300000)\n        d[299999] = 1\n        std.Free(d, 300000)\n"), "list-fence-within"), 0, ["1"], "");
     }
