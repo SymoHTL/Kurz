@@ -644,7 +644,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
   `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first: `Sort` a merge sort, which keeps
   equal items in their order, runs of 20 items sorted by insertion and merged in pairs through a buffer of
-  half the items; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
+  half the items, rounded up, as Rust's stable sort asks for at the least; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
   median of three, insertion below 21 items and a heapsort past twice the base-2 logarithm of the count
   in splits; and `SortBy` the key of each item made once, in order, kept with the item's position in a
   pair, the pairs sorted by the quicksort and the items moved where they say, as Rust's
@@ -1528,7 +1528,7 @@ round can ask about it by the rule's id.
   at every other place a call's cases can be kept: a variable, a result, a field, a list's items. A `T?` of one type is no union of
   cases there, nor in a variable or a result, so `int? x = Find(id)` unwraps, as O4's sentence on a
   type the success converts to says. Of a function whose parameter keeps the cases and one that takes the
-  success, the one that keeps them, the exact fit for the call's whole type, is picked (the owner, 2026-10-31,
+  success, the one that keeps them is picked where it is the exact fit for the call's whole type (the owner, 2026-10-31,
   "The union one"); the exact fit is read first,
   so `Show(int)` wins over `Show(long | NotFound)`, which fits with a widening (the owner, 2026-10-31,
   "Exact fit first"). Where no function fits, the
