@@ -602,7 +602,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   arguments by name, both counts at one; a field read through an instance, and by its name inside a
   method, and an assignment into a `mut` field of an instance, its value first, then the instance, then
   the field, which lets go of its old value (K2, K9, M4); each `mut` member of a list, a map or a hasher
-  held by a field of an instance (M5, M9); a method, a function of the module whose first parameter is
+  held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
   the instance, `this`, borrowed from the caller as a parameter is (K7); the text of an instance, which
   its `Text()` gives (A5); and a `T?` of a class, the address alone, its `null` the address 0, as Rust
   lays out `Option<Rc<T>>` (N1). The counting is below;

@@ -694,6 +694,11 @@ public sealed partial class Checker
             root = Unwrap(m.Target);
         }
 
+        if (members.Count == 0 && (RunsThroughInstance(fields) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null)))
+        {
+            return WrittenThroughInstance(a, index, fields); // K2: a collection a field of an instance holds
+        }
+
         if (members.Count > 0 || root is not NameExpression name || !model.IsVariable(name))
         {
             NotSupported(a.Line, unread);

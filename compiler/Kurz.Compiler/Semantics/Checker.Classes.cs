@@ -557,6 +557,26 @@ public sealed partial class Checker
         return MutField(receiver, field, line, what);
     }
 
+    /// <summary>
+    /// K2 with M4 and M5: an item or an entry written into a collection a <c>mut</c> field of an instance holds, <c>note.Counts[k] = v</c>,
+    /// read as a <c>mut</c> method on that field is (<see cref="MutReceiverThroughInstance"/>); a path that goes on into a data value
+    /// after the field is <c>not supported</c>, as an assignment into one is. Returns whether the checker takes the write.
+    /// </summary>
+    private bool WrittenThroughInstance(Assignment a, IndexExpression index, List<MemberAccess> fields)
+    {
+        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
+        if (fields.Count > 0 && fields.FindLastIndex(m => PathType(m.Target) is ClassType) < fields.Count - 1)
+        {
+            NotSupported(a.Line, "an assignment into a value held by a field of an instance (K2, M4)");
+            CheckLoosely(index.Index, a.Value);
+            return false;
+        }
+
+        var what = PathType(index.Target) is MapType ? "an entry is written into the map" : "an item is written into the list";
+        MutReceiverThroughInstance(index.Target, fields, a.Line, what);
+        return true;
+    }
+
     private bool MutField(Expression receiver, FieldSymbol field, int line, string what)
     {
         if (CapturedRoot(receiver) is { } root)

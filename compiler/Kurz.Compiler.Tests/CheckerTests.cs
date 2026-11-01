@@ -2909,6 +2909,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N) {\n    pub void Later() {\n        f = () => {\n            N = 1\n        }\n        f()\n    }\n}\n\nC(0).Later()"));
         Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N)\n\nc = C(0)\nf = () => { c.N = 1 }\nf()\nprint(c.N)"));
         Clean("class C(mut int N) {\n    pub void Add() {\n        N = N + 1\n    }\n}\n\nc = C(0)\nf = () => c.Add()\nf()\nprint(c.N)");
+        // K2 with M4, M5: an item or an entry written into a collection a field holds, as a `mut` method on the field is
+        Clean("class Note(mut Map<string, int> Counts, mut List<int> Xs) {\n    pub void Mark() {\n        Counts[\"a\"] = 1\n        this.Xs[0] = 2\n    }\n}\n\nn = Note(Map<string, int>(), [1])\nn.Mark()\nn.Counts[\"b\"] = 2\nn.Xs[0] = 3\nprint(n.Counts)");
+        Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Note(Map<string, int> Counts)\n\nn = Note(Map<string, int>())\nn.Counts[\"a\"] = 1"));
+        Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Box(List<int> Xs)\n\nb = Box([1])\nb.Xs[0] = 2"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class Box(mut List<int> Xs)\n\nb = Box([1])\nf = () => { b.Xs[0] = 2 }\nf()"));
+        Assert.Equal(["5: an assignment into a value held by a field of an instance (K2, M4)"], NotSupported("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag([1]))\np.B.Items[0] = 2"));
     }
 
     [Theory]

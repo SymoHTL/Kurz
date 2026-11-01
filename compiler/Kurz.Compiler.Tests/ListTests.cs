@@ -2212,6 +2212,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 Title = "{Title}!"
                 Counts = Map<string, int>()
             }
+
+            pub void Mark() {
+                Counts["m"] = 2
+            }
         }
 
         data Pair(Counter Left, int Right)
@@ -2278,6 +2282,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         note = Note("{c.Count}n", Map<string, int>())
         note.Counts["a"] = 1
         print("{note.Title} {note.Counts} {Clear(note)} {note.Title} {note.Counts}")
+        note.Mark()
+        print(note.Counts)
         """;
 
     private static readonly string[] ClassesPrint =
@@ -2296,6 +2302,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "499500",
         "c=14",
         "14n [a: 1] r 14n! []", // the string and the map the first holes took a count of, which the call replaced (K2)
+        "[m: 2]",
     ];
 
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
