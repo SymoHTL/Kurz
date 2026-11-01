@@ -193,7 +193,7 @@ public sealed partial class Emitter
         {
             pieces.Add(segment switch
             {
-                TextSegment t => new InterpolationPiece(StringValue(t.Text), null),
+                TextSegment t => new InterpolationPiece(StringValue(t.Text), null, t.Text.Length > 0),
                 HoleSegment h => Hole(h.Expression),
                 _ => throw new InvalidOperationException(segment.GetType().Name),
             });
@@ -218,9 +218,10 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A piece of an interpolation: a text, or an integer whose digits the block takes without a text of their own, as a 64-bit value
-    /// and whether it is signed.
+    /// and whether it is signed; <paramref name="Bytes"/> says whether it holds a byte whatever the program does, as a literal that
+    /// is not empty and an integer's digits do.
     /// </summary>
-    private sealed record InterpolationPiece(string Value, bool? Signed);
+    private sealed record InterpolationPiece(string Value, bool? Signed, bool Bytes);
 
     /// <summary>The piece of a hole: an integer as its 64-bit value, every other value as its text (<see cref="Text"/>).</summary>
     private InterpolationPiece Hole(Expression e)
@@ -230,10 +231,10 @@ public sealed partial class Emitter
         if (type is PrimitiveType p && Types.IsInteger(p))
         {
             var signed = Types.IsSigned(type);
-            return new InterpolationPiece(Resize(value, type, signed ? Types.Long : Types.ULong), signed);
+            return new InterpolationPiece(Resize(value, type, signed ? Types.Long : Types.ULong), signed, true);
         }
 
-        return new InterpolationPiece(Text(value, type, e.Line), null);
+        return new InterpolationPiece(Text(value, type, e.Line), null, false);
     }
 
     /// <summary>
@@ -242,7 +243,8 @@ public sealed partial class Emitter
     /// before the last: a text copied, and an integer's digits counted first and written in place by the runtime's
     /// <c>WriteDigits</c>, a <c>-</c> before those of a negative one, as its text has them (A2), so that no text of it is made, as Rust's
     /// <c>Display</c> of an integer writes its digits into the buffer it was given; more bytes than the largest <c>int</c> end the
-    /// process with the count asked for (T15).
+    /// process with the count asked for (T15). Pieces of no bytes together are the empty string, with no block, as Rust's
+    /// <c>format!</c> asks for none.
     /// </summary>
     private string InOneBlock(List<InterpolationPiece> pieces)
     {
@@ -267,32 +269,53 @@ public sealed partial class Emitter
         }
 
         var total = counts.Aggregate((sum, count) => fn.Value($"add i64 {sum}, {count}"));
-        var bytes = fn.Value($"call ptr {RuntimeFunction("AllocateString")}(i64 {total})");
-        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
-        var at = "0";
-        for (var i = 0; i < pieces.Count; i++)
+        if (pieces.Any(p => p.Bytes))
         {
-            var to = fn.Value($"getelementptr i8, ptr {bytes}, i64 {at}");
-            if (pieces[i].Signed is null)
-            {
-                fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {to}, ptr {fn.Value($"extractvalue %kz.str {pieces[i].Value}, 0")}, i64 {counts[i]}, i1 false)");
-            }
-            else if (digits[i].Negative is { } negative)
-            {
-                // the `-` written where a number that is not negative writes its first digit over it
-                fn.Emit($"store i8 45, ptr {to}");
-                var after = fn.Value($"getelementptr i8, ptr {to}, i64 {fn.Value($"zext i1 {negative} to i64")}");
-                fn.Emit($"call void {RuntimeFunction("WriteDigits")}(ptr {after}, i64 {digits[i].Magnitude}, i32 {fn.Value($"trunc i64 {digits[i].Count} to i32")})");
-            }
-            else
-            {
-                fn.Emit($"call void {RuntimeFunction("WriteDigits")}(ptr {to}, i64 {digits[i].Magnitude}, i32 {fn.Value($"trunc i64 {digits[i].Count} to i32")})");
-            }
-
-            at = fn.Value($"add i64 {at}, {counts[i]}");
+            return Written();
         }
 
-        return TakenOver(bytes, total);
+        // no piece holds a byte whatever the program does: a total of 0 is the empty string, with no block, as Rust's `format!` asks
+        // for none, its `String::with_capacity(0)` allocating nothing
+        var joined = fn.Alloca("%kz.str", "joined");
+        var block = fn.Label("block");
+        var done = fn.Label("joined");
+        fn.Emit($"store %kz.str {StringValue(string.Empty)}, ptr {joined}");
+        fn.CondBranch(fn.Value($"icmp eq i64 {total}, 0"), done, block);
+        fn.Block(block);
+        fn.Emit($"store %kz.str {Written()}, ptr {joined}");
+        fn.Branch(done);
+        fn.Block(done);
+        return fn.Value($"load %kz.str, ptr {joined}");
+
+        string Written()
+        {
+            var bytes = fn.Value($"call ptr {RuntimeFunction("AllocateString")}(i64 {total})");
+            module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+            var at = "0";
+            for (var i = 0; i < pieces.Count; i++)
+            {
+                var to = fn.Value($"getelementptr i8, ptr {bytes}, i64 {at}");
+                if (pieces[i].Signed is null)
+                {
+                    fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {to}, ptr {fn.Value($"extractvalue %kz.str {pieces[i].Value}, 0")}, i64 {counts[i]}, i1 false)");
+                }
+                else if (digits[i].Negative is { } negative)
+                {
+                    // the `-` written where a number that is not negative writes its first digit over it
+                    fn.Emit($"store i8 45, ptr {to}");
+                    var after = fn.Value($"getelementptr i8, ptr {to}, i64 {fn.Value($"zext i1 {negative} to i64")}");
+                    fn.Emit($"call void {RuntimeFunction("WriteDigits")}(ptr {after}, i64 {digits[i].Magnitude}, i32 {fn.Value($"trunc i64 {digits[i].Count} to i32")})");
+                }
+                else
+                {
+                    fn.Emit($"call void {RuntimeFunction("WriteDigits")}(ptr {to}, i64 {digits[i].Magnitude}, i32 {fn.Value($"trunc i64 {digits[i].Count} to i32")})");
+                }
+
+                at = fn.Value($"add i64 {at}, {counts[i]}");
+            }
+
+            return TakenOver(bytes, total);
+        }
     }
 
     /// <summary>

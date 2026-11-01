@@ -323,8 +323,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // strings in variables, fields, a `with`, a path assignment, an arm's name while the arm changes the subject's variable, a
     // lambda's environment, a list that copies and grows, the items `Where` keeps, a loop over a list its variable lets go of, the
     // parameters of a call, an interpolation, one of several texts in one block that a variable holds past its statement, one of no
-    // bytes and a hole of it, integers whose digits the block takes in place, the text of a value laid out as a block, literals, a
-    // string made in a `raw` block,
+    // bytes, the empty string with no block, and a hole of it, integers whose digits the block takes in place, the text of a value
+    // laid out as a block, literals, a string made in a `raw` block,
     // an interpolation of one hole beside a call that changes the place the hole read, the values `??` and `?.` give, a read of a
     // nullable variable known not null, an `Add` through the place of one, the item `?[` reads, a list without items in a nullable
     // variable, a `match` with a `null` arm on one whose arm changes it, a nullable parameter read in the arm of its case and after
@@ -454,6 +454,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         joined = "<{Made(40)}|{e}|{Made(41)}>"
         blank = "{e}{e}"
         print("{joined}{blank}[{blank}]")
+        raw {
+            print(blank.Pointer == "".Pointer)
+        }
         long smallest = -9223372036854775807 - 1
         ulong largest = 18446744073709551615
         print("{smallest}|{largest}|{byte(255)}|{-7}|{0}:{Made(42)}")
@@ -556,7 +559,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "n15",
         "n16",
         "n17n18",
-        "<n40||n41>[]", // texts in one block, which the variable takes over from the statement, and a block of no bytes as a hole
+        "<n40||n41>[]", // texts in one block, which the variable takes over from the statement, and the empty string as a hole
+        "true", // pieces of no bytes together are the empty string, the constant of no bytes, with no block
         "-9223372036854775808|18446744073709551615|255|-7|0:n42", // digits written in the block, a `-` before a negative number's
         "Node { Label = n19, Next = Node { Label = n20, Next = Leaf } }", // strings a value laid out as a block holds
         "1!",
