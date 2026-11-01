@@ -238,6 +238,15 @@ public sealed record TypeParameterType(TypeParameterSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>
+/// T34: the constant a call gives a type parameter that holds one, a value of an <c>enum</c> by its place among the enum's values; it
+/// stands in a copy's list of type arguments beside the types, and is never the type of a value.
+/// </summary>
+public sealed record ConstantArgument(EnumType Of, int Index) : KurzType
+{
+    public override string Text => $"{Of.Symbol.Name}.{Of.Symbol.Values[Index]}";
+}
+
 /// <summary>The one instance of each built-in type, and what the chapters say about them.</summary>
 public static class Types
 {

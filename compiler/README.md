@@ -584,6 +584,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type, `Order.Source`, where a pass made the copy;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
+- a type parameter that holds a constant of an `enum`, `const Mode M`, with its default, `const Mode M = Mode.Plain`: a call
+  writes the constant by name among its type arguments, `Say<Mode.Loud>`, or leaves out one with a default, and the
+  function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`, in
+  which the parameter's name is a constant of its enum and a call passes it on by that name (T34);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -1393,10 +1397,12 @@ type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where n
 which the intrinsics and their vector types stand (R18); a member of a type parameter that reads its type beyond `Kind` and
 `Fields`, `T.Make` and the parts beyond the fields, and `T.Fields` anywhere but after `in` in a `for` loop, in the copy that a
 call makes, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
-such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
+such a loop and an `enum`'s value, which is `type-mismatch` there (T34), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, and `void` as a type argument of such a function, `void` having no value of
-`TypeKind` (T33); and `use` (F10) of any folder but the runtime's `sys`;
+`TypeKind` (T33); a type parameter that holds a constant of a type but an `enum`, the record's integer types, `bool` and
+`char`, whose literal among a call's type arguments no rule reads, which leaves the function unread, and one of a `data` type
+(T34); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

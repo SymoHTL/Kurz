@@ -1,0 +1,10 @@
+// expect: error cannot-infer at 10
+// rules: T34
+
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    print("{M} {text}")
+}
+
+Say("a")

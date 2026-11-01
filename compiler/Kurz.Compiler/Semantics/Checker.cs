@@ -512,6 +512,10 @@ public sealed partial class Checker
         foreach (var p in d.TypeParameters)
         {
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
+            if (p.Constant is not null)
+            {
+                NotSupported(p.Line, "a type parameter that holds a constant, of a `data` type (T34)");
+            }
         }
 
         if (clash)
@@ -960,6 +964,13 @@ public sealed partial class Checker
         }
 
         var parameter = TypeParameter(n.Name);
+        if ((parameter?.Constant ?? BoundConstant(n.Name)?.Of) is { } constant)
+        {
+            // T34: it holds a value, and names no type, as a variable's name names none (V10); in a copy, the constant it is bound to
+            Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here: `{n.Name}` holds a constant of `{constant.Text}` (V10, T34)");
+            return Types.Error;
+        }
+
         if (parameter is not null)
         {
             return new TypeParameterType(parameter);
@@ -1071,12 +1082,23 @@ public sealed partial class Checker
     {
         var d = symbol.Declaration!;
         typeContext = symbol.TypeParameters;
-        foreach (var p in d.TypeParameters)
+        foreach (var (p, parameter) in d.TypeParameters.Zip(symbol.TypeParameters))
         {
             if (p.Limit is not null)
             {
                 NotSupported(p.Line, "the limit of a type parameter (T19)"); // not resolved: the one diagnostic of the construct (E1)
             }
+
+            if (p.Constant is not null)
+            {
+                parameter.Constant = ResolveConstantParameter(symbol, p);
+            }
+        }
+
+        // T34: a type parameter with a default comes after every one without, as Rust orders them, so that a call leaves out the last
+        if (d.TypeParameters.SkipWhile(p => p.Default is null).FirstOrDefault(p => p.Default is null) is { } after)
+        {
+            Report(ErrorIds.Syntax, after.Line, $"the type parameter `{after.Name}` without a default follows one with a default (T34)");
         }
 
         var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Naked | Modifiers.Extern);
@@ -1093,6 +1115,24 @@ public sealed partial class Checker
         {
             CheckCSignature(symbol, d); // R12, R16
         }
+    }
+
+    /// <summary>
+    /// T34: the type of the constant a type parameter holds. The build reads one of an <c>enum</c>, whose value a call writes by name;
+    /// the record's integer types, <c>bool</c> and <c>char</c> need a literal among a call's type arguments, which no rule reads yet, and
+    /// a function with such a parameter is not read (E1).
+    /// </summary>
+    private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
+    {
+        var type = Resolve(p.Constant!);
+        if (Types.IsError(type) || type is EnumType)
+        {
+            return type;
+        }
+
+        NotSupported(p.Line, $"a type parameter that holds a constant of the type `{type.Text}`, where an `enum`'s value alone is read (T34)");
+        modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped, and its calls are not read (E1)
+        return Types.Error;
     }
 
     private void ResolveTypes(FunctionSymbol symbol, FunctionDeclaration d)
@@ -1196,6 +1236,15 @@ public sealed partial class Checker
                     Unread(f, () => CheckDefault(p.Default, symbol.Type, p.Line));
                 }
             }
+
+            foreach (var (p, parameter) in f.Declaration!.TypeParameters.Zip(f.TypeParameters))
+            {
+                if (p.Default is not null && parameter.Constant is EnumType of)
+                {
+                    // T34: a value of the parameter's enum, a constant as F12 has a parameter's default
+                    Unread(f, () => parameter.Default = CheckDefault(p.Default, of, p.Line) is EnumConstant e ? new ConstantArgument(of, e.Index) : null);
+                }
+            }
         }
 
         foreach (var d in dataDeclared.Concat(refusedTypes))
@@ -1225,7 +1274,8 @@ public sealed partial class Checker
         }
     }
 
-    private void CheckDefault(Expression value, KurzType type, int parameterLine)
+    /// <summary>F12, D11: a default, which is a constant of the parameter's type; its value where it is one, null where it was reported.</summary>
+    private Constant? CheckDefault(Expression value, KurzType type, int parameterLine)
     {
         var reading = readingConstant;
         readingConstant = true; // a read of state or of raw memory is no constant, and `default-not-constant` is its one error (R13, E1)
@@ -1233,17 +1283,22 @@ public sealed partial class Checker
         readingConstant = reading;
         if (t.IsError || Types.IsError(type))
         {
-            return;
+            return null;
         }
 
         if (t.Constant is null)
         {
             Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields, or literals that T6 folds (F12)");
+            return null;
         }
-        else if (!Types.Assignable(t.Type, type))
+
+        if (!Types.Assignable(t.Type, type))
         {
             ReportMismatch(t.Type, type, value.Line, $"the default is {Types.A(t.Type)} where {Types.A(type)} is required");
+            return null;
         }
+
+        return t.Constant;
     }
 
     private void CheckFunctionBody(FunctionSymbol f)

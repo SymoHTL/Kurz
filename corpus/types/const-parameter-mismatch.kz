@@ -1,0 +1,11 @@
+// expect: error type-mismatch at 11
+// rules: T34
+
+enum Mode { Plain, Loud }
+enum Color { Red }
+
+void Say<const Mode M>(string text) {
+    print("{M} {text}")
+}
+
+Say<Color.Red>("a")

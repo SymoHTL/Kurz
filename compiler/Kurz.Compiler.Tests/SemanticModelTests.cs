@@ -111,6 +111,27 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_walk_reads_a_copy_for_each_constant_a_call_gives()
+    {
+        // T34: each constant makes a copy of its own, a default and a constant a copy passes on among them, and a second call with the
+        // same constant reads the copy the first made
+        var (tree, model) = Clean("enum Mode { Plain, Loud }\n\nvoid Say<const Mode M>() {\n    print(M)\n}\n\nvoid Twice<T, const Mode M = Mode.Loud>(T value) {\n    Say<M>()\n}\n\nSay<Mode.Plain>()\nSay<Mode.Plain>()\nTwice(1)\nTwice<int, Mode.Loud>(2)");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["Say<Mode.Plain>", "Say<Mode.Loud>", "Twice<int, Mode.Loud>"], walk.Copies);
+
+        // in each copy the parameter's name is the constant its call gave, the value's place among the enum's values
+        var say = model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree, f => f.Name == "Say")));
+        Assert.Equal([0, 1], say.Select(copy =>
+        {
+            var names = new List<NameExpression>();
+            Nodes.Collect(copy.Declaration!, names);
+            return Assert.IsType<EnumConstant>(model.TypeOf(names.Single(n => n.Name == "M")).Constant).Index;
+        }));
+    }
+
+    [Fact]
     public void The_walk_reads_each_pass_of_a_loop_over_the_fields_of_a_copy_s_type()
     {
         // T33: a code generator reads a pass for each field in place of the loop's own collection and body, `f.Name` as a constant, and
@@ -753,7 +774,9 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             switch (e)
             {
                 case NameExpression n:
-                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant) || model.IsImplicitField(n, out _, out _), n.Line, $"what `{n.Name}` means");
+                    // a variable, a function, a data value without fields, an implicit field (K7), or the name of a type parameter that
+                    // holds a constant, a value of its enum a code generator reads whole (T34)
+                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant or EnumConstant) || model.IsImplicitField(n, out _, out _), n.Line, $"what `{n.Name}` means");
                     break;
                 case ThisExpression t:
                     Need(model.IsImplicitField(t, out _, out _), t.Line, "`this`"); // K7

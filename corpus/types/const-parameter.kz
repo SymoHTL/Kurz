@@ -1,0 +1,25 @@
+// expect: output
+// | a!
+// | 1
+// | 1
+// | b!
+// | b!
+// rules: T34
+
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    match M {
+        Mode.Plain => print(text)
+        Mode.Loud => print("{text}!")
+    }
+}
+
+void Twice<T, const Mode M = Mode.Plain>(T value) {
+    Say<M>("{value}")
+    Say<M>("{value}")
+}
+
+Say<Mode.Loud>("a")
+Twice(1)
+Twice<string, Mode.Loud>("b")

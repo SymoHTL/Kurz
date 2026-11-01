@@ -246,8 +246,11 @@ public enum Modifiers
 /// <summary>A parameter of a function, a lambda or a primary constructor: <c>mut</c> (M7), a type (absent on an untyped lambda parameter), a name and a default (D11).</summary>
 public sealed record Parameter(int Line, bool Mut, TypeSyntax? Type, string Name, Expression? Default);
 
-/// <summary>A type parameter with its limit (T19): <c>T</c>, <c>T: Comparable</c>.</summary>
-public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit);
+/// <summary>
+/// A type parameter with its limit (T19): <c>T</c>, <c>T: Comparable</c>; or one that holds a constant of a type, with its default
+/// (T34): <c>const JsonKeys K</c>, <c>const Mode M = Mode.Plain</c>.
+/// </summary>
+public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit, TypeSyntax? Constant = null, Expression? Default = null);
 
 /// <summary>A function or a method (F1 to F4, K7). Both bodies are null for the signature of an interface method.</summary>
 public sealed record FunctionDeclaration(

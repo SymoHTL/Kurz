@@ -3641,4 +3641,52 @@ public sealed class CheckerTests
         Clean(program);
         Assert.Equal([(ErrorIds.UnusedVariable, 4)], Errors(program.Replace("print(label)", "print(1)")));
     }
+
+    // ---- constant type parameters (T34) -----------------------------------------------------------
+
+    private const string Modes = "enum Mode { Plain, Loud }\nenum Color { Red }\n\n";
+
+    [Fact]
+    public void A_type_parameter_that_holds_a_constant_of_an_enum_is_read_in_each_copy()
+    {
+        // T34: the call writes the constant among its type arguments, a call that leaves it out takes its default, the body reads it as a
+        // value of its enum, in a `match`, a lambda and a hole, and a copy passes its own constant on; `const` is a name elsewhere (L18)
+        Clean(Modes + "void Say<const Mode M>(string text) {\n    match M {\n        Mode.Plain => print(text)\n        Mode.Loud => print(\"{text}!\")\n    }\n}\n\n" +
+            "void Twice<T, const Mode M = Mode.Plain>(T value) {\n    f = () => M\n    Say<M>(\"{value} {f()}\")\n}\n\nSay<Mode.Loud>(\"a\")\nTwice(1)\nTwice<string, Mode.Loud>(\"b\")\nTwice<bool>(true)\nprint(Color.Red)");
+        Clean("const = 1\nprint(const)");
+    }
+
+    [Theory]
+    [InlineData("void Bad<const Mode M = Color.Red>() {\n}", "4: type-mismatch: the default is a `Color` where a `Mode` is required (T1)")]
+    [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T34)")]
+    [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T34)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Color.Red>()", "7: type-mismatch: `Color.Red` is a value of `Color`, where `M` takes one of `Mode` (T34, T1)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<int>()", "7: type-mismatch: the type `int` stands where `M` takes a value of `Mode` (T34, T1)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Nope>()", "7: unknown-name: `Mode` has no value `Nope` (D12, V10)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay()", "7: cannot-infer: the type arguments are neither written nor inferable from the arguments (T27)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Plain, int>()", "7: syntax: `Say` takes 1 type arguments (T19; E4 for another count)")]
+    [InlineData("void Two<T, const Mode M>(T x) {\n}\n\nTwo<int>(1)", "7: syntax: `Two` takes 2 type arguments (T19; E4 for another count)")]
+    [InlineData("void Other<T>() {\n}\n\nOther<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where a type stands (T34, T1)")]
+    [InlineData("void Inner<const Color C>() {\n}\n\nvoid Outer<const Mode M>() {\n    Inner<M>()\n}\n\nOuter<Mode.Plain>()", "8: type-mismatch: `M` holds a value of `Mode`, where `C` takes one of `Color` (T34, T1)")]
+    [InlineData("void Other<T>() {\n}\n\nvoid Outer<const Mode M>() {\n    Other<M>()\n}\n\nOuter<Mode.Plain>()", "8: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T34)")]
+    [InlineData("void Say<const Mode M>() {\n    int x = M\n    print(x)\n}\n\nSay<Mode.Plain>()", "5: type-mismatch: a `Mode` where an `int` is required (T1)")]
+    public void A_constant_type_argument_is_held_to_the_parameter_it_lands_on(string program, string expected)
+    {
+        // T34 with T1: a value of another enum, a type, and a constant where a type stands are type-mismatch, as a value of another type
+        // for a parameter is; the parameter's name is no type (V10); a call that writes no constant and leaves out one with no default
+        // fixes nothing (T27), and a default before a parameter with none is syntax, as Rust and C# refuse it; the constant is a value of
+        // its enum in the body
+        Assert.Equal(expected.Split('|'), Check(Modes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+    }
+
+    [Theory]
+    [InlineData("void Count<const int N>() {\n    print(N)\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `int`, where an `enum`'s value alone is read (T34)")]
+    [InlineData("void Flag<const bool B>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `bool`, where an `enum`'s value alone is read (T34)")]
+    [InlineData("data Box<const Mode M>(int X)\n\nprint(1)", "4: a type parameter that holds a constant, of a `data` type (T34)")]
+    public void A_constant_type_parameter_of_a_type_but_an_enum_or_of_a_data_type_is_not_supported(string program, string expected)
+    {
+        // T34: the record's integer types, `bool` and `char` are written as literals among a call's type arguments, which no rule reads
+        // yet, and a `data` type's copies are no part of the build
+        Assert.Equal(expected.Split('|'), NotSupported(Modes + program));
+    }
 }

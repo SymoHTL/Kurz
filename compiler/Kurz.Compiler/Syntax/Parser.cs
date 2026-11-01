@@ -1347,6 +1347,18 @@ public sealed class Parser
         suppressNewlines++;
         do
         {
+            if (Current is { Kind: TokenKind.Name, Text: "const" } && Peek().Kind is TokenKind.Name or TokenKind.Keyword)
+            {
+                // T34: `const` before a type parameter's type is the word of a parameter that holds a constant, and a name elsewhere,
+                // as `thread` is a word before `static` alone (L18); its default is a value as a unary operator reads one, before `,` or `>`
+                var line = Advance().Line;
+                var constant = ParseCoreType();
+                var named = ExpectName("a type parameter");
+                var value = Match(TokenKind.Assign) ? ParseUnary() : null;
+                result.Add(new TypeParameter(line, named.Text, null, constant, value));
+                continue;
+            }
+
             var name = ExpectName("a type parameter");
             TypeSyntax? limit = null;
             if (Match(TokenKind.Colon))

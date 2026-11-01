@@ -47,6 +47,12 @@ public sealed class TypeParameterSymbol(string name, int line)
     public int Line { get; } = line;
 
     public bool HasLimit { get; init; }
+
+    /// <summary>T34: the type of the constant the parameter holds, written <c>const JsonKeys K</c>; null for a type parameter, the error type where it is not read.</summary>
+    public KurzType? Constant { get; set; }
+
+    /// <summary>T34: the constant a call that leaves the parameter out gives it, <c>= Mode.Plain</c>; null where none is written or it is wrong.</summary>
+    public ConstantArgument? Default { get; set; }
 }
 
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>

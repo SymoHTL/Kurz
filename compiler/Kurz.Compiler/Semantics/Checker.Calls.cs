@@ -1725,22 +1725,26 @@ public sealed partial class Checker
     /// <summary>As above, recorded as a call of <paramref name="kind"/>: of a function, or of a method of a class (K7).</summary>
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function, CallKind kind)
     {
-        var typeArguments = c.TypeArguments.Select(Resolve).ToList(); // once: an error in one is one diagnostic, whatever the number of overloads (E1)
+        // once: an error in one is one diagnostic, whatever the number of overloads (E1); where a type parameter holds a constant, the
+        // type argument is its value (T34)
+        var typeArguments = c.TypeArguments.Select((t, i) => ConstantPlace(candidates, i) is { } holds ? ResolveConstantArgument(t, holds) : Resolve(t)).ToList();
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
             var slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, p.Mut, p.HasDefault, f.TypeParameters.Any(t => Types.Mentions(p.Type, t)))).ToList();
             var candidate = new Candidate { Function = f, Slots = slots, TypeParameters = f.TypeParameters, Result = f.ReturnType };
+            var left = f.TypeParameters.Skip(typeArguments.Count).ToList();
             if (typeArguments.Count > 0)
             {
-                if (typeArguments.Count != f.TypeParameters.Count)
+                if (typeArguments.Count > f.TypeParameters.Count || left.Any(p => p.Default is null))
                 {
                     candidate.BindingError = $"`{f.Name}` takes {f.TypeParameters.Count} type arguments (T19; E4 for another count)";
                     candidate.BindingErrorId = ErrorIds.Syntax;
                 }
                 else
                 {
-                    candidate.Map = f.TypeParameters.Zip(typeArguments).ToDictionary(p => p.First, p => p.Second);
+                    // T34: a type parameter the call leaves out takes its default
+                    candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType)p.Default!))).ToDictionary(p => p.First, p => p.Second);
                 }
             }
 
@@ -1750,6 +1754,61 @@ public sealed partial class Checker
         var typed = Record(c, kind, Call(list, c, expected, out var picked), picked);
         function = typed.IsError ? null : picked?.Function;
         return typed;
+    }
+
+    /// <summary>T34: the type parameter that holds a constant at a place of a call's type arguments, where a candidate has one there.</summary>
+    private static TypeParameterSymbol? ConstantPlace(List<FunctionSymbol> candidates, int place) =>
+        candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).FirstOrDefault(p => p?.Constant is EnumType);
+
+    /// <summary>
+    /// T34: the constant a call gives a type parameter that holds one: a value of its enum by name, <c>JsonKeys.SnakeCase</c>, or, in a
+    /// copy, the name of a type parameter of its own that holds one, passed on. A type there, or a value of another enum, is
+    /// <c>type-mismatch</c>, as a value of another type for a parameter is (T1).
+    /// </summary>
+    private KurzType ResolveConstantArgument(TypeSyntax argument, TypeParameterSymbol holds)
+    {
+        var of = (EnumType)holds.Constant!;
+        if (argument is NamedType { TypeArguments.Count: 0 } n)
+        {
+            if (BoundConstant(n.Name) is { } bound)
+            {
+                if (ReferenceEquals(bound.Of.Symbol, of.Symbol))
+                {
+                    return bound;
+                }
+
+                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{bound.Of.Text}`, where `{holds.Name}` takes one of `{of.Text}` (T34, T1)");
+                return Types.Error;
+            }
+
+            var dot = n.Name.LastIndexOf('.');
+            if (dot > 0 && enums.TryGetValue(n.Name[..dot], out var named))
+            {
+                var value = n.Name[(dot + 1)..];
+                var index = named.Values.IndexOf(value);
+                if (index < 0)
+                {
+                    Report(ErrorIds.UnknownName, n.Line, $"`{named.Name}` has no value `{value}` (D12, V10)");
+                    return Types.Error;
+                }
+
+                if (ReferenceEquals(named, of.Symbol))
+                {
+                    return new ConstantArgument(of, index);
+                }
+
+                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` is a value of `{named.Name}`, where `{holds.Name}` takes one of `{of.Text}` (T34, T1)");
+                return Types.Error;
+            }
+        }
+
+        var type = Resolve(argument); // a name that is no type has its own error (E1)
+        if (!Types.IsError(type))
+        {
+            Report(ErrorIds.TypeMismatch, argument.Line, $"the type `{type.Text}` stands where `{holds.Name}` takes a value of `{of.Text}` (T34, T1)");
+        }
+
+        return Types.Error;
     }
 
     /// <summary>Binds the arguments to each candidate, picks one (F13) and checks the arguments against it.</summary>
@@ -2104,6 +2163,12 @@ public sealed partial class Checker
         {
             if (map.ContainsKey(p))
             {
+                continue;
+            }
+
+            if (p.Default is { } constant)
+            {
+                map[p] = constant; // T34: no argument fixes a constant, so a call that writes no type arguments gives it its default
                 continue;
             }
 

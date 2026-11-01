@@ -841,6 +841,28 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("void Say<const Mode M>(string text) {\n}", "(function void Say<const Mode M>(string text) {})")]
+    [InlineData("void Twice<T, const Mode M = Mode.Plain>(T value) {\n}", "(function void Twice<T, const Mode M = (. Mode Plain)>(T value) {})")]
+    [InlineData("void Late<const Mode M = Mode.Plain, T>() {\n}", "(function void Late<const Mode M = (. Mode Plain), T>() {})")]
+    [InlineData("void Bare<const>() {\n}", "(function void Bare<const>() {})")]
+    [InlineData("const = 1", "(assign-or-declare const (int 1))")]
+    [InlineData("Say<Mode.Loud>(\"a\")", "(call Say<Mode.Loud> (string \"a\"))")]
+    public void A_type_parameter_that_holds_a_constant_is_written_with_const(string program, string tree)
+    {
+        // T34: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type alone and a
+        // name elsewhere, as `thread` is a word before `static` alone (L18), so a type parameter named `const` and a variable stand; the
+        // call writes the constant among its type arguments; the order of a default is the checker's
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void A_type_parameter_that_holds_a_constant_has_a_name()
+    {
+        // T34: `const Mode` with no name is no type parameter
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("void Say<const Mode>() {\n}").Distinct());
+    }
+
+    [Theory]
     [InlineData("data User(int Id, string Name)", "(data User(int Id, string Name))")]
     [InlineData("data Admin(int Level) : User", "(data Admin(int Level) : User)")]
     [InlineData("data Empty", "(data Empty)")]
