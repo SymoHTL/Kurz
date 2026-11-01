@@ -153,7 +153,7 @@ so a test cannot move that directory through a child's environment
 `--verbose` stands before or after `--version`, as rustc takes `-v` and `-V` in either order (the
 owner, 2026-10-23).
 
-`kurz build [--release] [--lines] file.kz [-o output]` builds the program for the machine that
+`kurz build [--release] [--lines] [--cpu name] file.kz [-o output]` builds the program for the machine that
 builds, the test build unless `--release` says otherwise, a release build with the line tables a
 test build has where `--lines` says so (the owner, 2026-10-29, "build, run and exec"), into the
 executable beside the source, named
@@ -200,8 +200,32 @@ The search for clang runs after the program was accepted, and its failures are t
 build writes the IR into a directory of its own under the system's temporary directory, which it
 removes after clang's run.
 
-`kurz run [--release] [--lines] file.kz` builds the file as `build` does and runs it, and
-`kurz exec [--release] [--lines] "program text"` builds its argument and runs it, the argument's lines named
+Without `--cpu` the build is for the baseline of the machine's architecture, on x86-64 the CPU every
+x86-64 machine is, with SSE and SSE2; `--cpu name` builds it for the CPU clang knows by that name,
+`native` the machine's own (design record, section 2; the owner, 2026-11-01, "--cpu on build, run and
+exec"): clang gets `-march=name` on x86-64 and `-mcpu=name` on Arm, as rustc passes `-C target-cpu`
+to LLVM, and a test of a class of intrinsics the CPU has is the constant `true` (R18, below). Once
+the program was accepted the command asks the clang found about the CPU: the macros it defines for
+it, `-E -dM` of an empty C file, name the classes it has (`__SSE4_1__` for `X86.Sse41`, `__SHA__` for
+`X86.Sha`), and the features its driver passes for it, `-###`, are kept for the functions compiled for
+more classes (below). For a CPU named by its name the driver passes none, the name carrying them to
+LLVM; for `native` it passes the machine's. An executable built so runs on a CPU that has what the
+name names, which nothing checks when it starts (section 2). The question's two failures are the
+command's own, the first in the owner's words, with clang's release and the target it builds for
+(the owner, 2026-11-01, #39), the second where clang fails on the question otherwise (the owner,
+2026-11-01):
+
+    error: clang 23.1.4 knows no x86-64 CPU named `pentium9`
+      note: `clang --target=x86_64-pc-linux-gnu --print-supported-cpus` lists the ones it knows
+      help: name one of those, or native
+
+    error: clang did not answer which CPU `native` is
+      note: /usr/bin/clang-23 exited with 1 and wrote:
+        <what clang wrote>
+      help: check that the clang found runs
+
+`kurz run [--release] [--lines] [--cpu name] file.kz` builds the file as `build` does and runs it, and
+`kurz exec [--release] [--lines] [--cpu name] "program text"` builds its argument and runs it, the argument's lines named
 `exec` in a refusal and in a failure the program reports (`exec:2: unknown-name: ...`,
 `error: overflow at exec:2`) (design record, section 2). Each builds into a place of its own,
 `place-` and 32 hexadecimal digits, under the directory `kurz` in the user's cache directory as
@@ -251,9 +275,9 @@ checks either.
 Any other command line gets the usage on standard error and the exit code 1:
 
     usage: kurz --version [--verbose]
-           kurz build [--release] [--lines] <file.kz> [-o <output>]
-           kurz run [--release] [--lines] <file.kz> [-- <argument>...]
-           kurz exec [--release] [--lines] "<program text>" [-- <argument>...]
+           kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]
+           kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]
+           kurz exec [--release] [--lines] [--cpu <name>] "<program text>" [-- <argument>...]
            run and exec pass the words after -- to the program
 
 ### Readings the record leaves open to the command
@@ -266,14 +290,15 @@ ask about it.
 - A file that does not start, exits with a code other than 0 or gives no answer in 30 s names no
   release, and is refused as such. Pinned by
   `ClangTests.A_file_whose_answer_names_no_clang_release_is_refused`.
-- `build` takes its options before or after the file, each once, and nothing else; the words of
-  its own failures are this directory's, in the record's form. Pinned by `CommandTests`.
+- `build` takes its options before or after the file, each once, `--cpu` with the word after it as
+  its name, and nothing else; the words of its own failures are this directory's, in the record's
+  form, but for those of the CPU's question, which are the owner's. Pinned by `CommandTests`.
 - `build` builds for a 64-bit machine alone: the emitter lays a pointer out in 8 bytes, and the
   runtime declares C's `size_t` as a `long`. Pinned by
   `CommandTests.The_target_is_a_64_bit_Linux_or_Windows_machine`.
-- `run` takes `--release`, `--lines` and the file before its first `--`, each once, in any order, and
-  nothing else, `-o` among it; `exec` takes `--release` and `--lines` before its text alone, each
-  once, and one text before its first `--`, which may be empty; every word after that `--` is the
+- `run` takes `--release`, `--lines`, `--cpu` with its name and the file before its first `--`, each
+  once, in any order, and nothing else, `-o` among it; `exec` takes `--release`, `--lines` and `--cpu`
+  with its name before its text alone, each once, and one text before its first `--`, which may be empty; every word after that `--` is the
   program's, a further `--` among them: an empty
   text is an empty program and ends with 0. A missing file or text gets the usage. Pinned by
   `CommandTests`.
@@ -283,6 +308,10 @@ ask about it.
   wait, under which the maker the record lets wait would fail
   ([a .NET open takes a lock that does not wait](../knowledge/a-dotnet-open-takes-a-lock-that-does-not-wait.md)).
   Pinned by `PlaceTests`.
+- The classes of a CPU are those whose macro clang defines for it, and the classes under `Arm` are
+  none, since the compiler builds the intrinsics of x86-64 alone (R18). On a 64-bit Arm machine the
+  failure names a `64-bit Arm` CPU and clang gets `-mcpu`, which no test runs: the suites run on
+  x86-64. Pinned on x86-64 by `ClangTests.A_cpu_is_described_by_the_classes_whose_macros_clang_defines_for_it_and_the_features_its_driver_passes`.
 - The program runs in the caller's directory, and the command waits for it however long it runs.
   Pinned by `CommandTests.The_program_takes_the_commands_input_output_and_error_the_words_given_and_the_callers_directory`
   and, on Linux, by the endless program of
@@ -804,9 +833,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
   literal for no bytes; `FixedTime.Equal` reads every byte of two lists of one count and stops at no difference,
   which promises nothing of the code LLVM makes of it (H4). The text of a hasher is a literal of its type's name
-  (H6). `HashTests` pins what no case can: every count of bytes from 0 to 130, whole and in two pieces cut at every
+  (H6). SHA-256 takes a block, and the run of whole blocks an `Update` holds, through the SHA instructions where a
+  test of `X86.Sha` and `X86.Sse41` finds them, the state held in two vectors from block to block, in the form of
+  the `shani` backend of RustCrypto's `sha2` crate, and through the plain rounds elsewhere (R18). `HashTests` pins
+  what no case can: every count of bytes from 0 to 130, whole and in two pieces cut at every
   place, with a copy of the hasher between the pieces, against .NET's SHA-256, MD5 and HMAC-SHA256 and a CRC-32
-  computed a bit at a time, under the normal allocator and the fenced one; the lint at each call of a function of
+  computed a bit at a time, under the normal allocator and the fenced one; SHA-256's both paths, every count of
+  bytes from 0 to 200 whole and in two pieces and FIPS 180-2's vectors, built as the standard library is, for
+  `native`, whose test is a constant, and with its tests turned `false`; the lint at each call of a function of
   `Md5`; and a build for Windows;
 - lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
@@ -979,6 +1013,52 @@ bytes of `allocation-failed` for `List<T>.Allocate` past the limit and refused, 
 past the limit and for the bytes of a literal refused. The strings' program and its rounds hold the
 bytes of a string, a string of bytes, a part of a list of strings and a list made in a `raw` block.
 
+The intrinsics of R18, on x86-64 (section 13): `Vector128<T>` and `Vector256<T>` are LLVM's vectors of
+their lanes, `<4 x i32>` for `Vector128<int>`, of 16 and 32 bytes and aligned to them; `Vector128.Create`
+of one value or of every lane, `GetElement`, whose index outside the lanes raises `index-out-of-range`
+where C# throws, and the `As` conversions, which keep the bits; and the functions of `X86.Sse2`,
+`X86.Ssse3`, `X86.Sse41`, `X86.Aes` and `X86.Sha` that R18's cases and the standard library call, each
+as LLVM's instruction or intrinsic for C#'s (`Shuffle` of `X86.Sse2` a `shufflevector`, of `X86.Ssse3`
+`llvm.x86.ssse3.pshuf.b.128`, `Sha256TwoRounds` `llvm.x86.sha256rnds2`), an immediate as the
+instruction reads it (`Extract` its low bits, `AlignRight` zeros past 31 bytes). A test of a class's
+`IsSupported` is a constant where the CPU of the build answers it: `true` for a class the CPU has,
+`X86.Sse2` on every x86-64 CPU and more with `--cpu`, `false` for a class under `Arm`. Otherwise it
+reads the CPU's word, a global that the program's `main` fills once, before the runtime starts and
+only where a test reads it, from `cpuid`'s leaf 1 (ECX, the low 32 bits) and leaf 7 (EBX, the high 32),
+as Rust's `std_detect` reads them; the test holds the bits of the class and of every class it derives
+from. The branch a constant test skips is not compiled, and code that a test of a class under `Arm`
+guards is never reached. The rest of a block from a statement that a test guards for classes the
+function being compiled lacks, and the right side of `&&` or `||` that such a test guards, are
+compiled as a function of their own, `f.main.guarded.3.1` for line 3 of the top level, with LLVM's
+`target-features` of those classes and every class they derive from after the features clang's driver
+passes for the CPU, since a function's features take the place of the driver's; it takes the variables
+of the function it stands in by their address, and returns how it left: fell through, returned with
+the value stored for the caller, broke or continued, which the caller then does. A function such a
+block calls is compiled again for the block's classes, `f.Inner.1.for.X86.Sse41`, and so is every
+function that copy calls, the runtime's and the standard library's among them, where the tests the
+classes answer are constants (the owner, 2026-11-01: "transitive"); a lambda is compiled for the
+classes of the function it was made in and not again for a block that calls it through its value, and
+the helpers the emitter writes, `retain` and `release` among them, for the CPU alone. An intrinsic in
+`raw` that no test guards is a call of a function compiled for its class, `intrinsic.<the function>`,
+as a Rust intrinsic is a function with its target features, and runs the instruction whether the CPU
+has it or not (section 13). The SHA instructions have no VEX form, and LLVM cleans the upper halves of
+the YMM registers before a call and a return alone, so on a CPU with AVX the first statement of a run
+that a test of `X86.Sha` guards is preceded by `vzeroupper`: a legacy instruction run while they are
+dirty pays a transition of the register state, and SHA-256 of 48 MiB built for `raptorlake`, whose
+hash stored its constants through YMM registers just before its rounds, took 594 ms without it and
+19 ms with it. Once a run, and not in a function the run calls: cleaned at the entry of every function
+that runs one, the rounds of SHA-256 written as small functions, which LLVM inlines into a loop, took
+36 ms. A 256-bit instruction that LLVM writes inside such a run, before a SHA instruction, and one
+before a SHA instruction in `raw` that no test guards, is not cleaned after. `IntrinsicTests` pins the shapes, the copies, the CPU's word, the ways out
+of a guarded block under the fenced allocator, every intrinsic against .NET's `System.Runtime.Intrinsics`
+on the same lanes, and the SHA-1 functions, which .NET does not have, by compressing a block of SHA-1.
+Those of its tests and of `HashTests` that run an instruction fail, naming the set, on a machine without
+SSE4.1, AES or SHA, and the one built for `native` without AVX, since a path no test runs must not look
+clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
+A trace names a guarded block's function by its symbol without the numbers, `main.guarded`, and a
+copy by its whole symbol, `Next.1.for.X86.Sse41`, since its numbers do not end it: the names the
+emitter gives, which the record leaves open (section 14).
+
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
@@ -986,7 +1066,10 @@ checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket and a read of the
-command line, the environment or the clock in a build for Windows (S11), and a construct of the other chapters the checker does not read. The line
+command line, the environment or the clock in a build for Windows (S11), a vector held in a list, a
+map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
+aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
+built (R18), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
 The reference counting of section 3 is emitted for lists, strings, maps, the environments of lambdas and
@@ -1237,7 +1320,10 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9's paths none, since they run through a
 class instance or a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
+flow), 11's raw forms (R7, R10 to R17) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
+functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
+and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A4, A6, A8, A10 for a type parameter, A11, A12 and A14. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -1274,7 +1360,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, and
+`naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -1318,8 +1404,11 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
-which the intrinsics and their vector types stand (R18); and `use` (F10) of any folder but the runtime's `sys`;
+type (A4, R10, R17); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
+among them, a function of a built class and a lane operation it does not build, an immediate that is
+no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
+vector and of a value that holds one, which C# writes as its lanes and no rule gives (A4), and a vector
+whose lanes are a type parameter (T19); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item
@@ -1678,3 +1767,17 @@ round can ask about it by the rule's id.
 - R16: each argument in the place of `...` that C would widen is a `native-type` of its own. A
   `mut` parameter is `native-type` at the declaration, and a call of the declaration is read with
   `mut` before that argument or without it (E1).
+- R18 with N3: a test guards where N3 would narrow, and only there: the block of `if` and `while`, the
+  right side of `&&`, `!` turning a test around, the `else` and the right side of `||` after a test
+  turned around, and the rest of a block after a test whose block always leaves; a `bool` stored from `IsSupported` guards nothing, and
+  `IsSupported` is a `bool` wherever it stands. A test of a class guards the classes it derives from,
+  as C#'s classes derive (`X86.Sse41` guards `X86.Ssse3` and `X86.Sse2`; `X86.Aes` and `X86.Sha` derive
+  from `X86.Sse2`), and not those derived from it. A function an intrinsic stands in is not guarded by
+  the test around its call. A lambda made in a guarded block is guarded inside it, as N3 keeps what
+  was known where a lambda was made.
+- R18 with F14 and L10: an immediate, a parameter C# types `byte` and takes as a constant, is an `int`
+  in the pick of the overload, so that a literal's own type fits it, and then a constant that does not
+  fit the parameter's type is `constant-overflow`.
+- R18 with T19: the lanes of a vector are C#'s ten number types, `decimal` not among them, and another
+  type is `type-mismatch`, as an unmet limit is. A class under `Arm` is read as on any target: its
+  test is a `bool`, its block is checked, and `intrinsic-unguarded` stands outside a test of it.

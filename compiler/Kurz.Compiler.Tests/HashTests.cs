@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -111,6 +112,94 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(expected, output);
         }
     }
+
+    [Fact]
+    public void Sha256_gives_the_same_digests_through_the_sha_instructions_and_through_the_plain_rounds()
+    {
+        // R18 in std: a block, and the whole blocks a feed holds, take the SHA instructions where a test of the CPU finds them, as the
+        // `shani` backend of Rust's `sha2` crate does, and the plain rounds elsewhere. Three builds of one program: as std is, its test
+        // reading the CPU's word of this machine, which has the instructions; for `native`, which names them, the test a constant; and with
+        // std's tests turned `false`, the plain rounds alone. Each gives the standard's vectors (FIPS 180-2's three messages and two of the
+        // NIST examples) and .NET's digest of every count of bytes from 0 to 200, whole and in two pieces cut at every place.
+        const string text = """
+            mut message = Bytes()
+            while message.Count < 200 {
+                message.Add(byte((message.Count * 31 + 7) % 256))
+            }
+
+            mut differ = 0
+            mut n = 0
+            while n <= 200 {
+                Bytes whole = message[0..<n]
+                Bytes sha = Sha256.Hash(whole)
+                print(Hex.Encode(sha))
+                mut k = 0
+                while k <= n {
+                    mut s = Sha256.New()
+                    s.Update(whole[0..<k])
+                    s.Update(whole[k..<n])
+                    if !FixedTime.Equal(s.Finish(), sha) {
+                        differ = differ + 1
+                    }
+
+                    k = k + 1
+                }
+
+                n = n + 1
+            }
+
+            print(differ)
+            print(Hex.Encode(Sha256.Hash("".Bytes)))
+            print(Hex.Encode(Sha256.Hash("abc".Bytes)))
+            print(Hex.Encode(Sha256.Hash("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq".Bytes)))
+            print(Hex.Encode(Sha256.Hash("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu".Bytes)))
+            mut a = Bytes()
+            while a.Count < 1000 {
+                a.Add(byte(97))
+            }
+
+            mut million = Sha256.New()
+            mut i = 0
+            while i < 1000 {
+                million.Update(a)
+                i = i + 1
+            }
+
+            print(Hex.Encode(million.Finish()))
+
+            """;
+        var message = Message200();
+        var expected = Enumerable.Range(0, 201).Select(n => Convert.ToHexStringLower(SHA256.HashData(message[..n])))
+            .Append("0")
+            .Append("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+            .Append("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+            .Append("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+            .Append("cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1")
+            .Append("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
+            .ToList();
+        Assert.True(System.Runtime.Intrinsics.X86.Sse41.IsSupported && (System.Runtime.Intrinsics.X86.X86Base.CpuId(7, 0).Ebx & (1 << 29)) != 0, "this machine lacks SSE4.1 or SHA, so the path through the SHA instructions is not run here");
+        var plain = ListTests.Edited(("std/std.kz", "X86.Sha.IsSupported && X86.Sse41.IsSupported", "false"));
+        var named = toolchain.Clang.DescribeCpu("native", x86: true, out _)!;
+        Assert.Contains("X86.Sha", named.Classes);
+        foreach (var (runtime, cpu, name, word) in new (CheckedRuntime, Cpu?, string, bool)[]
+        {
+            (toolchain.Runtime, null, "hash-sha-tested", true),
+            (toolchain.Runtime, named, "hash-sha-named", false),
+            (plain, null, "hash-sha-plain", false),
+        })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild: true, cpu: cpu is null ? null : () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir;
+            Assert.Equal((name, word), (name, ir.Contains("@kz.cpu", StringComparison.Ordinal))); // which path runs is held by the mutations of each
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, name));
+            Assert.Equal((name, 0, ""), (name, code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    /// <summary>The bytes of the message of <see cref="Sha256_gives_the_same_digests_through_the_sha_instructions_and_through_the_plain_rounds"/>.</summary>
+    private static byte[] Message200() => Enumerable.Range(0, 200).Select(i => (byte)((i * 31 + 7) % 256)).ToArray();
 
     [Fact]
     public void Every_call_of_a_function_of_md5_is_the_lint_md5_insecure_once_at_its_line_and_the_program_is_built()

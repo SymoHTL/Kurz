@@ -1,4 +1,5 @@
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Xunit;
 
 namespace Kurz.Compiler.Tests;
@@ -133,6 +134,36 @@ public sealed class ClangTests : IDisposable
     [InlineData("", null)]
     public void The_release_is_read_from_the_answer_as_each_distribution_words_it(string answer, string? release) =>
         Assert.Equal(release, Clang.ReadVersion(answer));
+
+    [Fact]
+    public void A_cpu_is_described_by_the_classes_whose_macros_clang_defines_for_it_and_the_features_its_driver_passes()
+    {
+        // section 2 and R18: x86-64 has the baseline's classes, x86-64-v2 adds SSE3 to SSE4.2 and no SHA, goldmont SHA and AES and no
+        // AVX, native this machine's, with the features the driver passes for it; a CPU clang does not know is null, with the target
+        // clang builds for
+        var clang = Clang.Find().Found ?? throw new InvalidOperationException("no clang of the pinned major is found");
+        var baseline = clang.DescribeCpu("x86-64", x86: true, out var target)!;
+        Assert.Equal(Cpu.Baseline.Classes, baseline.Classes);
+        Assert.Equal("x86-64", baseline.Name);
+        Assert.StartsWith("x86_64-", target, StringComparison.Ordinal);
+        var v2 = clang.DescribeCpu("x86-64-v2", x86: true, out _)!;
+        Assert.Equal([.. Cpu.Baseline.Classes, "X86.Sse3", "X86.Ssse3", "X86.Sse41", "X86.Sse42", "X86.Popcnt"], v2.Classes);
+        Assert.Empty(v2.Features); // the driver passes the CPU's name alone, which carries its features to LLVM
+        var goldmont = clang.DescribeCpu("goldmont", x86: true, out _)!;
+        Assert.Contains("X86.Sha", goldmont.Classes);
+        Assert.Contains("X86.Aes", goldmont.Classes);
+        Assert.DoesNotContain("X86.Avx", goldmont.Classes);
+        var native = clang.DescribeCpu("native", x86: true, out _)!;
+        var sha = (System.Runtime.Intrinsics.X86.X86Base.CpuId(7, 0).Ebx & (1 << 29)) != 0;
+        Assert.Equal(
+            (System.Runtime.Intrinsics.X86.Sse41.IsSupported, System.Runtime.Intrinsics.X86.Aes.IsSupported, sha),
+            (native.Classes.Contains("X86.Sse41"), native.Classes.Contains("X86.Aes"), native.Classes.Contains("X86.Sha")));
+        Assert.Equal(sha, native.Features.Contains("+sha")); // for `native` the driver passes the machine's features, each by its name
+        Assert.Null(clang.DescribeCpu("pentium9", x86: true, out var unknown));
+        Assert.Equal(target, unknown);
+        Assert.Null(clang.DescribeCpu("cortex-a72", x86: true, out var other)); // a CPU of another architecture, unknown for x86-64 (section 2)
+        Assert.Equal(target, other);
+    }
 
     [Fact]
     public void This_machine_has_the_clang_of_the_pinned_major()

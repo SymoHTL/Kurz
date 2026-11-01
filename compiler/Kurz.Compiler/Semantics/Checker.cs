@@ -339,19 +339,6 @@ public sealed partial class Checker
     /// <summary>A type's name the checker does not read: a type of chapter 7, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
 
-    /// <summary>R18: a name under which the intrinsics and their vector types stand (section 13, the owner, 2026-11-01), which the checker
-    /// does not read: where no declaration gives the name, it is <c>not supported</c>.</summary>
-    private bool UnreadIntrinsic(string name, int line)
-    {
-        if (name is not ("X86" or "Arm" or "Vector128" or "Vector256"))
-        {
-            return false;
-        }
-
-        NotSupported(line, $"CPU intrinsics and their vector types, `{name}` (R18)");
-        return true;
-    }
-
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
     private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
 
@@ -947,9 +934,9 @@ public sealed partial class Checker
             return Types.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line))
+        if (ResolveVector(n) is { } vector)
         {
-            return Types.Error;
+            return vector; // R18, where no declaration gives the name
         }
 
         Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here (V10)");
@@ -1330,10 +1317,13 @@ public sealed partial class Checker
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
-    /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), and the hashes' (H1 to H4).
+    /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), the hashes' (H1 to H4), and
+    /// <c>X86</c>, <c>Arm</c>, <c>Vector128</c> and <c>Vector256</c>, which a file's own declaration cannot take, as it cannot take
+    /// <c>Environment</c> (R18, the owner, 2026-11-01).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
-        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name);
+        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name)
+        || name is "X86" or "Arm" or "Vector128" or "Vector256";
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
     private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7" };
@@ -1471,6 +1461,7 @@ public sealed partial class Checker
 
     private Flow CheckStatement(Statement statement)
     {
+        RecordGuards(statement); // R18: what the emitter compiles a guarded block for
         var depth = expressionDepth;
         expressionDepth = 0; // a statement in a lambda's block or in an arm has expressions of its own (M7)
         var flow = CheckStatementCore(statement);

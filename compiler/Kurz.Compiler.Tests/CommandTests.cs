@@ -154,6 +154,83 @@ public sealed class CommandTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Build_run_and_exec_build_for_the_cpu_that_cpu_names_native_among_them()
+    {
+        // section 2 and R18 (the owner, 2026-11-01, "--cpu on build, run and exec"): a test the named CPU answers is a constant, one it
+        // does not answer reads the machine's word, and either way the block runs on a machine that has the set, as this one must
+        Assert.True(System.Runtime.Intrinsics.X86.Sse41.IsSupported, "this machine lacks SSE4.1, so the guarded block is not run here");
+        const string text = "v = Vector128.Create(1, 2, 3, 4)\nif X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 2))\n} else {\n    print(\"plain\")\n}\n";
+        var source = Path.Combine(root, "lanes.kz");
+        File.WriteAllText(source, text);
+        var output = Path.Combine(root, OperatingSystem.IsWindows() ? "lanes.exe" : "lanes");
+        foreach (var cpu in new[] { "native", "x86-64", "x86-64-v2" })
+        {
+            var built = Kurz("build", "--cpu", cpu, source, "-o", output);
+            Assert.Equal((cpu, 0, "", ""), (cpu, built.Code, built.Output, built.Error));
+            Assert.Equal((0, "3\n", ""), Processes.Capture(output, [], null, TimeSpan.FromSeconds(30)));
+        }
+
+        Assert.Equal((0, "3\n", ""), KurzWithPlaces("run", "--cpu", "native", source));
+        Assert.Equal((0, "3\n", ""), KurzWithPlaces("exec", "--release", "--cpu", "x86-64-v2", text));
+        NoPlaceLeft(made: true);
+    }
+
+    [Fact]
+    public void A_cpu_clang_does_not_know_is_the_commands_own_failure_naming_clangs_list_once_the_program_was_accepted()
+    {
+        // the owner, 2026-11-01 (#39): Kurz's own text, with clang's release, the triple clang builds for and the command that lists its CPUs
+        var clang = Clang.Find().Found ?? throw new InvalidOperationException("no clang of the pinned major is found");
+        var source = Path.Combine(root, "cpu.kz");
+        File.WriteAllText(source, "print(1)\n");
+        var (code, output, error) = Kurz("build", "--cpu", "pentium9", source);
+        var triple = Regex.Match(error, @"--target=(x86_64-\S+) ").Groups[1].Value;
+        Assert.Equal(
+            (1, "", $"error: clang {clang.Version} knows no x86-64 CPU named `pentium9`\n  note: `clang --target={triple} --print-supported-cpus` lists the ones it knows\n  help: name one of those, or native\n"),
+            (code, output, error));
+        Assert.False(File.Exists(Path.Combine(root, OperatingSystem.IsWindows() ? "cpu.exe" : "cpu")));
+        Assert.Equal((1, "", error), KurzWithPlaces("run", "--cpu", "pentium9", source));
+        Assert.Equal((1, "", error), KurzWithPlaces("exec", "--cpu", "pentium9", "print(1)"));
+
+        // a CPU of another architecture than the target's, `cortex-a72` on x86-64, fails as one clang does not know (section 2)
+        Assert.Equal((1, "", error.Replace("`pentium9`", "`cortex-a72`", StringComparison.Ordinal)), Kurz("build", "--cpu", "cortex-a72", source));
+
+        // the note's command does list the CPUs, on standard error as clang writes it, with one the build takes among them
+        var (listed, listOut, listError) = Processes.Capture(clang.Path, [$"--target={triple}", "--print-supported-cpus"], null, TimeSpan.FromSeconds(30));
+        Assert.Equal(0, listed);
+        Assert.Contains("\tx86-64-v2\n", (listOut + listError).ReplaceLineEndings("\n"), StringComparison.Ordinal);
+
+        // a program the compiler refuses gets its lines and no question to clang
+        File.WriteAllText(source, "print(y)\n");
+        var refused = Run(() => throw new InvalidOperationException("the search ran"), "build", "--cpu", "pentium9", source);
+        Assert.Equal((1, ""), (refused.Code, refused.Output));
+        Assert.StartsWith($"{source}:1: unknown-name: ", refused.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("pentium9", refused.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_clang_that_fails_on_the_question_of_the_cpu_writes_what_it_wrote_and_exits_1()
+    {
+        var source = Path.Combine(root, "hello.kz");
+        File.WriteAllText(source, "print(1)\n");
+        var (find, path) = Found(); // an empty file named clang-23, which does not start
+        var (code, output, error) = Run(find, "build", "--cpu", "native", source);
+        Assert.Equal((1, ""), (code, output));
+        Assert.StartsWith($"error: clang did not answer which CPU `native` is\n  note: {path} exited with -1 and wrote:\n    ", error, StringComparison.Ordinal);
+        Assert.EndsWith("\n  help: check that the clang found runs\n", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_cpu_with_no_clang_found_writes_the_search_once_the_program_was_accepted_and_exits_1()
+    {
+        var source = Path.Combine(root, "hello.kz");
+        File.WriteAllText(source, "print(1)\n");
+        var search = new ClangSearch(null, Path.Combine(root, "clang"), "20.1.2", ["clang-23 on the path", "clang on the path"]);
+        Assert.Equal(
+            (1, "", $"error: clang 20.1.2 is not LLVM 23\n  note: found at {Path.Combine(root, "clang")}\n  help: install LLVM 23, ahead of this clang on the path\n"),
+            Run(() => search, "build", "--cpu", "native", source));
+    }
+
     [Theory]
     [InlineData("print(1)\nprint(y)\n", ":2: unknown-name: ")] // a compile error, in the record's form
     [InlineData("s = \"ab\"\nprint(s.Chars[0])\n", ":2: not supported: `s.Chars` as a list (T15)\n")] // the emitter's not supported
@@ -293,10 +370,20 @@ public sealed class CommandTests : IDisposable
     [InlineData("exec", "print(1)", "--lines")]
     [InlineData("exec", "--", "print(1)")]
     [InlineData("exec", "print(1)", "a", "--", "b")]
+    [InlineData("build", "--cpu", "a.kz")] // the option takes the next word as its name
+    [InlineData("build", "a.kz", "--cpu")]
+    [InlineData("build", "--cpu", "native", "--cpu", "native", "a.kz")]
+    [InlineData("run", "a.kz", "--cpu")]
+    [InlineData("run", "--cpu", "native", "--cpu", "native", "a.kz")]
+    [InlineData("run", "--cpu", "--", "a.kz")]
+    [InlineData("exec", "--cpu", "print(1)")]
+    [InlineData("exec", "--cpu", "native")]
+    [InlineData("exec", "--cpu", "native", "--cpu", "native", "print(1)")]
+    [InlineData("exec", "print(1)", "--cpu", "native")]
     public void A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1(params string[] arguments) =>
         Assert.Equal(
-            (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] <file.kz> [-o <output>]\n"
-                + "       kurz run [--release] [--lines] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] \"<program text>\" [-- <argument>...]\n"
+            (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]\n"
+                + "       kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] [--cpu <name>] \"<program text>\" [-- <argument>...]\n"
                 + "       run and exec pass the words after -- to the program\n"),
             Kurz(arguments));
 

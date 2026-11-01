@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Kurz.Compiler.Emit;
 
 namespace Kurz.Compiler.Build;
 
@@ -133,10 +134,15 @@ public sealed partial class Clang
     /// them into the PDB. The failure, with what clang wrote, where it
     /// does not exit with 0.
     /// </summary>
-    public void Build(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines)
+    public void Build(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
     {
         ArgumentNullException.ThrowIfNull(libraries);
         var arguments = new List<string> { release ? "-O2" : "-O0", irPath, "-o", outputPath };
+        if (cpuFlag is not null)
+        {
+            arguments.Add(cpuFlag); // section 2: the CPU the build names, as rustc passes `-C target-cpu`
+        }
+
         if (lines)
         {
             arguments.Add("-g");
@@ -156,6 +162,65 @@ public sealed partial class Clang
         if (code != 0)
         {
             throw new ToolchainException($"{Path} exited with {code.ToString(CultureInfo.InvariantCulture)} and wrote:\n{error.TrimEnd()}");
+        }
+    }
+
+    /// <summary>The option that names the CPU to clang, as rustc's <c>-C target-cpu</c> reaches LLVM: <c>-march</c> on x86-64, <c>-mcpu</c> on Arm.</summary>
+    public static string CpuFlag(string name, bool x86) => (x86 ? "-march=" : "-mcpu=") + name;
+
+    [GeneratedRegex(@"^Target: (\S+)", RegexOptions.Multiline)]
+    private static partial Regex TargetText();
+
+    [GeneratedRegex(@"""-target-(cpu|feature)"" ""([^""]*)""")]
+    private static partial Regex DriverText();
+
+    [GeneratedRegex(@"^#define (\w+) ", RegexOptions.Multiline)]
+    private static partial Regex MacroText();
+
+    /// <summary>
+    /// The CPU clang knows by <paramref name="name"/>, <c>native</c> among them, as a build that names it compiles for (design record,
+    /// section 2): the classes of intrinsics it has, from the macros clang defines for it (R18), and the features clang's driver passes
+    /// for it, which a function compiled for more sets carries in front of theirs. Null where clang knows no CPU of that name for the
+    /// machine's architecture, with the target clang builds for in <paramref name="target"/>; a <see cref="ToolchainException"/> where
+    /// clang fails otherwise.
+    /// </summary>
+    public Cpu? DescribeCpu(string name, bool x86, out string target)
+    {
+        var work = Directory.CreateTempSubdirectory("kurz-cpu-");
+        try
+        {
+            var empty = System.IO.Path.Combine(work.FullName, "cpu.c");
+            File.WriteAllText(empty, string.Empty);
+            var flag = CpuFlag(name, x86);
+            var (driverCode, _, driver) = Processes.Capture(Path, [flag, "-###", "-c", empty], work.FullName, TimeSpan.FromSeconds(30));
+            target = TargetText().Match(driver) is { Success: true } t ? t.Groups[1].Value : "the default target";
+            if (driverCode != 0)
+            {
+                throw new ToolchainException($"{Path} exited with {driverCode.ToString(CultureInfo.InvariantCulture)} and wrote:\n{driver.TrimEnd()}");
+            }
+
+            var (code, macros, error) = Processes.Capture(Path, [flag, "-E", "-dM", empty], work.FullName, TimeSpan.FromSeconds(30));
+            if (code != 0 && error.Contains("unknown target CPU", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            if (code != 0)
+            {
+                throw new ToolchainException($"{Path} exited with {code.ToString(CultureInfo.InvariantCulture)} and wrote:\n{error.TrimEnd()}");
+            }
+
+            var defined = MacroText().Matches(macros).Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+            var classes = !x86 ? [] : Semantics.Intrinsics.Classes.Values
+                .Where(c => c.IsX86 && (c.Base is null || (c.Macro is not null && defined.Contains(c.Macro))))
+                .Select(c => c.Name)
+                .ToList();
+            var features = DriverText().Matches(driver).Where(m => m.Groups[1].Value == "feature").Select(m => m.Groups[2].Value).ToList();
+            return new Cpu(name, classes, features, x86);
+        }
+        finally
+        {
+            work.Delete(recursive: true);
         }
     }
 

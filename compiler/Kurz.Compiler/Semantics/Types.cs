@@ -218,6 +218,23 @@ public sealed record CFunctionType(IReadOnlyList<KurzType> Parameters, KurzType 
     public override int GetHashCode() => HashCode.Combine(nameof(CFunctionType), Parameters.Count, Result);
 }
 
+/// <summary>
+/// <c>Vector128&lt;T&gt;</c> or <c>Vector256&lt;T&gt;</c> (R18): the lanes of a CPU's vector register, as C#'s
+/// <c>System.Runtime.Intrinsics</c> holds them (section 13, the owner, 2026-11-01, "C#'s shape"); <paramref name="Lane"/> is one of
+/// the ten number types C# admits there, T2's numbers but <c>decimal</c>, and <paramref name="Bits"/> 128 or 256.
+/// </summary>
+public sealed record VectorType(KurzType Lane, int Bits) : KurzType
+{
+    public override string Text => $"Vector{Bits.ToString(System.Globalization.CultureInfo.InvariantCulture)}<{Lane.Text}>";
+
+    /// <summary>The count of lanes: the bits over the lane's width.</summary>
+    public int Count => Bits / Types.LaneBits(Lane);
+
+    public bool Equals(VectorType? other) => other is not null && Bits == other.Bits && Types.Same(Lane, other.Lane);
+
+    public override int GetHashCode() => HashCode.Combine(nameof(VectorType), Lane, Bits);
+}
+
 /// <summary>A type parameter inside the generic function or type that declares it (T19).</summary>
 public sealed record TypeParameterType(TypeParameterSymbol Symbol) : KurzType
 {
@@ -409,9 +426,16 @@ public static class Types
             (PointerType x, PointerType y) => Same(x.Pointee, y.Pointee),
             (CFunctionType x, CFunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (TypeParameterType x, TypeParameterType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (VectorType x, VectorType y) => x.Bits == y.Bits && Same(x.Lane, y.Lane),
             _ => false,
         };
     }
+
+    /// <summary>R18: whether a vector's lanes take the type: C#'s ten, T2's integers, <c>float</c> and <c>double</c>.</summary>
+    public static bool IsLane(KurzType type) => type is PrimitiveType { Kind: <= Primitive.Double };
+
+    /// <summary>R18: the width of a lane of the type in bits.</summary>
+    public static int LaneBits(KurzType lane) => lane is PrimitiveType { Kind: Primitive.Float } ? 32 : lane is PrimitiveType { Kind: Primitive.Double } ? 64 : Width(lane);
 
     public static bool AllSame(IReadOnlyList<KurzType> a, IReadOnlyList<KurzType> b)
     {
