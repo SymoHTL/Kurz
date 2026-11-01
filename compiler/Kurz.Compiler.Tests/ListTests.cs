@@ -1502,7 +1502,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // path of fields beside a copy of the data value; `IndexOf` of an item and of a run (X9), on a list of lists (F13), of `double` items
     // by IEEE's `==` and of `data` items as D3 compares them (M9); the searches of a string made while the program runs, with arguments
     // made in the call and read from a variable, a field and an item, and of `char`s of three and four bytes (X1); a list of bytes that
-    // shares a string's block, grown while the string keeps its bytes (M3); and `AddRange` of a list read from an item and from a field
+    // shares a string's block, grown while the string keeps its bytes (M3); `AddRange` of a list read from an item and from a field; a
+    // list of `int`s appended to itself in its room and grown, the block it alone holds with the argument (`ListWithin`), then beside a
+    // copy with another argument, which copies the block (M3); and more than `SmallCopy`'s bytes of `int`s and of strings appended, to
+    // another list and to the list itself
     private const string Searches = """
         data Bag(List<string> Items)
         data P(string Name, double X)
@@ -1585,6 +1588,39 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(t.IndexOf(euro) ?? -1)
         print(t.IndexOf('😀') ?? -1)
         print(t.Contains('😁'))
+        mut ns = List<int>()
+        ns.Add(1)
+        ns.Add(2)
+        ns.AddRange(ns)
+        print(ns)
+        ns.AddRange(ns)
+        print(ns)
+        seen = ns
+        ns.AddRange([3])
+        print(ns)
+        print(seen)
+        mut wide = [0]
+        for i in 0..<600 {
+            wide.Add(i)
+        }
+
+        mut far = [-1]
+        far.AddRange(wide)
+        print(far.Count)
+        print(far[2] + far[601])
+        wide.AddRange(wide)
+        print(wide.Count)
+        print(wide[601])
+        print(wide[1200] + wide[1201])
+        mut many = List<string>()
+        for i in 0..<130 {
+            many.Add(Made(i))
+        }
+
+        many.AddRange(many)
+        print(many.Count)
+        print(many[130] == many[0])
+        print(many[259])
         """;
 
     private static readonly string[] SearchesPrint =
@@ -1627,6 +1663,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "1", // a `char` of three bytes
         "4", // of four
         "false", // a `char` whose four bytes differ from the string's in the last
+        "[1, 2, 1, 2]", // appended in its room
+        "[1, 2, 1, 2, 1, 2, 1, 2]", // grown
+        "[1, 2, 1, 2, 1, 2, 1, 2, 3]", // beside a copy, another argument: the block copied (M3)
+        "[1, 2, 1, 2, 1, 2, 1, 2]",
+        "602", // 601 `int`s, past `SmallCopy`
+        "599",
+        "1202", // the list itself, past `SmallCopy`
+        "0",
+        "1197",
+        "260", // strings, past `SmallCopy`, appended to the list itself
+        "true",
+        "made 129",
     ];
 
     // The sorts of X8: a list of strings sorted beside a copy, which keeps its order (M3), and one it alone holds, longer than a run,
@@ -3699,12 +3747,54 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_AddRange_past_the_limit_reports_the_bytes_of_the_items_after_it()
     {
-        // M9, X9: the limit of the largest `int` lowered to 3 in the library's `ListReserve`, so that `AddRange` of three items to a list
-        // of one asks past it with the bytes of 4 `long`s, as an `Add` past the limit does; a block the system refuses ends the same way
-        // through the emitter's `Refused`, as every growth's does
-        const string text = "mut xs = List<long>()\nxs.Add(1)\nxs.AddRange([2, 3, 4])\nprint(xs.Count)\n";
-        Ran(BuildAndRun(text, Edited(("std/std.kz", "if count + more > 2147483647 {\n        asked = (count + more) * item", "if count + more > 3 {\n        asked = (count + more) * item")), "add-range-limit"), 1, [], "error: allocation-failed (32 bytes)\n");
-        Ran(BuildAndRun(text, toolchain.Runtime, "add-range-below-limit"), 0, ["4"], ""); // the positive control
+        // M9, X9: the limit of the largest `int` lowered to 3 in the library's `ListReserve`, so that `AddRange` of four items to a list
+        // of one, past its room of 4, asks past it with the bytes of 5 `long`s, as an `Add` past the limit does; a list with room for the
+        // items takes them without `ListReserve` (`ListHasRoomFor`), as no count past the limit fits a room. A block the system refuses
+        // ends the same way through the emitter's `Refused`, as every growth's does
+        const string text = "mut xs = List<long>()\nxs.Add(1)\nxs.AddRange([2, 3, 4, 5])\nprint(xs.Count)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "if count + more > 2147483647 {\n        asked = (count + more) * item", "if count + more > 3 {\n        asked = (count + more) * item")), "add-range-limit"), 1, [], "error: allocation-failed (40 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "add-range-below-limit"), 0, ["5"], ""); // the positive control
+    }
+
+    [Fact]
+    public void An_AddRange_asks_for_the_room_twice_the_old_or_of_its_items()
+    {
+        // X9, M9: `ListReserve` refuses every growth past 64 bytes, so the error names the bytes of the room the growth asked for: twice
+        // the room of 4 `long`s where that holds the items (Rust's `grow_amortized`, section 12, assumed), else the count and the items;
+        // `xs.AddRange(xs)` grows its own block (`ListReserveWithin`) to the same room as a copy beside another value makes; and past the
+        // limit of the largest `int`, lowered to 3, the bytes of the items after it, as the list's own block asks them
+        const string four = "mut xs = List<long>()\nxs.Add(1)\nxs.Add(2)\nxs.Add(3)\nxs.Add(4)\n";
+        var past64 = Edited(("std/std.kz", "    long bytes = 16 + grown * item\n    if block != null && !shared {", "    long bytes = 16 + grown * item\n    if bytes > 64 {\n        asked = bytes\n        return null\n    }\n\n    if block != null && !shared {"));
+        (string Name, string Text, string Bytes, string Count)[] rows =
+        [
+            ("twice", four + "xs.AddRange([5, 6, 7])\nprint(xs.Count)\n", "80", "7"),
+            ("items", "mut xs = List<long>()\nxs.Add(1)\nxs.AddRange([2, 3, 4, 5, 6, 7, 8, 9])\nprint(xs.Count)\n", "88", "9"),
+            ("itself", four + "xs.AddRange(xs)\nprint(xs.Count)\n", "80", "8"),
+            ("beside-a-copy", four + "ys = xs\nxs.AddRange(xs)\nprint(xs.Count + ys.Count)\n", "80", "12"),
+        ];
+        foreach (var (name, text, bytes, count) in rows)
+        {
+            Ran(BuildAndRun(text, past64, $"add-range-room-{name}"), 1, [], $"error: allocation-failed ({bytes} bytes)\n");
+            Ran(BuildAndRun(text, toolchain.Runtime, $"add-range-room-{name}-granted"), 0, [count], ""); // the positive control
+        }
+
+        const string itself = "mut xs = List<long>()\nxs.Add(1)\nxs.Add(2)\nxs.AddRange(xs)\nprint(xs.Count)\n";
+        Ran(BuildAndRun(itself, Edited(("std/std.kz", "if count + more > 2147483647 {\n        asked = (count + more) * item", "if count + more > 3 {\n        asked = (count + more) * item")), "add-range-itself-limit"), 1, [], "error: allocation-failed (32 bytes)\n");
+        Ran(BuildAndRun(itself, toolchain.Runtime, "add-range-itself-below-limit"), 0, ["4"], ""); // the positive control
+    }
+
+    [Fact]
+    public void An_AddRange_of_a_list_to_itself_keeps_no_block_it_grew_from()
+    {
+        // X9, M3: 3000 rounds of a list of 2000 `int`s appended to itself, the block of 8208 bytes it alone holds with the argument grown
+        // (`ListReserveWithin`), run in the 16 mebibytes of `Budget`; a block that stayed behind each round, 24 megabytes, would outgrow them
+        const string rounds = "mut total = 0\nfor round in 0..<3000 {\n    mut xs = List<int>()\n    for i in 0..<2000 {\n        xs.Add(i)\n    }\n\n    xs.AddRange(xs)\n    total = total + xs.Count\n}\n\nprint(total)\n";
+        Ran(BuildAndRun(rounds, Budget(), "add-range-itself-rounds"), 0, ["12000000"], "");
+
+        // the positive control: the block of each round held before the append outgrows the same memory
+        var held = BuildAndRun(rounds.Replace("mut total = 0\n", "mut total = 0\nmut all = List<List<int>>()\n", StringComparison.Ordinal).Replace("    xs.AddRange(xs)\n", "    all.Add(xs)\n    xs.AddRange(xs)\n", StringComparison.Ordinal), Budget(), "add-range-itself-rounds-held");
+        Assert.Equal(1, held.Code);
+        Assert.StartsWith("error: allocation-failed (", held.Error, StringComparison.Ordinal);
     }
 
     [Fact]

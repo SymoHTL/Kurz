@@ -662,7 +662,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   items of a list, a list of one-byte items through the standard library's two-way search, as a string,
   and a run of other items at each position in turn, as Rust's `windows`; `AddRange(collection)`, which
   reads its argument first and holds it with a count of its own while the list makes room for all of its
-  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block and appends
+  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block, or grows it
+  where only the list and the argument hold it, as Rust's `extend_from_within`, and appends
   the items as they were (section 12, assumed); `Reverse()`, which swaps the items in place and copies
   a block another value holds first (X9, M3); and `Sort()`, `SortUnstable()` and `SortBy(keySelector)`
   (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
