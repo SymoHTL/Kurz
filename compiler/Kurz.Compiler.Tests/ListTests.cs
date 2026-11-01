@@ -3249,7 +3249,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void SipHash_1_3_gives_the_vectors_of_the_reference()
     {
-        // the hash Rust's `HashMap` takes by default, which a map moves onto past the bound (section 4): the two vectors under keys of 0
+        // M9 (section 4): the hash Rust's `HashMap` takes by default, which a map moves onto past the bound: the two vectors under keys of 0
         // are CPython's `siphash13` of the same bytes, the third is under the reference implementation's keys, from the same code in
         // Python, which gives the reference's SipHash-2-4 vectors with two and four rounds
         const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
@@ -3429,10 +3429,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_key_of_every_count_of_bytes_from_0_to_24_has_the_SipHash_1_3_of_the_reference()
     {
-        // SipHash13 reads each whole word of 8 bytes in one read and the bytes after the last one four, two and one at a time, as Rust's
-        // SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes (i * 37 + 200) % 256, half of them 128 or more, of every count
-        // from 0 to 24, under keys of 0 and under the reference implementation's keys, against SipHash-1-3 in Python, which gives
-        // CPython's `hash` of the same bytes under keys of 0 (`PYTHONHASHSEED=0`) and the three vectors of the test above
+        // M9 (section 4): SipHash13, the hash of a map that switched, reads each whole word of 8 bytes in one read and the bytes after the
+        // last one four, two and one at a time, as Rust's SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes
+        // (i * 37 + 200) % 256, 14 of the 24 of them 128 or more, of every count from 0 to 24, under keys of 0 and under the reference
+        // implementation's keys, against SipHash-1-3 in Python, which gives CPython's `hash` of the same bytes under keys of 0
+        // (`PYTHONHASHSEED=0`) for the counts 1 to 24, CPython hashing no bytes as 0 without SipHash, and the three vectors of the test above
         ulong[] zero =
         [
             15130871412783076140UL, 12449551661063549815UL, 18410336655117930453UL, 14036337907613256389UL, 8188850183964244334UL,

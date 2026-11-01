@@ -3913,7 +3913,7 @@ pub ulong HashEnd(byte* state) {
 }
 
 // SipHash-1-3 of the `count` bytes at `bytes` under the keys `key0` and `key1`, the hash Rust's
-// `HashMap` takes by default: one round for each word of eight bytes, read with its first byte lowest,
+// `HashMap` takes by default and a map's once it switched (M9, section 4): one round for each word of eight bytes, read with its first byte lowest,
 // and three after the last word, which holds the bytes left and the count in its highest byte. A whole
 // word is read in one load and the bytes left four, two and one at a time, as Rust's `SipHasher13`
 // reads them (`load_int_le` and `u8to64_le`).
@@ -3952,7 +3952,8 @@ ulong SipHash13(ulong key0, ulong key1, byte* bytes, long count) {
 }
 
 // The 8 bytes at `p` as a word, the first byte lowest, at any address: LLVM joins the bytes into one
-// load, which a read through a `Ptr<ulong>` is not, since LLVM takes that one to be at a multiple of 8.
+// load with no alignment assumed, where a read through a `Ptr<ulong>` is a load LLVM takes to be at a
+// multiple of 8, which a key's bytes need not be.
 pub ulong WordAt(byte* p) {
     mut ulong word = 0
     raw {
