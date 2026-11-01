@@ -1000,7 +1000,9 @@ long MaximalSuffix(byte* x, long m, bool greater, mut long period) {
 // the part left of the cut repeats at the period, the search remembers how much of the needle the last
 // move kept matched and compares it no more; else it moves by more than either part. A set of the low
 // six bits of the needle's bytes, of its first period where it repeats, moves the window by the whole
-// needle where its last byte is none of them.
+// needle where its last byte is none of them. Each move goes on to the next window with `continue`, and
+// a match leaves the loop with `break`, as `next` of Rust's searcher continues its loop and returns, so
+// that a move tests nothing but that the next window still fits.
 long TwoWay(byte* hay, long n, byte* needle, long m) {
     mut long periodLess = 0
     mut long periodGreater = 0
@@ -1048,45 +1050,52 @@ long TwoWay(byte* hay, long n, byte* needle, long m) {
 
         mut long position = 0
         mut long memory = 0
-        while found < 0 && position + m <= n {
-            byte tail = hay[position + m - 1]
+        long last = n - m
+        byte* ends = hay + m - 1
+        while position <= last {
+            byte tail = ends[position]
             if ((set >> int(tail & 63)) & 1UL) == 0UL {
                 position = position + m
                 memory = 0
-            } else {
-                mut long i = crit
-                if periodic && memory > i {
-                    i = memory
-                }
-
-                while i < m && needle[i] == hay[position + i] {
-                    i = i + 1
-                }
-
-                if i < m {
-                    position = position + i - crit + 1
-                    memory = 0
-                } else {
-                    mut long j = crit
-                    mut long low = 0
-                    if periodic {
-                        low = memory
-                    }
-
-                    while j > low && needle[j - 1] == hay[position + j - 1] {
-                        j = j - 1
-                    }
-
-                    if j > low {
-                        position = position + period
-                        if periodic {
-                            memory = m - period
-                        }
-                    } else {
-                        found = position
-                    }
-                }
+                continue
             }
+
+            mut long i = crit
+            if periodic && memory > i {
+                i = memory
+            }
+
+            while i < m && needle[i] == hay[position + i] {
+                i = i + 1
+            }
+
+            if i < m {
+                position = position + i - crit + 1
+                memory = 0
+                continue
+            }
+
+            mut long j = crit
+            mut long low = 0
+            if periodic {
+                low = memory
+            }
+
+            while j > low && needle[j - 1] == hay[position + j - 1] {
+                j = j - 1
+            }
+
+            if j > low {
+                position = position + period
+                if periodic {
+                    memory = m - period
+                }
+
+                continue
+            }
+
+            found = position
+            break
         }
     }
 
