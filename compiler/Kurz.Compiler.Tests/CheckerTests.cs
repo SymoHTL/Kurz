@@ -2917,6 +2917,38 @@ public sealed class CheckerTests
         Assert.Equal(["5: an assignment into a value held by a field of an instance (K2, M4)"], NotSupported("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag([1]))\np.B.Items[0] = 2"));
     }
 
+    [Fact]
+    public void A_weak_reference_reads_as_a_strong_nullable_whose_narrowing_ends_where_a_count_can_be_let_go_of()
+    {
+        // R3 (the owner, 2026-11-01, "Anywhere a type stands"): a field, a list's item, a variable, a parameter and a result, which
+        // take a `T`, a `T?` and `null`
+        Clean("class Owner(string Name)\nclass Pet(mut weak Owner? Keeper)\n\nweak Owner? Keep(weak Owner? w) {\n    return w\n}\n\no = Owner(\"Ann\")\nweak Owner? k = Keep(o)\np = Pet(k)\np.Keeper = null\nprint(k?.Name ?? \"gone\")\nprint(p.Keeper?.Name ?? \"gone\")");
+        Clean("class Owner(string Name)\nclass Club(mut List<weak Owner?> Members)\n\no = Owner(\"Ann\")\nc = Club(List<weak Owner?>())\nc.Members.Add(o)\nc.Members.Add(null)\nfor m in c.Members {\n    print(m?.Name ?? \"gone\")\n}");
+        // R3 (the owner, 2026-11-01, "A strong T?, held"): a read is a `T?`, which a `T?` variable and a `T?` parameter take as it is
+        Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nx = Owner(\"Ann\")\np = Pet(x)\nOwner? k = p.Keeper\nprint(NameOf(k))\nprint(NameOf(p.Keeper))");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors("class Owner(string Name)\n\no = Owner(\"Ann\")\nweak Owner? w = o\nprint(w.Name)"));
+
+        // N9: a call between the test and the use ends what the test showed of a path through `weak`, as of one through a `mut` field
+        const string Head = "class Owner(string Name)\nclass Pet(mut weak Owner? Keeper)\n\nbool Keep(Pet pet, Owner owner) {\n    pet.Keeper = owner\n    return true\n}\n\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Head + "o = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(Keep(p, o))\n    print(p.Keeper.Name)\n}"));
+        Clean(Head + "o = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(p.Keeper.Name)\n}");
+        // the same through a `weak` field without `mut`, which nothing assigns and a call can still free the target of
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nbool Touch() => true\n\no = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(Touch())\n    print(p.Keeper.Name)\n}"));
+
+        // N9 (the owner, 2026-11-01, "Those ends stop narrowing"): a test after a call in the same condition narrows neither the block
+        // nor what the `if` leaves after it, since the condition's temporaries are let go of at its end, the case of the question; the
+        // same test in a condition of its own narrows its block
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Head + "p = Pet(null)\nif Keep(p, Owner(\"Ann\")) && p.Keeper != null {\n    print(p.Keeper.Name)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 14)], Errors(Head + "void Show(Pet p) {\n    if Keep(p, Owner(\"Ann\")) && p.Keeper == null {\n        return\n    }\n\n    print(p.Keeper.Name)\n}\n\nShow(Pet(null))"));
+        Clean(Head + "p = Pet(null)\nif Keep(p, Owner(\"Ann\")) {\n    if p.Keeper != null {\n        print(p.Keeper.Name)\n    }\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Head + "p = Pet(null)\nwhile Keep(p, Owner(\"Ann\")) && p.Keeper != null {\n    print(p.Keeper.Name)\n    p.Keeper = null\n}"));
+
+        // N9 (the same answer): the end of a block that declares a variable ends it too, since the block lets go of its variables
+        // there; a block that declares none keeps it
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nvoid Show(Pet p) {\n    if p.Keeper != null {\n        if p.Keeper.Name != \"\" {\n            n = p.Keeper.Name\n            if n == \"x\" {\n                return\n            }\n        }\n\n        print(p.Keeper.Name)\n    }\n}\n\no = Owner(\"Ann\")\nShow(Pet(o))"));
+        Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nvoid Show(Pet p) {\n    if p.Keeper != null {\n        if p.Keeper.Name == \"x\" {\n            return\n        }\n\n        print(p.Keeper.Name)\n    }\n}\n\no = Owner(\"Ann\")\nShow(Pet(o))");
+    }
+
     [Theory]
     [InlineData("class Box<T>(T Item)\n\nprint(1)", "1: a generic class (T19, chapter 7)")]
     [InlineData("class A\nclass B : A\n\nprint(1)", "2: a base class or an interface after `:` (K6, K10)")]
@@ -2930,11 +2962,12 @@ public sealed class CheckerTests
     [InlineData("class C(int N) {\n    prot int Get() => N\n}\n\nprint(1)", "2: the modifier `prot` of a method (K7, K18, R16)")]
     [InlineData("class C(int N) {\n    extern \"C\" long Twice(long x) {\n        return x * 2\n    }\n}\n\nprint(1)", "2: the modifier `extern` of a method (K7, K18, R16)")]
     [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))", "2: a method with type parameters of its own (section 4, T19)")]
-    [InlineData("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(List<weak Owner?> Keepers)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: a `weak` reference as a type argument of a data type (R3)")]
+    [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: a nullable case of a union, `weak Owner?` (N1, D9)")]
+    [InlineData("class Owner(string Name)\n\nvoid Keep<T>(weak T? w) {\n}\n\nprint(1)", "3: `weak` before `T`, which the checker does not read as a class (R5, T19, D9)")]
+    [InlineData("class A(int N)\nclass B(int N)\nclass Pet(weak (A | B)? Keeper)\n\nprint(1)", "3: `weak` before `A | B`, which the checker does not read as a class (R5, T19, D9)")]
+    [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: a `weak` reference as a parameter or the result of a function type (R3)")]
+    [InlineData("class Owner(string Name)\n\nm = Map<string, weak Owner?>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
     [InlineData("class C(int N)\n\na = C(1)\nprint(a == a)", "4: `==` on a `C`: the equality of a class instance (K4) is not read (D3, M9)")]
     [InlineData("class C(int N)\n\nxs = [C(1)]\nprint(xs == xs)", "4: `==` on a `List<C>`: its items: the equality of an instance of `C` (K4) is not read (D3, M9)")]
     [InlineData("class C(int N)\ndata P(C Item)\n\np = P(C(1))\nprint(p == p)", "5: `==` on a `P`: its field `Item`: the equality of an instance of `C` (K4) is not read (D3, M9)")]
@@ -2948,7 +2981,9 @@ public sealed class CheckerTests
     public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
         // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields and constructors in the body (K7, K14, K18),
-        // a method that is `static`, `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` at any depth (R3), `==`
+        // a method that is `static`, `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` (R3) in a type argument of a
+        // data type, a function type or a map, before a type parameter or a union of classes, or as a case of a union, whose
+        // nullable cases are open (section 14), `==`
         // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, and an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5)
         Assert.Equal([expected], NotSupported(program));

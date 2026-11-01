@@ -607,7 +607,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
   the instance, `this`, borrowed from the caller as a parameter is (K7); the text of an instance, which
   its `Text()` gives (A5); and a `T?` of a class, the address alone, its `null` the address 0, as Rust
-  lays out `Option<Rc<T>>` (N1). The counting is below;
+  lays out `Option<Rc<T>>` (N1); and a `weak T?`, the address alone too, which holds the instance's weak
+  count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
+  and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
+  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3). The
+  counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), their text, the text of the case's value
   (A4), `==` on a field of one, by the case and its value (D3), a call whose result is one, kept
@@ -946,7 +950,9 @@ while the expression still uses what it read (K2, K9), which neither M7 nor a pa
 read of an instance from a variable or a parameter is borrowed, as a list's is, which M7 holds for it,
 and so is `this`. The last count lets go of the fields in their order, as Rust drops them, then of the
 weak count all the strong ones held, whose last gives the block back to `Free`, as Rust's `Rc` and
-`Weak` do. The last count of an instance that another release lets go of puts it on its class's work
+`Weak` do. A `weak` reference takes a weak count where it is stored and lets go of it where a strong one
+lets go of its count, so the block of an instance whose strong count ended stays while a `weak`
+reference to it is held, with the strong count at 0, which its read finds (R3). The last count of an instance that another release lets go of puts it on its class's work
 list, linked through its strong count, which is no count from there on, and the release that came first
 works the lists off before it returns, so that a chain of any length is freed with no stack deeper than
 the nesting of the types in it and nothing allocated (the owner, 2026-11-01, "Iterative, never
@@ -1280,10 +1286,10 @@ The checker (`Semantics/`) takes a tree the parser read without an error and che
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
-class instance, not through a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
+class instance or through a `weak` reference, with the two more ends of such a path), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7 and K9, for a class with its primary constructor or none,
 its fields, its methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17) and its cycle rule judged by the types of the fields (R2, R4), and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5) and its cycle rule judged by the types of the fields (R2, R4), and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
@@ -1336,8 +1342,7 @@ which is the complete one: an `interface` or a `flags` type and a value of one (
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
 (K6, K10), `equal by` (K8), a field or a constructor in its body (K7, K14, K18), a method that is
 `static`, `virtual`, `override`, `prot` or `extern` or that has type parameters of its own (K7,
-section 4), a field that holds `weak` at any depth, since R2 cannot judge the class until `weak` is
-read (R2, R3), each of which leaves the class and every value of it unread, and of a class it reads, a
+section 4), each of which leaves the class and every value of it unread, and of a class it reads, a
 field of a function type, whose cycle R9 judges by the lambdas of the program (R9), a method as a
 value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)` (K2, M4, M5), and `==`
@@ -1352,8 +1357,10 @@ emitter does not read through a chain (N5, M9), and an assignment of a field, an
 through a nullable variable or field known not null, `o.I.X = 1` and `o.I.Items[0] = 1`, which the
 emitter does not write through, where an index written on a narrowed map or list, `o.Items[0] = 1`
 with a nullable field `Items`, is read (N3, M4), a `mut`
-method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
-R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
+method on such a path and such a path passed as `mut` (N3, M5, M7); a `weak` reference as a type
+argument of a `data` type, as a key or a value of a map and as a parameter or the result of a
+function type, which the emitter does not lay out, `weak` before a type parameter or a union of
+classes, and a `weak T?` as a case of a union, a nullable case of one (R3, R5, T19, D9); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
 (R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
 R10 says `&x` needs no `raw` block and Rust takes such a place in `unsafe` code alone (R10); an

@@ -128,6 +128,16 @@ public sealed record ClassType(ClassSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>
+/// R3, R5: <c>weak T?</c>, a reference to an instance of the class <c>T</c> that does not keep it alive, null once the instance is
+/// freed. It is the type of a place, a variable, a parameter, a result, a field or a list's item, which takes a <c>T</c>, a
+/// <c>T?</c> or <c>null</c>; a read of the place gives a strong <c>T?</c> (<see cref="Types.Read"/>).
+/// </summary>
+public sealed record WeakRefType(ClassType Target) : KurzType
+{
+    public override string Text => $"weak {Target.Text}?";
+}
+
 /// <summary>An <c>enum</c> (D12), one type per declaration.</summary>
 public sealed record EnumType(EnumSymbol Symbol) : KurzType
 {
@@ -279,6 +289,12 @@ public static class Types
     public static bool IsVoid(KurzType type) => type is VoidType;
 
     /// <summary>
+    /// The type a read of a place of the type gives: a strong <c>T?</c> for a <c>weak T?</c>, held at least to the end of its statement
+    /// (R3, the owner, 2026-11-01, "A strong T?, held"); the type itself for any other.
+    /// </summary>
+    public static KurzType Read(KurzType type) => type is WeakRefType weak ? Nullable(weak.Target) : type;
+
+    /// <summary>
     /// N1: the type a nullable type makes nullable, the cases of a union beside its <c>null</c>: the one case of <c>T | null</c>, and the
     /// union of the others where they are more, <c>int | string</c> of <c>(int | string)?</c>, which is <c>int | string | null</c>
     /// (section 4, the owner, 2026-10-30, "Nullable form, as Option"); null for any other type.
@@ -413,6 +429,7 @@ public static class Types
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (ClassType x, ClassType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (WeakRefType x, WeakRefType y) => ReferenceEquals(x.Target.Symbol, y.Target.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
             (HasherType x, HasherType y) => x.Kind == y.Kind,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
@@ -479,6 +496,11 @@ public static class Types
         if (from is ErrorType || to is ErrorType || Same(from, to))
         {
             return true;
+        }
+
+        if (to is WeakRefType weak)
+        {
+            return from is NullType || Assignable(from, Read(weak)); // R3: a `T`, a `T?` or `null` where a `weak T?` stands
         }
 
         if (from is UnionType fu)
