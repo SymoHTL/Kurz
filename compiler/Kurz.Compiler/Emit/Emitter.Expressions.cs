@@ -193,7 +193,7 @@ public sealed partial class Emitter
         {
             pieces.Add(segment switch
             {
-                TextSegment t => new InterpolationPiece(StringValue(t.Text), null, t.Text.Length > 0),
+                TextSegment t => LiteralPiece(t.Text),
                 HoleSegment h => Hole(h.Expression),
                 _ => throw new InvalidOperationException(segment.GetType().Name),
             });
@@ -217,25 +217,43 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// A piece of an interpolation: a text, or an integer whose digits the block takes without a text of their own, as a 64-bit value
-    /// and whether it is signed; <paramref name="Bytes"/> says whether it holds a byte whatever the program does, as a literal that
-    /// is not empty and an integer's digits do.
+    /// A piece of an interpolation, or of a text the emitted code joins in one block: a text, or an integer whose digits the block takes
+    /// without a text of their own, as a 64-bit value and whether it is signed; <paramref name="Bytes"/> says whether it holds a byte
+    /// whatever the program does, as a literal that is not empty and an integer's digits do, and <paramref name="Held"/> whether the
+    /// caller holds a count of the text, which it lets go of after the block is written (<see cref="Joined"/>).
     /// </summary>
-    private sealed record InterpolationPiece(string Value, bool? Signed, bool Bytes);
+    private sealed record InterpolationPiece(string Value, bool? Signed, bool Bytes, bool Held = false);
 
-    /// <summary>The piece of a hole: an integer as its 64-bit value, every other value as its text (<see cref="Text"/>).</summary>
+    /// <summary>The piece of a hole (<see cref="PieceOf"/>), a text it made a temporary of the region.</summary>
     private InterpolationPiece Hole(Expression e)
     {
-        var value = EmitExpression(e);
-        var type = TypeOf(e);
+        var piece = PieceOf(EmitExpression(e), TypeOf(e), e.Line);
+        return piece.Held ? piece with { Value = Temp(piece.Value, Types.String), Held = false } : piece;
+    }
+
+    /// <summary>
+    /// The piece of a value: an integer as its 64-bit value, every other value as its text (<see cref="TextOf"/>), held where the
+    /// caller holds a count of it (<see cref="MakesText"/>).
+    /// </summary>
+    private InterpolationPiece PieceOf(string value, KurzType type, int line)
+    {
         if (type is PrimitiveType p && Types.IsInteger(p))
         {
             var signed = Types.IsSigned(type);
-            return new InterpolationPiece(Resize(value, type, signed ? Types.Long : Types.ULong), signed, true);
+            return NumberPiece(Resize(value, type, signed ? Types.Long : Types.ULong), signed);
         }
 
-        return new InterpolationPiece(Text(value, type, e.Line), null, false);
+        return new InterpolationPiece(TextOf(value, type, line), null, false, MakesText(type));
     }
+
+    /// <summary>The piece of a literal, which holds a byte where it is not empty.</summary>
+    private InterpolationPiece LiteralPiece(string text) => new(StringValue(text), null, text.Length > 0);
+
+    /// <summary>The piece of a 64-bit integer, whose digits the block takes.</summary>
+    private static InterpolationPiece NumberPiece(string value, bool signed) => new(value, signed, true);
+
+    /// <summary>The piece of a text the caller holds no count of.</summary>
+    private static InterpolationPiece TextPiece(string text) => new(text, null, false);
 
     /// <summary>
     /// The pieces in one block of <c>string.Allocate</c> that holds their bytes together, each written after the one before, as Rust's
