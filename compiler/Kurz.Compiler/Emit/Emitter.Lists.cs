@@ -2099,7 +2099,8 @@ public sealed partial class Emitter
     /// X6: <c>string.Join(separator, values)</c>, the texts of the items (A4) with the separator, a string or a <c>char</c>'s UTF-8 bytes,
     /// between two of them, joined by the standard library's <c>Join</c>: a list of strings is its own texts, and the texts of the items of any other type are made into a
     /// buffer, as a list's text makes them (<see cref="ListText"/>), and let go of after the join. The separator and the list are held
-    /// without a count of their own while the arguments after them are made (M7). The buffer comes from the runtime's <c>Allocate</c>,
+    /// without a count of their own while the arguments after them are made, so that an argument that takes one of them as
+    /// <c>mut</c> is the checker's <c>changed-while-held</c> (M7). The buffer comes from the runtime's <c>Allocate</c>,
     /// which ends the process itself with <c>allocation-failed (&lt;n&gt; bytes)</c> where the system refuses it (O11), so the helper reads
     /// no null there; a block of the joined text the system refuses, or one past the largest <c>int</c>, is the library's
     /// <c>asked</c>, which the helper raises (M9, T15).
