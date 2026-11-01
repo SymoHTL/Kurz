@@ -129,7 +129,7 @@ public sealed partial class Emitter
                 }
 
                 var guards = NewGuards(statements[i]);
-                if (guards.Count > 0 && guards.All(c => c.IsX86))
+                if (guards.Count > 0 && guards.All(c => Known(c) is null))
                 {
                     var rest = statements.Skip(i).ToList();
                     EmitGuarded(guards, rest[0].Line, [], _ => EmitStatements(rest)); // a statement in the run that a test guards for still more sets runs in a function of its own again
@@ -137,7 +137,7 @@ public sealed partial class Emitter
                 }
 
                 CleanUpperHalves(statements[i]);
-                EmitStatement(statements[i]); // a run guarded by a class under `Arm` is never reached, which EmitStatement emits
+                EmitStatement(statements[i]); // a run guarded by a class the target cannot have is never reached, which EmitStatement emits
             }
         }
         finally
@@ -157,7 +157,7 @@ public sealed partial class Emitter
         {
             InRegion(() => fn.Emit($"store i1 {EmitExpression(right)}, ptr {slot}")); // what the right side makes is let go of where it ran
         }
-        else if (guards.Any(c => !c.IsX86))
+        else if (guards.Any(c => Known(c) == false))
         {
             fn.Unreachable(); // the left side showed a set the target cannot have
         }

@@ -312,6 +312,30 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
     }
 
     [Fact]
+    public void On_an_arm_machine_a_run_and_a_right_side_that_a_test_of_an_x86_class_guards_are_never_reached()
+    {
+        // a run guarded behind a condition that is not tests alone, and the right side of `&&` that a test guards, compiled for an Arm
+        // machine, where the test is false, as a run guarded by a class under `Arm` is on x86-64; and the standard library's SHA-256,
+        // whose blocks are guarded so; on x86-64 without SSE4.1 the same program compiles each as a guarded block's function
+        const string text = """
+            v = Vector128.Create(1, 2, 3, 4)
+            n = 3
+            if n > 2 && X86.Sse41.IsSupported {
+                print(X86.Sse41.Extract(v, 2))
+            }
+
+            print(n > 2 && X86.Sse41.IsSupported && X86.Sse41.Extract(v, 2) == 3)
+            print(Sha256.Hash(Bytes()).Count)
+
+            """;
+        var arm = Ir(text, Cpu.ArmBaseline);
+        Assert.DoesNotContain("guarded", arm, StringComparison.Ordinal);
+        Assert.DoesNotContain("intrinsic.", arm, StringComparison.Ordinal);
+        Assert.DoesNotContain("target-features", arm, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Count(Ir(text), @"call i32 @""f\.main\.guarded\."));
+    }
+
+    [Fact]
     public void On_an_arm_machine_a_test_of_an_x86_class_is_false_and_one_of_an_arm_class_is_not_supported()
     {
         var ir = Ir(Guarded, Cpu.ArmBaseline);
