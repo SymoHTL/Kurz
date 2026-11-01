@@ -339,6 +339,19 @@ public sealed partial class Checker
     /// <summary>A type's name the checker does not read: a type of chapter 7, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
 
+    /// <summary>R18: a name under which the intrinsics and their vector types stand (section 13, the owner, 2026-11-01), which the checker
+    /// does not read: where no declaration gives the name, it is <c>not supported</c>.</summary>
+    private bool UnreadIntrinsic(string name, int line)
+    {
+        if (name is not ("X86" or "Arm" or "Vector128" or "Vector256"))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"CPU intrinsics and their vector types, `{name}` (R18)");
+        return true;
+    }
+
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
     private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
 
@@ -930,6 +943,11 @@ public sealed partial class Checker
         }
 
         if (IsUnreadType(n.Name))
+        {
+            return Types.Error;
+        }
+
+        if (UnreadIntrinsic(n.Name, n.Line))
         {
             return Types.Error;
         }
