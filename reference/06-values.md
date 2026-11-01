@@ -638,7 +638,7 @@ lists of items `==` does not take are `type-mismatch`. Items of a nullable type 
 two nullable values (N10) *(assumed, §4: for the nullable types beside `double?` and `float?`)*, and the
 values of `double?` and `float?` items by IEEE's `==`, as Rust's `Vec<Option<f64>>` compares. A list held
 in a `data` value under `==` compares its `double` and `float` items, and the values of its `double?` and
-`float?` items, as C#'s `Equals` does (D3), and so does a list in a key. A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10), taken when a thread's first map takes its first block, at that map's first write *(assumed, §4: the
+`float?` items, as C#'s `Equals` does (D3), and so does a list in a key. A key's hash is a fast hash without keys until one insert's probe passes the bound, and from then on SipHash-1-3 under keys drawn from the system's randomness, the map moving its entries under that hash one time, as .NET's `Dictionary<string, ...>` switches to a randomized hash (M10; §4, the owner, 2026-11-01, "Switch, as .NET", which replaces "SipHash, random keys" of 2026-10-30) *(assumed, §4: the fast hash, foldhash 0.2.0's `fast::FixedState`; the bound, more than 512 slots of full groups passed by one insert's probe; a switch per map; every type of key)*. The keys are taken when a thread's first map takes its first block, at that map's first write, though a map hashes with them only after a switch *(assumed, §4: the
 moment)*, from the sources Rust's standard library takes them from: on Linux from `getrandom` with `GRND_INSECURE`, or `GRND_NONBLOCK` where the kernel refuses that flag, and from `/dev/urandom` where the system refuses `getrandom` or its pool is not ready, and on Windows from `ProcessPrng`, as Rust 1.82 takes them there, which does not fail (§4, the owner, 2026-10-30, "ProcessPrng, as Rust 1.82"; `random-failed` where its library or the call is missing, on a system older than Windows 8 or Windows Server 2008 R2, the floor Microsoft's page of the call names, assumed there); on Linux, where none of them gives the bytes, where Rust panics, the program ends there with `random-failed` (§4, the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path"), whose line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (O11) *(assumed, §4: the id, the name the question gave as an example, and the shape of its line)*. `Count` is
 the number of a map's entries, an `int`; `ContainsKey(key)` is a `bool`; `Remove(key)`, a `mut` method,
 takes the key's entry out of the map and gives its value, or `null` where there is none, of the type
@@ -1042,9 +1042,11 @@ print(k == Wrap<Wrap<int>>(Wrap<int>(5)))
 
 A map has no order a program may rely on. A `for` loop over it (C6) and its text (A6) yield the
 entries in the order of the map's storage, which can differ between runs and versions, as the
-documentation of C#'s `Dictionary` leaves its order undefined. Two runs of one program can print
-the same map differently, and do as a rule, since the hash of a map's keys takes keys drawn from the
-system's randomness, as Rust's `HashMap` takes them (§4, the owner, 2026-10-30).
+documentation of C#'s `Dictionary` leaves its order undefined. A map gives its entries in the same
+order in every run of one build until it switches to SipHash-1-3 under keys drawn from the system's
+randomness, where an insert's probe passed the bound (M9), and a switched map gives them in an order
+that differs between runs as a rule; a program still may rely on no order of a map (§4, the owner,
+2026-11-01, "Switch, as .NET").
 
 No case: no order can be expected, so a case can show a map of one entry only, which the case of
 A6 does.

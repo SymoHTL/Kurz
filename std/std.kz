@@ -3263,7 +3263,9 @@ ulong FiveDigits(int word) => match word {
 // the count of the map values that hold it, 8 bytes, the count of its entries and the count of slots it
 // has room for, a power of two from 8, 4 bytes each, the two keys
 // of its hash, 8 bytes each, the count of slots without an entry that entries can still take before the
-// block grows, 4 bytes, and 12 bytes unused, from its 48th byte a control byte for each slot, padded to a
+// block grows, 4 bytes, the hash it takes, 4 bytes, 0 for the fast hash and 1 for SipHash-1-3 under its
+// keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), and 4 bytes unused,
+// from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
 // entry: the hash of its key, 8 bytes, then the key and the value; a slot without an entry holds what its
 // bytes held before. A slot's control byte is 255 where the slot holds no entry and a probe ends at its
@@ -3385,6 +3387,8 @@ byte* MapBlock(long room, long entry, ulong key0, ulong key1, mut long asked) {
             *Ptr<ulong>(p + 16) = key0
             *Ptr<ulong>(p + 24) = key1
             *Ptr<int>(p + 32) = int(MapCapacity(room))
+            *Ptr<int>(p + 36) = 0
+            *Ptr<int>(p + 40) = 0
             mut long i = 0
             while i < room {
                 p[48 + i] = 255
@@ -3461,6 +3465,11 @@ pub byte* MapCopy(byte* block, long entry, mut long asked) {
 // its control byte set to the hash's, as hashbrown's `find_insert_slot` takes it; null, with nothing
 // written, where that slot is of 255 and the block can take no more such slots, which
 // `MapGrow` then makes room for, as hashbrown's `insert` calls `reserve` where `growth_left` is 0.
+// Where the probe passed more than 512 slots of full groups, 64 groups of 8, in a block on the fast hash,
+// the block is marked, and the insert moves the map onto SipHash-1-3 (`MapTripped`, `MapSwitched`), as
+// .NET's `Dictionary` switches to a randomized hash where one insert walks more than 100 entries of a
+// chain (section 4, the owner, 2026-11-01, "Switch, as .NET"; the bound, assumed there: a table filled to
+// 7 slots of 8 passes full groups as a rule, so that 100 slots would switch maps no key was made for).
 pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     long mask = long(MapRoom(block)) - 1
     byte* control = MapControl(block)
@@ -3490,6 +3499,10 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
             }
 
             *Ptr<int>(block + 32) = *Ptr<int>(block + 32) - 1
+        }
+
+        if step - 8 > 512 && *Ptr<int>(block + 36) == 0 {
+            *Ptr<int>(block + 40) = 1
         }
 
         control[i] = byte((hash >> 56) & 127UL)
@@ -3533,6 +3546,7 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
     byte* from = MapSlots(block)
     raw {
         *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
+        *Ptr<int>(p + 36) = *Ptr<int>(block + 36)
         mut long i = 0
         while i < room {
             if control[i] < 128 {
@@ -3606,8 +3620,22 @@ pub void MapAdded(byte* block) {
     }
 }
 
-// The hash of the `count` bytes at `bytes` under the keys of the map's block.
-pub ulong MapHash(byte* block, byte* bytes, long count) {
+// Whether an insert's probe in the map's block passed the bound, the block still on the fast hash.
+pub bool MapTripped(byte* block) {
+    mut bool tripped = false
+    raw {
+        tripped = *Ptr<int>(block + 40) != 0
+    }
+
+    return tripped
+}
+
+// For a map whose insert's probe passed the bound: a block of its slots and its count, under SipHash-1-3
+// with its keys, with no entry in a slot, which the emitted code moves every entry of the old block into
+// under its new hash and then frees the old block. Null with `asked` set to the bytes asked for where
+// the system refuses.
+pub byte* MapSwitched(byte* block, long entry, mut long asked) {
+    long room = long(MapRoom(block))
     mut ulong key0 = 0
     mut ulong key1 = 0
     raw {
@@ -3615,16 +3643,198 @@ pub ulong MapHash(byte* block, byte* bytes, long count) {
         key1 = *Ptr<ulong>(block + 24)
     }
 
+    byte* p = MapBlock(room, entry, key0, key1, mut asked)
+    if p == null {
+        return null
+    }
+
+    raw {
+        *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
+        *Ptr<int>(p + 36) = 1
+    }
+
+    return p
+}
+
+// The hash of the `count` bytes at `bytes` under the map's block: the fast hash, or SipHash-1-3 under
+// its keys once the map switched.
+pub ulong MapHash(byte* block, byte* bytes, long count) {
+    mut bool keyed = false
+    mut ulong key0 = 0
+    mut ulong key1 = 0
+    raw {
+        keyed = *Ptr<int>(block + 36) != 0
+        key0 = *Ptr<ulong>(block + 16)
+        key1 = *Ptr<ulong>(block + 24)
+    }
+
+    if !keyed {
+        return FoldHash(bytes, count)
+    }
+
     return SipHash13(key0, key1, bytes, count)
 }
 
+// The fast hash of the `count` bytes at `bytes`: foldhash's `fast::FixedState`, its seeds fixed, as its
+// `FoldHasher::write` hashes bytes, the accumulator turned right by the count, 16 bytes and fewer in one
+// folded multiply, more in its lanes.
+ulong FoldHash(byte* bytes, long count) {
+    ulong turn = ulong(count & 63)
+    ulong seed = 0x082efa98ec4e6c89UL
+    ulong accumulator = seed >> int(turn) | seed << int((64UL - turn) & 63UL)
+    if count > 16 {
+        return FoldLong(bytes, count, accumulator)
+    }
+
+    mut ulong s0 = accumulator
+    mut ulong s1 = 0x3f84d5b5b5470917UL
+    raw {
+        if count >= 8 {
+            s0 = s0 ^ WordAt(bytes)
+            s1 = s1 ^ WordAt(bytes + count - 8)
+        } else if count >= 4 {
+            s0 = s0 ^ QuarterAt(bytes)
+            s1 = s1 ^ QuarterAt(bytes + count - 4)
+        } else if count > 0 {
+            s0 = s0 ^ ulong(bytes[0])
+            s1 = s1 ^ (ulong(bytes[count - 1]) << 8 | ulong(bytes[count / 2]))
+        }
+    }
+
+    return FoldMultiply(s0, s1)
+}
+
+// foldhash's `hash_bytes_long` for more than 16 bytes: two lanes, four over 128 bytes and six over 256,
+// each folding a word of the front with one further on.
+ulong FoldLong(byte* bytes, long count, ulong accumulator) {
+    ulong k0 = 0xc0ac29b7c97c50ddUL
+    mut ulong s0 = accumulator
+    mut ulong s1 = accumulator +% 0x3f84d5b5b5470917UL
+    mut byte* v = bytes
+    mut long n = count
+    raw {
+        if n > 128 {
+            mut ulong s2 = accumulator +% 0x9216d5d98979fb1bUL
+            mut ulong s3 = accumulator +% 0xd1310ba698dfb5acUL
+            if n > 256 {
+                mut ulong s4 = accumulator +% 0x2ffd72dbd01adfb7UL
+                mut ulong s5 = accumulator +% 0xb8e1afed6a267e96UL
+                mut bool going = true
+                while going {
+                    s0 = FoldMultiply(WordAt(v) ^ s0, WordAt(v + 48) ^ k0)
+                    s1 = FoldMultiply(WordAt(v + 8) ^ s1, WordAt(v + 56) ^ k0)
+                    s2 = FoldMultiply(WordAt(v + 16) ^ s2, WordAt(v + 64) ^ k0)
+                    s3 = FoldMultiply(WordAt(v + 24) ^ s3, WordAt(v + 72) ^ k0)
+                    s4 = FoldMultiply(WordAt(v + 32) ^ s4, WordAt(v + 80) ^ k0)
+                    s5 = FoldMultiply(WordAt(v + 40) ^ s5, WordAt(v + 88) ^ k0)
+                    v = v + 96
+                    n = n - 96
+                    going = n > 256
+                }
+
+                s0 = s0 ^ s4
+                s1 = s1 ^ s5
+            }
+
+            mut bool going = true
+            while going {
+                s0 = FoldMultiply(WordAt(v) ^ s0, WordAt(v + 32) ^ k0)
+                s1 = FoldMultiply(WordAt(v + 8) ^ s1, WordAt(v + 40) ^ k0)
+                s2 = FoldMultiply(WordAt(v + 16) ^ s2, WordAt(v + 48) ^ k0)
+                s3 = FoldMultiply(WordAt(v + 24) ^ s3, WordAt(v + 56) ^ k0)
+                v = v + 64
+                n = n - 64
+                going = n > 128
+            }
+
+            s0 = s0 ^ s2
+            s1 = s1 ^ s3
+        }
+
+        s0 = FoldMultiply(WordAt(v) ^ s0, WordAt(v + n - 16) ^ k0)
+        s1 = FoldMultiply(WordAt(v + 8) ^ s1, WordAt(v + n - 8) ^ k0)
+        if n >= 32 {
+            s0 = FoldMultiply(WordAt(v + 16) ^ s0, WordAt(v + n - 32) ^ k0)
+            s1 = FoldMultiply(WordAt(v + 24) ^ s1, WordAt(v + n - 24) ^ k0)
+            if n >= 64 {
+                s0 = FoldMultiply(WordAt(v + 32) ^ s0, WordAt(v + n - 48) ^ k0)
+                s1 = FoldMultiply(WordAt(v + 40) ^ s1, WordAt(v + n - 40) ^ k0)
+                if n >= 96 {
+                    s0 = FoldMultiply(WordAt(v + 48) ^ s0, WordAt(v + n - 64) ^ k0)
+                    s1 = FoldMultiply(WordAt(v + 56) ^ s1, WordAt(v + n - 56) ^ k0)
+                }
+            }
+        }
+    }
+
+    return s0 ^ s1
+}
+
+// foldhash's `folded_multiply` where no product of 128 bits is at hand: the four products of the halves
+// of `x` and `y`, the low and the high one folded with the two across turned by 32 bits.
+ulong FoldMultiply(ulong x, ulong y) {
+    ulong lx = x & 4294967295UL
+    ulong hx = x >> 32
+    ulong ly = y & 4294967295UL
+    ulong hy = y >> 32
+    ulong across = (hx *% ly) ^ (lx *% hy)
+    return (hx *% hy) ^ (lx *% ly) ^ (across >> 32 | across << 32)
+}
+
+// One word into the state of the fast hash whose count of bytes, its highest bit set, is `count`, as
+// `FoldHasher::write_num` takes a `u64`: into the sponge's low word where it is empty, into its high word
+// where it holds one, and where it holds two the sponge folded into the accumulator first.
+void FoldWord(byte* state, ulong word, long count) {
+    long words = (count & 9223372036854775807) / 8
+    raw {
+        if words % 2 == 1 {
+            *Ptr<ulong>(state + 16) = word
+        } else {
+            if words > 0 {
+                ulong accumulator = *Ptr<ulong>(state)
+                *Ptr<ulong>(state) = FoldMultiply(*Ptr<ulong>(state + 8) ^ accumulator, *Ptr<ulong>(state + 16) ^ 0xc0ac29b7c97c50ddUL)
+            }
+
+            *Ptr<ulong>(state + 8) = word
+            *Ptr<ulong>(state + 16) = 0UL
+        }
+
+        *Ptr<long>(state + 32) = count + 8
+    }
+}
+
+// The fast hash of the words added, as `FoldHasher::finish`: the sponge folded into the accumulator where
+// it holds a word, else the accumulator.
+ulong FoldEnd(byte* state, long count) {
+    mut ulong hash = 0
+    raw {
+        hash = *Ptr<ulong>(state)
+        if (count & 9223372036854775807) > 0 {
+            hash = FoldMultiply(*Ptr<ulong>(state + 8) ^ hash, *Ptr<ulong>(state + 16) ^ 0xc0ac29b7c97c50ddUL)
+        }
+    }
+
+    return hash
+}
+
 // The hash of a key made of words, a `data` value's fields or a list's items, each the hash of a field or
-// an item, kept in the 40 bytes at `state` while they are added: SipHash-1-3's four words and the count of
-// bytes. `HashStart` takes the keys of the map's block, `HashWord` adds one word and `HashEnd` gives
-// SipHash-1-3 of the bytes of the words added, the first byte of each word lowest, as Rust's `Hash` of a
-// struct writes each field into one hasher.
+// an item, kept in the 40 bytes at `state` while they are added, as Rust's `Hash` of a struct writes each
+// field into one hasher. `HashStart` takes the hash of the map's block, `HashWord` adds one word and
+// `HashEnd` gives the hash of the words added. Under SipHash-1-3 the state is its four words and the count
+// of bytes, and the hash is SipHash-1-3 of the bytes of the words, the first byte of each word lowest.
+// Under the fast hash the state is foldhash's accumulator and its sponge of two words, and the count of
+// bytes with its highest bit set, which marks the fast hash; each word goes in as `FoldHasher::write_u64`
+// takes it and the end is `FoldHasher::finish`.
 pub void HashStart(byte* block, byte* state) {
     raw {
+        if *Ptr<int>(block + 36) == 0 {
+            *Ptr<ulong>(state) = 0x082efa98ec4e6c89UL
+            *Ptr<ulong>(state + 8) = 0UL
+            *Ptr<ulong>(state + 16) = 0UL
+            *Ptr<long>(state + 32) = -9223372036854775807 - 1
+            return
+        }
+
         ulong key0 = *Ptr<ulong>(block + 16)
         ulong key1 = *Ptr<ulong>(block + 24)
         *Ptr<ulong>(state) = key0 ^ 8317987319222330741UL
@@ -3636,6 +3846,16 @@ pub void HashStart(byte* block, byte* state) {
 }
 
 pub void HashWord(byte* state, ulong word) {
+    mut long count = 0
+    raw {
+        count = *Ptr<long>(state + 32)
+    }
+
+    if count < 0 {
+        FoldWord(state, word, count)
+        return
+    }
+
     mut ulong v0 = 0
     mut ulong v1 = 0
     mut ulong v2 = 0
@@ -3660,6 +3880,15 @@ pub void HashWord(byte* state, ulong word) {
 }
 
 pub ulong HashEnd(byte* state) {
+    mut long count = 0
+    raw {
+        count = *Ptr<long>(state + 32)
+    }
+
+    if count < 0 {
+        return FoldEnd(state, count)
+    }
+
     mut ulong v0 = 0
     mut ulong v1 = 0
     mut ulong v2 = 0
@@ -3733,6 +3962,16 @@ pub ulong WordAt(byte* p) {
     return word
 }
 
+// The 4 bytes at `p` as a word, the first byte lowest, at any address, which LLVM joins into one load.
+ulong QuarterAt(byte* p) {
+    mut ulong word = 0
+    raw {
+        word = ulong(p[0]) | ulong(p[1]) << 8 | ulong(p[2]) << 16 | ulong(p[3]) << 24
+    }
+
+    return word
+}
+
 // The `n` bytes at `p`, fewer than 8, as a word, the first byte lowest: four, two and one at a time, as
 // Rust's `u8to64_le` reads them.
 ulong SipTail(byte* p, long n) {
@@ -3740,7 +3979,7 @@ ulong SipTail(byte* p, long n) {
     mut long i = 0
     raw {
         if n >= 4 {
-            word = ulong(p[0]) | ulong(p[1]) << 8 | ulong(p[2]) << 16 | ulong(p[3]) << 24
+            word = QuarterAt(p)
             i = 4
         }
 
