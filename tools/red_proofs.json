@@ -1194,6 +1194,7 @@
   {"tool": "tools/unicode_tables.py", "anchor": " and (last[0] == last[1] or last[2] == 2):", "replacement": ":", "expect": "does not take a code point two after it"},
   {"tool": "tools/unicode_tables.py", "anchor": "            if any(c >> 16 != plane for c in out):", "replacement": "            if False:", "expect": "a mapping that leaves its plane is refused"},
   {"tool": "tools/unicode_tables.py", "anchor": "            if end - first > 255:", "replacement": "            if False:", "expect": "more than 256 code points is refused"},
+  {"tool": "tools/unicode_tables.py", "anchor": "            if end - first > 255:", "replacement": "            if end - first > 254:", "expect": "a run that spans 256 code points is one run"},
   {"tool": "tools/unicode_tables.py", "anchor": "        if len(out[name]) // WIDTH[name] < floor:", "replacement": "        if False:", "expect": "a table below its floor is refused"},
   {"tool": "tools/unicode_tables.py", "anchor": "    if got != digest:", "replacement": "    if False:", "expect": "a file of another hash is refused"},
   {"tool": "tools/unicode_tables.py", "anchor": "        if hashlib.sha256(data).hexdigest() == digest:", "replacement": "        if True:", "expect": "a kept file of another hash is fetched again"},
