@@ -384,6 +384,15 @@ Gate: review rule "rules for sessions".
   threads. What only the tool adds (the exact head, the last scan of the title and the
   description, the read-back of the settings) is not held against a merge by the button:
   HAZARD (#14).
+- **A merged branch is deleted with `py -3 tools/merge_pr.py --delete-branch <pr>`**, never with
+  `git push origin --delete` or a button. The forge closes every open pull request whose base is a
+  branch deleted that way: on 2026-11-01 the deletion of the branch of pull request 188 closed pull
+  request 192, which was reopened by hand
+  ([knowledge/a-deleted-branch-closes-the-pull-requests-on-it.md](knowledge/a-deleted-branch-closes-the-pull-requests-on-it.md)).
+  The command gives every open pull request on the branch the merged pull request's base, reads the
+  list again and deletes the branch only when none is left on it. Gate: `self-tests` (the merge
+  tool's cases "delete:"); a deletion by hand or by a button skips the command, as a merge by the
+  button skips the merge tool: HAZARD (#14).
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
   head**, passed as `--over-red`. An approval is never standing, but for one case: a pull request
   at the review cap (the rule "A pull request gets at most one review round" below) carries the
