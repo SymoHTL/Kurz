@@ -696,12 +696,13 @@ print(Count("a\n\nb") else {
 })
 ```
 
-The `File` buffers its own reads, 8 KiB at a time, as Rust's `BufReader` reads, and stays open after the
-loop, whether it ended, a `break` left it or a failure ended it: the lines it did not pull stay in the
-`File`, so that a later `Lines()` or `Read` goes on where the loop stopped, and a `Read` takes the
-buffered bytes first (§12, the owner, 2026-11-01, "`f.Lines()` on an open File" and "Stays open,
-continues"). Such a `Read` takes at most `max` of the buffered bytes and reads from the descriptor only
-where the buffer holds none, as Rust's `BufReader::read` does *(assumed, §12)*.
+The `File` buffers its own reads and stays open after the loop, whether it ended, a `break` left it or
+a failure ended it: the lines it did not pull stay in the `File`, so that a later `Lines()` or `Read`
+goes on where the loop stopped, and a `Read` takes the buffered bytes first (§12, the owner, 2026-11-01,
+"`f.Lines()` on an open File" and "Stays open, continues"). Such a `Read` takes at most `max` of the
+buffered bytes and reads from the descriptor only where the buffer holds none, as Rust's
+`BufReader::read` does *(assumed, §12)*. The buffer takes 8 KiB at a time, as Rust's `BufReader` reads
+*(assumed, §12)*.
 
 Case: [system/lines-break-read.kz](../corpus/system/lines-break-read.kz)
 ```kurz
