@@ -3270,6 +3270,47 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first.Output).Trim('[', ']').Split(", ").Order());
     }
 
+    [Fact]
+    public void A_key_of_every_count_of_bytes_from_0_to_24_has_the_SipHash_1_3_of_the_reference()
+    {
+        // SipHash13 reads each whole word of 8 bytes in one read and the bytes after the last one four, two and one at a time, as Rust's
+        // SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes (i * 37 + 200) % 256, half of them 128 or more, of every count
+        // from 0 to 24, under keys of 0 and under the reference implementation's keys, against SipHash-1-3 in Python, which gives
+        // CPython's `hash` of the same bytes under keys of 0 (`PYTHONHASHSEED=0`) and the three vectors of the test above
+        ulong[] zero =
+        [
+            15130871412783076140UL, 12449551661063549815UL, 18410336655117930453UL, 14036337907613256389UL, 8188850183964244334UL,
+            3177195191231020720UL, 11112996053577049341UL, 12494225358345731408UL, 3712373850883526462UL, 12892607951876773325UL,
+            12632183819240295938UL, 2608151670788947609UL, 15991896908241025576UL, 3217457963781418757UL, 5175628169687003164UL,
+            324940683844405139UL, 4078673874090109879UL, 15226221049046578814UL, 11307112605383110513UL, 9713625952335163347UL,
+            15212928445191759854UL, 10622023044703524569UL, 13280180098544721076UL, 4160088133271530178UL, 14255749407410980665UL,
+        ];
+        ulong[] reference =
+        [
+            12370263754033579228UL, 7382509910418742475UL, 2494721049683813306UL, 11620750396190661065UL, 5010687366671536750UL,
+            14218513396531960822UL, 11621134531688062575UL, 17244704406219703104UL, 12416751392242888934UL, 421987831323517835UL,
+            10723776196378657725UL, 13352898446040941761UL, 6124211783992107166UL, 18243523408008742371UL, 119414829251180199UL,
+            5538372403305982465UL, 1478129454238627121UL, 2867072306180843416UL, 1984877967642593061UL, 8806513419543075307UL,
+            16461867054457208225UL, 6477134911588130379UL, 7484306140281614234UL, 7636386497915317409UL, 11166856279661420457UL,
+        ];
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
+        const string hash = "    byte* p = Allocate(24)\n    raw {\n        for i in 0..<24 {\n            p[i] = byte((i * 37 + 200) % 256)\n        }\n    }\n    for n in 0..<25 {\n        WriteNumber(std.SipHash13(0, 0, p, long(n)))\n        WriteError(\" \")\n        WriteNumber(std.SipHash13(506097522914230528UL, 1084818905618843912UL, p, long(n)))\n        WriteError(\"\\n\")\n    }\n";
+        var runtime = Edited(("std/std.kz", "\nulong SipHash13(", "\npub ulong SipHash13("), ("runtime/common/runtime.kz", start, start + hash));
+        var expected = string.Concat(zero.Zip(reference, (z, r) => $"{z} {r}\n"));
+        Ran(BuildAndRun("print(1)\n", runtime, "map-siphash-counts"), 0, ["1"], expected);
+    }
+
+    [Fact]
+    public void Two_strings_are_equal_where_every_byte_is_compared_a_word_at_a_time_and_the_bytes_after()
+    {
+        // T18: the runtime's `Same` compares 8 bytes at a time and the bytes after the last 8 one at a time: a string of every count from 0
+        // to 20 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
+        // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
+        // byte 128 or more, against one letter changed at each place, which changes its second byte alone
+        const string text = "s = \"abcdefghijklmnopqrst\"\nmut long n = 0\nfor count in 0..<21 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["21000", "21000"], "");
+    }
+
     [Theory]
     [InlineData("s = \"ab\"\nprint(s.Chars[0])\n", 2, "`s.Chars` as a list (T15)", null)]
     [InlineData("data Box(List<int> Items)\n\nvoid Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nmut b = Box(List<int>())\nFill(mut b.Items)\n", 8, "a `mut` parameter given anything but a variable (M7)", null)]
