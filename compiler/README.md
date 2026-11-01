@@ -82,10 +82,10 @@ from inside `compiler/`,
     dotnet Kurz.Compiler.Tests/bin/Release/net10.0/Kurz.Compiler.Tests.dll <file> [--fenced] [--grant <name>]...
 
 builds the program with the runtime of this machine's target, or with `--fenced` under the
-allocator that makes every block it frees inaccessible (`ListTests.Fenced`, the one definition of
-that edit), runs it as the suites run a program, and prints what it wrote, what it wrote on its
-error stream and `exit <code>`; its own exit code is 0 where the program ran, 1 where the program
-has errors, which it prints, and 2 for an argument it does not read or a file it does not find
+allocator that makes every block it frees inaccessible, ends every block at a page it makes inaccessible and holds `Free` to
+the size its block was allocated with (`ListTests.Fenced`, the one definition of that edit), runs it as the suites run a
+program, and prints what it wrote, what it wrote on its error stream and `exit <code>`; its own exit code is 0 where the
+program ran, 1 where the program has errors, which it prints, and 2 for an argument it does not read or a file it does not find
 (`knowledge/a-probe-under-the-fence-is-a-command.md`). The test host runs the suites through an
 entry of its own, so the assembly's entry (`Probe.cs`) is the command's alone.
 
@@ -355,9 +355,11 @@ blocks, where a request of the class takes it first, and a larger one to the fro
 thread keeps where they take no more than 32 mebibytes with it, else to the system through the
 target's `Release`; the mebibytes a thread carved from and the blocks it keeps stay its own. `Reallocate` grows a block with
 its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes stays where it is where its
-header names room enough, as a kept block given out whole can, else grows through the target's
-`Resize`, which can grow it without a copy, else, and where `Resize` gives null, into a new block
-with its bytes copied and the old one freed. A target's directory gives
+header names room enough, as a kept block given out whole can, else moves into the smallest kept
+block that holds the grown block and that the grown block takes at least half of, its bytes copied
+and the old block freed (record, section 2: the owner, 2026-11-01, "Kept block first"), else grows
+through the target's `Resize`, which can grow it without a copy, else, and where `Resize` gives null,
+into a new block with its bytes copied and the old one freed. A target's directory gives
 `Start`, `Write`, `Exit`, `Memory`, `Release`, `Resize`, `Random`, `Trace` and `Crashing`: on Linux over the C library,
 `Start` keeping the count and the addresses of the arguments (S13), setting the signal of a closed pipe to ignored and installing the handler of a fault (below),
 `Write` calling again where a signal interrupted it (section 6), `Release` calling `munmap`, `Resize` calling `mremap`,
@@ -488,9 +490,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `s.Bytes` as a `Bytes`, which takes a count of the block of a string made while the program runs and copies the
   bytes of a literal, `s.Bytes[i]`, read from the string in place, and `string.FromUtf8(b)` and
   `string.FromUtf8Lossy(b)`, whose string takes a count of the block of the bytes where every sequence is UTF-8,
-  which `string.FromUtf8` reads a sequence at a time and a run of ASCII byte by byte, a run of more than 16 bytes
-  as Rust 1.82's `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a
-  multiple of 8, their case `InvalidUtf8` a data type every file sees,
+  which `string.FromUtf8` reads a sequence at a time, a letter with three bytes after it in place with no check of
+  the end between its bytes, and a run of ASCII byte by byte, a run of more than 16 bytes as Rust 1.82's
+  `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a multiple of 8, where
+  `run_utf8_validation` whole, which checks each byte of a letter against the end and tries its words at every byte
+  of ASCII at such an address, read text of short runs of ASCII between letters in 354 ms against the 280 ms of
+  every sequence read through one check (measured for pull request 154; record, section 1: the owner, 2026-11-01,
+  "Allow, faster wins"), their case `InvalidUtf8` a data type every file sees,
   declared before the file's own, and the lossy text, where a
   sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
   owner, 2026-10-29, "Union, as Rust"); `s.Contains(x)`, `s.StartsWith(x)`, `s.EndsWith(x)` and `s.IndexOf(x)`
@@ -652,7 +658,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
   `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first: `Sort` a merge sort, which keeps
   equal items in their order, runs of 20 items sorted by insertion and merged in pairs through a buffer of
-  half the items; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
+  half the items, rounded up, as Rust's stable sort asks for at the least; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
   median of three, insertion below 21 items and a heapsort past twice the base-2 logarithm of the count
   in splits; and `SortBy` the key of each item made once, in order, kept with the item's position in a
   pair, the pairs sorted by the quicksort and the items moved where they say, as Rust's
@@ -797,8 +803,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
-  holds its state, of a fixed count for each type (616 bytes for SHA-256, 408 for MD5, 1028 for CRC-32's register and
-  table, 1296 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
+  holds its state, of a fixed count for each type (104 bytes for SHA-256, 88 for MD5, 1028 for CRC-32's register and
+  table, 272 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
   the hasher's place, a `mut` variable or a path of fields from one (M5), copy it where another value holds it, as a
   list is copied before a write (M3), and store the block back. `Finish` gives a new block of the digest, or the
   CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
@@ -941,7 +947,13 @@ and the maps' program and twenty rounds of maps, and the programs of a map's mem
 past a `Clear`, keys, `double` keys, nullable keys and nullable values and of writes into a list's items and `==` on two
 lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a program of lists
 and maps in fields written through paths by each `mut` member, beside copies, a block's among them, and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
-since a kept block stays readable, so that a write into one freed under it ends the process; maps made and dropped through every way out of a block, removed, cleared,
+since a kept block stays readable, so that a write into one freed under it ends the process, and in which every block ends at a page
+the system makes inaccessible, where its size rounded up to 16 ends, so that a write one byte past the end of a block of 16 bytes,
+of 300000 and of one `Reallocate` gave as a new block ends the process, and the last byte of each written does not, and whose `Free`
+given 8 bytes more or less than its block was allocated with, or the size before `Reallocate` grew the block in place, or
+`Reallocate` given another size than the block's, writes one line and ends the process the same way: a check that sees a size
+written by hand whose block is too small within that rounding, as HMAC-SHA256's state made 1288 bytes where its code writes 1296,
+or 264 where the form of pull request 159 writes 272, which the page after the block does not see; maps made and dropped through every way out of a block, removed, cleared,
 walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
 of three inputs against vectors from outside this repository; two runs of one program that print a
 map of 20 entries in two orders; the bytes of a map's first block the system refuses; `random-failed`
@@ -1318,7 +1330,8 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
+type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
+which the intrinsics and their vector types stand (R18); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item
@@ -1553,7 +1566,7 @@ round can ask about it by the rule's id.
   at every other place a call's cases can be kept: a variable, a result, a field, a list's items. A `T?` of one type is no union of
   cases there, nor in a variable or a result, so `int? x = Find(id)` unwraps, as O4's sentence on a
   type the success converts to says. Of a function whose parameter keeps the cases and one that takes the
-  success, the one that keeps them, the exact fit for the call's whole type, is picked (the owner, 2026-10-31,
+  success, the one that keeps them is picked where it is the exact fit for the call's whole type (the owner, 2026-10-31,
   "The union one"); the exact fit is read first,
   so `Show(int)` wins over `Show(long | NotFound)`, which fits with a widening (the owner, 2026-10-31,
   "Exact fit first"). Where no function fits, the

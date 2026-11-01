@@ -207,25 +207,44 @@ pub void Free(byte* p, long size) {
 // A block the allocation entry gave for `size` bytes, grown to `grown` bytes with the bytes it holds, as
 // Rust's `GlobalAlloc::realloc`: a block of more than 262144 bytes is itself where its header names
 // room enough, as a kept block given out whole may, as glibc's `realloc` leaves a mapped chunk that
-// holds the size, else grown by the target's `Resize`, which can grow it without a copy, as the C
-// library's `realloc` grows a block it mapped; else, and where `Resize` gives null, a new block with the
-// bytes copied and the old one freed. Null where the system refuses, the block then left as it was.
+// holds the size, else the kept block `Reused` gives for the grown size, the bytes copied into it and
+// the old block freed (the owner, 2026-11-01, "Kept block first"), else grown by the target's `Resize`,
+// which can grow it without a copy, as the C library's `realloc` grows a block it mapped; else, and
+// where `Resize` gives null, a new block with the bytes copied and the old one freed. Null where the
+// system refuses, the block then left as it was.
 pub byte* Reallocate(byte* p, long size, long grown) {
     if size > 262144 {
         long bytes = (grown + 15) / 16 * 16 + 16
         mut byte* moved = null
+        mut bool copied = false
         raw {
             byte* block = p - 16
             long room = *Ptr<long>(block)
             if bytes <= room {
                 moved = p
             } else {
-                byte* q = sys.Resize(block, room, bytes)
-                if q != null {
-                    *Ptr<long>(q) = bytes
-                    moved = q + 16
+                byte* reused = Reused(bytes)
+                if reused != null {
+                    mut long i = 0
+                    while i < size {
+                        reused[16 + i] = p[i]
+                        i = i + 1
+                    }
+
+                    moved = reused + 16
+                    copied = true
+                } else {
+                    byte* q = sys.Resize(block, room, bytes)
+                    if q != null {
+                        *Ptr<long>(q) = bytes
+                        moved = q + 16
+                    }
                 }
             }
+        }
+
+        if copied {
+            Free(p, size)
         }
 
         if moved != null {
@@ -1064,7 +1083,9 @@ long MaximalSuffix(byte* x, long m, bool greater, mut long period) {
 // the part left of the cut repeats at the period, the search remembers how much of the needle the last
 // move kept matched and compares it no more; else it moves by more than either part. A set of the low
 // six bits of the needle's bytes, of its first period where it repeats, moves the window by the whole
-// needle where its last byte is none of them.
+// needle where its last byte is none of them. Each move goes on to the next window with `continue`, and
+// a match leaves the loop with `break`, as `next` of Rust's searcher continues its loop and returns, so
+// that a move tests nothing but that the next window still fits.
 long TwoWay(byte* hay, long n, byte* needle, long m) {
     mut long periodLess = 0
     mut long periodGreater = 0
@@ -1112,45 +1133,52 @@ long TwoWay(byte* hay, long n, byte* needle, long m) {
 
         mut long position = 0
         mut long memory = 0
-        while found < 0 && position + m <= n {
-            byte tail = hay[position + m - 1]
+        long last = n - m
+        byte* ends = hay + m - 1
+        while position <= last {
+            byte tail = ends[position]
             if ((set >> int(tail & 63)) & 1UL) == 0UL {
                 position = position + m
                 memory = 0
-            } else {
-                mut long i = crit
-                if periodic && memory > i {
-                    i = memory
-                }
-
-                while i < m && needle[i] == hay[position + i] {
-                    i = i + 1
-                }
-
-                if i < m {
-                    position = position + i - crit + 1
-                    memory = 0
-                } else {
-                    mut long j = crit
-                    mut long low = 0
-                    if periodic {
-                        low = memory
-                    }
-
-                    while j > low && needle[j - 1] == hay[position + j - 1] {
-                        j = j - 1
-                    }
-
-                    if j > low {
-                        position = position + period
-                        if periodic {
-                            memory = m - period
-                        }
-                    } else {
-                        found = position
-                    }
-                }
+                continue
             }
+
+            mut long i = crit
+            if periodic && memory > i {
+                i = memory
+            }
+
+            while i < m && needle[i] == hay[position + i] {
+                i = i + 1
+            }
+
+            if i < m {
+                position = position + i - crit + 1
+                memory = 0
+                continue
+            }
+
+            mut long j = crit
+            mut long low = 0
+            if periodic {
+                low = memory
+            }
+
+            while j > low && needle[j - 1] == hay[position + j - 1] {
+                j = j - 1
+            }
+
+            if j > low {
+                position = position + period
+                if periodic {
+                    memory = m - period
+                }
+
+                continue
+            }
+
+            found = position
+            break
         }
     }
 
@@ -3890,13 +3918,12 @@ pub byte* HasherOwned(byte* block, mut long asked) {
     return p
 }
 
-// SHA-256's state at `s`, 616 bytes: the eight words of the hash (0), the count of bytes added (32), the
-// block of 64 bytes being filled (40), the 64 words of the message schedule (104) and the 64 words of
-// FIPS 180-4's constants K (360). MD5's, 408 bytes: its four words A, B, C and D (0), the count of bytes
-// added (16), the block being filled (24), RFC 1321's 64 words T (88) and the 16 shifts of its rounds,
-// four for each round (344).
+// SHA-256's state at `s`, 104 bytes: the eight words of the hash (0), the count of bytes added (32) and the
+// block of 64 bytes being filled (40). MD5's, 88 bytes: its four words A, B, C and D (0), the count of bytes
+// added (16) and the block being filled (24). The rounds take their constants in the code, so that a state
+// holds no table.
 
-// The state of a new hasher of SHA-256 at `s`: FIPS 180-4's initial hash (5.3.3) and K (4.2.2).
+// The state of a new hasher of SHA-256 at `s`: FIPS 180-4's initial hash (5.3.3).
 void Sha256Start(byte* s) {
     raw {
         uint* hash = Ptr<uint>(s)
@@ -3909,96 +3936,68 @@ void Sha256Start(byte* s) {
         hash[6] = 0x1f83d9ab
         hash[7] = 0x5be0cd19
         *Ptr<long>(s + 32) = 0
-        uint* k = Ptr<uint>(s + 360)
-        k[0] = 0x428a2f98
-        k[1] = 0x71374491
-        k[2] = 0xb5c0fbcf
-        k[3] = 0xe9b5dba5
-        k[4] = 0x3956c25b
-        k[5] = 0x59f111f1
-        k[6] = 0x923f82a4
-        k[7] = 0xab1c5ed5
-        k[8] = 0xd807aa98
-        k[9] = 0x12835b01
-        k[10] = 0x243185be
-        k[11] = 0x550c7dc3
-        k[12] = 0x72be5d74
-        k[13] = 0x80deb1fe
-        k[14] = 0x9bdc06a7
-        k[15] = 0xc19bf174
-        k[16] = 0xe49b69c1
-        k[17] = 0xefbe4786
-        k[18] = 0x0fc19dc6
-        k[19] = 0x240ca1cc
-        k[20] = 0x2de92c6f
-        k[21] = 0x4a7484aa
-        k[22] = 0x5cb0a9dc
-        k[23] = 0x76f988da
-        k[24] = 0x983e5152
-        k[25] = 0xa831c66d
-        k[26] = 0xb00327c8
-        k[27] = 0xbf597fc7
-        k[28] = 0xc6e00bf3
-        k[29] = 0xd5a79147
-        k[30] = 0x06ca6351
-        k[31] = 0x14292967
-        k[32] = 0x27b70a85
-        k[33] = 0x2e1b2138
-        k[34] = 0x4d2c6dfc
-        k[35] = 0x53380d13
-        k[36] = 0x650a7354
-        k[37] = 0x766a0abb
-        k[38] = 0x81c2c92e
-        k[39] = 0x92722c85
-        k[40] = 0xa2bfe8a1
-        k[41] = 0xa81a664b
-        k[42] = 0xc24b8b70
-        k[43] = 0xc76c51a3
-        k[44] = 0xd192e819
-        k[45] = 0xd6990624
-        k[46] = 0xf40e3585
-        k[47] = 0x106aa070
-        k[48] = 0x19a4c116
-        k[49] = 0x1e376c08
-        k[50] = 0x2748774c
-        k[51] = 0x34b0bcb5
-        k[52] = 0x391c0cb3
-        k[53] = 0x4ed8aa4a
-        k[54] = 0x5b9cca4f
-        k[55] = 0x682e6ff3
-        k[56] = 0x748f82ee
-        k[57] = 0x78a5636f
-        k[58] = 0x84c87814
-        k[59] = 0x8cc70208
-        k[60] = 0x90befffa
-        k[61] = 0xa4506ceb
-        k[62] = 0xbef9a3f7
-        k[63] = 0xc67178f2
     }
 }
 
+// The word of the four bytes at `p`, the highest first, as SHA-256 reads a word (FIPS 180-4, 3.1), read a
+// byte at a time, which LLVM joins into one load of four bytes at any address.
+uint BigEndianWord(byte* p) {
+    mut uint word = 0
+    raw {
+        word = uint(p[0]) << 24 | uint(p[1]) << 16 | uint(p[2]) << 8 | uint(p[3])
+    }
+
+    return word
+}
+
+// The word of the schedule of a round t from round 16 on (FIPS 180-4, 6.2.2, step 1), of the words `w16`,
+// `w15`, `w7` and `w2` of the rounds t - 16, t - 15, t - 7 and t - 2.
+uint Sha256Word(uint w16, uint w15, uint w7, uint w2) {
+    uint small0 = (w15 >> 7 | w15 << 25) ^ (w15 >> 18 | w15 << 14) ^ w15 >> 3
+    uint small1 = (w2 >> 17 | w2 << 15) ^ (w2 >> 19 | w2 << 13) ^ w2 >> 10
+    return w16 +% small0 +% w7 +% small1
+}
+
+// One round of SHA-256 (FIPS 180-4, 6.2.2, step 3) with its constant `k` and its word `w`, on the working
+// variables in the order a to h that the round gives them: T1 is added to d, which is the next round's e,
+// and T1 + T2 is written to h, which is the next round's a. The next round takes the eight in the order
+// h, a, b, c, d, e, f, g, so that they move by the names of the call, where `sha2` writes the copies
+// `h = g` to `b = a`, which LLVM turns into the same renaming.
+void Sha256Round(uint a, uint b, uint c, mut uint d, uint e, uint f, uint g, mut uint h, uint k, uint w) {
+    uint big1 = (e >> 6 | e << 26) ^ (e >> 11 | e << 21) ^ (e >> 25 | e << 7)
+    uint choose = (e & f) ^ (~e & g)
+    uint first = big1 +% choose +% k +% w +% h
+    uint big0 = (a >> 2 | a << 30) ^ (a >> 13 | a << 19) ^ (a >> 22 | a << 10)
+    uint majority = (a & b) ^ (a & c) ^ (b & c)
+    d = d +% first
+    h = first +% big0 +% majority
+}
+
 // One block of 64 bytes at `p` through the 64 rounds of SHA-256 into the hash at `s` (FIPS 180-4,
-// 6.2.2), each word of the block read with its highest byte first.
+// 6.2.2), in the form of RustCrypto's `sha2` 0.11.1 without the CPU's instructions (`soft/unroll.rs`):
+// the 16 words of the block, each read with its highest byte first, before the first round; the 64 rounds
+// written out, each with its constant K (4.2.2) in the code, as `sha2` gives it on x86; and the word of
+// the schedule of a round from round 16 on written in place of the word of the round 16 before it, so
+// that the schedule is 16 words and takes no room in the state.
 void Sha256Block(byte* s, byte* p) {
     raw {
         uint* hash = Ptr<uint>(s)
-        uint* w = Ptr<uint>(s + 104)
-        uint* k = Ptr<uint>(s + 360)
-        mut int t = 0
-        while t < 16 {
-            w[t] = uint(p[4 * t]) << 24 | uint(p[4 * t + 1]) << 16 | uint(p[4 * t + 2]) << 8 | uint(p[4 * t + 3])
-            t = t + 1
-        }
-
-        while t < 64 {
-            uint x = w[t - 15]
-            uint y = w[t - 2]
-            uint small0 = (x >> 7 | x << 25) ^ (x >> 18 | x << 14) ^ x >> 3
-            uint small1 = (y >> 17 | y << 15) ^ (y >> 19 | y << 13) ^ y >> 10
-            w[t] = small1 +% w[t - 7] +% small0 +% w[t - 16]
-            t = t + 1
-        }
-
+        mut uint w0 = BigEndianWord(p)
+        mut uint w1 = BigEndianWord(p + 4)
+        mut uint w2 = BigEndianWord(p + 8)
+        mut uint w3 = BigEndianWord(p + 12)
+        mut uint w4 = BigEndianWord(p + 16)
+        mut uint w5 = BigEndianWord(p + 20)
+        mut uint w6 = BigEndianWord(p + 24)
+        mut uint w7 = BigEndianWord(p + 28)
+        mut uint w8 = BigEndianWord(p + 32)
+        mut uint w9 = BigEndianWord(p + 36)
+        mut uint w10 = BigEndianWord(p + 40)
+        mut uint w11 = BigEndianWord(p + 44)
+        mut uint w12 = BigEndianWord(p + 48)
+        mut uint w13 = BigEndianWord(p + 52)
+        mut uint w14 = BigEndianWord(p + 56)
+        mut uint w15 = BigEndianWord(p + 60)
         mut uint a = hash[0]
         mut uint b = hash[1]
         mut uint c = hash[2]
@@ -4007,24 +4006,118 @@ void Sha256Block(byte* s, byte* p) {
         mut uint f = hash[5]
         mut uint g = hash[6]
         mut uint h = hash[7]
-        t = 0
-        while t < 64 {
-            uint big1 = (e >> 6 | e << 26) ^ (e >> 11 | e << 21) ^ (e >> 25 | e << 7)
-            uint choose = (e & f) ^ (~e & g)
-            uint first = h +% big1 +% choose +% k[t] +% w[t]
-            uint big0 = (a >> 2 | a << 30) ^ (a >> 13 | a << 19) ^ (a >> 22 | a << 10)
-            uint majority = (a & b) ^ (a & c) ^ (b & c)
-            h = g
-            g = f
-            f = e
-            e = d +% first
-            d = c
-            c = b
-            b = a
-            a = first +% big0 +% majority
-            t = t + 1
-        }
-
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x428a2f98, w0)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x71374491, w1)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0xb5c0fbcf, w2)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0xe9b5dba5, w3)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x3956c25b, w4)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x59f111f1, w5)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x923f82a4, w6)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0xab1c5ed5, w7)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0xd807aa98, w8)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x12835b01, w9)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x243185be, w10)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x550c7dc3, w11)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x72be5d74, w12)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x80deb1fe, w13)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x9bdc06a7, w14)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0xc19bf174, w15)
+        w0 = Sha256Word(w0, w1, w9, w14)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0xe49b69c1, w0)
+        w1 = Sha256Word(w1, w2, w10, w15)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0xefbe4786, w1)
+        w2 = Sha256Word(w2, w3, w11, w0)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x0fc19dc6, w2)
+        w3 = Sha256Word(w3, w4, w12, w1)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x240ca1cc, w3)
+        w4 = Sha256Word(w4, w5, w13, w2)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x2de92c6f, w4)
+        w5 = Sha256Word(w5, w6, w14, w3)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x4a7484aa, w5)
+        w6 = Sha256Word(w6, w7, w15, w4)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x5cb0a9dc, w6)
+        w7 = Sha256Word(w7, w8, w0, w5)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x76f988da, w7)
+        w8 = Sha256Word(w8, w9, w1, w6)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x983e5152, w8)
+        w9 = Sha256Word(w9, w10, w2, w7)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0xa831c66d, w9)
+        w10 = Sha256Word(w10, w11, w3, w8)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0xb00327c8, w10)
+        w11 = Sha256Word(w11, w12, w4, w9)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0xbf597fc7, w11)
+        w12 = Sha256Word(w12, w13, w5, w10)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0xc6e00bf3, w12)
+        w13 = Sha256Word(w13, w14, w6, w11)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0xd5a79147, w13)
+        w14 = Sha256Word(w14, w15, w7, w12)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x06ca6351, w14)
+        w15 = Sha256Word(w15, w0, w8, w13)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x14292967, w15)
+        w0 = Sha256Word(w0, w1, w9, w14)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x27b70a85, w0)
+        w1 = Sha256Word(w1, w2, w10, w15)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x2e1b2138, w1)
+        w2 = Sha256Word(w2, w3, w11, w0)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x4d2c6dfc, w2)
+        w3 = Sha256Word(w3, w4, w12, w1)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x53380d13, w3)
+        w4 = Sha256Word(w4, w5, w13, w2)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x650a7354, w4)
+        w5 = Sha256Word(w5, w6, w14, w3)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x766a0abb, w5)
+        w6 = Sha256Word(w6, w7, w15, w4)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x81c2c92e, w6)
+        w7 = Sha256Word(w7, w8, w0, w5)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x92722c85, w7)
+        w8 = Sha256Word(w8, w9, w1, w6)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0xa2bfe8a1, w8)
+        w9 = Sha256Word(w9, w10, w2, w7)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0xa81a664b, w9)
+        w10 = Sha256Word(w10, w11, w3, w8)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0xc24b8b70, w10)
+        w11 = Sha256Word(w11, w12, w4, w9)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0xc76c51a3, w11)
+        w12 = Sha256Word(w12, w13, w5, w10)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0xd192e819, w12)
+        w13 = Sha256Word(w13, w14, w6, w11)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0xd6990624, w13)
+        w14 = Sha256Word(w14, w15, w7, w12)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0xf40e3585, w14)
+        w15 = Sha256Word(w15, w0, w8, w13)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x106aa070, w15)
+        w0 = Sha256Word(w0, w1, w9, w14)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x19a4c116, w0)
+        w1 = Sha256Word(w1, w2, w10, w15)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x1e376c08, w1)
+        w2 = Sha256Word(w2, w3, w11, w0)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x2748774c, w2)
+        w3 = Sha256Word(w3, w4, w12, w1)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x34b0bcb5, w3)
+        w4 = Sha256Word(w4, w5, w13, w2)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x391c0cb3, w4)
+        w5 = Sha256Word(w5, w6, w14, w3)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0x4ed8aa4a, w5)
+        w6 = Sha256Word(w6, w7, w15, w4)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0x5b9cca4f, w6)
+        w7 = Sha256Word(w7, w8, w0, w5)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0x682e6ff3, w7)
+        w8 = Sha256Word(w8, w9, w1, w6)
+        Sha256Round(a, b, c, mut d, e, f, g, mut h, 0x748f82ee, w8)
+        w9 = Sha256Word(w9, w10, w2, w7)
+        Sha256Round(h, a, b, mut c, d, e, f, mut g, 0x78a5636f, w9)
+        w10 = Sha256Word(w10, w11, w3, w8)
+        Sha256Round(g, h, a, mut b, c, d, e, mut f, 0x84c87814, w10)
+        w11 = Sha256Word(w11, w12, w4, w9)
+        Sha256Round(f, g, h, mut a, b, c, d, mut e, 0x8cc70208, w11)
+        w12 = Sha256Word(w12, w13, w5, w10)
+        Sha256Round(e, f, g, mut h, a, b, c, mut d, 0x90befffa, w12)
+        w13 = Sha256Word(w13, w14, w6, w11)
+        Sha256Round(d, e, f, mut g, h, a, b, mut c, 0xa4506ceb, w13)
+        w14 = Sha256Word(w14, w15, w7, w12)
+        Sha256Round(c, d, e, mut f, g, h, a, mut b, 0xbef9a3f7, w14)
+        w15 = Sha256Word(w15, w0, w8, w13)
+        Sha256Round(b, c, d, mut e, f, g, h, mut a, 0xc67178f2, w15)
         hash[0] = hash[0] +% a
         hash[1] = hash[1] +% b
         hash[2] = hash[2] +% c
@@ -4056,8 +4149,7 @@ void Sha256Close(byte* s, byte* out) {
     Sha256Start(s)
 }
 
-// The state of a new hasher of MD5 at `s`: RFC 1321's initial words (3.3), T (3.4) and the shifts of its
-// four rounds.
+// The state of a new hasher of MD5 at `s`: RFC 1321's initial words (3.3).
 void Md5Start(byte* s) {
     raw {
         uint* words = Ptr<uint>(s)
@@ -4066,130 +4158,137 @@ void Md5Start(byte* s) {
         words[2] = 0x98badcfe
         words[3] = 0x10325476
         *Ptr<long>(s + 16) = 0
-        uint* t = Ptr<uint>(s + 88)
-        t[0] = 0xd76aa478
-        t[1] = 0xe8c7b756
-        t[2] = 0x242070db
-        t[3] = 0xc1bdceee
-        t[4] = 0xf57c0faf
-        t[5] = 0x4787c62a
-        t[6] = 0xa8304613
-        t[7] = 0xfd469501
-        t[8] = 0x698098d8
-        t[9] = 0x8b44f7af
-        t[10] = 0xffff5bb1
-        t[11] = 0x895cd7be
-        t[12] = 0x6b901122
-        t[13] = 0xfd987193
-        t[14] = 0xa679438e
-        t[15] = 0x49b40821
-        t[16] = 0xf61e2562
-        t[17] = 0xc040b340
-        t[18] = 0x265e5a51
-        t[19] = 0xe9b6c7aa
-        t[20] = 0xd62f105d
-        t[21] = 0x02441453
-        t[22] = 0xd8a1e681
-        t[23] = 0xe7d3fbc8
-        t[24] = 0x21e1cde6
-        t[25] = 0xc33707d6
-        t[26] = 0xf4d50d87
-        t[27] = 0x455a14ed
-        t[28] = 0xa9e3e905
-        t[29] = 0xfcefa3f8
-        t[30] = 0x676f02d9
-        t[31] = 0x8d2a4c8a
-        t[32] = 0xfffa3942
-        t[33] = 0x8771f681
-        t[34] = 0x6d9d6122
-        t[35] = 0xfde5380c
-        t[36] = 0xa4beea44
-        t[37] = 0x4bdecfa9
-        t[38] = 0xf6bb4b60
-        t[39] = 0xbebfbc70
-        t[40] = 0x289b7ec6
-        t[41] = 0xeaa127fa
-        t[42] = 0xd4ef3085
-        t[43] = 0x04881d05
-        t[44] = 0xd9d4d039
-        t[45] = 0xe6db99e5
-        t[46] = 0x1fa27cf8
-        t[47] = 0xc4ac5665
-        t[48] = 0xf4292244
-        t[49] = 0x432aff97
-        t[50] = 0xab9423a7
-        t[51] = 0xfc93a039
-        t[52] = 0x655b59c3
-        t[53] = 0x8f0ccc92
-        t[54] = 0xffeff47d
-        t[55] = 0x85845dd1
-        t[56] = 0x6fa87e4f
-        t[57] = 0xfe2ce6e0
-        t[58] = 0xa3014314
-        t[59] = 0x4e0811a1
-        t[60] = 0xf7537e82
-        t[61] = 0xbd3af235
-        t[62] = 0x2ad7d2bb
-        t[63] = 0xeb86d391
-        uint* shifts = Ptr<uint>(s + 344)
-        shifts[0] = 7
-        shifts[1] = 12
-        shifts[2] = 17
-        shifts[3] = 22
-        shifts[4] = 5
-        shifts[5] = 9
-        shifts[6] = 14
-        shifts[7] = 20
-        shifts[8] = 4
-        shifts[9] = 11
-        shifts[10] = 16
-        shifts[11] = 23
-        shifts[12] = 6
-        shifts[13] = 10
-        shifts[14] = 15
-        shifts[15] = 21
     }
 }
 
-// One block of 64 bytes at `p` through the 64 steps of MD5 into the words at `s` (RFC 1321, 3.4), each
-// word of the block read with its lowest byte first.
+// The word of the four bytes at `p`, the lowest first, as MD5 reads a word (RFC 1321, 2), read a byte at a
+// time, which LLVM joins into one load of four bytes at any address.
+uint LittleEndianWord(byte* p) {
+    mut uint word = 0
+    raw {
+        word = uint(p[0]) | uint(p[1]) << 8 | uint(p[2]) << 16 | uint(p[3]) << 24
+    }
+
+    return word
+}
+
+// A step of each of MD5's four rounds (RFC 1321, 3.4) on a, b, c and d in the order the step gives them,
+// with its word `m`, its constant `t` and its shift `r`: the new value of a, as `md-5`'s `op_f` to `op_i`
+// give it. F and G add their two terms one at a time where RFC 1321 joins them with an or: the same
+// number, since the two share no bit, and the form LLVM makes of `op_f` and `op_g` where it knows that a
+// parameter holds no undefined bits (`noundef`), which the IR of Kurz does not say; with the or written
+// here, LLVM keeps an or of the two terms in the sum, one step longer on the path from b to the next step.
+uint Md5F(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
+    uint sum = a +% m +% t +% (b & c) +% (~b & d)
+    return (sum << r | sum >> (32 - r)) +% b
+}
+
+uint Md5G(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
+    uint sum = a +% m +% t +% (b & d) +% (c & ~d)
+    return (sum << r | sum >> (32 - r)) +% b
+}
+
+uint Md5H(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
+    uint sum = (b ^ c ^ d) +% a +% m +% t
+    return (sum << r | sum >> (32 - r)) +% b
+}
+
+uint Md5I(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
+    uint sum = (c ^ (b | ~d)) +% a +% m +% t
+    return (sum << r | sum >> (32 - r)) +% b
+}
+
+// One block of 64 bytes at `p` through the 64 steps of MD5 into the words at `s` (RFC 1321, 3.4), in the
+// form of RustCrypto's `md-5` 0.11.0 (`compress/soft.rs`): the 16 words of the block, each read with its
+// lowest byte first, before the first step; and the 64 steps written out, each with its word, its constant
+// T and its shift in the code.
 void Md5Block(byte* s, byte* p) {
     raw {
         uint* words = Ptr<uint>(s)
-        uint* t = Ptr<uint>(s + 88)
-        uint* shifts = Ptr<uint>(s + 344)
+        uint m0 = LittleEndianWord(p)
+        uint m1 = LittleEndianWord(p + 4)
+        uint m2 = LittleEndianWord(p + 8)
+        uint m3 = LittleEndianWord(p + 12)
+        uint m4 = LittleEndianWord(p + 16)
+        uint m5 = LittleEndianWord(p + 20)
+        uint m6 = LittleEndianWord(p + 24)
+        uint m7 = LittleEndianWord(p + 28)
+        uint m8 = LittleEndianWord(p + 32)
+        uint m9 = LittleEndianWord(p + 36)
+        uint m10 = LittleEndianWord(p + 40)
+        uint m11 = LittleEndianWord(p + 44)
+        uint m12 = LittleEndianWord(p + 48)
+        uint m13 = LittleEndianWord(p + 52)
+        uint m14 = LittleEndianWord(p + 56)
+        uint m15 = LittleEndianWord(p + 60)
         mut uint a = words[0]
         mut uint b = words[1]
         mut uint c = words[2]
         mut uint d = words[3]
-        mut int i = 0
-        while i < 64 {
-            mut uint f = 0
-            mut int g = 0
-            if i < 16 {
-                f = (b & c) | (~b & d)
-                g = i
-            } else if i < 32 {
-                f = (d & b) | (~d & c)
-                g = (5 * i + 1) % 16
-            } else if i < 48 {
-                f = b ^ c ^ d
-                g = (3 * i + 5) % 16
-            } else {
-                f = c ^ (b | ~d)
-                g = 7 * i % 16
-            }
-
-            uint m = uint(p[4 * g]) | uint(p[4 * g + 1]) << 8 | uint(p[4 * g + 2]) << 16 | uint(p[4 * g + 3]) << 24
-            uint sum = f +% a +% t[i] +% m
-            int r = int(shifts[i / 16 * 4 + i % 4])
-            a = d
-            d = c
-            c = b
-            b = b +% (sum << r | sum >> (32 - r))
-            i = i + 1
-        }
-
+        a = Md5F(a, b, c, d, m0, 0xd76aa478, 7)
+        d = Md5F(d, a, b, c, m1, 0xe8c7b756, 12)
+        c = Md5F(c, d, a, b, m2, 0x242070db, 17)
+        b = Md5F(b, c, d, a, m3, 0xc1bdceee, 22)
+        a = Md5F(a, b, c, d, m4, 0xf57c0faf, 7)
+        d = Md5F(d, a, b, c, m5, 0x4787c62a, 12)
+        c = Md5F(c, d, a, b, m6, 0xa8304613, 17)
+        b = Md5F(b, c, d, a, m7, 0xfd469501, 22)
+        a = Md5F(a, b, c, d, m8, 0x698098d8, 7)
+        d = Md5F(d, a, b, c, m9, 0x8b44f7af, 12)
+        c = Md5F(c, d, a, b, m10, 0xffff5bb1, 17)
+        b = Md5F(b, c, d, a, m11, 0x895cd7be, 22)
+        a = Md5F(a, b, c, d, m12, 0x6b901122, 7)
+        d = Md5F(d, a, b, c, m13, 0xfd987193, 12)
+        c = Md5F(c, d, a, b, m14, 0xa679438e, 17)
+        b = Md5F(b, c, d, a, m15, 0x49b40821, 22)
+        a = Md5G(a, b, c, d, m1, 0xf61e2562, 5)
+        d = Md5G(d, a, b, c, m6, 0xc040b340, 9)
+        c = Md5G(c, d, a, b, m11, 0x265e5a51, 14)
+        b = Md5G(b, c, d, a, m0, 0xe9b6c7aa, 20)
+        a = Md5G(a, b, c, d, m5, 0xd62f105d, 5)
+        d = Md5G(d, a, b, c, m10, 0x02441453, 9)
+        c = Md5G(c, d, a, b, m15, 0xd8a1e681, 14)
+        b = Md5G(b, c, d, a, m4, 0xe7d3fbc8, 20)
+        a = Md5G(a, b, c, d, m9, 0x21e1cde6, 5)
+        d = Md5G(d, a, b, c, m14, 0xc33707d6, 9)
+        c = Md5G(c, d, a, b, m3, 0xf4d50d87, 14)
+        b = Md5G(b, c, d, a, m8, 0x455a14ed, 20)
+        a = Md5G(a, b, c, d, m13, 0xa9e3e905, 5)
+        d = Md5G(d, a, b, c, m2, 0xfcefa3f8, 9)
+        c = Md5G(c, d, a, b, m7, 0x676f02d9, 14)
+        b = Md5G(b, c, d, a, m12, 0x8d2a4c8a, 20)
+        a = Md5H(a, b, c, d, m5, 0xfffa3942, 4)
+        d = Md5H(d, a, b, c, m8, 0x8771f681, 11)
+        c = Md5H(c, d, a, b, m11, 0x6d9d6122, 16)
+        b = Md5H(b, c, d, a, m14, 0xfde5380c, 23)
+        a = Md5H(a, b, c, d, m1, 0xa4beea44, 4)
+        d = Md5H(d, a, b, c, m4, 0x4bdecfa9, 11)
+        c = Md5H(c, d, a, b, m7, 0xf6bb4b60, 16)
+        b = Md5H(b, c, d, a, m10, 0xbebfbc70, 23)
+        a = Md5H(a, b, c, d, m13, 0x289b7ec6, 4)
+        d = Md5H(d, a, b, c, m0, 0xeaa127fa, 11)
+        c = Md5H(c, d, a, b, m3, 0xd4ef3085, 16)
+        b = Md5H(b, c, d, a, m6, 0x04881d05, 23)
+        a = Md5H(a, b, c, d, m9, 0xd9d4d039, 4)
+        d = Md5H(d, a, b, c, m12, 0xe6db99e5, 11)
+        c = Md5H(c, d, a, b, m15, 0x1fa27cf8, 16)
+        b = Md5H(b, c, d, a, m2, 0xc4ac5665, 23)
+        a = Md5I(a, b, c, d, m0, 0xf4292244, 6)
+        d = Md5I(d, a, b, c, m7, 0x432aff97, 10)
+        c = Md5I(c, d, a, b, m14, 0xab9423a7, 15)
+        b = Md5I(b, c, d, a, m5, 0xfc93a039, 21)
+        a = Md5I(a, b, c, d, m12, 0x655b59c3, 6)
+        d = Md5I(d, a, b, c, m3, 0x8f0ccc92, 10)
+        c = Md5I(c, d, a, b, m10, 0xffeff47d, 15)
+        b = Md5I(b, c, d, a, m1, 0x85845dd1, 21)
+        a = Md5I(a, b, c, d, m8, 0x6fa87e4f, 6)
+        d = Md5I(d, a, b, c, m15, 0xfe2ce6e0, 10)
+        c = Md5I(c, d, a, b, m6, 0xa3014314, 15)
+        b = Md5I(b, c, d, a, m13, 0x4e0811a1, 21)
+        a = Md5I(a, b, c, d, m4, 0xf7537e82, 6)
+        d = Md5I(d, a, b, c, m11, 0xbd3af235, 10)
+        c = Md5I(c, d, a, b, m2, 0x2ad7d2bb, 15)
+        b = Md5I(b, c, d, a, m9, 0xeb86d391, 21)
         words[0] = words[0] +% a
         words[1] = words[1] +% b
         words[2] = words[2] +% c
@@ -4315,7 +4414,7 @@ void HashPad(byte* s, bool md5) {
 
 // A new hasher of SHA-256 (H3): the block of its state; null, with `asked` set, where the system refuses.
 pub byte* Sha256New(mut long asked) {
-    byte* block = ByteBlock(616, mut asked)
+    byte* block = ByteBlock(104, mut asked)
     if block != null {
         Sha256Start(block + 16)
     }
@@ -4353,13 +4452,13 @@ pub byte* Sha256Hash(byte* message, mut long asked) {
 
     Sha256Update(block, message)
     byte* digest = Sha256Finish(block, mut asked)
-    Free(block, 632)
+    Free(block, 120)
     return digest
 }
 
 // A new hasher of MD5 (H3), as `Sha256New` makes one of SHA-256.
 pub byte* Md5New(mut long asked) {
-    byte* block = ByteBlock(408, mut asked)
+    byte* block = ByteBlock(88, mut asked)
     if block != null {
         Md5Start(block + 16)
     }
@@ -4393,7 +4492,7 @@ pub byte* Md5Hash(byte* message, mut long asked) {
 
     Md5Update(block, message)
     byte* digest = Md5Finish(block, mut asked)
-    Free(block, 424)
+    Free(block, 104)
     return digest
 }
 
@@ -4482,9 +4581,9 @@ pub uint Crc32Hash(byte* message, mut long asked) {
     return c
 }
 
-// HMAC-SHA256's state at `s`, 1296 bytes (RFC 2104): the key K0 (0), 64 bytes, the state of the inner
-// hash, which has taken K0 ^ ipad (64), and the state of the outer hash, which `HmacClose` starts (680)
-// and whose block of 64 bytes being filled, at 720, nothing reads between two calls of it.
+// HMAC-SHA256's state at `s`, 272 bytes (RFC 2104): the key K0 (0), 64 bytes, the state of the inner
+// hash, which has taken K0 ^ ipad (64), and the state of the outer hash, which `HmacClose` starts (168)
+// and whose block of 64 bytes being filled, at 208, nothing reads between two calls of it.
 
 // The state of a new hasher of HMAC-SHA256 at `s` on the `n` bytes of the key at `key`: K0 is the key,
 // or SHA-256 of a key longer than a block of 64 bytes, with zeros after it to 64 bytes.
@@ -4492,7 +4591,7 @@ void HmacStart(byte* s, byte* key, long n) {
     raw {
         mut long i = 0
         if n > 64 {
-            byte* outer = s + 680
+            byte* outer = s + 168
             Sha256Start(outer)
             HashFeed(outer, key, n, false)
             Sha256Close(outer, s)
@@ -4515,7 +4614,7 @@ void HmacStart(byte* s, byte* key, long n) {
 
 // The inner hash of the state at `s` started over on K0 ^ ipad, K0 with every byte xored with 0x36.
 void HmacKeyed(byte* s) {
-    byte* pad = s + 720
+    byte* pad = s + 208
     raw {
         mut long i = 0
         while i < 64 {
@@ -4532,8 +4631,8 @@ void HmacKeyed(byte* s) {
 // and of the inner hash's digest, written at `out`, 32 bytes; the inner hash then starts over on K0 ^ ipad,
 // as `HmacKeyed` starts it.
 void HmacClose(byte* s, byte* out) {
-    byte* outer = s + 680
-    byte* pad = s + 720
+    byte* outer = s + 168
+    byte* pad = s + 208
     raw {
         mut long i = 0
         while i < 64 {
@@ -4553,7 +4652,7 @@ void HmacClose(byte* s, byte* out) {
 // A new hasher of HMAC-SHA256 on the bytes of the list `key` (H3), as `Sha256New` makes one of SHA-256; the
 // null block of an empty list is a key of no bytes, of which `ListCount` gives 0 and `HmacStart` reads none.
 pub byte* HmacNew(byte* key, mut long asked) {
-    byte* block = ByteBlock(1296, mut asked)
+    byte* block = ByteBlock(272, mut asked)
     if block != null {
         HmacStart(block + 16, ListItems(key), long(ListCount(key)))
     }
@@ -4588,7 +4687,7 @@ pub byte* HmacSha256(byte* key, byte* message, mut long asked) {
 
     HmacUpdate(block, message)
     byte* digest = HmacFinish(block, mut asked)
-    Free(block, 1312)
+    Free(block, 288)
     return digest
 }
 

@@ -32,9 +32,13 @@ kit.ROUND_CAP review rounds. A run that
 posts (in CI or with --local) labels the pull request kit.ROUND_LABEL plus its round's number before
 its first pass, so a run that fails or is cancelled after it counts too, and a run with nothing to
 review counts none; `--dry-run` and `--plan` post nothing, that label included. On a pull request whose
-labels count kit.ROUND_CAP rounds (kit.review_rounds) every run ends before its first pass as
-`REVIEW DID NOT COMPLETE (cap)`, in CI with the status `error` that names the cap: the refusal is
-inside the job, since a job its `if` skips reports success (knowledge/a-skipped-job-reports-success.md).
+labels count kit.ROUND_CAP rounds (kit.review_rounds) every run with a file the replay cache does not
+answer ends before its first pass as `REVIEW DID NOT COMPLETE (cap)`, in CI with the status `error`
+that names the cap: the refusal is inside the job, since a job its `if` skips reports success
+(knowledge/a-skipped-job-reports-success.md). A run there whose every file replays makes no pass, puts
+no label on and completes, in CI with the status `success`: it is no round (the owner, 2026-11-01,
+"Free replay isn't a round"; knowledge/a-review-the-cache-answers-is-no-round.md). The stops before
+the replay is known (the secret, the rules, an oversized or empty diff) end as their own kind there.
 Two runs of one pull request at the same moment read the same count and label the same round.
 
 Exit codes: 0 review completed; 1 did not complete; 2 usage; 3 did not complete because of a usage
@@ -1056,13 +1060,6 @@ def review(argv):
         if pr["state"] != "open":
             return stop("closed", "the pull request is not open")
         rounds = kit.review_rounds([label["name"] for label in pr["labels"]])
-        if rounds >= kit.ROUND_CAP:  # before any pass: the round that would follow is the one the cap forbids
-            return stop("cap", f"the pull request has had {rounds} review rounds (its label {kit.ROUND_LABEL}{rounds}), and the cap is "
-                               f"{kit.ROUND_CAP} (the owner, 2026-10-22): no further round runs. What is still open goes on the "
-                               f"collection ticket, the open issue labelled {kit.LEFTOVERS_LABEL}, and the pull request merges as "
-                               f"it is at the head round {kit.ROUND_CAP} reviewed, on the approval the cap gives when that round "
-                               f"completed; a head pushed after that round is outside that approval",
-                        status=f"review did not complete: cap: {rounds} review rounds reached, the cap is {kit.ROUND_CAP}")
         if in_ci and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
             return stop("credential", "CLAUDE_CODE_OAUTH_TOKEN is not set as a repository secret")
 
@@ -1116,6 +1113,14 @@ def review(argv):
               f"{rounds} review rounds before this run, the cap is {kit.ROUND_CAP}; {cut}")
         for path in sorted(replay):
             print(f"  replayed (unchanged since a converged review): {path}")
+        if rounds >= kit.ROUND_CAP and todo:  # before any pass, and only a run with a file to review: a run the cache answers whole is no round
+            return stop("cap", f"files of this head the cache does not answer: {len(todo)} of {len(files)}; "
+                               f"the pull request has had {rounds} review rounds (its label {kit.ROUND_LABEL}{rounds}), and the cap is "
+                               f"{kit.ROUND_CAP} (the owner, 2026-10-22): no further round runs. What is still open goes on the "
+                               f"collection ticket, the open issue labelled {kit.LEFTOVERS_LABEL}, and the pull request merges as "
+                               f"it is at the head round {kit.ROUND_CAP} reviewed, on the approval the cap gives when that round "
+                               f"completed; a head pushed after that round is outside that approval",
+                        status=f"review did not complete: cap: {rounds} review rounds reached, the cap is {kit.ROUND_CAP}")
         if call["plan"]:  # what a run would read, said before a pass is paid for
             for index, batch in enumerate(work, 1):
                 print(f"  batch {index}/{len(work)}: {sum(len(text) for _, text in batch)} characters [{', '.join(sorted({p for p, _ in batch}))}]")
