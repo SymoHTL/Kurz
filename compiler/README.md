@@ -37,7 +37,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   runtime" below). A sixth builds
   every corpus case that expects a run with the pinned clang and runs it, and checks what it
   prints, its exit code and its error line against the case's header, then builds and runs it again
-  under an allocator that makes every block it frees inaccessible (`RunTests`); a seventh
+  under an allocator that makes every block it frees inaccessible, but for a case that allocator
+  cannot hold, which it lists with why (`RunTests`); a seventh
   builds the programs that pin what no case can, a refused write and a refused allocation among
   them (`EmitterTests`), and an eighth those of data values and unions, with the width of a tag and
   the copy of a block before a write (`DataTests`); a ninth makes and removes the places of `run`

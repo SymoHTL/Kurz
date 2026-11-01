@@ -104,7 +104,8 @@ public sealed class Toolchain : IDisposable
 /// Neither list holds a stale entry. A case is built with the grants of its <c>allow:</c> line, and as its <c>build:</c> line says, else
 /// as the test build, the default. A floor holds the count of cases run. Every case that is run runs a second time under an allocator that makes
 /// every block it frees inaccessible (<see cref="ListTests.Fenced"/>), so that a block the counting frees while a value still holds
-/// it ends that run with the system's signal.
+/// it ends that run with the system's signal; a case that allocator cannot hold is in <see cref="NotFenced"/>, with why, and is
+/// built under it and not run.
 /// </summary>
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -141,6 +142,14 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
             ["outcomes/stack-overflow.kz"] = "the raise of `stack-overflow` is the handler's of a fault (design record, section 6), which the runtime installs on Linux alone",
         }
         : new(StringComparer.Ordinal);
+
+    /// <summary>Cases run under the plain allocator alone, each with why the fenced one cannot hold them.</summary>
+    private static readonly Dictionary<string, string> NotFenced = new(StringComparer.Ordinal)
+    {
+        ["memory/long-chain-freed.kz"] = "a million instances alive at once, each in pages of its own with an inaccessible page after them: " +
+            "two million mappings, past the limit of a process on Linux (`vm.max_map_count`, 1048576 where the run was seen " +
+            "ending with `allocation-failed`), and a page of memory each, about four gibibytes",
+    };
 
     public static TheoryData<string> RunnableCases()
     {
@@ -193,9 +202,10 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     [Theory]
     [MemberData(nameof(RunnableCases))]
-    public void A_built_case_runs_as_its_header_says_where_no_freed_block_can_be_read(string relativePath) => RunCase(relativePath, ListTests.Fenced, "-fenced");
+    public void A_built_case_runs_as_its_header_says_where_no_freed_block_can_be_read(string relativePath) =>
+        RunCase(relativePath, ListTests.Fenced, "-fenced", NotFenced.ContainsKey(relativePath));
 
-    private void RunCase(string relativePath, CheckedRuntime runtime, string suffix)
+    private void RunCase(string relativePath, CheckedRuntime runtime, string suffix, bool buildOnly = false)
     {
         var header = Header(relativePath);
         var (program, notSupported) = Emit(relativePath, header, runtime);
@@ -210,7 +220,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         var executable = toolchain.Build(program, relativePath.Replace('/', '_').Replace(".kz", "", StringComparison.Ordinal) + suffix);
-        if (NotRun.ContainsKey(relativePath))
+        if (buildOnly || NotRun.ContainsKey(relativePath))
         {
             return;
         }
@@ -279,6 +289,14 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             var header = Header(relativePath);
             Assert.True(header.Expectation != Expectation.Error && Emit(relativePath, header).Program is not null, $"{relativePath}: listed as not run ({why}), and the emitter does not lay it out");
+        }
+
+        // a case listed as run under the plain allocator alone is one the plain run runs
+        Assert.NotEmpty(NotFenced);
+        foreach (var (relativePath, why) in NotFenced)
+        {
+            var header = Header(relativePath);
+            Assert.True(header.Expectation != Expectation.Error && !NotRun.ContainsKey(relativePath) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed as run under the plain allocator alone ({why}), and the plain run does not run it");
         }
     }
 }
