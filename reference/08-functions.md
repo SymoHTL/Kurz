@@ -368,6 +368,64 @@ long big = 5
 Show(big)
 ```
 
+Case: [outcomes/keep-argument-exact-fit-first.kz](../corpus/outcomes/keep-argument-exact-fit-first.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(int n) {
+    print("the success")
+}
+
+void Show(long | NotFound x) {
+    print("the union")
+}
+
+// `Show(int)` fits the success exactly, and the union needs a widening: the exact fit runs, and `NotFound` leaves `Shown`
+int | NotFound Shown(int id) {
+    Show(Find(id))
+    return 0
+}
+
+match Shown(1) {
+    int n => print("done")
+    NotFound => print("none")
+}
+match Shown(2) {
+    int n => print("done")
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/keep-argument-ambiguous-widening.kz](../corpus/outcomes/keep-argument-ambiguous-widening.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(long n) {
+    print("the success")
+}
+
+void Show(long | NotFound x) {
+    print("the union")
+}
+
+// one function takes the success with a widening and one keeps the cases with a widening: neither fits exactly
+Show(Find(1))
+```
+
 ### F14 (decided, §8) A literal as an argument of an overloaded function
 
 For the pick of an overload (F13), a literal argument has the type it has on its own (L10, L11):

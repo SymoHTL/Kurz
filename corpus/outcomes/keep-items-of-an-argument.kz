@@ -1,7 +1,7 @@
 // expect: output
 // | 10
 // | none
-// rules: O4
+// rules: O4, M11
 
 data NotFound
 
