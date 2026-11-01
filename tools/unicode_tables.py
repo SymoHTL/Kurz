@@ -400,7 +400,7 @@ def self_test():
     cases.append(("tables: a delta of 32768, the mark of a mapping to several code points, is refused",
                   isinstance(out, ValueError) and "mark" in str(out), brief(out)))
     out = got(lambda: tables({0xFFFF: (0x10000,)}))
-    cases.append(("tables: a mapping that leaves its plane is refused", isinstance(out, ValueError), brief(out)))
+    cases.append(("tables: a mapping that leaves its plane is refused", isinstance(out, ValueError) and "leaves its plane" in str(out), brief(out)))
 
     global PLANES
     planes, PLANES = PLANES, 0x100  # levels of the first 256 code points alone, which do not reach U+0150
@@ -432,13 +432,18 @@ def self_test():
                   ranges(props, "Cased")))
     out = got(lambda: generate(data, special, props))
     cases.append(("generate: a table below its floor is refused", isinstance(out, ValueError) and "floor" in str(out), out))
-    arrays = generate(data, special, props, floors={})
-    cases.append(("render and parse: the written file reads back as the arrays", parse(render(arrays)) == arrays, parse(render(arrays))))
-    deltas = list(arrays["LowerDeltas"])
-    deltas[arrays["LowerIndex"][0xC0 // BLOCK] * BLOCK + 0xC0 % BLOCK] = 33
-    changed = dict(arrays, LowerDeltas=deltas)
-    said = changes(arrays, changed)
-    cases.append(("changes: a changed mapping is named with both values", said == ["lower U+00C0: U+00E0 -> U+00E1"], said))
+    # a refusal of the tables, as a mutation of a case above makes, fails the two cases below and prints every case
+    arrays = got(lambda: generate(data, special, props, floors={}))
+    if isinstance(arrays, Exception):
+        cases.append(("render and parse: the written file reads back as the arrays", False, arrays))
+        cases.append(("changes: a changed mapping is named with both values", False, arrays))
+    else:
+        cases.append(("render and parse: the written file reads back as the arrays", parse(render(arrays)) == arrays, parse(render(arrays))))
+        deltas = list(arrays["LowerDeltas"])
+        deltas[arrays["LowerIndex"][0xC0 // BLOCK] * BLOCK + 0xC0 % BLOCK] = 33
+        changed = dict(arrays, LowerDeltas=deltas)
+        said = changes(arrays, changed)
+        cases.append(("changes: a changed mapping is named with both values", said == ["lower U+00C0: U+00E0 -> U+00E1"], said))
 
     with kit.scratch("kurz-ucd-") as cache:
         body = b"0041;A;Lu;0;L;;;;;N;;;;0061;\n"
@@ -493,41 +498,44 @@ def self_test():
         out = got(lambda: fetch("UnicodeData.txt", digest=other_digest, opener=lambda url, timeout: Answer(other), cache=cache))
         cases.append(("fetch: a kept file that cannot be read is fetched again", out == other.decode(), out))
 
-        texts = {"UnicodeData.txt": data, "SpecialCasing.txt": special, "DerivedCoreProperties.txt": props}
-        os.makedirs(os.path.join(cache, os.path.dirname(OUT)))
-        import contextlib
-        import io
+        if isinstance(arrays, Exception):
+            cases.append(("main: the runs of main over the tables of the cases above", False, arrays))
+        else:
+            texts = {"UnicodeData.txt": data, "SpecialCasing.txt": special, "DerivedCoreProperties.txt": props}
+            os.makedirs(os.path.join(cache, os.path.dirname(OUT)))
+            import contextlib
+            import io
 
-        def run(argv, fetcher=lambda name: texts[name]):
-            printed = io.StringIO()
-            with contextlib.redirect_stdout(printed):
-                code = main(argv, root=cache, fetcher=fetcher, floors={})
-            return code, printed.getvalue()
+            def run(argv, fetcher=lambda name: texts[name]):
+                printed = io.StringIO()
+                with contextlib.redirect_stdout(printed):
+                    code = main(argv, root=cache, fetcher=fetcher, floors={})
+                return code, printed.getvalue()
 
-        code, said = run([])
-        written = kit.read(os.path.join(cache, OUT))
-        cases.append(("main: writes the file where there was none", code == 0 and parse(written) == arrays and "there was none" in said, (code, said)))
-        code, said = run(["--check"])
-        cases.append(("main --check: the file the database gives passes", code == 0, (code, said)))
-        with open(os.path.join(cache, OUT), "w", encoding="utf-8") as f:
-            f.write(render(changed))
-        code, said = run(["--check"])
-        cases.append(("main --check: a file that differs fails, naming the mapping", code == 1 and "lower U+00C0: U+00E1 -> U+00E0" in said, (code, said)))
-        code, said = run([])
-        written = kit.read(os.path.join(cache, OUT))
-        cases.append(("main: writes the file again and names every change", code == 0 and parse(written) == arrays and "lower U+00C0: U+00E1 -> U+00E0" in said, (code, said)))
+            code, said = run([])
+            written = kit.read(os.path.join(cache, OUT))
+            cases.append(("main: writes the file where there was none", code == 0 and parse(written) == arrays and "there was none" in said, (code, said)))
+            code, said = run(["--check"])
+            cases.append(("main --check: the file the database gives passes", code == 0, (code, said)))
+            with open(os.path.join(cache, OUT), "w", encoding="utf-8") as f:
+                f.write(render(changed))
+            code, said = run(["--check"])
+            cases.append(("main --check: a file that differs fails, naming the mapping", code == 1 and "lower U+00C0: U+00E1 -> U+00E0" in said, (code, said)))
+            code, said = run([])
+            written = kit.read(os.path.join(cache, OUT))
+            cases.append(("main: writes the file again and names every change", code == 0 and parse(written) == arrays and "lower U+00C0: U+00E1 -> U+00E0" in said, (code, said)))
 
-        def unread(name):
-            raise Unread(f"{name}: could not be fetched")
+            def unread(name):
+                raise Unread(f"{name}: could not be fetched")
 
-        code, said = run(["--check"], fetcher=unread)
-        cases.append(("main --check: an unfetched file is PARTLY, never a pass", code == kit.PARTLY, (code, said)))
+            code, said = run(["--check"], fetcher=unread)
+            cases.append(("main --check: an unfetched file is PARTLY, never a pass", code == kit.PARTLY, (code, said)))
 
-        def wrong(name):
-            raise ValueError(f"{name}: SHA-256 0, where 1 is pinned: refused")
+            def wrong(name):
+                raise ValueError(f"{name}: SHA-256 0, where 1 is pinned: refused")
 
-        code, said = run(["--check"], fetcher=wrong)
-        cases.append(("main --check: a refused file fails", code == 1, (code, said)))
+            code, said = run(["--check"], fetcher=wrong)
+            cases.append(("main --check: a refused file fails", code == 1, (code, said)))
     return kit.report(cases)
 
 
