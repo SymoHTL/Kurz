@@ -13,7 +13,8 @@ namespace Kurz.Compiler.Tests;
 /// compared item by item; and the same under the allocator that makes every block it frees inaccessible. Needles of up to 12 bytes
 /// reach both cases of the two-way search, a needle whose part before its cut repeats at its period and one whose does not, each in at
 /// least 100 searches, and at least 100 stand twice in their string. A search of one byte, which reads two words at a time as Rust's
-/// <c>memchr</c> does, finds it at every place of lists of 0 to 40 bytes and from each of the 8 places in a word a search can start at.
+/// <c>memchr</c> does, finds it at every place of lists of 0 to 40 bytes and from each of the 8 places in a word a search can start at,
+/// takes the first of two places within one word, and reads no byte past the count of a list or a string.
 /// </summary>
 public sealed class SearchTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -323,6 +324,128 @@ public sealed class SearchTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var compilation = Builder.Compile(SourceText.FromString("program.kz", OneByte), [], runtime, testBuild: true);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "search-one-byte" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    private const string FirstAndCount = """
+        List<int> targets = [0, 35, 128, 255]
+        for ti in 0..<targets.Count {
+            byte t = byte(targets[ti])
+            byte flip = byte(targets[ti] ^ 1)
+            for n in 0..<41 {
+                mut xs = List<byte>()
+                for k in 0..<64 {
+                    xs.Add(t)
+                }
+
+                xs.Clear()
+                for k in 0..<n {
+                    mut v = byte((k * 37 + 11) % 256)
+                    if v == t {
+                        v = byte((k * 37 + 12) % 256)
+                    }
+
+                    xs.Add(v)
+                }
+
+                print(xs.IndexOf(t) ?? -1)
+                for q in 0..<n {
+                    List<int> laters = [q + 1 + (q * 7 + n) % 16, n - 1]
+                    for r in laters {
+                        if r > q && r < n {
+                            mut ys = xs[0..<n]
+                            ys[q] = t
+                            ys[r] = t
+                            if q + 1 < r {
+                                ys[q + 1] = flip
+                            }
+
+                            print(ys.IndexOf(t) ?? -1)
+                        }
+                    }
+                }
+            }
+        }
+
+        for n in 0..<41 {
+            mut cs = Bytes()
+            for k in 0..<64 {
+                cs.Add(byte(44))
+            }
+
+            cs.Clear()
+            for k in 0..<n {
+                if (k * 37 + 5) % 13 < 2 {
+                    cs.Add(byte(44))
+                } else {
+                    cs.Add(byte(97))
+                }
+            }
+
+            s = string.FromUtf8(cs) else {
+                InvalidUtf8 => "?"
+            }
+
+            at = s.IndexOf(',') ?? -1
+            mut line = "{at}:"
+            for piece in s.Split(',') {
+                line = "{line} {piece.Bytes.Count}"
+            }
+
+            print(line)
+        }
+
+        """;
+
+    [Fact]
+    public void A_search_of_one_byte_takes_the_first_of_two_and_reads_no_byte_past_the_count()
+    {
+        // X1, X9: `Find` takes the place of the byte from the mask of a word's test, whose lowest flag alone is sure, and reads the
+        // first 16 bytes, the words after them and the last 16 bytes in words. A list of 0 to 40 bytes holds the byte at two places, the
+        // second within 16 bytes of the first or at the end, and the byte after the first, where it stands before the second, is the
+        // byte with its lowest bit turned, which the test flags as well when a borrow reaches it: the first place is the answer. Each
+        // list, and a string that shares its block (T15), holds the byte only past its count, in the room 64 of them left behind
+        // (`Clear` keeps the room, M9): a read past the count finds it there, so the answer is -1, and the string's `Split` at a comma
+        // looks from each comma onward up to its end
+        var expected = new List<string>();
+        var near = 0;
+        var far = 0;
+        foreach (var t in new[] { 0, 35, 128, 255 })
+        {
+            for (var n = 0; n <= 40; n++)
+            {
+                expected.Add("-1");
+                for (var q = 0; q < n; q++)
+                {
+                    foreach (var r in new[] { q + 1 + (((q * 7) + n) % 16), n - 1 })
+                    {
+                        if (r > q && r < n)
+                        {
+                            expected.Add(q.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                            near += r - q < 8 ? 1 : 0;
+                            far += q >= 16 ? 1 : 0;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (var n = 0; n <= 40; n++)
+        {
+            var bytes = Enumerable.Range(0, n).Select(k => (byte)(((k * 37) + 5) % 13 < 2 ? ',' : 'a')).ToArray();
+            var pieces = Encoding.ASCII.GetString(bytes).Split(',').Select(p => p.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            expected.Add($"{bytes.AsSpan().IndexOf((byte)',')}: {string.Join(' ', pieces)}");
+        }
+
+        // the floors: two places within one word of each other, and a first place past the first 16 bytes, each at least 500 times
+        Assert.True(near >= 500 && far >= 500, $"{near}, {far}");
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", FirstAndCount), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "search-first-and-count" + suffix));
             Assert.Equal((0, ""), (code, error));
             Assert.Equal(expected, output);
         }

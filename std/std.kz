@@ -868,16 +868,28 @@ pub void StringFree(byte* bytes) {
     Free(bytes - 16, 16 + room)
 }
 
+// The place, 0 to 7 from the word's first address, of the first byte that the mask of `Find`'s test flags:
+// its lowest set bit, isolated, stands at bit 8k+7, and a multiply moves the byte k of a table of the numbers
+// 7 down to 0 into the top byte. A byte below the first byte of 0 is never flagged, since no borrow reaches
+// it; a byte above it may be, so only the lowest flag counts.
+long FirstFlag(ulong mask) => long((((mask & (0UL -% mask)) >> 7) *% 0x0001020304050607UL) >> 56)
+
 // The searches of a string and of a list of bytes (X1, X9), over the bytes of each, as Rust's
 // `str::find` searches a string's: the position of the first `m` bytes at `needle` among the `n` bytes
-// at `hay`, or -1 where they stand nowhere there; an `m` of 0 is found at 0. One byte is looked for as
-// Rust's `memchr` of a slice looks: among fewer than 16 bytes byte by byte, else byte by byte up to the
-// first address that is a multiple of 8, then two words of 8 bytes at a time, each word put through an
-// exclusive or with the byte repeated in its every byte, which leaves a byte of 0 where the byte stands,
-// and tested for a byte of 0 as `contains_zero_byte` tests, `(x - 0x0101010101010101) & ~x &
-// 0x8080808080808080`, and byte by byte from the two words that hold it; more take the two-way search
-// of `TwoWay`, which reads no byte of `hay` more than a bounded number of times, so that no input makes a
-// search slower than linear.
+// at `hay`, or -1 where they stand nowhere there; an `m` of 0 is found at 0. More bytes take the two-way
+// search of `TwoWay`, which reads no byte of `hay` more than a bounded number of times, so that no input
+// makes a search slower than linear. One byte is looked for among fewer than 16 bytes byte by byte, as
+// Rust's `memchr` of a slice looks among fewer than two words, so that no read passes the `n` bytes; among
+// 16 and more, the first 16 bytes are read as two words at any address (`WordAt`), then two words of 8
+// bytes at a time from the address at or below the 16th byte that is a multiple of 8, and the bytes left
+// after them as the last two words of `hay`, whose bytes before that point hold no such byte. Each word
+// is put through an exclusive or with the byte repeated in its every byte, which leaves a byte of 0 where
+// the byte stands, and tested for a byte of 0 as Rust's `contains_zero_byte` tests, `(x -
+// 0x0101010101010101) & ~x & 0x8080808080808080`, and the place comes from the mask (`FirstFlag`).
+// Rust's `memchr` reads byte by byte up to the first multiple of 8 and from the two words that hold the
+// byte: on the commas of a `Split` that stand every 7.5 bytes that form took 7% more time than a loop of
+// one byte at a time, 99.91 ms against 92.97, and this one takes 2% less, 91.44; it finds a byte at the
+// end of 1 MiB in 6.28 ms, where Rust's `str::find` takes 6.77 (issue #157, 2026-11-01, best of 9).
 pub long Find(byte* hay, long n, byte* needle, long m) {
     if m == 0 {
         return 0
@@ -894,35 +906,61 @@ pub long Find(byte* hay, long n, byte* needle, long m) {
     mut long found = -1
     raw {
         byte b = needle[0]
-        mut long i = 0
-        if n >= 16 {
-            long head = (8 - (long(hay) & 7)) & 7
-            while i < head && hay[i] != b {
+        if n < 16 {
+            mut long i = 0
+            while i < n && hay[i] != b {
                 i = i + 1
             }
 
-            if i == head {
-                ulong low = 0x0101010101010101UL
-                ulong high = 0x8080808080808080UL
-                ulong repeated = ulong(b) *% low
+            if i < n {
+                found = i
+            }
+        } else {
+            ulong low = 0x0101010101010101UL
+            ulong high = 0x8080808080808080UL
+            ulong repeated = ulong(b) *% low
+            ulong u = WordAt(hay) ^ repeated
+            ulong v = WordAt(hay + 8) ^ repeated
+            ulong mu = (u -% low) & ~u & high
+            ulong mv = (v -% low) & ~v & high
+            if mu != 0 {
+                found = FirstFlag(mu)
+            } else if mv != 0 {
+                found = 8 + FirstFlag(mv)
+            } else {
+                mut long i = 16 - (long(hay + 16) & 7)
+                mut bool hit = false
                 while i <= n - 16 {
-                    ulong u = *Ptr<ulong>(hay + i) ^ repeated
-                    ulong v = *Ptr<ulong>(hay + i + 8) ^ repeated
-                    if ((u -% low) & ~u & high) != 0 || ((v -% low) & ~v & high) != 0 {
+                    ulong x = *Ptr<ulong>(hay + i) ^ repeated
+                    ulong y = *Ptr<ulong>(hay + i + 8) ^ repeated
+                    ulong mx = (x -% low) & ~x & high
+                    ulong my = (y -% low) & ~y & high
+                    if (mx | my) != 0 {
+                        if mx != 0 {
+                            found = i + FirstFlag(mx)
+                        } else {
+                            found = i + 8 + FirstFlag(my)
+                        }
+
+                        hit = true
                         break
                     }
 
                     i = i + 16
                 }
+
+                if !hit {
+                    ulong x = WordAt(hay + n - 16) ^ repeated
+                    ulong y = WordAt(hay + n - 8) ^ repeated
+                    ulong mx = (x -% low) & ~x & high
+                    ulong my = (y -% low) & ~y & high
+                    if mx != 0 {
+                        found = n - 16 + FirstFlag(mx)
+                    } else if my != 0 {
+                        found = n - 8 + FirstFlag(my)
+                    }
+                }
             }
-        }
-
-        while i < n && hay[i] != b {
-            i = i + 1
-        }
-
-        if i < n {
-            found = i
         }
     }
 
