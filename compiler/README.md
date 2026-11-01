@@ -1359,8 +1359,8 @@ emitter does not write through, where an index written on a narrowed map or list
 with a nullable field `Items`, is read (N3, M4), a `mut`
 method on such a path and such a path passed as `mut` (N3, M5, M7); a `weak` reference as a type
 argument of a `data` type, as a key or a value of a map and as a parameter or the result of a
-function type, which the emitter does not lay out, and `weak` before a type parameter or a union of
-classes (R3, R5, T19, D9); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
+function type, which the emitter does not lay out, `weak` before a type parameter or a union of
+classes, and a `weak T?` as a case of a union, a nullable case of one (R3, R5, T19, D9); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
 (R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
 R10 says `&x` needs no `raw` block and Rust takes such a place in `unsafe` code alone (R10); an

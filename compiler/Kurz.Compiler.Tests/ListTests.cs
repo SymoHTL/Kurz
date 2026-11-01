@@ -2362,6 +2362,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         strong = null
         print(NameOf(faint))
         print(strong?.Name ?? "freed")
+        mut Owner? gus = Owner("Gus")
+        pg = Pet("Max", gus)
+        Owner? kept = pg.Keeper
+        gus = null
+        print(NameOf(pg.Keeper))
+        print(kept?.Name ?? "freed")
         """;
 
     private static readonly string[] WeakPrint =
@@ -2380,6 +2386,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "Fay",
         "gone",
         "freed",
+        "Gus", // R3: the read `kept` stored holds its target after its other holder let go of it
+        "Gus",
     ];
 
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
@@ -2853,6 +2861,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(Weak, toolchain.Runtime, "weak-values"), 0, WeakPrint, "");
     }
 
     [Fact]

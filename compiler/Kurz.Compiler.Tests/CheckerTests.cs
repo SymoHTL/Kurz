@@ -2964,6 +2964,8 @@ public sealed class CheckerTests
     [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))", "2: a method with type parameters of its own (section 4, T19)")]
     [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: a `weak` reference as a type argument of a data type (R3)")]
     [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: a nullable case of a union, `weak Owner?` (N1, D9)")]
+    [InlineData("class Owner(string Name)\n\nvoid Keep<T>(weak T? w) {\n}\n\nprint(1)", "3: `weak` before `T`, which the checker does not read as a class (R5, T19, D9)")]
+    [InlineData("class A(int N)\nclass B(int N)\nclass Pet(weak (A | B)? Keeper)\n\nprint(1)", "3: `weak` before `A | B`, which the checker does not read as a class (R5, T19, D9)")]
     [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: a `weak` reference as a parameter or the result of a function type (R3)")]
     [InlineData("class Owner(string Name)\n\nm = Map<string, weak Owner?>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
     [InlineData("class C(int N)\n\na = C(1)\nprint(a == a)", "4: `==` on a `C`: the equality of a class instance (K4) is not read (D3, M9)")]
@@ -2980,7 +2982,8 @@ public sealed class CheckerTests
     {
         // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields and constructors in the body (K7, K14, K18),
         // a method that is `static`, `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` (R3) in a type argument of a
-        // data type, a function type or a map, or as a case of a union, whose nullable cases are open (section 14), `==`
+        // data type, a function type or a map, before a type parameter or a union of classes, or as a case of a union, whose
+        // nullable cases are open (section 14), `==`
         // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, and an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5)
         Assert.Equal([expected], NotSupported(program));
