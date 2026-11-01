@@ -496,6 +496,11 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (UnreadIntrinsic(n.Name, n.Line))
+        {
+            return Typed.Error;
+        }
+
         Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
         return Typed.Error;
     }

@@ -490,9 +490,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `s.Bytes` as a `Bytes`, which takes a count of the block of a string made while the program runs and copies the
   bytes of a literal, `s.Bytes[i]`, read from the string in place, and `string.FromUtf8(b)` and
   `string.FromUtf8Lossy(b)`, whose string takes a count of the block of the bytes where every sequence is UTF-8,
-  which `string.FromUtf8` reads a sequence at a time and a run of ASCII byte by byte, a run of more than 16 bytes
-  as Rust 1.82's `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a
-  multiple of 8, their case `InvalidUtf8` a data type every file sees,
+  which `string.FromUtf8` reads a sequence at a time, a letter with three bytes after it in place with no check of
+  the end between its bytes, and a run of ASCII byte by byte, a run of more than 16 bytes as Rust 1.82's
+  `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a multiple of 8, where
+  `run_utf8_validation` whole, which checks each byte of a letter against the end and tries its words at every byte
+  of ASCII at such an address, read text of short runs of ASCII between letters in 354 ms against the 280 ms of
+  every sequence read through one check (measured for pull request 154; record, section 1: the owner, 2026-11-01,
+  "Allow, faster wins"), their case `InvalidUtf8` a data type every file sees,
   declared before the file's own, and the lossy text, where a
   sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
   owner, 2026-10-29, "Union, as Rust"); `s.Contains(x)`, `s.StartsWith(x)`, `s.EndsWith(x)` and `s.IndexOf(x)`
@@ -797,8 +801,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
-  holds its state, of a fixed count for each type (616 bytes for SHA-256, 408 for MD5, 1028 for CRC-32's register and
-  table, 1296 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
+  holds its state, of a fixed count for each type (104 bytes for SHA-256, 88 for MD5, 1028 for CRC-32's register and
+  table, 272 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
   the hasher's place, a `mut` variable or a path of fields from one (M5), copy it where another value holds it, as a
   list is copied before a write (M3), and store the block back. `Finish` gives a new block of the digest, or the
   CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
@@ -1324,7 +1328,8 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); and `use` (F10) of any folder but the runtime's `sys`;
+type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
+which the intrinsics and their vector types stand (R18); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

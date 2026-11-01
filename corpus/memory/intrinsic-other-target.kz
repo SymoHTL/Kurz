@@ -1,0 +1,11 @@
+// expect: output
+// | 3
+// rules: R18
+
+v = Vector128.Create(1, 2, 3, 4)
+// a case is read for x86-64 (R11), where the test of a class under `Arm` is `false`; its block is still checked (R18)
+if Arm.AdvSimd.IsSupported {
+    print(Arm.AdvSimd.Add(v, v).GetElement(2))
+} else {
+    print(v.GetElement(2))
+}
