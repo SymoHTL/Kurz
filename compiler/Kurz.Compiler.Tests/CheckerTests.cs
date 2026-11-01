@@ -1953,7 +1953,22 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("l.Accept()", "l.Read()", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("s.Close()", "s.Accept()", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(Program.Replace("c.Close()", "print(c.Port)", StringComparison.Ordinal)));
-        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors(Program.Replace("TcpStream.Connect(\"localhost:{port}\")", "TcpStream.Connect(port)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 10)], Errors(Program.Replace("TcpStream.Connect(\"localhost:{port}\")", "TcpStream.Connect(port)", StringComparison.Ordinal))); // F13: it fits neither form of `Connect`, the address alone nor the address and a time (S9)
+    }
+
+    [Fact]
+    public void A_stream_sets_the_time_of_its_reads_and_writes_and_connect_has_a_second_form_with_a_time()
+    {
+        // S9: a stream's setters take a `duration?`, `null` for no bound, and `Connect`'s second form a `duration`; a listener and a file have
+        // no setter, and a time of another type, or `null` in the second form of `Connect`, fits no form
+        const string Program = "void | IoError Bound() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)\n    c.SetReadTimeout(50ms)\n    c.SetWriteTimeout(null)\n    c.SetReadTimeout(timeout: 1s)\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nBound() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "l.SetReadTimeout(50ms)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(Program.Replace("c.SetWriteTimeout(null)", "l.SetWriteTimeout(null)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetReadTimeout(1s)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "c.SetReadTimeout(50)", StringComparison.Ordinal)));
+        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
+        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
     }
 
     [Fact]

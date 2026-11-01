@@ -1,0 +1,38 @@
+// expect: output
+// | InvalidInput 0
+// | InvalidInput 0
+// | InvalidInput 0
+// | Other 9
+// rules: S9
+
+// a time of zero or below is refused, in a setter and in the second form of `Connect`; `null` is no bound; and a setter on a closed
+// stream gets the system's error of a descriptor that is not open, as every call after `Close` does
+void | IoError Refused() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.SetReadTimeout(0s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.SetWriteTimeout(-1ms) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    match TcpStream.Connect("127.0.0.1:{listener.Port}", 0s) {
+        TcpStream => print("connected")
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.SetReadTimeout(null)
+    client.Close()
+    client.SetReadTimeout(1s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    server.Close()
+}
+
+Refused() else {
+    IoError e => print(e)
+}

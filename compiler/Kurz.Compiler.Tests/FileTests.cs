@@ -20,34 +20,37 @@ namespace Kurz.Compiler.Tests;
 /// colon, a literal of IPv6 binds where the machine has its loopback, and a connection <c>Accept</c> gave names its listener's address
 /// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c>, or with <c>EAI_SYSTEM</c> while <c>errno</c> holds 0, is the kind
 /// <c>Other</c>, and one that fails with <c>EAI_SYSTEM</c> while <c>errno</c> holds 13 the error of that number, each through a runtime
-/// whose lookup gives that result; and a build for Windows says
+/// whose lookup gives that result; a stream reads and writes within 5 seconds by default and a listener waits without a bound, a setter
+/// sets the time as Rust's <c>set_timeout</c> sets it, read back by <c>getsockopt</c>, the first form of <c>Connect</c> waits the default
+/// bound, one bound holds over every address of a name, and <c>EAGAIN</c> is <c>TimedOut</c> on a stream's read and write alone (S9);
+/// and a build for Windows says
 /// <c>not supported</c> at a call on a file or a socket (S11). Each program runs under
 /// the runtime of this machine and under the fenced allocator of <see cref="ListTests.Fenced"/>, where no other runtime is named; on
 /// Windows each is held to the build's refusal instead.
 /// </summary>
 public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    private static Compilation Compile(string text, CheckedRuntime runtime) => Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild: true);
+    private static Compilation Compile(string text, CheckedRuntime runtime, IReadOnlyCollection<string>? grants = null) => Builder.Compile(SourceText.FromString("program.kz", text), grants ?? [], runtime, testBuild: true);
 
     /// <summary>
     /// The program built for this machine and run with each runtime of <paramref name="runtimes"/>, or with this machine's and the fenced
     /// one, after the shell command <paramref name="setup"/> where that is given, prints <paramref name="lines"/> and exits with
     /// <paramref name="code"/> and <paramref name="error"/> on its error stream: the executables. On Windows the build says
-    /// <c>not supported</c> at a call on a file, and there are none.
+    /// <c>not supported</c> at a call on a file, and there are none. A program built with <paramref name="grants"/> is given them.
     /// </summary>
-    private List<string> Ran(string text, string name, string[] lines, string? setup = null, int code = 0, string error = "", CheckedRuntime[]? runtimes = null)
+    private List<string> Ran(string text, string name, string[] lines, string? setup = null, int code = 0, string error = "", CheckedRuntime[]? runtimes = null, IReadOnlyCollection<string>? grants = null)
     {
         var executables = new List<string>();
         if (Builder.HostTarget == Target.Windows)
         {
-            RefusedOnWindows(Compile(text, toolchain.Runtime));
+            RefusedOnWindows(Compile(text, toolchain.Runtime, grants));
             return executables;
         }
 
         var each = runtimes is null ? [(toolchain.Runtime, ""), (ListTests.Fenced, "-fenced")] : runtimes.Select((r, i) => (r, i == 0 ? "" : $"-{i}")).ToArray();
         foreach (var (runtime, suffix) in each)
         {
-            var compilation = Compile(text, runtime);
+            var compilation = Compile(text, runtime, grants);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var executable = toolchain.Build(compilation.Program, name + suffix);
             var run = setup is null ? Toolchain.Run(executable) : RunAfter(executable, setup);
@@ -541,7 +544,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         // the positive control: the runtime's socket and accept without `SOCK_CLOEXEC`
-        var without = ListTests.Edited(("runtime/linux/linux.kz", "int fd = socket(family, 524289, 0)", "int fd = socket(family, 1, 0)"), ("runtime/linux/linux.kz", "accept4(fd, null, null, 524288)", "accept4(fd, null, null, 0)"));
+        var without = ListTests.Edited(("runtime/linux/linux.kz", "int fd = socket(family, 524289 + blocking, 0)", "int fd = socket(family, 1 + blocking, 0)"), ("runtime/linux/linux.kz", "accept4(fd, null, null, 524288)", "accept4(fd, null, null, 0)"));
         if (CloseOnExec(without, "socket-cloexec-without") is { } withoutFlag)
         {
             Assert.Equal([false, false, false], withoutFlag);
@@ -771,6 +774,187 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(text, "socket-accepted-path", ["other (os error 9): 127.0.0.1:0"]);
+    }
+
+    // ---- the time bounds of sockets (S9) -------------------------------------------------------------------
+
+    /// <summary>
+    /// A program that reads the time of the reads (<c>SO_RCVTIMEO</c>, 20) and of the writes (<c>SO_SNDTIMEO</c>, 21) of a descriptor back
+    /// by <c>getsockopt</c>, as its seconds and microseconds: the descriptors 3, 4 and 5 are the listener, the stream <c>Connect</c> made
+    /// and the one <c>Accept</c> gave, the first three the program opens.
+    /// </summary>
+    private const string Bounds = """
+        extern "C" {
+            int getsockopt(int fd, int level, int name, void* value, int* length)
+            void* malloc(long size)
+            void free(void* p)
+        }
+
+        string Bound(int fd, int option) {
+            mut long seconds = -1
+            mut long micros = -1
+            raw {
+                void* time = malloc(16)
+                mut int length = 16
+                if getsockopt(fd, 1, option, time, &length) == 0 {
+                    seconds = *Ptr<long>(time)
+                    micros = *Ptr<long>(Ptr<byte>(time) + 8)
+                }
+
+                free(time)
+            }
+
+            return "{seconds} {micros}"
+        }
+
+        void | IoError Bounds() {
+            listener = TcpListener.Bind("127.0.0.1:0")
+            client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+            server = listener.Accept()
+            mut fd = 3
+            while fd <= 5 {
+                print("{Bound(fd, 20)} {Bound(fd, 21)}")
+                fd = fd + 1
+            }
+
+            client.SetReadTimeout(1500000001ns)
+            client.SetWriteTimeout(1ns)
+            print(Bound(4, 20))
+            print(Bound(4, 21) != "0 0")
+            client.SetReadTimeout(null)
+            print(Bound(4, 20))
+            client.Close()
+            server.Close()
+        }
+
+        Bounds() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void A_stream_waits_5_seconds_by_default_a_listener_without_a_bound_and_a_setter_sets_the_time_as_rust_does()
+    {
+        // S9: the stream `Connect` made and the one `Accept` gave read and write with a bound of 5 seconds, and the listener has none, so
+        // that `Accept` waits; a time cut down to whole microseconds, as Rust's `set_timeout` cuts it, which Linux keeps in its own ticks,
+        // rounding a part of one up, so that 1.5 s and 1 ns read back as 1.5 s and a 1 ns that rounded up would not; a positive time that
+        // comes to no microsecond raised to 1, a bound and not none; and `null` no bound
+        string[] lines(string seconds) => ["0 0 0 0", $"{seconds} 0 {seconds} 0", $"{seconds} 0 {seconds} 0", "1 500000", "true", "0 0"];
+        Ran(Bounds, "socket-bounds", lines("5"), grants: ["raw", "native"]);
+
+        // the positive control: the default the runtime sets, 7 seconds, read back as 7
+        var seven = ListTests.Edited(("runtime/linux/linux.kz", "long DefaultBound() => 5000000000", "long DefaultBound() => 7000000000"));
+        Ran(Bounds, "socket-bounds-seven", lines("7"), runtimes: [seven], grants: ["raw", "native"]);
+    }
+
+    /// <summary>A listener whose queue of 128 connections that wait is full, and connections to it until one is not made: what it was, and whether all of it took less than 2 seconds.</summary>
+    private const string Full = """
+        void | IoError Full() {
+            listener = TcpListener.Bind("127.0.0.1:0")
+            mut held = List<TcpStream>()
+            mut timedOut = false
+            start = timestamp.Now
+            while !timedOut && held.Count < 1000 {
+                match TcpStream.Connect("127.0.0.1:{listener.Port}") {
+                    TcpStream s => held.Add(s)
+                    IoError e => {
+                        print("{e.Kind} {e.Code}")
+                        timedOut = true
+                    }
+                }
+            }
+
+            print(held.Count > 1)
+            print(timestamp.Now - start < 2s)
+        }
+
+        Full() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void The_first_form_of_connect_is_bounded_by_the_default_and_runs_out_with_timed_out_and_the_number_0()
+    {
+        // S9: Linux drops the connection that finds its listener's queue full, so that it waits; the first form of `Connect` waits the
+        // default bound, here 100 ms, and gives `TimedOut` with the number 0, as Rust's `connect_timeout` gives no error of the system
+        var short_ = ListTests.Edited(("runtime/linux/linux.kz", "long DefaultBound() => 5000000000", "long DefaultBound() => 100000000"));
+        Ran(Full, "socket-connect-default", ["TimedOut 0", "true", "true"], runtimes: [short_]);
+    }
+
+    [Fact]
+    public void One_bound_holds_over_every_address_of_a_name_and_once_it_ran_out_no_other_is_tried()
+    {
+        // S9 (assumed: one bound shared by every address a name gives; its cost is that a first address that never answers spends the
+        // whole bound, and the later addresses are not tried): a lookup that asks for every type of socket gives `127.1` three times
+        // (a stream, a datagram and a raw socket), each a connection to the full queue; the call ends with the one bound, 500 ms, not
+        // three times it
+        const string text = """
+            void | IoError Shared() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                mut held = List<TcpStream>()
+                mut full = false
+                while !full && held.Count < 1000 {
+                    match TcpStream.Connect("127.0.0.1:{listener.Port}", 100ms) {
+                        TcpStream s => held.Add(s)
+                        IoError => full = true
+                    }
+                }
+
+                start = timestamp.Now
+                match TcpStream.Connect("127.1:{listener.Port}", 500ms) {
+                    TcpStream => print("connected")
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
+
+                print(timestamp.Now - start < 1s)
+            }
+
+            Shared() else {
+                IoError e => print(e)
+            }
+
+            """;
+        var every = ListTests.Edited(("runtime/linux/linux.kz", "*Ptr<int>(held + 72) = 1", "*Ptr<int>(held + 72) = 0"));
+        Ran(text, "socket-connect-shared", ["TimedOut 0", "true"], runtimes: [every]);
+    }
+
+    [Fact]
+    public void Eagain_is_timed_out_on_a_stream_s_read_and_write_alone()
+    {
+        // S9 (assumed): a call on a blocking socket whose time ran out returns `EAGAIN` (11), which a stream's read and write give as
+        // `TimedOut` with the system's number; every other `EAGAIN` keeps Rust's `WouldBlock`: through a runtime whose every read gives it
+        const string text = """
+            void | IoError Again() {
+                File.WriteAll("again.txt", "x".Bytes)
+                f = File.Open("again.txt")
+                File.Delete("again.txt")
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+                server = listener.Accept()
+                mut buffer = Bytes()
+                match f.Read(mut buffer, 1) {
+                    int => print("read")
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
+
+                match client.Read(mut buffer, 1) {
+                    int => print("read")
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
+
+                server.Close()
+            }
+
+            Again() else {
+                IoError e => print(e)
+            }
+
+            """;
+        var again = ListTests.Edited(("runtime/linux/linux.kz", "pub long ReadFile(int fd, byte* bytes, long count) {\n", "pub long ReadFile(int fd, byte* bytes, long count) {\n    if count >= 0 {\n        return -11\n    }\n\n"));
+        Ran(text, "socket-eagain", ["WouldBlock 11", "TimedOut 11"], runtimes: [again]);
     }
 
     [Fact]

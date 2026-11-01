@@ -423,6 +423,132 @@ match TcpStream.Connect("127.0.0.1:65536") {
 }
 ```
 
+Case: [system/read-timeout.kz](../corpus/system/read-timeout.kz)
+```kurz
+// a read whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time, which the system counts in
+// its own ticks, and long before the 5 seconds of the default; the stream stays open, and the next read takes what the peer wrote
+void | IoError Wait() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.SetReadTimeout(50ms)
+    mut buffer = Bytes()
+    start = timestamp.Now
+    match client.Read(mut buffer, 1) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    elapsed = timestamp.Now - start
+    print(elapsed >= 40ms && elapsed < 2s)
+    server.Write("x".Bytes)
+    print(client.Read(mut buffer, 1))
+}
+
+Wait() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/write-timeout.kz](../corpus/system/write-timeout.kz)
+```kurz
+// a peer that never reads: the writes fill what the system holds for it, and the one that waits longer than its time is `TimedOut`
+void | IoError Stall() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.SetWriteTimeout(50ms)
+    mut chunk = "0123456789abcdef".Bytes
+    while chunk.Count < 65536 {
+        chunk.AddRange(chunk)
+    }
+
+    start = timestamp.Now
+    mut writing = true
+    while writing {
+        client.Write(chunk) else {
+            IoError e => {
+                print("{e.Kind} {e.Code}")
+                writing = false
+            }
+        }
+    }
+
+    print(timestamp.Now - start < 3s)
+    server.Close()
+}
+
+Stall() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/connect-timeout.kz](../corpus/system/connect-timeout.kz)
+```kurz
+// a listener that accepts nothing: once its queue of connections that wait is full, a connection waits, and the second form of
+// `Connect` gives `TimedOut` after its time, with the number 0, since no error of the system came with it
+void | IoError Full() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    mut held = List<TcpStream>()
+
+    // the longest time a `duration` holds, about 292 years, is a bound too, which the queue's room meets at once
+    held.Add(TcpStream.Connect("127.0.0.1:{listener.Port}", 9223372036854775807ns))
+    mut timedOut = false
+    start = timestamp.Now
+    while !timedOut && held.Count < 1000 {
+        match TcpStream.Connect("127.0.0.1:{listener.Port}", 100ms) {
+            TcpStream s => held.Add(s)
+            IoError e => {
+                print("{e.Kind} {e.Code}")
+                timedOut = true
+            }
+        }
+    }
+
+    print(held.Count > 1)
+    print(timestamp.Now - start < 2s)
+}
+
+Full() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/timeout-refused.kz](../corpus/system/timeout-refused.kz)
+```kurz
+// a time of zero or below is refused, in a setter and in the second form of `Connect`; `null` is no bound; and a setter on a closed
+// stream gets the system's error of a descriptor that is not open, as every call after `Close` does
+void | IoError Refused() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.SetReadTimeout(0s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.SetWriteTimeout(-1ms) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    match TcpStream.Connect("127.0.0.1:{listener.Port}", 0s) {
+        TcpStream => print("connected")
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.SetReadTimeout(null)
+    client.Close()
+    client.SetReadTimeout(1s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    server.Close()
+}
+
+Refused() else {
+    IoError e => print(e)
+}
+```
+
 ### S10 (decided, §12) A call blocks its thread
 
 A call on a file or a socket is a system call that blocks the thread that makes it. A program

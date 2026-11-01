@@ -51,19 +51,24 @@ public sealed partial class Emitter
 
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
-        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept)
+        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout)
         {
-            var handle = EmitExpression(((MemberAccess)Unwrap(c.Callee)).Target);
+            var target = ((MemberAccess)Unwrap(c.Callee)).Target;
+            var kinds = TypeOf(target) is HandleType { Kind: Handle.TcpStream } ? "StreamErrorKind" : "ErrorKind";
+            var handle = EmitExpression(target);
             switch (info.Kind)
             {
                 case CallKind.FileRead:
-                    EmitFileRead(c, info, outcome, handle);
+                    EmitFileRead(c, info, outcome, handle, kinds);
                     break;
                 case CallKind.FileWrite:
-                    EmitFileWrite(c, info, outcome, handle);
+                    EmitFileWrite(c, info, outcome, handle, kinds);
                     break;
                 case CallKind.TcpAccept:
                     EmitAccept(outcome, handle);
+                    break;
+                case CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout:
+                    EmitSetTimeout(c, info, outcome, handle);
                     break;
                 default:
                     EmitFileClose(outcome, handle);
@@ -73,7 +78,13 @@ public sealed partial class Emitter
         else
         {
             var bytes = new ListType(Types.Byte);
-            var arguments = Arguments(c, info, j => info.Kind == CallKind.FileWriteAll && j == 1 ? bytes : Types.String, _ => false, _ => null, cConvention: false, owned: false)
+            KurzType Parameter(int j) => (info.Kind, j) switch
+            {
+                (CallKind.FileWriteAll, 1) => bytes,
+                (CallKind.TcpConnect, 1) => Types.Duration,
+                _ => Types.String,
+            };
+            var arguments = Arguments(c, info, Parameter, _ => false, _ => null, cConvention: false, owned: false)
                 .Select(a => a[(a.IndexOf(' ', StringComparison.Ordinal) + 1)..])
                 .ToList();
             EmitPathCall(info.Kind, outcome, arguments);
@@ -113,7 +124,8 @@ public sealed partial class Emitter
 
             case CallKind.TcpConnect:
                 {
-                    var r = SysCall("Connect", $"ptr {c}");
+                    // the second form takes its time (S9), the first the runtime's default bound
+                    var r = arguments.Count == 2 ? SysCall("ConnectWithin", $"ptr {c}, i64 {arguments[1]}") : SysCall("Connect", $"ptr {c}");
                     FreePath(c, path);
                     FailBelowZero(o, r, path);
                     Succeed(o, NewHandle(fn.Value($"trunc i64 {r} to i32"), path));
@@ -212,9 +224,10 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S3: <c>f.Read(mut into, max)</c>: a <c>max</c> below 0 raises <c>index-out-of-range</c>; then the room for <c>max</c> more bytes
-    /// is made in <c>into</c>, as <c>Add</c> grows a list, before any byte is read, and the bytes read are added at its end.
+    /// is made in <c>into</c>, as <c>Add</c> grows a list, before any byte is read, and the bytes read are added at its end; the kind of a
+    /// failure is the one the runtime's function <paramref name="kinds"/> gives (<see cref="FailBelowZero"/>).
     /// </summary>
-    private void EmitFileRead(CallExpression c, CallInfo info, FileOutcome o, string handle)
+    private void EmitFileRead(CallExpression c, CallInfo info, FileOutcome o, string handle, string kinds)
     {
         var arguments = Arguments(c, info, j => j == 0 ? new ListType(Types.Byte) : Types.Int, j => j == 0, _ => null, cConvention: false, owned: false);
         var place = arguments[0]["ptr ".Length..];
@@ -228,20 +241,36 @@ public sealed partial class Emitter
         var more = fn.Value($"sext i32 {max} to i64");
         var block = Reserve(place, more);
         var r = SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {more}");
-        FailBelowZero(o, r, HandlePath(handle));
+        FailBelowZero(o, r, HandlePath(handle), kinds: kinds);
         fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {r})");
         Succeed(o, fn.Value($"trunc i64 {r} to i32"));
     }
 
-    /// <summary>S4: <c>f.Write(bytes)</c>, every byte, a write of which the system takes none <c>WriteZero</c>.</summary>
-    private void EmitFileWrite(CallExpression c, CallInfo info, FileOutcome o, string handle)
+    /// <summary>S4: <c>f.Write(bytes)</c>, every byte, a write of which the system takes none <c>WriteZero</c>; the kind of a failure as <see cref="EmitFileRead"/> gives it.</summary>
+    private void EmitFileWrite(CallExpression c, CallInfo info, FileOutcome o, string handle, string kinds)
     {
         var list = Arguments(c, info, _ => new ListType(Types.Byte), _ => false, _ => null, cConvention: false, owned: false).Single()["ptr ".Length..];
         var (items, count) = BytesOf(list);
         var r = SysCall("WriteFile", $"i32 {HandleDescriptor(handle)}, ptr {items}, i64 {count}");
         var path = HandlePath(handle);
-        FailBelowZero(o, r, path);
+        FailBelowZero(o, r, path, kinds: kinds);
         WriteZeroBelow(o, r, count, path);
+        Succeed(o, null);
+    }
+
+    /// <summary>
+    /// S9: a stream's <c>SetReadTimeout(timeout)</c> or <c>SetWriteTimeout(timeout)</c>: the runtime's <c>SetTimeout</c> with
+    /// <c>SO_RCVTIMEO</c> (20) or <c>SO_SNDTIMEO</c> (21), the nanoseconds of the time, and whether there is one, <c>null</c> being no bound.
+    /// </summary>
+    private void EmitSetTimeout(CallExpression c, CallInfo info, FileOutcome o, string handle)
+    {
+        var nullable = Types.Nullable(Types.Duration);
+        var time = Arguments(c, info, _ => nullable, _ => false, _ => null, cConvention: false, owned: false).Single()[(Ir(nullable).Length + 1)..];
+        var bounded = fn.Value($"xor i1 {IsCase(Tag(time, nullable), nullable, Types.Null)}, true");
+        var nanoseconds = fn.Value($"select i1 {bounded}, i64 {Payload(time, nullable, Types.Duration)}, i64 0");
+        var option = info.Kind == CallKind.TcpSetReadTimeout ? "20" : "21";
+        var r = SysCall("SetTimeout", $"i32 {HandleDescriptor(handle)}, i32 {option}, i64 {nanoseconds}, i1 {bounded}");
+        FailBelowZero(o, r, HandlePath(handle));
         Succeed(o, null);
     }
 
@@ -320,15 +349,19 @@ public sealed partial class Emitter
 
     private void FreePath(string copy, string path) => fn.Emit($"call void {RuntimeFunction("FreePath")}(ptr {copy}, %kz.str {path})");
 
-    /// <summary>A failure, a result below 0, ends the call with its <c>IoError</c> after <paramref name="before"/>; the code goes on with a result of 0 or more.</summary>
-    private void FailBelowZero(FileOutcome o, string result, string path, Action? before = null)
+    /// <summary>
+    /// A failure, a result below 0, ends the call with its <c>IoError</c> after <paramref name="before"/>, its kind the one the runtime's
+    /// function <paramref name="kinds"/> gives, <c>ErrorKind</c>, or <c>StreamErrorKind</c> for a stream's read and write (S9); the code
+    /// goes on with a result of 0 or more.
+    /// </summary>
+    private void FailBelowZero(FileOutcome o, string result, string path, Action? before = null, string kinds = "ErrorKind")
     {
         var failed = fn.Label("io.failed");
         var ok = fn.Label("io.ok");
         fn.CondBranch(fn.Value($"icmp slt i64 {result}, 0"), failed, ok);
         fn.Block(failed);
         before?.Invoke();
-        Fail(o, fn.Value($"call {Ir(Layout.Fields(o.Error)[0])} {SysFunction("ErrorKind")}(i64 {result})"), fn.Value($"call i32 {SysFunction("ErrorCode")}(i64 {result})"), path);
+        Fail(o, fn.Value($"call {Ir(Layout.Fields(o.Error)[0])} {SysFunction(kinds)}(i64 {result})"), fn.Value($"call i32 {SysFunction("ErrorCode")}(i64 {result})"), path);
         fn.Block(ok);
     }
 
