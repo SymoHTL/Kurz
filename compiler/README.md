@@ -1392,7 +1392,10 @@ generic data type (T19), each of which leaves the data type, and every data type
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
-type or a time type (T10, T29);
+type or a time type (T10, T29); `void` as a type argument written in a type or a call, of a generic
+function, a generic `data` type, `List` and `Map`, which C# refuses and Rust's `()`, a type of no
+size, takes, and of which the record says neither (T17, T19), where `List<void>.FromRaw(p, n)` and
+`List<void>.Allocate(n)` keep R14's `type-mismatch` (below);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory

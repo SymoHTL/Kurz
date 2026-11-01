@@ -920,7 +920,8 @@ public sealed partial class Checker
     /// <summary>R15: <c>List&lt;T&gt;.FromRaw(p, n)</c> and <c>List&lt;T&gt;.Allocate(n)</c>; a member of another type with type arguments is one no rule gives it (V10).</summary>
     private Typed CheckTypeMemberCall(TypeMemberAccess t, CallExpression c)
     {
-        var type = Resolve(t.Type);
+        // `List<void>` is read here, where no type argument is `void` elsewhere (T17), so that `void`'s lack of a size is the error (R14)
+        var type = t.Type is NamedType { Name: "List", TypeArguments: [Syntax.VoidType] } ? new ListType(Types.Void) : Resolve(t.Type);
         if (type is ListType list && t.Member == "FromRaw")
         {
             return CheckFromRaw(c, list, list.Element, "List<T>.FromRaw");

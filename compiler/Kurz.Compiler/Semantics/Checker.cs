@@ -882,7 +882,7 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var element = Resolve(n.TypeArguments[0]);
+            var element = ResolveTypeArgument(n.TypeArguments[0], "`List`");
             return Types.IsError(element) ? Types.Error : new ListType(element);
         }
 
@@ -894,8 +894,8 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var key = Resolve(n.TypeArguments[0]);
-            var value = Resolve(n.TypeArguments[1]);
+            var key = ResolveTypeArgument(n.TypeArguments[0], "`Map`");
+            var value = ResolveTypeArgument(n.TypeArguments[1], "`Map`");
             return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
@@ -946,7 +946,7 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var arguments = n.TypeArguments.Select(Resolve).ToList();
+            var arguments = n.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{n.Name}`")).ToList();
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
@@ -984,6 +984,22 @@ public sealed partial class Checker
 
         Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here (V10)");
         return Types.Error;
+    }
+
+    /// <summary>
+    /// T17, T19: a type argument written in a type or a call, where `void` is not supported: C# refuses it as a type argument and Rust's
+    /// `()` takes one, and the record says neither, so it is refused here before the emitter writes a list or a copy of it.
+    /// </summary>
+    private KurzType ResolveTypeArgument(TypeSyntax argument, string of)
+    {
+        var type = Resolve(argument);
+        if (Types.IsVoid(type))
+        {
+            NotSupported(argument.Line, $"`void` as a type argument of {of} (T17, T19)");
+            return Types.Error;
+        }
+
+        return type;
     }
 
     private TypeParameterSymbol? TypeParameter(string name)
