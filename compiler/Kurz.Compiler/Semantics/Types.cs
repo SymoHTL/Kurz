@@ -287,8 +287,9 @@ public static class Types
     /// <summary>
     /// O4: whether a call keeps every case of its result where this type is written for its value, a variable's, a parameter's, a
     /// field's, a list's item type or a result: a union, with or without a <c>null</c> beside its cases, that names a case of the
-    /// call's <paramref name="whole"/> result beyond its success (the owner, 2026-10-10, for a variable; at the other places the reading
-    /// section 5 marks as assumed), or any union while that result is not read yet; a <c>T?</c> of one type is no list of cases (N8),
+    /// call's <paramref name="whole"/> result beyond its success (the owner, 2026-10-10, for a variable; 2026-10-31, for a parameter, "Keep,
+    /// like a variable", a constructor's field, "Keep, as any parameter", a list literal's items, "Keep, as the item type", and a
+    /// written union that holds a type parameter, "Keep, infer T = int"; at the other places the reading section 5 marks as assumed), or any union while that result is not read yet; a <c>T?</c> of one type is no list of cases (N8),
     /// and a union that names none of the call's other cases, <c>int | string</c> for an <c>int | NotFound</c> call, is a type the
     /// success converts to (D9), so the call stands for its success there, as for any other such type. The one test of every place
     /// that keeps a call's cases.

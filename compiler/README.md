@@ -1527,8 +1527,9 @@ round can ask about it by the rule's id.
   parameter is read before the inference. One test, `Types.KeepsCases`, decides it at a parameter and
   at every other place a call's cases can be kept: a variable, a result, a field, a list's items. A `T?` of one type is no union of
   cases there, nor in a variable or a result, so `int? x = Find(id)` unwraps, as O4's sentence on a
-  type the success converts to says. Of two functions that both fit exactly, the one whose parameter
-  keeps the cases is picked (the owner, 2026-10-31, "The union one"); the exact fit is read first,
+  type the success converts to says. Of a function whose parameter keeps the cases and one that takes the
+  success, the one that keeps them, the exact fit for the call's whole type, is picked (the owner, 2026-10-31,
+  "The union one"); the exact fit is read first,
   so `Show(int)` wins over `Show(long | NotFound)`, which fits with a widening (the owner, 2026-10-31,
   "Exact fit first"). Where no function fits, the
   call's error stands alone and no case of the argument is passed on beside it (E1).
