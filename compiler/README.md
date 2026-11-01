@@ -495,8 +495,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
   owner, 2026-10-29, "Union, as Rust"); `s.Contains(x)`, `s.StartsWith(x)`, `s.EndsWith(x)` and `s.IndexOf(x)`
   of a `string` or of a `char`, which is searched for as its UTF-8 bytes, over the string's bytes, through
-  the standard library's `Find`, a byte at a time for one byte and Crochemore and Perrin's two-way search
-  for more, as Rust's `str::find`, and its `BytesAt` for the start and the end (X1);
+  the standard library's `Find`, for one byte two words of 8 bytes at a time from the first address that is
+  a multiple of 8, as Rust's `memchr` of a slice, and Crochemore and Perrin's two-way search for more, as
+  Rust's `str::find`, and its `BytesAt` for the start and the end (X1);
   `s.Trim()`, `s.TrimStart()`, `s.TrimEnd()`, their ASCII forms, `s.Trim(c)`, `s.TrimStart(c)` and `s.TrimEnd(c)`,
   which take Unicode's White_Space,
   ASCII's five whitespace characters or the `char`'s UTF-8 bytes from the ends, through the standard library's
