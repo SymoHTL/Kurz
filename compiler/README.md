@@ -753,13 +753,22 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   closed at zero, the error of that close ignored, and `Close` writes -1 as the descriptor before it
   closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
-  holds, before it reads (S3), and `File.ReadAll` reads into the room the list has, else 8192
-  bytes more, no more than the largest `int` of items leaves, while a read gives bytes, and a list that
-  holds that many reads one byte more, which raises `allocation-failed` where the file has it (S6). `FileTests` pins what no case can: 200 opens of a
+  holds, before it reads (S3), and `File.ReadAll` makes room for the size `fstat` names for the open
+  file, no more than the largest `int` of items, as Rust's `fs::read` reserves it, then reads into the
+  room the list has, else 8192 bytes more, no more than the largest `int` of items leaves, while a read
+  gives bytes; a list full at that size, or that holds the largest `int` of items, reads one byte more,
+  none being the end of the file, and one added after room for it, which past the limit raises
+  `allocation-failed` (S6). `FileTests` pins what no case can: 200 opens of a
   file, and the files and directories the calls on a path open for themselves, under a limit of 32
   descriptors, and the same files all held, which reach the limit; a close through a copy; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
-  largest `int` of bytes, lowered to 20 in the library's text, and one byte more; a read and a write in
+  largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
+  file the system names no size for; files of 1 to 1048579 bytes read without their list grown, under
+  a library that ends the process where a read would grow one, and read whole where the size the
+  system names is 3 bytes short, 3 bytes long or a failure; a file whose room a system that refuses
+  more than a mebibyte refuses, one of more bytes than a list holds whose room it refuses, and one
+  whose room it gives; the room of the list a whole read gives,
+  under a library that ends the process where an `Add` would grow one; a read and a write in
   the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
   created again and one under a file; the text of an error without a path; and the refusal for Windows;
 - the command line, the environment and the clock (S13 to S15), in a build for Linux: `args` is a
