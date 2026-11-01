@@ -852,6 +852,118 @@ public sealed partial class Emitter
         return null;
     }
 
+    /// <summary>
+    /// X11, M5: <c>list.Insert(index, item)</c> on a <c>mut</c> variable or parameter, or on a path of fields from one, as Rust's
+    /// <c>Vec::insert</c> does it: the arguments are read in the order they are written and the item is held, then the list the variable
+    /// holds as they left it, as <c>Add</c> reads its item first (M4, M7), so that <c>xs.Insert(0, xs[0])</c> stores the item it read. An
+    /// index below 0 or past the count raises <c>index-out-of-range</c> before the list is copied or grows (section 12, assumed). A block
+    /// other values hold is copied (M3) and a full one grows, as for <c>Add</c> (<see cref="ReserveBody"/>), the items from the index on
+    /// move one place on by a memmove, as Rust's <c>ptr::copy</c> moves them, and the item takes the place at the index; at the count it
+    /// is appended.
+    /// </summary>
+    private string? EmitListInsert(CallExpression c, CallInfo info)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var list = (ListType)TypeOf(member.Target);
+        List<string> arguments = null!;
+        InRegion(() => arguments = Arguments(c, info, j => j == 0 ? Types.Int : list.Element, _ => false, _ => null, cConvention: false, owned: true));
+        var place = CollectionPlace(member.Target);
+        var index = arguments[0][(arguments[0].IndexOf(' ', StringComparison.Ordinal) + 1)..];
+        IndexInside(index, ListCount(fn.Value($"load ptr, ptr {place}")), "ugt", c.Line);
+        var insert = Helper($"insert.{Lower.Mangle(list)}", "void", ["ptr", "i32", Ir(list.Element)], () =>
+        {
+            var element = Ir(list.Element);
+            var size = ItemSize(list.Element);
+            var push = fn.Label("push");
+            var reserve = fn.Label("reserve");
+            fn.CondBranch(fn.Value($"call i1 {StdFunction("ListHasRoom")}(ptr {fn.Value("load ptr, ptr %a0")})"), push, reserve); // room in a block no other value holds
+            fn.Block(reserve);
+            var room = Helper($"reserve.{Lower.Mangle(list)}", "void", ["ptr"], () => ReserveBody(list.Element), "noinline", "cold");
+            fn.Emit($"call void {room}(ptr %a0)");
+            fn.Branch(push);
+            fn.Block(push);
+            var block = fn.Value("load ptr, ptr %a0");
+            var count = ListCount(block);
+            fn.Emit($"call ptr {StdFunction("ListPush")}(ptr {block}, i64 {size})"); // the count one more, the room at the end
+            var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {block})");
+            var at = fn.Value($"getelementptr {element}, ptr {items}, i64 {fn.Value("zext i32 %a1 to i64")}");
+            var after = fn.Value($"getelementptr {element}, ptr {at}, i64 1");
+            var tail = fn.Value($"mul i64 {fn.Value($"zext i32 {fn.Value($"sub i32 {count}, %a1")} to i64")}, {size}");
+            module.Declare("declare void @llvm.memmove.p0.p0.i64(ptr, ptr, i64, i1)");
+            fn.Emit($"call void @llvm.memmove.p0.p0.i64(ptr {after}, ptr {at}, i64 {tail}, i1 false)");
+            fn.Emit($"store {element} %a2, ptr {at}");
+            fn.Return(null);
+        });
+        fn.Emit($"call void {insert}(ptr {place}, {arguments[0]}, {arguments[1]})");
+        return null;
+    }
+
+    /// <summary>
+    /// X11, M5: <c>list.RemoveAt(index)</c> on a <c>mut</c> variable or parameter, or on a path of fields from one, as Rust's
+    /// <c>Vec::remove</c> does it: an index below 0 or at the count or past it raises <c>index-out-of-range</c> before the list is copied
+    /// (section 12, assumed); a block other values hold is copied first (M3), as <c>Reverse</c> copies it; the item is moved out, so the
+    /// count the list held of it is the result's, the items after it move one place back by a memmove, and the block keeps its room, as
+    /// Rust's <c>remove</c> keeps it (section 12, assumed).
+    /// </summary>
+    private string EmitListRemoveAt(CallExpression c, CallInfo info)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var list = (ListType)TypeOf(member.Target);
+        List<string> arguments = null!;
+        InRegion(() => arguments = Arguments(c, info, _ => Types.Int, _ => false, _ => null, cConvention: false, owned: true));
+        var place = CollectionPlace(member.Target);
+        var index = arguments[0][(arguments[0].IndexOf(' ', StringComparison.Ordinal) + 1)..];
+        IndexInside(index, ListCount(fn.Value($"load ptr, ptr {place}")), "uge", c.Line);
+        var element = Ir(list.Element);
+        var remove = Helper($"removeat.{Lower.Mangle(list)}", element, ["ptr", "i32"], () =>
+        {
+            var size = ItemSize(list.Element);
+            var block = fn.Value("load ptr, ptr %a0");
+            var copy = fn.Label("copy");
+            var own = fn.Label("own");
+            fn.CondBranch(fn.Value($"call i1 {StdFunction("ListShared")}(ptr {block})"), copy, own);
+            fn.Block(copy);
+            var asked = fn.Alloca("i64", "asked");
+            var copied = fn.Value($"call ptr {StdFunction("ListCopy")}(ptr {block}, i64 {size}, ptr {asked})"); // which lowers the old block's count
+            Refused(fn.Value($"icmp eq ptr {copied}, null"), asked);
+            if (Counted(list.Element))
+            {
+                EachItem(copied, list.Element, held => Retain(held, list.Element)); // the copy holds the items' blocks too
+            }
+
+            fn.Emit($"store ptr {copied}, ptr %a0");
+            fn.Branch(own);
+            fn.Block(own);
+            var mine = fn.Value("load ptr, ptr %a0");
+            var count = ListCount(mine);
+            var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {mine})");
+            var at = fn.Value($"getelementptr {element}, ptr {items}, i64 {fn.Value("zext i32 %a1 to i64")}");
+            var item = fn.Value($"load {element}, ptr {at}");
+            var after = fn.Value($"getelementptr {element}, ptr {at}, i64 1");
+            var tail = fn.Value($"mul i64 {fn.Value($"zext i32 {fn.Value($"sub i32 {fn.Value($"sub i32 {count}, %a1")}, 1")} to i64")}, {size}");
+            module.Declare("declare void @llvm.memmove.p0.p0.i64(ptr, ptr, i64, i1)");
+            fn.Emit($"call void @llvm.memmove.p0.p0.i64(ptr {at}, ptr {after}, i64 {tail}, i1 false)");
+            fn.Emit($"call void {StdFunction("ListShorten")}(ptr {mine})");
+            fn.Return($"{element} {item}");
+        });
+        return fn.Value($"call {element} {remove}(ptr {place}, {arguments[0]})");
+    }
+
+    /// <summary>
+    /// X11: the end of the actor with <c>index-out-of-range</c> at <paramref name="line"/> where the <c>i32</c> index compares to the count by
+    /// <paramref name="outside"/>, unsigned, so that an index below 0 is past every count: <c>ugt</c> for a place to insert at, which may be
+    /// the count, <c>uge</c> for an item.
+    /// </summary>
+    private void IndexInside(string index, string count, string outside, int line)
+    {
+        var fail = fn.Label("outside");
+        var inside = fn.Label("inside");
+        fn.CondBranch(fn.Value($"icmp {outside} i32 {index}, {count}"), fail, inside);
+        fn.Block(fail);
+        Raise(ErrorIds.IndexOutOfRange, line);
+        fn.Block(inside);
+    }
+
     // ---- the sorts of a list (X8) ----------------------------------------------------------------
 
     /// <summary>

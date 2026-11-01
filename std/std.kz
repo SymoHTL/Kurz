@@ -490,6 +490,14 @@ pub byte* ListPush(byte* block, long item) {
     return slot
 }
 
+// The count of the list's items lowered by one, for a `RemoveAt` (X11) on a list no other value holds,
+// which moved the item out and the items after it one place back.
+pub void ListShorten(byte* block) {
+    raw {
+        *Ptr<int>(block + 8) = *Ptr<int>(block + 8) - 1
+    }
+}
+
 // For a read into a list of bytes (S3): a block with room for `more` bytes after its own that no other
 // list value holds, as Rust's `Vec::reserve` makes room before a read: the block itself where it has the
 // room and no other value holds it, else a new block with its bytes, the old block freed, or held by one

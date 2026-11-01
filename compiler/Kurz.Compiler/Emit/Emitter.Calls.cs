@@ -40,6 +40,8 @@ public sealed partial class Emitter
             CallKind.ListIndexOf or CallKind.ListIndexOfRun => EmitListIndexOf(c, info.Kind == CallKind.ListIndexOfRun),
             CallKind.ListAddRange => EmitListAddRange(c),
             CallKind.ListReverse => EmitListReverse(c),
+            CallKind.ListInsert => EmitListInsert(c, info),
+            CallKind.ListRemoveAt => EmitListRemoveAt(c, info),
             CallKind.ListSort => EmitListSort(c, stable: true),
             CallKind.ListSortUnstable => EmitListSort(c, stable: false),
             CallKind.ListSortBy => EmitListSortBy(c, info),
