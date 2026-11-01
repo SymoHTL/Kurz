@@ -23,12 +23,14 @@ What the tables hold, as Rust's generator takes them:
   language are left out, as "no culture" (section 4) says;
 - the runs of the mappings to one code point, per plane, in Rust's two passes: consecutive code points
   with one delta make a run of step 1, and lone code points two apart with one delta a run of step 2,
-  each run spanning at most 256 code points from its first to its last; every mapping stays in its
-  plane, and only the first two planes hold mappings, to one code point or to several;
+  each run spanning at most 256 code points from its first to its last;
 - the mappings to two or three code points, padded with zeros;
 - the ranges of Cased and Case_Ignorable from DerivedCoreProperties.txt, ASCII among them, which
   Rust's `is_cased` and `is_case_ignorable` take from the same properties.
-A table with fewer entries than its floor is refused, so that a file read as empty is never a table."""
+This tool refuses the forms its tables do not hold: a mapping that leaves its plane, a mapping past
+the first two planes, to one code point or to several, and a run that spans more than 256 code
+points. A table with fewer entries than its floor is refused, so that a file read as empty is never a
+table."""
 import hashlib
 import http.client
 import os
@@ -364,6 +366,8 @@ def self_test():
     cases.append(("tables: a mapping that leaves its plane is refused", isinstance(out, ValueError), out))
     out = got(lambda: tables({cp: (cp + 1,) for cp in range(0x1000, 0x1000 + 257)}))
     cases.append(("tables: a run that spans more than 256 code points is refused", isinstance(out, ValueError), out))
+    out = got(lambda: runs_of({cp: (cp + 1,) for cp in range(0x1000, 0x1000 + 256)}))
+    cases.append(("tables: a run that spans 256 code points is one run", out == [(0x1000, 0x10FF, 1, 1)], out))
     out = got(lambda: tables({0x20000: (0x20001,)}))
     cases.append(("tables: a mapping to one code point past the first two planes is refused",
                   isinstance(out, ValueError) and "first two planes" in str(out), out))

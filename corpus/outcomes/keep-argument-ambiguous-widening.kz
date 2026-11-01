@@ -1,0 +1,22 @@
+// expect: error ambiguous-call at 22
+// rules: O4, F13
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(long n) {
+    print("the success")
+}
+
+void Show(long | NotFound x) {
+    print("the union")
+}
+
+// one function takes the success with a widening and one keeps the cases with a widening: neither fits exactly
+Show(Find(1))

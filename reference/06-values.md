@@ -1261,3 +1261,27 @@ List<int?> maybe = [1, null]
 print(maybe.Count)
 print(maybe)
 ```
+
+Case: [outcomes/keep-items-of-an-argument.kz](../corpus/outcomes/keep-items-of-an-argument.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report(List<int | NotFound> items) {
+    for f in items {
+        match f {
+            int n => print(n)
+            NotFound => print("none")
+        }
+    }
+}
+
+// the literal takes the parameter's item type, a union, which each item holds
+Report([Find(1), Find(2)])
+```

@@ -1187,6 +1187,29 @@ print(Take([]))
 
 Case: [values/list-literal-item-fixes.kz](../corpus/values/list-literal-item-fixes.kz)
 
+Case: [outcomes/keep-argument-generic-union.kz](../corpus/outcomes/keep-argument-generic-union.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report<T>(T | NotFound found) {
+    match found {
+        NotFound => print("none")
+        else => print("found")
+    }
+}
+
+// `T | NotFound` names a case of the call beyond its success, so it keeps the cases, and `T` is `int`
+Report(Find(1))
+Report(Find(2))
+```
+
 ### T18 (assumed, §4) Operators
 
 `+ - * / %` on numbers, `== != < <= > >=` for comparison, on two strings as T32 says, and `&& || !` on `bool`, with the
