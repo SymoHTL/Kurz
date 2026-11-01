@@ -1,0 +1,13 @@
+// expect: output
+// | \d{2,4}
+// | a\nb\tc
+// | say "hi"
+// | a "# b
+// | true
+// rules: L20
+
+print(r"\d{2,4}")
+print(r"a\nb\tc")
+print(r#"say "hi""#)
+print(r##"a "# b"##)
+print(r"" == "")

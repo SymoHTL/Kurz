@@ -206,6 +206,61 @@ public sealed class LexerTests
     }
 
     [Theory]
+    [InlineData("r\"\\d{2,4}\"", "\\d{2,4}")]
+    [InlineData("r\"a\\nb\\tc\"", "a\\nb\\tc")]
+    [InlineData("r\"\"", "")]
+    [InlineData("r#\"say \"hi\"\"#", "say \"hi\"")]
+    [InlineData("r##\"a \"# b\"##", "a \"# b")]
+    [InlineData("r\"\"\"\n    { \"a\": \"\\d\" }\n      {b}\n    \"\"\"", "{ \"a\": \"\\d\" }\n  {b}")]
+    [InlineData("r\"\"\"\r\n    a\\{b}\r\n    \"\"\"", "a\\{b}")]
+    public void A_raw_literal_holds_its_text_as_written(string program, string text)
+    {
+        // L20: no escape and no interpolation, in the one-line form, the `#` form and the block, which keeps L13's indentation and line ends
+        var token = Single(program);
+        var value = Assert.IsType<StringLiteralValue>(token.Value);
+        Assert.Equal(text, value.PlainText);
+    }
+
+    [Fact]
+    public void An_r_inside_a_name_starts_no_raw_literal()
+    {
+        // L20: the `r` starts a raw literal where a name could start; `fr` is a name, and the string after it an ordinary literal
+        var (tokens, _) = Lex("fr\"a\\tb\"");
+        var meaningful = tokens.Where(t => t.Kind is not TokenKind.Newline and not TokenKind.EndOfFile).ToList();
+        Assert.Equal([TokenKind.Name, TokenKind.StringLiteral], meaningful.Select(t => t.Kind));
+        Assert.Equal("a\tb", Assert.IsType<StringLiteralValue>(meaningful[1].Value).PlainText);
+    }
+
+    [Fact]
+    public void A_raw_literal_in_a_hole_ends_at_its_own_quote()
+    {
+        // L20, L6: the `\` of a raw literal in a hole escapes nothing, so its quote closes it and the hole closes after it
+        var program = "\"got {r\"a\\\"}\"";
+        var value = Assert.IsType<StringLiteralValue>(Single(program).Value);
+        Assert.Equal([new TextPart("got "), new HolePart("r\"a\\\"", 1, program.IndexOf('{') + 1)], value.Parts);
+    }
+
+    [Theory]
+    [InlineData("print(r\"abc)")]
+    [InlineData("print(r#\"a\"b\")")]
+    [InlineData("text = r\"\"\"abc\"\"\"")]
+    public void A_raw_literal_that_does_not_close_on_its_line_is_syntax(string program)
+    {
+        // L20, L13, E4: a raw literal ends on the line it starts on, and a raw block opens only at the end of a line
+        Assert.Equal((ErrorIds.Syntax, 1), OnlyError(program));
+    }
+
+    [Fact]
+    public void A_raw_literal_takes_at_most_255_hashes()
+    {
+        // L20: Rust's lexer refuses more than 255 `#`; 255 is read
+        var hashes = new string('#', 255);
+        Assert.Equal("a", Assert.IsType<StringLiteralValue>(Single($"r{hashes}\"a\"{hashes}").Value).PlainText);
+        var more = new string('#', 256);
+        Assert.Equal((ErrorIds.Syntax, 1), OnlyError($"x = r{more}\"a\"{more}"));
+    }
+
+    [Theory]
     [InlineData("print(\"\\u12\")")]
     [InlineData("print(\"a\\q\")")]
     [InlineData("print(\"\\}\")")]

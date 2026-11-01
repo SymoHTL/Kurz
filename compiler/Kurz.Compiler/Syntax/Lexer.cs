@@ -78,6 +78,10 @@ public sealed class Lexer
             {
                 LexNumber(); // L11: `.5` is a fraction literal; `..` is read as an operator before this, so `1..5` is a range
             }
+            else if (c == 'r' && AtRawLiteral())
+            {
+                LexRawString(); // L20
+            }
             else if (IsNameStart(c))
             {
                 LexName();
@@ -773,6 +777,12 @@ public sealed class Lexer
         while (!AtEnd && Current != '\n')
         {
             var c = Current;
+            if (c == 'r' && AtRawLiteral() && (position == 0 || !IsNamePart(text[position - 1])))
+            {
+                SkipNestedRawLiteral(); // L20: a raw literal's `\` escapes nothing
+                continue;
+            }
+
             if (c is '"' or '\'')
             {
                 SkipNestedLiteral(c);
@@ -819,6 +829,90 @@ public sealed class Lexer
         return true;
     }
 
+    /// <summary>L20: an <c>r</c> at the cursor that starts a raw literal, <c>r"</c>, or <c>r</c> and one or more <c>#</c> before a <c>"</c>.</summary>
+    private bool AtRawLiteral()
+    {
+        var p = position + 1;
+        while (p < end && text[p] == '#')
+        {
+            p++;
+        }
+
+        return p < end && text[p] == '"';
+    }
+
+    /// <summary>The end of the line the cursor stands on: the offset of its line feed, or the end of the text.</summary>
+    private int LineEnd()
+    {
+        var lineEnd = text.IndexOf('\n', position, end - position);
+        return lineEnd < 0 ? end : lineEnd;
+    }
+
+    /// <summary>
+    /// L20: a raw literal, <c>r"..."</c>, or <c>r#"..."#</c> with up to 255 <c>#</c> that a <c>"</c> and as many <c>#</c> close, as
+    /// Rust's raw string literal; its text is read as written, with no escape and no interpolation, and it ends on the line it
+    /// starts on, as an ordinary literal does (L13). <c>r"""</c> opens a raw block.
+    /// </summary>
+    private void LexRawString()
+    {
+        var start = position;
+        position++; // the `r`
+        var hashes = 0;
+        while (Current == '#')
+        {
+            hashes++;
+            position++;
+        }
+
+        if (hashes == 0 && Peek() == '"' && Peek(2) == '"')
+        {
+            LexBlockString(start, raw: true);
+            return;
+        }
+
+        var template = AtAsmTemplate();
+        position++; // the opening quote
+        var lineEnd = LineEnd();
+        var closing = "\"" + new string('#', hashes);
+        var close = hashes > 255 ? -1 : text.IndexOf(closing, position, lineEnd - position, StringComparison.Ordinal);
+        if (close < 0)
+        {
+            // L13, E4: a raw literal ends on its line, as an ordinary literal does; Rust's lexer refuses more than 255 `#`
+            position = lineEnd;
+            Bad(start, position - start, hashes > 255
+                ? "a raw literal takes at most 255 `#`"
+                : $"a raw literal ends with `{closing}` on its line; a raw string over several lines opens with `r\"\"\"`");
+            return;
+        }
+
+        var parts = new List<StringPart>();
+        if (close > position)
+        {
+            parts.Add(new TextPart(text[position..close]));
+        }
+
+        position = close + closing.Length;
+        Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts) { IsTemplate = template });
+    }
+
+    /// <summary>Past a raw literal nested in a hole (L20), whose <c>\</c> escapes nothing; to the line's end where it does not close.</summary>
+    private void SkipNestedRawLiteral()
+    {
+        position++; // the `r`
+        var hashes = 0;
+        while (Current == '#')
+        {
+            hashes++;
+            position++;
+        }
+
+        position++; // the opening quote
+        var lineEnd = LineEnd();
+        var closing = "\"" + new string('#', hashes);
+        var close = text.IndexOf(closing, position, lineEnd - position, StringComparison.Ordinal);
+        position = close < 0 ? lineEnd : close + closing.Length;
+    }
+
     private void SkipNestedLiteral(char quote)
     {
         position++;
@@ -833,8 +927,8 @@ public sealed class Lexer
         }
     }
 
-    /// <summary>L13 and L15: a <c>"""</c> block.</summary>
-    private void LexBlockString(int start)
+    /// <summary>L13 and L15: a <c>"""</c> block; with <paramref name="raw"/>, an <c>r"""</c> block, whose text has no escape and no interpolation (L20).</summary>
+    private void LexBlockString(int start, bool raw = false)
     {
         var template = AtAsmTemplate();
         position += 3;
@@ -945,6 +1039,17 @@ public sealed class Lexer
                 content = trimmed;
             }
 
+            if (raw)
+            {
+                buffer.Append(content); // L20: the text as written
+                if (i < lines.Count - 1)
+                {
+                    buffer.Append('\n');
+                }
+
+                continue;
+            }
+
             // the content of one line, with its escapes and holes, read through the same code as a one-line literal
             var saved = (position, end: this.end);
             position = offset;
@@ -1049,6 +1154,12 @@ public sealed class Lexer
         while (!AtEnd && Current != '\n')
         {
             var c = Current;
+            if (c == 'r' && AtRawLiteral() && (position == 0 || !IsNamePart(text[position - 1])))
+            {
+                SkipNestedRawLiteral(); // L20: a raw literal's `\` escapes nothing
+                continue;
+            }
+
             if (c is '"' or '\'')
             {
                 SkipNestedLiteral(c);

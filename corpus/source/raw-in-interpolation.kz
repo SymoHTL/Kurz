@@ -1,0 +1,5 @@
+// expect: output
+// | got a\
+// rules: L20
+
+print("got {r"a\"}")
