@@ -1433,9 +1433,20 @@ void Twice<T, const Mode M = Mode.Plain>(T value) {
     Say<M>("{value}")
 }
 
+void Shout<const Mode M>(string text) {
+    Say<M>(text)
+}
+
+void Report<const Mode M>() {
+    f = () => M
+    print("{M} {f()}")
+    Shout<M>("c")
+}
+
 Say<Mode.Loud>("a")
 Twice(1)
 Twice<string, Mode.Loud>("b")
+Report<Mode.Loud>()
 ```
 
 Case: [types/const-parameter-mismatch.kz](../corpus/types/const-parameter-mismatch.kz)
