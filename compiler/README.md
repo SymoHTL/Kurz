@@ -82,10 +82,10 @@ from inside `compiler/`,
     dotnet Kurz.Compiler.Tests/bin/Release/net10.0/Kurz.Compiler.Tests.dll <file> [--fenced] [--grant <name>]...
 
 builds the program with the runtime of this machine's target, or with `--fenced` under the
-allocator that makes every block it frees inaccessible (`ListTests.Fenced`, the one definition of
-that edit), runs it as the suites run a program, and prints what it wrote, what it wrote on its
-error stream and `exit <code>`; its own exit code is 0 where the program ran, 1 where the program
-has errors, which it prints, and 2 for an argument it does not read or a file it does not find
+allocator that makes every block it frees inaccessible, ends every block at a page it makes inaccessible and holds `Free` to
+the size its block was allocated with (`ListTests.Fenced`, the one definition of that edit), runs it as the suites run a
+program, and prints what it wrote, what it wrote on its error stream and `exit <code>`; its own exit code is 0 where the
+program ran, 1 where the program has errors, which it prints, and 2 for an argument it does not read or a file it does not find
 (`knowledge/a-probe-under-the-fence-is-a-command.md`). The test host runs the suites through an
 entry of its own, so the assembly's entry (`Probe.cs`) is the command's alone.
 
@@ -490,9 +490,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `s.Bytes` as a `Bytes`, which takes a count of the block of a string made while the program runs and copies the
   bytes of a literal, `s.Bytes[i]`, read from the string in place, and `string.FromUtf8(b)` and
   `string.FromUtf8Lossy(b)`, whose string takes a count of the block of the bytes where every sequence is UTF-8,
-  which `string.FromUtf8` reads a sequence at a time and a run of ASCII byte by byte, a run of more than 16 bytes
-  as Rust 1.82's `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a
-  multiple of 8, their case `InvalidUtf8` a data type every file sees,
+  which `string.FromUtf8` reads a sequence at a time, a letter with three bytes after it in place with no check of
+  the end between its bytes, and a run of ASCII byte by byte, a run of more than 16 bytes as Rust 1.82's
+  `run_utf8_validation` reads it, two words of 8 bytes at a time from an address that is a multiple of 8, where
+  `run_utf8_validation` whole, which checks each byte of a letter against the end and tries its words at every byte
+  of ASCII at such an address, read text of short runs of ASCII between letters in 354 ms against the 280 ms of
+  every sequence read through one check (measured for pull request 154; record, section 1: the owner, 2026-11-01,
+  "Allow, faster wins"), their case `InvalidUtf8` a data type every file sees,
   declared before the file's own, and the lossy text, where a
   sequence is not UTF-8, made by the runtime with one U+FFFD for each maximal part of one (T15; section 4, the
   owner, 2026-10-29, "Union, as Rust"); `s.Contains(x)`, `s.StartsWith(x)`, `s.EndsWith(x)` and `s.IndexOf(x)`
@@ -941,7 +945,13 @@ and the maps' program and twenty rounds of maps, and the programs of a map's mem
 past a `Clear`, keys, `double` keys, nullable keys and nullable values and of writes into a list's items and `==` on two
 lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a program of lists
 and maps in fields written through paths by each `mut` member, beside copies, a block's among them, and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
-since a kept block stays readable, so that a write into one freed under it ends the process; maps made and dropped through every way out of a block, removed, cleared,
+since a kept block stays readable, so that a write into one freed under it ends the process, and in which every block ends at a page
+the system makes inaccessible, where its size rounded up to 16 ends, so that a write one byte past the end of a block of 16 bytes,
+of 300000 and of one `Reallocate` gave as a new block ends the process, and the last byte of each written does not, and whose `Free`
+given 8 bytes more or less than its block was allocated with, or the size before `Reallocate` grew the block in place, or
+`Reallocate` given another size than the block's, writes one line and ends the process the same way: a check that sees a size
+written by hand whose block is too small within that rounding, as HMAC-SHA256's state made 1288 bytes where its code writes 1296,
+or 264 where the form of pull request 159 writes 272, which the page after the block does not see; maps made and dropped through every way out of a block, removed, cleared,
 walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
 of three inputs against vectors from outside this repository; two runs of one program that print a
 map of 20 entries in two orders; the bytes of a map's first block the system refuses; `random-failed`
