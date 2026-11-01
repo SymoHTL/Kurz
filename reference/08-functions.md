@@ -154,11 +154,17 @@ file.
 ### F10 (decided, §8, §13) Folders and `use`
 
 A folder is a namespace; there is no `namespace` line. Files in one folder see each other
-without imports. `use` brings in another folder or a package. A type it holds is visible
-unqualified, `Json.Parse<T>(text)`, and a function at the top of the folder is reached through the
-folder's name, `sys.Write(...)`; two folders a file uses that both hold a type of one name are the
-compile error `ambiguous-name` at the bare use of that name (§13, the owner, 2026-11-01, "By kind of
-name"). *(assumed, §13: the id)*
+without imports. `use` brings in another folder or a package: a folder of the project by its path
+from the folder of `project.kz`, `use a/util`, and a package by the name of its line in
+`project.kz`, `use json`. A type it holds is visible unqualified, `Json.Parse<T>(text)`, and is named
+through the folder too, `json.Json`; a function at the top of the folder is reached through the
+folder's last name, `util.Trim(s)`, `sys.Write(...)`; `use fastjson as fj` gives the folder another
+name in the file, `fj.Json`, `fj.Parse(text)`. Two folders a file uses that both hold a type of one
+name are the compile error `ambiguous-name` at the bare use of that name, and two whose last names
+agree are `redeclared` at the second `use` line (§8, §13, the owner, 2026-11-01, "By kind of name",
+"Both forms", "Root path, last name"). *(assumed, §8, §13: the two ids; a type of the file's own
+folder is the one its bare name means; every name at the top of a folder that is no type is reached
+through the folder's name; a package's qualifier is the name of its line)*
 
 No case: it takes several files, and a case of the corpus is a single file.
 
