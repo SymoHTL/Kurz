@@ -100,7 +100,7 @@ public sealed class CaseTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ("abc", false, "abc"), // nothing to change
         ("Straße ΑΒΓ", false, "straße αβγ"),
         ("1ŉ2", true, "1ʼN2"), // a byte kept as it is, then two bytes into three: the last code point outgrows the block
-        ("1ΐabc", true, "1\u0399\u0308\u0301ABC"), // two bytes into six after a byte kept as it is: four code points written after the growth
+        ("1ΐabc", true, "1\u0399\u0308\u0301ABC"), // two bytes into six after a byte kept as it is: the four input code points after the growth, six written
         ("AİB", false, "ai̇b"), // the block outgrown by the last code point
         ("AİΣ", false, "ai̇ς"), // and by a final sigma, which reads the code points before it
     ];
