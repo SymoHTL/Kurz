@@ -1,7 +1,7 @@
 // expect: error type-mismatch at 7
 // rules: D3
 
-// a union with no `null` case beside a value of one of its cases takes no `==`, as Rust refuses `Ok(5) == 5` on a
-// `Result<i32, String>` (D3)
+// a union beside a value of one of its cases takes no `==`, a nullable one after its lift too (N10), as Rust
+// refuses `Ok(5) == 5` on a `Result<i32, String>` (D3)
 int | string a = 1
 print(a == 1)
