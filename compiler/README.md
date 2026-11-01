@@ -1335,13 +1335,14 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
-(K6, K10), `equal by` (K8), a field or a constructor in its body (K7, K14, K18), a method that is
+(K6, K10), `equal by` (K8), a field, a constructor or a type declared in its body (K7, K14, K18), a method that is
 `static`, `virtual`, `override`, `prot` or `extern` or that has type parameters of its own (K7,
 section 4), a field that holds `weak` at any depth, since R2 cannot judge the class until `weak` is
 read (R2, R3), each of which leaves the class and every value of it unread, and of a class it reads, a
 field of a function type, whose cycle R9 judges by the lambdas of the program (R9), a method as a
 value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
-method on a path that goes on after such a field, `p.Pos.Items.Add(1)` (K2, M4, M5), and `==`
+method on a path that goes on after such a field, `p.Pos.Items.Add(1)`, the field named alone inside a
+method, `Pos.Items.Add(1)`, among them (K2, M4, M5), and `==`
 on two instances or on values that hold one, and an instance as a key of a map, at any depth (K4,
 K12); of chapter 4, a nullable `void` and a
 nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` to a member or an
@@ -1751,7 +1752,10 @@ round can ask about it by the rule's id.
 - N9: a path through a `mut` field of an instance is narrowed up to the next call or assignment of
   any kind, `print` and an interpolation that holds an instance among the calls (A5), so a lambda,
   which runs after them, knows nothing of such a path; a path through fields without `mut` keeps its
-  narrowing, as N7 reads it.
+  narrowing, as N7 reads it. An assignment ends it after its value, and a write into a list or a map
+  after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
+  reads a narrowed `Head`, while a call in the value ends it before the index; an assignment the
+  checker refuses narrows nothing.
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.

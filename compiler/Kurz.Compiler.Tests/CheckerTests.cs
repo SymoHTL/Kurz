@@ -2862,6 +2862,20 @@ public sealed class CheckerTests
         Clean("class A(mut string? E)\n\nmut a = A(null)\na.E = \"x\"\nprint(a.E.Bytes.Count)");
         Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    f = () => a.E.Bytes.Count\n    print(f())\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors("class A(mut string? E) {\n    pub int Size() {\n        if E != null {\n            n = E.Bytes.Count\n            Touch()\n            return n + E.Bytes.Count\n        }\n\n        return 0\n    }\n\n    void Touch() {\n    }\n}\n\nprint(A(null).Size())"));
+        // N9 with M4: an assignment runs after its value, and a write into a list or a map after its value and then its index or key,
+        // so a read there is still narrowed: of a field by its name, of a field through the instance, of a variable, of a data value's
+        // path, of an item and of an entry through an instance; a call in the value runs before the index and ends the narrowing
+        const string node = "class Node(int V, Node? Rest)\n";
+        Clean(node + "class Holder(mut Node? Head) {\n    pub void Pop() {\n        if Head != null {\n            Head = Head.Rest\n        }\n    }\n}\n\nHolder(Node(1, null)).Pop()");
+        Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nif h.Head != null {\n    h.Head = h.Head.Rest\n}\nprint(h.Head == null)");
+        Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut x = 0\nif h.Head != null {\n    x = h.Head.V\n}\nprint(x)");
+        Clean(node + "data P(int X)\nclass Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut p = P(0)\nif h.Head != null {\n    p.X = h.Head.V\n}\nprint(p)");
+        Clean(node + "class Holder(mut Node? Head, mut List<int> Xs)\n\nh = Holder(Node(0, null), [1])\nif h.Head != null {\n    h.Xs[h.Head.V] = h.Head.V\n}\nprint(h.Xs)");
+        Clean(node + "class Holder(mut Node? Head, mut Map<int, int> M)\n\nh = Holder(Node(0, null), Map<int, int>())\nif h.Head != null {\n    h.M[h.Head.V] = h.Head.V\n}\nprint(h.M)");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13), (ErrorIds.NullableUnchecked, 14)], Errors(node + "class Holder(mut Node? Head) {\n    pub int Reset() {\n        Head = null\n        return 0\n    }\n}\n\nh = Holder(Node(0, null))\nmut xs = [1, 2]\nmut m = Map<int, int>()\nif h.Head != null {\n    xs[h.Head.V] = h.Reset()\n    m[h.Head.V] = h.Reset()\n}\nprint(xs)"));
+        // and the assignment of a field without `mut`, which is refused, narrows nothing, by the field's name or through the instance
+        Assert.Equal([(ErrorIds.AssignImmutable, 5), (ErrorIds.NullableUnchecked, 6)], Errors(node + "class Holder(Node? Head)\n\nh = Holder(null)\nh.Head = Node(1, null)\nprint(h.Head.V)"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 4), (ErrorIds.NullableUnchecked, 5)], Errors(node + "class Holder(Node? Head) {\n    pub int Get() {\n        Head = Node(1, null)\n        return Head.V\n    }\n}\n\nprint(Holder(null).Get())"));
     }
 
     [Fact]
@@ -2958,12 +2972,16 @@ public sealed class CheckerTests
     [InlineData("data W<T>(W<() => int>? Inner, T V)\nclass C(W<int>? N)\n\nprint(1)", "2: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
     [InlineData("data Pos(int X)\nclass P(mut Pos At)\n\np = P(Pos(0))\np.At.X = 1\nprint(p.At.X)", "5: an assignment into a value held by a field of an instance (K2, M4)")]
     [InlineData("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag(List<int>()))\np.B.Items.Add(1)\nprint(p.B.Items.Count)", "5: a `mut` method on a value held by a field of an instance (K2, M5)")]
+    [InlineData("data Bag(List<int> Items)\nclass P(mut Bag B) {\n    pub void Go() {\n        B.Items.Add(1)\n    }\n}\n\nP(Bag([1])).Go()", "4: a `mut` method on a value held by a field of an instance (K2, M5)")]
+    [InlineData("class C(int N) {\n    data Inner(int X)\n}\n\nprint(C(1).N)", "2: a type declared in the body of a class (K7)")]
+    [InlineData("class C(int N) {\n    class D(int M)\n}\n\nprint(C(1).N)", "2: a type declared in the body of a class (K7)")]
     public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
         // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields and constructors in the body (K7, K14, K18),
         // a method that is `static`, `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` at any depth (R3), `==`
         // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
-        // the program, and an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5)
+        // the program, an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5), the field named alone
+        // inside a method among them, and a type declared in the body (K7)
         Assert.Equal([expected], NotSupported(program));
     }
 

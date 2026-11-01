@@ -87,8 +87,10 @@ public sealed partial class Checker
                     return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Static | Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)).ToString().ToLowerInvariant()}` of a method (K7, K18, R16)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
                     return (f.Line, "a method with type parameters of its own (section 4, T19)");
-                default:
+                case FunctionDeclaration:
                     break;
+                default:
+                    return (member.Line, "a type declared in the body of a class (K7)");
             }
         }
 
@@ -301,8 +303,13 @@ public sealed partial class Checker
             Report(ErrorIds.AssignImmutable, a.Line, $"`{a.Name}` is a field without `mut`, which nothing assigns (K1)");
         }
 
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         var value = CheckExpression(a.Value, field.Type, keepCases: Types.KeepsCases(field.Type));
+        EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
+        if (value.IsError)
+        {
+            return;
+        }
+
         if (Types.IsVoid(value.Type))
         {
             Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
@@ -476,8 +483,8 @@ public sealed partial class Checker
             Report(ErrorIds.AssignImmutable, a.Line, $"`{last.Member}` is a field without `mut`, which nothing assigns (K1)");
         }
 
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         var value = CheckExpression(a.Value, field.Type, keepCases: Types.KeepsCases(field.Type));
+        EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
         if (value.IsError)
         {
             return;
@@ -491,7 +498,7 @@ public sealed partial class Checker
         {
             ReportMismatch(value.Type, field.Type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(field.Type)} is required");
         }
-        else
+        else if (field.Mut)
         {
             Assigned(PathOf(a.Target), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
         }
@@ -510,6 +517,12 @@ public sealed partial class Checker
             if (Unwrap(receiver) is NameExpression n && Lookup(n.Name).Variable is null && ImplicitField(n.Name) is { } implicitField)
             {
                 return MutField(implicitField, line, what);
+            }
+
+            if (members.Count > 0 && Unwrap(members[0].Target) is NameExpression root && Lookup(root.Name).Variable is null && ImplicitField(root.Name) is not null)
+            {
+                NotSupported(line, "a `mut` method on a value held by a field of an instance (K2, M5)"); // K7: a field named alone is a step through `this`
+                return true;
             }
 
             return false;
@@ -538,7 +551,6 @@ public sealed partial class Checker
     /// </summary>
     private bool WrittenThroughInstance(Assignment a, IndexExpression index, List<MemberAccess> fields)
     {
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         if (fields.Count > 0 && fields.FindLastIndex(m => PathType(m.Target) is ClassType) < fields.Count - 1)
         {
             NotSupported(a.Line, "an assignment into a value held by a field of an instance (K2, M4)");
