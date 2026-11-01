@@ -34,6 +34,9 @@ public sealed partial class Checker
 
         /// <summary>A call with cases beside its success: its whole result, which a parameter of a written union keeps, where <see cref="Typed"/> is the success every other parameter takes (O4, O2).</summary>
         public UnionType? Whole { get; init; }
+
+        /// <summary>Of a list literal, the whole result of each item that is a call with cases beside its success, null for every other item, which a parameter's item type keeps or unwraps as it does a call's (O4).</summary>
+        public IReadOnlyList<UnionType?> ItemWholes { get; init; } = [];
     }
 
     private sealed class Candidate
@@ -1745,7 +1748,7 @@ public sealed partial class Checker
                 // M11: typed by its items for the pick, with what that reports kept back, since the parameter's type reaches it
                 Push();
                 var own = CheckExpression(a.Value, null);
-                pres.Add(new Pre { Argument = a, Typed = own, Diagnostics = Pop(commit: false), ListLiteral = true });
+                pres.Add(new Pre { Argument = a, Typed = own, Diagnostics = Pop(commit: false), ListLiteral = true, ItemWholes = ItemWholes((ListLiteral)Unwrap(a.Value)) });
                 continue;
             }
 
@@ -1789,7 +1792,7 @@ public sealed partial class Checker
             {
                 // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
                 // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
-                candidate.Keeps = pres.Select((p, i) => p.Whole is not null && Types.KeepsCases(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p.Whole)).ToArray();
+                candidate.Keeps = pres.Select((p, i) => KeepsAt(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p)).ToArray();
             }
 
             if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
@@ -1878,6 +1881,54 @@ public sealed partial class Checker
         }
 
         return typed;
+    }
+
+    /// <summary>
+    /// O4: whether an argument keeps the cases of a call on a parameter of this type: a call whose cases the written union names, and a list
+    /// literal with an item call whose cases the item type of the list that stands there names (the owner, 2026-11-01, "The union one").
+    /// </summary>
+    private static bool KeepsAt(KurzType parameter, Pre pre) =>
+        pre.Whole is not null
+            ? Types.KeepsCases(parameter, pre.Whole)
+            : ListTarget(parameter) is { } list && pre.ItemWholes.Any(w => w is not null && Types.KeepsCases(list.Element, w));
+
+    /// <summary>O4: of each item of a list literal, the whole result of an item that is a call with cases beside its success, as an argument's (above), null for every other item.</summary>
+    private List<UnionType?> ItemWholes(ListLiteral l)
+    {
+        var wholes = new List<UnionType?>();
+        foreach (var item in l.Items)
+        {
+            UnionType? whole = null;
+            if (Unwrap(item) is CallExpression)
+            {
+                Push();
+                var typed = CheckExpression(item, null, keepCases: true);
+                Pop(commit: false);
+                if (!typed.IsError && typed.Type is UnionType u && Types.NonNull(u) is null && !Types.IsVoid(u.Cases[0]))
+                {
+                    whole = u;
+                }
+            }
+
+            wholes.Add(whole);
+        }
+
+        return wholes;
+    }
+
+    /// <summary>
+    /// F13 with O4 (the owner, 2026-11-01, "The union one"): whether a list literal fits a list type exactly, item by item as an argument does:
+    /// an item call by its whole result where the item type keeps its cases and by its success where it unwraps it, any other item by the
+    /// literal's own item type (assumed, section 5: the defaults of the product pass of 2026-11-01).
+    /// </summary>
+    private static bool ItemsExact(Pre pre, KurzType type)
+    {
+        if (pre.Typed.IsError || type is not ListType list || pre.Typed.Type is not ListType own)
+        {
+            return !pre.Typed.IsError && Types.Same(pre.Typed.Type, type);
+        }
+
+        return pre.ItemWholes.All(w => w is not null && Types.KeepsCases(list.Element, w) ? Types.Same(w, list.Element) : Types.Same(own.Element, list.Element));
     }
 
     /// <summary>O4: the type an argument has on the parameter it lands on: a call's whole result where the parameter keeps its cases, its own type elsewhere.</summary>
@@ -1978,7 +2029,9 @@ public sealed partial class Checker
             {
                 types.Add(ArgumentType(candidate, pres, i));
             }
-            else if (!Unify(slot, ArgumentType(candidate, pres, i), map))
+            // O4: a call whose cases a union with a type parameter keeps fills the type parameter with its success alone, and a case the
+            // union does not name is the fit's misfit (the owner, 2026-11-01, "T = success only")
+            else if (!Unify(slot, pre.Whole is { } whole && candidate.Keeps[i] && slot is UnionType ? whole.Cases[0] : ArgumentType(candidate, pres, i), map))
             {
                 candidate.CannotInfer = true;
                 return;
@@ -2073,7 +2126,7 @@ public sealed partial class Checker
                 {
                     literal = items.Item;
                 }
-                else if (!pre.LiteralOnly || slot is not TypeParameterType tp || !ReferenceEquals(tp.Symbol, p))
+                else if (!pre.LiteralOnly || !LiteralPosition(slot, p, pre))
                 {
                     continue;
                 }
@@ -2111,6 +2164,21 @@ public sealed partial class Checker
 
         candidate.Map = map;
     }
+
+    /// <summary>
+    /// T27: whether a literal stands in a position of <paramref name="p"/>: a parameter that is <paramref name="p"/> itself, or, O4, a union of
+    /// <paramref name="p"/> and types none of which is the literal's own, <c>5</c> in <c>T | string</c> (the owner, 2026-11-01, "Bind T = int in
+    /// both"); a literal of a case the union names, <c>"a"</c> there, gives <paramref name="p"/> nothing, as a variable of its type does
+    /// (assumed, section 5: the defaults of the product pass of 2026-11-01).
+    /// </summary>
+    private static bool LiteralPosition(KurzType slot, TypeParameterSymbol p, Pre pre) => slot switch
+    {
+        TypeParameterType tp => ReferenceEquals(tp.Symbol, p),
+        UnionType u => u.Cases.Count(c => c is TypeParameterType) == 1
+            && u.Cases.Any(c => c is TypeParameterType tp && ReferenceEquals(tp.Symbol, p))
+            && (pre.Typed.IsError || !u.Cases.Any(c => Types.Same(c, pre.Typed.Type))),
+        _ => false,
+    };
 
     /// <summary>
     /// M11 with T27: a list literal whose items are literals alone, <c>[1, 2]</c>, in a parameter of a list of a type parameter,
@@ -2178,15 +2246,43 @@ public sealed partial class Checker
             case UnionType u when u.Cases.Count(c => c is TypeParameterType) == 1:
                 {
                     // O4 (the owner, 2026-10-31, "Keep, infer T = int"): in `T | NotFound` the type parameter takes the cases of the argument
-                    // the union does not name, the success of a call that keeps its cases
+                    // the union does not name: of a call that keeps its cases its success alone, which Infer passes here (the owner,
+                    // 2026-11-01, "T = success only"), of any other argument its own type less the named cases (the owner, 2026-11-01, "T =
+                    // int | Rejected, as built"); a case of the argument whose shape another case of the union has, a case that holds the
+                    // type parameter, is read through that case first (the owner, 2026-11-01, "Same shape first"; every shape read here,
+                    // assumed, section 5)
+                    var bare = (TypeParameterType)u.Cases.First(c => c is TypeParameterType);
                     IEnumerable<KurzType> cases = argument is UnionType ua ? ua.Cases : [argument];
-                    var rest = cases.Where(c => !u.Cases.Any(w => Types.Same(w, c))).ToList();
-                    return rest.Count == 0 || Unify(u.Cases.First(c => c is TypeParameterType), rest.Count == 1 ? rest[0] : new UnionType(rest), map);
+                    var rest = new List<KurzType>();
+                    foreach (var c in cases.Where(c => !u.Cases.Any(w => Types.Same(w, c))))
+                    {
+                        var shaped = u.Cases.FirstOrDefault(w => w is not TypeParameterType && Types.Mentions(w, bare.Symbol) && SameShape(w, c));
+                        if (shaped is null)
+                        {
+                            rest.Add(c);
+                        }
+                        else if (!Unify(shaped, c, map))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return rest.Count == 0 || Unify(bare, rest.Count == 1 ? rest[0] : new UnionType(rest), map);
                 }
             default:
                 return true; // nothing to bind here; whether the types fit is the fit's question
         }
     }
+
+    /// <summary>O4 with T27: whether an argument's case has the shape of a written case, the shapes <see cref="Unify"/> reads inside a type (assumed, section 5: the defaults of the product pass of 2026-11-01).</summary>
+    private static bool SameShape(KurzType written, KurzType argument) => (written, argument) switch
+    {
+        (ListType, ListType) => true,
+        (MapType, MapType) => true,
+        (DataType d, DataType da) => ReferenceEquals(d.Symbol, da.Symbol),
+        (FunctionType f, FunctionType fa) => f.Parameters.Count == fa.Parameters.Count,
+        _ => false,
+    };
 
     /// <summary>
     /// F13, F14: whether every argument fits its parameter by its own type, and whether all do exactly.
@@ -2230,7 +2326,7 @@ public sealed partial class Checker
                     }
                 }
 
-                exact &= !pre.Typed.IsError && Types.Same(pre.Typed.Type, type);
+                exact &= ItemsExact(pre, type);
                 continue;
             }
 
