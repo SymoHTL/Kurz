@@ -1,0 +1,14 @@
+// expect: output
+// | 1
+// | 6
+// | 2
+// | true
+// | true
+// rules: G4
+
+digits = Regex.New(r"\d+").Match("x١٢٣")
+print(digits?.Index)
+print(digits?.Length)
+print(Regex.New("b").Match("éb")?.Index)
+print(Regex.New(r"^\w+$").IsMatch("wörld"))
+print(Regex.New("(?i)é").IsMatch("É"))

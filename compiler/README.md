@@ -1329,7 +1329,9 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
-which the intrinsics and their vector types stand (R18); and `use` (F10) of any folder but the runtime's `sys`;
+which the intrinsics and their vector types stand (R18); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
+`redeclared` (G1 to G5); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

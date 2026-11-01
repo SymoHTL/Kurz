@@ -3171,4 +3171,25 @@ public sealed class CheckerTests
         // carries nothing more where a list is required
         Assert.Equal([(ErrorIds.UnknownName, 7)], Errors("List<T> Wrap<T>(T item) {\n    mut xs = List<T>()\n    xs.Add(item)\n    return xs\n}\n\nList<int> ys = Wrap(nope)\nprint(ys.Count)"));
     }
+
+    [Theory]
+    [InlineData("print(Regex.New(\"a\").IsMatch(\"a\"))", "1: regular expressions, `Regex` (G1 to G5)")]
+    [InlineData("print(Regex(\"a\"))", "1: regular expressions, `Regex` (G1 to G5)")]
+    [InlineData("print(RegexKind.Syntax)", "1: regular expressions, `RegexKind` (G1 to G5)")]
+    [InlineData("void Show(Match m) {\n}\n\nprint(1)", "1: regular expressions, `Match` (G1 to G5)")]
+    public void A_name_of_regular_expressions_is_not_supported_where_it_stands(string program, string expected) =>
+        // G1 to G5: a name every file sees, which the checker does not read, at a member's call, a call, a value and a type (E1)
+        Assert.Equal([expected], NotSupported(program));
+
+    [Fact]
+    public void A_file_s_own_name_of_regular_expressions_is_redeclared()
+    {
+        // G1 with V9: a type, a function, a variable and a parameter of the name, while a field takes it; a use of the name after a
+        // refused declaration reads the standard library's, which is `not supported`, so these programs use none
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("enum RegexKind { Syntax }\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("int Regex() => 1\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("string RegexError = \"a\"\nprint(RegexError)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("void Show(int Match) {\n    print(Match)\n}\n\nShow(1)"));
+        Assert.Empty(Errors("data Found(int Match)\n\nprint(Found(1).Match)"));
+    }
 }

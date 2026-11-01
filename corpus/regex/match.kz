@@ -1,0 +1,32 @@
+// expect: output
+// | true
+// | false
+// | 2026-11-01
+// | 3
+// | 10
+// | 2026
+// | 11
+// | 2026-11-01
+// | null
+// | null
+// | b
+// rules: G4
+
+date = Regex.New(r"(\d{4})-(?<month>\d{2})-(\d{2})")
+print(date.IsMatch("on 2026-11-01"))
+print(date.IsMatch("on 2026-11"))
+m = date.Match("on 2026-11-01!")
+if m != null {
+    print(m.Value)
+    print(m.Index)
+    print(m.Length)
+    print(m.Group(1)?.Value)
+    print(m.Group("month")?.Value)
+    print(m.Group(0)?.Value)
+}
+print(date.Match("none")?.Value)
+either = Regex.New("(a)|(b)").Match("b")
+if either != null {
+    print(either.Group(1)?.Value)
+    print(either.Group(2)?.Value)
+}

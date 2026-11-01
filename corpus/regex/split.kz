@@ -1,0 +1,11 @@
+// expect: output
+// | [1, 2, 3]
+// | [1, +, 2, -, 3]
+// | [1, +, 2, -, 3]
+// | [, a]
+// rules: G5
+
+print(Regex.New("[-+]").Split("1+2-3"))
+print(Regex.New("([-+])").Split("1+2-3"))
+print(Regex.New(r"(-)|(\+)").Split("1+2-3"))
+print(Regex.New(",").Split(",a"))
