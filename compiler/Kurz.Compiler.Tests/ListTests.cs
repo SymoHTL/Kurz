@@ -2300,9 +2300,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>The runtime and the standard library of this machine's target with each file's text edited where <paramref name="edits"/> names its path; each text it replaces is there.</summary>
-    internal static CheckedRuntime Edited(params (string Path, string Old, string New)[] edits)
+    internal static CheckedRuntime Edited(params (string Path, string Old, string New)[] edits) => EditedFor(Builder.HostTarget!.Value, edits);
+
+    /// <summary>As <see cref="Edited"/>, the runtime and the standard library of <paramref name="target"/>.</summary>
+    private static CheckedRuntime EditedFor(Target target, (string Path, string Old, string New)[] edits)
     {
-        var target = Builder.HostTarget!.Value;
         var files = Runtime.Files.Select(f =>
         {
             var text = Encoding.UTF8.GetString(f.Bytes);
@@ -2475,24 +2477,82 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             byte* Resized(byte* p, long bytes, long grown) {
             """));
 
+    /// <summary>The line the fenced allocator's `Free` writes to the error stream before it ends the process (<see cref="Fence"/>).</summary>
+    private const string FreeSizeLine = "fence: Free was given a size other than its block was allocated with\n";
+
     /// <summary>
-    /// The edits that make the allocator take every block from pages of its own and make them unreachable when the block is freed, so
-    /// that a read or a write of a freed block ends the process with the system's signal; nothing is used again. The thread keeps no
-    /// freed block: a kept block stays readable so that a request can take it, so the fence gives every block back to the system.
+    /// The edits that make the allocator take every block from pages of its own, which end at a page the system makes inaccessible,
+    /// as Electric Fence places a block by default, and make them unreachable when the block is freed, so that a write past a
+    /// block's end and a read or a write of a freed block end the process with the system's signal; nothing is used again. A block
+    /// ends where its size rounded up to 16 ends, so that its address stays a multiple of 16, as the allocation entry gives it: a
+    /// write past the size asked for that stays within that rounding is not seen by the page after it. The block's header holds the
+    /// size the allocation asked for, and `Free` holds the size it is given against it: another size writes
+    /// <see cref="FreeSizeLine"/> to the error stream and ends the process as a write past the block's end does. The check at `Free`
+    /// sees a size written by hand whose block is too small within the rounding, as HMAC-SHA256's state made 1288 bytes where its
+    /// code writes 1296, seen only by the `Free` of 1312 bytes against the 1304 asked for, and so 264 where the form of pull request
+    /// 159 writes 272, the mutation its judge named. The thread keeps no freed block: a kept block stays readable so that a request can take it, so the fence gives
+    /// every block back to the system; and the target's `Resize` grows none, since a block grown in place would reach past the page
+    /// after its end.
     /// </summary>
-    private static (string Path, string Old, string New)[] Fence => Builder.HostTarget == Target.Windows
-        ?
+    private static (string Path, string Old, string New)[] Fence => FenceOf(Builder.HostTarget!.Value);
+
+    /// <summary>The edits of <see cref="Fence"/> for the runtime of <paramref name="target"/>.</summary>
+    private static (string Path, string Old, string New)[] FenceOf(Target target)
+    {
+        var file = $"runtime/{Runtime.Directory(target)}/{Runtime.Directory(target)}.kz";
+        (string Path, string Old, string New)[] allocator =
         [
             ("std/std.kz", "if size > 262144 {", "if size >= 0 {"),
             ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0"),
-            (TargetFile, "VirtualFree(Ptr<void>(p), 0, 32768)", "VirtualFree(Ptr<void>(p), ulong(bytes), 16384)"), // MEM_DECOMMIT: the pages stay reserved
-        ]
-        :
-        [
-            ("std/std.kz", "if size > 262144 {", "if size >= 0 {"),
-            ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0"),
-            (TargetFile, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p), bytes, 0)"), // PROT_NONE: the pages stay mapped
+            // the size the allocation asked for, in the header's second word, which only a kept block uses
+            ("std/std.kz", "            if p != null {\n                p = p + 16\n", "            if p != null {\n                *Ptr<long>(p + 8) = size\n                p = p + 16\n"),
+            ("std/std.kz", "                moved = p\n", "                *Ptr<long>(block + 8) = grown\n                moved = p\n"),
+            ("std/std.kz", "            long bytes = *Ptr<long>(block)\n",
+                "            long bytes = *Ptr<long>(block)\n" +
+                "            if *Ptr<long>(block + 8) != size {\n" +
+                $"                string line = \"{FreeSizeLine.Replace("\n", "\\n", StringComparison.Ordinal)}\"\n" +
+                $"                sys.Write(2, line.Pointer, {Encoding.UTF8.GetByteCount(FreeSizeLine)})\n" +
+                "                block[bytes] = 1\n" + // the first byte of the page after the block's end
+                "            }\n\n"),
         ];
+        return target == Target.Windows
+            ?
+            [
+                .. allocator,
+                // MEM_RESERVE and PAGE_NOACCESS for the block's pages and one page after them, then MEM_COMMIT and PAGE_READWRITE for the block's
+                (file, "        p = Ptr<byte>(VirtualAlloc(null, ulong(bytes), 12288, 4))",
+                    "        long pages = (bytes + 4095) / 4096 * 4096\n" +
+                    "        byte* start = Ptr<byte>(VirtualAlloc(null, ulong(pages + 4096), 8192, 1))\n" +
+                    "        if start != null && VirtualAlloc(Ptr<void>(start), ulong(pages), 4096, 4) != null {\n" +
+                    "            p = start + pages - bytes\n" +
+                    "        }"),
+                (file, "VirtualFree(Ptr<void>(p), 0, 32768)", "VirtualFree(Ptr<void>(p), ulong(bytes), 16384)"), // MEM_DECOMMIT: the pages stay reserved
+            ]
+            :
+            [
+                .. allocator,
+                // the block's pages and one page after them, which `mprotect` makes inaccessible (PROT_NONE)
+                (file, "pub byte* Memory(long bytes) {",
+                    "pub byte* Memory(long bytes) {\n" +
+                    "    long pages = (bytes + 4095) / 4096 * 4096\n" +
+                    "    mut byte* p = Mapped(pages + 4096)\n" +
+                    "    raw {\n" +
+                    "        if p != null {\n" +
+                    "            if mprotect(Ptr<void>(p + pages), 4096, 0) == 0 {\n" +
+                    "                p = p + pages - bytes\n" +
+                    "            } else {\n" +
+                    "                p = null\n" +
+                    "            }\n" +
+                    "        }\n" +
+                    "    }\n\n" +
+                    "    return p\n" +
+                    "}\n\n" +
+                    "byte* Mapped(long bytes) {"),
+                // PROT_NONE from the first of the block's pages: the pages stay mapped
+                (file, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 0)"),
+                (file, "pub byte* Resize(byte* p, long bytes, long grown) {", "pub byte* Resize(byte* p, long bytes, long grown) {\n    return null\n}\n\nbyte* Resized(byte* p, long bytes, long grown) {"),
+            ];
+    }
 
     private static readonly Lazy<CheckedRuntime> FencedRuntime = new(() => Edited(Fence));
 
@@ -2610,6 +2670,48 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Crashed(BuildAndRun("print(1)\n", Edited([.. Fence, ("runtime/common/runtime.kz", start, start + write)]), "list-fence-control"));
         const string large = "    byte* p = Allocate(300000)\n    raw {\n        std.Free(p, 300000)\n        p[0] = 1\n    }\n";
         Crashed(BuildAndRun("print(1)\n", Edited([.. Fence, ("runtime/common/runtime.kz", start, start + large)]), "list-fence-control-large"));
+
+        // and a write one byte past a block's end, of a block within a page and of one over many pages, ends the process; a `Free`
+        // given 8 bytes more or 8 bytes less than the block was allocated with writes its line and ends the process as such a write
+        // does, as does the `Free` of a block `Reallocate` grew in place given the size before, and `Reallocate` given another size
+        // than the block's, whose `Free` of it holds it; and a write past a block that `Reallocate` gave as a new one, a block that
+        // starts at its page among them
+        CheckedRuntime Starting(string code) => Edited([.. Fence, ("runtime/common/runtime.kz", start, start + "    raw {\n" + code + "    }\n")]);
+        const string allocated = "        byte* p = Allocate(16)\n";
+        const string larger = "        byte* p = Allocate(300000)\n";
+        const string inPlace = "        byte* p = std.Reallocate(Allocate(20), 20, 24)\n";
+        Crashed(BuildAndRun("print(1)\n", Starting(allocated + "        p[16] = 1\n"), "list-fence-past-end"));
+        Crashed(BuildAndRun("print(1)\n", Starting(larger + "        p[300000] = 1\n"), "list-fence-past-end-large"));
+        Crashed(BuildAndRun("print(1)\n", Starting("        byte* p = std.Reallocate(Allocate(16), 16, 300000)\n        p[300000] = 1\n"), "list-fence-past-end-moved"));
+        Crashed(BuildAndRun("print(1)\n", Starting("        byte* p = std.Reallocate(Allocate(4080), 4080, 300000)\n        p[300000] = 1\n"), "list-fence-past-end-grown"));
+        FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(allocated + "        std.Free(p, 24)\n"), "list-fence-free-more"));
+        FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(allocated + "        std.Free(p, 8)\n"), "list-fence-free-less"));
+        FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(inPlace + "        std.Free(p, 20)\n"), "list-fence-free-before-growth"));
+        FreedWithAnotherSize(BuildAndRun("print(1)\n", Starting(allocated + "        std.Reallocate(p, 8, 300000)\n"), "list-fence-reallocate-less"));
+        // the positive control: the last byte of each block written, each freed with its own size, a block grown in place freed with
+        // the grown size, and a block grown into a new one freed with its size, runs
+        Ran(BuildAndRun("print(1)\n", Starting(
+            "        byte* a = Allocate(16)\n        a[15] = 1\n        std.Free(a, 16)\n" +
+            "        byte* b = Allocate(300000)\n        b[299999] = 1\n        std.Free(b, 300000)\n" +
+            "        byte* c = std.Reallocate(Allocate(20), 20, 24)\n        c[23] = 1\n        std.Free(c, 24)\n" +
+            "        byte* d = std.Reallocate(Allocate(16), 16, 300000)\n        d[299999] = 1\n        std.Free(d, 300000)\n"), "list-fence-within"), 0, ["1"], "");
+    }
+
+    /// <summary>The run ended as the fenced allocator's `Free` ends it for a size other than the block's: its line, then the system's signal, before the program printed.</summary>
+    private static void FreedWithAnotherSize((int Code, IReadOnlyList<string> Output, string Error) run)
+    {
+        Assert.True(run.Code is not 0 and not 1, $"exit {run.Code}");
+        Assert.Empty(run.Output);
+        Assert.Equal(FreeSizeLine, run.Error);
+    }
+
+    [Fact]
+    public void The_fenced_allocator_checks_clean_for_every_target()
+    {
+        foreach (var target in new[] { Target.Linux, Target.Windows })
+        {
+            Assert.NotEmpty(EditedFor(target, FenceOf(target)).Std.Statements);
+        }
     }
 
     [Fact]
