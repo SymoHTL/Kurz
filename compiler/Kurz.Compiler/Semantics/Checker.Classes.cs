@@ -290,17 +290,13 @@ public sealed partial class Checker
 
     /// <summary>
     /// K1, K2, K7: an assignment to a field by its name inside a method: the field of <c>this</c>, which takes a value only where it is
-    /// <c>mut</c>; inside a lambda it is the change of a captured value, <c>capture-assign</c> (F11).
+    /// <c>mut</c>; inside a lambda too, which holds a reference to the same instance (F11, K2).
     /// </summary>
     private void AssignImplicitField(AssignOrDeclare a, FieldSymbol field)
     {
-        var (receiver, captured) = Lookup("this");
-        model.RecordImplicitField(a, receiver!, field);
-        if (captured)
-        {
-            Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `this` and cannot change its field `{a.Name}` (F11)");
-        }
-        else if (!field.Mut)
+        var receiver = ThisVariable();
+        model.RecordImplicitField(a, receiver, field);
+        if (!field.Mut)
         {
             Report(ErrorIds.AssignImmutable, a.Line, $"`{a.Name}` is a field without `mut`, which nothing assigns (K1)");
         }
@@ -315,9 +311,9 @@ public sealed partial class Checker
         {
             ReportMismatch(value.Type, field.Type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(field.Type)} is required");
         }
-        else if (!captured && field.Mut)
+        else if (field.Mut)
         {
-            Assigned(new NullPath(receiver!, field.Name), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
+            Assigned(new NullPath(receiver, field.Name), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
         }
     }
 
@@ -445,9 +441,9 @@ public sealed partial class Checker
 
     /// <summary>
     /// K1, K2: an assignment of a field of an instance, <c>c.Count = 1</c>: the field is <c>mut</c>, the variable that holds the
-    /// reference need not be, since the reference does not change; through a lambda's captured value it is <c>capture-assign</c> (F11).
-    /// A path that goes on into a data value after the instance's field is <c>not supported</c>. The value is read before the path, as
-    /// M4 reads an assignment into a path (the emitter's order).
+    /// reference need not be, since the reference does not change; a lambda that captured the instance, or a value that holds it, assigns
+    /// it too (F11). A path that goes on into a data value after the instance's field is <c>not supported</c>. The value is read before
+    /// the path, as M4 reads an assignment into a path (the emitter's order).
     /// </summary>
     private void AssignThroughInstance(Assignment a, List<MemberAccess> members)
     {
@@ -475,11 +471,7 @@ public sealed partial class Checker
         }
 
         model.RecordType(last, new Typed(field.Type));
-        if (CapturedRoot(last.Target) is { } root)
-        {
-            Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{root}` and cannot change what is reached through it (F11)");
-        }
-        else if (!field.Mut)
+        if (!field.Mut)
         {
             Report(ErrorIds.AssignImmutable, a.Line, $"`{last.Member}` is a field without `mut`, which nothing assigns (K1)");
         }
@@ -505,28 +497,10 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>F11: the name of the variable a path starts at where a lambda captured it, <c>this</c> among them; null where it is the function's own.</summary>
-    private string? CapturedRoot(Expression e)
-    {
-        switch (Unwrap(e))
-        {
-            case NameExpression n when Lookup(n.Name) is (not null, var captured):
-                return captured ? n.Name : null;
-            case NameExpression n when ImplicitField(n.Name) is not null:
-                return Lookup("this").Captured ? "this" : null;
-            case ThisExpression:
-                return Lookup("this").Captured ? "this" : null;
-            case MemberAccess m:
-                return CapturedRoot(m.Target);
-            default:
-                return null;
-        }
-    }
-
     /// <summary>
     /// M5 with K2: the receiver of a <c>mut</c> method that is a <c>mut</c> field of an instance, <c>node.Children.Add(x)</c>, which every
     /// reference reaches (M5's reading of K2 for paths); a field without <c>mut</c> is <c>mut-required</c>, a path that goes on into a
-    /// data value after the field is <c>not supported</c>, and inside a lambda the change of a captured value is <c>capture-assign</c> (F11).
+    /// data value after the field is <c>not supported</c>, and a lambda that captured the instance changes the field too (F11).
     /// Returns false where the receiver is no such field.
     /// </summary>
     private bool MutReceiverThroughInstance(Expression receiver, List<MemberAccess> members, int line, string what)
@@ -535,7 +509,7 @@ public sealed partial class Checker
         {
             if (Unwrap(receiver) is NameExpression n && Lookup(n.Name).Variable is null && ImplicitField(n.Name) is { } implicitField)
             {
-                return MutField(receiver, implicitField, line, what);
+                return MutField(implicitField, line, what);
             }
 
             return false;
@@ -554,7 +528,7 @@ public sealed partial class Checker
             return true; // reported where the receiver was read
         }
 
-        return MutField(receiver, field, line, what);
+        return MutField(field, line, what);
     }
 
     /// <summary>
@@ -577,13 +551,9 @@ public sealed partial class Checker
         return true;
     }
 
-    private bool MutField(Expression receiver, FieldSymbol field, int line, string what)
+    private bool MutField(FieldSymbol field, int line, string what)
     {
-        if (CapturedRoot(receiver) is { } root)
-        {
-            Report(ErrorIds.CaptureAssign, line, $"a lambda reads `{root}` and cannot change what is reached through it (F11)");
-        }
-        else if (!field.Mut)
+        if (!field.Mut)
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{field.Name}` is a field without `mut` (M5, K1)");
         }

@@ -229,6 +229,9 @@ bump = () => c.Add(1)
 bump()
 bump()
 print(c.Count)
+reset = () => { c.Count = 5 }
+reset()
+print(c.Count)
 ```
 
 Case: [functions/function-type-void.kz](../corpus/functions/function-type-void.kz)

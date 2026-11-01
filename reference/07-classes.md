@@ -47,6 +47,9 @@ bump = () => c.Add(1)
 bump()
 bump()
 print(c.Count)
+reset = () => { c.Count = 5 }
+reset()
+print(c.Count)
 ```
 
 ### K3 (decided, §4) References with identity

@@ -1743,8 +1743,11 @@ round can ask about it by the rule's id.
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the
   instance, as an assignment into a path does (the owner, 2026-10-24, "Value first"), and Rust
-  evaluates the right side of an assignment first; through a captured variable, also through an
-  instance on the path, it is `capture-assign`, as F11 proposes.
+  evaluates the right side of an assignment first; a lambda that captured the instance, or a `data`
+  value that holds it, assigns the field and writes into what the field holds too, by the field's
+  name inside a method as well, while an assignment of the captured variable itself, or into a
+  `data` value's path, stays `capture-assign` (F11 with K2: the owner, 2026-11-01, "Both allowed";
+  through a `data` value, assumed).
 - N9: a path through a `mut` field of an instance is narrowed up to the next call or assignment of
   any kind, `print` and an interpolation that holds an instance among the calls (A5), so a lambda,
   which runs after them, knows nothing of such a path; a path through fields without `mut` keeps its

@@ -2183,8 +2183,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // instances of classes (chapter 7): a method that changes its fields by their names and through `this`, a second reference, a
     // list and an instance read from fields while a method replaces them, also inside one interpolation, a nullable field, an
-    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, and a chain of 1000 links
-    // made and let go of, which the release frees off its work list
+    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, a chain of 1000 links
+    // made and let go of, which the release frees off its work list, and lambdas that assign and write into the fields of the
+    // instances they captured (F11 with K2), `this` among them, while an interpolation holds the list one of them replaces
     private const string Classes = """
         class Counter(mut int Count, string Name) {
             pub void Add(int n) {
@@ -2193,6 +2194,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             pub string Text() => "{Name}={Count}"
+
+            pub void Later(int n) {
+                f = () => { Count = n }
+                f()
+            }
         }
 
         class Holder(mut List<string> Items, mut Counter? Current) {
@@ -2284,6 +2290,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print("{note.Title} {note.Counts} {Clear(note)} {note.Title} {note.Counts}")
         note.Mark()
         print(note.Counts)
+        swap = () => {
+            h.Items = ["s"]
+            h.Items.Add("t")
+            h.Items[0] = "u"
+            c.Count = 30
+            p.Left.Count = 7
+        }
+        swap()
+        c.Later(40)
+        print("{c.Count} {h.Items} {p.Left.Count}")
+        g = () => {
+            h.Items = ["g"]
+            return "g"
+        }
+        print("{h.Items} {g()} {h.Items}")
         """;
 
     private static readonly string[] ClassesPrint =
@@ -2303,6 +2324,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "c=14",
         "14n [a: 1] r 14n! []", // the string and the map the first holes took a count of, which the call replaced (K2)
         "[m: 2]",
+        "40 [u, t] 7",
+        "[u, t] g [g]", // the list the first hole took a count of, which the lambda replaced (K2)
     ];
 
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned

@@ -2905,15 +2905,28 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int N) {\n    pub int Get() {\n        int N = 2\n        return N\n    }\n}\n\nprint(C(1).Get())"));
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int N)\n\nprint(C(1).M)"));
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int N)\n\nprint(C(1).M())"));
-        // F11: a lambda changes no field of what it captured, by the field's name inside a method or through the instance
-        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N) {\n    pub void Later() {\n        f = () => {\n            N = 1\n        }\n        f()\n    }\n}\n\nC(0).Later()"));
-        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N)\n\nc = C(0)\nf = () => { c.N = 1 }\nf()\nprint(c.N)"));
+        // F11 with K2: a lambda changes a `mut` field of an instance it captured, by the field's name inside a method, through the
+        // instance, through a `data` value that holds it (assumed) and through a method; the variable itself, a `data` value's field
+        // and a field without `mut` are not changed
+        Clean("class C(mut int N) {\n    pub void Later() {\n        f = () => {\n            N = 1\n        }\n        f()\n    }\n}\n\nC(0).Later()");
+        Clean("class C(mut int N)\n\nc = C(0)\nf = () => { c.N = 1 }\nf()\nprint(c.N)");
+        Clean("class C(mut int N)\ndata D(C Item, int X)\n\nd = D(C(0), 1)\nf = () => { d.Item.N = 1 }\nf()\nprint(d.Item.N)");
         Clean("class C(mut int N) {\n    pub void Add() {\n        N = N + 1\n    }\n}\n\nc = C(0)\nf = () => c.Add()\nf()\nprint(c.N)");
+        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N)\n\nmut c = C(0)\nf = () => { c = C(1) }\nf()\nprint(c.N)"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 5)], Errors("class C(mut int N)\ndata D(C Item, int X)\n\nmut d = D(C(0), 1)\nf = () => { d.X = 2 }\nf()\nprint(d.X)"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 4)], Errors("class C(int N)\n\nc = C(0)\nf = () => { c.N = 1 }\nf()\nprint(c.N)"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("class C(int N) {\n    pub void Later() {\n        f = () => { N = 1 }\n        f()\n    }\n}\n\nC(0).Later()"));
         // K2 with M4, M5: an item or an entry written into a collection a field holds, as a `mut` method on the field is
         Clean("class Note(mut Map<string, int> Counts, mut List<int> Xs) {\n    pub void Mark() {\n        Counts[\"a\"] = 1\n        this.Xs[0] = 2\n    }\n}\n\nn = Note(Map<string, int>(), [1])\nn.Mark()\nn.Counts[\"b\"] = 2\nn.Xs[0] = 3\nprint(n.Counts)");
         Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Note(Map<string, int> Counts)\n\nn = Note(Map<string, int>())\nn.Counts[\"a\"] = 1"));
         Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Box(List<int> Xs)\n\nb = Box([1])\nb.Xs[0] = 2"));
-        Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class Box(mut List<int> Xs)\n\nb = Box([1])\nf = () => { b.Xs[0] = 2 }\nf()"));
+        // F11 with K2: a lambda writes into a collection a `mut` field of an instance it captured holds, as a `mut` method on the field
+        // does, and one held by a field without `mut` stays unchanged
+        Clean("class Box(mut List<int> Xs)\n\nb = Box([1])\nf = () => { b.Xs[0] = 2 }\nf()");
+        Clean("class Box(mut List<int> Xs) {\n    pub void Later() {\n        f = () => {\n            Xs[0] = 2\n            Xs.Add(3)\n        }\n        f()\n    }\n}\n\nBox([1]).Later()");
+        Clean("class Box(mut List<int> Xs)\n\nb = Box([1])\nf = () => b.Xs.Add(2)\nf()");
+        Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Box(List<int> Xs)\n\nb = Box([1])\nf = () => { b.Xs[0] = 2 }\nf()"));
+        Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Box(List<int> Xs)\n\nb = Box([1])\nf = () => b.Xs.Add(2)\nf()"));
         Assert.Equal(["5: an assignment into a value held by a field of an instance (K2, M4)"], NotSupported("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag([1]))\np.B.Items[0] = 2"));
     }
 
