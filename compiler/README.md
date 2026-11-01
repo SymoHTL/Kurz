@@ -707,22 +707,31 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   and a `Remove` of the last entry leave an empty map that holds its block): the count
   of the values that hold it, 8 bytes, the count of its entries and the number of its slots, a power
   of two from 8, 4 bytes each, the two keys of its hash, 8 bytes each, and the number of slots a key
-  can still take before the block grows, 4 bytes, padded to 48 bytes, then a control byte for
+  can still take before the block grows, 4 bytes, the hash it takes, 4 bytes, 0 for the fast hash and 1
+  for SipHash-1-3, and whether an insert's probe passed the bound, 4 bytes, padded to 48 bytes, then a control byte for
   each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
-  key and the value, laid out as a `data` value of the three. A key's hash is SipHash-1-3 of its
+  key and the value, laid out as a `data` value of the three. A key's hash is taken over its
   bytes, a string's UTF-8 bytes and any other key widened to 64 bits, a time's 16 bytes, a `double`'s
   8 bytes and a `float`'s widened to a `double`, with every NaN as the one NaN of the bits
   `0x7FF8000000000000` and -0.0 as 0.0, as .NET's `double.GetHashCode` folds them, since such a key
   compares as C#'s `double.Equals`, NaN equal to NaN and -0.0 to 0.0 (section 4, the owner, 2026-10-30,
-  "As C#"; D3), the hash Rust's `HashMap` takes by default; a key that is a list, a `data` value or a union, of every type
-  the checker takes as a key (section 4, the owner, 2026-10-30, "Any type with =="), is hashed by
-  SipHash-1-3 over 64-bit words, each item's own hash for a list, a union's tag and its case's hash, the
+  "As C#"; D3); a key that is a list, a `data` value or a union, of every type
+  the checker takes as a key (section 4, the owner, 2026-10-30, "Any type with =="), is hashed over
+  64-bit words, each item's own hash for a list, a union's tag and its case's hash, the
   `null` of a nullable key, a union of its type and `null`, by its tag alone, a `data` type laid out as a
   block its type's number and each field's hash, as Rust's derived `Hash`
   feeds each field to one hasher, and compared by `==` (D3), lists by their counts and items, their
   `double` and `float` items, and the values of their `double?` and `float?` items, as C#'s `Equals`
   compares them and hashed as a `double` key is (section 4, the owner, 2026-10-30, "Equals inside
-  data/keys", "As plain double").
+  data/keys", "As plain double"). The hash is the fast hash, foldhash 0.2.0's `fast::FixedState` with its
+  folded multiply in the crate's form for a target without a product of 128 bits (`FoldHash`, and `FoldWord` and
+  `FoldEnd` for words, as `FoldHasher`'s `write`, `write_u64` and `finish`), until one insert's lookup of its key
+  passes more than 512 slots of groups without a slot of 255 (`MapEmpty` counts them, past a removed entry's slot
+  it takes up to the group that ends the lookup); the insert then moves every entry, one time, into a block of
+  its slots under SipHash-1-3 with the block's keys, the hash Rust's `HashMap` takes by default (`MapSwitched`
+  and the emitted `switch` helper, which hashes each key again and frees the old block), and the map stays on
+  SipHash-1-3, as .NET's `Dictionary` switches to its randomized comparer one time (section 4, the owner,
+  2026-11-01, "Switch, as .NET").
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
   no entry since the block was made or cleared, 128 for one whose entry was removed, else 7 bits of its
   entry's hash, bits 56 to 62; a lookup reads the control bytes of a group of 8 slots as one word and
@@ -737,7 +746,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Clear` of a map another value holds copy the block first, or for `Clear` let go of it (M3), as a
   list's `Add` and `Clear` do. The keys of the hash come from the system's `Random` for each thread, at its
   first map, and each new map takes the first key plus one, as Rust's `RandomState` takes them, so
-  that the order of a map's entries differs between runs (M10) and a block takes its keys with it;
+  that the order of a switched map's entries differs between runs, where a map on the fast hash gives
+  one order in every run of one build (M10), and a block takes its keys with it;
   the Linux runtime's `Random` takes them as Rust's standard library takes the seed of a `HashMap`
   (`library/std/src/sys/pal/unix/rand.rs`, checked at the tag 1.82.0): `getrandom` with
   `GRND_INSECURE`, `GRND_NONBLOCK` for the rest of the process where the kernel refuses that flag with
@@ -982,8 +992,18 @@ given 8 bytes more or less than its block was allocated with, or the size before
 written by hand whose block is too small within that rounding, as HMAC-SHA256's state made 1288 bytes where its code writes 1296,
 or 264 where the form of pull request 159 writes 272, which the page after the block does not see; maps made and dropped through every way out of a block, removed, cleared,
 walked, kept as entries and written into a list's item, for 3000 rounds within the sixteen pieces, and a map of 1000 entries kept each round not; SipHash-1-3
-of three inputs against vectors from outside this repository; two runs of one program that print a
-map of 20 entries in two orders; the bytes of a map's first block the system refuses; `random-failed`
+of three inputs against vectors from outside this repository; the fast hash of the bytes of 41 counts
+and of 0 to 5 words against the values of foldhash 0.2.0 built from its source with the folded multiply
+of a target without a product of 128 bits; two runs of one program that print a map of 20 entries in
+one order; keys whose fast hash starts their probe at one group, of which the 520th stays on the fast
+hash and the 521st moves its map onto SipHash-1-3, two runs then printing two orders with every entry,
+so too after 1000 keys more grow the switched map, those 1521 keys in one order under a bound no probe
+passes, a map made before the switched one and one made after it in one order in two runs, and a copy of
+the switched map's block, which a write to a map value that shares it makes, with every entry, 512 and 520
+of them with one removed and the next added into its slot, whose lookup passes 64 groups and stays and 65
+and moves, and 600 keys of one group as strings under the
+allocator that makes every freed block inaccessible; the maps' programs with every map moved onto
+SipHash-1-3 at its first insert, under that allocator too; the bytes of a map's first block the system refuses; `random-failed`
 at a map's first write where the target's `Random` reports a failure, and a program without a map that
 runs there; on Linux a map whose keys come from `/dev/urandom` where the system refuses `getrandom`
 with `ENOSYS`, and `random-failed` where that file is not there either;
