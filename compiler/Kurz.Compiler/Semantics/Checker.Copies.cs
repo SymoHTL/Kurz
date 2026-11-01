@@ -96,11 +96,11 @@ public sealed partial class Checker
         }
 
         var kinds = enums["TypeKind"];
-        return new Typed(new EnumType(kinds), new EnumConstant(kinds.IndexOf(KindOf(bound))));
+        return new Typed(new EnumType(kinds), new EnumConstant(kinds.IndexOf(KindOf(bound)!)));
     }
 
-    /// <summary>The name of the value of <c>TypeKind</c> for a type (T33; section 4, assumed with "Kinds + parts").</summary>
-    private static string KindOf(KurzType type) => type switch
+    /// <summary>The name of the value of <c>TypeKind</c> for a type (T33; section 4, assumed with "Kinds + parts"); null for <c>void</c>, which has none.</summary>
+    private static string? KindOf(KurzType type) => type switch
     {
         PrimitiveType p => p.Kind.ToString(),
         ListType => "List",
@@ -109,9 +109,10 @@ public sealed partial class Checker
         UnionType => "Union",
         DataType => "Data",
         EnumType => "Enum",
-        HandleType or HasherType => "Class",
+        ClassType or HandleType or HasherType => "Class",
         FunctionType or CFunctionType => "Function",
         PointerType => "Pointer",
+        VoidType => null,
         _ => throw new InvalidOperationException($"`{type.Text}` has no kind of type"),
     };
 
@@ -223,6 +224,12 @@ public sealed partial class Checker
             if (info.Map.Values.Any(t => Types.IsError(t) || t is TypeParameterType))
             {
                 continue; // a type argument that was reported, or a caller that is no copy of a reader and so reads no type parameter here
+            }
+
+            if (info.Map.Values.FirstOrDefault(t => KindOf(t) is null) is { } kindless)
+            {
+                ReportOnce(Diagnostic.NotSupported(c.Line, $"`{kindless.Text}` as a type argument of `{info.Function!.Name}`, which reads its type, `{kindless.Text}` having no kind of `TypeKind` (T33)"));
+                continue;
             }
 
             var copy = CopyOf(info.Function!, info.Map, c, outer);

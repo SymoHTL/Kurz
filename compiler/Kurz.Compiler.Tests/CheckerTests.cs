@@ -3362,10 +3362,11 @@ public sealed class CheckerTests
     [InlineData("Order", "Data")]
     [InlineData("Shape", "Enum")]
     [InlineData("(int) => int", "Function")]
+    [InlineData("Counter", "Class")]
     public void T_Kind_in_a_copy_is_the_constant_of_the_kind_of_its_type(string type, string kind)
     {
         // T33: each copy reads its type's kind, a constant of `TypeKind`, so that a `match` on it takes the arm of that value alone
-        var program = $"data Order(string Id)\nenum Shape {{ Round }}\n\nvoid Only<T>() {{\n    match T.Kind {{\n        TypeKind.{kind} => print(1)\n    }}\n}}\n\nOnly<{type}>()";
+        var program = $"data Order(string Id)\nenum Shape {{ Round }}\nclass Counter(int Count)\n\nvoid Only<T>() {{\n    match T.Kind {{\n        TypeKind.{kind} => print(1)\n    }}\n}}\n\nOnly<{type}>()";
         Clean(program);
     }
 
@@ -3432,6 +3433,18 @@ public sealed class CheckerTests
         // T33: a reader that calls itself for a larger type each time makes a new copy at each call, which no build could end
         Assert.Equal(["7: a chain of more than 64 copies of generic functions that read their type, from `Deep<int>` (T33)"],
             NotSupported("void Deep<T>() {\n    match T.Kind {\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()"));
+    }
+
+    [Fact]
+    public void A_type_argument_with_no_kind_is_not_supported_at_the_call_that_writes_it()
+    {
+        // T33: `void` has no value of `TypeKind`, so a reader called with it, or a function that passes it on to one, is not supported
+        // at the call that writes it, where the checker takes it in any other generic call
+        var reader = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\n";
+        Assert.Equal(["7: `void` as a type argument of `Only`, which reads its type, `void` having no kind of `TypeKind` (T33)"], NotSupported(reader + "Only<void>()"));
+        Assert.Equal(["11: `void` as a type argument of `Outer`, which reads its type, `void` having no kind of `TypeKind` (T33)"],
+            NotSupported(reader + "void Outer<U>() {\n    Only<U>()\n}\n\nOuter<void>()"));
+        Clean(reader + "void Other<T>() {\n    print(1)\n}\n\nOther<void>()\nOnly<int>()");
     }
 
     [Fact]
