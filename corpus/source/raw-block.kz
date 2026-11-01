@@ -1,0 +1,10 @@
+// expect: output
+// | { "pattern": "\d+" }
+// |   {indented}
+// rules: L20
+
+text = r"""
+    { "pattern": "\d+" }
+      {indented}
+    """
+print(text)
