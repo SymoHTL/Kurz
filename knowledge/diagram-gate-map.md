@@ -161,7 +161,7 @@ flowchart TD
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
         no program of them"]
         G11["unicode-tables: compiler/Kurz.Compiler/Emit/CaseTables.cs is not what tools/unicode_tables.py writes from
-        the Unicode Character Database of the version it pins, Rust's pin when it was taken; a file of the
+        the Unicode Character Database of the version it pins (`VERSION`), Rust's pin on 2026-10-31; a file of the
         database whose SHA-256 is not the pinned one; a table with fewer entries than its floor; PARTLY, which is red,
         where a file cannot be fetched from unicode.org or its download is cut off, since nothing was compared. A
         fetched file is kept under its hash in the system's temporary directory and read again while the hash holds,

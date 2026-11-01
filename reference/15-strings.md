@@ -295,8 +295,8 @@ reads it under the invariant culture;
 groups not checked, so that `"1,2,3"` reads as 123; `Infinity`, `-Infinity` and `NaN`, the words of
 `double` and `float`, are read in any case; a number may start or end with its point; a sign before
 the digits of an unsigned type reads as C#'s `Parse` reads it, `"-0"` as 0 and `"-1"` as `TooSmall`; `float.Parse` reads as `double.Parse`
-does, a number past the largest `float` being infinity at the edge `double.Parse` reads, the halfway
-point above the largest finite value (below); and `ParseError` and `ParseKind` are types
+does, a number at or past the halfway point above the largest finite `float` being infinity
+(below); and `ParseError` and `ParseKind` are types
 every file sees, so that a file's own declaration of one is `redeclared` (V9), as a file's own
 `InvalidUtf8` is (T15) *(assumed, §12: the readings said back with the answers and the defaults of the
 build's product pass, not put to the owner as questions, and the two names, a default of the question)*.
@@ -305,8 +305,8 @@ C#'s `decimal.Parse` keeps the sign in the value's bits (§12, the owner, 2026-1
 sign"). A `double` is the one nearest the number its digits write, ties to the even one, and a `float`
 is rounded once, from the digits, as Rust's `parse` and C#'s `Parse` since .NET Core 3.0 read them,
 by Rust's mechanism: Clinger's fast path where the digits and the power of ten are exact in the type,
-the digits an integer of at most 2^53 and the power from 10^-22 to 10^22 for a `double` and of at most
-2^24 and from 10^-10 to 10^10 for a `float`, as Rust's limits are, with a power up to 10^37 or 10^17
+that is, where the digits are an integer of at most 2^53 and the power is from 10^-22 to 10^22 for a
+`double`, and the digits are at most 2^24 and the power from 10^-10 to 10^10 for a `float`, as Rust's limits are, with a power up to 10^37 or 10^17
 first moved into the digits where they stay within that limit, Eisel-Lemire's with a
 table of the 128-bit powers of five from 5^-342 to 5^308, and for the strings the two cannot settle a
 slow path over at most 768 of the digits on the stack, so that a parse asks the allocator for nothing;
