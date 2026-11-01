@@ -1652,7 +1652,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "true",
         "made 0",
         "made 9",
-        "[made 2, made 1, made 10]", // by keys of 6, 7 and 6 bytes, equal keys in their order
+        "[made 2, made 1, made 10]", // by the keys made 6, made 7 and made 6, of items of 6, 7 and 6 bytes, equal keys in their order
         "[3, 2, 1]", // by keys of 0, 2 and 1, the block the lambda holds copied first
         "[3, 1, 2]",
         "[made 9]",
@@ -1662,7 +1662,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // The trims, splits, replaces, changes of case and joins of X3 to X6 on strings made while the program runs, each source given a
     // new value after its result is taken, with the result printed after that: a trim that copies, one that keeps the whole string,
-    // which shares it, and one of a literal, which keeps its bytes in place, and a trim of a `char` from the start and from the end; a
+    // which shares it, and one of a literal, which keeps its bytes in place, a trim of a `char` from the start and from the end, and
+    // the ASCII trims of the start and of the end; a
     // split into copies, into the whole string and of a literal, an item of a split read after its list is gone; a replace that finds
     // nothing, which shares the string, one with arguments made in the call, one into an empty string and one into the variable it
     // reads, and a replace of a `char` by a `char` of three bytes into the variable it reads and one that finds nothing; a change of
@@ -1670,7 +1671,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // list made for the call, of items whose text is made for the join (A4), and with a `char` separator read from a variable and
     // written in the call; and a cut of X2 that copies, one that keeps the whole string, one of a literal, one of nothing and one
     // through a field, and a parse and a decode (X7, H7) of a variable given a new value after it, of a cut made in the call and of a
-    // field, and a parse of a `double`, a `float` and a `decimal` of the same and of an interpolation
+    // field, and a parse of a `double`, a `float` and a `decimal` of the same and of an interpolation, the data value of the field
+    // given a new value after its cut, its decode and its parse
     private const string Pieces = """
         data Bag(List<string> Items)
         data Name(string Value)
@@ -1702,6 +1704,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         v = Made(0)
         print(lead)
         print(tail)
+        mut z = "  {Made(9)}  "
+        front = z.TrimStartAscii()
+        back = z.TrimEndAscii()
+        z = Made(0)
+        print("[{front}]")
+        print("[{back}]")
 
         mut s = "{Made(1)},{Made(2)},"
         parts = s.Split(',')
@@ -1773,8 +1781,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(piece.Substring(0, piece.Bytes.Count))
         print("lit cut".Substring(4, 3))
         print("[{Made(1).Substring(3, 0)}]")
+        mut named = Name("{Made(2)}ä")
+        inField = named.Value.Substring(5, 3)
         named = Name("{Made(2)}ä")
-        print(named.Value.Substring(5, 3))
+        print(inField)
         mut digits = " {40 + 2}\t"
         long | ParseError number = long.Parse(digits)
         digits = Made(0)
@@ -1784,6 +1794,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Bytes | HexError hexed = Hex.Decode("{Made(1).Substring(5, 1)}f")
         print(hexed)
         Bytes | HexError wrong = Hex.Decode(named.Value)
+        named = Name("{Made(2)}ä")
         print(wrong)
         mut real = " {1}.5e1 "
         double | ParseError scaled = double.Parse(real)
@@ -1794,6 +1805,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         decimal | ParseError money = decimal.Parse("-{Made(2).Substring(5, 1)}.50")
         print(money)
         double | ParseError fielded = double.Parse(named.Value)
+        named = Name(Made(0))
         print(fielded)
         """;
 
@@ -1809,6 +1821,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[  made 7]",
         "made 8xx", // a `char` from the start
         "xxmade 8", // from the end
+        "[made 9  ]", // the ASCII form of the start, its source given a new value
+        "[  made 9]", // of the end
         "[made 1, made 2, ]", // copies, an empty piece kept
         "3",
         "[made 8]", // the whole string, shared
@@ -1843,7 +1857,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "made 9", // the whole string, shared
         "cut", // a literal's bytes in place
         "[]",
-        "2ä", // through a field
+        "2ä", // through a field, its data value given a new value
         "42", // a parse of a variable given a new value after it
         "1",
         "[31]",
@@ -2635,7 +2649,35 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string piece = "x = \"a\"\nprint(\"{x},bb\".Split(\",\"))\n";
         Ran(BuildAndRun(piece, Edited([.. Fence, ("std/std.kz", "    byte* text = StringBlock(count)\n", "    mut byte* text = null\n    if count < 2 {\n        text = StringBlock(count)\n    }\n\n")]), "split-piece-refused"), 1, [], "error: allocation-failed (18 bytes)\n");
         Ran(BuildAndRun(piece, Fenced, "split-piece-granted"), 0, ["[a, bb]"], ""); // the positive control
+
+        // X4: a trim of a string made while the program runs copies the 3 bytes it keeps, `StringOf` refusing 2 bytes or more as
+        // above, which reports 16 bytes of counts and the 3, a trim of whitespace and one of a `char` alike
+        var copies = Edited([.. Fence, ("std/std.kz", "    byte* text = StringBlock(count)\n", "    mut byte* text = null\n    if count < 2 {\n        text = StringBlock(count)\n    }\n\n")]);
+        const string trims = "x = \"a\"\nprint(\" {x}bc \".Trim())\nprint(\"xx{x}bc\".TrimStart('x'))\n";
+        Ran(BuildAndRun(trims, copies, "trim-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        Ran(BuildAndRun("x = \"a\"\nprint(\"xx{x}bc\".TrimStart('x'))\n", copies, "trim-char-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        Ran(BuildAndRun(trims, Fenced, "trims-granted"), 0, ["abc", "abc"], ""); // the positive control
     }
+
+    [Fact]
+    public void A_Join_whose_buffer_of_texts_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
+    {
+        // X6, O11: the texts of 100 `int` items take a buffer of 100 strings of 16 bytes from the runtime's `Allocate`, which ends
+        // the process itself where the system refuses it, the runtime refusing 1000 to 4095 bytes as for the sorts; a list of
+        // strings of as many items is its own texts and takes no buffer
+        var refusing = RefusingSmallBlocks;
+        const string texts = "mut xs = List<int>()\nfor i in 0..<100 {\n    xs.Add(i)\n}\n\nprint(string.Join(\",\", xs).Bytes.Count)\n";
+        Ran(BuildAndRun(texts, refusing, "join-texts-refused"), 1, [], "error: allocation-failed (1600 bytes)\n");
+        Ran(BuildAndRun(texts, toolchain.Runtime, "join-texts-granted"), 0, ["289"], ""); // the positive control
+        const string strings = "mut xs = List<string>()\nfor i in 0..<100 {\n    xs.Add(\"a\")\n}\n\nprint(string.Join(\",\", xs).Bytes.Count)\n";
+        Ran(BuildAndRun(strings, refusing, "join-strings-granted"), 0, ["199"], "");
+    }
+
+    /// <summary>
+    /// The runtime of this machine's target whose `Allocate` refuses 1000 to 4095 bytes in its text, below the 4096 bytes `print` takes,
+    /// while the lists' own blocks do not go through it.
+    /// </summary>
+    private static CheckedRuntime RefusingSmallBlocks => Edited(("runtime/common/runtime.kz", "    byte* p = std.Allocate(size)\n", "    mut byte* p = null\n    if size < 1000 || size >= 4096 {\n        p = std.Allocate(size)\n    }\n\n"));
 
     [Fact]
     public void A_cut_or_a_decode_whose_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
@@ -2653,11 +2695,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_sort_whose_buffer_or_keys_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
-        // M9, X8: the runtime's `Allocate` refusing 1000 to 4095 bytes in its text, below the 4096 bytes `print` takes, while the lists'
-        // own blocks do not go through it: a
-        // stable sort of 300 `long` items asks for a buffer of half of them, 150 of 8 bytes, and `SortBy` of 100 items with `long` keys
-        // for the pairs of a key and a position, 100 of 16 bytes; an unstable sort asks for nothing
-        var refusing = Edited(("runtime/common/runtime.kz", "    byte* p = std.Allocate(size)\n", "    mut byte* p = null\n    if size < 1000 || size >= 4096 {\n        p = std.Allocate(size)\n    }\n\n"));
+        // M9, X8: the runtime's `Allocate` refusing 1000 to 4095 bytes (<see cref="RefusingSmallBlocks"/>): a stable sort of 300 `long`
+        // items asks for a buffer of half of them, 150 of 8 bytes, and `SortBy` of 100 items with `long` keys for the pairs of a key and
+        // a position, 100 of 16 bytes; an unstable sort asks for nothing
+        var refusing = RefusingSmallBlocks;
         const string list = "mut xs = List<long>()\nfor i in 0..<300 {\n    xs.Add(long(299 - i))\n}\n\n";
         const string sort = list + "xs.Sort()\nprint(xs[0])\n";
         Ran(BuildAndRun(sort, refusing, "sort-refused"), 1, [], "error: allocation-failed (1200 bytes)\n");

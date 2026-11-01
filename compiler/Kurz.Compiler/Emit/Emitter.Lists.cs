@@ -854,7 +854,11 @@ public sealed partial class Emitter
 
     // ---- the sorts of a list (X8) ----------------------------------------------------------------
 
-    /// <summary>The items below which a sort takes insertion alone, and the runs the stable sort sorts so before it merges them, as Rust's sorts take 20.</summary>
+    /// <summary>
+    /// The most items for which a sort takes insertion alone, as Rust's sorts sort a list of 20 items or fewer by insertion, and the length of
+    /// the runs the stable sort sorts so before it merges them, fixed runs of this compiler's own, where Rust's merge sort finds the runs the
+    /// list holds and makes a short one longer.
+    /// </summary>
     private const int ShortRun = 20;
 
     /// <summary>What the sort helpers sort: the name of the items in the helpers' keys, their IR type, and the helper that gives whether one sorts before another.</summary>
@@ -1308,7 +1312,7 @@ public sealed partial class Emitter
     /// around it from both ends, so that items equal to it fall on both sides; the shorter side is sorted by a call and the longer in the
     /// same loop, so that the calls nest no deeper than the base-2 logarithm of the count. A side of <see cref="ShortRun"/> items or fewer
     /// is sorted by insertion, and a side reached after <c>%a2</c> splits, the bound <see cref="SortLimit"/> gives, by a heapsort
-    /// (<see cref="HeapSort"/>), so that no order of the items takes more than n log n comparisons.
+    /// (<see cref="HeapSort"/>), so that the comparisons of no order of the items grow faster than a constant times n log n.
     /// </summary>
     private string UnstableSort(SortOf s) => Helper($"sort.unstable.{s.Key}", "void", ["ptr", "i64", "i64"], () =>
     {
@@ -1345,6 +1349,8 @@ public sealed partial class Emitter
         OrderTwo(s, v, "0", middle);
         OrderTwo(s, v, middle, last);
         OrderTwo(s, v, "0", middle);
+        // the pivot is read from its slot without a count of its own and kept while the split swaps that slot: the swaps move items
+        // inside the block and let go of none, and nothing frees the block while the split runs, so the item it names stays alive
         var p = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, v, middle)}");
 
         // Hoare's split: the first item from the front that the pivot does not follow, and the first from the back it does not precede,
@@ -1936,14 +1942,6 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// X7: <c>long.Parse(s)</c>, and the same call on each number type, the number the string's bytes give, or the case <c>ParseError</c> of
-    /// the kind the standard library gives (section 12, the owner, 2026-10-31, "Outcome long | ParseError"): an integer from
-    /// <c>ParseInteger</c>, which reads it against the type's range; the bits of a <c>double</c> and a <c>float</c> from <c>ParseDouble</c>
-    /// and <c>ParseFloat</c>, through a helper that keeps the 768 bytes of their slow path on its stack, as Rust keeps its <c>Decimal</c>,
-    /// so that a parse asks the allocator for nothing; and the two words of a <c>decimal</c> from <c>ParseDecimal</c>. The string is
-    /// borrowed for the call.
-    /// </summary>
-    /// <summary>
     /// The 128-bit powers of five of Eisel-Lemire (X7), 5^q for q from -342 to 308, two words each, the high one first, as fast_float's
     /// and Rust's <c>POWER_OF_FIVE_128</c> hold them: for q from 0, 5^q shifted until its first bit is bit 127 and cut to 128 bits; for
     /// a negative q, 2^b / 5^-q rounded down and then up by one, cut to 128 bits, where b is 127 more than the bits of 5^-q from 5^-27
@@ -2001,6 +1999,14 @@ public sealed partial class Emitter
         return name;
     }
 
+    /// <summary>
+    /// X7: <c>long.Parse(s)</c>, and the same call on each number type, the number the string's bytes give, or the case <c>ParseError</c> of
+    /// the kind the standard library gives (section 12, the owner, 2026-10-31, "Outcome long | ParseError"): an integer from
+    /// <c>ParseInteger</c>, which reads it against the type's range; the bits of a <c>double</c> and a <c>float</c> from <c>ParseDouble</c>
+    /// and <c>ParseFloat</c>, through a helper that keeps the 768 bytes of their slow path on its stack, as Rust keeps its <c>Decimal</c>,
+    /// so that a parse asks the allocator for nothing; and the two words of a <c>decimal</c> from <c>ParseDecimal</c>. The string is
+    /// borrowed for the call.
+    /// </summary>
     private string EmitParse(CallExpression c, CallInfo info)
     {
         var text = Arguments(c, info, _ => Types.String, _ => false, _ => null, cConvention: false, owned: false).Single()["%kz.str ".Length..];
@@ -2093,7 +2099,10 @@ public sealed partial class Emitter
     /// X6: <c>string.Join(separator, values)</c>, the texts of the items (A4) with the separator, a string or a <c>char</c>'s UTF-8 bytes,
     /// between two of them, joined by the standard library's <c>Join</c>: a list of strings is its own texts, and the texts of the items of any other type are made into a
     /// buffer, as a list's text makes them (<see cref="ListText"/>), and let go of after the join. The separator and the list are held
-    /// without a count of their own while the arguments after them are made (M7). A block the system refuses ends the process (M9).
+    /// without a count of their own while the arguments after them are made (M7). The buffer comes from the runtime's <c>Allocate</c>,
+    /// which ends the process itself with <c>allocation-failed (&lt;n&gt; bytes)</c> where the system refuses it (O11), so the helper reads
+    /// no null there; a block of the joined text the system refuses, or one past the largest <c>int</c>, is the library's
+    /// <c>asked</c>, which the helper raises (M9, T15).
     /// </summary>
     private string EmitStringJoin(CallExpression c, CallInfo info)
     {
@@ -2120,6 +2129,8 @@ public sealed partial class Emitter
                 buffer = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {size})");
                 var at = fn.Alloca("i64", "at");
                 fn.Emit($"store i64 0, ptr {at}");
+                // the line is the first call's of this list type: `not supported` of an item type without a text is the one diagnostic of
+                // the run, which ends at the call whose emission makes this helper, so no later call of the type is reached
                 EachItem("%a2", type.Element, item =>
                 {
                     var i = fn.Value($"load i64, ptr {at}");

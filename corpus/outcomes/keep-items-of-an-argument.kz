@@ -1,0 +1,25 @@
+// expect: output
+// | 10
+// | none
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report(List<int | NotFound> items) {
+    for f in items {
+        match f {
+            int n => print(n)
+            NotFound => print("none")
+        }
+    }
+}
+
+// the literal takes the parameter's item type, a union, which each item holds
+Report([Find(1), Find(2)])

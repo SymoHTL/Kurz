@@ -1,8 +1,9 @@
-// expect: error type-mismatch at 21
+// expect: error type-mismatch at 22
 // rules: O4
 
 data NotFound
 
+// `Invalid` is the case of an enum's `From` that every file sees without declaring it (D18)
 int | NotFound | Invalid Find(int id) {
     if id == 1 {
         return 10

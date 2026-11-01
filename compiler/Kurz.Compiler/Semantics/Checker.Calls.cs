@@ -82,7 +82,7 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
-        if (keepCases || result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null)
+        if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
         }
@@ -1278,7 +1278,9 @@ public sealed partial class Checker
 
                         // X8: the key is what a function of an item gives, as C#'s `OrderBy` infers its `TKey` from its `keySelector`: a
                         // lambda takes the item type for a parameter it does not type (F11) and its result from its body, which T27's
-                        // inference, from the arguments alone, does not reach; any other argument is a function value of one item
+                        // inference, from the arguments alone, does not reach; any other argument is a function value of one item. A
+                        // form of the call that fits none is `argument-mismatch`, and a key of another type `type-mismatch` (section 12,
+                        // the owner, 2026-10-31, "As the checker does")
                         if (c.Arguments.Count != 1 || (c.Arguments[0].Name is { } named && named != "keySelector")
                             || (Unwrap(c.Arguments[0].Value) is LambdaExpression { Parameters.Count: not 1 }))
                         {
@@ -1411,9 +1413,9 @@ public sealed partial class Checker
     /// or with a <c>char trimChar</c>, two forms, and the ASCII forms; <c>Split</c>, a <c>List&lt;string&gt;</c>, of a <c>string</c> or
     /// of a <c>char</c>, and <c>Replace</c>, a <c>string</c>, of two strings, of a <c>char</c> by a string or of a <c>char</c> by a
     /// <c>char</c>, three forms (X5); <c>ToLower()</c>, <c>ToUpper()</c>, <c>ToLowerAscii()</c> and <c>ToUpperAscii()</c> (X3); and <c>Substring(startIndex, length)</c>, a
-    /// <c>string</c> of two <c>int</c>s, the form the record names (X2). A member of two forms takes a literal argument at its own type (F14) and
-    /// gives a call that fits neither <c>argument-mismatch</c> with a line for each form (F13), as X1's searches do; the parameters
-    /// take C#'s names.
+    /// <c>string</c> of two <c>int</c>s, the form the record names (X2). A member of two forms or three takes a literal argument at its own type (F14)
+    /// and gives a call that fits none of them <c>argument-mismatch</c> with a line for each form (F13), as X1's searches do; the
+    /// parameters take C#'s names (section 12, the owner, 2026-10-31, "C#'s names").
     /// </summary>
     private Typed CheckStringMember(CallExpression c, MemberAccess m)
     {
@@ -1525,10 +1527,6 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
-    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7).
-    /// </summary>
-    /// <summary>
     /// X8: whether a sort orders values of <paramref name="type"/>, the items of a list or the keys of <c>SortBy</c>: a type <c>&lt;</c>
     /// orders, a number, a <c>char</c>, a <c>string</c>, a time and an enum that numbers its values (T18, T32, D18), and one of them that
     /// may be <c>null</c>, which sorts before every value (section 12, the owner, 2026-10-31, "Null first, as C#/Rust"); an enum that numbers
@@ -1558,6 +1556,10 @@ public sealed partial class Checker
         return false;
     }
 
+    /// <summary>
+    /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
+    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7).
+    /// </summary>
     private void MutReceiver(CallExpression call, Expression receiver, int line, string what)
     {
         var members = new List<MemberAccess>();
@@ -1787,7 +1789,7 @@ public sealed partial class Checker
             {
                 // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
                 // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
-                candidate.Keeps = pres.Select((p, i) => p.Whole is not null && Types.KeepsCases(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map))).ToArray();
+                candidate.Keeps = pres.Select((p, i) => p.Whole is not null && Types.KeepsCases(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p.Whole)).ToArray();
             }
 
             if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
@@ -1908,7 +1910,7 @@ public sealed partial class Checker
 
                 if (i >= candidate.Slots.Count)
                 {
-                    candidate.BindingError = $"the call passes {pres.Count} arguments to {candidate.Slots.Count} parameters (D11)";
+                    candidate.BindingError = $"the call passes {Types.Count(pres.Count, "argument")} to {Types.Count(candidate.Slots.Count, "parameter")} (D11)";
                     return;
                 }
 
@@ -2173,6 +2175,14 @@ public sealed partial class Checker
                 return d.TypeArguments.Zip(da.TypeArguments).All(pair => Unify(pair.First, pair.Second, map));
             case FunctionType f when argument is FunctionType fa && f.Parameters.Count == fa.Parameters.Count:
                 return f.Parameters.Zip(fa.Parameters).All(pair => Unify(pair.First, pair.Second, map)) && Unify(f.Result, fa.Result, map);
+            case UnionType u when u.Cases.Count(c => c is TypeParameterType) == 1:
+                {
+                    // O4 (the owner, 2026-10-31, "Keep, infer T = int"): in `T | NotFound` the type parameter takes the cases of the argument
+                    // the union does not name, the success of a call that keeps its cases
+                    IEnumerable<KurzType> cases = argument is UnionType ua ? ua.Cases : [argument];
+                    var rest = cases.Where(c => !u.Cases.Any(w => Types.Same(w, c))).ToList();
+                    return rest.Count == 0 || Unify(u.Cases.First(c => c is TypeParameterType), rest.Count == 1 ? rest[0] : new UnionType(rest), map);
+                }
             default:
                 return true; // nothing to bind here; whether the types fit is the fit's question
         }

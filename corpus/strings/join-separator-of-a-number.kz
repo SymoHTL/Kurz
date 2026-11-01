@@ -1,0 +1,5 @@
+// expect: error argument-mismatch at 5
+// rules: X6
+
+// the separator is a `string` or a `char`, so `5` fits neither form
+print(string.Join(5, ["a"]))

@@ -271,13 +271,23 @@ parameter of a constructor, which a field of a written union holds (§5, the own
 as any parameter"), and an item of a list literal whose written item type is a union (§5, the owner,
 2026-10-31, "Keep, as the item type"). Of two functions of one name, one that takes the union and one
 that takes the success case, such a call runs the one that takes the union, its exact fit (F13) (§5,
-the owner, 2026-10-31, "The union one"). A parameter whose type is a type parameter is no written
-union: the call unwraps, and the type parameter is the success case (§5, the owner, 2026-10-31,
-"Unwrap: T = int"). A parameter whose union names some of the call's cases and not all is
+the owner, 2026-10-31, "The union one"); that pick is made among the functions that fit exactly, so
+of `Show(int n)` and `Show(long | NotFound x)`, `Show(Find(1))` runs `Show(int n)` and the other cases
+leave the caller (§5, the owner, 2026-10-31, "Exact fit first"). A parameter whose type is a type
+parameter the call infers, `Same(Find(1))`, is no written union: the call unwraps, and the type
+parameter is the success case (§5, the owner, 2026-10-31, "Unwrap: T = int"). A parameter whose
+written union holds a type parameter, `void F<T>(T | NotFound x)`, keeps the cases where it names one
+beyond the success, as a variable of that type, and `T` is inferred from the success (§5, the owner,
+2026-10-31, "Keep, infer T = int"). A parameter whose union names some of the call's cases and not all is
 `type-mismatch`, as for a variable; a parameter of the success case or of a type it converts to
-unwraps the call; a lambda's and a function value's parameter and a named argument follow the same
-rule; and a call inside an expression, `Show(Find(1) + 1)`, unwraps *(assumed, §5: the defaults of the
-change's product pass)*. A parameter whose type is a union by a type argument written at the call,
+unwraps the call, a union that names no case of the call beyond the success, `int | string` for an
+`int | NotFound` call, among them, at a parameter as at a variable; a lambda's and a function value's parameter and a named argument follow the same
+rule; and a call inside an expression, `Show(Find(1) + 1)`, unwraps; a list literal takes its written item
+type from the type that stands where it does, a declaration's, a parameter's or a result's (M11); two
+functions that both keep the cases, neither of which fits exactly, are `ambiguous-call` (F13); and a
+call that fits no function reports that error alone, with no case of a call among its arguments
+passed on beside it (E1) *(assumed, §5: the defaults of the change's product pass and the readings
+its review left)*. A parameter whose type is a union by a type argument written at the call,
 `Same<int | NotFound>(Find(1))`, or by the type of the list a method is called on, `xs.Add(Find(1))`
 on a `List<int | NotFound>`, is a written union and keeps the cases *(assumed, §5: a reading of the
 change)*.
@@ -385,7 +395,7 @@ Show(long.Parse("1"))
 Show(5L)
 ```
 
-Case: [outcomes/keep-field-and-items.kz](../corpus/outcomes/keep-field-and-items.kz)
+Case: [outcomes/keep-field.kz](../corpus/outcomes/keep-field.kz)
 ```kurz
 data NotFound
 
@@ -405,9 +415,30 @@ void Report(int | NotFound found) {
     }
 }
 
-// a constructor's parameter is a field of a written union, and the list's written item type is one
+// a constructor's parameter is a field of a written union, which holds the call's cases
 Report(Box(Find(1)).Value)
 Report(Box(Find(2)).Value)
+```
+
+Case: [outcomes/keep-items.kz](../corpus/outcomes/keep-items.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    match found {
+        int n => print(n)
+        NotFound => print("none")
+    }
+}
+
+// the list's written item type is a union, which each item of the literal holds
 List<int | NotFound> items = [Find(1), Find(2)]
 for f in items {
     Report(f)
@@ -418,6 +449,7 @@ Case: [outcomes/keep-argument-partial.kz](../corpus/outcomes/keep-argument-parti
 ```kurz
 data NotFound
 
+// `Invalid` is the case of an enum's `From` that every file sees without declaring it (D18)
 int | NotFound | Invalid Find(int id) {
     if id == 1 {
         return 10
@@ -449,9 +481,13 @@ int | NotFound Find(int id) {
 
 T Same<T>(T x) => x
 
-// a type parameter is no written union, so the call unwraps: `T` is `int`, and `NotFound` leaves `Doubled`
+// a type parameter the call infers is no written union, so the call unwraps: `T` is `int`, and the match lists no `NotFound`
 int | NotFound Doubled(int id) {
-    return Same(Find(id)) * 2
+    mut doubled = 0
+    match Same(Find(id)) {
+        int n => doubled = n * 2
+    }
+    return doubled
 }
 
 match Doubled(1) {
@@ -462,6 +498,147 @@ match Doubled(2) {
     int n => print(n)
     NotFound => print("none")
 }
+```
+
+Case: [outcomes/union-without-the-cases-unwraps.kz](../corpus/outcomes/union-without-the-cases-unwraps.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report(int | string value) {
+    match value {
+        int n => print(n)
+        string s => print(s)
+    }
+}
+
+// `int | string` names no case of the call beyond its success, so the call unwraps and `NotFound` leaves `Shown`
+int | NotFound Shown(int id) {
+    Report(Find(id))
+    int | string kept = Find(id)
+    Report(kept)
+    return 0
+}
+
+match Shown(1) {
+    int n => print("done")
+    NotFound => print("none")
+}
+match Shown(2) {
+    int n => print("done")
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/keep-argument-exact-fit-first.kz](../corpus/outcomes/keep-argument-exact-fit-first.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(int n) {
+    print("the success")
+}
+
+void Show(long | NotFound x) {
+    print("the union")
+}
+
+// `Show(int)` fits the success exactly, and the union needs a widening: the exact fit runs, and `NotFound` leaves `Shown`
+int | NotFound Shown(int id) {
+    Show(Find(id))
+    return 0
+}
+
+match Shown(1) {
+    int n => print("done")
+    NotFound => print("none")
+}
+match Shown(2) {
+    int n => print("done")
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/keep-argument-ambiguous.kz](../corpus/outcomes/keep-argument-ambiguous.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(long | NotFound x) {
+    print("long")
+}
+
+void Show(double | NotFound x) {
+    print("double")
+}
+
+// both functions keep the cases with a widening, and neither fits exactly
+Show(Find(1))
+```
+
+Case: [outcomes/keep-argument-generic-union.kz](../corpus/outcomes/keep-argument-generic-union.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report<T>(T | NotFound found) {
+    match found {
+        NotFound => print("none")
+        else => print("found")
+    }
+}
+
+// `T | NotFound` names a case of the call beyond its success, so it keeps the cases, and `T` is `int`
+Report(Find(1))
+Report(Find(2))
+```
+
+Case: [outcomes/keep-items-of-an-argument.kz](../corpus/outcomes/keep-items-of-an-argument.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Report(List<int | NotFound> items) {
+    for f in items {
+        match f {
+            int n => print(n)
+            NotFound => print("none")
+        }
+    }
+}
+
+// the literal takes the parameter's item type, a union, which each item holds
+Report([Find(1), Find(2)])
 ```
 
 ### O5 (decided, §5) Postfix `else`

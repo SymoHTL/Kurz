@@ -286,11 +286,15 @@ public static class Types
 
     /// <summary>
     /// O4: whether a call keeps every case of its result where this type is written for its value, a variable's, a parameter's, a
-    /// field's, a list's item type or a result: a union, with or without a <c>null</c> beside its cases; a <c>T?</c> of one type is
-    /// no list of cases (N8), and the call stands for its success there, as for any other type its success converts to. The one
-    /// test of every place that keeps a call's cases.
+    /// field's, a list's item type or a result: a union, with or without a <c>null</c> beside its cases, that names a case of the
+    /// call's <paramref name="whole"/> result beyond its success (the owner, 2026-10-10), or any union while that result is not read
+    /// yet; a <c>T?</c> of one type is no list of cases (N8), and a union that names none of the call's other cases, <c>int | string</c>
+    /// for an <c>int | NotFound</c> call, is a type the success converts to (D9), so the call stands for its success there, as for any
+    /// other such type. The one test of every place that keeps a call's cases.
     /// </summary>
-    public static bool KeepsCases(KurzType? written) => written is UnionType && (NonNull(written) ?? written) is UnionType;
+    public static bool KeepsCases(KurzType? written, KurzType? whole = null) =>
+        written is UnionType && (NonNull(written) ?? written) is UnionType kept
+        && (whole is not UnionType u || u.Cases.Skip(1).Any(c => kept.Cases.Any(w => Same(w, c))));
 
     /// <summary>
     /// N1: whether a <c>null</c> arm over a subject of these cases is an arm no value reaches: none of them is <c>null</c>, a pointer, which
@@ -586,6 +590,9 @@ public static class Types
         var text = name.ToString() ?? "";
         return (text.Length > 0 && text[0] is 'a' or 'e' or 'i' or 'o' or 'A' or 'E' or 'I' or 'O' ? "an `" : "a `") + text + "`";
     }
+
+    /// <summary>A count with its noun, as a text writes it: "1 argument", "0 parameters".</summary>
+    public static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
 
     /// <summary>
     /// The common type of two integer operands under <c>+ - * / %</c>, the comparisons and
