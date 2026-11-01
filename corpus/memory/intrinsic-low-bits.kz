@@ -1,0 +1,11 @@
+// expect: output
+// | 4
+// rules: R18
+
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Sse41.IsSupported {
+    // 255 fits a `byte`; past the four lanes, its low bits name lane 3, as .NET 10 gives it (R18)
+    print(X86.Sse41.Extract(v, 255))
+} else {
+    print(v.GetElement(3))
+}
