@@ -255,6 +255,7 @@ public sealed class SemanticModel
     private readonly Dictionary<FunctionSymbol, List<FunctionSymbol>> copiesOf = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<FunctionSymbol> readers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Expression, MatchArm> kindArms = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ForInStatement, IReadOnlyList<Block>> passes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
@@ -324,6 +325,9 @@ public sealed class SemanticModel
 
     /// <summary>T33: the one arm a <c>match</c> on <c>T.Kind</c> in a copy reads, by the match's subject; null for any other <c>match</c>.</summary>
     public MatchArm? KindArmOf(Expression subject) => kindArms.GetValueOrDefault(subject);
+
+    /// <summary>T33: the passes of a loop over <c>T.Fields</c> in a copy, a copy of its body for each field in order, which a code generator reads in place of the loop; null for any other loop.</summary>
+    public IReadOnlyList<Block>? PassesOf(ForInStatement loop) => passes.GetValueOrDefault(loop);
 
     /// <summary>Whether the checker read the call.</summary>
     public bool HasCall(CallExpression call) => calls.ContainsKey(call);
@@ -395,6 +399,8 @@ public sealed class SemanticModel
     internal void RecordReader(FunctionSymbol function) => readers.Add(function);
 
     internal void RecordKindArm(Expression subject, MatchArm arm) => kindArms[subject] = arm;
+
+    internal void RecordPasses(ForInStatement loop, IReadOnlyList<Block> blocks) => passes[loop] = blocks;
 
     internal void RecordAssignment(AssignOrDeclare assignment, VariableSymbol variable) => assignments[assignment] = variable;
 

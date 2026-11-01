@@ -1669,6 +1669,13 @@ public sealed class Parser
         if (token.Kind == TokenKind.Name || (token.Kind == TokenKind.Keyword && CoreWords.TypeNames.Contains(token.Text)))
         {
             Advance();
+            var name = token.Text;
+            while (token.Kind == TokenKind.Name && At(TokenKind.Dot) && Peek().Kind == TokenKind.Name)
+            {
+                Advance();
+                name += "." + Advance().Text; // T33: a dotted name, `f.Type` in a loop over `T.Fields`; which the checker binds is its own
+            }
+
             var arguments = new List<TypeSyntax>();
             if (At(TokenKind.Less))
             {
@@ -1683,7 +1690,7 @@ public sealed class Parser
                 ExpectGreater();
             }
 
-            return new NamedType(token.Line, token.Text, arguments);
+            return new NamedType(token.Line, name, arguments);
         }
 
         throw Fail("a type");

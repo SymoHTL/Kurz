@@ -111,6 +111,29 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_walk_reads_each_pass_of_a_loop_over_the_fields_of_a_copy_s_type()
+    {
+        // T33: a code generator reads a pass for each field in place of the loop's own collection and body, `f.Name` as a constant, and
+        // a lambda in a pass captures the value it reads and no `f`, which holds no value
+        var (tree, model) = Clean("data Order(string Id, int Count)\n\nvoid Show<T>(T value) {\n    for f in T.Fields {\n        show = () => print(\"{f.Name} {f.Get(value)}\")\n        show()\n    }\n}\n\nShow(Order(\"a\", 1))");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["Show<Order>"], walk.Copies);
+        Assert.Equal(2, walk.Passes);
+        var copy = Assert.Single(model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree))));
+        var loops = new List<ForInStatement>();
+        Nodes.Collect(copy.Declaration!, loops);
+        var passes = model.PassesOf(Assert.Single(loops))!;
+        foreach (var pass in passes)
+        {
+            var lambdas = new List<LambdaExpression>();
+            Nodes.Collect(pass, lambdas);
+            Assert.Equal(["value"], model.LambdaOf(Assert.Single(lambdas)).Captures.Select(v => v.Name));
+        }
+    }
+
+    [Fact]
     public void The_walk_finds_a_node_the_checker_did_not_record()
     {
         // the positive control of the theory: a checked tree with a statement the checker never read, built by hand and put after the others
@@ -468,6 +491,9 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
         /// <summary>T33: the arms the walk read of the matches on <c>T.Kind</c>, one of each in each copy.</summary>
         public int KindArms { get; private set; }
 
+        /// <summary>T33: the passes the walk read of the loops over <c>T.Fields</c>, in place of each loop's own body.</summary>
+        public int Passes { get; private set; }
+
         private void Need(bool present, int line, string what)
         {
             Seen++;
@@ -527,6 +553,14 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case WhileStatement w:
                     Expression(w.Condition);
                     Block(w.Body);
+                    break;
+                case ForInStatement f when model.PassesOf(f) is { } passes:
+                    foreach (var pass in passes)
+                    {
+                        Passes++; // T33: a code generator reads each pass, never the loop's own collection and body
+                        Block(pass);
+                    }
+
                     break;
                 case ForInStatement f:
                     Need(model.Declares(f), f.Line, $"loop variable `{f.Variable}`");
@@ -726,6 +760,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is EnumConstant:
                     break; // D12: a value of an enum, a constant a code generator reads whole
+                case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is StringConstant:
+                    break; // T33: `f.Name` in a pass of a loop over `T.Fields`, a constant a code generator reads whole
                 case MemberAccess m when model.IsClockRead(m):
                     break; // S15: `timestamp.Now`, a read of the clock a code generator reads whole
                 case MemberAccess m:

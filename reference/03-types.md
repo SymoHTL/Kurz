@@ -1228,7 +1228,9 @@ file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in typ
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
 on `T.Kind` is checked only in the copies whose kind it names; `Kind`, `Fields` and `Make` are
-members of a type parameter alone; `f.Get(value)` reads as `value.Field`)* A `match` on `T.Kind`
+members of a type parameter alone; `f.Get(value)` reads as `value.Field`; `f` stands in `f.Name`, `f.Type` and
+`f.Get(value)` alone, and anywhere else is `syntax`; `f.Get` takes a value of `T` or of a type derived from it, and one of
+another type is `type-mismatch`)* A `match` on `T.Kind`
 is not held to name every kind or end in an `else` arm, unlike one on a union or an `enum` (O8,
 D12): it is checked in each copy, and where it has no arm for the kind of a copy's type argument,
 the call that made the copy is the compile error `kind-not-read`, which names the generic function,
@@ -1251,6 +1253,29 @@ void ShowFields<T>(T value) {
 }
 
 ShowFields(Order("a1", 3))
+```
+
+Case: [types/type-fields-type.kz](../corpus/types/type-fields-type.kz)
+```kurz
+data Point(int X, int Y)
+data Shape(string Name, Point Corner)
+
+string Show<T>(T value) => match T.Kind {
+    TypeKind.Data => Fields(value)
+    else => "{value}"
+}
+
+string Fields<T>(T value) {
+    mut text = ""
+    for f in T.Fields {
+        f.Type part = f.Get(value)
+        shown = Show<f.Type>(part)
+        text = "{text}{f.Name}=({shown});"
+    }
+    return text
+}
+
+print(Show(Shape("box", Point(1, 2))))
 ```
 
 Case: [types/type-kind.kz](../corpus/types/type-kind.kz)
@@ -1334,6 +1359,44 @@ void ShowKind<T>() {
 
 ShowKind<Order>()
 ShowKind<bool>()
+```
+
+Case: [types/type-fields-kind-not-read.kz](../corpus/types/type-fields-kind-not-read.kz)
+```kurz
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print(f.Name)
+    }
+}
+
+ShowFields(3)
+```
+
+Case: [types/type-fields-value.kz](../corpus/types/type-fields-value.kz)
+```kurz
+data Order(string Id)
+
+void Show<T>(T value) {
+    for f in T.Fields {
+        print(f)
+    }
+}
+
+Show(Order("a1"))
+```
+
+Case: [types/type-fields-get-mismatch.kz](../corpus/types/type-fields-get-mismatch.kz)
+```kurz
+data Order(string Id)
+data Invoice(string Id)
+
+void Show<T>(T value, Invoice other) {
+    for f in T.Fields {
+        print(f.Get(other))
+    }
+}
+
+Show(Order("a1"), Invoice("b2"))
 ```
 
 ### T18 (assumed, §4) Operators

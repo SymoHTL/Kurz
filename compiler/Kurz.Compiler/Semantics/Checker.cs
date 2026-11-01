@@ -371,7 +371,7 @@ public sealed partial class Checker
             return false;
         }
 
-        NotSupported(line, $"reading a type in generic code, `{name}.{member}` (T33)");
+        NotSupported(line, member == "Fields" ? $"`{name}.Fields` anywhere but after `in` in a `for` loop (T33)" : $"reading a type in generic code, `{name}.{member}` (T33)");
         return true;
     }
 
@@ -875,6 +875,11 @@ public sealed partial class Checker
 
     private KurzType ResolveNamed(NamedType n)
     {
+        if (n.Name.Contains('.'))
+        {
+            return ResolveDotted(n); // T33: `f.Type`
+        }
+
         if (Types.ByName.TryGetValue(n.Name, out var primitive))
         {
             if (n.TypeArguments.Count > 0)
@@ -1350,8 +1355,8 @@ public sealed partial class Checker
 
     // ---- scopes ----------------------------------------------------------------------------------
 
-    /// <summary>The variable a name means here, and whether it belongs to a function around the lambda being checked (F11, F15).</summary>
-    private (VariableSymbol? Variable, bool Captured) Lookup(string name)
+    /// <summary>The variable a name means here, and whether it belongs to a function around the lambda being checked (F11, F15), which the lambdas between capture unless <paramref name="capture"/> is false.</summary>
+    private (VariableSymbol? Variable, bool Captured) Lookup(string name, bool capture = true)
     {
         var f = frame;
         var scope = f.Scope;
@@ -1362,7 +1367,7 @@ public sealed partial class Checker
             {
                 if (s.Variables.TryGetValue(name, out var v))
                 {
-                    for (var g = frame; captured && g != f; g = g.Outer!)
+                    for (var g = frame; capture && captured && g != f; g = g.Outer!)
                     {
                         g.Captures.Add(v); // every lambda between the use and the function that declares the variable captures it
                     }
@@ -1604,6 +1609,10 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.BreakOutsideLoop, b.Line, "`break` with no loop around it (C7)");
                 }
+                else if (frame.Loops[^1].Unrolled)
+                {
+                    NotSupported(b.Line, "`break` in a loop over `T.Fields`, which is unrolled (T33)");
+                }
                 else
                 {
                     frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop
@@ -1614,6 +1623,10 @@ public sealed partial class Checker
                 if (frame.LoopDepth == 0)
                 {
                     Report(ErrorIds.BreakOutsideLoop, c.Line, "`continue` with no loop around it (C7)");
+                }
+                else if (frame.Loops[^1].Unrolled)
+                {
+                    NotSupported(c.Line, "`continue` in a loop over `T.Fields`, which is unrolled (T33)");
                 }
                 else
                 {
@@ -2131,6 +2144,11 @@ public sealed partial class Checker
     /// </summary>
     private void CheckForIn(ForInStatement f)
     {
+        if (CheckFieldsLoop(f))
+        {
+            return; // T33: a loop over `T.Fields` in a copy, unrolled
+        }
+
         KurzType element;
         KurzType? value = null;
         if (Unwrap(f.Collection) is RangeExpression range)

@@ -1,0 +1,23 @@
+// expect: output
+// | Name=(box);Corner=(X=(1);Y=(2););
+// rules: T33
+
+data Point(int X, int Y)
+data Shape(string Name, Point Corner)
+
+string Show<T>(T value) => match T.Kind {
+    TypeKind.Data => Fields(value)
+    else => "{value}"
+}
+
+string Fields<T>(T value) {
+    mut text = ""
+    for f in T.Fields {
+        f.Type part = f.Get(value)
+        shown = Show<f.Type>(part)
+        text = "{text}{f.Name}=({shown});"
+    }
+    return text
+}
+
+print(Show(Shape("box", Point(1, 2))))
