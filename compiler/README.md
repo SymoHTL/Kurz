@@ -507,7 +507,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   values)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
-  library's `UnicodeCase`, a first walk that counts the bytes and a second that writes them, with the table of the
+  library's `UnicodeCase`, which copies the bytes before the first code point that changes into a block of the
+  input's size and looks up and writes the code points after them one at a time, Latin-1 by Rust's rules without
+  the table, up to one whose mapping outgrows the block, from which it sizes the rest in a walk, grows the block
+  once and writes the rest in a second walk, with the table of the
   direction the emitter writes into the program once, `case.lower` or `case.upper`, from `Emit/CaseTables.cs`, which
   `tools/unicode_tables.py` generates from the Unicode Character Database of the version Rust's stable pins and the
   gate `unicode-tables` holds to that database: the runs of code points with one delta and a step of 1 or 2, found by
