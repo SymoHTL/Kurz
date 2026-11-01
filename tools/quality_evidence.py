@@ -6,8 +6,13 @@ The frontmatter's `generated:` date and the `digest:` of the blocks are stamped 
 tools/lint_knowledge.py counts `ttl_days:` down and fails once it ran out, and fails when the
 blocks are not what the digest says: numbers somebody typed are not this tool's numbers.
 
-  quality_evidence.py            recompute every block and rewrite the file
-  quality_evidence.py --print    recompute and print, write nothing
+  quality_evidence.py              recompute every block and rewrite the file
+  quality_evidence.py --print      recompute and print, write nothing
+  quality_evidence.py --self-test  the tool's cases
+
+Each call is one of these three, alone. Any other call, `--help` and `-h` among them, a mistyped
+option, a second argument or two of these together, prints the usage and exits 2 before anything is
+computed or written, as a mistyped option of the merge tool merges nothing.
 
 It refuses to write (exit 1, file untouched) when a block it computed has no marker in the file,
 when the file has a block it did not compute, when a marker is not closed, when the file has no
@@ -26,6 +31,7 @@ branch is enough, which a fork gives), and an issue template could put the hazar
 stranger's issue."""
 import contextlib
 import datetime
+import io
 import json
 import os
 import re
@@ -211,9 +217,41 @@ def update(path, compute, today, write=True):
     return new
 
 
+USAGE = ("usage: quality_evidence.py [--print]\n"
+         "       quality_evidence.py --self-test   (alone: it takes no other argument)\n"
+         "  (no argument)  recompute every block and rewrite guides/quality-bar-evidence.md\n"
+         "  --print        recompute and print, write nothing")
+
+
+def mode(argv):
+    """What a call does: "write" with no argument, "print" with --print alone, "self-test" with --self-test
+    alone, or None when the call is not understood (the docstring above)."""
+    return {(): "write", ("--print",): "print", ("--self-test",): "self-test"}.get(tuple(argv))
+
+
 def writes(argv):
-    """Whether a run with these arguments writes the file: --print recomputes and prints only."""
-    return "--print" not in argv
+    """Whether a call writes the file: only the call with no argument does."""
+    return mode(argv) == "write"
+
+
+def run(argv, refresh=None):
+    """The command's exit code. A call that is not understood prints the usage and exits 2 before
+    anything is computed; `refresh` stands in for update() in a self-test."""
+    call = mode(argv)
+    if call is None:
+        print(USAGE)
+        return 2
+    if call == "self-test":
+        return self_test()
+    write = writes(argv)
+    try:
+        new = (refresh or update)(os.path.join(kit.ROOT, EVIDENCE), {name: (lambda fn=fn: fn(kit.ROOT)) for name, fn in BLOCKS.items()},
+                                  datetime.date.today(), write=write)
+    except (kit.Refused, OSError, KeyError, ValueError) as e:
+        print(f"REFUSED, nothing written: {type(e).__name__}: {e}")
+        return 1
+    print(f"{EVIDENCE}: {len(BLOCKS)} blocks regenerated" if write else new)
+    return 0
 
 
 def self_test():
@@ -273,6 +311,28 @@ def cases_in(base):
     update(path, {"a": lambda: "new a", "b": lambda: "new b"}, today, write=writes([]))
     cases.append(("a full run writes the file, and leaves no temp file", kit.read(path) == new and os.listdir(os.path.dirname(path)) == ["evidence.md"],
                   os.listdir(os.path.dirname(path))))
+
+    # the call: one of three, each alone; any other call is the usage and exit 2, before anything is computed
+    calls = [mode([]), mode(["--print"]), mode(["--self-test"])]
+    cases.append(("call: no argument writes, --print prints, --self-test runs the cases, each alone", calls == ["write", "print", "self-test"], calls))
+    odd = (["--help"], ["-h"], ["--prnt"], ["page"], ["--print", "--print"], ["--print", "--self-test"], ["--self-test", "--help"])
+    cases.append(("call: --help, -h, a mistyped option, a positional argument, a repeated option and two calls together are not understood",
+                  [mode(a) for a in odd] == [None] * len(odd), [mode(a) for a in odd]))
+    reached = []
+
+    def refresh(path, compute, today, write=True):
+        """Stands in for update(), which computes every block: a call that reaches it is recorded."""
+        reached.append(write)
+        return "the recomputed page"
+    with contextlib.redirect_stdout(io.StringIO()) as printed:
+        codes = [run(a, refresh) for a in (["--help"], ["--prnt"], ["page"])]
+    cases.append(("call: a call that is not understood prints the usage and exits 2, and computes and writes nothing",
+                  codes == [2, 2, 2] and not reached and printed.getvalue().count("usage: quality_evidence.py [--print]") == 3,
+                  (codes, reached, printed.getvalue()[:200])))
+    with contextlib.redirect_stdout(io.StringIO()) as printed:
+        codes = [run([], refresh), run(["--print"], refresh)]
+    cases.append(("call: the plain call reaches the recompute and writes, and --print reaches it and writes nothing",
+                  codes == [0, 0] and reached == [True, False] and "the recomputed page" in printed.getvalue(), (codes, reached, printed.getvalue()[:200])))
     cases.append(("the real guide has a marker for every block this tool computes, and no other",
                   sorted(m.group(1) for m in BLOCK.finditer(kit.read(os.path.join(kit.ROOT, EVIDENCE)))) == sorted(BLOCKS), ""))
 
@@ -457,13 +517,4 @@ def cases_in(base):
 
 
 if __name__ == "__main__":
-    if "--self-test" in sys.argv:
-        sys.exit(self_test())
-    write = writes(sys.argv[1:])
-    try:
-        new = update(os.path.join(kit.ROOT, EVIDENCE), {name: (lambda fn=fn: fn(kit.ROOT)) for name, fn in BLOCKS.items()},
-                     datetime.date.today(), write=write)
-    except (kit.Refused, OSError, KeyError, ValueError) as e:
-        print(f"REFUSED, nothing written: {type(e).__name__}: {e}")
-        sys.exit(1)
-    print(f"{EVIDENCE}: {len(BLOCKS)} blocks regenerated" if write else new)
+    sys.exit(run(sys.argv[1:]))
