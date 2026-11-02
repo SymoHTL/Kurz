@@ -5200,8 +5200,9 @@ pub byte* HexEncode(byte* message, mut long asked) {
 // odd, read before the digits, and else the position of the first byte that is no digit; and -1 with
 // null in `made` and `asked` set where the system refuses. `digits` is the emitter's table of the value
 // of each byte as a digit, 255 for a byte that is no digit, read as .NET's scalar `FromHexString` reads
-// its table: the two digits of a pair, one test of both, and where it fails the position of the high
-// byte where that is no digit, else of the low one.
+// its table: the two digits of a pair and one test of both. Where the test fails, the position is H7's,
+// the high byte of the pair where that is no digit, else the low one; where both are no digit, .NET's
+// scalar form names the low one.
 pub long HexDecode(byte* text, long count, byte* digits, mut byte* made, mut long asked) {
     made = null
     if count % 2 != 0 {
