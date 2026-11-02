@@ -9,7 +9,10 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The decisions on files and sockets that no corpus case pins (chapter 13; design record, section 12): a file closes when the last value that
 /// holds it lets go of it, which a process allowed few descriptors shows over many opens, and so do the calls that open a file or a
-/// directory for themselves (S5, S6, S8); a copy of a file holds the one file (S5); a read into a list another value holds copies the
+/// directory for themselves (S5, S6, S8); a copy of a file holds the one file (S5); a call in flight on a file keeps its descriptor
+/// through a close through another holder, the last call out releasing it, a socket's close shuts it down, so that a call in flight on it
+/// that the shutdown ends gets the closed handle's error, and a closed handle reaches no file the system gave its number to since,
+/// through a call, a second close or its last count (S5, S9); a read into a list another value holds copies the
 /// list first, and a count and a <c>max</c> past the largest <c>int</c> raise <c>allocation-failed</c> before the read (S3); a whole
 /// file a list holds is read whole, and one byte more raises <c>allocation-failed</c>, and a whole file is read into room for the size
 /// the system names for it without its list grown, and whole where that size is short, long or a failure, the room it asks for at
@@ -141,6 +144,283 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // the positive control: without the close the copy writes
         Ran(Shared.Replace("    f.Close()\n", "", StringComparison.Ordinal), "file-shared-open", ["end"]);
+    }
+
+    // ---- a close while a call is in flight (S5) -------------------------------------------------------------
+
+    /// <summary>
+    /// The program built for this machine and run with its runtime and with the fenced one, as <see cref="Ran"/> runs it, from IR in which
+    /// the call on a handle that follows a call of <c>Arm</c> (<see cref="Armed"/>), once it is in flight (<c>enter.handle</c>), first
+    /// meets a <c>Close</c> of that handle through another holder (<c>close.handle</c>), of a file where <c>Arm</c> was given 1 and of a
+    /// socket where it was given 2, before it reads the descriptor: a close that races the call, held in one thread where it falls between
+    /// the two. No program can make that race, since no handle reaches a second thread, a pointer to it being <c>counted-pointee</c> (R10).
+    /// A <c>Close</c> there that gives anything but 0, the result of a close whose release a call in flight leaves to the last call out,
+    /// ends the process with a trap.
+    /// </summary>
+    private void RanWithCloseInFlight(string text, string name, string[] lines, IReadOnlyCollection<string> grants)
+    {
+        if (Builder.HostTarget == Target.Windows)
+        {
+            RefusedOnWindows(Compile(text, toolchain.Runtime, grants));
+            return;
+        }
+
+        const string Enter = "call i1 @\"enter.handle\"(";
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Compile(text, runtime, grants);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir;
+            Assert.Contains(Enter, ir, StringComparison.Ordinal);
+            Assert.Contains("define internal i64 @\"close.handle\"(", ir, StringComparison.Ordinal); // a program with a `Close`
+            Assert.DoesNotContain("@llvm.trap(", ir, StringComparison.Ordinal);
+            var armed = System.Text.RegularExpressions.Regex.Matches(ir, "^(@\"s\\.[^\"]*\\.armed\") = internal global i32 0$", System.Text.RegularExpressions.RegexOptions.Multiline);
+            Assert.Single(armed);
+            var racing = $$"""
+
+                define internal i1 @"test.enter.close"(ptr %handle) {
+                  %entered = call i1 @"enter.handle"(ptr %handle)
+                  %armed = load i32, ptr {{armed[0].Groups[1].Value}}
+                  %go = icmp ne i32 %armed, 0
+                  %both = and i1 %entered, %go
+                  br i1 %both, label %inflight, label %done
+                inflight:
+                  store i32 0, ptr {{armed[0].Groups[1].Value}}
+                  %socket = icmp eq i32 %armed, 2
+                  %closed = call i64 @"close.handle"(ptr %handle, i1 %socket)
+                  %deferred = icmp eq i64 %closed, 0
+                  br i1 %deferred, label %done, label %refused
+                refused:
+                  call void @llvm.trap()
+                  unreachable
+                done:
+                  ret i1 %entered
+                }
+
+                declare void @llvm.trap()
+
+                """;
+            ir = ir.Replace(Enter, "call i1 @\"test.enter.close\"(", StringComparison.Ordinal) + racing;
+            var run = Toolchain.Run(toolchain.Build(compilation.Program with { Ir = ir }, name + suffix));
+            Assert.Equal(lines, run.Output);
+            Assert.Equal((0, ""), (run.Code, run.Error));
+        }
+    }
+
+    /// <summary>The state and the function by which a program of <see cref="RanWithCloseInFlight"/> arms the close of its next call; the program as it is built reads no <c>armed</c>.</summary>
+    private const string Armed = """
+        static mut int armed = 0
+
+        // the next call on a handle meets a `Close` of it while it is in flight: of a file (1) or of a socket (2)
+        void Arm(int kind) {
+            raw {
+                armed = kind
+            }
+        }
+
+        """;
+
+    private const string InFlightFiles = Armed + """
+        extern "C" {
+            int fcntl(int fd, int command, ...)
+        }
+
+        // whether the descriptor is open, by `F_GETFD` (1)
+        bool Open(int fd) {
+            mut open = false
+            raw {
+                open = fcntl(fd, 1) >= 0
+            }
+
+            return open
+        }
+
+        void | IoError | InvalidUtf8 Race() {
+            File.WriteAll("in-flight.txt", "ab\ncd\n".Bytes)
+            f = File.Open("in-flight.txt")
+            g = f
+            mut bytes = Bytes()
+            Arm(1)
+            n = f.Read(mut bytes, 2)
+            print(n)
+            print(Open(3))
+            print(g.Read(mut bytes, 1) else {
+                IoError e => -e.Code
+            })
+
+            lines = File.Open("in-flight.txt")
+            Arm(1)
+            for line in lines.Lines() {
+                print(line)
+            } else {
+                IoError e => print(e)
+            }
+
+            written = File.Create("in-flight-written.txt")
+            Arm(1)
+            written.Write("xyz".Bytes)
+            print(File.ReadAll("in-flight-written.txt").Count)
+            written.Write("x".Bytes) else {
+                IoError e => print(e.Code)
+            }
+
+            File.Delete("in-flight.txt")
+            File.Delete("in-flight-written.txt")
+            lines.Close() else {
+                IoError e => print(e.Code)
+            }
+        }
+
+        Race() else {
+            IoError e => print(e)
+            InvalidUtf8 u => print(u)
+        }
+
+        """;
+
+    [Fact]
+    public void A_read_a_pull_and_a_write_in_flight_keep_their_descriptor_through_a_close_whose_release_the_last_call_out_makes()
+    {
+        // S5: the read takes its 2 bytes from the descriptor it entered with, which its end releases, so that the number 3 is no longer
+        // open, and the copy's read after it is `EBADF`; the pull gives its line and the next pull is `EBADF`; the write writes its bytes,
+        // and the write and the close after a call closed their handle are `EBADF`
+        RanWithCloseInFlight(InFlightFiles, "in-flight-files", ["2", "false", "-9", "ab", "other (os error 9): in-flight.txt", "3", "9", "9"], ["raw", "native"]);
+
+        // the positive control: built as it is, no call closes its handle, the descriptor stays open, and the copy reads the line break
+        Ran(InFlightFiles, "in-flight-files-open", ["2", "true", "1", "ab", "cd", "3"], grants: ["raw", "native"]);
+    }
+
+    private const string InFlightSockets = Armed + """
+        void | IoError Take(TcpListener l) {
+            s = l.Accept()
+            print("accepted")
+            s.Close()
+        }
+
+        void | IoError Rebind(int port) {
+            again = TcpListener.Bind("127.0.0.1:{port}")
+            print(again.Port == port)
+        }
+
+        void | IoError Race() {
+            listener = TcpListener.Bind("127.0.0.1:0")
+            port = listener.Port
+            first = TcpStream.Connect("127.0.0.1:{port}")
+            second = TcpStream.Connect("127.0.0.1:{port}")
+            Arm(2)
+            Take(listener) else {
+                IoError e => print(e)
+            }
+
+            Take(listener) else {
+                IoError e => print(e.Code)
+            }
+
+            Rebind(port) else {
+                IoError e => print(e.Code)
+            }
+
+            pair = TcpListener.Bind("127.0.0.1:0")
+            client = TcpStream.Connect("127.0.0.1:{pair.Port}")
+            server = pair.Accept()
+            client.Write("abcd".Bytes)
+            mut bytes = Bytes()
+            Arm(2)
+            print(server.Read(mut bytes, 3))
+            print(server.Read(mut bytes, 1) else {
+                IoError e => -e.Code
+            })
+
+            Arm(2)
+            client.Write("e".Bytes) else {
+                IoError e => print(e.Code)
+            }
+
+            idle = TcpStream.Connect("127.0.0.1:{pair.Port}")
+            idle.SetReadTimeout(100ms)
+            Arm(2)
+            print(idle.Read(mut bytes, 1) else {
+                IoError e => -e.Code
+            })
+
+            timed = TcpListener.Bind("127.0.0.1:0")
+            a = TcpStream.Connect("127.0.0.1:{timed.Port}")
+            Arm(2)
+            a.SetReadTimeout(1s)
+            a.SetWriteTimeout(1s) else {
+                IoError e => print(e.Code)
+            }
+
+            Arm(2)
+            timed.SetAcceptTimeout(1s)
+            timed.SetAcceptTimeout(1s) else {
+                IoError e => print(e.Code)
+            }
+
+            first.Close()
+            second.Close()
+        }
+
+        Race() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void A_close_of_a_socket_shuts_it_down_so_a_call_in_flight_on_it_ends_with_the_closed_handle_s_error()
+    {
+        // S5, S9: the shutdown ends the `Accept` in flight with the closed handle's error, and once it is out the descriptor is released,
+        // so that the port binds again; a read in flight takes the bytes the socket holds, and one that finds none, as a write, ends with
+        // that error; a setter in flight sets its time; each next call is `EBADF`
+        RanWithCloseInFlight(InFlightSockets, "in-flight-sockets", ["other (os error 9): 127.0.0.1:0", "9", "true", "3", "-9", "9", "-9", "9", "9"], ["raw"]);
+
+        // the positive control: built as it is, the second accept takes the second connection, the listener holds its port, the second
+        // read takes the fourth byte, and the idle read runs out of its time
+        Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "accepted", "98", "3", "1", "-11"], grants: ["raw"]);
+    }
+
+    private const string Reused = """
+        File | IoError Reopened() {
+            f = File.Open("reused.txt")
+            f.Close()
+            // the number the close released, which `f` lets go of at the return
+            return File.Open("other.txt")
+        }
+
+        void | IoError Reuse() {
+            File.WriteAll("reused.txt", "abc".Bytes)
+            File.WriteAll("other.txt", "xyz".Bytes)
+            f = File.Open("reused.txt")
+            f.Close()
+            g = File.Open("other.txt")
+            mut bytes = Bytes()
+            print(f.Read(mut bytes, 3) else {
+                IoError e => -e.Code
+            })
+            f.Close() else {
+                IoError e => print(e.Code)
+            }
+
+            print(g.Read(mut bytes, 3))
+            h = Reopened()
+            print(h.Read(mut bytes, 3))
+            File.Delete("reused.txt")
+            File.Delete("other.txt")
+        }
+
+        Reuse() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void A_closed_handle_whose_number_the_system_gave_another_file_reaches_that_file_through_no_call_and_no_count()
+    {
+        // S5: a read through the closed handle is `EBADF` and not the other file's 3 bytes, a second close leaves the other file open,
+        // and so does the last count of a closed handle
+        Ran(Reused, "file-reused", ["-9", "9", "3", "3"]);
     }
 
     [Fact]
