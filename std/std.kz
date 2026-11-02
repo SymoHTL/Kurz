@@ -2,7 +2,8 @@
 // now"), which the compiler compiles with every program, as it compiles the runtime: the allocator of
 // section 3, the blocks of a list and of a string, the searches of a string and of a list of bytes, the
 // trimming, the splitting, the replacing, the joining and the change of ASCII case of a string, and the
-// hashes of section 12. It takes its memory from the system through the runtime's boundary call, reached
+// hashes of section 12, and the failure of HTTP, `HttpError` with its `HttpKind`, which every file sees
+// (reference, W1). It takes its memory from the system through the runtime's boundary call, reached
 // as the folder `sys`, the directory of the target the program is built for, and the runtime reaches it
 // as the folder `std`, through its allocation entry, `Allocate` (the owner, 2026-10-24, "As built";
 // compiler/README.md, "The runtime"). The emitted code calls the functions of a list's block and of a
@@ -5816,3 +5817,10 @@ pub long HexDecode(byte* text, long count, byte* digits, mut byte* made, mut lon
     made = list
     return -1
 }
+
+// The failure of HTTP, a case of its own beside the network's `IoError`, and its kinds (design record,
+// section 12: the owner, 2026-10-31, "HttpError + record's rule", and 2026-11-01, Q4 (a)), types every
+// file sees (W1, W2).
+pub enum HttpKind { Protocol, TooLarge, Status, Unsupported }
+
+pub data HttpError(HttpKind Kind, string Detail)

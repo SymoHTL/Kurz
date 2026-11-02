@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using Kurz.Compiler.Text;
@@ -2052,6 +2053,76 @@ public sealed class CheckerTests
 
         // a name the file declares twice names V9 alone
         Assert.EndsWith("(V9)", Assert.Single(Check("data Rejected\ndata Rejected").Diagnostics.Items).Message, StringComparison.Ordinal);
+    }
+
+    // ---- the types of std/ every file sees (chapter 16) ------------------------------------------------
+
+    /// <summary>The runtime and <c>std/</c> checked once, for the tests that read the types of the prelude from <c>std/</c>'s checker (W1).</summary>
+    private static readonly Lazy<CheckedRuntime> StdRuntime = new(() => Builder.CheckRuntime(Target.Linux));
+
+    /// <summary>The checker's reading of a program that sees the types of <c>std/</c> the prelude names, as a build reads it.</summary>
+    private static (DiagnosticBag Diagnostics, Checker Checker) CheckSeeingStd(string program, CheckedRuntime? runtime = null)
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
+        Assert.Empty(diagnostics.Items);
+        return (diagnostics, Checker.Check(tree, diagnostics, [], (runtime ?? StdRuntime.Value).StdChecker));
+    }
+
+    [Fact]
+    public void A_type_of_std_that_the_prelude_names_is_std_s_own_in_the_file()
+    {
+        // W1: the file reads the symbols std/'s checker made, so that a value of one is of the same type in the file and in std/
+        var runtime = StdRuntime.Value;
+        var stdError = runtime.StdChecker.Model.DataTypeOf(runtime.Std.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "HttpError"));
+        var (diagnostics, checker) = CheckSeeingStd("e = HttpError(HttpKind.Protocol, \"no request line\")\nk = e.Kind\nprint(e.Detail)\nprint(k)\nprint(\"{e.Kind}: {e.Detail}\")\n");
+        Assert.Empty(diagnostics.Items);
+        Assert.Same(stdError, Assert.IsType<DataType>(checker.TopLevelVariables["e"]).Symbol);
+        Assert.Same(Assert.IsType<EnumType>(stdError.Fields[0].Type).Symbol, Assert.IsType<EnumType>(checker.TopLevelVariables["k"]).Symbol);
+
+        // the positive control: a checker given no std/ sees neither name
+        Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnknownName, 1)], Errors("e = HttpError(HttpKind.Protocol, \"x\")"));
+    }
+
+    [Theory]
+    [InlineData("pub data HttpError(", "e = HttpError(HttpKind.Protocol, \"x\")\nprint(e.Detail)\n", "print(HttpKind.Protocol)\n")]
+    [InlineData("pub enum HttpKind {", "print(HttpKind.Protocol)\n", "string Detail(HttpError e) => e.Detail\n\nprint(1)\n")]
+    public void A_name_of_the_prelude_that_std_does_not_declare_pub_is_seen_by_no_file(string declaration, string uses, string other)
+    {
+        // W1 with F9: a type of std/ without `pub` is private to its folder, so the list does not bring it in; the other stays seen
+        var runtime = ListTests.Edited(("std/std.kz", declaration, declaration["pub ".Length..]));
+        Assert.Contains((ErrorIds.UnknownName, 1), CheckSeeingStd(uses, runtime).Diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Empty(CheckSeeingStd(uses).Diagnostics.Items); // the positive control: `pub` in std/ as it stands
+        Assert.Empty(CheckSeeingStd(other, runtime).Diagnostics.Items);
+    }
+
+    [Theory]
+    [InlineData("data HttpError(int Code)", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    [InlineData("enum HttpKind { Lost }", "`HttpKind` is an enum of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    public void A_file_s_own_declaration_of_a_type_of_the_prelude_is_redeclared_and_names_W1(string text, string message)
+    {
+        var error = Assert.Single(CheckSeeingStd(text).Diagnostics.Items);
+        Assert.Equal((ErrorIds.Redeclared, 1, message), (error.Id, error.Line, error.Message));
+        Assert.Empty(Check(text).Diagnostics.Items); // the positive control: without std/ the file's own type is the only one
+    }
+
+    [Theory]
+    [InlineData("print(e)")]
+    [InlineData("print(\"error: {e}\")")]
+    [InlineData("print(string.Join(\", \", [e]))")]
+    [InlineData("print([e])")]
+    [InlineData("int | HttpError u = e\nprint(u)")]
+    [InlineData("mut m = Map<string, HttpError>()\nm[\"a\"] = e\nprint(m)")]
+    [InlineData("mut m = Map<HttpError, int>()\nm[e] = 1\nprint(m)")]
+    [InlineData("print(Held(e))")]
+    public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
+    {
+        // W2: the record gives its text, its detail alone, through a `Text()` in the body of the `data` type (A5), which the checker does
+        // not read (D16), so it takes no text of one, nor of a value that holds one
+        var (diagnostics, _) = CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n");
+        var refused = Assert.Single(diagnostics.Items);
+        Assert.Equal((true, 4 + use.Count(c => c == '\n')), (refused.IsNotSupported, refused.Line));
+        Assert.Equal("the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)", refused.Message);
     }
 
     // ---- files (chapter 13) --------------------------------------------------------------------------------

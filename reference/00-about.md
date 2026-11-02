@@ -117,7 +117,8 @@ No case: every case that expects output shows it.
 The text of a `data` value is derived from its type, in the manner of C# records: the name of the
 type, then ` { `, then its fields in the order of their declaration, each as `Name = text` and
 with `, ` between them, then ` }`. The text of a field is the text of its value. A `data` value
-without fields (D8) has no braces: it shows its name alone, as A4 says.
+without fields (D8) has no braces: it shows its name alone, as A4 says. A `data` type that declares
+its text with `Text()` has that text instead (A5).
 
 Case: [data/print.kz](../corpus/data/print.kz)
 ```kurz
@@ -233,7 +234,8 @@ Case: [data/print-union-field.kz](../corpus/data/print-union-field.kz)
 
 A class declares its text with a method named `Text` that takes no parameters and returns a
 `string`, as `ToString()` does in C#: `pub string Text() => "counter {Count}"`. `print` and an
-interpolated string (L6) use its result as the text of the instance. The record holds, as
+interpolated string (L6) use its result as the text of the instance. A `data` type declares its text
+the same way, in its body (D16), and has it instead of A3's (§8, the owner, 2026-11-02). The record holds, as
 *(assumed)*, how the compiler keeps that cheap: it changes how the text is built and not what it
 is, so no case shows it. A `Text()` of the base class counts, one without `pub` does not (A9); an
 interface or a type parameter has a text through an interface that declares it (A10).
@@ -247,6 +249,17 @@ class Counter(mut int Count) {
 c = Counter(3)
 print(c)
 print("got {c}")
+```
+
+Case: [data/text-declared.kz](../corpus/data/text-declared.kz)
+```kurz
+data User(int Id, string Name) {
+    pub string Text() => "{Name} ({Id})"
+}
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")
 ```
 
 ### A9 (decided, §8) An inherited or a private `Text()`
