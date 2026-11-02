@@ -282,12 +282,13 @@ Case: [classes/field-counted.kz](../corpus/classes/field-counted.kz)
 class Bag(string Name) {
     mut List<string> items = [Name]
     string title = "bag of {Name}"
+    string first = Name
 
     pub void Add(string x) {
         items.Add(x)
     }
 
-    pub string Text() => "{title}: {items.Count}"
+    pub string Text() => "{title}: {items.Count}, first {first}"
 }
 
 b = Bag("ann")

@@ -1762,7 +1762,9 @@ round can ask about it by the rule's id.
   a method named as a field, are `redeclared`, as two fields of one name are; `this` outside a method
   is `unknown-name`. A field of the class body is a name in the default of a field below it, read
   through the instance being built, before the defaults of the fields after it run, as C# runs a
-  field's initializer before the constructor's body.
+  field's initializer before the constructor's body. A field of the body of the name of a field of
+  the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
+  is no name in a default, as it is none in a method (F16).
 - K14 with K7: a field of a class body without `=`, `mut` or not, is `field-unassigned` at the field
   in a class with no constructor at all, as in one with a primary constructor, since K14's empty
   constructor of a class without one assigns it no more than the primary one does, and Kurz has no

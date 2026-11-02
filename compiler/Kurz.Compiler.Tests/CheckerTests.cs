@@ -2869,7 +2869,8 @@ public sealed class CheckerTests
         // R2: a field of the body takes part in the cycle rule as a field of the primary constructor does
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class Node {\n    pub mut Node? next = null\n}\n\nprint(1)"));
         // F16: a default reads no top-level variable, as a method does not
-        Assert.Contains((ErrorIds.UnknownName, 4), Errors("x = 5\n\nclass C(int V) {\n    int a = x\n}\n\nprint(1)"));
+        var (topLevel, _) = Check("x = 5\n\nclass C(int V) {\n    int a = x\n}\n\nprint(1)");
+        Assert.Contains("4: `x` is a top-level variable, which a top-level function does not read (F16, V10)", topLevel.Sorted.Select(d => $"{d.Line}: {d.Message}"));
     }
 
     [Theory]
