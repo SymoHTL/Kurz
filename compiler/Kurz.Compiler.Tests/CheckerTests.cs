@@ -887,6 +887,17 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MutAtCall, 6)], Errors("void FillB(mut List<byte> xs) {\n    xs.Add(1)\n}\n\nmut s = \"abc\"\nFillB(mut s.Bytes)")); // M7: a path of data fields, which `Bytes` is not
         Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("mut s = \"abc\"\ns.Bytes.Add(1)")); // M5 with M4: the same for a receiver
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut short s = 1\nBump(mut s)\nprint(s)")); // M7: the callee writes an `int` back
+
+        // M7 with K7: a `mut` field of the instance named alone in its method is passed as `mut`; one without `mut` is mut-required,
+        // one field twice is mut-at-call, and one inside a lambda is capture-assign
+        var box = "void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nvoid Two(mut List<int> a, mut List<int> b) {\n    a.Add(b.Count)\n}\n\n";
+        Clean(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Fill(mut Items)\n    }\n}\n\nBox([]).Grow()");
+        var (fixedField, _) = Check(box + "class Box(List<int> Items) {\n    pub void Grow() {\n        Fill(mut Items)\n    }\n}\n\nBox([]).Grow()");
+        Assert.Equal(["11: `Items` is a field without `mut` and cannot be passed as `mut` (M7, K1)"], fixedField.Sorted.Select(d => $"{d.Line}: {d.Message}"));
+        var (twice, _) = Check(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Two(mut Items, mut Items)\n    }\n}\n\nBox([]).Grow()");
+        Assert.Equal([(ErrorIds.MutAtCall, "11: `Items` is passed as `mut` twice (M7)")], twice.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
+        var (inLambda, _) = Check(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        f = () => Fill(mut Items)\n        f()\n    }\n}\n\nBox([]).Grow()"); // F11: a lambda's `this`
+        Assert.Equal([(ErrorIds.CaptureAssign, "11: a lambda reads `this` and cannot pass its field `Items` as `mut` (F11)")], inLambda.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
     }
 
     [Fact]
@@ -2952,6 +2963,101 @@ public sealed class CheckerTests
         Assert.Contains(shown, message, StringComparison.Ordinal);
         Assert.EndsWith(cited, message, StringComparison.Ordinal);
     }
+
+    // ---- intrinsics (R18) ----------------------------------------------------------------------------------------
+
+    /// <summary>A program between two vectors it makes and a line that reads them, so that no case is about V5.</summary>
+    private static string Lanes(string program) => "v = Vector128.Create(1, 2, 3, 4)\nb = Vector128.Create(byte(1))\n" + program + "\nprint(v.GetElement(0) + b.GetElement(0))";
+
+    [Theory]
+    [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 2))\n}")]
+    [InlineData("while X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 2))\n    break\n}")]
+    [InlineData("if X86.Sse41.IsSupported && X86.Sse41.Extract(v, 0) == 1 {\n    print(X86.Sse41.Extract(v, 1))\n}")]
+    [InlineData("if !X86.Sse41.IsSupported || X86.Sse41.Extract(v, 0) == 1 {\n    print(1)\n}")]
+    [InlineData("if !X86.Sse41.IsSupported {\n    print(0)\n} else {\n    print(X86.Sse41.Extract(v, 1))\n}")]
+    [InlineData("if !X86.Sse41.IsSupported {\n    return\n}\n\nprint(X86.Sse41.Extract(v, 1))")]
+    [InlineData("int Second(Vector128<int> lanes) {\n    if !X86.Sse41.IsSupported {\n        return lanes.GetElement(1)\n    }\n\n    return X86.Sse41.Extract(lanes, 1)\n}\n\nprint(Second(v))")]
+    [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Ssse3.Shuffle(b, b).GetElement(0))\n    print(X86.Sse2.Add(v, v).GetElement(0))\n}")]
+    [InlineData("if X86.Sha.IsSupported && X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(X86.Sha.Sha256MessageSchedule1(v.AsUInt32(), v.AsUInt32()), 0))\n}")]
+    [InlineData("if X86.Sse41.IsSupported {\n    f = () => X86.Sse41.Extract(v, 1)\n    print(f())\n}")]
+    [InlineData("if Arm.AdvSimd.IsSupported {\n    print(Arm.AdvSimd.Add(v, v).GetElement(0))\n}")]
+    [InlineData("print(X86.Sse2.IsSupported)\nprint(Arm.Sha256.IsSupported)\nok = X86.Sha.IsSupported\nprint(ok)")]
+    [InlineData("print(v.GetElement(3) + Vector256.Create(1.5).GetElement(0))\nprint(Vector128.Create(byte(1)).AsUInt64().GetElement(1))")]
+    public void An_intrinsic_that_a_test_of_its_class_or_of_one_derived_from_it_guards_is_clean(string program) => Clean(Lanes(program));
+
+    [Fact]
+    public void An_intrinsic_in_raw_needs_no_test()
+    {
+        Clean(Lanes("raw {\n    print(X86.Sse41.Extract(v, 2))\n}"), grants: "raw");
+        Assert.Equal([(ErrorIds.IntrinsicUnguarded, 3)], Errors(Lanes("print(X86.Sse41.Extract(v, 2))"), grants: "raw"));
+    }
+
+    [Theory]
+    [InlineData("print(X86.Sse41.Extract(v, 2))", 3)]
+    [InlineData("print(X86.Sse2.Add(v, v).GetElement(0))", 3)]
+    [InlineData("if X86.Sse41.IsSupported {\n    print(1)\n} else {\n    print(X86.Sse41.Extract(v, 2))\n}", 6)]
+    [InlineData("if X86.Ssse3.IsSupported {\n    print(X86.Sse41.Extract(v, 2))\n}", 4)]
+    [InlineData("if X86.Sha.IsSupported {\n    print(X86.Sse41.Extract(v, 2))\n}", 4)]
+    [InlineData("if X86.Sse41.IsSupported {\n    print(1)\n}\n\nprint(X86.Sse41.Extract(v, 2))", 7)]
+    [InlineData("if X86.Sse2.IsSupported || X86.Sse41.Extract(v, 0) == 1 {\n    print(1)\n}", 3)]
+    [InlineData("ok = X86.Sse41.IsSupported\nif ok {\n    print(X86.Sse41.Extract(v, 2))\n}", 5)]
+    [InlineData("int Second(Vector128<int> lanes) => X86.Sse41.Extract(lanes, 1)\n\nif X86.Sse41.IsSupported {\n    print(Second(v))\n}", 3)]
+    [InlineData("if !X86.Sse41.IsSupported {\n    print(0)\n}\n\nprint(X86.Sse41.Extract(v, 1))", 7)]
+    public void An_intrinsic_that_no_test_of_its_class_guards_is_intrinsic_unguarded(string program, int line) =>
+        Assert.Equal([(ErrorIds.IntrinsicUnguarded, line)], Errors(Lanes(program)));
+
+    [Theory]
+    [InlineData("data Vector128(int X)\nprint(1)", "Vector128", 1)]
+    [InlineData("enum Vector256 { One }\nprint(1)", "Vector256", 1)]
+    [InlineData("X86 = 3\nprint(X86)", "X86", 1)]
+    [InlineData("int Arm() => 2\n\nprint(Arm())", "Arm", 1)]
+    [InlineData("int Twice(int X86) => X86 * 2\n\nprint(Twice(1))", "X86", 1)]
+    [InlineData("int Read() {\n    Arm = 1\n    return Arm\n}\n\nprint(Read())", "Arm", 2)] // and its read reports nothing more (E1)
+    [InlineData("print(1)\nf = (int Vector128) => Vector128 + 1\nprint(f(1))", "Vector128", 2)]
+    public void A_files_own_x86_arm_vector128_or_vector256_is_redeclared_at_any_level(string program, string name, int line)
+    {
+        // R18 as S14 reads a file's own `Environment` (the owner, 2026-11-01): a type, a function, a variable or a parameter of the name
+        Assert.Equal([(ErrorIds.Redeclared, line)], Errors(program));
+        Clean(program.Replace(name, "Own", StringComparison.Ordinal)); // the positive control
+    }
+
+    [Fact]
+    public void A_field_takes_x86_arm_vector128_or_vector256_as_a_field_takes_envError() =>
+        // R18 as S14 reads a field `EnvError` (the owner, 2026-11-01): a field takes the name, as H1 says
+        Clean("data P(int X86, int Arm, int Vector128, int Vector256)\n\np = P(1, 2, 3, 4)\nprint(p.X86 + p.Arm + p.Vector128 + p.Vector256)");
+
+    [Fact]
+    public void An_intrinsic_under_arm_is_checked_although_its_test_is_false_on_x86_64()
+    {
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 4)], Errors(Lanes("if Arm.AdvSimd.IsSupported {\n    print(Arm.AdvSimd.Add(v, b).GetElement(0))\n}")));
+        Assert.Equal([(ErrorIds.IntrinsicUnguarded, 3)], Errors(Lanes("print(Arm.AdvSimd.Add(v, v).GetElement(0))")));
+    }
+
+    [Theory]
+    [InlineData("List<Vector128<string>> xs = []\nprint(xs.Count)", ErrorIds.TypeMismatch, 3)]
+    [InlineData("print(X86.Nope.IsSupported)", ErrorIds.UnknownName, 3)]
+    [InlineData("print(X86.Sse41.IsSupported())", ErrorIds.TypeMismatch, 3)]
+    [InlineData("print(X86.Sse41.Extract)", ErrorIds.UnknownName, 3)]
+    [InlineData("print(X86)", ErrorIds.UnknownName, 3)]
+    [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 300))\n}", ErrorIds.ConstantOverflow, 4)]
+    [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, -1))\n}", ErrorIds.ConstantOverflow, 4)]
+    [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, \"2\"))\n}", ErrorIds.ArgumentMismatch, 4)]
+    public void A_name_type_or_immediate_an_intrinsic_does_not_take_is_its_error(string program, string id, int line) =>
+        Assert.Equal([(id, line)], Errors(Lanes(program)));
+
+    [Theory]
+    [InlineData("print(X86.Avx2.IsSupported)", "3: `X86.Avx2`, a class of C#'s whose intrinsics the compiler does not build (R18)")]
+    [InlineData("T First<T>(Vector128<T> lanes) => lanes.GetElement(0)\n\nprint(1)", "3: a vector whose lanes are a type parameter, `Vector128<T>` (R18, T19)")]
+    [InlineData("mut i = 2\nif X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, i))\n}", "5: `index` of `X86.Sse41.Extract` that is no constant: C# compiles it with a slower path, which the compiler does not build (R18)")]
+    [InlineData("print(v + v)", "3: `+` on a `Vector128<int>`, as C# has it, which the compiler does not build (R18)")]
+    [InlineData("print(v == v)", "3: `==` on a `Vector128<int>`, as C# has it, which the compiler does not build (R18)")]
+    [InlineData("print(v)", "3: the text of a vector, which C# writes as its lanes and no rule gives (A4, R18)")]
+    [InlineData("print([v])", "3: the text of a vector, which C# writes as its lanes and no rule gives (A4, R18)")]
+    [InlineData("print(\"{v}\")", "3: the text of a vector, which C# writes as its lanes and no rule gives (A4, R18)")]
+    [InlineData("print(v.WithElement(0, 5).GetElement(0))", "3: `WithElement` of a `Vector128<int>`, which the compiler does not build (R18)")]
+    [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Min(v, v).GetElement(0))\n}", "4: `X86.Sse41.Min`, which the compiler does not build (R18)")]
+    public void What_of_the_intrinsics_the_compiler_does_not_build_is_not_supported(string program, string expected) =>
+        Assert.Equal([expected], NotSupported(Lanes(program)));
 
     // ---- classes (chapter 7; R2 and R4 judged by the types of the fields) ---------------------------------------------
 
