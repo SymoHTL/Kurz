@@ -418,15 +418,15 @@ pub bool Same(string first, string second) {
 // first, as Rust's `Ord` for `str` compares them; in UTF-8 that is the order of their code points (T32). The first bytes are compared
 // first, and where they differ the order is their difference, a value, as a compare a byte at a time gives it. A `-1` or a `1` chosen
 // by a test of which byte is the lower became, where `Order` went into the loop of its one caller, a branch on that test, which
-// mispredicted on every second pair of random words: `<` of 200k such words and the next took 35.6 ms so, 12.6 ms with the difference
-// and 16.4 ms a byte at a time (Rust 18.9 ms). Where the first bytes agree, the shared bytes are compared as the C library's `memcmp`
+// mispredicted on every second pair of random words: `<` of 200k such words and the next took 35.2 ms so, 12.2 ms with the difference
+// and 15.8 ms a byte at a time (Rust 18.1 ms). Where the first bytes agree, the shared bytes are compared as the C library's `memcmp`
 // compares a small count, which Rust's `Ord` calls, reading no byte past the end of either, as words read with their first byte
 // highest, so that the order of two words is the order of their bytes: 1 to 3 as their first, middle and last byte; 4 to 16 as four
 // words of 4, the first two at 0 and at 4 (at 0 again below 8 bytes) and the last two ending 4 bytes before the end and at the end;
 // more than 16 as 16 bytes at a time, then as four words of 8, the 16 bytes where that stopped and the 16 that end the shared bytes.
 // The first word that differs holds the first byte that differs, and gives the order, `-1` or `1` by a test of which word is the
 // lower, which LLVM made into a value with no branch (`setae` on x86-64) in the loop of one caller of `<` on strings that differ past
-// their first byte, as likely one way as the other: 18.4 ms against 34.2 ms on `main` for 50 rounds of 82,000 pairs. A value
+// their first byte, as likely one way as the other: 16.2 ms against 33.8 ms on `main` for 50 rounds of 82,000 pairs. A value
 // made from the words' bits took 3.3 ms longer on 50 rounds of 200k sorted neighbours. Where no word differs, the counts give the order.
 pub int Order(string first, string second) {
     long a = long(first.Bytes.Count)
