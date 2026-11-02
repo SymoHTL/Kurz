@@ -406,6 +406,17 @@ public sealed partial class Emitter
         }
     }
 
+    /// <summary>
+    /// The functions of the runtime and the standard library that the emitter marks <c>noinline</c>, by their unit and their name.
+    /// <c>rt.common.SameBytes</c> compares the bytes of two strings of more than 16 bytes for the runtime's <c>Same</c> (T18), whose
+    /// one caller is <c>Same</c>: LLVM inlines a function into its one caller, and <c>Same</c> with it grew too big to be inlined, a
+    /// call at every <c>==</c> of strings. Rust's <c>==</c> of <c>str</c> has the shape this keeps, the test in every caller and a
+    /// call for the bytes, because that call is <c>bcmp</c>, in the C library, which LLVM cannot inline; the runtime of Kurz is
+    /// written in Kurz (design record, section 2), so the emitter keeps the call. No program sees the mark: it names no function of a
+    /// program.
+    /// </summary>
+    private static readonly HashSet<string> OutOfLine = new(StringComparer.Ordinal) { "rt.common.SameBytes" };
+
     private void EmitFunctionCore(FunctionSymbol f, FunctionDeclaration d, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap, string name)
     {
         if ((d.Modifiers & Modifiers.Naked) != 0)
@@ -429,7 +440,8 @@ public sealed partial class Emitter
             parameters.Add(p.Mut ? $"ptr %p{i}" : $"{ParameterType(f, type)} %p{i}");
         }
 
-        Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", FeatureAttributes(features)), instanceMap, result);
+        string[] attributes = unit.Runtime && OutOfLine.Contains($"{unit.Prefix}.{f.Name}") ? [.. FeatureAttributes(features), "noinline"] : FeatureAttributes(features);
+        Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", attributes), instanceMap, result);
         Trace(unit.Prefix.StartsWith("rt.", StringComparison.Ordinal) ? Symbol(name) : TraceName(f, instanceMap), Symbol(name), d.Line);
         if (f.Owner is not null && !f.IsStatic)
         {

@@ -1,0 +1,14 @@
+// expect: output
+// | 4
+// | 3
+// rules: K20
+
+int Compute() => 3
+
+class Table {
+    pub static int A = Compute()
+    pub static int B = A + 1
+}
+
+print(Table.B)
+print(Table.A)
