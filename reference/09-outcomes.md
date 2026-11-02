@@ -294,7 +294,31 @@ the cases or one keeping them and one unwrapping the call, `Show(long n)` beside
 defaults of the change's product pass and the readings its reviews left)*. A parameter whose type is a union by a type argument written at the call,
 `Same<int | NotFound>(Find(1))`, or by the type of the list a method is called on, `xs.Add(Find(1))`
 on a `List<int | NotFound>`, is a written union and keeps the cases, so that a call unwraps at a type
-parameter where the arguments infer it *(assumed, §5: a reading of the change)*.
+parameter where the arguments infer it (§5, the owner, 2026-11-01, "Keep the cases"). A parameter whose
+union holds a type parameter takes from a call that keeps the cases its success alone, so that
+`Report(Find(2))` with `void Report<T>(T | NotFound found)` and a `Find` of `int | NotFound | Rejected`
+gives `T` = `int`, and `Rejected`, which the union does not name, makes the call `type-mismatch` (T1),
+as for a variable of `int | NotFound` (§5, the owner, 2026-11-01, "T = success only"); an argument that
+is no call binds the type parameter to its own type less the cases the union names, a variable of
+`int | NotFound | Rejected` giving `T` = `int | Rejected` (§5, the owner, 2026-11-01, "T = int |
+Rejected, as built"). Where another case of the union holds the type parameter, an argument of that
+case's shape is read through it, so that `void Wide<T>(T | List<T> x)` with a `List<int>` gives `T` =
+`int` (§5, the owner, 2026-11-01, "Same shape first"). A union with a type parameter that names no case
+of the call beyond the success unwraps the call, and a literal binds the type parameter to its own
+type, as at a bare type parameter (T27), so that `F(Find(1))` and `F(5)` with `void F<T>(T | string x)`
+both give `T` = `int` (§5, the owner, 2026-11-01, "Bind T = int in both"). A list literal of calls is
+read as such a call is: of `Show(List<int> xs)` and `Show(List<int | NotFound> xs)`, `Show([Find(1)])`
+runs the one whose item type keeps the cases (§5, the owner, 2026-11-01, "The union one"). The shape is
+any that the inference reads inside a type, a list, a map, a `data` type of the same name and a function
+type of the same count of parameters, and an argument union with cases of both shapes gives each case of
+a shape to the case of that shape and the rest to the bare type parameter; a literal of a case the union
+names, `F("a")`, is `cannot-infer`, as a variable of `string` is; a variable of `int | bool` passed to
+`F` gives `T` = `int | bool`; two type parameters in one union, `void G<T, U>(T | U | NotFound x)`, are
+`cannot-infer` (T27); and a list literal fits a parameter exactly item by item, a call by its whole
+union where the item type keeps its cases and by its success where the item type unwraps it, any other
+item by its own type, so that `[Find(1), 2]` runs `Show(List<int> xs)`, and two functions whose item
+types keep the cases with a widening are `ambiguous-call` (F13) *(assumed, §5: the defaults of the
+questions on O4 of 2026-11-01 and of their product pass)*.
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -670,6 +694,195 @@ void Report(List<int | NotFound> items) {
 
 // the literal takes the parameter's item type, a union, which each item holds
 Report([Find(1), Find(2)])
+```
+
+Case: [outcomes/generic-union-takes-the-success.kz](../corpus/outcomes/generic-union-takes-the-success.kz)
+```kurz
+data NotFound
+data Rejected
+
+int | NotFound | Rejected Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Rejected
+    }
+    return NotFound
+}
+
+void Report<T>(T | NotFound found) {
+    match found {
+        NotFound => print("none")
+        else => print("found")
+    }
+}
+
+// `T` is the success alone, `int`, and `Rejected`, which the union does not name, does not fit `int | NotFound`
+Report(Find(2))
+```
+
+Case: [outcomes/generic-union-variable-binds-the-rest.kz](../corpus/outcomes/generic-union-variable-binds-the-rest.kz)
+```kurz
+data NotFound
+data Rejected
+
+int | NotFound | Rejected Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Rejected
+    }
+    return NotFound
+}
+
+List<T> Wrap<T>(T | NotFound found) => List<T>()
+
+int | NotFound | Rejected got = Find(2)
+// a variable is no call: `T` is its type less the case the union names, `int | Rejected`
+List<int | Rejected> kept = Wrap(got)
+print(kept)
+```
+
+Case: [outcomes/generic-union-same-shape-first.kz](../corpus/outcomes/generic-union-same-shape-first.kz)
+```kurz
+List<T> Wide<T>(T | List<T> x) => List<T>()
+
+List<int> xs = [1, 2]
+// the list is read through the case of its shape, `List<T>`: `T` is `int`, and the result a `List<int>`
+List<int> ys = Wide(xs)
+print(ys)
+```
+
+Case: [outcomes/generic-union-unwraps-a-call.kz](../corpus/outcomes/generic-union-unwraps-a-call.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+List<T> F<T>(T | string x) => List<T>()
+
+int | NotFound Run() {
+    // `T | string` names no case of the call beyond its success: the call unwraps, and `T` is `int`
+    List<int> got = F(Find(1))
+    print(got)
+    return 1
+}
+
+match Run() {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/generic-union-literal.kz](../corpus/outcomes/generic-union-literal.kz)
+```kurz
+List<T> F<T>(T | string x) => List<T>()
+
+// the literal binds `T` to its own type, as at a bare `T`: `int`
+List<int> got = F(5)
+print(got)
+```
+
+Case: [outcomes/keep-items-the-union-one.kz](../corpus/outcomes/keep-items-the-union-one.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(List<int> xs) {
+    print("the items")
+}
+
+void Show(List<int | NotFound> xs) {
+    print("the union")
+}
+
+int | NotFound Run() {
+    // a list literal of calls is read as such a call: the function whose item type keeps the cases fits it exactly, and wins
+    Show([Find(1)])
+    return 1
+}
+
+match Run() {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
+Case: [outcomes/keep-written-type-argument.kz](../corpus/outcomes/keep-written-type-argument.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+T Same<T>(T x) => x
+
+// a type argument written as a union keeps the cases of the call
+match Same<int | NotFound>(Find(2)) {
+    int n => print(n)
+    NotFound => print("none")
+}
+
+// and so does the item type of the list a method is called on
+mut List<int | NotFound> ys = []
+ys.Add(Find(1))
+ys.Add(Find(2))
+print(ys)
+```
+
+Case: [outcomes/generic-union-two-parameters.kz](../corpus/outcomes/generic-union-two-parameters.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void G<T, U>(T | U | NotFound x) {
+    print("g")
+}
+
+// two type parameters in one union: neither is inferred, and the call writes them
+G(Find(1))
+```
+
+Case: [outcomes/generic-union-variable-own-type.kz](../corpus/outcomes/generic-union-variable-own-type.kz)
+```kurz
+List<T> F<T>(T | string x) => List<T>()
+
+int | bool got = 1
+// a variable binds `T` to its own type, which names no case of the union: `int | bool`
+List<int | bool> kept = F(got)
+print(kept)
+```
+
+Case: [outcomes/generic-union-literal-of-a-named-case.kz](../corpus/outcomes/generic-union-literal-of-a-named-case.kz)
+```kurz
+List<T> F<T>(T | string x) => List<T>()
+
+// a literal of the case the union names leaves `T` nothing, as a variable of `string` does
+got = F("a")
+print(got)
 ```
 
 ### O5 (decided, §5) Postfix `else`

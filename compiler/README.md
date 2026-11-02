@@ -595,6 +595,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
+- a generic function that reads its type with `T.Kind`, and one that passes its type parameter to
+  such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
+  a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
+  every node is new (`Syntax/SyntaxCopy.cs`), so that the model holds each copy's types apart, with
+  the type parameter's name bound to the type argument and `T.Kind` a constant of `TypeKind`; a
+  `match` on it reads the one arm that takes the copy's kind, and the emitter emits that arm alone;
+  no such function is checked where no call makes a copy, and a generic function that calls one for a
+  type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -1436,9 +1444,10 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
-which the intrinsics and their vector types stand (R18); a member of a type parameter that reads its type, `T.Kind`,
-`T.Fields`, `T.Make` and the parts beyond the fields, and the name `TypeKind`, which every file sees, so that a file's own
-declaration of it is `redeclared` (T33); and `use` (F10) of any folder but the runtime's `sys`;
+which the intrinsics and their vector types stand (R18); a member of a type parameter that reads its type beyond `Kind`,
+`T.Fields`, `T.Make` and the parts beyond the fields, in the copy that a call makes, and a chain of more than 64 copies of
+generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
+larger type each time makes without end (T33); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item
@@ -1680,7 +1689,17 @@ round can ask about it by the rule's id.
   "The union one"); the exact fit is read first,
   so `Show(int)` wins over `Show(long | NotFound)`, which fits with a widening (the owner, 2026-10-31,
   "Exact fit first"). Where no function fits, the
-  call's error stands alone and no case of the argument is passed on beside it (E1).
+  call's error stands alone and no case of the argument is passed on beside it (E1). A type parameter in
+  such a union takes from a call that keeps the cases its success alone, so that a case the union does not
+  name is the call's `type-mismatch` (the owner, 2026-11-01, "T = success only"), and from any other
+  argument its own type less the cases the union names ("T = int | Rejected, as built"); a case of the
+  argument whose shape a case that holds the type parameter has, a list, a map, a data type of the same name
+  or a function of the same count of parameters, is read through that case first, so that `List<int>` gives
+  `T` = `int` in `T | List<T>` ("Same shape first"), and a literal binds the type parameter to its own type
+  where the union names no case of that type, `F(5)` in `T | string` ("Bind T = int in both"): `Infer` and
+  `Unify` in `Checker.Calls.cs`. A list literal keeps the cases at a parameter whose item type names a case
+  of an item call beyond its success, and fits exactly item by item, so that of `Show(List<int>)` and
+  `Show(List<int | NotFound>)` the call `Show([Find(1)])` runs the second ("The union one", 2026-11-01).
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
   ways meet, at the end of an `if`, after the arms of a `match` or an `else` and at the head of a

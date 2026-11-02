@@ -115,6 +115,11 @@ public sealed partial class Emitter
     /// </summary>
     private string? EmitMatch(Expression subject, IReadOnlyList<MatchArm> arms, KurzType? result)
     {
+        if (Model.KindArmOf(subject) is { } taken)
+        {
+            arms = [taken]; // T33: a `match` on `T.Kind` in a copy, whose other arms the checker did not read
+        }
+
         var type = TypeOf(subject);
         var value = EmitExpression(subject);
         var union = type as UnionType;
