@@ -2181,6 +2181,199 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[3]",
     ];
 
+    // instances of classes (chapter 7): a method that changes its fields by their names and through `this`, a second reference, a
+    // list and an instance read from fields while a method replaces them, also inside one interpolation, a nullable field, an
+    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, and a chain of 1000 links
+    // made and let go of, which the release frees off its work list
+    private const string Classes = """
+        class Counter(mut int Count, string Name) {
+            pub void Add(int n) {
+                Count = Count + n
+                this.Count = this.Count + 1
+            }
+
+            pub string Text() => "{Name}={Count}"
+        }
+
+        class Holder(mut List<string> Items, mut Counter? Current) {
+            pub void Replace() {
+                Items = List<string>()
+                Items.Add("new")
+                Current = null
+            }
+
+            pub int Size() => Items.Count
+        }
+
+        class Link(int V, Link? Next)
+
+        class Note(mut string Title, mut Map<string, int> Counts) {
+            pub void Reset() {
+                Title = "{Title}!"
+                Counts = Map<string, int>()
+            }
+
+            pub void Mark() {
+                Counts["m"] = 2
+            }
+        }
+
+        data Pair(Counter Left, int Right)
+
+        int Sum(Link? head) {
+            mut total = 0
+            mut cur = head
+            while cur != null {
+                total = total + cur.V
+                cur = cur.Next
+            }
+
+            return total
+        }
+
+        string Touch(Holder x) {
+            x.Replace()
+            return "t"
+        }
+
+        string Clear(Note n) {
+            n.Reset()
+            return "r"
+        }
+
+        c = Counter(0, "c")
+        c.Add(2)
+        print(c)
+        alias = c
+        alias.Count = 10
+        print(c.Count)
+        h = Holder(List<string>(), Counter(5, "k"))
+        h.Items.Add("a")
+        items = h.Items
+        kept = h.Current
+        h.Replace()
+        print(items)
+        print(h.Items)
+        print(h.Size())
+        print(kept?.Name ?? "gone")
+        print(h.Current?.Name ?? "gone")
+        h.Items.Add("b")
+        print("{h.Items} {Touch(h)} {h.Items}")
+        p = Pair(Counter(1, "p"), 2)
+        p.Left.Add(1)
+        print(p)
+        bump = () => c.Add(1)
+        bump()
+        bump()
+        print(c)
+        mut cs = List<Counter>()
+        cs.Add(Counter(1, "a"))
+        cs.Add(c)
+        cs[0].Add(1)
+        print(cs)
+        mut Link? links = null
+        for i in 0..<1000 {
+            links = Link(i, links)
+        }
+
+        print(Sum(links))
+        links = null
+        print(alias)
+        note = Note("{c.Count}n", Map<string, int>())
+        note.Counts["a"] = 1
+        print("{note.Title} {note.Counts} {Clear(note)} {note.Title} {note.Counts}")
+        note.Mark()
+        print(note.Counts)
+        """;
+
+    private static readonly string[] ClassesPrint =
+    [
+        "c=3",
+        "10", // K3: one instance through two references
+        "[a]", // the list the variable took a count of, which the field let go of
+        "[new]",
+        "1",
+        "k",
+        "gone",
+        "[new, b] t [new]", // the first hole took a count of the list the call replaced (K2)
+        "Pair { Left = p=3, Right = 2 }",
+        "c=14",
+        "[a=3, c=14]",
+        "499500",
+        "c=14",
+        "14n [a: 1] r 14n! []", // the string and the map the first holes took a count of, which the call replaced (K2)
+        "[m: 2]",
+    ];
+
+    // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
+    // over, a `return` and a `break` and a `continue` that leave a block, a call's result nothing holds, a `data` value's field, a
+    // lambda's environment and a list's item, each holding a chain of links
+    private const string ClassRounds = """
+        class Link(int V, Link? Next)
+
+        class Box(mut List<int> Xs, mut Link? Chain) {
+            pub void Fill(int n) {
+                for i in 0..<n {
+                    Xs.Add(i)
+                    Chain = Link(i, Chain)
+                }
+            }
+
+            pub int Count() => Xs.Count
+        }
+
+        data Pair(Box Left, int Right)
+
+        Box Make(int n) {
+            b = Box(List<int>(), null)
+            b.Fill(n)
+            return b
+        }
+
+        int Early(int n) {
+            b = Make(n)
+            if n > 0 {
+                return b.Count()
+            }
+
+            return 0
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(100)
+            a.Chain = Link(0, null)
+            p = Pair(Make(100), 1)
+            for j in 0..<3 {
+                c = Make(100)
+                if j == 1 {
+                    continue
+                }
+
+                total = total + c.Count()
+            }
+
+            for x in 0..<5 {
+                d = Make(100)
+                total = total + d.Count() - 100
+                if x == 2 {
+                    break
+                }
+            }
+
+            Make(100)
+            h = () => a.Count()
+            mut bs = List<Box>()
+            bs.Add(Make(100))
+            total = total + Early(100) + p.Left.Count() + h() + bs[0].Count() - 400
+        }
+
+        print(round)
+        print(total)
+        """;
+
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
     // of maps whose entry is written over, a map of strings whose value and key a write over a key lets go of, and entries kept, made
@@ -2665,10 +2858,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, fenced, "string-pieces-fenced"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
         Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
+        Ran(BuildAndRun(ClassRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "class-rounds-fenced"), 0, ["20", "4000"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -2734,6 +2929,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Rounds, Budget(), "list-rounds"), 0, ["3000", "12003000"], "");
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
         Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
+        Ran(BuildAndRun(ClassRounds, Budget(), "class-rounds"), 0, ["3000", "600000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -2752,6 +2948,28 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var full = BuildAndRun(maps, Budget(), "map-rounds-held");
         Assert.Equal(1, full.Code);
         Assert.StartsWith("error: allocation-failed (", full.Error, StringComparison.Ordinal);
+
+        // and the rounds' boxes, each with a chain of 1000 links, all held: about 100 megabytes
+        var boxes = BuildAndRun(ClassRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    all.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "class-rounds-held");
+        Assert.Equal(1, boxes.Code);
+        Assert.StartsWith("error: allocation-failed (", boxes.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_chain_of_a_million_instances_is_freed_off_the_work_list_where_a_recursive_walk_of_it_overflows_the_stack()
+    {
+        // section 3 with the owner's answer of 2026-11-01, "Iterative, never crashes": the last count of a link that a release lets go
+        // of waits on its class's work list, so no release calls itself once for each link
+        const string chain = "class Link(int V, Link? Next)\n\nLink? Build(int n) {\n    mut Link? head = null\n    for i in 0..<n {\n        head = Link(i, head)\n    }\n\n    return head\n}\n\nmut Link? all = Build(1000000)\nprint(all?.V ?? -1)\nall = null\nprint(\"freed\")\n";
+        Ran(BuildAndRun(chain, toolchain.Runtime, "class-chain-freed"), 0, ["999999", "freed"], "");
+
+        // the positive control: a function that walks the same chain by calling itself for each link ends with `stack-overflow`
+        var walked = BuildAndRun(chain.Replace("print(\"freed\")", "print(Depth(Build(1000000)))", StringComparison.Ordinal) + "\nint Depth(Link? l) {\n    if l == null {\n        return 0\n    }\n\n    return 1 + Depth(l.Next)\n}\n", toolchain.Runtime, "class-chain-walked");
+        Assert.NotEqual(0, walked.Code);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.StartsWith("error: stack-overflow", walked.Error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
+        }
     }
 
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
@@ -3583,36 +3801,243 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_key_is_hashed_by_SipHash_1_3_under_keys_the_system_gives_each_process()
+    public void SipHash_1_3_gives_the_vectors_of_the_reference()
     {
-        // the hash Rust's `HashMap` takes by default: the two vectors under keys of 0 are CPython's `siphash13` of the same bytes, the
-        // third is under the reference implementation's keys, from the same code in Python, which gives the reference's SipHash-2-4
-        // vectors with two and four rounds
+        // M9 (section 4): the hash Rust's `HashMap` takes by default, which a map moves onto past the bound: the two vectors under keys of 0
+        // are CPython's `siphash13` of the same bytes, the third is under the reference implementation's keys, from the same code in
+        // Python, which gives the reference's SipHash-2-4 vectors with two and four rounds
         const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
         const string hash = "    byte* p = Allocate(15)\n    raw {\n        p[0] = 97\n        p[1] = 98\n        p[2] = 99\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 3))\n    WriteError(\"\\n\")\n    raw {\n        for i in 0..<15 {\n            p[i] = byte(i)\n        }\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 15))\n    WriteError(\"\\n\")\n    WriteNumber(std.SipHash13(506097522914230528UL, 1084818905618843912UL, p, 15))\n    WriteError(\"\\n\")\n";
         var runtime = Edited(("std/std.kz", "\nulong SipHash13(", "\npub ulong SipHash13("), ("runtime/common/runtime.kz", start, start + hash));
         Ran(BuildAndRun("print(1)\n", runtime, "map-siphash"), 0, ["1"], "13851880170939887858\n17514137373579004394\n15213397504630561110\n");
+    }
 
-        // the keys differ between two runs of one program, so the order of a map's 20 entries does too (M10), as in Rust
-        const string text = "mut m = Map<int, int>()\nfor i in 0..<20 {\n    m[i] = i\n}\nprint(m)\n";
-        var compilation = Compile(text, toolchain.Runtime);
+    [Fact]
+    public void A_key_has_the_fast_hash_of_foldhash_s_fixed_state_and_a_map_prints_one_order_in_every_run()
+    {
+        // section 4 (the owner, 2026-11-01, "Switch, as .NET"; the pick assumed there): foldhash 0.2.0's `fast::FixedState`, its folded
+        // multiply in the crate's form for a target without a product of 128 bits. The values are the crate's own: its source at the tag
+        // v0.2.0, built with that form forced, `write` of the bytes (i * 37 + 200) % 256 of each count and then `finish`, through each of
+        // its paths, 0 to 3 bytes, 4 to 7, 8 to 16, two lanes past 16, four past 128 and six past 256; and `write_u64` of 0 to 5 words
+        // and then `finish`, the sponge folded into the accumulator at the third and the fifth. The fourth word, 0, goes into the
+        // sponge's high word, which held 0, so that four words hash as the first three, in the crate as here.
+        int[] counts = [.. Enumerable.Range(0, 25), 31, 32, 33, 63, 64, 65, 95, 96, 97, 127, 128, 129, 200, 256, 257, 300];
+        ulong[] bytes =
+        [
+            18381908264018682402UL, 10313515915333765677UL, 1929429560286372662UL, 3654902873879048536UL, 13737300313343162903UL,
+            14615724446555654224UL, 6818008286726094372UL, 4015009889731994202UL, 16611864332146022195UL, 8677002230768383255UL,
+            14855835650959486829UL, 13318177731941119817UL, 2137668317467798322UL, 1268008852833601159UL, 15454146103877839619UL,
+            14084194896136060238UL, 1034229071626006353UL, 12363388824720602842UL, 4844350055151983448UL, 11438981068341899001UL,
+            14547473599202013301UL, 4048246751756763233UL, 15937682811256106777UL, 14157417799970833427UL, 14295417949404985957UL,
+            9179077512255625425UL, 509270408215261943UL, 5655969144459170779UL, 7590674684585511704UL, 12808656483676525743UL,
+            8708528239955626882UL, 2991818355018454276UL, 5076192079195121934UL, 1748880783929899074UL, 2769889656097390526UL,
+            502028113298308887UL, 5898250822708355634UL, 14916995925869765630UL, 8332800458142957887UL, 16664090395458995668UL,
+            18242600445215221827UL,
+        ];
+        ulong[] words = [1UL, 18446744073709551615UL, 81985529216486895UL, 0UL, 42UL];
+        ulong[] wordHashes =
+        [
+            589684135938649225UL, 11635162890515786560UL, 16422133183253862721UL, 10749504763468978905UL, 10749504763468978905UL,
+            2957822281828288061UL,
+        ];
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
+        var hash = new StringBuilder("    byte* p = Allocate(300)\n    byte* b = Allocate(48)\n    byte* s = Allocate(40)\n    raw {\n        for i in 0..<300 {\n            p[i] = byte((i * 37 + 200) % 256)\n        }\n\n        for i in 0..<48 {\n            b[i] = 0\n        }\n    }\n");
+        foreach (var n in counts)
+        {
+            hash.Append(CultureInfo.InvariantCulture, $"    WriteNumber(std.FoldHash(p, {n}))\n    WriteError(\"\\n\")\n");
+        }
+
+        // a block whose byte 36 is 0, a map's on the fast hash
+        hash.Append("    std.HashStart(b, s)\n    WriteNumber(std.HashEnd(s))\n    WriteError(\"\\n\")\n");
+        foreach (var word in words)
+        {
+            hash.Append(CultureInfo.InvariantCulture, $"    std.HashWord(s, {word}UL)\n    WriteNumber(std.HashEnd(s))\n    WriteError(\"\\n\")\n");
+        }
+
+        var runtime = Edited(("std/std.kz", "\nulong FoldHash(", "\npub ulong FoldHash("), ("runtime/common/runtime.kz", start, start + hash));
+        var expected = string.Concat(bytes.Concat(wordHashes).Select(h => $"{h}\n"));
+        Ran(BuildAndRun("print(1)\n", runtime, "map-fast-hash"), 0, ["1"], expected);
+
+        // with no keys of the system's in the hash, two runs of one program print a map's 20 entries in one order (M10)
+        var (first, second) = RunTwice("mut m = Map<int, int>()\nfor i in 0..<20 {\n    m[i] = i\n}\nprint(m)\n", toolchain.Runtime, "map-order");
+        Assert.Equal(first, second);
+        Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first).Trim('[', ']').Split(", ").Order());
+    }
+
+    [Fact]
+    public void A_map_whose_insert_passes_more_than_512_slots_moves_onto_SipHash_1_3_and_keeps_every_entry()
+    {
+        // section 4 (the owner, 2026-11-01, "Switch, as .NET"; the bound assumed there): keys whose fast hash starts their probe at the
+        // first group of every block of up to 1024 slots. In the block of 1024 slots that 449 to 896 entries take, the k-th of them passes
+        // the full groups of the k - 1 before it: the 520th passes 64 groups, 512 slots, and stays on the fast hash, so that two runs
+        // print one order; the 521st passes 65 and moves the map onto SipHash-1-3 under the keys the system gives each process, so that
+        // two runs print two orders, and the map gives every entry, before the move and after it. 1000 keys more after the 521 grow the
+        // switched map from 1024 slots to 2048, which stays on SipHash-1-3.
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the cases take
+        var grown = keys.Concat(Enumerable.Range(1000000, 1000).Select(k => (long)k)).ToList();
+        foreach (var (name, set) in new[] { ("520", keys.Take(520).ToList()), ("521", keys), ("grown", grown) })
+        {
+            var (first, second) = RunTwice(Filled("int", set.Select(k => k.ToString(CultureInfo.InvariantCulture))), toolchain.Runtime, $"map-switch-{name}");
+            Assert.Equal($"{set.Count} {set.Count} -1", string.Join(" ", first.Take(3)));
+            Assert.Equal(set.Select((k, i) => $"{k}: {i}").Order(), first[3].Trim('[', ']').Split(", ").Order());
+            if (name == "520")
+            {
+                Assert.Equal(first, second);
+            }
+            else
+            {
+                Assert.NotEqual(first, second);
+            }
+        }
+
+        // the positive control: the same 1521 keys under a bound no probe passes stay on the fast hash, one order in two runs, every entry
+        var held = RunTwice(Filled("int", grown.Select(k => k.ToString(CultureInfo.InvariantCulture))), Edited(NoBound), "map-switch-none");
+        Assert.Equal(held.First, held.Second);
+        Assert.Equal("1521 1521 -1", string.Join(" ", held.First.Take(3)));
+
+        // a switch moves its own map alone (section 4, assumed there): a map of 20 keys made before the switched one and one made after
+        // it print one order in two runs, while the switched map prints two; and a write to a map value that shares the switched map's
+        // block copies the block with its hash (M3), so that the copy finds every entry and the map it was copied from keeps its count
+        var alone = RunTwice(
+            "mut before = Map<int, int>()\nfor i in 0..<20 {\n    before[i] = i\n}\n" +
+            Filled("int", keys.Select(k => k.ToString(CultureInfo.InvariantCulture))) +
+            "mut after = Map<int, int>()\nfor i in 0..<20 {\n    after[i] = i\n}\nmut twin = m\ntwin[-5] = -5\nmut kept = 0\n" +
+            "for i in 0..<keys.Count {\n    w = twin[keys[i]] ?? -1\n    if w == i {\n        kept = kept + 1\n    }\n}\n" +
+            "print(kept)\nprint(twin.Count)\nprint(m.Count)\nprint(before)\nprint(after)\n",
+            toolchain.Runtime,
+            "map-switch-alone");
+        Assert.Equal(9, alone.First.Count);
+        Assert.Equal("521 521 -1", string.Join(" ", alone.First.Take(3)));
+        Assert.NotEqual(alone.First[3], alone.Second[3]);
+        Assert.Equal("521 522 521", string.Join(" ", alone.First.Skip(4).Take(3)));
+        Assert.Equal(alone.First.Skip(7), alone.Second.Skip(7));
+        Assert.All(alone.First.Skip(7), line => Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), line.Trim('[', ']').Split(", ").Order()));
+
+        // an insert into the slot of a removed entry counts the walk its lookup of the key pays (section 4, assumed there, as .NET counts
+        // the chain its insert walks): 512 and 520 of the keys, one of them removed, which leaves the slot of a removed entry in a group
+        // with no slot of 255, and then the next key added, which takes that slot. Its lookup passes 64 groups, 512 slots, of the first
+        // map, which stays on the fast hash, and 65, 520 slots, of the second, which moves onto SipHash-1-3; each gives every entry
+        foreach (var count in new[] { 512, 520 })
+        {
+            var (first, second) = RunTwice(Removed(keys.Take(count + 1)), toolchain.Runtime, $"map-switch-removed-{count}");
+            Assert.Equal($"{count} {count} 0", string.Join(" ", first.Take(3)));
+            Assert.Equal(keys.Skip(1).Take(count).Select((k, i) => $"{k}: {i + 1}").Order(), first[3].Trim('[', ']').Split(", ").Order());
+            if (count == 512)
+            {
+                Assert.Equal(first, second);
+            }
+            else
+            {
+                Assert.NotEqual(first, second);
+            }
+        }
+
+        // keys of 8 bytes hash as the word of their bytes: strings, whose blocks the move carries into the new block without a count
+        // more or less, under the allocator that makes every freed block inaccessible
+        var strings = SameGroupKeys(600, k => $"k{k:D7}");
+        Assert.Equal(600, strings.Count); // the floor: the keys the case takes
+        var fenced = RunTwice(Filled("string", strings.Select(s => $"\"{s}\"")), Fenced, "map-switch-strings-fenced");
+        Assert.Equal("600 600 -1", string.Join(" ", fenced.First.Take(3)));
+        Assert.NotEqual(fenced.First, fenced.Second);
+    }
+
+    [Fact]
+    public void The_map_programs_print_the_same_with_every_map_moved_onto_SipHash_1_3_at_its_first_insert()
+    {
+        // the bound of `MapEmpty` edited so that the first insert into each map passes it: every key type of the maps' programs is hashed
+        // by SipHash-1-3 from the map's second entry on, through growth, copies of a shared block, `Remove` and `Clear`; under the
+        // allocator that makes every freed block inaccessible, the block the move frees is not read again
+        (string Path, string Old, string New) first = ("std/std.kz", "if step - 8 > 512 && ", "if step - 8 > -1 && ");
+        var switched = Edited(first);
+        Ran(BuildAndRun(Maps, switched, "map-values-switched"), 0, MapsPrint, "");
+        Ran(BuildAndRun(MapMembers, switched, "map-members-switched"), 0, MapMembersPrint, "");
+        Ran(BuildAndRun(Fields, switched, "field-collections-switched"), 0, FieldsPrint, "");
+        var fenced = Edited([.. Fence, first]);
+        Ran(BuildAndRun(Maps, fenced, "map-values-switched-fenced"), 0, MapsPrint, "");
+        Ran(BuildAndRun(MapMembers, fenced, "map-members-switched-fenced"), 0, MapMembersPrint, "");
+        Ran(BuildAndRun(Fields, fenced, "field-collections-switched-fenced"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-switched-fenced"), 0, ["20", "280"], "");
+
+        // the positive control that the edit moved them: two runs print a map's 20 entries in two orders
+        var (one, two) = RunTwice("mut m = Map<int, int>()\nfor i in 0..<20 {\n    m[i] = i\n}\nprint(m)\n", switched, "map-order-switched");
+        Assert.NotEqual(one, two);
+    }
+
+    /// <summary>The bound of <c>MapEmpty</c> edited to one no probe passes, which no map switches at.</summary>
+    private static readonly (string Path, string Old, string New) NoBound = ("std/std.kz", "if step - 8 > 512 && ", "if step - 8 > 1000000000 && ");
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/>, literals of the map's key type <paramref name="type"/>, into a map with its
+    /// index as its value, then prints how many of them the map gives back with that value, the map's count, what it gives for a key it
+    /// does not hold, and the map.
+    /// </summary>
+    private static string Filled(string type, IEnumerable<string> keys) =>
+        $"List<{type}> keys = [{string.Join(", ", keys)}]\nmut m = Map<{type}, int>()\nfor i in 0..<keys.Count {{\n    m[keys[i]] = i\n}}\n" +
+        "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\n" +
+        $"print(found)\nprint(m.Count)\nprint(m[{(type == "string" ? "\"\"" : "-1")}] ?? -1)\nprint(m)\n";
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> but the last into a map with its index as its value, removes the first,
+    /// puts the last in, then prints how many of the keys after the first the map gives back with their index, the map's count, the
+    /// value the removal gave, and the map.
+    /// </summary>
+    private static string Removed(IEnumerable<long> keys) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nn = keys.Count - 1\nmut m = Map<int, int>()\n" +
+        "for i in 0..<n {\n    m[keys[i]] = i\n}\nremoved = m.Remove(keys[0]) ?? -1\nm[keys[n]] = n\nmut found = 0\n" +
+        "for i in 1..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\n" +
+        "print(found)\nprint(m.Count)\nprint(removed)\nprint(m)\n";
+
+    /// <summary>
+    /// The first <paramref name="count"/> keys from 0 up whose fast hash has bits 3 to 9 of 0, so that their probe starts at the first
+    /// group of a block of up to 1024 slots, each as <paramref name="shape"/> writes it, 8 bytes whose word is hashed (the number's
+    /// <c>long</c> where no shape is given).
+    /// </summary>
+    private static List<string> SameGroupKeys(int count, Func<int, string> shape) =>
+        [.. Enumerable.Range(0, int.MaxValue).Select(shape).Where(k => (FastHashOfWord(BitConverter.ToUInt64(Encoding.ASCII.GetBytes(k))) & 1016UL) == 0).Take(count)];
+
+    private static List<long> SameGroupKeys(int count) =>
+        [.. Enumerable.Range(0, int.MaxValue).Select(k => (long)k).Where(k => (FastHashOfWord((ulong)k) & 1016UL) == 0).Take(count)];
+
+    /// <summary>
+    /// The fast hash of a key of 8 bytes whose word is <paramref name="word"/>, as std's <c>FoldHash</c> takes it and as the test of the
+    /// fast hash's values holds it to foldhash 0.2.0: the accumulator turned right by 8, the word into both halves, one folded multiply
+    /// in the crate's form for a target without a product of 128 bits.
+    /// </summary>
+    private static ulong FastHashOfWord(ulong word)
+    {
+        unchecked
+        {
+            const ulong seed = 0x082efa98ec4e6c89UL;
+            var x = ((seed >> 8) | (seed << 56)) ^ word;
+            var y = 0x3f84d5b5b5470917UL ^ word;
+            ulong lx = x & 0xFFFFFFFFUL, hx = x >> 32, ly = y & 0xFFFFFFFFUL, hy = y >> 32;
+            var across = (hx * ly) ^ (lx * hy);
+            return (hx * hy) ^ (lx * ly) ^ ((across >> 32) | (across << 32));
+        }
+    }
+
+    /// <summary>Builds the program once and runs it twice, each run ending with 0 and no error line: what each run printed.</summary>
+    private (IReadOnlyList<string> First, IReadOnlyList<string> Second) RunTwice(string text, CheckedRuntime runtime, string name)
+    {
+        var compilation = Compile(text, runtime);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-        var program = toolchain.Build(compilation.Program, "map-order");
+        var program = toolchain.Build(compilation.Program, name);
         var first = Toolchain.Run(program);
         var second = Toolchain.Run(program);
         Assert.Equal((0, ""), (first.Code, first.Error));
         Assert.Equal((0, ""), (second.Code, second.Error));
-        Assert.NotEqual(first.Output, second.Output);
-        Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first.Output).Trim('[', ']').Split(", ").Order());
+        return (first.Output, second.Output);
     }
 
     [Fact]
     public void A_key_of_every_count_of_bytes_from_0_to_24_has_the_SipHash_1_3_of_the_reference()
     {
-        // SipHash13 reads each whole word of 8 bytes in one read and the bytes after the last one four, two and one at a time, as Rust's
-        // SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes (i * 37 + 200) % 256, half of them 128 or more, of every count
-        // from 0 to 24, under keys of 0 and under the reference implementation's keys, against SipHash-1-3 in Python, which gives
-        // CPython's `hash` of the same bytes under keys of 0 (`PYTHONHASHSEED=0`) and the three vectors of the test above
+        // M9 (section 4): SipHash13, the hash of a map that switched, reads each whole word of 8 bytes in one read and the bytes after the
+        // last one four, two and one at a time, as Rust's SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes
+        // (i * 37 + 200) % 256, 14 of the 24 of them 128 or more, of every count from 0 to 24, under keys of 0 and under the reference
+        // implementation's keys, against SipHash-1-3 in Python, which gives CPython's `hash` of the same bytes under keys of 0
+        // (`PYTHONHASHSEED=0`) for the counts 1 to 24, CPython hashing no bytes as 0 without SipHash, and the three vectors of the test above
         ulong[] zero =
         [
             15130871412783076140UL, 12449551661063549815UL, 18410336655117930453UL, 14036337907613256389UL, 8188850183964244334UL,
