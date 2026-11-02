@@ -29,6 +29,9 @@ public static class Builder
     /// </summary>
     public static Target? HostTarget => TargetFor(RuntimeInformation.OSArchitecture, OperatingSystem.IsWindows(), OperatingSystem.IsLinux());
 
+    /// <summary>The baseline CPU of the machine that builds, which a build that names no CPU is for (section 2): x86-64's, or 64-bit Arm's.</summary>
+    public static Cpu HostCpu => RuntimeInformation.OSArchitecture == Architecture.Arm64 ? Cpu.ArmBaseline : Cpu.Baseline;
+
     /// <summary>The target of a machine of this architecture and system, as <see cref="HostTarget"/> reads it.</summary>
     internal static Target? TargetFor(Architecture architecture, bool windows, bool linux) =>
         architecture is not (Architecture.X64 or Architecture.Arm64) ? null
@@ -51,10 +54,12 @@ public static class Builder
 
     /// <summary>
     /// Reads, checks and emits the program, with the grants of <paramref name="grants"/> (R7, R16) and the runtime given, and with the
-    /// line tables in a release build where <paramref name="lines"/> asks for them (<c>--lines</c>). A program the front end or the
-    /// checker refuses, and one that uses what the checker or the emitter does not read, gets no IR, and the diagnostics say why.
+    /// line tables in a release build where <paramref name="lines"/> asks for them (<c>--lines</c>), for the CPU <paramref name="cpu"/>
+    /// gives once the checker accepted the program, the machine's baseline where it is null (section 2). A program the front end or the
+    /// checker refuses, and one that uses what the checker or the emitter does not read, gets no IR, and the diagnostics say why; where
+    /// <paramref name="cpu"/> gives null, it wrote why itself, and the program gets no IR either.
     /// </summary>
-    public static Compilation Compile(SourceText source, IReadOnlyCollection<string> grants, CheckedRuntime runtime, bool testBuild, bool lines = false)
+    public static Compilation Compile(SourceText source, IReadOnlyCollection<string> grants, CheckedRuntime runtime, bool testBuild, bool lines = false, Func<Cpu?>? cpu = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         var diagnostics = new DiagnosticBag();
@@ -70,7 +75,9 @@ public static class Builder
             return new Compilation(diagnostics, null);
         }
 
-        return new Compilation(diagnostics, Emitter.Emit(tree, checker, runtime, source.Name, testBuild, diagnostics, lines));
+        return (cpu ?? (() => HostCpu))() is { } named
+            ? new Compilation(diagnostics, Emitter.Emit(tree, checker, runtime, source.Name, testBuild, diagnostics, lines, named))
+            : new Compilation(diagnostics, null);
     }
 
     /// <summary>Writes the IR into the working directory and has clang build the executable at <paramref name="outputPath"/>.</summary>
@@ -81,7 +88,7 @@ public static class Builder
         Directory.CreateDirectory(workingDirectory);
         var irPath = Path.Combine(workingDirectory, IrFile);
         File.WriteAllText(irPath, program.Ir);
-        clang.Build(irPath, outputPath, program.Libraries, program.Release, program.Lines);
+        clang.Build(irPath, outputPath, program.Libraries, program.Release, program.Lines, program.CpuFlag);
     }
 
     /// <summary>The name of the executable a build of this source writes beside it: the source's name without its extension, with <c>.exe</c> on Windows.</summary>
