@@ -1221,7 +1221,7 @@ off by KURZ_INTRINSICS_AVX2`, apart by `; ` (the owner, 2026-11-02, #39), on sta
 Windows, and ends with 1. The same read takes the run setting, each variable once, through `getenv`
 on Linux and `GetEnvironmentVariableA` on Windows: `KURZ_INTRINSICS=0` clears the bits of every class
 from the CPU's word, and `KURZ_INTRINSICS_<SET>=0` the class's, which the test of every class derived
-from it holds too. `IntrinsicTests` pins the check against LLVM's own reading of the machine the suites
+from it holds too (the names, and that only `0` acts, are assumed in section 13 and R18). `IntrinsicTests` pins the check against LLVM's own reading of the machine the suites
 run on, clang's `native`, for every row of the table at once, that every x86-64 CPU clang 23 knows
 has only sets the table reads, the lines of the run setting, and the word it turns off. On a CPU of
 the test's own, whose `cpuid` and `xgetbv` are functions the test writes into the IR, it pins what that
