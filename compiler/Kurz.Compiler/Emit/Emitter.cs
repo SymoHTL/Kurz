@@ -426,9 +426,9 @@ public sealed partial class Emitter
         var result = Types.Substitute(f.ReturnType, instanceMap);
         RequireSupported(result, d.Line);
         var parameters = new List<string>();
-        if (f.Owner is not null)
+        if (f.Owner is not null && !f.IsStatic)
         {
-            parameters.Add("ptr %this"); // K7: the instance, borrowed from the caller
+            parameters.Add("ptr %this"); // K7: the instance, borrowed from the caller; a `static` method has none
         }
 
         for (var i = 0; i < f.Parameters.Count; i++)
@@ -442,7 +442,7 @@ public sealed partial class Emitter
         string[] attributes = unit.Runtime && OutOfLine.Contains($"{unit.Prefix}.{f.Name}") ? [.. FeatureAttributes(features), "noinline"] : FeatureAttributes(features);
         Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", attributes), instanceMap, result);
         Trace(unit.Prefix.StartsWith("rt.", StringComparison.Ordinal) ? Symbol(name) : TraceName(f, instanceMap), Symbol(name), d.Line);
-        if (f.Owner is not null)
+        if (f.Owner is not null && !f.IsStatic)
         {
             var self = fn.Alloca("ptr", "this");
             fn.Emit($"store ptr %this, ptr {self}");

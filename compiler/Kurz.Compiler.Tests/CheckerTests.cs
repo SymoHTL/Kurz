@@ -1358,6 +1358,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    IoError e => print(e)\n}"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for x in nope {\n    print(x)\n} else {\n}"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("n = 5\nfor x in n {\n    print(x)\n} else {\n    IoError e => print(e)\n}"));
+        // an `else` with no arms, or an `else` arm, after a call or a collection that did not type adds no error, while an arm's pattern type
+        // and its body are still checked, each giving the error of its own construct (E1, proposed)
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("y = Nope() else {\n}\nprint(y)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("y = Nope() else {\n    else => 0\n}\nprint(y)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    else => print(0)\n}"));
+        Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnknownName, 4), (ErrorIds.BreakOutsideLoop, 5)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    Nope e => print(e)\n    IoError => break\n}"));
     }
 
     [Fact]
@@ -3042,6 +3048,7 @@ public sealed class CheckerTests
     [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 300))\n}", ErrorIds.ConstantOverflow, 4)]
     [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, -1))\n}", ErrorIds.ConstantOverflow, 4)]
     [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, \"2\"))\n}", ErrorIds.ArgumentMismatch, 4)]
+    [InlineData("l = Vector128.Create(1L)\nif X86.Sse2.IsSupported {\n    print(X86.Sse2.CompareEqual(l, l).GetElement(0))\n}", ErrorIds.ArgumentMismatch, 5)] // SSE2 compares no 8-byte lanes; SSE4.1 does
     public void A_name_type_or_immediate_an_intrinsic_does_not_take_is_its_error(string program, string id, int line) =>
         Assert.Equal([(id, line)], Errors(Lanes(program)));
 
@@ -3091,6 +3098,80 @@ public sealed class CheckerTests
         Assert.Empty(Errors("data Node<T>(int V, Node<List<T>>? Next)\n\nn = Node<int>(1, null)\nprint(\"{n}\")\nprint(n)"));
         Assert.Equal([(ErrorIds.NoText, 3)], Errors("class P(int X)\n\nprint(P(1))"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(this)"));
+    }
+
+    [Fact]
+    public void A_static_method_has_no_instance_and_is_called_by_its_class_name()
+    {
+        // K7: `T.M(args)` from outside, `M(args)` alone inside the class, from a method of the instance and from another `static` one,
+        // recursion as `T.M`, and a lambda of a `static` method that calls one (F11)
+        Clean("class C(mut int V) {\n    pub static C Zero() => C(0)\n\n    pub static C From(int n) {\n        made = Zero()\n        made.V = Twice(n)\n        return made\n    }\n\n    pub int Doubled() => Twice(V)\n\n    pub static int Fact(int n) {\n        if n <= 1 {\n            return 1\n        }\n\n        return n * C.Fact(n - 1)\n    }\n\n    pub static () => int Later() => () => Fact(3)\n\n    static int Twice(int n) => n * 2\n}\n\nprint(C.From(3).Doubled())\nprint(C.Fact(5))\nprint(C.Later()())");
+        // F9: a `static` method without `pub` is its class's own
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class C(int V) {\n    static int Hidden() => 1\n}\n\nprint(C.Hidden())"));
+        // F13: a `static` and an instance method of one name with the same parameter types are `duplicate-function`, as two methods are
+        Assert.Equal([(ErrorIds.DuplicateFunction, 3)], Errors("class C(int V) {\n    pub static int M() => 1\n    pub int M() => 2\n}\n\nprint(C.M())"));
+        // A5: a `static` `Text()` gives an instance no text
+        Assert.Equal([(ErrorIds.NoText, 5)], Errors("class C(int V) {\n    pub static string Text() => \"s\"\n}\n\nprint(C(1))"));
+        // the product pass's Q2: inside its class, a `static` method hides a top-level function of its name, as a method of the instance does
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors("string Twice(string s) => s\n\nclass C(int V) {\n    static int Twice(int n) => n * 2\n\n    pub int Get() => Twice(V)\n    pub string Bad() => Twice(\"a\")\n}\n\nprint(C(1).Get())"));
+    }
+
+    [Fact]
+    public void A_static_field_holds_a_constant_that_nothing_assigns()
+    {
+        // K18, K20: a constant of each type the checker reads, and one that reads a `static` field of its class declared above it, by its
+        // name and as `T.F`; read by its name inside the class, in a method and a lambda, and as `T.F` outside it
+        Clean("enum Kind { A, B }\n\nclass C(int V) {\n    pub static int Step = 2\n    static int Four = Step * 2\n    pub static int Eight = C.Four * 2\n    pub static string Name = \"c\"\n    pub static double Half = 0.5\n    pub static decimal Price = 1\n    pub static Kind K = Kind.B\n    pub static char Ch = 'A'\n    pub static bool Yes = true\n    pub static duration D = 5s\n\n    pub int Get() {\n        f = () => Step + V\n        return f() + Four\n    }\n}\n\nprint(C(1).Get() + C.Eight)\nprint(\"{C.Name} {C.Half} {C.Price} {C.K} {C.Ch} {C.Yes} {C.D}\")");
+        // K20: a `static` field declared below, and the field itself, are no names its initial value reads
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int V) {\n    pub static int A = B\n    pub static int B = 2\n}\n\nprint(C.A)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int V) {\n    pub static int A = A + 1\n}\n\nprint(C.A)"));
+        // a read outside an initial value is a value of its type and no constant, as C#'s `static readonly`: no literal's reach (T7),
+        // and no constant zero (T25)
+        Assert.Equal([(ErrorIds.NarrowingConversion, 5)], Errors("class C(int V) {\n    pub static int A = 2\n}\n\nbyte b = C.A\nprint(b)"));
+        Clean("class C(int V) {\n    pub static int Zero = 0\n}\n\nx = 5\nprint(x / C.Zero)");
+        // T1, T6: an initial value of another type, or out of the written type's range, as a variable's
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("class C(int V) {\n    pub static int A = \"s\"\n}\n\nprint(C.A)"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("class C(int V) {\n    pub static byte B = 300\n}\n\nprint(C.B)"));
+        // F11: a call of a `static` field is a call of its value, as `T.F()` and by its name inside the class
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("class C(int V) {\n    pub static int Step = 2\n}\n\nprint(C.Step())"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("class C(int V) {\n    pub static int Step = 2\n\n    pub int Get() => Step()\n}\n\nprint(C(1).Get())"));
+        // K18: nothing assigns a `static` field, as `T.F` or by its name inside the class
+        Assert.Equal([(ErrorIds.AssignImmutable, 5)], Errors("class C(int V) {\n    pub static int Step = 2\n}\n\nC.Step = 3\nprint(C.Step)"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 4)], Errors("class C(int V) {\n    pub static int Step = 2\n    pub void Set() {\n        Step = 3\n    }\n}\n\nC(1).Set()"));
+        // K18: `static mut` and a class held are `static-state`, and a read or an assignment of such a field carries nothing more (E1)
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C(int V) {\n    static mut int Total = 0\n\n    pub void Add() {\n        Total = Total + 1\n    }\n}\n\nC(1).Add()"));
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C(int V) {\n    pub static C? None = null\n}\n\nprint(C.None == null)"));
+        Assert.Equal([(ErrorIds.StaticState, 4)], Errors("class C(int V)\n\nclass R {\n    pub static List<C> All = []\n}\n\nprint(1)"));
+        // V9: a `static` field of the name of another field or of a method is `redeclared`
+        Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int V) {\n    pub static int A = 1\n    pub static int A = 2\n}\n\nprint(C.A)"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("class C(int V) {\n    pub static int V = 1\n}\n\nprint(C.V)"));
+        Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int V) {\n    pub static int Step = 2\n    pub static int Step() => 1\n}\n\nprint(1)"));
+        // F9: a `static` field without `pub` is its class's own
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class C(int V) {\n    static int Step = 2\n}\n\nprint(C.Step)"));
+        // K18, K14: a `static` field without `=` takes no value, since no constructor assigns one, at the field
+        var (unassigned, _) = Check("class C {\n    pub static int Step\n}\n\nprint(1)");
+        Assert.Equal(["2: the `static` field `Step` takes no value: it has no `=`, and no constructor assigns a `static` field (K14, K18)"], unassigned.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
+        Assert.All(unassigned.Items, d => Assert.Equal(ErrorIds.FieldUnassigned, d.Id));
+    }
+
+    [Theory]
+    [InlineData("class C(int V) {\n    pub int Get() => V\n}\n\nprint(C.Get())", "5: `Get` is a method of an instance of `C`, not of the class: call it on an instance (K7, K19)")]
+    [InlineData("class C(int V)\n\nprint(C.V)", "3: `V` is a field of an instance of `C`, not of the class: read it from an instance (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub static C Make() => C(1)\n}\n\nc = C(2)\nprint(c.Make().V)", "6: `Make` is a `static` method of `C`: call it as `C.Make(...)` (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub static int Step = 2\n}\n\nc = C(1)\nprint(c.Step)", "6: `Step` is a `static` field of `C`: read it as `C.Step` (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub static int Bad() => V\n}\n\nprint(C.Bad())", "2: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub static int Bad() => this.V\n}\n\nprint(C.Bad())", "2: a `static` member has no instance, and so no `this` (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub int Get() => V\n    pub static int Bad() => Get()\n}\n\nprint(C.Bad())", "3: a `static` member has no instance: `Get` is a method of an instance of `C` (K7, K19)")]
+    [InlineData("class C(mut int V) {\n    pub static int Bad() {\n        V = 3\n        return 1\n    }\n}\n\nprint(C.Bad())", "3: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub static () => int Bad() => () => V\n}\n\nprint(1)", "2: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub static int A = V\n}\n\nprint(C.A)", "2: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
+    public void A_member_on_the_other_side_of_static_is_static_mismatch_and_names_its_side(string program, string expected)
+    {
+        // K19, the product pass's Q1 (b): one id for a member of an instance where no instance is, as C#'s CS0120 and CS0026, and for a
+        // `static` member reached through an instance, as C#'s CS0176, its text saying on which side the member is
+        var (diagnostics, _) = Check(program);
+        Assert.Equal([expected], diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
+        Assert.All(diagnostics.Items, d => Assert.Equal(ErrorIds.StaticMismatch, d.Id));
     }
 
     [Fact]
@@ -3170,24 +3251,68 @@ public sealed class CheckerTests
         Assert.Equal(["5: an assignment into a value held by a field of an instance (K2, M4)"], NotSupported("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag([1]))\np.B.Items[0] = 2"));
     }
 
+    [Fact]
+    public void A_weak_reference_reads_as_a_strong_nullable_whose_narrowing_ends_where_a_count_can_be_let_go_of()
+    {
+        // R3 (the owner, 2026-11-01, "Anywhere a type stands"): a field, a list's item, a variable, a parameter and a result, which
+        // take a `T`, a `T?` and `null`
+        Clean("class Owner(string Name)\nclass Pet(mut weak Owner? Keeper)\n\nweak Owner? Keep(weak Owner? w) {\n    return w\n}\n\no = Owner(\"Ann\")\nweak Owner? k = Keep(o)\np = Pet(k)\np.Keeper = null\nprint(k?.Name ?? \"gone\")\nprint(p.Keeper?.Name ?? \"gone\")");
+        Clean("class Owner(string Name)\nclass Club(mut List<weak Owner?> Members)\n\no = Owner(\"Ann\")\nc = Club(List<weak Owner?>())\nc.Members.Add(o)\nc.Members.Add(null)\nfor m in c.Members {\n    print(m?.Name ?? \"gone\")\n}");
+        // R3 (the owner, 2026-11-01, "A strong T?, held"): a read is a `T?`, which a `T?` variable and a `T?` parameter take as it is
+        Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nx = Owner(\"Ann\")\np = Pet(x)\nOwner? k = p.Keeper\nprint(NameOf(k))\nprint(NameOf(p.Keeper))");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors("class Owner(string Name)\n\no = Owner(\"Ann\")\nweak Owner? w = o\nprint(w.Name)"));
+
+        // N9: a call between the test and the use ends what the test showed of a path through `weak`, as of one through a `mut` field
+        const string Head = "class Owner(string Name)\nclass Pet(mut weak Owner? Keeper)\n\nbool Keep(Pet pet, Owner owner) {\n    pet.Keeper = owner\n    return true\n}\n\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Head + "o = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(Keep(p, o))\n    print(p.Keeper.Name)\n}"));
+        Clean(Head + "o = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(p.Keeper.Name)\n}");
+        // the same through a `weak` field without `mut`, which nothing assigns and a call can still free the target of
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nbool Touch() => true\n\no = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(Touch())\n    print(p.Keeper.Name)\n}"));
+        // N9 (the owner, 2026-11-02, #156): a write into a list or a map that a variable holds, with no call in it, ends it too, since
+        // the item or the entry it lets go of can hold the target's last count, while a path with no `weak` reference in it keeps its
+        // narrowing there; the read before the write is narrowed
+        const string Kept = "class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nn = Owner(\"b\")\nmut xs = [Owner(\"a\")]\np = Pet(xs[0])\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Kept + "if p.Keeper != null {\n    xs[0] = n\n    print(p.Keeper.Name)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\no = Owner(\"a\")\nmut m = Map<int, int>()\np = Pet(o)\nif p.Keeper != null {\n    m[0] = 1\n    print(p.Keeper.Name)\n}\nprint(m.Count)"));
+        Clean(Kept + "if p.Keeper != null {\n    print(p.Keeper.Name)\n    xs[0] = n\n}");
+        Clean("class Owner(string Name)\nclass Holder(mut Owner? Head)\n\nn = Owner(\"b\")\nmut xs = [Owner(\"a\")]\nmut m = Map<int, int>()\nh = Holder(n)\nif h.Head != null {\n    xs[0] = n\n    m[0] = 1\n    print(h.Head.Name)\n}\nprint(m.Count)");
+
+        // N9 (the owner, 2026-11-01, "Those ends stop narrowing"): a test after a call in the same condition narrows neither the block
+        // nor what the `if` leaves after it, since the condition's temporaries are let go of at its end, the case of the question; the
+        // same test in a condition of its own narrows its block
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Head + "p = Pet(null)\nif Keep(p, Owner(\"Ann\")) && p.Keeper != null {\n    print(p.Keeper.Name)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 14)], Errors(Head + "void Show(Pet p) {\n    if Keep(p, Owner(\"Ann\")) && p.Keeper == null {\n        return\n    }\n\n    print(p.Keeper.Name)\n}\n\nShow(Pet(null))"));
+        Clean(Head + "p = Pet(null)\nif Keep(p, Owner(\"Ann\")) {\n    if p.Keeper != null {\n        print(p.Keeper.Name)\n    }\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Head + "p = Pet(null)\nwhile Keep(p, Owner(\"Ann\")) && p.Keeper != null {\n    print(p.Keeper.Name)\n    p.Keeper = null\n}"));
+
+        // N9 (the same answer): the end of a block that declares a variable ends it too, since the block lets go of its variables
+        // there; a block that declares none keeps it
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nvoid Show(Pet p) {\n    if p.Keeper != null {\n        if p.Keeper.Name != \"\" {\n            n = p.Keeper.Name\n            if n == \"x\" {\n                return\n            }\n        }\n\n        print(p.Keeper.Name)\n    }\n}\n\no = Owner(\"Ann\")\nShow(Pet(o))"));
+        Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nvoid Show(Pet p) {\n    if p.Keeper != null {\n        if p.Keeper.Name == \"x\" {\n            return\n        }\n\n        print(p.Keeper.Name)\n    }\n}\n\no = Owner(\"Ann\")\nShow(Pet(o))");
+    }
+
     [Theory]
     [InlineData("class Box<T>(T Item)\n\nprint(1)", "1: a generic class (T19, chapter 7)")]
     [InlineData("class A\nclass B : A\n\nprint(1)", "2: a base class or an interface after `:` (K6, K10)")]
     [InlineData("class K(int Id) equal by Id\n\nprint(1)", "1: `equal by` (K8)")]
-    [InlineData("class C {\n    pub static int Step = 1\n}\n\nprint(1)", "2: a `static` field (K18)")]
+    [InlineData("class C {\n    prot static int Step = 1\n}\n\nprint(1)", "2: the modifier `prot` of a `static` field (K7, K18, R13)")]
+    [InlineData("class C {\n    pub static List<int> Steps = []\n}\n\nprint(1)", "2: a `static` field of type `List<int>`: the checker reads one of a number, a `bool`, a `char`, a `string`, a time or a value of an enum, which a constant gives (K18)")]
+
+    [InlineData("int Two() => 2\n\nclass C {\n    pub static int Step = Two()\n}\n\nprint(C.Step)", "4: the initial value of the `static` field `Step`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)")]
     [InlineData("class C {\n    mut int n = 0\n}\n\nprint(1)", "2: a field declared in the body of a class (K7, K14)")]
     [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)", "2: a constructor declared in the body of a class (K14)")]
-    [InlineData("class C(int N) {\n    pub virtual int Get() => N\n}\n\nprint(C(1).Get())", "2: the modifier `virtual` of a method (K7, K18, R16)")]
-    [InlineData("class C(int N) {\n    pub static int Make() => 1\n}\n\nprint(1)", "2: the modifier `static` of a method (K7, K18, R16)")]
-    [InlineData("class C(int N) {\n    pub override string Text() => \"c\"\n}\n\nprint(1)", "2: the modifier `override` of a method (K7, K18, R16)")]
-    [InlineData("class C(int N) {\n    prot int Get() => N\n}\n\nprint(1)", "2: the modifier `prot` of a method (K7, K18, R16)")]
-    [InlineData("class C(int N) {\n    extern \"C\" long Twice(long x) {\n        return x * 2\n    }\n}\n\nprint(1)", "2: the modifier `extern` of a method (K7, K18, R16)")]
+    [InlineData("class C(int N) {\n    pub virtual int Get() => N\n}\n\nprint(C(1).Get())", "2: the modifier `virtual` of a method (K7, R16)")]
+    [InlineData("class C(int N) {\n    pub static int Make() => 1\n}\n\nf = C.Make\nprint(f())", "5: a method as a value, named without a call (K7, F11)")]
+    [InlineData("class C(int N) {\n    pub override string Text() => \"c\"\n}\n\nprint(1)", "2: the modifier `override` of a method (K7, R16)")]
+    [InlineData("class C(int N) {\n    prot int Get() => N\n}\n\nprint(1)", "2: the modifier `prot` of a method (K7, R16)")]
+    [InlineData("class C(int N) {\n    extern \"C\" long Twice(long x) {\n        return x * 2\n    }\n}\n\nprint(1)", "2: the modifier `extern` of a method (K7, R16)")]
     [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))", "2: a method with type parameters of its own (section 4, T19)")]
-    [InlineData("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(List<weak Owner?> Keepers)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: a `weak` reference as a type argument of a data type (R3)")]
+    [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: a nullable case of a union, `weak Owner?` (N1, D9)")]
+    [InlineData("class Owner(string Name)\n\nvoid Keep<T>(weak T? w) {\n}\n\nprint(1)", "3: `weak` before `T`, which the checker does not read as a class (R5, T19, D9)")]
+    [InlineData("class A(int N)\nclass B(int N)\nclass Pet(weak (A | B)? Keeper)\n\nprint(1)", "3: `weak` before `A | B`, which the checker does not read as a class (R5, T19, D9)")]
+    [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: a `weak` reference as a parameter or the result of a function type (R3)")]
+    [InlineData("class Owner(string Name)\n\nm = Map<string, weak Owner?>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
     [InlineData("class C(int N)\n\na = C(1)\nprint(a == a)", "4: `==` on a `C`: the equality of a class instance (K4) is not read (D3, M9)")]
     [InlineData("class C(int N)\n\nxs = [C(1)]\nprint(xs == xs)", "4: `==` on a `List<C>`: its items: the equality of an instance of `C` (K4) is not read (D3, M9)")]
     [InlineData("class C(int N)\ndata P(C Item)\n\np = P(C(1))\nprint(p == p)", "5: `==` on a `P`: its field `Item`: the equality of an instance of `C` (K4) is not read (D3, M9)")]
@@ -3200,8 +3325,11 @@ public sealed class CheckerTests
     [InlineData("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag(List<int>()))\np.B.Items.Add(1)\nprint(p.B.Items.Count)", "5: a `mut` method on a value held by a field of an instance (K2, M5)")]
     public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
-        // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields and constructors in the body (K7, K14, K18),
-        // a method that is `static`, `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` at any depth (R3), `==`
+        // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields of the instance and constructors in the body
+        // (K7, K14), a `static` field of another modifier, of another type, or with an initial value that is no constant
+        // (K18), a method that is `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` (R3) in a type argument of a
+        // data type, a function type or a map, before a type parameter or a union of classes, or as a case of a union, whose
+        // nullable cases are open (section 14), `==`
         // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, and an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5)
         Assert.Equal([expected], NotSupported(program));
