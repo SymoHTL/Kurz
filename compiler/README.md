@@ -670,7 +670,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
   the instance, `this`, borrowed from the caller as a parameter is (K7); the text of an instance, which
   its `Text()` gives (A5); and a `T?` of a class, the address alone, its `null` the address 0, as Rust
-  lays out `Option<Rc<T>>` (N1). The counting is below;
+  lays out `Option<Rc<T>>` (N1); and a `weak T?`, the address alone too, which holds the instance's weak
+  count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
+  and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
+  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3). The
+  counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), their text, the text of the case's value
   (A4), `==` on a field of one, by the case and its value (D3), a call whose result is one, kept
@@ -1053,7 +1057,9 @@ while the expression still uses what it read (K2, K9), which neither M7 nor a pa
 read of an instance from a variable or a parameter is borrowed, as a list's is, which M7 holds for it,
 and so is `this`. The last count lets go of the fields in their order, as Rust drops them, then of the
 weak count all the strong ones held, whose last gives the block back to `Free`, as Rust's `Rc` and
-`Weak` do. The last count of an instance that another release lets go of puts it on its class's work
+`Weak` do. A `weak` reference takes a weak count where it is stored and lets go of it where a strong one
+lets go of its count, so the block of an instance whose strong count ended stays while a `weak`
+reference to it is held, with the strong count at 0, which its read finds (R3). The last count of an instance that another release lets go of puts it on its class's work
 list, linked through its strong count, which is no count from there on, and the release that came first
 works the lists off before it returns, so that a chain of any length is freed with no stack deeper than
 the nesting of the types in it and nothing allocated (the owner, 2026-11-01, "Iterative, never
@@ -1452,10 +1458,11 @@ The checker (`Semantics/`) takes a tree the parser read without an error and che
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
-class instance, not through a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7 and K9, for a class with its primary constructor or none,
-its fields, its methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
+a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
+M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7, K9 and K18 to K20, for a class with its primary constructor or none,
+its fields, its methods, its `static` fields and methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
@@ -1496,7 +1503,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, and
+`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -1509,12 +1516,14 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
-(K6, K10), `equal by` (K8), a field or a constructor in its body (K7, K14, K18), a method that is
-`static`, `virtual`, `override`, `prot` or `extern` or that has type parameters of its own (K7,
-section 4), a field that holds `weak` at any depth, since R2 cannot judge the class until `weak` is
-read (R2, R3), each of which leaves the class and every value of it unread, and of a class it reads, a
-field of a function type, whose cycle R9 judges by the lambdas of the program (R9), a method as a
-value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
+(K6, K10), `equal by` (K8), a field of the instance or a constructor in its body (K7, K14), a
+`static` field with a modifier other than `pub` and `mut` (K18, R13), a method that is `virtual`,
+`override`, `prot` or `extern` or that has type parameters of its own (K7, section 4), each of
+which leaves the class and every value of it unread, and of a class it reads, a `static` field
+with an initial value that is no constant, which section 4 computes at the field's
+first read and whose open items section 14 holds, or of a type other than a number, a `bool`, a
+`char`, a `string`, a time or an enum (K18), a field of a function type, whose cycle R9 judges by
+the lambdas of the program (R9), a method as a value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)` (K2, M4, M5), and `==`
 on two instances or on values that hold one, and an instance as a key of a map, at any depth (K4,
 K12); of chapter 4, a nullable `void` and a
@@ -1527,8 +1536,10 @@ emitter does not read through a chain (N5, M9), and an assignment of a field, an
 through a nullable variable or field known not null, `o.I.X = 1` and `o.I.Items[0] = 1`, which the
 emitter does not write through, where an index written on a narrowed map or list, `o.Items[0] = 1`
 with a nullable field `Items`, is read (N3, M4), a `mut`
-method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
-R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
+method on such a path and such a path passed as `mut` (N3, M5, M7); a `weak` reference as a type
+argument of a `data` type, as a key or a value of a map and as a parameter or the result of a
+function type, which the emitter does not lay out, `weak` before a type parameter or a union of
+classes, and a `weak T?` as a case of a union, a nullable case of one (R3, R5, T19, D9); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
 (R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
 R10 says `&x` needs no `raw` block and Rust takes such a place in `unsafe` code alone (R10); an
@@ -1953,7 +1964,9 @@ round can ask about it by the rule's id.
 - K7 with V8 and V9: inside a method a field of its instance is a name, read and assigned as
   `Count = Count + 1`, as C# reads it, so a parameter or a variable of a method named as a field, and
   a method named as a field, are `redeclared`, as two fields of one name are; `this` outside a method
-  is `unknown-name`.
+  is `unknown-name`. A `static` field or method of the class is a name there too, and in a `static`
+  method, and a method of the class, `static` or not, hides a top-level function of its name inside
+  the class, as C# reads it.
 - K9 with E4: `mut` before a method of a class is `syntax`, since K9 gives the marker to the methods
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the
