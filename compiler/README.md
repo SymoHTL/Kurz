@@ -719,10 +719,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   word (a string, a time of 128 bits, a `data` value, a list, a union), as .NET's `Dictionary` keeps
   each entry's hash code, and the key and the value alone for a key of one word (an integer, a `bool`,
   a `char`, an enum's value, a time of 64 bits, a `double`, a `float`), whose growth hashes every key
-  again, as `hashbrown`'s buckets keep no hash *(assumed: a layout no program sees, taken under the
-  owner's "Allow, faster wins" of 2026-11-01, issue 157, by the rows of item 14 there: without the hash
+  again, as `hashbrown`'s buckets keep no hash *(assumed: taken under the owner's "Allow, faster wins"
+  of 2026-11-01, issue 157, comment 6556450466, by the rows of item 14 there: without the hash
   a `Map<int, int>` of 1,000,000 entries took its `Remove`s in half the time, while maps keyed by a
-  `data` value of two strings and by a list of 4 `int`s grew 31% to 36% slower)*. A key's hash is taken over its
+  `data` value of two strings and by a list of 4 `int`s grew 31% to 36% slower; a program sees the layout
+  only in the bytes `allocation-failed` names for a map's block (M9), 192 for the first block of a
+  `Map<long, long>` and 320 for that of a `Map<string, long>`)*. A key's hash is taken over its
   bytes, a string's UTF-8 bytes and any other key widened to 64 bits, a time's 16 bytes, a `double`'s
   8 bytes and a `float`'s widened to a `double`, with every NaN as the one NaN of the bits
   `0x7FF8000000000000` and -0.0 as 0.0, as .NET's `double.GetHashCode` folds them, since such a key
