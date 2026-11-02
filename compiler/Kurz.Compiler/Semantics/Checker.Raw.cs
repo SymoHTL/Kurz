@@ -164,7 +164,7 @@ public sealed partial class Checker
         PrimitiveType { Kind: Primitive.String } => Holding.Counted,
         PrimitiveType => Holding.Nothing,
         ListType or MapType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
-        ClassType => Holding.Counted, // K2: an instance is a counted reference (section 3)
+        ClassType or WeakRefType => Holding.Counted, // K2: an instance is a counted reference (section 3), and a weak one counts its block (R3)
         UnionType u => Worst(u.Cases.Select(c => Holds(c, seen))),
         DataType d => seen.Contains(d.Symbol) ? Holding.Counted : HoldsFields(d, seen),
         TypeParameterType => Holding.Unknown,
@@ -667,6 +667,7 @@ public sealed partial class Checker
 
         CheckKey(index.Index, map);
         CheckWrittenValue(a, index, map.Value);
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the entry it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>
@@ -689,6 +690,7 @@ public sealed partial class Checker
         }
 
         CheckWrittenValue(a, index, list.Element);
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the item it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>

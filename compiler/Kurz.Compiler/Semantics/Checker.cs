@@ -58,6 +58,7 @@ public sealed partial class Checker
     private int rawDepth; // R7, R12: the `raw` blocks and `naked` bodies around the code being checked
     private bool readingConstant; // F12, R13: a default value or the initial value of state is being read, in which a read of state or of raw memory is no constant
     private bool stateRead; // R13: the value being read as a constant reads state
+    private StaticFieldSymbol? initializing; // K18, K20: the `static` field whose initial value is being read
     private List<(PointerType Pointer, int Line, string What)>? pendingPointees; // R10: the pointers the fields of data types name, judged after every field is resolved
     private readonly bool allowRaw;
     private readonly bool allowNative;
@@ -170,6 +171,9 @@ public sealed partial class Checker
 
         /// <summary>K7: the class whose method this frame checks, with its instance as <c>this</c>; a lambda inside the method finds it through <see cref="Outer"/>.</summary>
         public ClassSymbol? Class { get; init; }
+
+        /// <summary>K7: set where <see cref="Class"/>'s member being checked is <c>static</c>, a method or a field's initial value, which has no instance.</summary>
+        public bool Static { get; init; }
 
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
@@ -323,6 +327,7 @@ public sealed partial class Checker
         CheckEnumNumbers();
         CheckDefaults();
         CheckClassDefaults();
+        CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
 
         FindReaders();
@@ -926,7 +931,7 @@ public sealed partial class Checker
             case Syntax.UnionType u:
                 {
                     var cases = u.Cases.Select(Resolve).ToList();
-                    if (cases.FirstOrDefault(c => Types.NonNull(c) is not null) is { } nullable)
+                    if (cases.FirstOrDefault(c => Types.NonNull(c) is not null || c is WeakRefType) is { } nullable)
                     {
                         NotSupported(u.Line, $"a nullable case of a union, `{nullable}` (N1, D9)"); // its `null` would be one of the union's cases (O1)
                         return Types.Error;
@@ -939,12 +944,16 @@ public sealed partial class Checker
                 {
                     var parameters = f.Parameters.Select(Resolve).ToList();
                     var result = Resolve(f.Result);
+                    if (WeakUnread(f.Line, "a parameter or the result of a function type", [.. parameters, result]))
+                    {
+                        return Types.Error;
+                    }
+
                     return parameters.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameters, result);
                 }
 
             case WeakType w:
-                NotSupported(w.Line, "weak (R3, R5)");
-                return Types.Error;
+                return ResolveWeak(w); // R3, R5
             case Syntax.PointerType p:
                 return PointerTo(Resolve(p.Pointee), p.Line, "a pointer"); // R10, R14
             case ExternFunctionType f:
@@ -1000,6 +1009,11 @@ public sealed partial class Checker
 
             var key = ResolveTypeArgument(n.TypeArguments[0], "`Map`");
             var value = ResolveTypeArgument(n.TypeArguments[1], "`Map`");
+            if (WeakUnread(n.Line, "a key or a value of a map", key, value))
+            {
+                return Types.Error;
+            }
+
             return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
@@ -1056,6 +1070,11 @@ public sealed partial class Checker
             }
 
             var arguments = n.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{n.Name}`")).ToList();
+            if (WeakUnread(n.Line, "a type argument of a data type", [.. arguments]))
+            {
+                return Types.Error;
+            }
+
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
@@ -1560,6 +1579,11 @@ public sealed partial class Checker
     private void PopScope()
     {
         ReportUnused(frame.Scope);
+        if (frame.Scope.Variables.Count > 0)
+        {
+            frame.Known = Unweak(frame.Known); // N9: the end of a block that declares a variable lets go of counts, which can free a `weak` target
+        }
+
         frame.Scope = frame.Scope.Parent!;
     }
 
@@ -1670,9 +1694,10 @@ public sealed partial class Checker
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
+                    var calls = callsRun;
                     CheckCondition(i.Condition);
                     var start = frame.Known;
-                    var (whenTrue, whenFalse) = Tests(i.Condition);
+                    var (whenTrue, whenFalse) = ConditionTests(i.Condition, calls);
                     frame.Known = start.Union(whenTrue);
                     var then = CheckBlock(i.Then);
                     var afterThen = frame.Known;
@@ -1967,6 +1992,19 @@ public sealed partial class Checker
             return;
         }
 
+        if (variable is null && ImplicitStaticField(a.Name) is { } staticField)
+        {
+            AssignStaticField(staticField, a.Line); // K18
+            CheckExpression(a.Value, null);
+            return;
+        }
+
+        if (variable is null && InstanceFieldInStatic(a.Name, a.Line))
+        {
+            CheckExpression(a.Value, null); // K19: no variable is declared
+            return;
+        }
+
         if (variable is not null)
         {
             EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
@@ -2082,7 +2120,19 @@ public sealed partial class Checker
             var (variable, captured) = Lookup(name.Name);
             if (variable is null)
             {
-                CheckName(name); // reports what the name is
+                if (classes.TryGetValue(name.Name, out var owner) && ImplicitField(name.Name) is null)
+                {
+                    var member = ClassStaticMember(owner, members[0]); // K7, K19: `T.F`, a member of the class
+                    if (!member.IsError && owner.StaticField(members[0].Member) is { } staticField)
+                    {
+                        AssignStaticField(staticField, a.Line); // K18
+                    }
+                }
+                else if (!CheckName(name).IsError && ImplicitStaticField(name.Name) is { } implicitStatic) // CheckName reports what the name is
+                {
+                    AssignStaticField(implicitStatic, a.Line); // K18: a path that starts at a `static` field
+                }
+
                 CheckExpression(a.Value, null);
                 return;
             }
@@ -2266,7 +2316,7 @@ public sealed partial class Checker
 
                 element = t.Type switch
                 {
-                    ListType l => l.Element,
+                    ListType l => Types.Read(l.Element), // R3
                     ErrorType or VoidType => Types.Error,
                     MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
                     MapType m => m.Key,

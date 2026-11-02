@@ -85,7 +85,7 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
-        EndChangeableNarrowing(); // N9: a call can assign a `mut` field through another reference (K2)
+        CallRan(); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
@@ -127,6 +127,19 @@ public sealed partial class Checker
                         var field = ReadImplicitField(n, implicitField);
                         model.RecordType(n, field);
                         return CallValue(field.Type, c); // F11: a field of function type
+                    }
+
+                    if (ImplicitStaticField(n.Name) is not null || InstanceFieldInStatic(n.Name, n.Line))
+                    {
+                        var value = CheckName(n); // K18, K19: what a call of a `static` field's value says
+                        if (!value.IsError)
+                        {
+                            model.RecordType(n, value);
+                            return CallValue(value.Type, c);
+                        }
+
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
                     }
 
                     if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
@@ -794,7 +807,7 @@ public sealed partial class Checker
 
         var key = ResolveTypeArgument(c.TypeArguments[0], "`Map`");
         var value = ResolveTypeArgument(c.TypeArguments[1], "`Map`");
-        if (Types.IsError(key) || Types.IsError(value))
+        if (Types.IsError(key) || Types.IsError(value) || WeakUnread(c.Line, "a key or a value of a map", key, value))
         {
             CheckArgumentsLoosely(c);
             return Typed.Error; // a type it cannot find comes first, as for `List<T>()` above, and nothing more (E1)
@@ -1091,7 +1104,14 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            candidate.Map = data.TypeParameters.Zip(c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{data.Name}`"))).ToDictionary(p => p.First, p => p.Second);
+            var written = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{data.Name}`")).ToList();
+            if (WeakUnread(c.Line, "a type argument of a data type", [.. written]))
+            {
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            candidate.Map = data.TypeParameters.Zip(written).ToDictionary(p => p.First, p => p.Second);
         }
 
         var typed = Call([candidate], c, expected);
@@ -1205,8 +1225,12 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name)
-                || (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null))
+            if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
+            {
+                return CallStatic(classSymbol, m, c, null); // K7: `T.M(args)`, as a method on an instance is read (CallMethod)
+            }
+
+            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
                 CheckArgumentsLoosely(c);
@@ -1796,6 +1820,12 @@ public sealed partial class Checker
     {
         // once: an error in one is one diagnostic, whatever the number of overloads (E1)
         var typeArguments = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{candidates.FirstOrDefault()?.Name}`")).ToList();
+        if (WeakUnread(c.Line, "a type argument of a function", [.. typeArguments]))
+        {
+            function = null;
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
@@ -1987,7 +2017,8 @@ public sealed partial class Checker
         if (picked is not null && !typed.IsError)
         {
             var map = picked.Map.Count == 0 ? NoMap : picked.Map;
-            model.RecordCall(c, new CallInfo(kind, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
+            var recorded = kind == CallKind.Method && picked.Function is { IsStatic: true } ? CallKind.Function : kind; // K7: a `static` method has no instance
+            model.RecordCall(c, new CallInfo(recorded, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
             if (kind == CallKind.Function)
             {
                 KeepGenericCall(c, picked.Function); // T33: a call that may make a copy

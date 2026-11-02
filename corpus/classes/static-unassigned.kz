@@ -1,0 +1,8 @@
+// expect: error field-unassigned at 5
+// rules: K18
+
+class Limits(int Size) {
+    pub static int Max
+}
+
+print(Limits(1).Size)

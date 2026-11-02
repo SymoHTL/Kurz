@@ -54,6 +54,8 @@ public sealed partial class Checker
                 return new Typed(p, new NullConstant()); // R10: a pointer can be `null`
             case NullLiteral when expected is not null && Types.IsError(expected):
                 return Typed.Error; // the type it stands for was the error, which was reported (E1)
+            case NullLiteral when expected is WeakRefType:
+                return new Typed(Types.Null, new NullConstant()); // R3: a `weak T?` is nullable (R5)
             case NullLiteral when expected is not null && Types.NonNull(expected) is not null:
                 return new Typed(Types.Null, new NullConstant()); // N1: the value of a nullable type's case `null`, which the site makes a value of that type
             case NullLiteral n:
@@ -69,7 +71,11 @@ public sealed partial class Checker
             case MemberAccess m:
                 return CheckMember(m);
             case CallExpression c:
-                return CheckCall(c, expected, keepCases);
+                {
+                    var result = CheckCall(c, expected, keepCases);
+                    return result.Type is WeakRefType ? new Typed(Types.Read(result.Type)) : result; // R3: a `weak T?` result reads as a strong `T?`
+                }
+
             case IndexExpression i:
                 return CheckIndex(i);
             case ListLiteral l when expected is not null && Types.IsError(expected):
@@ -366,7 +372,7 @@ public sealed partial class Checker
                 }
                 else if (HoldsInstance(t.Type, []))
                 {
-                    EndChangeableNarrowing(); // N9: the text of an instance is its `Text()`, a call (A5)
+                    CallRan(); // N9: the text of an instance is its `Text()`, a call (A5)
                 }
                 else if (HoldsRaw(t.Type, []))
                 {
@@ -403,6 +409,7 @@ public sealed partial class Checker
         UnionType u => u.Cases.All(c => HasText(c, seen)),
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
         ClassType c => c.Symbol.TextMethod is not null, // A4, A5: an instance has the text its class declares, and none else
+        WeakRefType w => HasText(w.Target, seen), // A4 with R3: the text of what its read gives
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
         TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
         _ => false, // a function value; a type parameter of a function, which has no limit the checker reads (A10)
@@ -447,12 +454,22 @@ public sealed partial class Checker
 
             stateRead |= readingConstant && variable.Kind == VariableKind.Static;
             RequireRawForState(variable, n.Line);
-            return Narrowed(n, new Typed(variable.Type)); // N3
+            return Narrowed(n, new Typed(Types.Read(variable.Type))); // N3; R3: a `weak` place reads as a strong `T?`
         }
 
         if (ImplicitField(n.Name) is { } implicitField)
         {
             return ReadImplicitField(n, implicitField); // K7: the field of `this`
+        }
+
+        if (ImplicitStaticField(n.Name) is { } staticField)
+        {
+            return ReadStaticField(n, staticField); // K18: a `static` field of the class
+        }
+
+        if (InstanceFieldInStatic(n.Name, n.Line))
+        {
+            return Typed.Error; // K19
         }
 
         if (ImplicitMethods(n.Name) is not null)
@@ -570,10 +587,9 @@ public sealed partial class Checker
                 return EnumValue(enumSymbol, m.Member, m.Line);
             }
 
-            if (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null)
+            if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
             {
-                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a class and has no member `{m.Member}` of its own: a field is read from an instance (K1, V10)");
-                return Typed.Error;
+                return ClassStaticMember(classSymbol, m); // K7, K18, K19
             }
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
@@ -686,7 +702,7 @@ public sealed partial class Checker
                     var field = d.Symbol.Field(member);
                     if (field is not null)
                     {
-                        return new Typed(SubstituteData(d, field.Type));
+                        return new Typed(Types.Read(SubstituteData(d, field.Type))); // R3
                     }
 
                     if (HasBody(d.Symbol))
@@ -807,7 +823,7 @@ public sealed partial class Checker
                 Report(ErrorIds.StringIndex, i.Line, "a string is indexed through `.Bytes` or `.Chars` (T15)");
                 return Typed.Error;
             case ListType l:
-                return new Typed(l.Element);
+                return new Typed(Types.Read(l.Element)); // R3: a `weak` item reads as a strong `T?`
             default:
                 Report(ErrorIds.TypeMismatch, i.Line, $"{Types.A(target.Type)} is not indexed (M9)");
                 return Typed.Error;
