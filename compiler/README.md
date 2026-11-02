@@ -1481,7 +1481,7 @@ and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind` and `HttpError`, which a program checked with `std/`'s checker, as every
 build checks it, sees as `std/` declares them, and W2 but for the text of an `HttpError`; the other names of W1 are no types of `std/`, and a
-file's own declaration of one is the file's own), and the rules of `print` and of a value's text that
+file's own declaration of one is the file's own, where W1 makes it `redeclared`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
