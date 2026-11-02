@@ -1485,7 +1485,7 @@ generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path 
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7, K9 and K18 to K20, for a class with its primary constructor or none,
-its fields, its methods, its `static` fields and methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
@@ -1543,15 +1543,16 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
-(K6, K10), `equal by` (K8), a field of the instance or a constructor in its body (K7, K14), a
-`static` field with a modifier other than `pub` and `mut` (K18, R13), a method that is `virtual`,
-`override`, `prot` or `extern` or that has type parameters of its own (K7, section 4), each of
-which leaves the class and every value of it unread, and of a class it reads, a `static` field
-with an initial value that is no constant, which section 4 computes at the field's
-first read and whose open items section 14 holds, or of a type other than a number, a `bool`, a
-`char`, a `string`, a time or an enum, but for one that is or holds a class, which is `static-state`
-(K18), a field of a function type, whose cycle R9 judges by
-the lambdas of the program (R9), a method as a value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
+(K6, K10), `equal by` (K8), a constructor in its body (K14), a field there without a written type
+or with a modifier other than `pub` and `mut` (K7, F9), a `static` field with a modifier other
+than `pub` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
+that has type parameters of its own (K7, section 4), each of which leaves the class and every
+value of it unread, and of a class it reads, a `static` field with an initial value that is no
+constant, which section 4 computes at the field's first read and whose open items section 14
+holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum, but for
+one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
+cycle R9 judges by the lambdas of the program (R9), a method as a value, an assignment into a
+`data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)` (K2, M4, M5), and `==`
 on two instances or on values that hold one, and an instance as a key of a map, at any depth (K4,
 K12); of chapter 4, a nullable `void` and a
@@ -1998,6 +1999,13 @@ round can ask about it by the rule's id.
   is `static-mismatch` (K19). A `static` field or method of the class is a name there too, and in a `static`
   method, and a method of the class, `static` or not, hides a top-level function of its name inside
   the class, as C# reads it.
+  A field of the class body is a name in the default of a field below it, read
+  through the instance being built, before the defaults of the fields after it run, as C# runs a
+  field's initializer before the constructor's body. A `static` method of the class is a name in a
+  default too, and a method of the instance is none, as C# refuses an instance member in an
+  initializer and no `static` one. A field of the body of the name of a field of
+  the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
+  is no name in a default, as it is none in a method (F16).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
   field first, so that every read is the constant its field holds. A read of a field whose check is

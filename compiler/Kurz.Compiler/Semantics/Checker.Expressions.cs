@@ -558,7 +558,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
+        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line) || OutOfReachInDefault(n.Name, n.Line))
         {
             return Typed.Error;
         }
