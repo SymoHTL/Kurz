@@ -7,11 +7,11 @@ namespace Kurz.Compiler.Semantics;
 
 /// <summary>
 /// The checker: names, scopes and types of a program the parser read without an error, against the
-/// rules of chapters 1 to 3, 5, 6, 8, 9 and 10 of the reference and the raw forms of chapter 11, with
-/// the grants a program is given (R7). It reports the compile errors of
+/// rules of chapters 1 to 3, 5 to 10 of the reference, the raw forms of chapter 11 and its cycle rule
+/// judged by types, with the grants a program is given (R7). It reports the compile errors of
 /// the error table those chapters name, each at the line E1 gives it, and <c>not supported</c>
-/// for a construct it does not read, at the construct's line and nothing else: a class and the
-/// other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c>, and
+/// for a construct it does not read, at the construct's line and nothing else: the parts of a class
+/// <see cref="UnreadClassPart"/> names and the other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c>, and
 /// the rest of the list in the section "What the checker does not read" of <c>compiler/README.md</c>,
 /// which is the one complete list. A value of a construct it does not read has the error type, about
 /// which nothing is reported, so that the one line of the construct carries the one diagnostic
@@ -143,6 +143,9 @@ public sealed partial class Checker
 
         public bool IsTopLevel { get; init; }
 
+        /// <summary>K7: the class whose method this frame checks, with its instance as <c>this</c>; a lambda inside the method finds it through <see cref="Outer"/>.</summary>
+        public ClassSymbol? Class { get; init; }
+
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
 
@@ -268,6 +271,12 @@ public sealed partial class Checker
             ResolveData(symbol);
         }
 
+        foreach (var symbol in classDeclared)
+        {
+            ResolveClass(symbol); // K1
+        }
+
+        CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -275,17 +284,21 @@ public sealed partial class Checker
             ResolveSignature(f);
         }
 
+        ResolveMethods(); // K7
         RefuseModifiedFunctions();
         CheckDuplicateFunctions();
         CheckStates();
         CheckEnumNumbers();
         CheckDefaults();
+        CheckClassDefaults();
         CollectReserved(program.Statements);
 
         foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
         {
             Unread(f, () => CheckFunctionBody(f));
         }
+
+        CheckMethodBodies(); // K7
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
@@ -424,6 +437,12 @@ public sealed partial class Checker
                 DeclareEnum(d);
             }
 
+            return;
+        }
+
+        if (d.Kind == TypeDeclarationKind.Class && !clash)
+        {
+            DeclareClass(d); // K1: chapter 7
             return;
         }
 
@@ -931,6 +950,17 @@ public sealed partial class Checker
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
+        if (classes.TryGetValue(n.Name, out var classSymbol))
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (K1, T19)");
+                return Types.Error;
+            }
+
+            return new ClassType(classSymbol); // K1
+        }
+
         if (enums.TryGetValue(n.Name, out var enumSymbol))
         {
             if (n.TypeArguments.Count > 0)
@@ -987,7 +1017,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1326,7 +1356,8 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name)
+        || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
@@ -1790,8 +1821,15 @@ public sealed partial class Checker
             return;
         }
 
+        if (variable is null && ImplicitField(a.Name) is { } implicitField)
+        {
+            AssignImplicitField(a, implicitField); // K7: the field of `this`
+            return;
+        }
+
         if (variable is not null)
         {
+            EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
             RequireRawForState(variable, a.Line);
             if (captured)
             {
@@ -1888,6 +1926,14 @@ public sealed partial class Checker
             CheckExpression(a.Value, null);
             return;
         }
+
+        if (RunsThroughInstance(members) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null))
+        {
+            AssignThroughInstance(a, members); // K1, K2: a field of an instance
+            return;
+        }
+
+        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
 
         KurzType current;
         VariableSymbol? changed = null;

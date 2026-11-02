@@ -25,8 +25,8 @@ internal sealed class LoopExits
 /// is kept as the set of paths known not null where the checker reads (<see cref="Frame.Known"/>): a test adds its paths to the branch
 /// it guards, an assignment of a value whose type has no <c>null</c> adds its target, any other assignment and a <c>mut</c> argument
 /// take away what runs through their target, and where branches or the rounds of a loop meet only what every path that reaches the
-/// point keeps is kept, the join C#'s nullable analysis makes (section 4, an assumption there). A path through a class instance or a
-/// <c>weak</c> reference (N9) is not read: the checker reads neither.
+/// point keeps is kept, the join C#'s nullable analysis makes (section 4, an assumption there). A path through a <c>mut</c> field of a
+/// class instance is known up to the next call or assignment (N9, <see cref="EndChangeableNarrowing"/>); a <c>weak</c> reference is not read.
 /// </summary>
 public sealed partial class Checker
 {
@@ -74,6 +74,10 @@ public sealed partial class Checker
         {
             case NameExpression n when Lookup(n.Name).Variable is { Kind: not VariableKind.Static } v:
                 return new NullPath(v, string.Empty);
+            case NameExpression n when ImplicitField(n.Name) is not null:
+                return new NullPath(ThisVariable(), n.Name); // K7: a field of `this` by its name
+            case ThisExpression when CurrentClass() is not null:
+                return new NullPath(ThisVariable(), string.Empty);
             case MemberAccess m when PathOf(m.Target) is { } target:
                 return target with { Fields = target.Fields.Length == 0 ? m.Member : target.Fields + "." + m.Member };
             default:

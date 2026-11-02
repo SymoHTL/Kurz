@@ -1021,6 +1021,25 @@ def suite(case):
     case("run: at the cap the note is posted on a head that already carries a failure note",
          code == 1 and "REVIEW DID NOT COMPLETE (cap)" in out and sum("(cap)" in n["body"] for n in forge.notes) == 1
          and sum("(failed)" in n["body"] for n in forge.notes) == 1, [n["body"][:120] for n in forge.notes])
+    # the owner, 2026-11-01, "Free replay isn't a round": at the cap a head whose every file the cache answers is reviewed
+    # with no pass, and a head with one file it does not answer ends as cap
+    forge, newer = MemoryForge(), "e" * 40
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
+    first = (code, stored(forge))
+    forge.labels, forge.heads = [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"], [newer]  # edited: the round at the cap, then a head that took main
+    unused = scripted_model(found)
+    code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")
+    case("run: at the cap a run that only replays completes, makes no pass and labels nothing",
+         first == (0, ["a.md", "b.md", "e.md", "new.kz"]) and code == 0 and unused.batches == [] and "REVIEW COMPLETE" in out
+         and forge.statuses[-1] == (newer, "review", "success") and "0 passes, $0.00" in forge.said[-1]
+         and forge.labels == [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"] and "(cap)" not in out,
+         (first, code, unused.batches, forge.statuses, forge.labels, out[-300:]))
+    one_changed = fixture("sample-diff.txt").replace("+line 2, changed", "+line 2, changed again")  # a.md has a pass to make, the rest replays
+    code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x", diff=one_changed)
+    case("run: at the cap a run with one file to review ends as cap before any pass, and says how many files the cache does not answer",
+         code == 1 and "REVIEW DID NOT COMPLETE (cap)" in out and unused.batches == [] and forge.statuses[-1] == (newer, "review", "error")
+         and forge.labels == [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"] and "files of this head the cache does not answer: 1 of 4" in out,
+         (code, unused.batches, forge.statuses[-1:], forge.labels, out[-300:]))
     forge = MemoryForge()
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--dry-run"])
     case("run: a dry run counts no round: it posts nothing, that label included", code == 0 and forge.labels == [], (code, forge.labels))

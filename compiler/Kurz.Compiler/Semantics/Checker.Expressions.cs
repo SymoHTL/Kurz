@@ -65,8 +65,7 @@ public sealed partial class Checker
             case NameExpression n:
                 return CheckName(n, expected);
             case ThisExpression t:
-                NotSupported(t.Line, "this (K7)");
-                return Typed.Error;
+                return CheckThis(t); // K7
             case MemberAccess m:
                 return CheckMember(m);
             case CallExpression c:
@@ -353,6 +352,14 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.NoText, hole.Expression.Line, $"{Types.A(t.Type)} has no text to put into a string (A4, A7, A10)");
                 }
+                else if (PrivateText(t.Type, hole.Expression.Line))
+                {
+                    // A9, A15: reported
+                }
+                else if (HoldsInstance(t.Type, []))
+                {
+                    EndChangeableNarrowing(); // N9: the text of an instance is its `Text()`, a call (A5)
+                }
                 else if (HoldsRaw(t.Type, []))
                 {
                     NotSupported(hole.Expression.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
@@ -384,6 +391,7 @@ public sealed partial class Checker
         MapType m => HasText(m.Value, seen), // A6, M9: every type a map takes as its key has a text; a function value and a handle, which have none, are no key
         UnionType u => u.Cases.All(c => HasText(c, seen)),
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
+        ClassType c => c.Symbol.TextMethod is not null, // A4, A5: an instance has the text its class declares, and none else
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
         TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
         _ => false, // a function value; a type parameter of a function, which has no limit the checker reads (A10)
@@ -431,9 +439,26 @@ public sealed partial class Checker
             return Narrowed(n, new Typed(variable.Type)); // N3
         }
 
+        if (ImplicitField(n.Name) is { } implicitField)
+        {
+            return ReadImplicitField(n, implicitField); // K7: the field of `this`
+        }
+
+        if (ImplicitMethods(n.Name) is not null)
+        {
+            NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
+            return Typed.Error;
+        }
+
         if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
         {
             Report(ErrorIds.UnknownName, n.Line, $"`{n.Name}` is a top-level variable, which a top-level function does not read (F16, V10)");
+            return Typed.Error;
+        }
+
+        if (classes.ContainsKey(n.Name))
+        {
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a class, and no value stands here: an instance is made by `{n.Name}(...)` (K1; E4)");
             return Typed.Error;
         }
 
@@ -522,6 +547,12 @@ public sealed partial class Checker
             if (enums.TryGetValue(n.Name, out var enumSymbol))
             {
                 return EnumValue(enumSymbol, m.Member, m.Line);
+            }
+
+            if (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null)
+            {
+                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a class and has no member `{m.Member}` of its own: a field is read from an instance (K1, V10)");
+                return Typed.Error;
             }
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
@@ -646,6 +677,8 @@ public sealed partial class Checker
                     break;
                 }
 
+            case ClassType c:
+                return ClassMember(c, member, line); // K1, F9
             case EnumType e when member == "Number":
                 if (e.Symbol.Refused)
                 {
@@ -1354,6 +1387,7 @@ public sealed partial class Checker
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
                 || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is ListType && Types.Same(left.Type, right.Type))
+                || (left.Type is ClassType && Types.Same(left.Type, right.Type))
                 || (left.Type is UnionType && right.Type is UnionType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
             var refused = !ok ? null : left.Type switch
             {
@@ -1361,6 +1395,7 @@ public sealed partial class Checker
                 // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
+                ClassType => (false, $"the equality of a class instance (K4) is not read"),
                 DataType => HeldEquality(left.Type, [], [], []) ?? HeldEquality(right.Type, [], [], []),
                 // two values of a union, as the union the other side goes to: by the case, then by the value (section 4, the owner,
                 // 2026-10-30, "Case and value, as Rust"); a union beside a value of one of its cases is no such pair, as Rust refuses
@@ -1500,7 +1535,7 @@ public sealed partial class Checker
             Line = l.Line,
             TypeParameters = outer.TypeParameters,
             Reserved = outer.Reserved,
-            Known = outer.Known, // N3 with F15: the lambda takes the values its variables have where it is made, and what was known of them
+            Known = Unchangeable(outer.Known), // N3 with F15: the lambda takes the values its variables have where it is made, and what was known of them; N9: not of a path a call can change before the lambda runs
         };
         var parameters = new List<VariableSymbol>();
         foreach (var (p, type) in l.Parameters.Zip(parameterTypes))

@@ -387,18 +387,108 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
         Assert.Equal("  at Down in program.kz:3", Split(Toolchain.Run(built, null).Error).Trace[0]);
 
         // the symbol table taken out of the file (its type set to SHT_NULL): no frame has a name, and each is its address
-        var nameless = Path.Combine(toolchain.Directory, "trace-nameless");
-        File.Copy(built, nameless, overwrite: true);
-        Patch(nameless, ".symtab", (bytes, header) => BitConverter.TryWriteBytes(bytes.AsSpan(header + 4, 4), 0));
+        var nameless = Variant(built, "trace-nameless", ".symtab", (bytes, header) => BitConverter.TryWriteBytes(bytes.AsSpan(header + 4, 4), 0));
         var unknown = Split(Toolchain.Run(nameless, null).Error).Trace;
         Assert.True(unknown.Count >= 6, string.Join("\n", unknown)); // the runtime's frames, Down's four and main's, and the C library's start
         Assert.All(unknown, l => Assert.Matches(Unknown(), l));
 
         // the line tables taken out (their section renamed): every frame is named and has no line
-        var lineless = Path.Combine(toolchain.Directory, "trace-lineless");
-        File.Copy(built, lineless, overwrite: true);
-        Patch(lineless, ".debug_line", (bytes, header) => bytes[NameAt(bytes, header) + 1] = (byte)'_');
+        var lineless = Variant(built, "trace-lineless", ".debug_line", (bytes, header) => bytes[NameAt(bytes, header) + 1] = (byte)'_');
         Assert.Equal(["  at Down", "  at Down", "  at Down", "  at Down", "  at main"], Split(Toolchain.Run(lineless, null).Error).Trace);
+    }
+
+    [Fact]
+    public void A_program_whose_file_another_process_holds_open_for_writing_does_not_start_and_its_run_has_no_trace()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the trace of Linux
+        }
+
+        // the cause of the empty traces of #156: a file a process holds open for writing does not start while it does, and a child
+        // started from this process holds each descriptor this one had open at the fork, up to the child's exec. Here the child opens
+        // the file itself (`exec 3>>`, which changes no byte) and keeps it open while it waits, so that this process never holds it
+        var program = Build(Down, "trace-held");
+        var info = new ProcessStartInfo("sh", ["-c", "exec 3>>\"$0\" && echo open && exec sleep 60", program]) { UseShellExecute = false, RedirectStandardOutput = true };
+        using var holder = Process.Start(info)!;
+        try
+        {
+            Assert.Equal("open", holder.StandardOutput.ReadLine());
+            var run = Toolchain.Run(program, null);
+            Assert.Equal(-1, run.Code);
+            Assert.EndsWith("Text file busy", run.Error);
+            Assert.Empty(Split(run.Error).Trace);
+        }
+        finally
+        {
+            holder.Kill();
+            holder.WaitForExit();
+        }
+
+        // the positive control: with the child ended no process holds the file, and the program starts and writes its trace
+        Assert.Equal("  at Down in program.kz:3", Split(Toolchain.Run(program, null).Error).Trace[0]);
+    }
+
+    [Fact]
+    public void A_variant_starts_while_other_threads_start_processes()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the variants of the file's reader on Linux
+        }
+
+        // a hundred variants, each run as it is written, while two threads start processes as the other tests' builds and runs do:
+        // this process holds no descriptor of a variant, so no child holds one, and every variant starts. The floor: the threads
+        // started processes while the variants ran
+        var built = Build(Down, "trace-starting");
+        using var stop = new CancellationTokenSource();
+        var starts = 0;
+        var starters = Enumerable.Range(0, 2).Select(_ => new Thread(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                if (Processes.Capture("true", [], null, TimeSpan.FromSeconds(30)).Code == 0)
+                {
+                    Interlocked.Increment(ref starts);
+                }
+            }
+        }) { IsBackground = true }).ToList();
+        List<string> refused;
+        int beside;
+        try
+        {
+            starters.ForEach(t => t.Start());
+            var before = Volatile.Read(ref starts);
+            refused = Enumerable.Range(0, 100)
+                .Select(_ => Toolchain.Run(Variant(built, "trace-starting-variant", ".symtab", (_, _) => { }), null))
+                .Where(r => r.Code == -1).Select(r => r.Error).ToList();
+            beside = Volatile.Read(ref starts) - before;
+        }
+        finally
+        {
+            stop.Cancel();
+            starters.Where(t => t.IsAlive).ToList().ForEach(t => t.Join());
+        }
+
+        Assert.True(beside > 0, "no process started beside the variants");
+        Assert.True(refused.Count == 0, $"{refused.Count} of 100 variants did not start, the first so: {refused.FirstOrDefault()}");
+    }
+
+    /// <summary>
+    /// A copy of the build <paramref name="built"/> named <paramref name="name"/>, beside the builds, with the header of its section
+    /// <paramref name="section"/> changed as <paramref name="change"/> does, which <c>cp</c> writes from a file of the changed bytes:
+    /// a file a process holds open for writing does not start (<c>ETXTBSY</c>, "Text file busy"), and a child another test starts
+    /// from this process holds each of its descriptors from the fork to the exec, so that a copy this process wrote itself did not
+    /// start now and then, and its run had no trace (#156).
+    /// </summary>
+    private string Variant(string built, string name, string section, Action<byte[], int> change)
+    {
+        var bytes = Path.Combine(toolchain.Directory, name + ".bytes");
+        File.Copy(built, bytes, overwrite: true);
+        Patch(bytes, section, change);
+        var variant = Path.Combine(toolchain.Directory, name);
+        Assert.Equal((0, "", ""), Processes.Capture("cp", [bytes, variant], null, TimeSpan.FromSeconds(30)));
+        return variant;
     }
 
     /// <summary>Changes the header of the section named <paramref name="section"/> of an ELF file, or its name, as <paramref name="change"/> does.</summary>
