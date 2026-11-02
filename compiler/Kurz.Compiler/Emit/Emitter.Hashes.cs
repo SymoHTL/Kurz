@@ -39,11 +39,8 @@ public sealed partial class Emitter
         switch (info.Kind)
         {
             case CallKind.Hash when hasher == Hasher.Crc32:
-                {
-                    var crc = fn.Value($"call i32 {StdFunction("Crc32Hash")}({listed}ptr {Crc32Table()}, ptr {asked})");
-                    Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
-                    return crc;
-                }
+                // H1: the register a local of `Crc32Hash`, which asks for no block, so nothing is refused
+                return fn.Value($"call i32 {StdFunction("Crc32Hash")}({listed}ptr {Crc32Table()})");
 
             case CallKind.HmacVerify:
                 {

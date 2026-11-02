@@ -147,9 +147,10 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_crc_block_the_system_refuses_reports_the_bytes_of_a_hasher_s_block()
     {
-        // `Crc32.Hash` and `Crc32.New()` each ask for a hasher's block: 16 bytes of a list's counts and 1028 of the register and the
-        // 1024 bytes after it, where the table stood before it was the program's, which keep the bytes `allocation-failed` names (H1)
-        foreach (var (text, name) in new[] { ("print(Crc32.Hash(Bytes()))\n", "crc-hash"), ("mut c = Crc32.New()\nprint(c.Finish())\n", "crc-new") })
+        // `Crc32.New()` asks for a hasher's block: 16 bytes of a list's counts and 1028 of the register and the 1024 bytes after it,
+        // where the table stood before it was the program's, which keep the bytes `allocation-failed` names (H1); `Crc32.Hash` asks
+        // for none (the test below)
+        foreach (var (text, name) in new[] { ("mut c = Crc32.New()\nprint(c.Finish())\n", "crc-new") })
         {
             var refused = Compile(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value));
             Assert.True(refused.Program is not null, string.Join("; ", refused.Diagnostics.Sorted));
@@ -162,6 +163,30 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal((0, ""), (grantedCode, grantedError));
             Assert.Equal(["0"], printed);
         }
+    }
+
+    [Fact]
+    public void Crc32_Hash_keeps_its_register_in_a_local_and_asks_for_no_block()
+    {
+        // H1: `Crc32.Hash` keeps its register in a local of `Crc32Hash`, as crc32fast's `hash` keeps its state, so it asks the system
+        // for no block (the owner, 2026-11-02, issue 157, comment 6573114059: the bytes `allocation-failed` names follow the layout).
+        // Where the system refuses every block, a program that hashes no bytes ends as it does with memory, where a block of the
+        // hasher's ended it with `allocation-failed`; it prints only where the CRC is not 0, and a print asks for a block of its own,
+        // so a wrong CRC ends it with `allocation-failed` too. The IR of `Crc32Hash` calls `Crc32Bytes`, the positive control, and
+        // neither `Crc32New` nor `ByteBlock`
+        var refused = Compile("if Crc32.Hash(Bytes()) != 0 {\n    print(1)\n}\n", EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value));
+        Assert.True(refused.Program is not null, string.Join("; ", refused.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(refused.Program, "crc-hash-no-block"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Empty(output);
+        var ir = refused.Program.Ir;
+        var start = ir.IndexOf("define internal i32 @\"std.Crc32Hash.", StringComparison.Ordinal);
+        Assert.True(start >= 0, "the program holds the standard library's `Crc32Hash`");
+        var hash = ir[start..];
+        hash = hash[..hash.IndexOf("\n}", StringComparison.Ordinal)];
+        Assert.Contains("call i32 @\"std.Crc32Bytes.", hash, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"std.Crc32New.", hash, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"std.ByteBlock.", hash, StringComparison.Ordinal);
     }
 
     [Fact]

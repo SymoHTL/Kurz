@@ -4993,18 +4993,17 @@ pub uint Crc32Finish(byte* block) {
     return c
 }
 
-// CRC-32 of the bytes of the list `message` (H1), by the emitter's table at `table`, on a state of its own,
-// a hasher's block, which it frees; 0, with `asked` set, where the system refuses.
-pub uint Crc32Hash(byte* message, uint* table, mut long asked) {
-    byte* block = Crc32New(mut asked)
-    if block == null {
-        return 0
+// CRC-32 of the bytes of the list `message` (H1), by the emitter's table at `table`, its register a local, as
+// crc32fast's `hash` keeps its state: it asks the system for no block, so no refusal ends it.
+pub uint Crc32Hash(byte* message, uint* table) {
+    mut uint c = 0xffffffff
+    if message != null {
+        raw {
+            c = Crc32Bytes(c, ListItems(message), long(ListCount(message)), table)
+        }
     }
 
-    Crc32Update(block, message, table)
-    uint c = Crc32Finish(block)
-    Free(block, 1044)
-    return c
+    return c ^ 0xffffffff
 }
 
 // HMAC-SHA256's state at `s`, 272 bytes (RFC 2104): the key K0 (0), 64 bytes, the state of the inner
