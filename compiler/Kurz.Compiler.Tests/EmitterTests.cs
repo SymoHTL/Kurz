@@ -273,7 +273,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             "mut a = Map<int, int>()\na[1] = 1\nmut b = Map<long, int>()\nb[1] = 1\nmut c = Map<char, int>()\nc['x'] = 1\n" +
             "mut d = Map<bool, int>()\nd[true] = 1\nmut e = Map<Color, int>()\ne[Color.Green] = 1\nmut f = Map<double, int>()\nf[1.5] = 1\n" +
             "mut g = Map<string, int>()\ng[\"x\"] = 1\nmut h = Map<Pair, int>()\nh[Pair(\"a\", \"b\")] = 1\nmut i = Map<List<int>, int>()\ni[[1, 2]] = 1\n" +
-            "mut j = Map<timestamp, int>()\nj[timestamp.Now] = 1\nmut k = Map<longduration, int>()\nk[far] = 1\nmut l = Map<int?, int>()\nl[null] = 1\n" +
+            "mut j = Map<duration, int>()\nj[90min] = 1\nmut k = Map<longduration, int>()\nk[far] = 1\nmut l = Map<int?, int>()\nl[null] = 1\n" +
             "mut m = Map<float, int>()\nm[1.5f] = 1\n" +
             "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count)\n";
         var compiled = Compile(program, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
@@ -286,7 +286,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             "Map<bool, int>\" = type { i1, i32 }",
             "Map<Color, int>\" = type { i8, i32 }",
             "Map<double, int>\" = type { double, i32 }",
-            "Map<timestamp, int>\" = type { i64, i32 }",
+            "Map<duration, int>\" = type { i64, i32 }",
             "Map<float, int>\" = type { float, i32 }",
             "Map<string, int>\" = type { i64, %kz.str, i32 }",
             "Map<Pair, int>\" = type { i64, %\"d.Pair\", i32 }",
