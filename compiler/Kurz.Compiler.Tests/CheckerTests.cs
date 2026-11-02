@@ -1342,7 +1342,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_derived_data_type_without_fields_of_its_own_has_the_fields_of_its_base()
     {
-        // D21 (assumed, §4): `data Dot : Shape` has the fields of its base (D7), through every base above it, so its bare name stands for no
+        // D21 (decided, §4): `data Dot : Shape` has the fields of its base (D7), through every base above it, so its bare name stands for no
         // value (D2), `Dot(...)` binds the base's fields, a member on its name is no field of a value, and no text of D8 names it. Where no base
         // has a field, the bare name is the one value (D8), and an argument or `()` keeps D8's errors; a type of a cycle of bases has no base
         // and keeps its own fields

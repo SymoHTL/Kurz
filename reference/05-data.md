@@ -409,7 +409,7 @@ e = Empty
 print(e == Empty)
 ```
 
-### D21 (assumed, §4) A derived `data` type without fields of its own
+### D21 (decided, §4) A derived `data` type without fields of its own
 
 `data Dot : Shape` writes no fields of its own and has the fields of its base (D7): its
 constructor takes them in their order, and a value of it is made as a value of any type with
