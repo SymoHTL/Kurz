@@ -80,6 +80,9 @@ public sealed class DiagnosticBag
 
     public void Add(Diagnostic diagnostic) => items.Add(diagnostic);
 
+    /// <summary>Takes back a diagnostic added before, by its reference: T33's generic check of a function that turned out to read its type in its copies alone.</summary>
+    internal void Remove(Diagnostic diagnostic) => items.RemoveAll(d => ReferenceEquals(d, diagnostic));
+
     public void Error(string id, int line, string message) => items.Add(Diagnostic.Error(id, line, message));
 
     public void NotSupported(int line, string construct) => items.Add(Diagnostic.NotSupported(line, construct));
@@ -157,6 +160,7 @@ public static class ErrorIds
     public const string OverrideReturnType = "override-return-type";
     public const string DefaultNotConstant = "default-not-constant";
     public const string BaseCycle = "base-cycle";
+    public const string KindNotRead = "kind-not-read";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

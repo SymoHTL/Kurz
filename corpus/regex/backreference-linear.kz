@@ -1,0 +1,5 @@
+// expect: error regex-invalid at 4
+// rules: G2
+
+twice = Regex.New(r"(\w+) \1")
+print(twice.IsMatch("a a"))
