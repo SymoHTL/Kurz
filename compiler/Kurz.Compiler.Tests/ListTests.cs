@@ -4406,20 +4406,93 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Two_strings_of_one_count_are_compared_by_their_first_bytes_before_a_word_of_either_is_read()
     {
-        // T18: the runtime's `Same` tests the first bytes of two strings of one count before it reads a word of either, since two
-        // different strings of one count most often differ there, and reads no word where they differ. No result tells that order
-        // from the other, so the IR holds it: in a program that compares two strings, the body of `Same` as the emitter writes it, in
-        // the order of its source, reads a byte (`load i8`) before its first call that reads a word, and holds both
+        // T18: the runtime's `Same` tests the first bytes of two strings of one count before it calls `SameBytes`, which reads the
+        // words of both, since two different strings of one count most often differ there, and calls it only where they agree. No
+        // result tells that order from the other, so the IR holds it: in a program that compares two strings, the body of `Same` as the
+        // emitter writes it, in the order of its source, reads a byte (`load i8`) before it calls `SameBytes`, and the body of
+        // `SameBytes` reads words of 8 and of 4
         var ir = Compile("a = \"ab\"\nb = \"ac\"\nprint(a == b)\n", toolchain.Runtime).Program!.Ir;
-        var start = ir.IndexOf("define internal i1 @\"rt.common.Same.", StringComparison.Ordinal);
-        Assert.True(start >= 0, "the program holds the runtime's `Same`");
-        var same = ir[start..];
-        same = same[..same.IndexOf("\n}", StringComparison.Ordinal)];
+        string Body(string definition)
+        {
+            var start = ir.IndexOf(definition, StringComparison.Ordinal);
+            Assert.True(start >= 0, $"the program holds {definition}");
+            var body = ir[start..];
+            return body[..body.IndexOf("\n}", StringComparison.Ordinal)];
+        }
+
+        var same = Body("define internal i1 @\"rt.common.Same.");
         var bytes = same.IndexOf("= load i8, ptr", StringComparison.Ordinal);
-        int[] reads = [same.IndexOf("call i64 @\"std.WordAt.", StringComparison.Ordinal), same.IndexOf("call i32 @\"std.LittleEndianWord.", StringComparison.Ordinal)];
+        var call = same.IndexOf("call i1 @\"rt.common.SameBytes.", StringComparison.Ordinal);
         Assert.True(bytes >= 0, $"`Same` reads a byte:\n{same}");
-        Assert.All(reads, read => Assert.True(read >= 0, $"`Same` reads words of 8 and of 4:\n{same}"));
-        Assert.True(bytes < reads.Min(), $"`Same` reads the first bytes before it reads a word:\n{same}");
+        Assert.True(call >= 0, $"`Same` calls `SameBytes`:\n{same}");
+        Assert.True(bytes < call, $"`Same` reads the first bytes before it calls `SameBytes`:\n{same}");
+        var rest = Body("define internal i1 @\"rt.common.SameBytes.");
+        int[] reads = [rest.IndexOf("call i64 @\"std.WordAt.", StringComparison.Ordinal), rest.IndexOf("call i32 @\"std.LittleEndianWord.", StringComparison.Ordinal)];
+        Assert.All(reads, read => Assert.True(read >= 0, $"`SameBytes` reads words of 8 and of 4:\n{rest}"));
+    }
+
+    [Fact]
+    public void Two_strings_are_compared_by_their_counts_and_first_bytes_in_each_caller_and_by_a_call_for_the_rest()
+    {
+        // T18: as Rust's `==` of `str` compares the two lengths and calls `bcmp` for the bytes, the runtime's `Same` holds only the
+        // test of the counts and of the first bytes, small enough that clang inlines it into each caller, and `SameBytes` the rest,
+        // which the emitter marks `noinline` (`Emitter.OutOfLine`), so that LLVM does not inline it into `Same`, its one caller, and
+        // keep `Same` a call. No result tells that from one function of both, so the IR clang optimises as a release build is
+        // optimised holds it: a program that compares strings in three places, whose IR calls `Same` in each, calls `Same` nowhere
+        // once optimised, and `SameBytes` in more than one place (LLVM writes a name without its quotes where it needs none)
+        const string text = """
+            bool Equal(string x, string y) {
+                return x == y
+            }
+
+            bool Differ(string x, string y) {
+                return x != y
+            }
+
+            mut words = List<string>()
+            for i in 0..<6 {
+                words.Add("w{i % 3}")
+            }
+
+            mut count = 0
+            for i in 0..<6 {
+                if Equal(words[i], words[(i + 1) % 6]) {
+                    count = count + 1
+                }
+
+                if Differ(words[i], words[(i + 2) % 6]) {
+                    count = count + 10
+                }
+
+                if words[i] == words[(i + 3) % 6] {
+                    count = count + 100
+                }
+            }
+
+            print(count)
+
+            """;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        static int Calls(IEnumerable<string> lines, string name) =>
+            lines.Count(l => l.Contains("call ", StringComparison.Ordinal)
+                && (l.Contains($"@\"rt.common.{name}.", StringComparison.Ordinal) || l.Contains($"@rt.common.{name}.", StringComparison.Ordinal)));
+        Assert.True(Calls(program.Ir.Split('\n'), "Same") >= 3, "the IR as the emitter writes it calls `Same` in each place");
+        var directory = Path.Combine(toolchain.Directory, "string-same-inlined");
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "program.ll");
+        var output = Path.Combine(directory, "optimised.ll");
+        File.WriteAllText(input, program.Ir);
+        List<string> arguments = ["-O2", "-S", "-emit-llvm", input, "-o", output];
+        if (program.CpuFlag is { } cpu)
+        {
+            arguments.Add(cpu);
+        }
+
+        var (code, _, error) = Processes.Capture(toolchain.Clang.Path, arguments, null, TimeSpan.FromMinutes(2));
+        Assert.True(code == 0, error);
+        var optimised = File.ReadAllLines(output);
+        Assert.Equal(0, Calls(optimised, "Same"));
+        Assert.True(Calls(optimised, "SameBytes") >= 2, string.Join('\n', optimised.Where(l => l.Contains("rt.common.Same", StringComparison.Ordinal))));
     }
 
     /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>
