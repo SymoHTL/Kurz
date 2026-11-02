@@ -1,0 +1,41 @@
+// expect: output
+// | 2
+// | not UTF-8 at 0
+// rules: S16
+
+// a failure of the read leaves the function through the loop, as a case of a call does
+int | IoError | InvalidUtf8 Longest(File f) {
+    mut longest = 0
+    for line in f.Lines() {
+        if line.Bytes.Count > longest {
+            longest = line.Bytes.Count
+        }
+    }
+
+    return longest
+}
+
+void Show(Bytes content) {
+    File.WriteAll("lines-propagate.txt", content) else {
+        IoError => return
+    }
+
+    f = File.Open("lines-propagate.txt") else {
+        IoError => return
+    }
+
+    File.Delete("lines-propagate.txt") else {
+        IoError => return
+    }
+
+    match Longest(f) {
+        int n => print(n)
+        IoError e => print(e)
+        InvalidUtf8 u => print("not UTF-8 at {u.At}")
+    }
+}
+
+Show("ab\nc\n".Bytes)
+mut bad = "x\n".Bytes
+bad.Add(byte(255))
+Show(bad)

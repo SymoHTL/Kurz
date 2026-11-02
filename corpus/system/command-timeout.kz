@@ -1,0 +1,17 @@
+// expect: output
+// | timed out: sleep
+// | TimedOut
+// rules: S20
+
+void | IoError | ExitError Run() {
+    Command.New("sleep").Arg("10").Timeout(100ms).Status()
+    print("not reached")
+}
+
+Run() else {
+    IoError e => {
+        print(e)
+        print(e.Kind)
+    }
+    ExitError e => print(e)
+}

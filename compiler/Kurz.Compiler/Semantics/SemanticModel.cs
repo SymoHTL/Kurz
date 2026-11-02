@@ -80,6 +80,12 @@ public enum CallKind
     /// <summary>A list's <c>Reverse()</c> (X9).</summary>
     ListReverse,
 
+    /// <summary>A list's <c>Insert(index, item)</c> (X11).</summary>
+    ListInsert,
+
+    /// <summary>A list's <c>RemoveAt(index)</c>, which gives the item it takes out (X11).</summary>
+    ListRemoveAt,
+
     /// <summary>A list's <c>Sort()</c>, in place and stable (X8).</summary>
     ListSort,
 
@@ -167,14 +173,26 @@ public enum CallKind
     /// <summary>A file's, a listener's or a stream's <c>Close()</c> (S5, S9).</summary>
     FileClose,
 
+    /// <summary>A file's <c>Lines()</c>, the collection of a <c>for</c> loop (S16).</summary>
+    FileLines,
+
     /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
     TcpBind,
 
-    /// <summary><c>TcpStream.Connect(address)</c> (S9).</summary>
+    /// <summary><c>TcpStream.Connect(address)</c>, or its second form <c>TcpStream.Connect(address, timeout)</c>, of two slots (S9).</summary>
     TcpConnect,
 
     /// <summary>A listener's <c>Accept()</c> (S9).</summary>
     TcpAccept,
+
+    /// <summary>A stream's <c>SetReadTimeout(timeout)</c> (S9).</summary>
+    TcpSetReadTimeout,
+
+    /// <summary>A stream's <c>SetWriteTimeout(timeout)</c> (S9).</summary>
+    TcpSetWriteTimeout,
+
+    /// <summary>A listener's <c>SetAcceptTimeout(timeout)</c> (S9).</summary>
+    TcpSetAcceptTimeout,
 
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,
@@ -211,6 +229,9 @@ public enum CallKind
 
     /// <summary><c>FixedTime.Equal(a, b)</c> (H4).</summary>
     FixedTimeEqual,
+
+    /// <summary>An intrinsic of a class under <c>X86</c> or <c>Arm</c>, or a lane operation of a vector (R18); <see cref="CallInfo.Intrinsic"/> is the one picked, and <see cref="CallInfo.Target"/> the vector a lane operation is called on.</summary>
+    Intrinsic,
 }
 
 /// <summary>
@@ -228,7 +249,11 @@ public sealed record CallInfo(
     IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map,
     IReadOnlyList<int> Binding,
     int SlotCount,
-    KurzType Result);
+    KurzType Result)
+{
+    /// <summary>The intrinsic or lane operation a call of <see cref="CallKind.Intrinsic"/> calls (R18).</summary>
+    public Intrinsic? Intrinsic { get; init; }
+}
 
 /// <summary>A lambda as the checker read it: its parameters, the variables of the functions around it that it reads (F11, F15) and its type.</summary>
 public sealed record LambdaInfo(IReadOnlyList<VariableSymbol> Parameters, IReadOnlyList<VariableSymbol> Captures, FunctionType Type);
@@ -265,6 +290,8 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<MemberAccess, IntrinsicClass> supportTests = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Node, IReadOnlyList<IntrinsicClass>> guards = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
@@ -364,6 +391,32 @@ public sealed class SemanticModel
     public bool IsClockRead(MemberAccess access) => clockReads.Contains(access);
 
     internal void RecordClockRead(MemberAccess access) => clockReads.Add(access);
+
+    /// <summary>Every test of a class's <c>IsSupported</c> the checker read, with its class (R18).</summary>
+    public IEnumerable<(MemberAccess Access, IntrinsicClass Class)> SupportTests => supportTests.Select(p => (p.Key, p.Value));
+
+    /// <summary>R18: the class whose <c>IsSupported</c> the member reads, <c>X86.Sse41.IsSupported</c>, or null for any other member.</summary>
+    public IntrinsicClass? SupportTestOf(MemberAccess access) => supportTests.TryGetValue(access, out var c) ? c : null;
+
+    /// <summary>
+    /// R18: the classes whose tests the flow of the code knows true where the statement, or the right side of <c>&amp;&amp;</c> or
+    /// <c>||</c>, starts, as N3's flow knows a variable not null there; none where nothing is known or the node is no such place.
+    /// </summary>
+    public IReadOnlyList<IntrinsicClass> GuardsAt(Node node) => guards.TryGetValue(node, out var g) ? g : [];
+
+    internal void RecordSupportTest(MemberAccess access, IntrinsicClass c) => supportTests[access] = c;
+
+    internal void RecordGuards(Node node, IReadOnlyList<IntrinsicClass> classes)
+    {
+        if (classes.Count == 0)
+        {
+            guards.Remove(node);
+        }
+        else
+        {
+            guards[node] = classes;
+        }
+    }
 
     internal void RecordArguments(VariableSymbol arguments) => Arguments = arguments;
 
