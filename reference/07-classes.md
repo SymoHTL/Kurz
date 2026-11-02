@@ -47,6 +47,9 @@ bump = () => c.Add(1)
 bump()
 bump()
 print(c.Count)
+reset = () => { c.Count = 5 }
+reset()
+print(c.Count)
 ```
 
 ### K3 (decided, §4) References with identity
@@ -100,6 +103,14 @@ a = Pet("Rex", o)
 b = Pet("Rex", o)
 print(a == b)
 print(a == a)
+```
+
+Case: [classes/equality-content-map.kz](../corpus/classes/equality-content-map.kz)
+```kurz
+class Tally(string Name, Map<string, int> Counts)
+
+t = Tally("a", Map<string, int>())
+print(t == t)
 ```
 
 ### K13 (decided, §4) Equality across inheritance
@@ -253,7 +264,9 @@ assigned and its first value after `=`, which may be any expression (the owner, 
 parameter's default): it may read the parameters of the primary constructor, the fields declared above
 it and functions outside the class, and is evaluated in declaration order before the body of a
 constructor runs, as C# evaluates an initializer, which refuses an instance member there; a field
-declared below it, a method of the class or `this` is `unknown-name` (V10); the cost is that such a
+declared below it, a method of its instance or `this` is `unknown-name` (V10), while a `static`
+method of the class is a name there, as C# refuses no `static` member in an initializer (§4, the
+owner, 2026-11-02); the cost is that such a
 default runs at every construction, which a constant one does not (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). A method is written as a function (chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
 further constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
 method that a derived class overrides is marked `virtual` in the base and `override` in the derived
@@ -291,6 +304,54 @@ class Box {
 print(Box().Size())
 ```
 
+Case: [classes/field-default-order.kz](../corpus/classes/field-default-order.kz)
+```kurz
+int Note(string s, int v) {
+    print(s)
+    return v
+}
+
+class Counter(int Start) {
+    int next = Note("b", Start + 1)
+    int last = Note("c", next + 1)
+
+    pub int Last() => last
+}
+
+print(Counter(Note("a", 1)).Last())
+```
+
+Case: [classes/field-counted.kz](../corpus/classes/field-counted.kz)
+```kurz
+class Bag(string Name) {
+    mut List<string> items = [Name]
+    string title = "bag of {Name}"
+    string first = Name
+
+    pub void Add(string x) {
+        items.Add(x)
+    }
+
+    pub string Text() => "{title}: {items.Count}, first {first}"
+}
+
+b = Bag("ann")
+b.Add("pen")
+print(b)
+```
+
+Case: [classes/field-default-below.kz](../corpus/classes/field-default-below.kz)
+```kurz
+class Box(int Side) {
+    int area = Side * depth
+    int depth = 2
+
+    pub int Area() => area
+}
+
+print(Box(3).Area())
+```
+
 Case: [classes/interface-method-inherited-private.kz](../corpus/classes/interface-method-inherited-private.kz)
 ```kurz
 interface Shape {
@@ -306,6 +367,38 @@ class Dot : Base, Shape {
 }
 
 print(Dot().Size())
+```
+
+Case: [classes/field-default-static-method.kz](../corpus/classes/field-default-static-method.kz)
+```kurz
+class Grid(int Side) {
+    int cells = Area(Side) + Border()
+
+    pub static int Area(int side) => side * side
+    static int Border() => 3
+
+    pub int Cells() => cells
+}
+
+print(Grid(2).Cells())
+print(Grid(3).Cells())
+```
+
+Case: [classes/field-weak.kz](../corpus/classes/field-weak.kz)
+```kurz
+class Owner(string Name)
+
+class Pet {
+    pub mut weak Owner? keeper = null
+
+    pub string Who() => keeper?.Name ?? "none"
+}
+
+o = Owner("ann")
+p = Pet()
+print(p.Who())
+p.keeper = o
+print(p.Who())
 ```
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
@@ -512,11 +605,20 @@ statics. The owner chose any order on 2026-11-02, against a class declared above
 class's own fields alone and against a cycle decided at run time, as C#'s type initializers, which
 give default values in a cycle without a word; on the same day this replaced the owner's earlier
 answer, the fields of its class declared above it. *(assumed: the id, the message and the place,
-which the build named and said back to the owner)* Inside an initial value, a read of a `static`
-field is the constant the field holds, of the field's type, so a constant built from such reads is
-checked as any constant: `1 / Zero` is `constant-divide-by-zero` (T25), a product past the field's
-type `constant-overflow` (T6), and an `int` field read into a `byte` field `narrowing-conversion`
-(T7), as a typed `int` is *(assumed: as §4 marks it)*. Outside an initial value, a read of a
+which the build named and said back to the owner; the message's list starting at the field the error
+stands at; in a cycle across the files of a program, the place at the field that comes first where
+the files are read in the order of their paths, as for `base-cycle` (D6); every field of the cycle
+refused, so that a cycle through a field one reported refused, and a field that reads one, add no
+error (E1), as §4 marks it)* Inside an initial value, a read of a `static` field whose initial value
+is a constant is the constant the field holds, of the field's type, so a constant built from such
+reads is checked as any constant: `1 / Zero` is `constant-divide-by-zero` (T25), a product past the
+field's type `constant-overflow` (T6), and an `int` field read into a `byte` field
+`narrowing-conversion` (T7), as a typed `int` is *(assumed: as §4 marks it)*. An initial value that
+reads a field computed at its first read (§4) is no constant either, and its own field is computed
+at its own first read, which computes the field it reads first where that one is not computed yet:
+each field alone, and no initializer runs for the whole class, as one `LazyLock` of Rust reads
+another (§4, the owner, 2026-11-02, against the whole class at its first touch, as C#'s type
+initializer, and against constants only, with such a read an error of its own id). Outside an initial value, a read of a
 `static` field is a value of its type and no constant, as C# reads a `static readonly` field: an
 `int` field does not go into a `byte` as an integer literal would (T7) *(assumed: as §4 marks it)*.
 The cycle this rule names is one between the names initial values read; what a field that a
@@ -559,6 +661,68 @@ class Counter {
 print(Counter.Start)
 ```
 
+Case: [classes/static-constant-limits.kz](../corpus/classes/static-constant-limits.kz)
+```kurz
+class Limits {
+    pub static int Q = 10 / Two
+    pub static int Two = 2
+    pub static int Big = Half * 4
+    pub static int Half = 536870911
+    pub static long Wide = Small
+    pub static int Small = 7
+}
+
+print(Limits.Q)
+print(Limits.Big)
+print(Limits.Wide)
+```
+
+Case: [classes/static-divide-by-zero.kz](../corpus/classes/static-divide-by-zero.kz)
+```kurz
+class Ratio {
+    pub static int Q = 1 / Zero
+    pub static int Zero = 0
+}
+
+print(Ratio.Q)
+```
+
+Case: [classes/static-overflow.kz](../corpus/classes/static-overflow.kz)
+```kurz
+class Size {
+    pub static int Big = Half * 4
+    pub static int Half = 1073741824
+}
+
+print(Size.Big)
+```
+
+Case: [classes/static-narrowing.kz](../corpus/classes/static-narrowing.kz)
+```kurz
+class Level {
+    pub static byte Small = Wide
+    pub static int Wide = 7
+}
+
+print(Level.Small)
+```
+
+Case: [classes/static-reads-first-read.kz](../corpus/classes/static-reads-first-read.kz)
+```kurz
+int Compute() => 3
+
+class Table {
+    pub static int A = Compute()
+    pub static int B = A + 1
+}
+
+print(Table.B)
+print(Table.A)
+```
+
+No case: the place of a cycle across the files of a program, since the compiler reads one file of a
+program and a case is one file.
+
 ### K14 (decided, §4) Further constructors and fields without `mut`
 
 A constructor, and only a constructor, may assign each field without `mut` once, before its body
@@ -583,10 +747,24 @@ field, a `mut` field written between the braces without `=` is `field-unassigned
 `mut` is (the owner,
 2026-10-10, confirming the reading proposed after the review of round 13). Reading such a field
 before its first assignment is that error too, as the read of a field without `mut` is (the owner,
-2026-10-10). The call of the primary one is direct; a further constructor
+2026-10-10). In a class with no constructor at all, a field of the body without `=`, `mut` or not,
+is `field-unassigned` too, at the field's line: the empty constructor of such a class assigns it no
+more than a primary constructor does (the owner, 2026-11-02, against `not supported`, and the
+field's line against the class's). The call of the primary one is direct; a further constructor
 without it is `constructor-must-chain`. A constructor written in the body is private without `pub`,
 as every member is (F9); the primary constructor, and the empty constructor of a class without one,
 are visible wherever the class is.
+
+Case: [classes/field-unassigned-none.kz](../corpus/classes/field-unassigned-none.kz)
+```kurz
+class Tally {
+    mut int count
+
+    pub int Count() => count
+}
+
+print(Tally().Count())
+```
 
 Case: [classes/field-read-before-assignment.kz](../corpus/classes/field-read-before-assignment.kz)
 ```kurz
@@ -658,6 +836,17 @@ class Point {
 }
 
 print(Point(true).X())
+```
+
+Case: [classes/field-unassigned-primary.kz](../corpus/classes/field-unassigned-primary.kz)
+```kurz
+class Point(int X) {
+    int y
+
+    pub int Y() => y
+}
+
+print(Point(1).Y())
 ```
 
 ### K8 (decided, §4) How a class names the fields that count

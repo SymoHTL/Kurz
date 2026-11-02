@@ -144,15 +144,21 @@ Case: [system/write-read.kz](../corpus/system/write-read.kz)
 A `File` is a handle: a copy is a second holder of the one file, as a list's copy holds its block
 (section 3 of the record), and the file closes when the last value that holds it lets go of it,
 ignoring an error of that close. `f.Close()` closes it before that and returns `void | IoError`; a
-`Close` through one holder closes it for all. Every call on a closed file, `Close` among them, returns
-the error the system gives a descriptor that is not open, `Other` with the number 9, with the path
-the file was opened with, since a close stores -1 in the file's descriptor before the system closes
-it, so that no call that starts after that store passes the system a number it may have given
-another file. A call through another holder that read the descriptor before the store and enters
-the system after the close can still reach such a number, and so read or write a file its holder
-never opened, while a call already in the system keeps the file it entered with: the record names that hazard in the cost of the answer and keeps what bounds it open
-(§12, §14). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's
-error, the -1 stored at the close, the close that ignores its error, and no text)*
+`Close` through one holder ends the handle for every holder at once, so that every later call through
+any holder, `Close` among them, returns the error the system gives a descriptor that is not open,
+`Other` with the number 9, with the path the file was opened with, and the descriptor itself is
+released only when the last call in flight on the handle returns, as Rust's `Arc<File>` closes the
+file with its last clone, so that no call reaches a number the system has given another file since: a
+call already in flight when the `Close` runs keeps the descriptor and completes, and the `Close`
+succeeds at once, an error of the close the last call makes dropped, as the close at the last count
+drops it (§12, the owner, 2026-11-02, against a lock around each call, against keeping the hazard and
+against a new error for a deferred close; the cost is a count kept around each call on a handle, two
+atomic operations, and a `Close` that shuts a socket down holds a count of its own across the
+shutdown, so that the release comes after it (S9; the owner, 2026-11-02, on a review's finding)). A
+`File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
+last count that ignores its error, and no text)*
+
+No case: a case runs one thread, and a call in flight beside a `Close` needs two.
 
 Case: [system/close-twice.kz](../corpus/system/close-twice.kz)
 ```kurz
@@ -310,7 +316,23 @@ it is written. An address that holds a NUL byte is `InvalidInput`, as a path is 
 takes every interface where its address is a wildcard, `0.0.0.0`, `[::]`, which takes IPv4 too on
 Linux's dual stack, on by default, since the runtime sets no `IPV6_V6ONLY`, as Rust sets none, or a
 name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
-and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
+and closes as a file does (S3, S4, S5), and a listener accepts and closes. A `Close` of a stream
+or a listener also shuts the socket down, `shutdown(2)`, so that a call that blocks on it in another
+thread returns at once, as Go's close wakes it, a blocked `Accept` or `Read` with the error of a closed
+handle, S5's, and a listener's port is free right away (§12, the owner, 2026-11-02, against a call that
+waits for its bound). The shutdown runs only while calls are in flight, a `Close` with none releasing
+the descriptor at once as before (against a shutdown at every `Close`); a blocked `Write` that the
+shutdown wakes gets that error too, as Go's close gives a blocked write `net.ErrClosed` (against the
+system's broken pipe or reset); a `Read` in flight that the shutdown meets with bytes the socket holds
+takes them, and the next call gets that error (against failing the call and dropping the bytes); and a
+stream's `Read` or `Write` or a listener's `Accept` that fails, or reads no byte, after the mark gives
+that error, a real timeout or reset that races the `Close` among them (against the system's answer,
+which would depend on the race) (§12, the owner, 2026-11-02). An actor waiting in the poller on a
+socket that another holder closes is woken at the close with that error, as Go's `net.Conn.Close`
+wakes the reads and writes that wait (§12, the owner, 2026-11-02, against leaving it waiting until its
+bound and against a kind of its own, as Go's `net.ErrClosed`; the cost is one wake-up for each caller
+that waits); the runtime of Linux has no poller, a call blocking its thread (S10), so that no actor
+waits in one there. A listener's socket reuses
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
 what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
 address without a `:`, a port that is not a number from 0 to 65535 and a name whose lookup succeeds
@@ -399,6 +421,10 @@ holder ends the writes of every holder, so that a later write through any holder
 the number 32, and the reads go on. A listener has no such member, and there is no `ShutdownRead` and
 no `Shutdown(how)` (§12, the owner, 2026-11-02, a half-close on `TcpStream` for the staged close of
 the HTTP server, and the answers to the product pass of the call).
+
+No case: a case runs one thread, and a call in flight beside a `Close` needs two; the runtime of
+Linux has no poller (S10); and whether a `Close` with no call in flight shuts the socket down no
+program can see, since the runtime shares no descriptor across processes.
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
