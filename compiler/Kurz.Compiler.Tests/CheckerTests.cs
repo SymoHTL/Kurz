@@ -1340,6 +1340,37 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_derived_data_type_without_fields_of_its_own_has_the_fields_of_its_base()
+    {
+        // D21 (assumed, §4): `data Dot : Shape` has the fields of its base (D7), through every base above it, so its bare name stands for no
+        // value (D2), `Dot(...)` binds the base's fields, a member on its name is no field of a value, and no text of D8 names it. Where no base
+        // has a field, the bare name is the one value (D8), and an argument or `()` keeps D8's errors; a type of a cycle of bases has no base
+        // and keeps its own fields
+        var shape = "data Shape(int A, int B)\ndata Dot : Shape\ndata Spot : Dot\n\n";
+        Clean(shape + "d = Dot(1, 2)\nprint(Spot(3, 4).B + d.A)");
+        var bare = Assert.Single(Check(shape + "print(Dot)").Diagnostics.Sorted);
+        Assert.Equal((ErrorIds.Syntax, 5, "`Dot` is a type, and no value stands here (D2; E4)"), (bare.Id, bare.Line, bare.Message));
+        var member = Assert.Single(Check(shape + "print(Spot.A)").Diagnostics.Sorted);
+        Assert.Equal((ErrorIds.UnknownName, 5, "`Spot` is a type and has no member `A` (D1, V10)"), (member.Id, member.Line, member.Message));
+        foreach (var (call, text) in new[]
+        {
+            ("Dot()", "the parameter `A` gets no argument and has no default (D11)"),
+            ("Dot(1)", "the parameter `B` gets no argument and has no default (D11)"),
+            ("Spot(1, 2, 3)", "the call passes 3 arguments to 2 parameters (D11)"),
+        })
+        {
+            var wrong = Assert.Single(Check(shape + $"print({call})").Diagnostics.Sorted);
+            Assert.Equal((ErrorIds.ArgumentMismatch, 5, text), (wrong.Id, wrong.Line, wrong.Message));
+        }
+
+        var tag = "data Tag\ndata Mark : Tag\n\n";
+        Clean(tag + "m = Mark\nprint(m == Mark)");
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 4)], Errors(tag + "print(Mark(1))"));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors(tag + "print(Mark())"));
+        Assert.Equal([(ErrorIds.BaseCycle, 2)], Errors("data A : B\ndata B : A\n\nprint(A == A)"));
+    }
+
+    [Fact]
     public void A_data_type_takes_the_data_type_among_its_bases_and_one_it_does_not_read_leaves_it_unread()
     {
         // D6 gives a data type one base, the data type among its bases wherever it stands, and a second one is `syntax` (E4); a type argument

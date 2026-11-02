@@ -99,8 +99,12 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     /// <summary>Set when the checker starts resolving the type, whatever the outcome, so that it is resolved once and a cycle of bases ends.</summary>
     public bool Resolved { get; set; }
 
-    /// <summary>Whether the declaration writes a primary constructor: <c>data Empty</c> has none and one value (D8); an empty <c>()</c> is <c>syntax</c> and counts as written.</summary>
-    public bool HasFields => Declaration.PrimaryConstructor is not null;
+    /// <summary>
+    /// Whether the type has a field, of its own or of its base (D7, D21), or writes a primary constructor: <c>data Empty</c> has none
+    /// and one value (D8), as has <c>data Leaf : Empty</c>; an empty <c>()</c> is <c>syntax</c> and counts as written. The fields are
+    /// the resolved ones, so it is read after the type is resolved.
+    /// </summary>
+    public bool HasFields => Declaration.PrimaryConstructor is not null || Fields.Count > 0;
 
     public int Line => Declaration.Line;
 

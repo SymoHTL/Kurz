@@ -1469,7 +1469,7 @@ round can ask about it by the rule's id.
   in a `void` function's block `type-mismatch`; a call with a `void` success where a value stands
   (O10), an argument at any parameter included, except as the body of a lambda under a function
   type whose result is not `void`, which F11 makes `type-mismatch` at the lambda; `Name()` on a
-  data type without fields, whose value D8 writes as the bare name; a second data type among the
+  data type without fields, its bases' fields included (D21), whose value D8 writes as the bare name; a second data type among the
   bases of a data type, which D6 gives one base; a count of type arguments the type or function
   does not have (T17, T19), in a type as in a call, one on a callee without type parameters
   included (`print<int>(1)`, a conversion, a function value, a list's `Add` and `Where`), where a
