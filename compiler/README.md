@@ -784,19 +784,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   that a key which changes it through an instance whose field holds it leaves its change standing and the
   sort of the list it read is dropped, as C#'s `List.Sort` sorts the list it read where a comparer assigns
   the field another list (X8, section 12, the owner, 2026-11-01, "Change stands, as C#", #39, comment
-  6562795140), the list counted as changed where the field holds another one than it read, whatever items
-  that one holds (X8, assumed), at one count for each call. Two forms are not Rust's and measured faster on
-  the same results: an item of 8 or 16 bytes made of parts is moved as one integer, and a pair whose key
-  `<` orders as an integer of 64 bits or fewer is compared as one integer of the key above the position. A
-  scratch or a block of pairs the system refuses ends the program with `allocation-failed` (M9);
-  `SortTests` holds `Sort` and `SortUnstable` to .NET's `OrderBy` over 300 generated lists of each of five
-  item types, `int`, `byte`, `double`, `string` and `int?`, the unstable sort of `double` items with `-0`
-  read as `0`, and `SortBy` of the `int` lists by an `int`, a `string`, a `double`, a `ulong`, a `byte`, an
-  enum and a `duration` key, the first 50 under the allocator that makes every freed block inaccessible
-  as well; over 65 lists of `double` items of eight shapes, runs that rise and that fall among them, of up
-  to 64,000 items and one of 1,100,000, and over lists of `decimal` items whose equal values print apart;
-  and the quicksorts of both sorts to lists McIlroy's adversary built against their pivots, which reach
-  the heapsort and the driftsort they fall back on;
+  6562795140), the list counted as changed where the field holds another one than it read, whatever
+  items that one holds (X8, section 12, the owner, 2026-11-02, #194, comment 6573115730), at one count
+  for each call. Two forms are not Rust's and measured faster on the same results: an item of 8 or 16
+  bytes made of parts is moved as one integer, and a pair whose key `<` orders as an integer of 64 bits
+  or fewer is compared as one integer of the key above the position. A scratch or a block of pairs the
+  system refuses ends the program with `allocation-failed` (M9); `SortTests` holds `Sort` and
+  `SortUnstable` to .NET's `OrderBy` over 300 generated lists of each of five item types, `int`, `byte`,
+  `double`, `string` and `int?`, the unstable sort of `double` items with `-0` read as `0`, and `SortBy`
+  of the `int` lists by an `int`, a `string`, a `double`, a `ulong`, a `byte`, an enum and a `duration`
+  key, the first 50 under the allocator that makes every freed block inaccessible as well; over 65 lists
+  of `double` items of eight shapes, runs that rise and that fall among them, of up to 64,000 items and
+  one of 1,100,000, and over lists of `decimal` items whose equal values print apart; and the quicksorts
+  of both sorts to lists McIlroy's adversary built against their pivots, which reach the heapsort and
+  the driftsort they fall back on;
 - list literals (M11): `[1, 2, 3]` and `[]`, read as a call of one function `List<T> Of<T>(T a, T b, T c)`, so
   that the list type where one stands, a parameter's among them, reaches the items as a parameter's type
   reaches a call's literals and lambdas, and where none stands the items infer `T` as T27 infers it (section
