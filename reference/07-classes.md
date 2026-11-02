@@ -105,6 +105,14 @@ print(a == b)
 print(a == a)
 ```
 
+Case: [classes/equality-content-map.kz](../corpus/classes/equality-content-map.kz)
+```kurz
+class Tally(string Name, Map<string, int> Counts)
+
+t = Tally("a", Map<string, int>())
+print(t == t)
+```
+
 ### K13 (decided, §4) Equality across inheritance
 
 What D15 says for `data` holds for classes: instances of different classes are never equal,

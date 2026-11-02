@@ -3350,7 +3350,12 @@ public sealed class CheckerTests
         Clean("class User(int Id, mut string Name, Map<string, int> Seen) equal by Id\n\nmut m = Map<User, int>()\nm[User(1, \"a\", Map<string, int>())] = 1\nprint(m.Count)");
         Clean("class Tag(mut string Name, mut Map<string, int> Seen) equal by Name\n\nprint(Tag(\"a\", Map<string, int>()) == Tag(\"a\", Map<string, int>()))");
         Clean("class Box(mut Map<string, int> Seen)\n\nb = Box(Map<string, int>())\nprint(b == b)");
-        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("class C(Map<string, int> M)\n\nc = C(Map<string, int>())\nprint(c == c)"));
+        var (contentWithMap, _) = Check("class C(Map<string, int> M)\n\nc = C(Map<string, int>())\nprint(c == c)");
+        Assert.Equal([(ErrorIds.TypeMismatch, "4: `==` takes no `C` and `C`: its field `M`: `==` between two `Map<string, int>` is `type-mismatch` (T18, K4, D3, M9)")],
+            contentWithMap.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
+        var (dataWithMap, _) = Check("data Box(Map<string, int> M)\n\na = Box(Map<string, int>())\nprint(a == a)"); // the control: a data value names no K4
+        Assert.Equal([(ErrorIds.TypeMismatch, "4: `==` takes no `Box` and `Box`: its field `M`: `==` between two `Map<string, int>` is `type-mismatch` (T18, D3, M9)")],
+            dataWithMap.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
         // K15: a name that is no field; K5: a method named `Equals` or `GetHashCode`, at the method; K12: the key type itself
         Assert.Equal([(ErrorIds.EqualByUnknown, 1)], Errors("class Key(int Id) equal by Id, Code\n\nprint(Key(1) == Key(1))"));
         Assert.Equal([(ErrorIds.EqualsMethod, 2), (ErrorIds.EqualsMethod, 3)], Errors("class User(int Id) {\n    pub bool Equals(User other) => Id == other.Id\n    pub int GetHashCode() => Id\n}\n\nprint(User(1) == User(1))"));

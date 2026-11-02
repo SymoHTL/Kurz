@@ -166,14 +166,15 @@ No case: it takes several files, and a case of the corpus is a single file.
 
 The type of a function value is written with an arrow: the parameter types between brackets, `=>`,
 and the result type, as in `(int) => bool`. A lambda reads the variables around it and cannot assign
-them: assigning one is the compile error `capture-assign`. So is every change of a captured
-variable: an assignment into a path from it (M4), a `mut` method called on it or on a path from it
-(M5), and passing it as a `mut` argument (M7); the lambda holds a copy (F15), and a change to the
-copy would be lost. *(proposed: the record speaks of assigning)* A class instance is no part of the
-copy: the lambda holds a reference to the same instance, which changes through every reference
-(K2), so it may change what the instance holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
+them: assigning one is the compile error `capture-assign`. The lambda holds a copy of each (F15),
+and a class instance is no part of the copy: the lambda holds a reference to the same instance. So
+every change of the copy is `capture-assign` too, since it would be lost: an assignment into a path
+from a captured variable that reaches no instance (M4), a `mut` method called on the variable or on
+such a path (M5), and passing the variable or such a path as a `mut` argument (M7). *(proposed: the
+record speaks of assigning)* An instance changes through every reference (K2), so the lambda may
+change what an instance it captured holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
 or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
-value `d` stay `capture-assign` (§4, the owner, 2026-11-01, "Both allowed", against a method call
+value `d` stay `capture-assign` (§4, the owner, 2026-11-01, #110, comment 6562487754, "Both allowed", against a method call
 alone and against neither). It may also write into the list or the map that a `mut` field of the
 instance holds, `() => { b.Xs[0] = 2 }` and `() => b.Xs.Add(3)`, as M5's reading of K2 takes the same
 write outside a lambda (§4, the owner, 2026-11-02, #110, comment 6573113786), and pass a `mut` field of the
@@ -236,6 +237,27 @@ print(c.Count)
 reset = () => { c.Count = 5 }
 reset()
 print(c.Count)
+```
+
+Case: [functions/capture-writes-field.kz](../corpus/functions/capture-writes-field.kz)
+```kurz
+void Fill(mut List<int> xs) {
+    xs.Add(xs.Count)
+}
+
+class Box(mut List<int> Items) {
+    pub () => void Filler() => () => Fill(mut Items)
+}
+
+b = Box([1, 0])
+first = () => { b.Items[0] = 2 }
+more = () => b.Items.Add(3)
+first()
+more()
+print(b.Items)
+fill = b.Filler()
+fill()
+print(b.Items.Count)
 ```
 
 Case: [functions/function-type-void.kz](../corpus/functions/function-type-void.kz)

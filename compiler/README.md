@@ -1293,8 +1293,9 @@ ask about it.
 - K4 with K1: a class with no field compares every two of its instances equal, as a `data` type with no
   field does, since none of its fields is `mut` or `weak` *(assumed)*; and `==` and the hash of a chain of
   instances recurse, a call per link, so that a chain long enough ends the program with the stack's
-  overflow, as Rust's derived `PartialEq` and `Hash` on an `Rc` chain do *(assumed)*. Pinned by the
-  equality program of `ListTests`.
+  overflow, as Rust's derived `PartialEq` and `Hash` on an `Rc` chain do *(assumed)*. The equality
+  program of `ListTests` pins the class with no field and a chain of two links; no test builds a chain
+  long enough to end the program.
 
 ## What the compiler says about a program
 
@@ -1996,7 +1997,8 @@ round can ask about it by the rule's id.
   evaluates the right side of an assignment first; a lambda that captured the instance, or a `data`
   value that holds it, assigns the field and writes into what the field holds too, by the field's
   name inside a method as well, while an assignment of the captured variable itself, or into a
-  `data` value's path, stays `capture-assign` (F11 with K2: the owner, 2026-11-01, "Both allowed";
+  `data` value's path, stays `capture-assign` (F11 with K2: the owner, 2026-11-01, #110, comment
+  6562487754, "Both allowed";
   through a `data` value, assumed; a write into what the field holds, `b.Xs[0] = 2` and
   `b.Xs.Add(2)`, as M5's proposed reading of K2 for paths takes it outside a lambda: the owner,
   2026-11-02, #110, comment 6573113786).

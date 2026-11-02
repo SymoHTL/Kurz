@@ -1442,7 +1442,8 @@ public sealed partial class Checker
             switch (refused)
             {
                 case (true, var why):
-                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} (T18, D3, M9)");
+                    var rules = left.Type is ClassType ? "T18, K4, D3, M9" : "T18, D3, M9"; // K4: a class compares each field as its type does
+                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} ({rules})");
                     return new Typed(Types.Bool);
                 case (false, var why):
                     NotSupported(b.Line, $"`{op}` on {Types.A(left.Type)}: {why} (D3, M9)");
