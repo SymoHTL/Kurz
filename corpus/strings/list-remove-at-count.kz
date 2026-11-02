@@ -1,0 +1,8 @@
+// expect: throws index-out-of-range at 8
+// | 2
+// rules: X11
+
+mut xs = [1, 2]
+print(xs.RemoveAt(1))
+// the last item is at `Count - 1`; `Count` is outside the list
+print(xs.RemoveAt(1))
