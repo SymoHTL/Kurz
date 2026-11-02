@@ -43,6 +43,7 @@ extern "C" {
     int poll(void* fds, ulong count, int timeout)
     int bind(int fd, void* address, int length)
     int listen(int fd, int backlog)
+    int shutdown(int fd, int how)
     int getsockname(int fd, void* address, int* length)
     int connect(int fd, void* address, int length)
     int accept4(int fd, void* address, int* length, int options)
@@ -2295,6 +2296,18 @@ pub long SetTimeout(int fd, int option, long nanoseconds, bool bounded) {
         *Ptr<long>(held + 128) = seconds
         *Ptr<long>(held + 136) = micros
         result = Checked(long(setsockopt(fd, 1, option, Ptr<void>(held + 128), 16)))
+    }
+
+    return result
+}
+
+// The writes of the socket `fd` ended, by `shutdown` with `SHUT_WR` (1), as Rust's `shutdown(Shutdown::Write)`
+// ends them (S9): the peer's read then gives 0, and the socket still reads. 0, or the failure, which the system
+// gives as it is: none for a second call, `ENOTCONN` (107) where the peer reset the connection.
+pub long ShutdownWrite(int fd) {
+    mut long result = 0
+    raw {
+        result = Checked(long(shutdown(fd, 1)))
     }
 
     return result

@@ -31,7 +31,8 @@ cannot be fetched, since then nothing was compared.
    methods of `char` and `str` changes over time, as the standard library takes each new version,
    and that "This is *not* considered to be
    a breaking change". The tool refuses a mapping that leaves its plane, a mapping past the first
-   two planes and a run that spans more than 256 code points, the forms its tables do not hold:
+   two planes, a delta of 32768, the mark of a mapping to several code points, and more distinct
+   blocks of 32 code points than an index of one byte numbers, the forms its tables do not hold:
    such a refusal is a change of the tables' form, and a question for a design round before it is
    a line of code.
 5. The suite's `CaseTests` reads the new tables on its own, and the record's sizes (section 12)
@@ -51,10 +52,16 @@ hash it pins, whatever unicode.org serves.
 
 The tool takes the mappings as Rust's generator does: UnicodeData.txt's simple mappings, then
 SpecialCasing.txt's mappings without a condition over them, a mapping to the code point itself
-left out, and ASCII left to the standard library's own letters. It packs the mappings to one code
-point into runs in Rust's two passes, consecutive code points with one delta, then lone code points
-two apart. On 2026-10-31, for 17.0.0, the runs and the mappings to several code points it wrote
-were those of Rust's `LOWERCASE_LUT` and `UPPERCASE_LUT` on its stable branch entry for entry,
-184 and 197 runs and 1 and 102 mappings, with Rust's deltas read modulo 65536, as its `i16` holds
-them. The two properties the final sigma reads are DerivedCoreProperties.txt's Cased and
+left out, and ASCII left to the standard library's own letters. On 2026-10-31, for 17.0.0, it
+packed the mappings to one code point into runs in Rust's two passes, consecutive code points with
+one delta, then lone code points two apart, and the runs and the mappings to several code points it
+wrote were those of Rust's `LOWERCASE_LUT` and `UPPERCASE_LUT` on its stable branch entry for
+entry, 184 and 197 runs and 1 and 102 mappings, with Rust's deltas read modulo 65536, as its `i16`
+holds them. Since issue 157 (2026-11-01, under the owner's general answer "Allow, faster wins") it
+writes those mappings as levels, as .NET's `CharUnicodeInfo` holds its own: the code points of the
+first two planes in blocks of 32, an index of one byte for each block and the 32 deltas of each
+distinct block, 16 bits each, 69 blocks for lowering and 82 for raising, with 32768 marking a
+mapping to several code points. Before the runs were removed, the standard library read the levels
+while `CaseTests` still held every code point of both directions to the runs, and passed; the tool
+reads the levels back and refuses them where they do not give the mappings they were made from. The two properties the final sigma reads are DerivedCoreProperties.txt's Cased and
 Case_Ignorable, ASCII among them, the properties Rust's `is_cased` and `is_case_ignorable` read.
