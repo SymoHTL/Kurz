@@ -3099,6 +3099,24 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    [Fact]
+    public void A_mut_field_of_the_instance_passed_as_mut_is_written_in_its_place()
+    {
+        // M7 with K7: a `mut` field named alone in a method and passed as `mut` is the field's own place, so the callee's write is the
+        // field's, and the block the list field held before is let go of once, which the fence holds
+        const string box = "class Box(mut int N, mut List<int> Items) {\n    pub void Fill() {\n        Bump(mut N)\n        Grow(mut Items, N)\n        Grow(mut Items, N)\n    }\n\n    pub string Text() => \"{N} {Items}\"\n}\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nvoid Grow(mut List<int> xs, int n) {\n    xs = [n]\n    for i in 0..<n {\n        xs.Add(i)\n    }\n}\n\nb = Box(1, [7])\nb.Fill()\nprint(b)\n";
+        Ran(BuildAndRun(box, Fenced, "class-mut-field-argument-fenced"), 0, ["2 [2, 0, 1]"], "");
+    }
+
+    [Fact]
+    public void The_first_class_a_program_releases_may_hold_a_field_of_another_class()
+    {
+        // the release of `Outer`, the first one built, builds `Inner`'s for its field before `Outer` is in the emitter's list of
+        // released classes: the flag of a release at work is declared once all the same, with the function that works the lists off
+        const string outer = "class Inner(int N)\n\nclass Outer(Inner? I, int N)\n\nvoid Show() {\n    o = Outer(null, 1)\n    print(o.N)\n}\n\nShow()\n";
+        Ran(BuildAndRun(outer, toolchain.Runtime, "class-first-released-holds-a-class"), 0, ["1"], "");
+    }
+
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
     // all held
     private const string LargeRounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";
@@ -3315,25 +3333,37 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(decode, toolchain.Runtime, "decode-granted"), 0, ["[0]"], ""); // the positive control
     }
 
+    /// <summary>The runtime of this machine's target whose `Allocate` refuses <paramref name="least"/> bytes and more, in its text, while the lists' own blocks do not go through it; the first `print` asks it for 4096 bytes.</summary>
+    private static CheckedRuntime RefusingFrom(int least) => Edited(("runtime/common/runtime.kz", "    byte* p = std.Allocate(size)\n", $"    mut byte* p = null\n    if size < {least} {{\n        p = std.Allocate(size)\n    }}\n\n"));
+
     [Fact]
     public void A_sort_whose_buffer_or_keys_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
-        // M9, X8: the runtime's `Allocate` refusing 1000 to 4095 bytes (<see cref="RefusingSmallBlocks"/>): a stable sort of 300 `long`
-        // items asks for a buffer of half of them, 150 of 8 bytes, and one of 301 items for half of them rounded up, 151 of 8 bytes, as
-        // Rust's stable sort asks for at the least; `SortBy` of 100 items with `long` keys for the pairs of a key and a position, 100 of
-        // 16 bytes; an unstable sort asks for nothing
-        var refusing = RefusingSmallBlocks;
-        const string list = "mut xs = List<long>()\nfor i in 0..<300 {\n    xs.Add(long(299 - i))\n}\n\n";
-        const string sort = list + "xs.Sort()\nprint(xs[0])\n";
-        Ran(BuildAndRun(sort, refusing, "sort-refused"), 1, [], "error: allocation-failed (1200 bytes)\n");
-        Ran(BuildAndRun(sort, toolchain.Runtime, "sort-granted"), 0, ["0"], ""); // the positive control
-        const string odd = "mut xs = List<long>()\nfor i in 0..<301 {\n    xs.Add(long(300 - i))\n}\n\nxs.Sort()\nprint(xs[0])\n";
-        Ran(BuildAndRun(odd, refusing, "sort-refused-odd"), 1, [], "error: allocation-failed (1208 bytes)\n");
-        Ran(BuildAndRun(odd, toolchain.Runtime, "sort-granted-odd"), 0, ["0"], "");
-        const string keys = list + "mut ys = xs[0..<100]\nys.SortBy(y => y * 2)\nprint(ys[0])\n";
-        Ran(BuildAndRun(keys, refusing, "keys-refused"), 1, [], "error: allocation-failed (1600 bytes)\n");
-        Ran(BuildAndRun(keys, toolchain.Runtime, "keys-granted"), 0, ["200"], "");
-        Ran(BuildAndRun(list + "xs.SortUnstable()\nprint(xs[0])\n", refusing, "unstable-granted"), 0, ["0"], "");
+        // M9, X8: the runtime's `Allocate` refusing more than 4096 bytes (<see cref="RefusingFrom"/>), and the sizes Rust's stable sort
+        // asks for: a stable sort of 512 `long` items takes its scratch of every item from 4096 bytes on the stack and asks for nothing,
+        // which a runtime that refuses 4096 bytes shows with a program that prints nothing; one of 513 asks for every item, 4104 bytes; one
+        // of 1,500,000 for the 8,000,000 bytes that hold every item up to them, and one of 2,200,000 for half of them, 1,100,000 of 8 bytes;
+        // `SortBy` of 600 items with `int` keys asks for the pairs of a key and a 4-byte position, 600 of 8 bytes, and with `long` keys for
+        // pairs of a key and an 8-byte position, which a 4-byte one does not make smaller, 600 of 16 bytes; an unstable sort asks for nothing
+        var refusing = RefusingFrom(4097);
+        static string Longs(int count, string then) => $"mut xs = List<long>()\nfor i in 0..<{count} {{\n    xs.Add(long({count - 1} - i))\n}}\n\n{then}";
+        const string sort = "xs.Sort()\nprint(xs[0])\n";
+        Ran(BuildAndRun(Longs(512, "xs.Sort()\n"), RefusingFrom(4096), "sort-on-stack"), 0, [], "");
+        Ran(BuildAndRun(Longs(512, sort), toolchain.Runtime, "sort-on-stack-granted"), 0, ["0"], "");
+        Ran(BuildAndRun(Longs(513, "xs.Sort()\n"), RefusingFrom(4096), "sort-past-stack"), 1, [], "error: allocation-failed (4104 bytes)\n"); // the runtime refuses
+        foreach (var (count, bytes) in new[] { (513, 4104), (1_500_000, 8_000_000), (2_200_000, 8_800_000) })
+        {
+            Ran(BuildAndRun(Longs(count, sort), refusing, $"sort-refused-{count}"), 1, [], $"error: allocation-failed ({bytes} bytes)\n");
+            Ran(BuildAndRun(Longs(count, sort), toolchain.Runtime, $"sort-granted-{count}"), 0, ["0"], ""); // the positive control
+        }
+
+        const string ints = "mut ys = List<int>()\nfor i in 0..<600 {\n    ys.Add(599 - i)\n}\n\nys.SortBy(y => y * 2)\nprint(ys[0])\n";
+        Ran(BuildAndRun(ints, refusing, "int-keys-refused"), 1, [], "error: allocation-failed (4800 bytes)\n");
+        Ran(BuildAndRun(ints, toolchain.Runtime, "int-keys-granted"), 0, ["0"], "");
+        var longs = Longs(600, "xs.SortBy(x => x * 2L)\nprint(xs[0])\n");
+        Ran(BuildAndRun(longs, refusing, "long-keys-refused"), 1, [], "error: allocation-failed (9600 bytes)\n");
+        Ran(BuildAndRun(longs, toolchain.Runtime, "long-keys-granted"), 0, ["0"], "");
+        Ran(BuildAndRun(Longs(2_200_000, "xs.SortUnstable()\nprint(xs[0])\n"), refusing, "unstable-granted"), 0, ["0"], "");
     }
 
     [Fact]
