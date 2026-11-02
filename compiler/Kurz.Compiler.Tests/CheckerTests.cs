@@ -866,8 +866,10 @@ public sealed class CheckerTests
         Clean(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Fill(mut Items)\n    }\n}\n\nBox([]).Grow()");
         var (fixedField, _) = Check(box + "class Box(List<int> Items) {\n    pub void Grow() {\n        Fill(mut Items)\n    }\n}\n\nBox([]).Grow()");
         Assert.Equal(["11: `Items` is a field without `mut` and cannot be passed as `mut` (M7, K1)"], fixedField.Sorted.Select(d => $"{d.Line}: {d.Message}"));
-        Assert.Equal([(ErrorIds.MutAtCall, 11)], Errors(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Two(mut Items, mut Items)\n    }\n}\n\nBox([]).Grow()"));
-        Assert.Equal([(ErrorIds.CaptureAssign, 11)], Errors(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        f = () => Fill(mut Items)\n        f()\n    }\n}\n\nBox([]).Grow()")); // F11: a lambda's `this`
+        var (twice, _) = Check(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Two(mut Items, mut Items)\n    }\n}\n\nBox([]).Grow()");
+        Assert.Equal([(ErrorIds.MutAtCall, "11: `Items` is passed as `mut` twice (M7)")], twice.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
+        var (inLambda, _) = Check(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        f = () => Fill(mut Items)\n        f()\n    }\n}\n\nBox([]).Grow()"); // F11: a lambda's `this`
+        Assert.Equal([(ErrorIds.CaptureAssign, "11: a lambda reads `this` and cannot pass its field `Items` as `mut` (F11)")], inLambda.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
     }
 
     [Fact]
