@@ -307,7 +307,8 @@ literal below, so that `void Wide<T>(T | List<T> x)` with a `List<int>` gives `T
 `int` (§5, the owner, 2026-11-01, "Same shape first"). A union with a type parameter that names no case
 of the call beyond the success unwraps the call, and a literal of a type the union does not name binds
 the type parameter to its own type, as at a bare type parameter (T27), so that `F(Find(1))` and `F(5)` with `void F<T>(T | string x)`
-both give `T` = `int` (§5, the owner, 2026-11-01, "Bind T = int in both"). A list literal of calls is
+both give `T` = `int` (§5, the owner, 2026-11-01, "Bind T = int in both", asked of `F(Find(1))` and
+`F(5)` alone). A list literal of calls is
 read as such a call is: of `Show(List<int> xs)` and `Show(List<int | NotFound> xs)`, `Show([Find(1)])`
 runs the one whose item type keeps the cases (§5, the owner, 2026-11-01, "The union one"). The shapes are
 the four that the inference reads inside a type, and no other: a list, a map, a `data` type of the same
