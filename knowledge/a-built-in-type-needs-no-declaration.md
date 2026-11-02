@@ -30,3 +30,9 @@ declares the type, since no line of the file does (`corpus/types/invalid-utf8-re
 `corpus/hashing/hex-kind-redeclared.kz`). A case or a sample uses such a type by its name alone; a
 reader who takes one for undeclared looks the name up in the checker's list, which is the one
 definition: this table is a copy of the day it was written.
+
+The types of `std/` that every file sees are a second list, `Prelude` in the same file (W1):
+`HttpKind` and `HttpError` on 2026-11-02, each declared `pub` in `std/std.kz`, which a program sees
+as `std/` declares them, and whose own declaration in a file is `redeclared` with a message that
+names W1 (`corpus/http/http-error-redeclared.kz`). A name in neither list that a case uses with no
+declaration is undeclared.
