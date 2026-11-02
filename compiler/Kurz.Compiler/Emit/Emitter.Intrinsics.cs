@@ -458,6 +458,24 @@ public sealed partial class Emitter
                 return fn.Value($"bitcast {Ir(VectorOf(intrinsic))} {a[0]} to {Ir(result)}");
             case "add":
                 return fn.Value($"{(Types.IsFloating(((VectorType)result).Lane) ? "fadd" : "add")} {Ir(result)} {a[0]}, {a[1]}");
+            case "cmpeq":
+                {
+                    // every lane all ones where the two are equal, else zero
+                    var vector = (VectorType)result;
+                    var equal = fn.Value($"icmp eq {Ir(vector)} {a[0]}, {a[1]}");
+                    return fn.Value($"sext <{Number(vector.Count)} x i1> {equal} to {Ir(vector)}");
+                }
+
+            case "and":
+                return fn.Value($"and {Ir(result)} {a[0]}, {a[1]}");
+            case "movemask":
+                {
+                    // bit i the top bit of byte i, the 16 bits above them zero
+                    var vector = (VectorType)first!;
+                    var tops = fn.Value($"icmp slt {Ir(vector)} {a[0]}, zeroinitializer");
+                    return fn.Value($"zext i16 {fn.Value($"bitcast <16 x i1> {tops} to i16")} to i32");
+                }
+
             case "load":
                 return fn.Value($"load {Ir(result)}, ptr {a[0]}, align 1");
             case "store":

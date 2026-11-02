@@ -554,7 +554,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the standard library's `Find`, for one byte two words of 8 bytes at a time, the first two read at any
   address and the rest from an address that is a multiple of 8, with the place taken from the mask of Rust's
   `contains_zero_byte` test, and Crochemore and Perrin's two-way search for more, as
-  Rust's `str::find`, and its `BytesAt` for the start and the end (X1);
+  Rust's `str::find`, but for a needle of 2 to 32 bytes where the CPU has SSE2, which takes
+  Rust's `simd_contains` (R18), and its `BytesAt` for the start and the end (X1);
   `s.Trim()`, `s.TrimStart()`, `s.TrimEnd()`, their ASCII forms, `s.Trim(c)`, `s.TrimStart(c)` and `s.TrimEnd(c)`,
   which take Unicode's White_Space,
   ASCII's five whitespace characters or the `char`'s UTF-8 bytes from the ends, through the standard library's
@@ -721,8 +722,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
   lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
   `IndexOf(item)` and `IndexOf(value)` of a run, an `int?`, which compare items as `==` compares two
-  items of a list, a list of one-byte items through the standard library's two-way search, as a string,
-  and a run of other items at each position in turn, as Rust's `windows`; `AddRange(collection)`, which
+  items of a list, a list of one-byte items through the standard library's `Find`, as a string, a list
+  of 64 bytes or more of an integer type of 2, 4 or 8 bytes or of `char`s through its `FindShort`,
+  `FindInt` and `FindLong`, 16 bytes at a time where the CPU has SSE2 (R18), and a run of other items at
+  each position in turn, as Rust's `windows`; `AddRange(collection)`, which
   reads its argument first and holds it with a count of its own while the list makes room for all of its
   items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block, or grows it
   where only the list and the argument hold it, as Rust's `extend_from_within`, and appends
@@ -1141,7 +1144,10 @@ of one value or of every lane, `GetElement`, whose index outside the lanes raise
 where C# throws, and the `As` conversions, which keep the bits; and the functions of `X86.Sse2`,
 `X86.Ssse3`, `X86.Sse41`, `X86.Aes` and `X86.Sha` that R18's cases and the standard library call, each
 as LLVM's instruction or intrinsic for C#'s (`Shuffle` of `X86.Sse2` a `shufflevector`, of `X86.Ssse3`
-`llvm.x86.ssse3.pshuf.b.128`, `Sha256TwoRounds` `llvm.x86.sha256rnds2`), an immediate as the
+`llvm.x86.ssse3.pshuf.b.128`, `Sha256TwoRounds` `llvm.x86.sha256rnds2`; `CompareEqual` of `X86.Sse2`, of
+lanes of 1, 2 and 4 bytes, an `icmp eq` whose lanes are widened to all ones, `And` an `and`, and
+`MoveMask` of bytes the top bits of the lanes as an `i16`, which LLVM turns into `pmovmskb`, each held
+to .NET's result by `IntrinsicTests`), an immediate as the
 instruction reads it (`Extract` its low bits, `AlignRight` zeros past 31 bytes). A test of a class's
 `IsSupported` is a constant where the CPU of the build answers it: `true` for a class the CPU has,
 `X86.Sse2` on every x86-64 CPU and more with `--cpu`, `false` for a class under `Arm`. Otherwise it
