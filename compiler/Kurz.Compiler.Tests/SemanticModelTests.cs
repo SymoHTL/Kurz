@@ -608,6 +608,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case RawBlock r:
                     Block(r.Body);
                     break;
+                case ConstAssertStatement:
+                    break; // T35: checked while the program compiles, and nothing of it is emitted
                 case AsmStatement a:
                     foreach (var o in a.Operands)
                     {

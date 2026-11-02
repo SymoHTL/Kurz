@@ -1,0 +1,25 @@
+// expect: output
+// | X
+// | Y
+// | a
+// rules: T35
+
+enum Mode { Plain, Loud }
+data Point(int X, int Y)
+
+void Names<T>(T value) {
+    const assert(T.Kind == TypeKind.Data, "{T} is no data type")
+    for f in T.Fields {
+        const assert(f.Name != "Id", "{T} has a field {f.Name}")
+        print(f.Name)
+    }
+}
+
+void Say<const Mode M>(string text) {
+    const assert(M == Mode.Plain, "{M} is not plain")
+    print(text)
+}
+
+const assert(1 + 1 == 2, "one and one")
+Names(Point(1, 2))
+Say<Mode.Plain>("a")

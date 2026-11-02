@@ -863,6 +863,30 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("const assert(T.Kind == TypeKind.Data, \"{T} is no data type\")", "(const-assert (== (. T Kind) (. TypeKind Data)) (string T \" is no data type\"))")]
+    [InlineData("const assert(\n    true,\n    \"a\"\n)", "(const-assert true (string \"a\"))")]
+    [InlineData("assert = 1", "(assign-or-declare assert (int 1))")]
+    [InlineData("assert(true)", "(call assert true)")]
+    [InlineData("const assert = 1", "(declare const assert (int 1))")]
+    public void A_const_assert_is_a_statement_of_its_own(string program, string tree)
+    {
+        // T35: `const assert(condition, text)` at the start of a statement, with newlines inside its parentheses; `assert` is a name
+        // elsewhere, and `const assert` with no `(` after it is a declaration whose type is named `const` (L18)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("const assert(true, 5)")]
+    [InlineData("const assert(true, n)")]
+    [InlineData("const assert(true)")]
+    [InlineData("const assert(true, \"a\", \"b\")")]
+    public void A_const_assert_takes_a_condition_and_a_string_literal(string program)
+    {
+        // T35: the text is a string literal, as Rust's `assert!` takes its message as one
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program).Distinct());
+    }
+
+    [Theory]
     [InlineData("data User(int Id, string Name)", "(data User(int Id, string Name))")]
     [InlineData("data Admin(int Level) : User", "(data Admin(int Level) : User)")]
     [InlineData("data Empty", "(data Empty)")]

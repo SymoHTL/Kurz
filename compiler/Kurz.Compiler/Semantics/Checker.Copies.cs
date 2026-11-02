@@ -141,7 +141,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// The generic functions whose own text reads their type: a member of <see cref="IsTypeMember"/> on the name of one of their type
-    /// parameters, or a type parameter that holds a constant (T34), which each copy binds to its value.
+    /// parameters, a type parameter that holds a constant (T34), which each copy binds to its value, or a <c>const assert</c>, which
+    /// each copy checks (T35).
     /// </summary>
     private void FindReaders()
     {
@@ -154,7 +155,7 @@ public sealed partial class Checker
 
             var names = f.TypeParameters.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
             var reads = f.TypeParameters.Any(p => p.Constant is EnumType); // T34: its body reads the constant a copy binds
-            SyntaxCopy.Walk(d, e => reads |= e is MemberAccess { Target: NameExpression n, Member: var m } && names.Contains(n.Name) && IsTypeMember(m));
+            SyntaxCopy.Walk(d, e => reads |= e is MemberAccess { Target: NameExpression n, Member: var m } && names.Contains(n.Name) && IsTypeMember(m), s => reads |= s is ConstAssertStatement);
             if (reads)
             {
                 readers.Add(f);

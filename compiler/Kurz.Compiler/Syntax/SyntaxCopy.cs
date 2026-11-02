@@ -19,13 +19,16 @@ public static class SyntaxCopy
     /// </summary>
     public static Block Copy(Block b, Func<Expression, Func<Expression, Expression>, Expression?> rewrite) => (Block)new Copier(null, rewrite).Statement(b);
 
-    /// <summary>Shows <paramref name="visit"/> every expression of the declaration, its parameters' default values among them.</summary>
-    public static void Walk(FunctionDeclaration d, Action<Expression> visit) => new Copier(visit).Function(d);
+    /// <summary>
+    /// Shows <paramref name="visit"/> every expression of the declaration, its parameters' default values among them, and
+    /// <paramref name="statements"/> every statement of its body and of its lambdas' bodies.
+    /// </summary>
+    public static void Walk(FunctionDeclaration d, Action<Expression> visit, Action<Statement>? statements = null) => new Copier(visit, statements: statements).Function(d);
 
     /// <summary>Shows <paramref name="visit"/> every expression of a statement.</summary>
     public static void Walk(Statement s, Action<Expression> visit) => new Copier(visit).Statement(s);
 
-    private sealed class Copier(Action<Expression>? visit, Func<Expression, Func<Expression, Expression>, Expression?>? rewrite = null)
+    private sealed class Copier(Action<Expression>? visit, Func<Expression, Func<Expression, Expression>, Expression?>? rewrite = null, Action<Statement>? statements = null)
     {
         public FunctionDeclaration Function(FunctionDeclaration d) => d with
         {
@@ -112,7 +115,7 @@ public static class SyntaxCopy
 
         private Block Block(Block b) => b with { Statements = b.Statements.Select(Statement).ToList() };
 
-        public Statement Statement(Statement s) => s switch
+        public Statement Statement(Statement s) => Seen(s) switch
         {
             Block b => Block(b),
             VariableDeclaration v => v with { Type = OptionalType(v.Type), Value = Optional(v.Value) },
@@ -127,6 +130,7 @@ public static class SyntaxCopy
             ReturnStatement r => r with { Value = Optional(r.Value) },
             ThrowStatement t => t with { Value = Optional(t.Value) },
             RawBlock r => r with { Body = Block(r.Body) },
+            ConstAssertStatement c => c with { Condition = Expression(c.Condition), Text = (StringLiteral)Expression(c.Text) },
             AsmStatement a => a with
             {
                 Operands = a.Operands.Select(o => o with { Value = Optional(o.Value), Output = Optional(o.Output), Body = o.Body is null ? null : Block(o.Body) }).ToList(),
@@ -134,5 +138,11 @@ public static class SyntaxCopy
             FunctionDeclaration or TypeDeclaration or ExternBlock or UseStatement or FieldDeclaration or ConstructorDeclaration => s, // not supported in a body (F1)
             _ => throw new InvalidOperationException($"the statement `{s.GetType().Name}` has no copy"),
         };
+
+        private Statement Seen(Statement s)
+        {
+            statements?.Invoke(s);
+            return s;
+        }
     }
 }

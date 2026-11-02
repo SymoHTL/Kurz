@@ -29,6 +29,7 @@ internal static class SyntaxPrinter
         ReturnStatement r => r.Value is null ? "(return)" : $"(return {Print(r.Value)})",
         ThrowStatement t => t.Value is null ? "(throw)" : $"(throw {Print(t.Value)})",
         RawBlock r => $"(raw {Print(r.Body)})",
+        ConstAssertStatement c => $"(const-assert {Print(c.Condition)} {Print(c.Text)})",
         UseStatement u => $"(use {u.Target})",
         AsmStatement a => $"(asm {string.Join(" ", a.Templates.Select(x => Quote(x.Text)))}{string.Concat(a.Operands.Select(o => " " + Operand(o)))})",
         ExternBlock e => $"(extern{(e.Library is null ? "" : " in " + Quote(e.Library))} {{{string.Join(" ", e.Functions.Select(CFunction))}}})",

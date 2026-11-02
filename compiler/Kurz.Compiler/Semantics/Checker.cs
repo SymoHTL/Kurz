@@ -1730,6 +1730,9 @@ public sealed partial class Checker
             case AsmStatement a:
                 CheckAsm(a, naked: false);
                 return Flow.Completes;
+            case ConstAssertStatement c:
+                CheckConstAssert(c); // T35: checked while the program compiles
+                return Flow.Completes;
             case FunctionDeclaration f:
                 if (blockDepth > 0)
                 {

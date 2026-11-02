@@ -1,0 +1,11 @@
+// expect: error const-assert-failed at 11
+// rules: T35
+
+data Point(int X, int Y)
+
+void Need<T>(T value) {
+    const assert(T.Kind == TypeKind.Data, "{T} is no data type")
+}
+
+Need(Point(1, 2))
+Need(1)

@@ -161,6 +161,7 @@ public static class ErrorIds
     public const string DefaultNotConstant = "default-not-constant";
     public const string BaseCycle = "base-cycle";
     public const string KindNotRead = "kind-not-read";
+    public const string ConstAssertFailed = "const-assert-failed";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";
