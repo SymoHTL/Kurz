@@ -1749,7 +1749,8 @@ round can ask about it by the rule's id.
   name inside a method as well, while an assignment of the captured variable itself, or into a
   `data` value's path, stays `capture-assign` (F11 with K2: the owner, 2026-11-01, "Both allowed";
   through a `data` value, assumed; a write into what the field holds, `b.Xs[0] = 2` and
-  `b.Xs.Add(2)`, assumed, as M5's proposed reading of K2 for paths takes it outside a lambda).
+  `b.Xs.Add(2)`, as M5's proposed reading of K2 for paths takes it outside a lambda: the owner,
+  2026-11-02, #110, comment 6573113786).
 - N9: a path through a `mut` field of an instance is narrowed up to the next call or assignment of
   any kind, `print` and an interpolation that holds an instance among the calls (A5), so a lambda,
   which runs after them, knows nothing of such a path; a path through fields without `mut` keeps its
