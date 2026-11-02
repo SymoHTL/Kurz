@@ -654,6 +654,7 @@ public sealed partial class Checker
 
         CheckKey(index.Index, map);
         CheckWrittenValue(a, index, map.Value);
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the entry it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>
@@ -676,6 +677,7 @@ public sealed partial class Checker
         }
 
         CheckWrittenValue(a, index, list.Element);
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the item it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>

@@ -2934,6 +2934,14 @@ public sealed class CheckerTests
         Clean(Head + "o = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(p.Keeper.Name)\n}");
         // the same through a `weak` field without `mut`, which nothing assigns and a call can still free the target of
         Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nbool Touch() => true\n\no = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(Touch())\n    print(p.Keeper.Name)\n}"));
+        // N9 (the owner, 2026-11-02, #156): a write into a list or a map that a variable holds, with no call in it, ends it too, since
+        // the item or the entry it lets go of can hold the target's last count, while a path with no `weak` reference in it keeps its
+        // narrowing there; the read before the write is narrowed
+        const string Kept = "class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nn = Owner(\"b\")\nmut xs = [Owner(\"a\")]\np = Pet(xs[0])\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Kept + "if p.Keeper != null {\n    xs[0] = n\n    print(p.Keeper.Name)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\no = Owner(\"a\")\nmut m = Map<int, int>()\np = Pet(o)\nif p.Keeper != null {\n    m[0] = 1\n    print(p.Keeper.Name)\n}\nprint(m.Count)"));
+        Clean(Kept + "if p.Keeper != null {\n    print(p.Keeper.Name)\n    xs[0] = n\n}");
+        Clean("class Owner(string Name)\nclass Holder(mut Owner? Head)\n\nn = Owner(\"b\")\nmut xs = [Owner(\"a\")]\nmut m = Map<int, int>()\nh = Holder(n)\nif h.Head != null {\n    xs[0] = n\n    m[0] = 1\n    print(h.Head.Name)\n}\nprint(m.Count)");
 
         // N9 (the owner, 2026-11-01, "Those ends stop narrowing"): a test after a call in the same condition narrows neither the block
         // nor what the `if` leaves after it, since the condition's temporaries are let go of at its end, the case of the question; the

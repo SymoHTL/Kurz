@@ -1286,7 +1286,8 @@ The checker (`Semantics/`) takes a tree the parser read without an error and che
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
-class instance or through a `weak` reference, with the two more ends of such a path), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
+class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
+a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7 and K9, for a class with its primary constructor or none,
 its fields, its methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5) and its cycle rule judged by the types of the fields (R2, R4), and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
