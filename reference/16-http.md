@@ -11,13 +11,18 @@ declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declarat
 names that binds it in a scope, a type, a function, a variable, a parameter, a lambda's parameter or
 a variable in a block, is `redeclared` (V9), whether `std/` declares that type or not, so that no
 program stops building when `std/` adds it. A member so named, a field, a `static` field, a method,
-an `enum` value or a member of a `data` type, is no declaration of the name and builds, as a member
-shadows no type in C# and Rust.
+an `enum` value or a member of a `data` type, is no declaration of the name and builds. Outside its
+class the name is the type; inside a class that has such a member, a type's place finds the type and
+an expression finds the member first, as C# reads a simple name (`HttpError.Make()` inside a class
+with an `int HttpError` is CS1061), so that inside `class S(int HttpError)` the call
+`HttpError(HttpKind.Protocol, "x")` reads the field and is `type-mismatch`.
 The names are a list the compiler holds, each a `pub` type of `std/`, where Rust writes its list in
 `std`, as the module `std::prelude::rust_2021` that its compiler names by edition (§12: the owner,
 2026-11-01, Q7 (b), that every file sees them, and 2026-11-02, that a file's own declaration of one
 is `redeclared` whether `std/` declares it or not, that only a declaration that binds the name in a
-scope is one, against every member so named, and that the compiler holds the list, against
+scope is one, against every member so named, that an expression inside a class finds a member so
+named first, as C# does, against a call's name looked up as a type first, and that the compiler holds
+the list, against
 every `pub` type of `std/` and against a list written in `std/`; the two of `Uri` are the record's
 assumptions).
 

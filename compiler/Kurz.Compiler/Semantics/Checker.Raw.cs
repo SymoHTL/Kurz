@@ -660,13 +660,18 @@ public sealed partial class Checker
     /// </summary>
     private void CheckMapWrite(Assignment a, IndexExpression index, MapType map, List<MemberAccess> members)
     {
-        if (!WrittenVariable(a, index, members, "an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)"))
+        if (!WrittenVariable(a, index, members, "an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)", out var throughInstance))
         {
             return;
         }
 
+        CheckWrittenValue(a, index, map.Value); // M4: the value first, then the key, as the write runs them
         CheckKey(index.Index, map);
-        CheckWrittenValue(a, index, map.Value);
+        if (throughInstance)
+        {
+            EndChangeableNarrowing(); // N9: the write, which runs after its value and its key, ends what was known of a path through a `mut` field
+        }
+
         frame.Known = Unweak(frame.Known); // N9: the write lets go of the entry it replaces, whose count can be a `weak` target's last
     }
 
@@ -678,18 +683,23 @@ public sealed partial class Checker
     /// </summary>
     private void CheckListWrite(Assignment a, IndexExpression index, ListType list, List<MemberAccess> members)
     {
-        if (!WrittenVariable(a, index, members, "an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)"))
+        if (!WrittenVariable(a, index, members, "an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)", out var throughInstance))
         {
             return;
         }
 
+        CheckWrittenValue(a, index, list.Element); // M4: the value first, then the index, as the write runs them
         var position = CheckExpression(index.Index, Types.Int);
         if (!position.IsError && !Types.IsInteger(position.Type))
         {
             Report(ErrorIds.TypeMismatch, index.Line, $"an index is an integer, not {Types.A(position.Type)} (M9, T2)");
         }
 
-        CheckWrittenValue(a, index, list.Element);
+        if (throughInstance)
+        {
+            EndChangeableNarrowing(); // N9: the write, which runs after its value and its index, ends what was known of a path through a `mut` field
+        }
+
         frame.Known = Unweak(frame.Known); // N9: the write lets go of the item it replaces, whose count can be a `weak` target's last
     }
 
@@ -699,8 +709,9 @@ public sealed partial class Checker
     /// a nullable field is not changed through (N3), a member that is no field cannot be assigned, as in a path assignment, and
     /// anything else is <c>not supported</c> with <paramref name="unread"/>.
     /// </summary>
-    private bool WrittenVariable(Assignment a, IndexExpression index, List<MemberAccess> members, string unread)
+    private bool WrittenVariable(Assignment a, IndexExpression index, List<MemberAccess> members, string unread, out bool throughInstance)
     {
+        throughInstance = false;
         var fields = new List<MemberAccess>();
         var root = Unwrap(index.Target);
         while (root is MemberAccess { Conditional: false } m)
@@ -711,6 +722,7 @@ public sealed partial class Checker
 
         if (members.Count == 0 && (RunsThroughInstance(fields) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null)))
         {
+            throughInstance = true;
             return WrittenThroughInstance(a, index, fields); // K2: a collection a field of an instance holds
         }
 

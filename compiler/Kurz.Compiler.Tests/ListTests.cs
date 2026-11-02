@@ -2308,8 +2308,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // instances of classes (chapter 7): a method that changes its fields by their names and through `this`, a second reference, a
     // list and an instance read from fields while a method replaces them, also inside one interpolation, a nullable field, an
-    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, and a chain of 1000 links
-    // made and let go of, which the release frees off its work list
+    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, a chain of 1000 links
+    // made and let go of, which the release frees off its work list, and lambdas that assign and write into the fields of the
+    // instances they captured (F11 with K2), `this` among them, while an interpolation holds the list one of them replaces
     private const string Classes = """
         class Counter(mut int Count, string Name) {
             pub void Add(int n) {
@@ -2318,6 +2319,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             pub string Text() => "{Name}={Count}"
+
+            pub void Later(int n) {
+                f = () => { Count = n }
+                f()
+            }
         }
 
         class Holder(mut List<string> Items, mut Counter? Current) {
@@ -2409,6 +2415,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print("{note.Title} {note.Counts} {Clear(note)} {note.Title} {note.Counts}")
         note.Mark()
         print(note.Counts)
+        swap = () => {
+            h.Items = ["s"]
+            h.Items.Add("t")
+            h.Items[0] = "u"
+            c.Count = 30
+            p.Left.Count = 7
+        }
+        swap()
+        c.Later(40)
+        print("{c.Count} {h.Items} {p.Left.Count}")
+        g = () => {
+            h.Items = ["g"]
+            return "g"
+        }
+        print("{h.Items} {g()} {h.Items}")
         """;
 
     private static readonly string[] ClassesPrint =
@@ -2428,6 +2449,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "c=14",
         "14n [a: 1] r 14n! []", // the string and the map the first holes took a count of, which the call replaced (K2)
         "[m: 2]",
+        "40 [u, t] 7",
+        "[u, t] g [g]", // the list the first hole took a count of, which the lambda replaced (K2)
     ];
 
     // `weak` references (R3): a field, a variable, a parameter, a result, a list's item and a data value's field; a target freed while
@@ -2521,6 +2544,70 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "freed",
         "Gus", // R3: the read `kept` stored holds its target after its other holder let go of it
         "Gus",
+    ];
+
+    // K4, K5, K8 with K12: instances compared by identity, by content and by the fields a clause names, in a list, a data value, a
+    // nullable value and a chain, and kept as map keys: a key equal to one the map holds replaces its value and is let go of
+    private const string Equality = """
+        class Point(int X, int Y)
+        class Box(mut int N)
+        class User(int Id, mut string Name) equal by Id
+        class Link(int V, Link? Next)
+        class Mark
+        data Pair(Point A, Box B)
+
+        a = Point(1, 2)
+        print(a == Point(1, 2))
+        print(a != Point(2, 1))
+        b = Box(1)
+        c = b
+        print("{b == Box(1)} {b == c}")
+        u = User(1, "a")
+        print(u == User(1, "b"))
+        u.Name = "c"
+        print(u == User(2, "c"))
+        print(Link(1, Link(2, null)) == Link(1, Link(2, null)))
+        print(Link(1, Link(2, null)) == Link(1, null))
+        print([Point(1, 2), Point(3, 4)] == [Point(1, 2), Point(3, 4)])
+        print(Pair(a, b) == Pair(Point(1, 2), c))
+        print(Pair(a, b) == Pair(a, Box(1)))
+        Point? n = null
+        print("{n == a} {Mark() == Mark()}")
+        mut m = Map<Point, string>()
+        m[Point(1, 2)] = "one"
+        m[Point(1, 2)] = "uno"
+        m[Point(2, 1)] = "two"
+        print("{m.Count} {m[a] ?? "-"} {m[Point(9, 9)] ?? "-"}")
+        mut boxes = Map<Box, int>()
+        boxes[b] = 1
+        boxes[Box(1)] = 2
+        print("{boxes.Count} {boxes[c] ?? 0}")
+        mut users = Map<User, string>()
+        users[u] = "first"
+        users[User(1, "z")] = "second"
+        print("{users.Count} {users[User(1, "q")] ?? "-"}")
+        mut links = Map<Link, int>()
+        links[Link(1, Link(2, null))] = 3
+        print(links[Link(1, Link(2, null))] ?? 0)
+        """;
+
+    private static readonly string[] EqualityPrint =
+    [
+        "true",
+        "true",
+        "false true", // K4: a class with a `mut` field compares by identity
+        "true", // K5: by the field the clause names
+        "false",
+        "true", // a chain compares link by link
+        "false",
+        "true",
+        "true",
+        "false",
+        "false true", // a class with no fields: every instance has the same content *(assumed)*
+        "2 uno -",
+        "2 1", // a key that compares by identity hashes its address
+        "1 second",
+        "3",
     ];
 
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
@@ -2996,6 +3083,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Weak, toolchain.Runtime, "weak-values"), 0, WeakPrint, "");
+        Ran(BuildAndRun(Equality, toolchain.Runtime, "class-equality"), 0, EqualityPrint, "");
     }
 
     [Fact]
@@ -3081,6 +3169,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
+        Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
         // a release under way stands once in the program
         Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");
@@ -3201,9 +3290,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_mut_field_of_the_instance_passed_as_mut_is_written_in_its_place()
     {
         // M7 with K7: a `mut` field named alone in a method and passed as `mut` is the field's own place, so the callee's write is the
-        // field's, and the block the list field held before is let go of once, which the fence holds
-        const string box = "class Box(mut int N, mut List<int> Items) {\n    pub void Fill() {\n        Bump(mut N)\n        Grow(mut Items, N)\n        Grow(mut Items, N)\n    }\n\n    pub string Text() => \"{N} {Items}\"\n}\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nvoid Grow(mut List<int> xs, int n) {\n    xs = [n]\n    for i in 0..<n {\n        xs.Add(i)\n    }\n}\n\nb = Box(1, [7])\nb.Fill()\nprint(b)\n";
-        Ran(BuildAndRun(box, Fenced, "class-mut-field-argument-fenced"), 0, ["2 [2, 0, 1]"], "");
+        // field's, and the block the list field held before is let go of once, which the fence holds; a lambda that passes the field
+        // writes it through the reference to the instance it holds, inside the method and after it returned (F11 with K2)
+        const string box = "class Box(mut int N, mut List<int> Items) {\n    pub void Fill() {\n        Bump(mut N)\n        Grow(mut Items, N)\n        Grow(mut Items, N)\n    }\n\n    pub void Later() {\n        f = () => Bump(mut N)\n        g = () => Grow(mut Items, N)\n        f()\n        g()\n    }\n\n    pub () => void Bumper() => () => Bump(mut N)\n\n    pub string Text() => \"{N} {Items}\"\n}\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nvoid Grow(mut List<int> xs, int n) {\n    xs = [n]\n    for i in 0..<n {\n        xs.Add(i)\n    }\n}\n\nb = Box(1, [7])\nb.Fill()\nprint(b)\nb.Later()\nprint(b)\nk = b.Bumper()\nk()\nk()\nprint(b)\n";
+        Ran(BuildAndRun(box, Fenced, "class-mut-field-argument-fenced"), 0, ["2 [2, 0, 1]", "3 [3, 0, 1, 2]", "5 [3, 0, 1, 2]"], "");
     }
 
     [Fact]
@@ -3729,6 +3819,96 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    [Fact]
+    public void Copy_writes_every_byte_of_0_to_17_and_24_wherever_it_reads_them_and_writes_them()
+    {
+        // The standard library's `Copy`, whose form for small counts the speed escape of issue 156 (comment 6575718942) kept: up to
+        // 16 bytes as the C library's `memcpy` copies a small count, two words of 8, two words of 4 or three bytes, overlapping where
+        // the count is no power of two, and more byte by byte. `Substring` copies through it from the offset it starts at, and `Join`
+        // to the offset of each part: for each count 0 to 17 and 24, bytes of 128 and above in every place of a word (letters of two
+        // bytes, after one byte of ASCII where the count is odd), cut 0, 1, 3 and 7 bytes into a string that holds a block, with 0 or 5
+        // bytes after them, so that a cut ends where its string ends; and the cut joined after the bytes before it, so that `Join`
+        // writes it at that offset. Under the fence too, where a block ends where its page ends
+        const string text = """
+            Bytes Content(int count) {
+                mut b = Bytes()
+                if count % 2 == 1 {
+                    b.Add(90)
+                }
+
+                for j in 0..<count / 2 {
+                    c = 128 + (41 * j + 7 * count) % 1920
+                    b.Add(byte(192 + c / 64))
+                    b.Add(byte(128 + c % 64))
+                }
+
+                return b
+            }
+
+            void Cut(string s, int at, int count) {
+                cut = s.Substring(at, count)
+                print(cut.Bytes)
+                print(string.Join("", [s.Substring(0, at), cut]).Bytes)
+            }
+
+            for n in 0..<19 {
+                mut count = n
+                if n == 18 {
+                    count = 24
+                }
+
+                content = Content(count)
+                for at in [0, 1, 3, 7] {
+                    for end in [0, 5] {
+                        mut b = Bytes()
+                        for i in 0..<at {
+                            b.Add(byte(97 + i))
+                        }
+
+                        b.AddRange(content)
+                        for i in 0..<end {
+                            b.Add(byte(65 + i))
+                        }
+
+                        match string.FromUtf8(b) {
+                            string s => Cut(s, at, count)
+                            InvalidUtf8 e => print(e.At)
+                        }
+                    }
+                }
+            }
+
+            """;
+        var lines = new List<string>();
+        foreach (var count in Enumerable.Range(0, 18).Append(24))
+        {
+            var content = new List<int>();
+            if (count % 2 == 1)
+            {
+                content.Add(90);
+            }
+
+            for (var j = 0; j < count / 2; j++)
+            {
+                var c = 128 + (((41 * j) + (7 * count)) % 1920);
+                content.Add(192 + (c / 64));
+                content.Add(128 + (c % 64));
+            }
+
+            foreach (var at in new[] { 0, 1, 3, 7 })
+            {
+                foreach (var _ in new[] { 0, 5 })
+                {
+                    lines.Add("[" + string.Join(", ", content) + "]");
+                    lines.Add("[" + string.Join(", ", Enumerable.Range(97, at).Concat(content)) + "]");
+                }
+            }
+        }
+
+        Ran(BuildAndRun(text, toolchain.Runtime, "copy-counts"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "copy-counts-fenced"), 0, [.. lines], "");
     }
 
     [Fact]

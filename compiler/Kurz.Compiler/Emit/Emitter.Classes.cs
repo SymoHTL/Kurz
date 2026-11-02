@@ -22,11 +22,15 @@ public sealed partial class Emitter
     // each class whose instances are released: the helper that ends one, and its work list (the owner, 2026-11-01, "Iterative, never crashes")
     private readonly List<(string Drop, string List)> released = [];
 
-    /// <summary>K1: an instance with both counts at one and each field holding the argument bound to it or its default.</summary>
+    /// <summary>
+    /// K1, K7: an instance with both counts at one, each field of the primary constructor holding the argument bound to it or its
+    /// default, then each field of the body its default, in their order, read in the class's file through the instance being built, as
+    /// C# runs a field's initializer before the constructor's body.
+    /// </summary>
     private string EmitClassNew(CallExpression c, CallInfo info)
     {
         var symbol = ((ClassType)info.Target!).Symbol;
-        var fields = symbol.Fields.Select(f => f.Type).ToList();
+        var fields = symbol.Fields.Where(f => f.Body is null).Select(f => f.Type).ToList();
         var arguments = Arguments(c, info, j => fields[j], _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true);
         var block = layout.ClassBlock(symbol);
         var p = Allocate(block);
@@ -35,6 +39,19 @@ public sealed partial class Emitter
         for (var i = 0; i < fields.Count; i++)
         {
             fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(symbol, p, i)}");
+        }
+
+        if (fields.Count < symbol.Fields.Count)
+        {
+            var self = fn.Alloca("ptr", "this");
+            fn.Emit($"store ptr {p}, ptr {self}");
+            slots[Model.FieldsThisOf(symbol)] = self;
+            for (var i = fields.Count; i < symbol.Fields.Count; i++)
+            {
+                var field = symbol.Fields[i];
+                var value = EmitDefault(classOwners[symbol], field.Body!.Value!, field.Type, owned: true);
+                fn.Emit($"store {Ir(field.Type)} {value}, ptr {InstanceFieldPointer(symbol, p, i)}");
+            }
         }
 
         return p;
