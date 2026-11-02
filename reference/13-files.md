@@ -159,8 +159,11 @@ atomic operations, and a `Close` that shuts a socket down holds a count of its o
 shutdown, so that the release comes after it (S9; the owner, 2026-11-02, on a review's finding)). A
 call in flight is a `Read`, a `Write`, a stream's `ShutdownWrite`, a listener's `Accept`, a setter of
 a bound (S9) or a pull of a loop over the lines (S16), each from after its arguments have run to its
-return (§12, the owner, 2026-11-02; `ShutdownWrite`'s, issue 39, comment 6583351876); a loop over the
-lines is in flight while it pulls a line, and not while its block runs. A
+return (§12, the owner, 2026-11-02, issue 110, comment 6588037045; `ShutdownWrite`'s, issue 39, comment
+6583351876); a loop over the lines is in flight while it pulls a line, and not while its block runs,
+so that a `Close` in its block ends the handle and the next pull gets the error above, as a borrow
+of `&mut self` in Rust lasts its call (the same comment, against a count held for the loop's whole
+block, at the cost of a `Close` in that block whose release would wait for its own loop). A
 `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
 last count that ignores its error, and no text)*
 
@@ -335,18 +338,25 @@ stream's `Read` or `Write` or a listener's `Accept` that fails, or reads no byte
 gives that error, a real timeout or reset that races the `Close` among them (against the system's
 answer, which would depend on the race) (§12, the owner, 2026-11-02). An `Accept` in flight whose
 system call succeeds after the mark returns the stream it got, as a `Read` keeps the bytes it took,
-and the next `Accept` gets that error, so that no connection is thrown away, as Go's `Accept` returns
-a connection whose system call finished before the close (§12, the owner, 2026-11-02, issue 39,
-comment 6578783655, against that error with the connection closed); and a `Write` that the shutdown
+and the next `Accept` gets that error, so that the connection it got is not thrown away, as Go's
+`Accept` returns a connection whose system call finished before the close (§12, the owner,
+2026-11-02, issue 39, comment 6578783655, against that error with the connection closed, at the cost
+of a connection the system accepted and its client sees closed; the cost is a stream that reaches
+the program after the listener's `Close`, which the program closes, or lets go of, as any other; the costs,
+issue 110, comment 6588037045); a connection still waiting in the listener's queue is reset when the
+descriptor is released, as Linux resets it for any program that closes a listener, a cost of a
+listener's `Close` (§12); and a `Write` that the shutdown
 ends after part of its bytes went out gives that error, the part sent not reported, as Rust's
 `write_all` and C#'s `Stream.Write` report none (§12, the owner, 2026-11-02, the same comment, against
-the count sent with the error left to the next call). An actor waiting in the poller on a
+the count sent with the error left to the next call, at the cost of a `Write` that returns a count,
+where a `Write` writes every byte and returns none (S4); the cost is that the program cannot tell
+how many bytes the peer got; the costs, issue 110, comment 6588037045). An actor waiting in the poller on a
 socket that another holder closes is woken at the close with that error, as Go's `net.Conn.Close`
 wakes the reads and writes that wait (§12, the owner, 2026-11-02, against leaving it waiting until its
 bound and against a kind of its own, as Go's `net.ErrClosed`; the cost is one wake-up for each caller
-that waits); the poller is the one under `epoll` that §12 decides for an actor's socket, and the
-runtime of Linux has neither actors nor that poller, a call blocking its thread (S10), so that no
-actor waits in one there. A listener's socket reuses
+that waits); the poller is the one under `epoll` that §12 decides for an actor's socket, and a call
+of a program without actors blocks its thread (S10) and waits in no poller, the shutdown waking it.
+A listener's socket reuses
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
 what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
 address without a `:`, a port that is not a number from 0 to 65535 and a name whose lookup succeeds

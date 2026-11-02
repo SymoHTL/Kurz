@@ -55,7 +55,10 @@ expression (M7, `Semantics/Checker.Reads.cs`), an interpolation's holes among th
 list or a string (R13),
 the count a loop holds of its collection (C6), the count the name an arm binds holds, the count
 `Add` takes of its item before its list grows (`rows.Add(rows[0])`, which the owner allowed on
-2026-10-25), the count a lambda's environment takes of each value the lambda reads (F15), and the
+2026-10-25), the count a lambda's environment takes of each value the lambda reads (F15), the count
+the read of a field of a class instance takes, held to the statement's end (`InstanceField` in
+`Emit/Emitter.Classes.cs`), so that a call on a handle the field holds keeps that handle while its
+arguments give the field another (pull request 243), and the
 count the emitter takes of a read of a copied type that the checker marks as met by a change, a
 function value beside `Swap(mut f)` (`SemanticModel.IsHeldCopy`, the owner's "Copied", 2026-10-25). A construct
 that has none takes a count of what it read. Each one gets a line in a fenced program of `ListTests`
