@@ -80,9 +80,9 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// W1: the names of the types of <c>std/</c> every file sees, each a <c>pub</c> type there, as Rust's <c>std::prelude::rust_2021</c>
-    /// lists the names every module sees (design record, section 12: the owner, 2026-11-01, Q7 (b), the list held in the compiler an
-    /// assumption there).
+    /// W1: the names of the types of <c>std/</c> every file sees, each a <c>pub</c> type there, a list held in the compiler where Rust
+    /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
+    /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
     public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError"];
 

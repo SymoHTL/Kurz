@@ -388,7 +388,10 @@ public sealed partial class Checker
         return new Typed(Types.String, text is null ? null : new StringConstant(text.ToString()));
     }
 
-    /// <summary>W2: the text of an <c>HttpError</c>, which no rule says how a type of <c>std/</c> gives, where the checker takes it.</summary>
+    /// <summary>
+    /// W2: the text of an <c>HttpError</c>, where the checker takes it: section 12 gives it through a <c>Text()</c> in the body of the
+    /// <c>data</c> type, a body the checker does not read (D16), so <c>std/</c> declares none.
+    /// </summary>
     private const string HttpErrorText = "the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)";
 
     /// <summary>A2 to A15: whether a value of the type has a text for <c>print</c> and an interpolation. The error type has one, so that nothing more is reported.</summary>
