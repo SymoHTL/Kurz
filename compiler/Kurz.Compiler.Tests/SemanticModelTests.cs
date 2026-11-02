@@ -581,6 +581,12 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
                     Need(Try(() => model.ClassOf(t)), t.Line, $"class `{t.Name}`");
                     Defaults(t.PrimaryConstructor ?? []);
+                    foreach (var field in (t.Members ?? []).OfType<FieldDeclaration>().Where(f => (f.Modifiers & Modifiers.Static) == 0 && f.Value is not null))
+                    {
+                        Need(Try(() => model.FieldsThisOf(model.ClassOf(t))), field.Line, $"the instance the default of `{field.Name}` reads"); // K7
+                        Expression(field.Value);
+                    }
+
                     foreach (var method in (t.Members ?? []).OfType<FunctionDeclaration>())
                     {
                         Need(Try(() => model.ThisOf(model.FunctionOf(method))), method.Line, $"`this` of `{method.Name}`"); // K7

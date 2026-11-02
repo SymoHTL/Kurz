@@ -262,6 +262,7 @@ public sealed class SemanticModel
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ClassSymbol, VariableSymbol> buildReceivers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
@@ -387,6 +388,9 @@ public sealed class SemanticModel
     /// <summary>The variable that holds a method's instance, <c>this</c> (K7).</summary>
     public VariableSymbol ThisOf(FunctionSymbol method) => receivers.TryGetValue(method, out var v) ? v : throw Missing($"`this` of `{method.Name}`", method.Line);
 
+    /// <summary>K7: the instance being built, through which the defaults of a class's body fields read the fields above them.</summary>
+    public VariableSymbol FieldsThisOf(ClassSymbol symbol) => buildReceivers.TryGetValue(symbol, out var v) ? v : throw Missing($"the instance the defaults of `{symbol.Name}` read", symbol.Line);
+
     /// <summary>
     /// Inside a method, a name that means a field of its instance (K7): a read, a <see cref="NameExpression"/>, or an assignment, an
     /// <see cref="AssignOrDeclare"/>, with the variable <c>this</c> it goes through; a <see cref="ThisExpression"/> is <c>this</c> itself.
@@ -402,6 +406,8 @@ public sealed class SemanticModel
     internal void RecordClass(TypeDeclaration declaration, ClassSymbol symbol) => classes[declaration] = symbol;
 
     internal void RecordThis(FunctionSymbol method, VariableSymbol thisVariable) => receivers[method] = thisVariable;
+
+    internal void RecordFieldsThis(ClassSymbol symbol, VariableSymbol thisVariable) => buildReceivers[symbol] = thisVariable;
 
     internal void RecordImplicitField(object node, VariableSymbol thisVariable, FieldSymbol? field) => implicitFields[node] = (thisVariable, field!);
 

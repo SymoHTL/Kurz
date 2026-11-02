@@ -260,6 +260,53 @@ class Box {
 print(Box().Size())
 ```
 
+Case: [classes/field-default-order.kz](../corpus/classes/field-default-order.kz)
+```kurz
+int Note(string s, int v) {
+    print(s)
+    return v
+}
+
+class Counter(int Start) {
+    int next = Note("b", Start + 1)
+    int last = Note("c", next + 1)
+
+    pub int Last() => last
+}
+
+print(Counter(Note("a", 1)).Last())
+```
+
+Case: [classes/field-counted.kz](../corpus/classes/field-counted.kz)
+```kurz
+class Bag(string Name) {
+    mut List<string> items = [Name]
+    string title = "bag of {Name}"
+
+    pub void Add(string x) {
+        items.Add(x)
+    }
+
+    pub string Text() => "{title}: {items.Count}"
+}
+
+b = Bag("ann")
+b.Add("pen")
+print(b)
+```
+
+Case: [classes/field-default-below.kz](../corpus/classes/field-default-below.kz)
+```kurz
+class Box(int Side) {
+    int area = Side * depth
+    int depth = 2
+
+    pub int Area() => area
+}
+
+print(Box(3).Area())
+```
+
 Case: [classes/interface-method-inherited-private.kz](../corpus/classes/interface-method-inherited-private.kz)
 ```kurz
 interface Shape {
@@ -504,6 +551,17 @@ class Point {
 }
 
 print(Point(true).X())
+```
+
+Case: [classes/field-unassigned-primary.kz](../corpus/classes/field-unassigned-primary.kz)
+```kurz
+class Point(int X) {
+    int y
+
+    pub int Y() => y
+}
+
+print(Point(1).Y())
 ```
 
 ### K8 (decided, §4) How a class names the fields that count

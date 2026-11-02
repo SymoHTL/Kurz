@@ -521,7 +521,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line))
+        if (UnreadIntrinsic(n.Name, n.Line) || OutOfReachInDefault(n.Name, n.Line))
         {
             return Typed.Error;
         }

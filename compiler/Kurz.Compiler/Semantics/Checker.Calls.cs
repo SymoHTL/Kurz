@@ -216,7 +216,11 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
+                    if (!OutOfReachInDefault(n.Name, n.Line))
+                    {
+                        Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
+                    }
+
                     CheckArgumentsLoosely(c);
                     return Typed.Error;
                 }

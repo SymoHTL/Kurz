@@ -146,6 +146,9 @@ public sealed partial class Checker
         /// <summary>K7: the class whose method this frame checks, with its instance as <c>this</c>; a lambda inside the method finds it through <see cref="Outer"/>.</summary>
         public ClassSymbol? Class { get; init; }
 
+        /// <summary>K7: the field of <see cref="Class"/>'s body whose default this frame checks, which reads the fields above it alone.</summary>
+        public FieldSymbol? Initializing { get; init; }
+
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
 
@@ -292,6 +295,7 @@ public sealed partial class Checker
         CheckDefaults();
         CheckClassDefaults();
         CollectReserved(program.Statements);
+        CheckFieldDefaults(); // K7
 
         foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
         {
