@@ -1,0 +1,20 @@
+// expect: output
+// | 1||command-dir
+// | $HOME *
+// rules: S21
+
+void | IoError | ExitError | InvalidUtf8 Run() {
+    Directory.Create("command-dir")
+    script = "printf '%s|%s|%s' \"$KURZ_CASE_A\" \"$KURZ_CASE_B\" \"$(basename \"$(pwd -P)\")\""
+    out = Command.New("sh").Args(["-c", script]).Env("KURZ_CASE_A", "1").Env("KURZ_CASE_B", "2").EnvRemove("KURZ_CASE_B").Dir("command-dir").Output()
+    print(string.FromUtf8(out.Stdout))
+    words = Command.New("printf").Args(["%s", "$HOME *"]).Output()
+    print(string.FromUtf8(words.Stdout))
+    Directory.Delete("command-dir")
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}

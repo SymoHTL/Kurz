@@ -1,0 +1,31 @@
+// expect: output
+// | first
+// | bad line at 2
+// | third
+// rules: S16
+
+void | IoError Show() {
+    mut content = "first\nab".Bytes
+    content.Add(byte(255))
+    content.AddRange("\nthird\n".Bytes)
+    File.WriteAll("lines-invalid.txt", content)
+    f = File.Open("lines-invalid.txt")
+    File.Delete("lines-invalid.txt")
+    // a line that is not UTF-8 ends the loop with `InvalidUtf8`, whose `At` is the position in the line
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 u => print("bad line at {u.At}")
+    }
+
+    // its bytes were taken, and the next loop goes on after them
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => print("bad line")
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+}

@@ -1,0 +1,8 @@
+// expect: error cannot-infer at 7
+// rules: O4
+
+List<T> F<T>(T | string x) => List<T>()
+
+// a literal of the case the union names leaves `T` nothing, as a variable of `string` does
+got = F("a")
+print(got)

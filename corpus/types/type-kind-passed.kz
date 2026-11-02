@@ -1,0 +1,20 @@
+// expect: output
+// | Data
+// | other: Int
+// | other: List
+// rules: T33
+
+data Order(string Id)
+
+string Describe<T>() => match T.Kind {
+    TypeKind.Data => "Data"
+    else => "other: {T.Kind}"
+}
+
+void Show<U>(U value) {
+    print(Describe<U>())
+}
+
+Show(Order("a1"))
+Show(3)
+Show([1, 2])
