@@ -3170,6 +3170,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("class Counter(int Count) {\n    pub void Reset() {\n        Count = 0\n    }\n}\n\nprint(Counter(1).Count)"));
         Assert.Equal([(ErrorIds.MutRequired, 4)], Errors("class Box(List<int> Items)\n\nb = Box(List<int>())\nb.Items.Add(1)"));
         Clean("class Box(mut List<int> Items)\n\nb = Box(List<int>())\nb.Items.Add(1)\nprint(b.Items.Count)");
+        // K7: a field named alone is a step through `this`, so a `mut` method on a path from it that runs through instances is taken,
+        // as it is through `this`
+        Clean("class Node(mut List<int> Children)\nclass Tree(Node Root) {\n    pub void Grow() {\n        Root.Children.Add(1)\n        this.Root.Children.Add(2)\n    }\n}\n\nt = Tree(Node([]))\nt.Grow()\nprint(t.Root.Children.Count)");
     }
 
     [Fact]
@@ -3413,7 +3416,7 @@ public sealed class CheckerTests
         Clean(node + "data P(int X)\nclass Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut p = P(0)\nif h.Head != null {\n    p.X = h.Head.V\n}\nprint(p)");
         Clean(node + "class Holder(mut Node? Head, mut List<int> Xs)\n\nh = Holder(Node(0, null), [1])\nif h.Head != null {\n    h.Xs[h.Head.V] = h.Head.V\n}\nprint(h.Xs)");
         Clean(node + "class Holder(mut Node? Head, mut Map<int, int> M)\n\nh = Holder(Node(0, null), Map<int, int>())\nif h.Head != null {\n    h.M[h.Head.V] = h.Head.V\n}\nprint(h.M)");
-        Assert.Equal([(ErrorIds.NullableUnchecked, 13), (ErrorIds.NullableUnchecked, 14)], Errors(node + "class Holder(mut Node? Head) {\n    pub int Reset() {\n        Head = null\n        return 0\n    }\n}\n\nh = Holder(Node(0, null))\nmut xs = [1, 2]\nmut m = Map<int, int>()\nif h.Head != null {\n    xs[h.Head.V] = h.Reset()\n    m[h.Head.V] = h.Reset()\n}\nprint(xs)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13), (ErrorIds.NullableUnchecked, 16)], Errors(node + "class Holder(mut Node? Head) {\n    pub int Reset() {\n        Head = null\n        return 0\n    }\n}\n\nh = Holder(Node(0, null))\nmut xs = [1, 2]\nmut m = Map<int, int>()\nif h.Head != null {\n    xs[h.Head.V] = h.Reset()\n}\nif h.Head != null {\n    m[h.Head.V] = h.Reset()\n}\nprint(xs)"));
         // and each of those assignments does end the narrowing, after its value: of a field by its name, of a field through the
         // instance, of a variable, of a data value's path, of an item and of an entry through an instance
         Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors(node + "class Holder(mut Node? Head, mut int N) {\n    pub int Get() {\n        if Head != null {\n            N = 1\n            return Head.V\n        }\n\n        return 0\n    }\n}\n\nprint(Holder(null, 0).Get())"));
@@ -3422,13 +3425,16 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(node + "data P(int X)\nclass Holder(mut Node? Head)\n\nh = Holder(null)\nmut p = P(0)\nif h.Head != null {\n    p.X = 1\n    print(h.Head.V)\n}\nprint(p)"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(node + "class Holder(mut Node? Head, mut List<int> Xs)\n\nh = Holder(null, [1])\nif h.Head != null {\n    h.Xs[0] = 2\n    print(h.Head.V)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(node + "class Holder(mut Node? Head, mut Map<int, int> M)\n\nh = Holder(null, Map<int, int>())\nif h.Head != null {\n    h.M[0] = 2\n    print(h.Head.V)\n}"));
-        // but a write into a list or a map that a variable holds, itself or through `data` fields, ends nothing: it runs no code of the
-        // program, and the count it lets go of, an instance's among them, frees nothing a path of strong references holds (the owner,
-        // 2026-11-02, #156)
+        // but a write into a list or a map that a variable holds, itself or through `data` fields, keeps the narrowing of a path with no
+        // `weak` reference in it: it runs no code of the program, and the count it lets go of, an instance's among them, frees nothing a
+        // path of strong references holds; a path with a `weak` reference in it is narrowed no more after it, since that count can be
+        // the target's last (the owner, 2026-11-02, #156)
         Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut xs = [1]\nif h.Head != null {\n    xs[0] = 2\n    print(h.Head.V)\n}\nprint(xs)");
         Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut m = Map<int, int>()\nif h.Head != null {\n    m[0] = 2\n    print(h.Head.V)\n}\nprint(m)");
         Clean(node + "data P(List<int> Xs)\nclass Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut p = P([1])\nif h.Head != null {\n    p.Xs[0] = 2\n    print(h.Head.V)\n}\nprint(p)");
         Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nn = Node(6, null)\nmut ns = [Node(5, null)]\nif h.Head != null {\n    ns[0] = n\n    print(h.Head.V)\n}\nprint(ns.Count)");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\no = Owner(\"Ann\")\np = Pet(o)\nmut xs = [1]\nif p.Keeper != null {\n    xs[0] = 2\n    print(p.Keeper.Name)\n}\nprint(o.Name)"));
+        Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\no = Owner(\"Ann\")\np = Pet(o)\nmut xs = [1]\nif p.Keeper != null {\n    print(p.Keeper.Name)\n}\nxs[0] = 2\nprint(o.Name)");
         // except where the map's key type compares by a clause: the read or the write runs that `==` and the key's hash, a call (the
         // owner, 2026-11-02, #110, comment 6586836827)
         Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(node + "class K(int Id) equal by Id\nclass Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nk = K(1)\nmut m = Map<K, int>()\nif h.Head != null {\n    m[k] = 2\n    print(h.Head.V)\n}\nprint(m.Count)"));
@@ -3481,14 +3487,15 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int N)\n\nprint(C(1).M)"));
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int N)\n\nprint(C(1).M())"));
         // F11 with K2: a lambda changes a `mut` field of an instance it captured, by the field's name inside a method, through the
-        // instance, through a `data` value that holds it (assumed) and through a method; the variable itself, a `data` value's field
-        // and a field without `mut` are not changed
+        // instance, through a `data` value that holds it (assumed) and through a method; the variable itself, a `data` value's field,
+        // one that holds an instance among them, and a field without `mut` are not changed
         Clean("class C(mut int N) {\n    pub void Later() {\n        f = () => {\n            N = 1\n        }\n        f()\n    }\n}\n\nC(0).Later()");
         Clean("class C(mut int N)\n\nc = C(0)\nf = () => { c.N = 1 }\nf()\nprint(c.N)");
         Clean("class C(mut int N)\ndata D(C Item, int X)\n\nd = D(C(0), 1)\nf = () => { d.Item.N = 1 }\nf()\nprint(d.Item.N)");
         Clean("class C(mut int N) {\n    pub void Add() {\n        N = N + 1\n    }\n}\n\nc = C(0)\nf = () => c.Add()\nf()\nprint(c.N)");
         Assert.Equal([(ErrorIds.CaptureAssign, 4)], Errors("class C(mut int N)\n\nmut c = C(0)\nf = () => { c = C(1) }\nf()\nprint(c.N)"));
         Assert.Equal([(ErrorIds.CaptureAssign, 5)], Errors("class C(mut int N)\ndata D(C Item, int X)\n\nmut d = D(C(0), 1)\nf = () => { d.X = 2 }\nf()\nprint(d.X)"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 5)], Errors("class C(mut int N)\ndata D(C Item, int X)\n\nmut d = D(C(0), 1)\nf = () => { d.Item = C(2) }\nf()\nprint(d.Item.N)"));
         Assert.Equal([(ErrorIds.AssignImmutable, 4)], Errors("class C(int N)\n\nc = C(0)\nf = () => { c.N = 1 }\nf()\nprint(c.N)"));
         Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("class C(int N) {\n    pub void Later() {\n        f = () => { N = 1 }\n        f()\n    }\n}\n\nC(0).Later()"));
         // K2 with M4, M5: an item or an entry written into a collection a field holds, as a `mut` method on the field is
@@ -3561,22 +3568,32 @@ public sealed class CheckerTests
         Clean("class User(int Id, mut string Name, Map<string, int> Seen) equal by Id\n\nmut m = Map<User, int>()\nm[User(1, \"a\", Map<string, int>())] = 1\nprint(m.Count)");
         Clean("class Tag(mut string Name, mut Map<string, int> Seen) equal by Name\n\nprint(Tag(\"a\", Map<string, int>()) == Tag(\"a\", Map<string, int>()))");
         Clean("class Box(mut Map<string, int> Seen)\n\nb = Box(Map<string, int>())\nprint(b == b)");
-        var (contentWithMap, _) = Check("class C(Map<string, int> M)\n\nc = C(Map<string, int>())\nprint(c == c)");
-        Assert.Equal([(ErrorIds.TypeMismatch, "4: `==` takes no `C` and `C`: its field `M`: `==` between two `Map<string, int>` is `type-mismatch` (T18, K4, D3, M9)")],
-            contentWithMap.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
-        var (dataWithMap, _) = Check("data Box(Map<string, int> M)\n\na = Box(Map<string, int>())\nprint(a == a)"); // the control: a data value names no K4
-        Assert.Equal([(ErrorIds.TypeMismatch, "4: `==` takes no `Box` and `Box`: its field `M`: `==` between two `Map<string, int>` is `type-mismatch` (T18, D3, M9)")],
-            dataWithMap.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
+        // the text ends with the rules that make the field count: K4 where the class compares by content, K5 where its clause names
+        // the field, and neither for a data value, the control
+        foreach (var (source, rules) in new[]
+        {
+            ("class C(Map<string, int> M)\n\nc = C(Map<string, int>())\nprint(c == c)", "(T18, K4, D3, M9)"),
+            ("class C(string Name, Map<string, int> M) equal by M\n\nc = C(\"a\", Map<string, int>())\nprint(c == c)", "(T18, K5, D3, M9)"),
+            ("data C(Map<string, int> M)\n\nc = C(Map<string, int>())\nprint(c == c)", "(T18, D3, M9)"),
+        })
+        {
+            var (result, _) = Check(source);
+            var error = Assert.Single(result.Sorted);
+            Assert.Equal((ErrorIds.TypeMismatch, 4), (error.Id, error.Line));
+            Assert.EndsWith(rules, error.Message);
+        }
         // K15: a name that is no field; K5: a method named `Equals` or `GetHashCode`, at the method; K12: the key type itself
         Assert.Equal([(ErrorIds.EqualByUnknown, 1)], Errors("class Key(int Id) equal by Id, Code\n\nprint(Key(1) == Key(1))"));
         Assert.Equal([(ErrorIds.EqualsMethod, 2), (ErrorIds.EqualsMethod, 3)], Errors("class User(int Id) {\n    pub bool Equals(User other) => Id == other.Id\n    pub int GetHashCode() => Id\n}\n\nprint(User(1) == User(1))"));
         Assert.Equal([(ErrorIds.MutableKey, 3)], Errors("class Tag(mut string Name) equal by Name\n\nmut m = Map<Tag, int>()\nm[Tag(\"a\")] = 1\nprint(m.Count)"));
         Clean("class Tag(mut string Name, string Kind) equal by Kind\n\nmut m = Map<Tag, int>()\nm[Tag(\"a\", \"k\")] = 1\nprint(m.Count)");
         Clean("class Key(int Id, int N) equal by Id, Id\n\nprint(Key(1, 1) == Key(1, 2))"); // a name given twice counts once *(assumed)*
-        // N9 with K5: `==` on instances of a class that names its fields, and on a list or a `data` value that holds one *(assumed)*,
-        // ends what is known of a path through a `mut` field; on instances that compare by content it does not
+        // N9 with K5: `==` on instances of a class that names its fields, and on a nullable, a list or a `data` value that holds one,
+        // ends what is known of a path through a `mut` field, since such an `==` is a call everywhere (the owner, 2026-11-02, #110,
+        // comment 6586836827); on instances that compare by content it does not
         const string holder = "class Node(int V)\nclass Holder(mut Node? Head)\n";
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\na = K(1)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\nK? a = K(1)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\na = [K(1)]\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(holder + "class K(int Id) equal by Id\ndata P(K Item)\n\na = P(K(1))\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
         // the inner `Pair<K>` of a `Pair<Pair<K>>` too, and the walk of a type that holds itself with other arguments ends (#39, comment
