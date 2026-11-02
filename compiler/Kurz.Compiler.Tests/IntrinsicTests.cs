@@ -105,7 +105,8 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
     public void A_guarded_blocks_function_is_named_after_the_function_it_stands_in_in_the_trace_and_in_the_line_tables()
     {
         // section 13, the owner, 2026-11-02: `<function>.guarded`, in the pattern of a lambda's `main.lambda`, in the trace and in the
-        // line tables alike; a lambda written in a guarded block is named after the function the block stands in, as its symbol is
+        // line tables alike; a lambda written in a guarded block is named after the function the block stands in, as its symbol is; `Pick`
+        // takes its value from a list, not from the command line, which the runtime of Windows does not give (S11)
         HasTheSets();
         const string text = """
             int Pick(int n) {
@@ -147,7 +148,8 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
                 return x
             }, 3))
 
-            print(Pick(args.Count + 5))
+            values = [6]
+            print(Pick(values[0]))
 
             """;
         var ir = Ir(text);
@@ -165,7 +167,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
             1,
             ["2", "2", "3"],
             "error: thrown at program.kz:6:\nlane 0 too big\n"
-            + (OperatingSystem.IsLinux() ? "  at Pick.guarded in program.kz:6\n  at Pick in program.kz:3\n  at main in program.kz:40\n" : string.Empty));
+            + (OperatingSystem.IsLinux() ? "  at Pick.guarded in program.kz:6\n  at Pick in program.kz:3\n  at main in program.kz:41\n" : string.Empty));
     }
 
     [Fact]
