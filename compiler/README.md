@@ -1444,7 +1444,10 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
-which the intrinsics and their vector types stand (R18); a member of a type parameter that reads its type beyond `Kind`,
+which the intrinsics and their vector types stand (R18); the names `Command`, `ChildProcess`, `ProcessOutput`,
+`ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
+error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);
+`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
 `T.Fields`, `T.Make` and the parts beyond the fields, in the copy that a call makes, and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); and `use` (F10) of any folder but the runtime's `sys`;
