@@ -333,13 +333,18 @@ pub void ListFree(byte* block, long item) {
     Free(block, 16 + room * item)
 }
 
-// Whether the list can take one more item in place: it has a block, no other list value holds it,
-// and it has room.
+// Whether the list can take one more item in place, as `ListHasRoomFor` reads it.
 pub bool ListHasRoom(byte* block) {
+    return ListHasRoomFor(block, 1)
+}
+
+// Whether the list can take `more` items in place: it has a block, no other list value holds it, and
+// it has room for them.
+pub bool ListHasRoomFor(byte* block, long more) {
     mut bool room = false
     raw {
         if block != null {
-            room = *Ptr<long>(block) == 1 && *Ptr<int>(block + 8) < *Ptr<int>(block + 12)
+            room = *Ptr<long>(block) == 1 && long(*Ptr<int>(block + 12)) - long(*Ptr<int>(block + 8)) >= more
         }
     }
 
@@ -614,8 +619,8 @@ pub byte* BytesEnd(byte* block) {
     return end
 }
 
-// The count of a list of bytes raised by the `count` bytes a read put after its own, in its room; a
-// list without a block takes no byte.
+// The count of a list raised by the `count` items put after its own, in its room: the bytes a read
+// put there, the items an `AddRange` copied; a list without a block takes none.
 pub void BytesAdded(byte* block, long count) {
     raw {
         if block != null {
@@ -711,6 +716,41 @@ pub byte* ListReserve(byte* block, long more, long item, mut long asked) {
     }
 
     return p
+}
+
+// Whether `other` is the list's own block and no value but the list and the argument holds it: the
+// `xs.AddRange(xs)` (X9) whose block `ListReserveWithin` grows.
+pub bool ListWithin(byte* block, byte* other) {
+    mut bool within = false
+    raw {
+        if block != null && block == other {
+            within = *Ptr<long>(block) == 2
+        }
+    }
+
+    return within
+}
+
+// For `xs.AddRange(xs)` (X9) where only the list and the argument hold the block, as Rust's
+// `Vec::extend_from_within` reserves before it copies from the vector itself: the block, or the block
+// `ListReserve` grows it to, with room for `more` items after its own and `ListReserve`'s room, the
+// argument's hold set aside while it grows and put back on the block it gives, whose front holds the
+// items to append; null with `asked` set as `ListReserve` sets it, the block then held as before.
+pub byte* ListReserveWithin(byte* block, long more, long item, mut long asked) {
+    raw {
+        *Ptr<long>(block) = 1
+    }
+
+    byte* grown = ListReserve(block, more, item, mut asked)
+    raw {
+        if grown != null {
+            *Ptr<long>(grown) = 2
+        } else {
+            *Ptr<long>(block) = 2
+        }
+    }
+
+    return grown
 }
 
 // The `count` items of `item` bytes at `items` put after the items of a block with room for them,
