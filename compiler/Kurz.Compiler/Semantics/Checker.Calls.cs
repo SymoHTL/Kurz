@@ -63,8 +63,8 @@ public sealed partial class Checker
 
         public bool CannotInfer { get; set; }
 
-        /// <summary>The message of <c>cannot-infer</c> where this candidate is the call's one: a call's, or a list literal's (M11).</summary>
-        public string CannotInferText { get; init; } = "the type arguments are neither written nor inferable from the arguments (T27)";
+        /// <summary>The message of <c>cannot-infer</c> where this candidate is the call's one: a list literal's (M11); null for a call's, whose message <see cref="GivesNothing"/> completes (T27).</summary>
+        public string? CannotInferText { get; init; }
 
         /// <summary>The first argument whose own type does not fit its parameter, with the parameter's type after substitution.</summary>
         public (int Argument, KurzType Parameter)? Misfit { get; set; }
@@ -1906,7 +1906,11 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        Commit(picked, pres);
+        if (!Commit(picked, pres))
+        {
+            return Typed.Error; // E1: an argument that does not fit is the call's one error, as where it fits no parameter by its own type, so no case of the call's result is passed on
+        }
+
         var result = Types.Substitute(picked.Result, picked.Map);
         return new Typed(result);
     }
@@ -2337,7 +2341,7 @@ public sealed partial class Checker
 
         if (bound.CannotInfer)
         {
-            Report(ErrorIds.CannotInfer, c.Line, bound.CannotInferText);
+            Report(ErrorIds.CannotInfer, c.Line, bound.CannotInferText ?? $"the type arguments are neither written nor inferable from the arguments{GivesNothing(bound, pres)} (T27)");
             return;
         }
 
@@ -2398,7 +2402,7 @@ public sealed partial class Checker
 
         if (candidate.CannotInfer)
         {
-            return "its type arguments are neither written nor inferable from the arguments (T27)";
+            return $"its type arguments are neither written nor inferable from the arguments{GivesNothing(candidate, pres)} (T27)";
         }
 
         var (index, parameter) = candidate.Misfit!.Value;
@@ -2424,9 +2428,38 @@ public sealed partial class Checker
         return $"argument {index + 1} is {Types.A(own)}{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where {Types.A(parameter)} is required: {why} ({Types.MismatchRule(own, parameter)})";
     }
 
-    /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7).</summary>
-    private void Commit(Candidate candidate, List<Pre> pres)
+    /// <summary>
+    /// T27: the clause of a <c>cannot-infer</c> that names the first argument whose type has no part where a type parameter of its
+    /// parameter stands, so that it gives that type parameter nothing, a <c>5</c> where a <c>List&lt;T&gt;</c> is required; empty where
+    /// every argument gives its type parameters a type, and the types differ or no argument stands in a position.
+    /// </summary>
+    private static string GivesNothing(Candidate candidate, List<Pre> pres)
     {
+        for (var i = 0; i < pres.Count; i++)
+        {
+            var pre = pres[i];
+            if (pre.Lambda is not null || pre.Typed.IsError)
+            {
+                continue; // a lambda has no type of its own before the pick (F11), and an argument the checker could not type gives nothing and fits (E1)
+            }
+
+            var slot = candidate.Slots[candidate.Binding[i]].Type;
+            var own = ArgumentType(candidate, pres, i);
+            var found = new Dictionary<TypeParameterSymbol, KurzType>();
+            Unify(slot, own, found);
+            if (candidate.TypeParameters.FirstOrDefault(p => Types.Mentions(slot, p) && !found.ContainsKey(p)) is { } nothing)
+            {
+                return $": argument {i + 1} is {Types.A(own)} where {Types.A(slot)} is required, and gives `{nothing.Name}` nothing";
+            }
+        }
+
+        return "";
+    }
+
+    /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7); false where an argument typed so does not fit its parameter.</summary>
+    private bool Commit(Candidate candidate, List<Pre> pres)
+    {
+        var fits = true;
         var mutPaths = new List<string>();
         for (var i = 0; i < pres.Count; i++)
         {
@@ -2456,6 +2489,8 @@ public sealed partial class Checker
                 {
                     ReportMismatch(typed.Type, type, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required");
                 }
+
+                fits &= !typed.IsError; // a `null` or a function's name has no type of its own: the error of its reading under the parameter's type is its misfit (N6, F11)
             }
             else if (pre.ListLiteral && pre.Typed.IsError && Types.IsError(type))
             {
@@ -2470,6 +2505,11 @@ public sealed partial class Checker
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
                     ReportMismatch(typed.Type, type, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required");
+                    fits = false;
+                }
+                else if (typed.IsError && !pre.Typed.IsError)
+                {
+                    fits = false; // a literal its own type reads and the parameter's does not, `300` for a `byte`, which its reading reported (L17)
                 }
             }
             else
@@ -2498,6 +2538,8 @@ public sealed partial class Checker
                 MutArgument(a, mutPaths);
             }
         }
+
+        return fits;
     }
 
     /// <summary>M7, M9: whether the path after <c>mut</c> starts at an element of a list, which the checker does not read.</summary>

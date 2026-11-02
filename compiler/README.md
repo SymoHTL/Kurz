@@ -1456,7 +1456,8 @@ round can ask about it by the rule's id.
   among them (M7). A map that
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
   (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
-  separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13).
+  separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13), each form's
+  line naming that argument.
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
   checker can tell among them (D13's `match` on flags, O10's call). The checker reads these shapes
@@ -1521,6 +1522,11 @@ round can ask about it by the rule's id.
   has are `cannot-infer`; a type a nested position fixes (`List<T>` of a `List<User>`) is the one
   the direct arguments meet, each of them that type or one derived from it. T27 names the base for
   classes; the checker reads it for data types.
+- T27 with T1: the text of a `cannot-infer` names the first argument whose type has no part where its
+  parameter's type parameter stands, so that it gives that type parameter nothing (`Count(5)` for a
+  `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing"); where the
+  arguments give their type parameters types that differ, or no argument stands in a position, it names
+  none. The id stays T27's: no argument stands in the type parameter's position.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a
@@ -1538,7 +1544,17 @@ round can ask about it by the rule's id.
 - E1 with V9: a function named as a built-in (`int File() => 1`) is `redeclared`, and a call of it
   reports nothing more, its arguments checked, as a read of a variable named so does; where a data
   type, an enum, a C declaration or a state of the file has the name, or `print`, `List`, `Map` or
-  `Bytes` is it, the call keeps that one's reading and its errors.
+  `Bytes` is it, the call keeps that one's reading and its errors, and so does the bare name: after
+  `void IoError()`, `x = IoError` is the `syntax` of a type no value stands for (D2). Where a type every
+  file sees has the name, the text of the function's declaration names that type and the rule that
+  declares it, as a type's declaration of the name does.
+- E1 with O2 and O9: a call whose argument does not fit its parameter reports that misfit alone, and no
+  case of its result is passed on beside it, at the top level or in a function. That holds for a list
+  literal, a literal that its own type reads and the parameter's does not (`300` for a `byte`), a `null`
+  and a function's name, which the parameter types (M11, L17, N6, F11), as it holds for a variable of
+  another type. An argument with an error of its own fits every parameter (E1), so the call passes its
+  cases on, an item of a list literal among them; so does a lambda whose parameter is written with
+  another type than the one the call passes, which the lambda's own check reports (F11).
 - S13 with V9: `args = value` among the top-level statements is `redeclared`, with a text that cites
   S13 and V9. It is one reading of the question S13 and section 14 of the record hold open, where V8's
   reading is `assign-immutable`, and no corpus case stands on it.
