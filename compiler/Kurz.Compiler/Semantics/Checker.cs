@@ -52,6 +52,7 @@ public sealed partial class Checker
     private Frame frame = null!;
     private List<TypeParameterSymbol>? typeContext;
     private bool inElseArm;
+    private CallExpression? loopSource; // S16: the collection of the `for` loop being checked, the one place `f.Lines()` stands
     private bool realKeepsOwnType;
     private int blockDepth;
     private int rawDepth; // R7, R12: the `raw` blocks and `naked` bodies around the code being checked
@@ -178,6 +179,9 @@ public sealed partial class Checker
         public int Line { get; init; }
 
         public List<TypeParameterSymbol> TypeParameters { get; init; } = [];
+
+        /// <summary>T33: the copy whose body this is, which binds the names of its function's type parameters to its type arguments.</summary>
+        public Copy? Copy { get; init; }
 
         /// <summary>F16: the names of the top-level variables, which a top-level function neither reads nor declares.</summary>
         public HashSet<string>? Reserved { get; init; }
@@ -321,12 +325,17 @@ public sealed partial class Checker
         CheckClassDefaults();
         CollectReserved(program.Statements);
 
+        FindReaders();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
         {
-            Unread(f, () => CheckFunctionBody(f));
+            if (!readers.Contains(f))
+            {
+                CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
+            }
         }
 
         CheckMethodBodies(); // K7
+        JoinPassingReaders();
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
@@ -345,6 +354,7 @@ public sealed partial class Checker
         }
 
         ReportUnused(frame.Scope);
+        MakeCopies();
     }
 
     /// <summary>
@@ -380,6 +390,20 @@ public sealed partial class Checker
     /// <summary>A type's name the checker does not read: a type of chapter 7, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
 
+    /// <summary>T33: a member of a type parameter, or of the name a copy binds, that reads its type and that the checker does not read,
+    /// <c>T.Fields</c>, <c>T.Make</c> and the parts beyond the fields: it is <c>not supported</c>. <c>T.Kind</c> of a copy is read
+    /// (<see cref="KindOfCopy"/>).</summary>
+    private bool UnreadTypeMember(string name, string member, int line)
+    {
+        if ((TypeParameter(name) is null && BoundType(name) is null) || !IsTypeMember(member))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"reading a type in generic code, `{name}.{member}` (T33)");
+        return true;
+    }
+
     /// <summary>R18: a name under which the intrinsics and their vector types stand (section 13, the owner, 2026-11-01), which the checker
     /// does not read: where no declaration gives the name, it is <c>not supported</c>.</summary>
     private bool UnreadIntrinsic(string name, int line)
@@ -390,6 +414,43 @@ public sealed partial class Checker
         }
 
         NotSupported(line, $"CPU intrinsics and their vector types, `{name}` (R18)");
+        return true;
+    }
+
+    /// <summary>S17 to S22, A17: the names of processes, of standard input and of standard error, which every file sees (section 12, the
+    /// owner, 2026-11-01), so that a file's own declaration of one is <c>redeclared</c> (V9).</summary>
+    private static bool IsProcessName(string name) =>
+        name is "Command" or "ChildProcess" or "ProcessOutput" or "ExitStatus" or "Stdio" or "ExitError" or "Stdin" or "eprint";
+
+    /// <summary>S17 to S22, A17: a name of <see cref="IsProcessName"/>, which the checker does not read: a use of one is <c>not supported</c>.</summary>
+    private bool UnreadProcessName(string name, int line)
+    {
+        if (!IsProcessName(name))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"processes, standard input and standard error, `{name}` (S17 to S22, A17)");
+        return true;
+    }
+
+    /// <summary>S23: a call of <c>Environment.Exit</c>, after which no path goes on (section 12).</summary>
+    private bool IsExit(Expression e) =>
+        e is CallExpression { Callee: MemberAccess { Target: NameExpression { Name: "Environment" }, Member: "Exit" } } && Lookup("Environment").Variable is null;
+
+    /// <summary>G1: the names of regular expressions, which every file sees (section 12, the owner, 2026-11-01), so that a file's own
+    /// declaration of one is <c>redeclared</c> (V9).</summary>
+    private static bool IsRegexName(string name) => name is "Regex" or "Match" or "RegexError" or "RegexKind";
+
+    /// <summary>G1 to G5: a name of <see cref="IsRegexName"/>, which the checker does not read: a use of one is <c>not supported</c>.</summary>
+    private bool UnreadRegexName(string name, int line)
+    {
+        if (!IsRegexName(name))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"regular expressions, `{name}` (G1 to G5)");
         return true;
     }
 
@@ -938,7 +999,7 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var element = Resolve(n.TypeArguments[0]);
+            var element = ResolveTypeArgument(n.TypeArguments[0], "`List`");
             return Types.IsError(element) ? Types.Error : new ListType(element);
         }
 
@@ -950,8 +1011,8 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var key = Resolve(n.TypeArguments[0]);
-            var value = Resolve(n.TypeArguments[1]);
+            var key = ResolveTypeArgument(n.TypeArguments[0], "`Map`");
+            var value = ResolveTypeArgument(n.TypeArguments[1], "`Map`");
             return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
@@ -982,6 +1043,11 @@ public sealed partial class Checker
             return new HasherType(hasher);
         }
 
+        if (BoundType(n.Name) is { } bound && n.TypeArguments.Count == 0)
+        {
+            return bound; // T33: in a copy, the type argument its call gave
+        }
+
         var parameter = TypeParameter(n.Name);
         if (parameter is not null)
         {
@@ -1002,7 +1068,7 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var arguments = n.TypeArguments.Select(Resolve).ToList();
+            var arguments = n.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{n.Name}`")).ToList();
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
@@ -1033,13 +1099,29 @@ public sealed partial class Checker
             return Types.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line))
+        if (UnreadIntrinsic(n.Name, n.Line) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Types.Error;
         }
 
         Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here (V10)");
         return Types.Error;
+    }
+
+    /// <summary>
+    /// T17, T19: a type argument written in a type or a call, where `void` is not supported: C# refuses it as a type argument and Rust's
+    /// `()` takes one, and the record says neither, so it is refused here before the emitter writes a list or a copy of it.
+    /// </summary>
+    private KurzType ResolveTypeArgument(TypeSyntax argument, string of)
+    {
+        var type = Resolve(argument);
+        if (Types.IsVoid(type))
+        {
+            NotSupported(argument.Line, $"`void` as a type argument of {of} (T17, T19)");
+            return Types.Error;
+        }
+
+        return type;
     }
 
     private TypeParameterSymbol? TypeParameter(string name)
@@ -1073,7 +1155,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1278,7 +1360,7 @@ public sealed partial class Checker
             return;
         }
 
-        frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel };
+        frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel, Copy = copies.GetValueOrDefault(f) };
         foreach (var (p, node) in f.Parameters.Zip(d.Parameters))
         {
             DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node);
@@ -1412,7 +1494,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name)
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
         || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>
@@ -1423,7 +1505,7 @@ public sealed partial class Checker
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name);
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
@@ -1437,7 +1519,9 @@ public sealed partial class Checker
     /// by <c>with</c> as every data type
     /// (section 4, the owner, 2026-10-30, "Both, as a data type"), and <c>ParseError</c> with its <c>ParseKind</c>, the case of a number
     /// type's <c>Parse</c> that is no number (X7), and <c>HexError</c> with its <c>HexKind</c>, the case of <c>Hex.Decode</c> that gives no
-    /// bytes (H7; section 12, the owner, 2026-10-31, "Without input").
+    /// bytes (H7; section 12, the owner, 2026-10-31, "Without input"), and <c>TypeKind</c>, the kind of a type that generic code reads
+    /// (T33; section 4, assumed with the owner's answer "Kinds + parts" of 2026-11-01), a value for each built-in type named as the
+    /// type and one for each other kind.
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
         SourceText.FromString(
@@ -1460,6 +1544,10 @@ public sealed partial class Checker
             data ParseError(ParseKind Kind)
             enum HexKind { OddLength, InvalidDigit }
             data HexError(HexKind Kind, int At)
+            enum TypeKind {
+                SByte, Byte, Short, UShort, Int, UInt, Long, ULong, Float, Double, Decimal, Bool, String, Char, Duration, Timestamp,
+                LongDuration, LongTimestamp, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
+            }
             """));
 
     /// <summary>The tree of the built-in types, which reads clean and holds type declarations alone, or the compiler's defect.</summary>
@@ -1582,7 +1670,7 @@ public sealed partial class Checker
                 return Flow.Completes;
             case ExpressionStatement e:
                 CheckExpressionStatement(e);
-                return Flow.Completes;
+                return IsExit(e.Expression) ? Flow.Ends : Flow.Completes; // S23: no path goes on after `Environment.Exit`, as after a `throw`
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
@@ -2149,12 +2237,14 @@ public sealed partial class Checker
     /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
     /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
     /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is (C6, proposed:
-    /// section 4 gives the form over a map alone).
+    /// section 4 gives the form over a map alone). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
+    /// failures the arms of an <c>else</c> after the block handle as a call's (O5) and every other one leaves the function at the loop's line.
     /// </summary>
     private void CheckForIn(ForInStatement f)
     {
         KurzType element;
         KurzType? value = null;
+        UnionType? failures = null;
         if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
@@ -2162,22 +2252,33 @@ public sealed partial class Checker
         }
         else
         {
+            var outer = loopSource;
+            loopSource = Unwrap(f.Collection) as CallExpression;
             var t = CheckExpression(f.Collection, null);
-            if (Types.IsVoid(t.Type))
+            loopSource = outer;
+            if (Unwrap(f.Collection) is CallExpression lines && model.HasCall(lines) && model.CallOf(lines).Kind == CallKind.FileLines && t.Type is UnionType pulls)
             {
-                this.Report(ErrorIds.Syntax, f.Collection.Line, "a call with a `void` success used as a value (O10)");
+                failures = pulls; // S16: a line is a `string`, and a pull's cases go to the loop's `else`, or leave the function through it
+                element = Types.String;
             }
-
-            element = t.Type switch
+            else
             {
-                ListType l => l.Element,
-                ErrorType or VoidType => Types.Error,
-                MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
-                MapType m => m.Key,
-                _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
-                _ => Report(f.Collection.Line, t.Type),
-            };
-            value = t.Type is MapType map ? map.Value : null;
+                if (Types.IsVoid(t.Type))
+                {
+                    this.Report(ErrorIds.Syntax, f.Collection.Line, "a call with a `void` success used as a value (O10)");
+                }
+
+                element = t.Type switch
+                {
+                    ListType l => l.Element,
+                    ErrorType or VoidType => Types.Error,
+                    MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
+                    MapType m => m.Key,
+                    _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
+                    _ => Report(f.Collection.Line, t.Type),
+                };
+                value = t.Type is MapType map ? map.Value : null;
+            }
         }
 
         if (f.Second is not null && value is null && !Types.IsError(element))
@@ -2195,6 +2296,12 @@ public sealed partial class Checker
 
         CheckLoop(null, f.Body);
         PopScope();
+        if (failures is not null || f.Arms is not null)
+        {
+            // S16: the cases a pull fails with are handled by the arms of the `else` after the block, as a call's (O5), and every other
+            // one leaves the function at the loop's line (O2, O3, O9); a collection that fails with none gives its arms no case
+            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line);
+        }
 
         KurzType Report(int line, KurzType type)
         {
@@ -2205,6 +2312,13 @@ public sealed partial class Checker
 
     private void CheckReturn(ReturnStatement r)
     {
+        if (frame.IsTopLevel && r.Value is not null)
+        {
+            NotSupported(r.Line, "a `return` with a value among the top-level statements, the program's exit code (F17)");
+            CheckExpression(r.Value, null);
+            return;
+        }
+
         var expected = frame.ReturnType;
         if (expected is null)
         {
