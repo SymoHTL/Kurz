@@ -173,9 +173,9 @@ a = 1
 print(a); print(a + 1)
 ```
 
-### L6 (decided, §8) Interpolation is on in every string but an `asm` template
+### L6 (decided, §8) Interpolation is on in every string that is not raw, but an `asm` template
 
-Inside a string literal, `{expression}` is replaced by the text (A2 to A15) of the expression's value.
+Inside a string literal that is not raw (L20), `{expression}` is replaced by the text (A2 to A15) of the expression's value.
 The template of an `asm` statement is the one exception: there `{name}` names an operand (R11, §3).
 
 Case: [source/interpolation.kz](../corpus/source/interpolation.kz)
@@ -189,7 +189,7 @@ print("next {count + 1}")
 
 ### L7 (assumed, §8) Escapes
 
-Inside a string literal, `\n`, `\t`, `\"` and `\\` mean what they mean in C#, and `\{` is a brace
+Inside a string literal that is not raw (L20), `\n`, `\t`, `\"` and `\\` mean what they mean in C#, and `\{` is a brace
 that does not start an interpolation. A `}` outside an interpolation is an ordinary character.
 The other escapes of C#, and a backslash before any other character, are L16.
 
@@ -787,7 +787,7 @@ print(0x10ms)
 
 ### L15 (decided, §8) What is special inside a `"""` block
 
-Inside a `"""` block (L13), `{expression}` is replaced (L6) and `\` starts an escape (L7), as in
+Inside a `"""` block (L13) that is not raw (L20), `{expression}` is replaced (L6) and `\` starts an escape (L7), as in
 every other literal. A brace that starts no interpolation is written `\{`. This is where the
 block leaves the raw string of C#, which never treats `\` as an escape and replaces
 `{expression}` only when it is marked with `$`. A `"` inside
@@ -800,5 +800,61 @@ text = """
     \{ "table": "{table}" }
     a\\b
     """
+print(text)
+```
+
+### L20 (decided, §8) Raw literals
+
+A raw literal, `r"\d{2,4}"`, holds its text as it is written, with no escape and no interpolation, as
+Rust's raw string literal does: `\` and `{` are ordinary characters in it. `r#"say "hi""#` holds a `"`:
+the literal opens with `r`, one or more `#` and a `"`, and closes at a `"` followed by as many `#`. A raw
+block stands beside the `"""` block, with no escape and no interpolation in its text (§8, the owner,
+2026-11-01, "Rust's raw r\"...\""): it opens with `r"""` at the end of a line and takes every rule of
+L13. Every literal that is not
+raw keeps its escapes (L7, L16) and its interpolation (L6, L15). A raw literal takes at most 255 `#`, as
+Rust's lexer does; it ends on the line it starts on, as an ordinary literal does (L13), and one that does
+not is `syntax` (E4); a raw block has no `#` form, and one of a wrong shape is the error L13 gives that
+shape; an `r` directly before `"`, or before `#` and a `"`, starts a raw literal wherever a name could
+start; and a raw literal stands wherever a literal does, an interpolation's hole (L6) and an `asm`
+template (R11) among them, where its `{name}` names an operand as in any template. *(assumed, §8: the
+spelling `r"""` and the rules of L13 for the raw block, the count of `#`, the end on its line, no `#`
+form of the block, the `r` and where a raw literal stands)*
+
+Case: [source/raw-literal.kz](../corpus/source/raw-literal.kz)
+```kurz
+print(r"\d{2,4}")
+print(r"a\nb\tc")
+print(r#"say "hi""#)
+print(r##"a "# b"##)
+print(r"" == "")
+```
+
+Case: [source/raw-block.kz](../corpus/source/raw-block.kz)
+```kurz
+text = r"""
+    { "pattern": "\d+" }
+      {indented}
+    """
+print(text)
+```
+
+Case: [source/raw-in-interpolation.kz](../corpus/source/raw-in-interpolation.kz)
+```kurz
+print("got {r"a\"}")
+```
+
+Case: [source/raw-literal-unclosed.kz](../corpus/source/raw-literal-unclosed.kz)
+```kurz
+print(r"abc)
+```
+
+Case: [source/raw-hash-unclosed.kz](../corpus/source/raw-hash-unclosed.kz)
+```kurz
+print(r#"a"b")
+```
+
+Case: [source/raw-block-one-line.kz](../corpus/source/raw-block-one-line.kz)
+```kurz
+text = r"""abc"""
 print(text)
 ```

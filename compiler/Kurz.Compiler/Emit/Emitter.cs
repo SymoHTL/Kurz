@@ -258,6 +258,11 @@ public sealed partial class Emitter
                     }
             }
         }
+
+        foreach (var copy in u.Model.Copies)
+        {
+            owners[copy] = u; // T33: a copy of a generic function that reads its type belongs to the function's file
+        }
     }
 
     /// <summary>R13: state outside a function is a global of the module, its constant initial value its initializer; <c>thread static</c> is the target's thread-local storage.</summary>
@@ -759,9 +764,20 @@ public sealed partial class Emitter
 
     private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>C8, C6: a range runs its numbers in order, both ends read once, an end below the start the exception before the first round; a list its items (<see cref="EmitForInList"/>); a `for` over anything else is not emitted.</summary>
+    /// <summary>C8, C6: a range runs its numbers in order, both ends read once, an end below the start the exception before the first round; a list its items (<see cref="EmitForInList"/>); S16: a file its lines (<see cref="EmitForInLines"/>); a `for` over anything else is not emitted.</summary>
     private void EmitForIn(ForInStatement f)
     {
+        if (Unwrap(f.Collection) is CallExpression call && Model.CallOf(call).Kind == CallKind.FileLines)
+        {
+            EmitForInLines(f, call);
+            return;
+        }
+
+        if (f.Arms is not null)
+        {
+            throw new InvalidOperationException($"an `else` after a loop over {Types.A(TypeOf(f.Collection))} at line {f.Line}: the checker reports it (S16)");
+        }
+
         if (TypeOf(f.Collection) is ListType list)
         {
             EmitForInList(f, list);

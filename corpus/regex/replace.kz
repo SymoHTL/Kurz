@@ -1,0 +1,16 @@
+// expect: output
+// | 11/2026 and 01/2027
+// | 11.2026
+// | 2026a
+// | 
+// | $
+// | bonono
+// rules: G5
+
+date = Regex.New(r"(?<year>\d{4})-(?<month>\d{2})")
+print(date.Replace("2026-11 and 2027-01", "$2/$1"))
+print(date.Replace("2026-11", r"${month}.${year}"))
+print(date.Replace("2026-11", r"${1}a"))
+print(date.Replace("2026-11", "$1a"))
+print(date.Replace("2026-11", "$$"))
+print(Regex.New("a").Replace("banana", "o"))
