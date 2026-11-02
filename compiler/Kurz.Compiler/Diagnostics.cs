@@ -141,6 +141,8 @@ public static class ErrorIds
     public const string AmbiguousCall = "ambiguous-call";
     public const string CannotInfer = "cannot-infer";
     public const string EqualByUnknown = "equal-by-unknown";
+    public const string EqualsMethod = "equals-method";
+    public const string MutableKey = "mutable-key";
     public const string BaseFieldClash = "base-field-clash";
     public const string NoText = "no-text";
     public const string BlockIndentation = "block-indentation";
