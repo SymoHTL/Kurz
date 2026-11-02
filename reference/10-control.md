@@ -254,7 +254,7 @@ Value, as C#", the option that also named the entry's `Key` and `Value`); for a 
 by `for line in f.Lines() { }`, which pulls them one at a time, with an `else` after the block for the
 cases a pull fails with: S16 states it. They are the exception to the collection as it was when the
 loop started: the loop pulls each line when it needs it, so that a `Read` or a second `Lines()` on the
-same `File` in the block takes what the loop would have pulled next (S16).
+same `File` in the block takes what the loop would have pulled next (S16) *(assumed, §12)*.
 
 Case: [control/for-in.kz](../corpus/control/for-in.kz)
 ```kurz

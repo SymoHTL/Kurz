@@ -1100,8 +1100,8 @@ for line in f.Lines() {
 `f.Lines()` stands as the collection of a `for` loop alone and has no type name: anywhere else it is
 text no rule gives a meaning, `syntax` (E4) (§12, the owner, 2026-11-01, "Loop source only";
 *(proposed: the id)*). An arm of the `else` that names a case the collection cannot give is
-`type-mismatch` at the arm, as an arm of O5's that names no case of the call, and after a loop over a
-list, a range or a map, which fails with no case, every such arm is *(proposed)*. An `else` with no
+`type-mismatch` at the arm, as an arm of O5's that names no case of the call *(proposed)*, and after a
+loop over a list, a range or a map, which fails with no case, every such arm is *(proposed)*. An `else` with no
 arms there is `unreachable-arm` at the line of the `else`, as an `else` arm there is (§5, the owner,
 2026-11-02). Two names, `for i, line in f.Lines()`, are `type-mismatch` at the loop's line, as over a
 list (C6) *(proposed)*. An arm of the `else` stands after the loop: a `break` or `continue` in it
