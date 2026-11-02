@@ -151,10 +151,14 @@ c.Add()
 No case shows the folder part: it takes several folders, and a case of the corpus is a single
 file.
 
-### F10 (decided, §8) Folders and `use`
+### F10 (decided, §8, §13) Folders and `use`
 
 A folder is a namespace; there is no `namespace` line. Files in one folder see each other
-without imports. `use` brings in another folder or a package.
+without imports. `use` brings in another folder or a package. A type it holds is visible
+unqualified, `Json.Parse<T>(text)`, and a function at the top of the folder is reached through the
+folder's name, `sys.Write(...)`; two folders a file uses that both hold a type of one name are the
+compile error `ambiguous-name` at the bare use of that name (§13, the owner, 2026-11-01, "By kind of
+name"). *(assumed, §13: the id)*
 
 No case: it takes several files, and a case of the corpus is a single file.
 
@@ -617,4 +621,45 @@ int Twice(int n) => n * 2
 
 f = (int n) => Twice(n)
 print(f(4))
+```
+
+### F17 (decided, §12) A top-level `return` with a value
+
+A `return` with a value among the top-level statements, `return 2`, ends the program with that value as
+its exit code, and the end of the top-level code, and a bare `return` among its statements, end it with
+0, whether or not a `return` with a value stands beside them (§12, the owner, 2026-11-01, "Top-level
+return n + Exit" and "0, silently"). The value is an `int`, and a value of another type is
+`type-mismatch`. Linux takes the low 8 bits of the value, as of `Environment.Exit`'s (S23), and a build
+for Windows says `not supported` to a `return` with a value among the top-level statements (S11), as to
+`Environment.Exit`. *(assumed, §12: the type, the low 8 bits and Windows)*
+
+No case for a code other than 0: a case that expects output ends with 0.
+
+Case: [functions/top-level-return.kz](../corpus/functions/top-level-return.kz)
+```kurz
+print("a")
+if args.Count == 0 {
+    return 0
+}
+print("b")
+```
+
+Case: [functions/top-level-return-end.kz](../corpus/functions/top-level-return-end.kz)
+```kurz
+print("a")
+if args.Count > 0 {
+    return 3
+}
+if args.Count > 1 {
+    return
+}
+print("b")
+```
+
+Case: [functions/top-level-return-mismatch.kz](../corpus/functions/top-level-return-mismatch.kz)
+```kurz
+print("a")
+if args.Count == 0 {
+    return "stop"
+}
 ```

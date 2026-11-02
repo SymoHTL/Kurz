@@ -1,0 +1,7 @@
+// expect: throws index-out-of-range at 7
+// | 2
+// rules: X11
+
+mut xs = [1, 2]
+print(xs.RemoveAt(1))
+print(xs.RemoveAt(-1))

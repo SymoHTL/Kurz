@@ -1,0 +1,29 @@
+// expect: output
+// | 10
+// | not found
+// rules: O5
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+// an `else` with no arms after a call with cases handles none of them: each propagates
+int | NotFound Pass(int id) {
+    value = Find(id) else {
+    }
+    return value
+}
+
+match Pass(1) {
+    int n => print(n)
+    NotFound => print("not found")
+}
+match Pass(2) {
+    int n => print(n)
+    NotFound => print("not found")
+}

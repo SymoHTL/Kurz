@@ -133,6 +133,9 @@ public sealed partial class Checker
                     return (lt.Intersect(kept.Union(rt)), kept.Union(rf));
                 }
 
+            case MemberAccess when ClassTested(condition) is { } tested:
+                return (tested, none); // R18: a test of a class's `IsSupported` guards where it is true, as a test of `null` narrows
+
             case BinaryExpression { Operator: TokenKind.EqualEqual or TokenKind.NotEqual } b when Unwrap(b.Left) is NullLiteral != Unwrap(b.Right) is NullLiteral:
                 {
                     var paths = NonNullPaths(Unwrap(b.Left) is NullLiteral ? b.Right : b.Left);
@@ -210,6 +213,7 @@ public sealed partial class Checker
         var before = frame.Known;
         var (whenTrue, whenFalse) = Tests(b.Left);
         frame.Known = before.Union(b.Operator == TokenKind.AmpersandAmpersand ? whenTrue : whenFalse);
+        RecordGuards(b.Right); // R18: the right side runs where the left showed what it shows
         var right = CheckExpression(b.Right, Types.Bool);
         afterRight[b] = frame.Known;
         frame.Known = before.Intersect(frame.Known);
@@ -301,9 +305,10 @@ public sealed partial class Checker
             var (whenTrue, whenFalse) = (ImmutableHashSet<NullPath>.Empty, ImmutableHashSet<NullPath>.Empty);
             if (condition is not null)
             {
+                var calls = callsRun;
                 CheckCondition(condition);
                 tested = frame.Known; // what the condition's `mut` arguments changed, while the head stays what a round comes back to
-                (whenTrue, whenFalse) = Tests(condition);
+                (whenTrue, whenFalse) = ConditionTests(condition, calls);
             }
 
             var exits = new LoopExits();

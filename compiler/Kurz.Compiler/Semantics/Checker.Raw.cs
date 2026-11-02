@@ -164,7 +164,7 @@ public sealed partial class Checker
         PrimitiveType { Kind: Primitive.String } => Holding.Counted,
         PrimitiveType => Holding.Nothing,
         ListType or MapType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
-        ClassType => Holding.Counted, // K2: an instance is a counted reference (section 3)
+        ClassType or WeakRefType => Holding.Counted, // K2: an instance is a counted reference (section 3), and a weak one counts its block (R3)
         UnionType u => Worst(u.Cases.Select(c => Holds(c, seen))),
         DataType d => seen.Contains(d.Symbol) ? Holding.Counted : HoldsFields(d, seen),
         TypeParameterType => Holding.Unknown,
@@ -654,6 +654,7 @@ public sealed partial class Checker
 
         CheckKey(index.Index, map);
         CheckWrittenValue(a, index, map.Value);
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the entry it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>
@@ -676,6 +677,7 @@ public sealed partial class Checker
         }
 
         CheckWrittenValue(a, index, list.Element);
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the item it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>
@@ -920,7 +922,8 @@ public sealed partial class Checker
     /// <summary>R15: <c>List&lt;T&gt;.FromRaw(p, n)</c> and <c>List&lt;T&gt;.Allocate(n)</c>; a member of another type with type arguments is one no rule gives it (V10).</summary>
     private Typed CheckTypeMemberCall(TypeMemberAccess t, CallExpression c)
     {
-        var type = Resolve(t.Type);
+        // `List<void>` is read here, where no type argument is `void` elsewhere (T17), so that `void`'s lack of a size is the error (R14)
+        var type = t.Type is NamedType { Name: "List", TypeArguments: [Syntax.VoidType] } ? new ListType(Types.Void) : Resolve(t.Type);
         if (type is ListType list && t.Member == "FromRaw")
         {
             return CheckFromRaw(c, list, list.Element, "List<T>.FromRaw");
