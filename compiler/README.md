@@ -593,6 +593,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
+- a generic function that reads its type with `T.Kind`, and one that passes its type parameter to
+  such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
+  a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
+  every node is new (`Syntax/SyntaxCopy.cs`), so that the model holds each copy's types apart, with
+  the type parameter's name bound to the type argument and `T.Kind` a constant of `TypeKind`; a
+  `match` on it reads the one arm that takes the copy's kind, and the emitter emits that arm alone;
+  no such function is checked where no call makes a copy, and a generic function that calls one for a
+  type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -1426,9 +1434,10 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
-which the intrinsics and their vector types stand (R18); a member of a type parameter that reads its type, `T.Kind`,
-`T.Fields`, `T.Make` and the parts beyond the fields, and the name `TypeKind`, which every file sees, so that a file's own
-declaration of it is `redeclared` (T33); and `use` (F10) of any folder but the runtime's `sys`;
+which the intrinsics and their vector types stand (R18); a member of a type parameter that reads its type beyond `Kind`,
+`T.Fields`, `T.Make` and the parts beyond the fields, in the copy that a call makes, and a chain of more than 64 copies of
+generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
+larger type each time makes without end (T33); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item
