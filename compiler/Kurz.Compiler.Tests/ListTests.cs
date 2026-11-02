@@ -12,7 +12,8 @@ namespace Kurz.Compiler.Tests;
 /// a block nothing holds, which the allocator gives out again, and a lambda's environment as it frees a list's block (the owner,
 /// 2026-10-25, "Pair + heap env"), and a string's block, which a literal does not have (the owner, 2026-10-29, "Bit in the count"
 /// and "string.Allocate, take over"), no block is read after it is freed, the number `allocation-failed`
-/// reports past the limit and for a refused growth, an integer's digits in every text that holds them, against what .NET writes (A2),
+/// reports past the limit and for a refused growth, an integer's digits in a print, a hole, a list and a `data` value, against what
+/// .NET writes (A2),
 /// and what the emitter says `not supported` to; what the checker refuses of a
 /// read beside a `mut` call (M7) the corpus pins.
 /// </summary>
@@ -3966,10 +3967,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // M9 (the owner, 2026-10-30, "Rust's full path"): each `getrandom` of the runtime is a system call of a number the kernel does
         // not have, 100000, which it refuses with ENOSYS (seen on x86_64), as a kernel before 3.17 refuses `getrandom`; the keys come
-        // from `/dev/urandom`
+        // from `/dev/urandom`; the runtime declares `syscall` for the lock of a file's reader (S16)
         (string Path, string Old, string New)[] enosys =
         [
-            (TargetFile, "    long getrandom(byte* bytes, long count, uint options)\n", "    long getrandom(byte* bytes, long count, uint options)\n    long syscall(long number, ...)\n"),
             (TargetFile, "getrandom(bytes, count, 4)", "syscall(100000, bytes, count, 4)"),
             (TargetFile, "getrandom(bytes, count, 1)", "syscall(100000, bytes, count, 1)"),
         ];
