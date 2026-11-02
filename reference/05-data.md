@@ -409,6 +409,40 @@ e = Empty
 print(e == Empty)
 ```
 
+### D21 (assumed, §4) A derived `data` type without fields of its own
+
+`data Dot : Shape` writes no fields of its own and has the fields of its base (D7): its
+constructor takes them in their order, and a value of it is made as a value of any type with
+fields (D2). Its bare name is its one value (D8) only where no base above it has a field either;
+where one has, the bare name stands for no value (D2).
+
+Case: [data/inherit-no-own-fields.kz](../corpus/data/inherit-no-own-fields.kz)
+```kurz
+data Shape(int A, int B)
+data Dot : Shape
+data Spot : Dot
+data Tag
+data Mark : Tag
+
+int Sum(Shape s) => s.A + s.B
+
+d = Dot(1, 2)
+print(d.A)
+print(d)
+print(Sum(d))
+print(Spot(4, 5))
+m = Mark
+print(m == Mark)
+```
+
+Case: [data/inherit-no-own-fields-bare.kz](../corpus/data/inherit-no-own-fields-bare.kz)
+```kurz
+data Shape(int A, int B)
+data Dot : Shape
+
+print(Dot)
+```
+
 ### D9 (decided, §4, §5) Unions
 
 `A | B` is a type. Its values are the values of `A` and the values of `B`. A value of a case
