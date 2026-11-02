@@ -141,6 +141,7 @@ class MemoryForge(rv.Forge):
         self.labels = []  # labels on the pull request, which a case may preload: pr() answers them, and a run adds to them
         self.refuse_labels = None  # the forge refuses a label write whose name starts with this
         self.refuse_unlabel = False  # the forge refuses to take a label off
+        self.wire = []  # (method, path) of every write that reached the wire, in order
         self.read_back = 0  # how often the lows issue was read back after a comment on it failed
 
     def pr(self):
@@ -176,6 +177,7 @@ class MemoryForge(rv.Forge):
         return [{"body": body} for n, body in self.collected if n == number]
 
     def send(self, path, payload, method):
+        self.wire.append((method, path))
         body = payload.get("body") or ""
         counting = path == f"issues/{self.number}/labels" and all(n.startswith(kit.ROUND_LABEL) for n in payload["labels"])
         if self.first_write is None and hasattr(sys.stdout, "getvalue") and not counting:
@@ -1016,6 +1018,11 @@ def suite(case):
          and "no pass was paid, so this run is no review round" in failure[0]
          and forge.statuses == error and forge.said == ["review did not complete: usage-limit, before any paid pass: no round counted"],
          ([n["body"][:200] for n in forge.notes], forge.said))
+    at = lambda shape: [i for i, (method, path) in enumerate(forge.wire) if shape(method, path)]
+    removed, noted = at(lambda m, p: m == "DELETE" and "/labels/" in p), at(lambda m, p: m == "POST" and p == "issues/1/comments")
+    status = at(lambda m, p: p.startswith("statuses/"))
+    case("run: a run takes its round label off before its note and its status say that it did",
+         len(removed) == 1 and bool(noted) and bool(status) and removed[0] < noted[-1] and removed[0] < status[0], forge.wire)
     forge = MemoryForge()
     code, out = run_review(forge, limited(1), ["--pr", "1"], ci=True, credential="x")
     case("run: a run the usage limit ends after one paid pass stays a round, and its label stays",

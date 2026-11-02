@@ -54,7 +54,8 @@ flowchart TD
     Gate: the status stays error, so the ruleset holds the merge.
     usage-limit: wait for the reset. credential: the owner fixes the secret.
     budget: re-run, what converged is replayed. A run that labelled the pull request is a round whatever its kind,
-    so a re-run takes the one round, and when one is counted no re-run follows: node Q.
+    so a re-run takes the one round, and when one is counted no re-run follows: node Q; but a run that usage-limit
+    ended before any paid pass took its label off again and is no round, so its run after the reset is the round.
     head-moved: a push arrived, review the new head.
     oversized: split the change. base: target the default branch. cap: the one review round is spent, node Q.
     rules, empty, bad-diff: the line says what.

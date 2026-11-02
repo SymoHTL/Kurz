@@ -1258,9 +1258,9 @@ def review(argv):
             if counted and incomplete[0] == "usage-limit" and not passes and not cost and not any(r["error"] and r["error"].cost for r in results):
                 try:
                     forge.unlabel(counted)
-                except kit.Refused as e:
+                except kit.Refused as refusal:  # a name of one letter before the colon reads as a drive in the ledger's anchor
                     return stop("failed", f"the usage limit ended the run before any paid pass ({incomplete[1]}); then "
-                                          f"{label_unknown(counted, 'taken off again', 'it was taken off', e)}")
+                                          f"{label_unknown(counted, 'taken off again', 'it was taken off', refusal)}")
                 print(f"  took the label {counted} off again: no pass was paid, so this run is no review round")
                 return stop(incomplete[0], f"{incomplete[1]}. Posted so far: {summary}", uncounted=counted)
             return stop(incomplete[0], f"{incomplete[1]}. Posted so far: {summary}")
