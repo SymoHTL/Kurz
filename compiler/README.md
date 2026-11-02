@@ -1754,8 +1754,8 @@ round can ask about it by the rule's id.
   which runs after them, knows nothing of such a path; a path through fields without `mut` keeps its
   narrowing, as N7 reads it. An assignment ends it after its value, and a write into a list or a map
   after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
-  reads a narrowed `Head`, while a call in the value ends it before the index; an assignment the
-  checker refuses narrows nothing.
+  reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
+  field that the checker refuses narrows nothing *(assumed)*.
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.
