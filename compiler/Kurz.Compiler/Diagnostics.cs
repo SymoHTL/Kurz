@@ -144,6 +144,7 @@ public static class ErrorIds
     public const string BreakOutsideLoop = "break-outside-loop";
     public const string UnknownEscape = "unknown-escape";
     public const string StaticState = "static-state";
+    public const string StaticMismatch = "static-mismatch";
     public const string OverrideWithoutVirtual = "override-without-virtual";
     public const string HidesMember = "hides-member";
     public const string NoPrimaryConstructor = "no-primary-constructor";

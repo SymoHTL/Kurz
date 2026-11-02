@@ -444,6 +444,16 @@ public sealed partial class Checker
             return ReadImplicitField(n, implicitField); // K7: the field of `this`
         }
 
+        if (ImplicitStaticField(n.Name) is { } staticField)
+        {
+            return ReadStaticField(n, staticField); // K18: a `static` field of the class
+        }
+
+        if (InstanceFieldInStatic(n.Name, n.Line))
+        {
+            return Typed.Error; // K19
+        }
+
         if (ImplicitMethods(n.Name) is not null)
         {
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
@@ -549,10 +559,9 @@ public sealed partial class Checker
                 return EnumValue(enumSymbol, m.Member, m.Line);
             }
 
-            if (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null)
+            if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
             {
-                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a class and has no member `{m.Member}` of its own: a field is read from an instance (K1, V10)");
-                return Typed.Error;
+                return ClassStaticMember(classSymbol, m); // K7, K18, K19
             }
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)

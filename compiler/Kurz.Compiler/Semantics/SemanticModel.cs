@@ -260,6 +260,7 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Expression, StaticFieldSymbol> staticFields = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
@@ -341,6 +342,11 @@ public sealed class SemanticModel
     public bool IsClockRead(MemberAccess access) => clockReads.Contains(access);
 
     internal void RecordClockRead(MemberAccess access) => clockReads.Add(access);
+
+    /// <summary>K18: whether the expression, a name inside the class or <c>T.F</c>, reads a <c>static</c> field, whose constant a read gives.</summary>
+    public bool IsStaticField(Expression read, out StaticFieldSymbol field) => staticFields.TryGetValue(read, out field!);
+
+    internal void RecordStaticField(Expression read, StaticFieldSymbol field) => staticFields[read] = field;
 
     internal void RecordArguments(VariableSymbol arguments) => Arguments = arguments;
 

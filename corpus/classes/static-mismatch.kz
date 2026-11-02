@@ -1,0 +1,8 @@
+// expect: error static-mismatch at 8
+// rules: K19
+
+class Counter(int Count) {
+    pub int Next() => Count + 1
+}
+
+print(Counter.Next())

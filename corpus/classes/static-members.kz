@@ -1,0 +1,15 @@
+// expect: output
+// | 3
+// | 100
+// rules: K7, K18
+
+class Money(int Cents) {
+    pub static int CentsPerUnit = 100
+
+    pub static Money Of(int units) => Money(units * CentsPerUnit)
+
+    pub int Units() => Cents / CentsPerUnit
+}
+
+print(Money.Of(3).Units())
+print(Money.CentsPerUnit)

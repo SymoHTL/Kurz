@@ -583,7 +583,11 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     Defaults(t.PrimaryConstructor ?? []);
                     foreach (var method in (t.Members ?? []).OfType<FunctionDeclaration>())
                     {
-                        Need(Try(() => model.ThisOf(model.FunctionOf(method))), method.Line, $"`this` of `{method.Name}`"); // K7
+                        if ((method.Modifiers & Modifiers.Static) == 0)
+                        {
+                            Need(Try(() => model.ThisOf(model.FunctionOf(method))), method.Line, $"`this` of `{method.Name}`"); // K7: a `static` one has none
+                        }
+
                         Statement(method);
                     }
 
@@ -680,7 +684,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             switch (e)
             {
                 case NameExpression n:
-                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant) || model.IsImplicitField(n, out _, out _), n.Line, $"what `{n.Name}` means");
+                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant) || model.IsImplicitField(n, out _, out _) || model.IsStaticField(n, out _), n.Line, $"what `{n.Name}` means");
                     break;
                 case ThisExpression t:
                     Need(model.IsImplicitField(t, out _, out _), t.Line, "`this`"); // K7
@@ -689,6 +693,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break; // D12: a value of an enum, a constant a code generator reads whole
                 case MemberAccess m when model.IsClockRead(m):
                     break; // S15: `timestamp.Now`, a read of the clock a code generator reads whole
+                case MemberAccess m when model.IsStaticField(m, out _):
+                    break; // K18: `T.F`, a `static` field whose constant a code generator reads, with no instance
                 case MemberAccess m:
                     Expression(m.Target);
                     break;

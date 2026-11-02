@@ -364,6 +364,20 @@ class Dog : Animal {
 print(Dog().Sound())
 ```
 
+Case: [classes/static-members.kz](../corpus/classes/static-members.kz)
+```kurz
+class Money(int Cents) {
+    pub static int CentsPerUnit = 100
+
+    pub static Money Of(int units) => Money(units * CentsPerUnit)
+
+    pub int Units() => Cents / CentsPerUnit
+}
+
+print(Money.Of(3).Units())
+print(Money.CentsPerUnit)
+```
+
 ### K18 (decided, §3, §4, §6) What a `static` field may hold
 
 A `static` field exists once for the program, so it holds an immutable value only: `static
@@ -376,9 +390,13 @@ that a static field of a generic class exists once per type argument, as in C#)*
 a static field that is allowed. R13's state at the top level of a file, in a package granted `allow
 raw`, is the one exception the record decides to the reason of this rule, a C library's global
 variables standing open (§14) (§3, the owner, 2026-10-21), and a `static mut`
-field stays `static-state` there too *(assumed: as §3 marks it)*.
+field stays `static-state` there too *(assumed: as §3 marks it)*. An assignment of a `static` field,
+which holds one immutable value for the program, is the compile error `assign-immutable`, as one of
+a field without `mut` is *(proposed: the error, which the record does not name)*.
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
+
+Case: [classes/static-members.kz](../corpus/classes/static-members.kz)
 
 Case: [classes/static-mut.kz](../corpus/classes/static-mut.kz)
 ```kurz
@@ -403,6 +421,57 @@ class Registry {
 }
 
 print(Registry.Zero.Count)
+```
+
+Case: [classes/static-assign.kz](../corpus/classes/static-assign.kz)
+```kurz
+class Limits(int Size) {
+    pub static int Max = 10
+}
+
+Limits.Max = 20
+print(Limits.Max)
+```
+
+### K19 (proposed, §4) A member on the other side of `static`
+
+A member of an instance named where there is no instance, and a `static` member named through an
+instance, are the compile error `static-mismatch`, its message saying on which side the member is:
+a field or a method of the instance, or `this`, in a `static` method or in the initial value of a
+`static` field, and one named through its class, `Counter.Next()`; a `static` field or method named
+through an instance, `c.Of(3)`. C# refuses the same with CS0120, CS0026 and CS0176; one id whose
+text names the side is the smallest thing that tells them apart. The record names no error for
+them.
+
+Case: [classes/static-mismatch.kz](../corpus/classes/static-mismatch.kz)
+```kurz
+class Counter(int Count) {
+    pub int Next() => Count + 1
+}
+
+print(Counter.Next())
+```
+
+### K20 (proposed, §4) What the initial value of a `static` field reads
+
+The initial value of a `static` field reads constants and the `static` fields of its class declared
+above it, by their names inside the class or as `Money.CentsPerUnit`; a `static` field declared
+below it, and the field itself, are `unknown-name` (V10), as a field's default reads the fields
+above it (K7), and a member of an instance is K19's. Outside an initial value, a read of a `static`
+field is a value of its type and no constant, as C# reads a `static readonly` field: an `int` field
+does not go into a `byte` as an integer literal would (T7). The record computes a field at its
+first read (§4), and what an initializer does that reads, on a path of its calls, a field whose
+initializer reads the first stands open (§14); reading only the fields above keeps such a path out
+of reach.
+
+Case: [classes/static-initializer.kz](../corpus/classes/static-initializer.kz)
+```kurz
+class Money(int Cents) {
+    pub static int CentsPerUnit = 100
+    pub static int Max = CentsPerUnit * 1000
+}
+
+print(Money.Max)
 ```
 
 ### K14 (decided, §4) Further constructors and fields without `mut`
