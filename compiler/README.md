@@ -1993,7 +1993,8 @@ round can ask about it by the rule's id.
   file, its message naming the fields from there in the order they read each other, and every field
   of the cycle refused, so that a read of one adds nothing (E1); two cycles that share a field are
   one error, two that share none are two. An initial value that calls a function is `not
-  supported`, so the walk meets no call.
+  supported`, so the walk meets no call, and one that reads such a field, which K20 computes at its
+  own first read too, adds nothing to that field's `not supported` (E1).
 - K9 with E4: `mut` before a method of a class is `syntax`, since K9 gives the marker to the methods
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the

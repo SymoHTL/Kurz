@@ -512,11 +512,20 @@ statics. The owner chose any order on 2026-11-02, against a class declared above
 class's own fields alone and against a cycle decided at run time, as C#'s type initializers, which
 give default values in a cycle without a word; on the same day this replaced the owner's earlier
 answer, the fields of its class declared above it. *(assumed: the id, the message and the place,
-which the build named and said back to the owner)* Inside an initial value, a read of a `static`
-field is the constant the field holds, of the field's type, so a constant built from such reads is
-checked as any constant: `1 / Zero` is `constant-divide-by-zero` (T25), a product past the field's
-type `constant-overflow` (T6), and an `int` field read into a `byte` field `narrowing-conversion`
-(T7), as a typed `int` is *(assumed: as §4 marks it)*. Outside an initial value, a read of a
+which the build named and said back to the owner; the message's list starting at the field the error
+stands at; in a cycle across the files of a program, the place at the field that comes first where
+the files are read in the order of their paths, as for `base-cycle` (D6); every field of the cycle
+refused, so that a cycle through a field one reported refused, and a field that reads one, add no
+error (E1), as §4 marks it)* Inside an initial value, a read of a `static` field whose initial value
+is a constant is the constant the field holds, of the field's type, so a constant built from such
+reads is checked as any constant: `1 / Zero` is `constant-divide-by-zero` (T25), a product past the
+field's type `constant-overflow` (T6), and an `int` field read into a `byte` field
+`narrowing-conversion` (T7), as a typed `int` is *(assumed: as §4 marks it)*. An initial value that
+reads a field computed at its first read (§4) is no constant either, and its own field is computed
+at its own first read, which computes the field it reads first where that one is not computed yet:
+each field alone, and no initializer runs for the whole class, as one `LazyLock` of Rust reads
+another (§4, the owner, 2026-11-02, against the whole class at its first touch, as C#'s type
+initializer, and against constants only, with such a read an error of its own id). Outside an initial value, a read of a
 `static` field is a value of its type and no constant, as C# reads a `static readonly` field: an
 `int` field does not go into a `byte` as an integer literal would (T7) *(assumed: as §4 marks it)*.
 The cycle this rule names is one between the names initial values read; what a field that a
@@ -558,6 +567,68 @@ class Counter {
 
 print(Counter.Start)
 ```
+
+Case: [classes/static-constant-limits.kz](../corpus/classes/static-constant-limits.kz)
+```kurz
+class Limits {
+    pub static int Q = 10 / Two
+    pub static int Two = 2
+    pub static int Big = Half * 4
+    pub static int Half = 536870911
+    pub static long Wide = Small
+    pub static int Small = 7
+}
+
+print(Limits.Q)
+print(Limits.Big)
+print(Limits.Wide)
+```
+
+Case: [classes/static-divide-by-zero.kz](../corpus/classes/static-divide-by-zero.kz)
+```kurz
+class Ratio {
+    pub static int Q = 1 / Zero
+    pub static int Zero = 0
+}
+
+print(Ratio.Q)
+```
+
+Case: [classes/static-overflow.kz](../corpus/classes/static-overflow.kz)
+```kurz
+class Size {
+    pub static int Big = Half * 4
+    pub static int Half = 1073741824
+}
+
+print(Size.Big)
+```
+
+Case: [classes/static-narrowing.kz](../corpus/classes/static-narrowing.kz)
+```kurz
+class Level {
+    pub static byte Small = Wide
+    pub static int Wide = 7
+}
+
+print(Level.Small)
+```
+
+Case: [classes/static-reads-first-read.kz](../corpus/classes/static-reads-first-read.kz)
+```kurz
+int Compute() => 3
+
+class Table {
+    pub static int A = Compute()
+    pub static int B = A + 1
+}
+
+print(Table.B)
+print(Table.A)
+```
+
+No case: the place of a cycle across the files of a program, since the compiler reads one file of a
+program and a case is one file.
 
 ### K14 (decided, §4) Further constructors and fields without `mut`
 
