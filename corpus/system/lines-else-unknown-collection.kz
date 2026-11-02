@@ -1,0 +1,9 @@
+// expect: error unknown-name at 5
+// rules: E1
+
+// the collection's error is the one error: the arms of the loop's `else` have no cases to be checked against
+for line in g.Lines() {
+    print(line)
+} else {
+    IoError e => print(e)
+}
