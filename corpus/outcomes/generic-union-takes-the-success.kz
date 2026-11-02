@@ -1,0 +1,25 @@
+// expect: error type-mismatch at 25
+// rules: O4
+
+data NotFound
+data Rejected
+
+int | NotFound | Rejected Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Rejected
+    }
+    return NotFound
+}
+
+void Report<T>(T | NotFound found) {
+    match found {
+        NotFound => print("none")
+        else => print("found")
+    }
+}
+
+// `T` is the success alone, `int`, and `Rejected`, which the union does not name, does not fit `int | NotFound`
+Report(Find(2))

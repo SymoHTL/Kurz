@@ -38,6 +38,10 @@ public sealed partial class Emitter
         {
             case StringLiteral s:
                 return EmitInterpolation(s);
+            case NameExpression n when Model.IsImplicitField(n, out _, out var field) && field is not null:
+                return ImplicitField(n, field, type); // K7
+            case ThisExpression t:
+                return This(t, t.Line); // K7: borrowed, as a parameter is
             case NameExpression n when Model.IsVariable(n):
                 {
                     var stored = Sub(Model.VariableOf(n).Type);
@@ -257,12 +261,14 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The pieces in one block of <c>string.Allocate</c> that holds their bytes together, each written after the one before, as Rust's
-    /// <c>format!</c> writes its pieces into one <c>String</c> and C#'s interpolation into one buffer, with no text made of the pieces
-    /// before the last: a text copied, and an integer's digits counted first and written in place by the runtime's
-    /// <c>WriteDigits</c>, a <c>-</c> before those of a negative one, as its text has them (A2), so that no text of it is made, as Rust's
-    /// <c>Display</c> of an integer writes its digits into the buffer it was given; more bytes than the largest <c>int</c> end the
-    /// process with the count asked for (T15). Pieces of no bytes together are the empty string, with no block, as Rust's
-    /// <c>format!</c> asks for none.
+    /// <c>format!</c> writes its pieces into one <c>String</c>, and C#'s interpolation into a rented buffer that it grows where a hole
+    /// does not fit and copies into the string once, with no text made of the pieces before the last: a text copied, and an integer's
+    /// digits counted first and written in place by the runtime's <c>WriteDigits</c>, a <c>-</c> before those of a negative one, as its
+    /// text has them (A2), so that no text of it is made, where Rust's <c>Display</c> of an integer writes them into a buffer of its own
+    /// on the stack and copies them; more bytes than the largest <c>int</c> end the process with the count asked for (T15). Pieces of
+    /// no bytes together are the empty string, with no block, as Rust's <c>format!</c> asks for none. A hole of a string read from a
+    /// place holds no count of it until the block is written, and nothing changes that place before then: the checker refuses a later
+    /// hole that changes it (M7, <c>changed-while-held</c>).
     /// </summary>
     private string InOneBlock(List<InterpolationPiece> pieces)
     {
@@ -352,6 +358,12 @@ public sealed partial class Emitter
                 {
                     var index = Layout.FieldIndex(d, m.Member);
                     return Narrowed(Field(target(), d, index), Layout.Fields(d)[index], type);
+                }
+
+            case ClassType c:
+                {
+                    var index = c.Symbol.FieldIndex(m.Member);
+                    return Narrowed(InstanceField(target(), c.Symbol, index), c.Symbol.Fields[index].Type, type); // K1, K2
                 }
 
             case PrimitiveType { Kind: Primitive.String } when m.Member == "Pointer":
@@ -919,6 +931,8 @@ public sealed partial class Emitter
 
             case DataType or UnionType:
                 return DerivedText(value, type, line);
+            case ClassType c:
+                return InstanceText(value, c); // A5
             case EnumType e:
                 return EnumText(value, e); // A4
             case NullType:

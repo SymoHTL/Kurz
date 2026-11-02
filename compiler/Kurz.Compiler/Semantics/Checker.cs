@@ -7,11 +7,11 @@ namespace Kurz.Compiler.Semantics;
 
 /// <summary>
 /// The checker: names, scopes and types of a program the parser read without an error, against the
-/// rules of chapters 1 to 3, 5, 6, 8, 9 and 10 of the reference and the raw forms of chapter 11, with
-/// the grants a program is given (R7). It reports the compile errors of
+/// rules of chapters 1 to 3, 5 to 10 of the reference, the raw forms of chapter 11 and its cycle rule
+/// judged by types, with the grants a program is given (R7). It reports the compile errors of
 /// the error table those chapters name, each at the line E1 gives it, and <c>not supported</c>
-/// for a construct it does not read, at the construct's line and nothing else: a class and the
-/// other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c>, and
+/// for a construct it does not read, at the construct's line and nothing else: the parts of a class
+/// <see cref="UnreadClassPart"/> names and the other types of chapter 7, chapter 4's <c>null</c>, chapter 11's <c>weak</c>, and
 /// the rest of the list in the section "What the checker does not read" of <c>compiler/README.md</c>,
 /// which is the one complete list. A value of a construct it does not read has the error type, about
 /// which nothing is reported, so that the one line of the construct carries the one diagnostic
@@ -52,6 +52,7 @@ public sealed partial class Checker
     private Frame frame = null!;
     private List<TypeParameterSymbol>? typeContext;
     private bool inElseArm;
+    private CallExpression? loopSource; // S16: the collection of the `for` loop being checked, the one place `f.Lines()` stands
     private bool realKeepsOwnType;
     private int blockDepth;
     private int rawDepth; // R7, R12: the `raw` blocks and `naked` bodies around the code being checked
@@ -143,6 +144,9 @@ public sealed partial class Checker
 
         public bool IsTopLevel { get; init; }
 
+        /// <summary>K7: the class whose method this frame checks, with its instance as <c>this</c>; a lambda inside the method finds it through <see cref="Outer"/>.</summary>
+        public ClassSymbol? Class { get; init; }
+
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
 
@@ -151,6 +155,9 @@ public sealed partial class Checker
         public int Line { get; init; }
 
         public List<TypeParameterSymbol> TypeParameters { get; init; } = [];
+
+        /// <summary>T33: the copy whose body this is, which binds the names of its function's type parameters to its type arguments.</summary>
+        public Copy? Copy { get; init; }
 
         /// <summary>F16: the names of the top-level variables, which a top-level function neither reads nor declares.</summary>
         public HashSet<string>? Reserved { get; init; }
@@ -268,6 +275,12 @@ public sealed partial class Checker
             ResolveData(symbol);
         }
 
+        foreach (var symbol in classDeclared)
+        {
+            ResolveClass(symbol); // K1
+        }
+
+        CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -275,17 +288,26 @@ public sealed partial class Checker
             ResolveSignature(f);
         }
 
+        ResolveMethods(); // K7
         RefuseModifiedFunctions();
         CheckDuplicateFunctions();
         CheckStates();
         CheckEnumNumbers();
         CheckDefaults();
+        CheckClassDefaults();
         CollectReserved(program.Statements);
 
+        FindReaders();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
         {
-            Unread(f, () => CheckFunctionBody(f));
+            if (!readers.Contains(f))
+            {
+                CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
+            }
         }
+
+        CheckMethodBodies(); // K7
+        JoinPassingReaders();
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
@@ -304,6 +326,7 @@ public sealed partial class Checker
         }
 
         ReportUnused(frame.Scope);
+        MakeCopies();
     }
 
     /// <summary>
@@ -338,6 +361,20 @@ public sealed partial class Checker
 
     /// <summary>A type's name the checker does not read: a type of chapter 7, a flags type, a data type it does not read, or one declared inside a block around the place.</summary>
     private bool IsUnreadType(string name) => unsupportedTypes.Contains(name) || nestedNames.Any(n => n.Types.Contains(name));
+
+    /// <summary>T33: a member of a type parameter, or of the name a copy binds, that reads its type and that the checker does not read,
+    /// <c>T.Fields</c>, <c>T.Make</c> and the parts beyond the fields: it is <c>not supported</c>. <c>T.Kind</c> of a copy is read
+    /// (<see cref="KindOfCopy"/>).</summary>
+    private bool UnreadTypeMember(string name, string member, int line)
+    {
+        if ((TypeParameter(name) is null && BoundType(name) is null) || !IsTypeMember(member))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"reading a type in generic code, `{name}.{member}` (T33)");
+        return true;
+    }
 
     /// <summary>R18: a name under which the intrinsics and their vector types stand (section 13, the owner, 2026-11-01), which the checker
     /// does not read: where no declaration gives the name, it is <c>not supported</c>.</summary>
@@ -445,6 +482,12 @@ public sealed partial class Checker
                 DeclareEnum(d);
             }
 
+            return;
+        }
+
+        if (d.Kind == TypeDeclarationKind.Class && !clash)
+        {
+            DeclareClass(d); // K1: chapter 7
             return;
         }
 
@@ -884,7 +927,7 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var element = Resolve(n.TypeArguments[0]);
+            var element = ResolveTypeArgument(n.TypeArguments[0], "`List`");
             return Types.IsError(element) ? Types.Error : new ListType(element);
         }
 
@@ -896,8 +939,8 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var key = Resolve(n.TypeArguments[0]);
-            var value = Resolve(n.TypeArguments[1]);
+            var key = ResolveTypeArgument(n.TypeArguments[0], "`Map`");
+            var value = ResolveTypeArgument(n.TypeArguments[1], "`Map`");
             return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
@@ -928,6 +971,11 @@ public sealed partial class Checker
             return new HasherType(hasher);
         }
 
+        if (BoundType(n.Name) is { } bound && n.TypeArguments.Count == 0)
+        {
+            return bound; // T33: in a copy, the type argument its call gave
+        }
+
         var parameter = TypeParameter(n.Name);
         if (parameter is not null)
         {
@@ -948,8 +996,19 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            var arguments = n.TypeArguments.Select(Resolve).ToList();
+            var arguments = n.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{n.Name}`")).ToList();
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
+        }
+
+        if (classes.TryGetValue(n.Name, out var classSymbol))
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (K1, T19)");
+                return Types.Error;
+            }
+
+            return new ClassType(classSymbol); // K1
         }
 
         if (enums.TryGetValue(n.Name, out var enumSymbol))
@@ -975,6 +1034,22 @@ public sealed partial class Checker
 
         Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here (V10)");
         return Types.Error;
+    }
+
+    /// <summary>
+    /// T17, T19: a type argument written in a type or a call, where `void` is not supported: C# refuses it as a type argument and Rust's
+    /// `()` takes one, and the record says neither, so it is refused here before the emitter writes a list or a copy of it.
+    /// </summary>
+    private KurzType ResolveTypeArgument(TypeSyntax argument, string of)
+    {
+        var type = Resolve(argument);
+        if (Types.IsVoid(type))
+        {
+            NotSupported(argument.Line, $"`void` as a type argument of {of} (T17, T19)");
+            return Types.Error;
+        }
+
+        return type;
     }
 
     private TypeParameterSymbol? TypeParameter(string name)
@@ -1008,7 +1083,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1213,7 +1288,7 @@ public sealed partial class Checker
             return;
         }
 
-        frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel };
+        frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel, Copy = copies.GetValueOrDefault(f) };
         foreach (var (p, node) in f.Parameters.Zip(d.Parameters))
         {
             DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node);
@@ -1347,7 +1422,8 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name);
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name)
+        || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
@@ -1357,7 +1433,7 @@ public sealed partial class Checker
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name);
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
@@ -1371,7 +1447,9 @@ public sealed partial class Checker
     /// by <c>with</c> as every data type
     /// (section 4, the owner, 2026-10-30, "Both, as a data type"), and <c>ParseError</c> with its <c>ParseKind</c>, the case of a number
     /// type's <c>Parse</c> that is no number (X7), and <c>HexError</c> with its <c>HexKind</c>, the case of <c>Hex.Decode</c> that gives no
-    /// bytes (H7; section 12, the owner, 2026-10-31, "Without input").
+    /// bytes (H7; section 12, the owner, 2026-10-31, "Without input"), and <c>TypeKind</c>, the kind of a type that generic code reads
+    /// (T33; section 4, assumed with the owner's answer "Kinds + parts" of 2026-11-01), a value for each built-in type named as the
+    /// type and one for each other kind.
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
         SourceText.FromString(
@@ -1394,6 +1472,10 @@ public sealed partial class Checker
             data ParseError(ParseKind Kind)
             enum HexKind { OddLength, InvalidDigit }
             data HexError(HexKind Kind, int At)
+            enum TypeKind {
+                SByte, Byte, Short, UShort, Int, UInt, Long, ULong, Float, Double, Decimal, Bool, String, Char, Duration, Timestamp,
+                LongDuration, LongTimestamp, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
+            }
             """));
 
     /// <summary>The tree of the built-in types, which reads clean and holds type declarations alone, or the compiler's defect.</summary>
@@ -1811,8 +1893,15 @@ public sealed partial class Checker
             return;
         }
 
+        if (variable is null && ImplicitField(a.Name) is { } implicitField)
+        {
+            AssignImplicitField(a, implicitField); // K7: the field of `this`
+            return;
+        }
+
         if (variable is not null)
         {
+            EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
             RequireRawForState(variable, a.Line);
             if (captured)
             {
@@ -1909,6 +1998,14 @@ public sealed partial class Checker
             CheckExpression(a.Value, null);
             return;
         }
+
+        if (RunsThroughInstance(members) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null))
+        {
+            AssignThroughInstance(a, members); // K1, K2: a field of an instance
+            return;
+        }
+
+        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
 
         KurzType current;
         VariableSymbol? changed = null;
@@ -2068,12 +2165,14 @@ public sealed partial class Checker
     /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
     /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
     /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is (C6, proposed:
-    /// section 4 gives the form over a map alone).
+    /// section 4 gives the form over a map alone). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
+    /// failures the arms of an <c>else</c> after the block handle as a call's (O5) and every other one leaves the function at the loop's line.
     /// </summary>
     private void CheckForIn(ForInStatement f)
     {
         KurzType element;
         KurzType? value = null;
+        UnionType? failures = null;
         if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
@@ -2081,22 +2180,33 @@ public sealed partial class Checker
         }
         else
         {
+            var outer = loopSource;
+            loopSource = Unwrap(f.Collection) as CallExpression;
             var t = CheckExpression(f.Collection, null);
-            if (Types.IsVoid(t.Type))
+            loopSource = outer;
+            if (Unwrap(f.Collection) is CallExpression lines && model.HasCall(lines) && model.CallOf(lines).Kind == CallKind.FileLines && t.Type is UnionType pulls)
             {
-                this.Report(ErrorIds.Syntax, f.Collection.Line, "a call with a `void` success used as a value (O10)");
+                failures = pulls; // S16: a line is a `string`, and a pull's cases go to the loop's `else`, or leave the function through it
+                element = Types.String;
             }
-
-            element = t.Type switch
+            else
             {
-                ListType l => l.Element,
-                ErrorType or VoidType => Types.Error,
-                MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
-                MapType m => m.Key,
-                _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
-                _ => Report(f.Collection.Line, t.Type),
-            };
-            value = t.Type is MapType map ? map.Value : null;
+                if (Types.IsVoid(t.Type))
+                {
+                    this.Report(ErrorIds.Syntax, f.Collection.Line, "a call with a `void` success used as a value (O10)");
+                }
+
+                element = t.Type switch
+                {
+                    ListType l => l.Element,
+                    ErrorType or VoidType => Types.Error,
+                    MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
+                    MapType m => m.Key,
+                    _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
+                    _ => Report(f.Collection.Line, t.Type),
+                };
+                value = t.Type is MapType map ? map.Value : null;
+            }
         }
 
         if (f.Second is not null && value is null && !Types.IsError(element))
@@ -2114,6 +2224,12 @@ public sealed partial class Checker
 
         CheckLoop(null, f.Body);
         PopScope();
+        if (failures is not null || f.Arms is not null)
+        {
+            // S16: the cases a pull fails with are handled by the arms of the `else` after the block, as a call's (O5), and every other
+            // one leaves the function at the loop's line (O2, O3, O9); a collection that fails with none gives its arms no case
+            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line);
+        }
 
         KurzType Report(int line, KurzType type)
         {
