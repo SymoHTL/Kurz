@@ -594,7 +594,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type's name (D20);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
-  called with (T19, T27);
+  called with (T19, T27); a call in a generic function's body whose type argument holds a type
+  parameter of the function inside a form of a type other than a union, on a cycle of calls among
+  generic functions that gives it back to that type parameter, is `growing-type-argument` at that
+  call, read on the text of every generic function that reads no type, called or not, and of no
+  copy (T34);
 - a generic function that reads its type with `T.Kind`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which

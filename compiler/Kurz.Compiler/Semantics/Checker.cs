@@ -308,6 +308,7 @@ public sealed partial class Checker
 
         CheckMethodBodies(); // K7
         JoinPassingReaders();
+        FindGrowingCycles(); // T34: after the readers are known, which it does not read
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
