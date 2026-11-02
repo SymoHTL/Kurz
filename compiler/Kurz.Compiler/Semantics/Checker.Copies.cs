@@ -429,7 +429,7 @@ public sealed partial class Checker
         }
 
         if (c.TypeArguments.Count != 0
-            || c.Arguments is not [{ Name: null, Mut: false, Value: LambdaExpression { Parameters: [{ Mut: false, Type: null, Default: null } parameter] } lambda }])
+            || c.Arguments is not [{ Name: null, Mut: false, Value: LambdaExpression { Parameters: [{ Mut: false, Type: null } parameter] } lambda }])
         {
             Report(ErrorIds.Syntax, c.Line, $"`{n.Name}.Make` takes one lambda of one parameter with no type, `{n.Name}.Make(f => ...)` (T33)");
             return Typed.Error;
@@ -453,6 +453,7 @@ public sealed partial class Checker
 
         if (!made.Symbol.HasFields)
         {
+            CountNamesRead(new ExpressionStatement(body.Line, body)); // the body is made for no field, and what it names counts as read
             model.RecordMade(c, null);
             return new Typed(made, new UnitConstant()); // D8: its value is the bare name, and no argument is made
         }
