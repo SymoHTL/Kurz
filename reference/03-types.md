@@ -1551,9 +1551,11 @@ the build stops at the call that made the copy, with the text of the code that h
 `const assert(T.Kind == TypeKind.Data, "{T} is no data type")` stops `Need(1)` with `int is no
 data type` at that call, as Rust's `const { assert!(condition, "text") }` stops a build in a copy of
 generic code. Any generic code can use it (§4, the owner, 2026-11-01, "const assert, as Rust").
-Everything a `const assert` refuses is the compile error `const-assert-failed`, a variable or a
-parameter in its condition or in a hole among it (§4, the owner, 2026-11-02,
-"`const-assert-failed`"). *(assumed, §4: the spelling `const assert(condition, text)`, a statement; the text interpolates
+A variable or a parameter in its condition or in a hole of its text, whose value is not known while
+the program compiles, is `const-assert-failed`, as a false condition is (§4, the owner, 2026-11-02,
+"`const-assert-failed`"). *(assumed, §4: the answer's "the one id of everything a const assert
+refuses" read as what its evaluation refuses, a condition that is not a `bool` and a text that is
+not a string literal keeping their own ids (below); the spelling `const assert(condition, text)`, a statement; the text interpolates
 values known while the program compiles as a string literal interpolates values, a type giving its
 name and an `enum` value its name; the compiler evaluates literals, constants, operators, a copy's
 reading of its type, its constant type arguments, the standard library's functions on strings, and
