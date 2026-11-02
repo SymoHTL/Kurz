@@ -410,6 +410,22 @@ public sealed partial class Checker
     private bool IsExit(Expression e) =>
         e is CallExpression { Callee: MemberAccess { Target: NameExpression { Name: "Environment" }, Member: "Exit" } } && Lookup("Environment").Variable is null;
 
+    /// <summary>G1: the names of regular expressions, which every file sees (section 12, the owner, 2026-11-01), so that a file's own
+    /// declaration of one is <c>redeclared</c> (V9).</summary>
+    private static bool IsRegexName(string name) => name is "Regex" or "Match" or "RegexError" or "RegexKind";
+
+    /// <summary>G1 to G5: a name of <see cref="IsRegexName"/>, which the checker does not read: a use of one is <c>not supported</c>.</summary>
+    private bool UnreadRegexName(string name, int line)
+    {
+        if (!IsRegexName(name))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"regular expressions, `{name}` (G1 to G5)");
+        return true;
+    }
+
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
     private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
 
@@ -1027,7 +1043,7 @@ public sealed partial class Checker
             return Types.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line) || UnreadProcessName(n.Name, n.Line))
+        if (UnreadIntrinsic(n.Name, n.Line) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Types.Error;
         }
@@ -1083,7 +1099,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1422,7 +1438,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name)
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
         || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>

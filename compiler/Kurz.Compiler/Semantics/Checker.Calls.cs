@@ -190,7 +190,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line))
+                    if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
                     {
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
