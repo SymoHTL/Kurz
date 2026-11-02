@@ -12,7 +12,8 @@ namespace Kurz.Compiler.Tests;
 /// a block nothing holds, which the allocator gives out again, and a lambda's environment as it frees a list's block (the owner,
 /// 2026-10-25, "Pair + heap env"), and a string's block, which a literal does not have (the owner, 2026-10-29, "Bit in the count"
 /// and "string.Allocate, take over"), no block is read after it is freed, the number `allocation-failed`
-/// reports past the limit and for a refused growth, an integer's digits in every text that holds them, against what .NET writes (A2),
+/// reports past the limit and for a refused growth, an integer's digits in a print, a hole, a list and a `data` value, against what
+/// .NET writes (A2),
 /// and what the emitter says `not supported` to; what the checker refuses of a
 /// read beside a `mut` call (M7) the corpus pins.
 /// </summary>
@@ -1502,7 +1503,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // path of fields beside a copy of the data value; `IndexOf` of an item and of a run (X9), on a list of lists (F13), of `double` items
     // by IEEE's `==` and of `data` items as D3 compares them (M9); the searches of a string made while the program runs, with arguments
     // made in the call and read from a variable, a field and an item, and of `char`s of three and four bytes (X1); a list of bytes that
-    // shares a string's block, grown while the string keeps its bytes (M3); and `AddRange` of a list read from an item and from a field
+    // shares a string's block, grown while the string keeps its bytes (M3); `AddRange` of a list read from an item and from a field; a
+    // list of `int`s appended to itself in its room and grown, the block it alone holds with the argument (`ListWithin`), then beside a
+    // copy with another argument, which copies the block (M3); and more than `SmallCopy`'s bytes of `int`s and of strings appended, to
+    // another list and to the list itself
     private const string Searches = """
         data Bag(List<string> Items)
         data P(string Name, double X)
@@ -1585,6 +1589,39 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(t.IndexOf(euro) ?? -1)
         print(t.IndexOf('😀') ?? -1)
         print(t.Contains('😁'))
+        mut ns = List<int>()
+        ns.Add(1)
+        ns.Add(2)
+        ns.AddRange(ns)
+        print(ns)
+        ns.AddRange(ns)
+        print(ns)
+        seen = ns
+        ns.AddRange([3])
+        print(ns)
+        print(seen)
+        mut wide = [0]
+        for i in 0..<600 {
+            wide.Add(i)
+        }
+
+        mut far = [-1]
+        far.AddRange(wide)
+        print(far.Count)
+        print(far[2] + far[601])
+        wide.AddRange(wide)
+        print(wide.Count)
+        print(wide[601])
+        print(wide[1200] + wide[1201])
+        mut many = List<string>()
+        for i in 0..<130 {
+            many.Add(Made(i))
+        }
+
+        many.AddRange(many)
+        print(many.Count)
+        print(many[130] == many[0])
+        print(many[259])
         """;
 
     private static readonly string[] SearchesPrint =
@@ -1627,6 +1664,94 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "1", // a `char` of three bytes
         "4", // of four
         "false", // a `char` whose four bytes differ from the string's in the last
+        "[1, 2, 1, 2]", // appended in its room
+        "[1, 2, 1, 2, 1, 2, 1, 2]", // grown
+        "[1, 2, 1, 2, 1, 2, 1, 2, 3]", // beside a copy, another argument: the block copied (M3)
+        "[1, 2, 1, 2, 1, 2, 1, 2]",
+        "602", // 601 `int`s, past `SmallCopy`
+        "599",
+        "1202", // the list itself, past `SmallCopy`
+        "0",
+        "1197",
+        "260", // strings, past `SmallCopy`, appended to the list itself
+        "true",
+        "made 129",
+    ];
+
+    // `Insert` and `RemoveAt` (X11): an item inserted beside a copy, which keeps its items (M3), and one read from the list it goes into,
+    // which `Insert` holds before the list moves (M7); the item `RemoveAt` gives, kept, printed and dropped, from a list beside a copy;
+    // a list it alone holds grown by inserts at the end and at the front and emptied from its middle; through a path of fields beside a
+    // copy of the data value, with an item read from the same path; and a list of lists, whose item is a block
+    private const string Edits = """
+        data Bag(List<string> Items)
+
+        string Made(int n) => "made {n}"
+
+        mut words = [Made(1), Made(3)]
+        held = words
+        words.Insert(1, Made(2))
+        print(words)
+        print(held)
+        words.Insert(0, words[2])
+        print(words)
+        gone = words.RemoveAt(1)
+        print(gone)
+        print(words)
+        copy = words
+        print(words.RemoveAt(2))
+        print(copy)
+        words.RemoveAt(0)
+        print(words)
+        mut alone = List<string>()
+        for i in 0..<5 {
+            alone.Insert(alone.Count, Made(i))
+        }
+        for i in 0..<5 {
+            alone.Insert(0, Made(10 + i))
+        }
+        print(alone.Count)
+        print(alone[0])
+        print(alone[9])
+        mut total = 0
+        while alone.Count > 0 {
+            s = alone.RemoveAt(alone.Count / 2)
+            total = total + s.Bytes.Count
+        }
+        print(total)
+        mut bag = Bag([Made(6)])
+        other = bag
+        bag.Items.Insert(0, bag.Items[0])
+        print(bag.Items)
+        print(other.Items)
+        print(bag.Items.RemoveAt(1))
+        mut grid = [[1], [2, 3]]
+        grid.Insert(1, grid[1])
+        print(grid)
+        row = grid.RemoveAt(0)
+        print(row)
+        print(grid)
+        """;
+
+    private static readonly string[] EditsPrint =
+    [
+        "[made 1, made 2, made 3]", // inserted beside a copy, which keeps its items (M3)
+        "[made 1, made 3]",
+        "[made 3, made 1, made 2, made 3]", // the item read from the list before it moves
+        "made 1",
+        "[made 3, made 2, made 3]",
+        "made 3", // removed from a list beside a copy
+        "[made 3, made 2, made 3]",
+        "[made 2]", // an item given and dropped
+        "10",
+        "made 14",
+        "made 4",
+        "65", // five items of 6 bytes and five of 7
+        "[made 6, made 6]", // through a field, beside a copy of the data value
+        "[made 6]",
+        "made 6",
+        "[[1], [2, 3], [2, 3]]",
+        "[1]",
+        "[[2, 3], [2, 3]]",
     ];
 
     // The sorts of X8: a list of strings sorted beside a copy, which keeps its order (M3), and one it alone holds, longer than a run,
@@ -2772,6 +2897,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, toolchain.Runtime, "map-values"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, toolchain.Runtime, "map-members"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, toolchain.Runtime, "list-searches"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Edits, toolchain.Runtime, "list-edits"), 0, EditsPrint, "");
         Ran(BuildAndRun(Sorts, toolchain.Runtime, "list-sorts"), 0, SortsPrint, "");
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
@@ -2854,6 +2980,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Maps, fenced, "map-values-fenced"), 0, MapsPrint, "");
         Ran(BuildAndRun(MapMembers, fenced, "map-members-fenced"), 0, MapMembersPrint, "");
         Ran(BuildAndRun(Searches, fenced, "list-searches-fenced"), 0, SearchesPrint, "");
+        Ran(BuildAndRun(Edits, fenced, "list-edits-fenced"), 0, EditsPrint, "");
         Ran(BuildAndRun(Sorts, fenced, "list-sorts-fenced"), 0, SortsPrint, "");
         Ran(BuildAndRun(Pieces, fenced, "string-pieces-fenced"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
@@ -3248,6 +3375,32 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // made before the index is read (M4), so its `print` runs
         var text = $"int Seven() {{\n    print(7)\n    return 7\n}}\n\nmut xs = List<int>()\nxs.Add(4)\nxs.Add(5)\nxs[1] = 6\nprint(xs[1])\nxs[{index}] = Seven()\nprint(xs)\n";
         Ran(BuildAndRun(text, toolchain.Runtime, "list-write-" + name), 1, ["6", "7"], "error: index-out-of-range at program.kz:11\n");
+    }
+
+    [Theory]
+    [InlineData("Insert", "-1, 9", "minus")]
+    [InlineData("Insert", "3, 9", "past")]
+    [InlineData("Insert", "-2147483648, 9", "smallest")]
+    [InlineData("RemoveAt", "-1", "minus")]
+    [InlineData("RemoveAt", "2", "count")]
+    [InlineData("RemoveAt", "2147483647", "largest")]
+    public void An_Insert_or_a_RemoveAt_outside_the_list_raises_index_out_of_range_at_its_line(string member, string arguments, string name)
+    {
+        // X11: the call before it is the positive control, at the edge inside the list: an `Insert` at `Count`, a `RemoveAt` of the last item
+        var inside = member == "Insert" ? "xs.Insert(2, 6)\nxs.RemoveAt(2)\n" : "xs.Add(6)\nprint(xs.RemoveAt(2))\n";
+        var text = $"mut xs = List<int>()\nxs.Add(4)\nxs.Add(5)\n{inside}print(xs)\nxs.{member}({arguments})\nprint(xs)\n";
+        var printed = member == "Insert" ? new[] { "[4, 5]" } : ["6", "[4, 5]"];
+        Ran(BuildAndRun(text, toolchain.Runtime, $"list-{member.ToLowerInvariant()}-{name}"), 1, printed, "error: index-out-of-range at program.kz:7\n");
+    }
+
+    [Fact]
+    public void An_Insert_past_the_limit_reports_the_bytes_of_the_items_after_it()
+    {
+        // X11, M9: as `Add`, with the limit of the largest `int` lowered to 3 in the library's text, so that a fourth `Insert` asks for
+        // 4 times the 16 bytes of a string
+        const string text = "mut xs = List<string>()\nxs.Insert(0, \"a\")\nxs.Insert(0, \"b\")\nxs.Insert(1, \"c\")\nxs.Insert(1, \"d\")\nprint(xs)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-insert-limit"), 1, [], "error: allocation-failed (64 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-insert-below-limit"), 0, ["[b, d, c, a]"], ""); // the positive control
     }
 
     [Fact]
@@ -3699,12 +3852,54 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_AddRange_past_the_limit_reports_the_bytes_of_the_items_after_it()
     {
-        // M9, X9: the limit of the largest `int` lowered to 3 in the library's `ListReserve`, so that `AddRange` of three items to a list
-        // of one asks past it with the bytes of 4 `long`s, as an `Add` past the limit does; a block the system refuses ends the same way
-        // through the emitter's `Refused`, as every growth's does
-        const string text = "mut xs = List<long>()\nxs.Add(1)\nxs.AddRange([2, 3, 4])\nprint(xs.Count)\n";
-        Ran(BuildAndRun(text, Edited(("std/std.kz", "if count + more > 2147483647 {\n        asked = (count + more) * item", "if count + more > 3 {\n        asked = (count + more) * item")), "add-range-limit"), 1, [], "error: allocation-failed (32 bytes)\n");
-        Ran(BuildAndRun(text, toolchain.Runtime, "add-range-below-limit"), 0, ["4"], ""); // the positive control
+        // M9, X9: the limit of the largest `int` lowered to 3 in the library's `ListReserve`, so that `AddRange` of four items to a list
+        // of one, past its room of 4, asks past it with the bytes of 5 `long`s, as an `Add` past the limit does; a list with room for the
+        // items takes them without `ListReserve` (`ListHasRoomFor`), as no count past the limit fits a room. A block the system refuses
+        // ends the same way through the emitter's `Refused`, as every growth's does
+        const string text = "mut xs = List<long>()\nxs.Add(1)\nxs.AddRange([2, 3, 4, 5])\nprint(xs.Count)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "if count + more > 2147483647 {\n        asked = (count + more) * item", "if count + more > 3 {\n        asked = (count + more) * item")), "add-range-limit"), 1, [], "error: allocation-failed (40 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "add-range-below-limit"), 0, ["5"], ""); // the positive control
+    }
+
+    [Fact]
+    public void An_AddRange_asks_for_the_room_twice_the_old_or_of_its_items()
+    {
+        // X9, M9: `ListReserve` refuses every growth past 64 bytes, so the error names the bytes of the room the growth asked for: twice
+        // the room of 4 `long`s where that holds the items (Rust's `grow_amortized`, section 12, assumed), else the count and the items;
+        // `xs.AddRange(xs)` grows its own block (`ListReserveWithin`) to the same room as a copy beside another value makes; and past the
+        // limit of the largest `int`, lowered to 3, the bytes of the items after it, as the list's own block asks them
+        const string four = "mut xs = List<long>()\nxs.Add(1)\nxs.Add(2)\nxs.Add(3)\nxs.Add(4)\n";
+        var past64 = Edited(("std/std.kz", "    long bytes = 16 + grown * item\n    if block != null && !shared {", "    long bytes = 16 + grown * item\n    if bytes > 64 {\n        asked = bytes\n        return null\n    }\n\n    if block != null && !shared {"));
+        (string Name, string Text, string Bytes, string Count)[] rows =
+        [
+            ("twice", four + "xs.AddRange([5, 6, 7])\nprint(xs.Count)\n", "80", "7"),
+            ("items", "mut xs = List<long>()\nxs.Add(1)\nxs.AddRange([2, 3, 4, 5, 6, 7, 8, 9])\nprint(xs.Count)\n", "88", "9"),
+            ("itself", four + "xs.AddRange(xs)\nprint(xs.Count)\n", "80", "8"),
+            ("beside-a-copy", four + "ys = xs\nxs.AddRange(xs)\nprint(xs.Count + ys.Count)\n", "80", "12"),
+        ];
+        foreach (var (name, text, bytes, count) in rows)
+        {
+            Ran(BuildAndRun(text, past64, $"add-range-room-{name}"), 1, [], $"error: allocation-failed ({bytes} bytes)\n");
+            Ran(BuildAndRun(text, toolchain.Runtime, $"add-range-room-{name}-granted"), 0, [count], ""); // the positive control
+        }
+
+        const string itself = "mut xs = List<long>()\nxs.Add(1)\nxs.Add(2)\nxs.AddRange(xs)\nprint(xs.Count)\n";
+        Ran(BuildAndRun(itself, Edited(("std/std.kz", "if count + more > 2147483647 {\n        asked = (count + more) * item", "if count + more > 3 {\n        asked = (count + more) * item")), "add-range-itself-limit"), 1, [], "error: allocation-failed (32 bytes)\n");
+        Ran(BuildAndRun(itself, toolchain.Runtime, "add-range-itself-below-limit"), 0, ["4"], ""); // the positive control
+    }
+
+    [Fact]
+    public void An_AddRange_of_a_list_to_itself_keeps_no_block_it_grew_from()
+    {
+        // X9, M3: 3000 rounds of a list of 2000 `int`s appended to itself, the block of 8208 bytes it alone holds with the argument grown
+        // (`ListReserveWithin`), run in the 16 mebibytes of `Budget`; a block that stayed behind each round, 24 megabytes, would outgrow them
+        const string rounds = "mut total = 0\nfor round in 0..<3000 {\n    mut xs = List<int>()\n    for i in 0..<2000 {\n        xs.Add(i)\n    }\n\n    xs.AddRange(xs)\n    total = total + xs.Count\n}\n\nprint(total)\n";
+        Ran(BuildAndRun(rounds, Budget(), "add-range-itself-rounds"), 0, ["12000000"], "");
+
+        // the positive control: the block of each round held before the append outgrows the same memory
+        var held = BuildAndRun(rounds.Replace("mut total = 0\n", "mut total = 0\nmut all = List<List<int>>()\n", StringComparison.Ordinal).Replace("    xs.AddRange(xs)\n", "    all.Add(xs)\n    xs.AddRange(xs)\n", StringComparison.Ordinal), Budget(), "add-range-itself-rounds-held");
+        Assert.Equal(1, held.Code);
+        Assert.StartsWith("error: allocation-failed (", held.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3763,10 +3958,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // M9 (the owner, 2026-10-30, "Rust's full path"): each `getrandom` of the runtime is a system call of a number the kernel does
         // not have, 100000, which it refuses with ENOSYS (seen on x86_64), as a kernel before 3.17 refuses `getrandom`; the keys come
-        // from `/dev/urandom`
+        // from `/dev/urandom`; the runtime declares `syscall` for the lock of a file's reader (S16)
         (string Path, string Old, string New)[] enosys =
         [
-            (TargetFile, "    long getrandom(byte* bytes, long count, uint options)\n", "    long getrandom(byte* bytes, long count, uint options)\n    long syscall(long number, ...)\n"),
             (TargetFile, "getrandom(bytes, count, 4)", "syscall(100000, bytes, count, 4)"),
             (TargetFile, "getrandom(bytes, count, 1)", "syscall(100000, bytes, count, 1)"),
         ];
@@ -4062,14 +4256,149 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void Two_strings_are_equal_where_every_byte_is_compared_a_word_at_a_time_and_the_bytes_after()
+    public void Two_strings_are_equal_where_every_byte_is_compared_in_words_the_last_of_which_ends_where_the_bytes_end()
     {
-        // T18: the runtime's `Same` compares 8 bytes at a time and the bytes after the last 8 one at a time: a string of every count from 0
-        // to 20 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
+        // T18: the runtime's `Same` compares the first byte, then 8 bytes or more as words of 8, the last ending where the bytes end over
+        // the one before it, 4 to 7 as two words of 4 and 1 to 3 as their first, middle and last byte: a string of every count from 0 to
+        // 40 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
         // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
-        // byte 128 or more, against one letter changed at each place, which changes its second byte alone
-        const string text = "s = \"abcdefghijklmnopqrst\"\nmut long n = 0\nfor count in 0..<21 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
-        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["21000", "21000"], "");
+        // byte 128 or more, against one letter changed at each place, which changes its second byte alone; and the same under the fence,
+        // where a changed string of 16 or 32 bytes ends where its page ends, so that a word read past its end ends the process
+        const string text = "s = \"abcdefghijklmnopqrstuvwxyz0123456789ABCDE\"\nmut long n = 0\nfor count in 0..<41 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["41000", "21000"], "");
+        Ran(BuildAndRun(text, Fenced, "string-same-words-fenced"), 0, ["41000", "21000"], "");
+    }
+
+    [Fact]
+    public void Two_strings_are_ordered_by_the_first_byte_in_which_they_differ_read_in_words_with_their_first_byte_highest()
+    {
+        // T32: the runtime's `Order` compares the first byte, then 8 shared bytes or more as words of 8 read with their first byte
+        // highest, each an unsigned number, the last ending where the shared bytes end over the one before it, 4 to 7 as two words of 4
+        // and 1 to 3 as their first, middle and last byte, and where the shared bytes agree the lengths: a string of every count from 0
+        // to 40 against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
+        // after it raised, and the byte replaced by `é`, whose first byte, 195, is above every byte of ASCII; then against itself one
+        // byte longer, itself, and a copy of itself. Each pair is read both ways through `<`, `==` and `>`, and gives the sign of the
+        // order of its UTF-8 bytes; and the same under the fence, where a changed string of 16 or 32 bytes ends where its page ends, so
+        // that a word read past its end ends the process
+        const string text = """
+            string Sign(string x, string y) {
+                mut t = ""
+                if x < y {
+                    t = "{t}<"
+                }
+
+                if x == y {
+                    t = "{t}="
+                }
+
+                if x > y {
+                    t = "{t}>"
+                }
+
+                return t
+            }
+
+            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE"
+            for count in 0..<41 {
+                a = s.Substring(0, count)
+                mut line = ""
+                for k in 0..<count {
+                    head = s.Substring(0, k)
+                    mut up = "{head}~"
+                    mut down = "{head} "
+                    if k + 1 < count {
+                        rest = s.Substring(k + 2, count - k - 2)
+                        up = "{head}~ {rest}"
+                        down = "{head} ~{rest}"
+                    }
+
+                    wide = "{head}é{s.Substring(k + 1, count - k - 1)}"
+                    line = "{line}{Sign(a, up)}{Sign(up, a)}{Sign(a, down)}{Sign(down, a)}{Sign(a, wide)}{Sign(wide, a)}"
+                }
+
+                longer = s.Substring(0, count + 1)
+                padded = "{a}!"
+                again = padded.Substring(0, count)
+                print("{line}{Sign(a, longer)}{Sign(longer, a)}{Sign(a, a)}{Sign(a, again)}")
+            }
+
+            """;
+        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+        var lines = new List<string>();
+        for (var count = 0; count <= 40; count++)
+        {
+            var a = s[..count];
+            var line = new StringBuilder();
+            for (var k = 0; k < count; k++)
+            {
+                var head = s[..k];
+                var (up, down) = k + 1 < count ? (head + "~ " + s[(k + 2)..count], head + " ~" + s[(k + 2)..count]) : (head + "~", head + " ");
+                var wide = head + "é" + s[(k + 1)..count];
+                foreach (var b in new[] { up, down, wide })
+                {
+                    line.Append(Sign(a, b)).Append(Sign(b, a));
+                }
+            }
+
+            var longer = s[..(count + 1)];
+            lines.Add($"{line}{Sign(a, longer)}{Sign(longer, a)}{Sign(a, a)}{Sign(a, a)}");
+        }
+
+        Assert.Contains("<>><<>", lines[40], StringComparison.Ordinal); // a raised, a lowered and a wider byte each give their sign
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-order-words"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "string-order-words-fenced"), 0, [.. lines], "");
+    }
+
+    /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>
+    private static string Sign(string x, string y)
+    {
+        var order = Encoding.UTF8.GetBytes(x).AsSpan().SequenceCompareTo(Encoding.UTF8.GetBytes(y));
+        return order < 0 ? "<" : order == 0 ? "=" : ">";
+    }
+
+    [Fact]
+    public void A_piece_of_up_to_40_bytes_is_copied_whole_from_each_place_in_a_word()
+    {
+        // the standard library's `Copy`, with which `StringOf` copies a piece of a string's block: 8 to 16 bytes as two words of 8, the
+        // second ending where the bytes end, 4 to 7 as two words of 4, 1 to 3 as their first, middle and last byte, more byte by byte:
+        // every count from 0 to 40, copied from each of the 8 places of a word; and the same under the fence, where a piece of 16 or
+        // 32 bytes ends where its page ends, so that a byte written past its end ends the process
+        const string text = """
+            t = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            s = "{t}{t}"
+            for count in 0..<41 {
+                mut line = ""
+                for at in 0..<8 {
+                    line = "{line}{s.Substring(at, count)}|"
+                }
+
+                print(line)
+            }
+
+            """;
+        const string t = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        var lines = Enumerable.Range(0, 41).Select(count => string.Concat(Enumerable.Range(0, 8).Select(at => string.Concat((t + t).AsSpan(at, count), "|")))).ToArray();
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-copy-counts"), 0, lines, "");
+        Ran(BuildAndRun(text, Fenced, "string-copy-counts-fenced"), 0, lines, "");
+    }
+
+    [Fact]
+    public void A_replace_of_one_byte_by_one_byte_takes_no_block_where_it_finds_none()
+    {
+        // X5: a `Replace` of a character of one byte by another, given as `char`s or as strings, gives the string itself where it finds
+        // none, held once more, where Rust's `replace_ascii` makes a copy: 15000 such results of a string of 1024 bytes, all of them
+        // held, fit the 16 pieces of memory of `Budget`, where 15000 copies, each a block of 1040 bytes in the size class of 2048, are
+        // 30 megabytes and outgrow them, as the same replaces that find the byte do (the positive control); where it finds one it asks
+        // for the block of its result, 16 bytes of counts and the 3 of `axc`
+        const string held = "string Make(int n) {\n    mut s = \"x\"\n    mut i = 0\n    while i < n {\n        s = \"{s}{s}\"\n        i = i + 1\n    }\n    return s\n}\n\ntext = Make(10)\nmut all = List<string>()\nmut round = 0\nwhile round < 7500 {\n    round = round + 1\n    all.Add(text.Replace('q', 'y'))\n    all.Add(text.Replace(\"q\", \"y\"))\n}\nprint(all.Count)\n";
+        Ran(BuildAndRun(held, Budget(), "replace-byte-absent-held"), 0, ["15000"], "");
+        var copied = BuildAndRun(held.Replace("'q'", "'x'", StringComparison.Ordinal).Replace("\"q\"", "\"x\"", StringComparison.Ordinal), Budget(), "replace-byte-present-held");
+        Assert.Equal(1, copied.Code);
+        Assert.StartsWith("error: allocation-failed (", copied.Error, StringComparison.Ordinal);
+
+        var none = EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value);
+        Ran(BuildAndRun("print(\"abc\".Replace('b', 'x'))\n", none, "replace-byte-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        Ran(BuildAndRun("print(\"abc\".Replace('b', 'x'))\nprint(\"abc\".Replace(\"c\", \"x\"))\n", toolchain.Runtime, "replace-byte-granted"), 0, ["axc", "abx"], ""); // the positive control
     }
 
     [Theory]
