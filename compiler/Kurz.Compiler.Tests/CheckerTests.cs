@@ -1289,8 +1289,8 @@ public sealed class CheckerTests
     public void A_list_literal_of_calls_runs_the_function_whose_item_type_keeps_the_cases()
     {
         // O4 with F13 (the owner, 2026-11-01, "The union one"): a list literal of calls is read as such a call, so the function whose item type
-        // keeps the cases fits it exactly and wins, and nothing of the call is passed on; a literal fits exactly item by item, so a value beside
-        // the call leaves the items one exact alone, an exact fit wins over a union with a widening, and two whose item types keep the cases
+        // keeps the cases fits it exactly and wins, and nothing of the call is passed on; a literal fits exactly by the whole result of each
+        // call whose cases its item type keeps and by its own item type for the rest, so a value beside the call leaves the items one exact alone, an exact fit wins over a union with a widening, and two whose item types keep the cases
         // with a widening are ambiguous (assumed, section 5)
         var find = "data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\n";
         var show = "int Show(List<int> xs) => 1\n\nstring Show(List<int | NotFound> xs) => \"union\"\n\n";
