@@ -200,10 +200,10 @@ public sealed partial class Emitter
             EmitDrain(); // K2 with section 3: the work lists of the instances released
         }
 
-        var main = new IrFunction("i32 @main(i32 %argc, ptr %argv)");
+        var main = new IrFunction("i32 @main(i32 %argc, ptr %argv)", StartAttributes); // nothing compiled for the build's CPU runs before its check
         if (CpuRead() is { } read)
         {
-            main.Emit($"call void {read}()"); // R18: the CPU's word, read once before the runtime starts, for every test that reads it
+            main.Emit($"call void {read}()"); // R18: the CPU's word and the start check, read once before the runtime starts
         }
 
         main.Emit($"call void {start}(i32 %argc, ptr %argv)");

@@ -7,8 +7,9 @@ here: `invalid-source` (L1), since the tools read every case as UTF-8, and `file
 `network-not-allowed`, `env-not-allowed` and `run-not-allowed` (S12), since a case is a program and no package, and
 `invalid-argument` (S13), since a case gives its program no argument, and `ambiguous-name` (F10), since it takes two folders and a case is a single file; the three exceptions are
 `print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21), `allocation-failed`
-(O11), which has its row by the owner's choice (§6, 2026-10-23), and `random-failed` (M9), which has
-its row by the owner's choice (§4, 2026-10-30), and each says in it why no case expects it. The lint
+(O11), which has its row by the owner's choice (§6, 2026-10-23), `random-failed` (M9), which has
+its row by the owner's choice (§4, 2026-10-30), and `cpu-lacks-set` (R18), which has its row by the
+owner's choice (§13, 2026-11-02), and each says in it why no case expects it. The lint
 `md5-insecure` (H5) is a warning, which builds the program, and no error: it has no row, and no case
 expects it (V12).
 
@@ -28,6 +29,7 @@ expects it (V12).
 | `not-visible` | F9, A9, A15 | a member, type or function used where it is not visible; `print` of an instance, or an interpolation of one, whose `Text()` is not `pub`, from outside its class (A9); the same inside the class is A15's reading |
 | `duplicate-function` | F12 | two functions of one name whose parameters do not differ |
 | `constant-overflow` | T6, L10, L11, L17, T28, D20, M11, R18 | an operation of a constant expression of an integer or `decimal` type whose result leaves the range of its type (T6), a literal that fits no integer type (L10), a literal outside the range of its type, a floating-point one (L11) included, or one that does not fit the type it takes, written for it (L10, L17) or the other operand's (L17, T28), and a written integer conversion of a constant whose value lies outside the target (T6), and the number of an `enum` value past the range of an `int` (D20); a fraction or exponent literal inside a written conversion keeps its own type (L17); a constant given for an intrinsic's parameter of type `byte` that it does not fit, `X86.Sse41.Extract(v, 256)` (R18) |
+| `lane-out-of-range` | R18 | a constant given for an intrinsic's parameter that names a lane, the `index` of `X86.Sse41.Extract`, that fits the parameter's type and lies past the lanes of its vector, `X86.Sse41.Extract(v, 255)` of four lanes; the text names the lane and the count of the lanes (§13, the owner, 2026-11-02) |
 | `constant-divide-by-zero` | T25 | an integer or `decimal` division or remainder by a constant zero, a literal or folded from literals |
 | `narrowing-conversion` | T7, T28, C8, D20 | a wider integer type put into a narrower one without a conversion, whatever the signedness, the `int` of a promoted operation, the loop variable of a range of a wider type (C8) and the number of an `enum` value of a wider type (D20) included |
 | `sign-mix` | T9, T23, C8, D20 | an operation between a signed and an unsigned integer, the two ends of a range (C8) included, that C# joins through `long` or refuses (`uint` or `ulong` with a signed type), or a value put where a type of the other signedness and at least its width is required, into which it does not widen, the number of an `enum` value of type `uint`, `2u` (D20), among them |
@@ -88,11 +90,11 @@ expects it (V12).
 The exceptions a program can raise, as the header of a case names them. The line is the one that
 holds the construct that raised: the `throw`, the arithmetic, the index, the call of the type, or
 the range of the loop. Every id of the table but `stack-overflow`, `print-failed`,
-`allocation-failed` and `random-failed` is raised by the program's code, a check or a `throw`, with its file and its line
+`allocation-failed`, `random-failed` and `cpu-lacks-set` is raised by the program's code, a check or a `throw`, with its file and its line
 as constants (§6, an assumption there as to that list and the file), or in a test build by a check of
 the runtime's own code (below); `print-failed` is raised by the runtime with the file and the line its
-`print` passed as constants (A1; §6, the owner, 2026-10-23), and `allocation-failed` and
-`random-failed` name no place (O11, M9). A stack overflow, which is, but for a check of the runtime's own code in a test build (below),
+`print` passed as constants (A1; §6, the owner, 2026-10-23), and `allocation-failed`,
+`random-failed` and `cpu-lacks-set` name no place (O11, M9, R18). A stack overflow, which is, but for a check of the runtime's own code in a test build (below),
 the one exception a primitive of the runtime raises with a line it reads from the tables, at the call
 that did not fit or at a primitive's entry check, names no line in a release build built without its line
 tables (O11; §6 for the primitive's raise, an assumption there), and in either build where the stack
@@ -133,7 +135,8 @@ chosen, its error line naming the file and the line that a throw or a check of t
 carries, with nothing below it, and being the fixed line above for a raise that carries none (§6,
 assumptions there); the error line of `allocation-failed` names the size asked for and no place (O11;
 §6, the owner, 2026-10-23); the error line of `random-failed` is `error: random-failed`, with no place
-(M9; §4, assumed); the error line of `not-char-boundary` ends with a colon, and the position of the cut stands on the line
+(M9; §4, assumed); the error line of `cpu-lacks-set` is `error: cpu-lacks-set (<the CPU option>: <the
+sets>)`, with no place and no trace (R18; §13, the owner, 2026-11-02); the error line of `not-char-boundary` ends with a colon, and the position of the cut stands on the line
 below it, as the text of a `throw` does (X10; §12, the owner, 2026-10-31, "Below, as throw text", the colon assumed); the
 error line of every other id ends with its line, or with the note in its place (§6, decided there).
 
@@ -149,6 +152,7 @@ error line of every other id ends with its line, or with the note in its place (
 | `allocation-failed` | O11, T15, M9, R15, S3, S6, X4, X5, X6, X8, X11 | an allocation the system refused, or an operation that would make a string of more bytes, or a list of more items, than the largest `int`, `string.Allocate`, `List<T>.Allocate`, a read of a file or a socket and a read of a whole file among them (S3, S6) (§4, the owner, 2026-10-23 and 2026-10-24; §3, assumed for `string.Allocate` and `List<T>.Allocate`), a block of a trim, of `Split`, of `Replace` or of `string.Join` (X4, X5, X6, by T15 and M9), and the scratch of a list's `Sort` of more than 20 items that 4096 bytes on the stack do not hold, every item up to 8,000,000 bytes of them and half its items past that, times the item's size, and the block of the keys its `SortBy` keeps, a pair of the key and a position for each item, the position of 4 bytes where that makes the pair smaller and else of 8, padding included, with no buffer for the sort of those pairs, which are sorted in place as `SortUnstable` sorts a list (X8, assumed in §12); the error line is `error: allocation-failed (<n> bytes)`, with the size asked for, for a list past the limit the bytes of its items, the count of its items after the operation times the item's size as M9 counts it, padding included, and for a growth the system refuses the bytes the allocator was asked for, the whole request with the list's own counts, before the allocator rounds it up (§4, the owner, 2026-10-24), and for a string's block the system refuses the bytes the allocator was asked for, the 16 of the string's counts among them (§4, assumed), and no place and no trace (§6, the owner, 2026-10-23) (no case: a case cannot make memory run out, and a string over the limit takes 2 GiB) |
 | `not-char-boundary` | X2 | a `Substring` inside its string whose start or end falls inside a code point, the bounds read first (X2; §12, assumed); the error names the position (§12, the owner, 2026-10-31, "Two ids"), on the line below the error line, as the text of a `throw` stands (X10) |
 | `random-failed` | M9 | the system gave no randomness for the keys of a map's hash when a thread's first map takes its first block, on Linux neither `getrandom` nor, where the system refuses that call or its pool is not ready, `/dev/urandom`, which ends the program there, where Rust's standard library panics for want of a seed for a `HashMap` (§4, the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path"); on Windows `ProcessPrng` gives the keys, which does not fail (§4, the owner, 2026-10-30, "ProcessPrng, as Rust 1.82"), and the error comes only where its library or the call is missing, on a system older than Windows 8 or Windows Server 2008 R2, the floor Microsoft's page of the call names (§4, assumed); the id is the name the owner's question gave as an example, and the error line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (§4, assumed) (no case: a case cannot make the system refuse its randomness; `ListTests` runs a map on a runtime whose `Random` reports a failure) |
+| `cpu-lacks-set` | R18 | a build whose CPU option names sets beyond the target's baseline started on a CPU that lacks one of them, or with the run setting turning one of them off, before the program's first statement; the line names the CPU option and the sets by clang's names, those the CPU lacks first, then one group for each variable that turned sets off, `avx2 turned off by KURZ_INTRINSICS_AVX2`, the groups apart by `; `, and the exit code is 1 (§13, the owner, 2026-11-02) (no case: a case runs on the machine that builds it, whose CPU it cannot pick, with no setting) |
 
 ## The rules of this chapter
 

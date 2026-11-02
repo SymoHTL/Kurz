@@ -102,6 +102,73 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
     }
 
     [Fact]
+    public void A_guarded_blocks_function_is_named_after_the_function_it_stands_in_in_the_trace_and_in_the_line_tables()
+    {
+        // section 13, the owner, 2026-11-02: `<function>.guarded`, in the pattern of a lambda's `main.lambda`, in the trace and in the
+        // line tables alike; a lambda written in a guarded block is named after the function the block stands in, as its symbol is
+        HasTheSets();
+        const string text = """
+            int Pick(int n) {
+                v = Vector128.Create(n, 2, 3, 4)
+                if X86.Sse41.IsSupported {
+                    x = X86.Sse41.Extract(v, 0)
+                    if x > 2 {
+                        throw "lane 0 too big"
+                    }
+
+                    return x
+                }
+
+                return n
+            }
+
+            int Apply((int) => int f, int n) => f(n)
+
+            if X86.Sse41.IsSupported {
+                print(Apply(y => y + 1, 1))
+            }
+
+            class Doubler {
+                pub int Twice(int n) {
+                    if X86.Sse41.IsSupported {
+                        return X86.Sse41.Extract(Vector128.Create(n, n, n, n), 0) * 2
+                    }
+
+                    return n * 2
+                }
+            }
+
+            print(Doubler().Twice(1))
+            print(Apply(x => {
+                if X86.Sse41.IsSupported {
+                    return X86.Sse41.Extract(Vector128.Create(x, x, x, x), 1)
+                }
+
+                return x
+            }, 3))
+
+            print(Pick(args.Count + 5))
+
+            """;
+        var ir = Ir(text);
+        var names = Regex.Matches(ir, @"!DISubprogram\(name: ""([^""]*)"", linkageName: ""([^""]*)""")
+            .Where(m => m.Groups[2].Value.Contains(".guarded", StringComparison.Ordinal) || m.Groups[2].Value.Contains(".lambda", StringComparison.Ordinal))
+            .Select(m => $"{Regex.Replace(m.Groups[2].Value, @"^f\.|(\.[0-9]+)+$", string.Empty)} {m.Groups[1].Value}") // the symbol as the trace shows it, and the name
+            .Distinct()
+            .Order(StringComparer.Ordinal);
+        Assert.Equal(
+            "Doubler.Twice.guarded Doubler.Twice.guarded, Pick.guarded Pick.guarded, main.guarded main.guarded, main.lambda main.lambda, main.lambda.guarded main.lambda.guarded",
+            string.Join(", ", names));
+
+        Ran(
+            Toolchain.Run(toolchain.Build(Compile(text, toolchain.Runtime).Program!, "guarded-trace-name"), null), // the trace on
+            1,
+            ["2", "2", "3"],
+            "error: thrown at program.kz:6:\nlane 0 too big\n"
+            + (OperatingSystem.IsLinux() ? "  at Pick.guarded in program.kz:6\n  at Pick in program.kz:3\n  at main in program.kz:40\n" : string.Empty));
+    }
+
+    [Fact]
     public void Where_the_build_names_a_cpu_that_has_the_set_the_test_is_true_and_the_else_is_dropped()
     {
         var named = Ir(Guarded, CpuWith("X86.Sse3", "X86.Ssse3", "X86.Sse41"));
@@ -131,7 +198,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
         HasTheSets();
         var native = Compile(text, toolchain.Runtime, toolchain.Clang.DescribeCpu("native", x86: true, out _)).Program!;
         Assert.Equal("-march=native", native.CpuFlag);
-        Assert.DoesNotContain("@kz.cpu", native.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("load i64, ptr @kz.cpu", native.Ir, StringComparison.Ordinal); // the start check reads the CPU, and no test reads the word
 
         // a SHA instruction has no VEX form, so on a CPU with AVX a run of statements a test of `X86.Sha` guards starts by cleaning the
         // upper halves of the YMM registers, once; on a CPU without AVX nothing does
@@ -360,6 +427,12 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
         Assert.Contains("add <4 x i32>", functions["kz.main"].Body, StringComparison.Ordinal);
         HasTheSets();
         Ran(BuildAndRun(text, toolchain.Runtime, "intrinsic-raw", "raw"), 0, ["3", "8"], "");
+
+        // on an Arm machine no function of the set can be compiled: the intrinsic is refused, as one of a class under `Arm` is on x86-64
+        var arm = Compile(text, toolchain.Runtime, Cpu.ArmBaseline, "raw");
+        Assert.Null(arm.Program);
+        var d = Assert.Single(arm.Diagnostics.Items);
+        Assert.Equal((DiagnosticKind.NotSupported, 3, "`X86.Sse41.Extract` outside a test of `X86.Sse41.IsSupported`, which the target does not have (R18)"), (d.Kind, d.Line, d.Message));
     }
 
     [Fact]
@@ -500,7 +573,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
                 print(Lanes(X86.Ssse3.AlignRight(a, b, 255)))
                 print(Lanes(X86.Ssse3.AlignRight(a.AsUInt32(), b.AsUInt32(), 12).AsByte()))
                 print(X86.Sse41.Extract(a, 13))
-                print(X86.Sse41.Extract(a.AsInt32(), 6))
+                print(X86.Sse41.Extract(a.AsInt32(), 2))
                 print(X86.Sse41.Extract(a.AsUInt32(), 3))
                 print(X86.Sse41.Extract(a.AsSingle(), 1) == a.AsSingle().GetElement(1))
                 print(Lanes(X86.Sse41.Blend(a.AsUInt16(), b.AsUInt16(), 0xA5).AsByte()))
@@ -549,7 +622,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
             Bytes(Ssse3.AlignRight(a, b, 255)),
             Bytes(Ssse3.AlignRight(a.AsUInt32(), b.AsUInt32(), 12).AsByte()),
             Sse41.Extract(a, 13).ToString(CultureInfo.InvariantCulture),
-            Sse41.Extract(a.AsInt32(), 6).ToString(CultureInfo.InvariantCulture), // the instruction reads the immediate's low bits: lane 2
+            Sse41.Extract(a.AsInt32(), 2).ToString(CultureInfo.InvariantCulture),
             Sse41.Extract(a.AsUInt32(), 3).ToString(CultureInfo.InvariantCulture),
             "true",
             Bytes(Sse41.Blend(a.AsUInt16(), b.AsUInt16(), 0xA5).AsByte()),
