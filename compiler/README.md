@@ -300,7 +300,10 @@ The runtime a built program links is written in Kurz, in `runtime/` at the top o
 `runtime/linux/` and `runtime/windows/` the code of one target each. The standard library's Kurz
 code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"),
 and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
-section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, at
+section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
+`HttpError` with its `HttpKind` (W2), types every program sees (W1: the checker of a program is given `std/`'s checker and takes the
+symbols it made of each `pub` type that `Checker.Prelude` names, where the built-in types every file sees, `IoError` among them, are
+the checker's own declarations, made again for each file), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
@@ -1311,7 +1314,10 @@ class instance, not through a `weak` reference), 5 (data types: D1 to D12, D14, 
 M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7 and K9, for a class with its primary constructor or none,
 its fields, its methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and its cycle rule judged by the types of the fields (R2, R4), and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), 16 (HTTP: W1 for the
+types of `std/` that the list `Checker.Prelude` names, `HttpKind` and `HttpError`, which a program checked with `std/`'s checker, as every
+build checks it, sees as `std/` declares them, and W2 but for the text of an `HttpError`; the other names of W1 are no types of `std/`, and a
+file's own declaration of one is the file's own), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -1401,7 +1407,9 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
+type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
+`string.Join`, which W2 gives as its detail alone and no rule says how a type of `std/` gives, by a member of the type (D16) or as
+the compiler gives the text of an `IoError` (W2); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
 which the intrinsics and their vector types stand (R18); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of

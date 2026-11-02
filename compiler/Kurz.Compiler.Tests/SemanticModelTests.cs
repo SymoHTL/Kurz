@@ -50,7 +50,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             }
 
             var diagnostics = new DiagnosticBag();
-            var checker = Checker.Check(tree, diagnostics, header.Grants);
+            var checker = Checker.Check(tree, diagnostics, header.Grants, CorpusTests.StdChecker.Value); // W1: as a build reads it
             if (diagnostics.Items.Count == 0)
             {
                 yield return (file, tree, checker.Model);

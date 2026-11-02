@@ -264,22 +264,35 @@ public sealed partial class Checker
     };
 
     /// <summary>A4 with R10 and R17: whether a value of the type holds a raw pointer or a C function value, whose text no rule gives.</summary>
-    private static bool HoldsRaw(KurzType type, List<DataSymbol> seen)
+    private static bool HoldsRaw(KurzType type, List<DataSymbol> seen) => Holds(type, t => t is PointerType or CFunctionType, seen);
+
+    /// <summary>W2: whether a value of the type holds an <c>HttpError</c> of <c>std/</c>, whose text the compiler does not give.</summary>
+    private bool HoldsHttpError(KurzType type) =>
+        preludeSeen.Contains("HttpError") && Holds(type, t => t is DataType d && ReferenceEquals(d.Symbol, dataTypes["HttpError"]), []);
+
+    /// <summary>
+    /// Whether a value of the type is or holds one of a type <paramref name="leaf"/> picks, as the text of a value shows it: an item, a
+    /// map's value, a case of a union or a field of a data type.
+    /// </summary>
+    private static bool Holds(KurzType type, Func<KurzType, bool> leaf, List<DataSymbol> seen)
     {
+        if (leaf(type))
+        {
+            return true;
+        }
+
         switch (type)
         {
-            case PointerType or CFunctionType:
-                return true;
             case ListType l:
-                return HoldsRaw(l.Element, seen);
+                return Holds(l.Element, leaf, seen);
             case MapType m:
-                return HoldsRaw(m.Value, seen);
+                return Holds(m.Value, leaf, seen);
             case UnionType u:
-                return u.Cases.Any(c => HoldsRaw(c, seen));
+                return u.Cases.Any(c => Holds(c, leaf, seen));
             case DataType d when !seen.Contains(d.Symbol):
                 {
                     seen.Add(d.Symbol);
-                    var result = d.Symbol.Fields.Any(f => HoldsRaw(SubstituteData(d, f.Type), seen));
+                    var result = d.Symbol.Fields.Any(f => Holds(SubstituteData(d, f.Type), leaf, seen));
                     seen.RemoveAt(seen.Count - 1);
                     return result;
                 }
