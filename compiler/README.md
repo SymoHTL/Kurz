@@ -1518,7 +1518,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, and
+`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -1537,7 +1537,8 @@ D17, D19, and the A-rules of their text); of a class, type parameters (T19), a b
 which leaves the class and every value of it unread, and of a class it reads, a `static` field
 with an initial value that is no constant, which section 4 computes at the field's
 first read and whose open items section 14 holds, or of a type other than a number, a `bool`, a
-`char`, a `string`, a time or an enum (K18), a field of a function type, whose cycle R9 judges by
+`char`, a `string`, a time or an enum, but for one that is or holds a class, which is `static-state`
+(K18), a field of a function type, whose cycle R9 judges by
 the lambdas of the program (R9), a method as a value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)` (K2, M4, M5), and `==`
 on two instances or on values that hold one, and an instance as a key of a map, at any depth (K4,
@@ -1981,9 +1982,18 @@ round can ask about it by the rule's id.
 - K7 with V8 and V9: inside a method a field of its instance is a name, read and assigned as
   `Count = Count + 1`, as C# reads it, so a parameter or a variable of a method named as a field, and
   a method named as a field, are `redeclared`, as two fields of one name are; `this` outside a method
-  is `unknown-name`. A `static` field or method of the class is a name there too, and in a `static`
+  is `unknown-name`, but in a `static` method and in the initial value of a `static` field, where it
+  is `static-mismatch` (K19). A `static` field or method of the class is a name there too, and in a `static`
   method, and a method of the class, `static` or not, hides a top-level function of its name inside
   the class, as C# reads it.
+- K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
+  field by field, in source order, and a read of a field whose value is not checked yet checks that
+  field first, so that every read is the constant its field holds. A read of a field whose check is
+  under way closes a cycle: one `static-cycle` at the field of the cycle that comes first in the
+  file, its message naming the fields from there in the order they read each other, and every field
+  of the cycle refused, so that a read of one adds nothing (E1); two cycles that share a field are
+  one error, two that share none are two. An initial value that calls a function is `not
+  supported`, so the walk meets no call.
 - K9 with E4: `mut` before a method of a class is `syntax`, since K9 gives the marker to the methods
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the
