@@ -112,6 +112,19 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void A_loop_takes_an_else_after_its_block_on_the_line_of_its_closing_brace()
+    {
+        // S16: the arms of a postfix `else` after the loop's block, as after a call (O5; section 12, the owner, 2026-11-01, "Unwrap like a call")
+        Assert.Equal(
+            "(for line in (call (. f Lines)) {(call print line)} else [(IoError e => (call print e))])",
+            Tree("for line in f.Lines() {\n    print(line)\n} else {\n    IoError e => print(e)\n}"));
+        Assert.Equal("(for line in (call (. f Lines)) {(call print line)})", Tree("for line in f.Lines() {\n    print(line)\n}")); // and none without one
+
+        // an `else` on a line of its own is no part of the loop: E4's `syntax` at its line, as after an `if` (C2)
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("for line in f.Lines() {\n    print(line)\n}\nelse {\n    IoError e => print(e)\n}").ToList());
+    }
+
+    [Fact]
     public void If_else_if_and_else_follow_the_closing_brace()
     {
         // C1: `if` with its block; C2: `else` and `else if` after the closing brace on its line; F3: a block body with `return`
