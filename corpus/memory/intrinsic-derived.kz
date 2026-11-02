@@ -1,11 +1,11 @@
 // expect: output
-// | 6
+// | 4
 // rules: R18
 
 v = Vector128.Create(1, 2, 3, 4)
 if X86.Sse41.IsSupported {
-    // a test of `X86.Sse41` guards the intrinsics of the classes it derives from, `X86.Sse2` among them (R18)
-    print(X86.Sse2.Add(v, v).GetElement(2))
+    // a test of `X86.Sse41` guards the intrinsics of the classes it derives from, `X86.Ssse3` among them (R18)
+    print(X86.Ssse3.AlignRight(v, v, 4).GetElement(2))
 } else {
-    print(v.GetElement(2) * 2)
+    print(v.GetElement(3))
 }

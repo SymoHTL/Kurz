@@ -381,6 +381,10 @@ public sealed partial class Checker
         {
             Report(ErrorIds.Syntax, c.Line, "a call with a `void` success used as a value (O10)");
         }
+        else if (!t.IsError && HoldsVector(t.Type))
+        {
+            NotSupported(c.Line, VectorText);
+        }
         else if (!t.IsError && !HasText(t.Type))
         {
             Report(ErrorIds.NoText, c.Line, $"{Types.A(t.Type)} has no text to print (A4, A7, A10)");
@@ -1115,6 +1119,11 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (CheckIntrinsicCall(m, c) is { } intrinsic)
+        {
+            return intrinsic; // R18
+        }
+
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
             if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line))
@@ -1206,6 +1215,11 @@ public sealed partial class Checker
         {
             CheckArgumentsLoosely(c);
             return Typed.Error;
+        }
+
+        if (target.Type is VectorType vector)
+        {
+            return CheckVectorMethod(vector, m, c); // R18
         }
 
         if (target.Type is ClassType classType)
