@@ -531,7 +531,10 @@ The emitter (`Emit/`) takes a program the checker read without an error and with
 supported`, with the runtime checked for its target and the standard library, and writes one LLVM
 module of the three, which the
 pinned clang compiles unoptimised, at `-O0`, in a test build, as Cargo's `dev` profile builds, and at
-`-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), and links with the C
+`-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), every function of which
+it aligns at 64 bytes through LLVM's `-align-all-functions=6`, where LLVM, and rustc with it, aligns one
+at 16 (the owner, 2026-11-02, issue 156, comment 6580739215; pinned by
+`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
 library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
 library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
 which links `m` beside `c` on Linux), whose `fmod` an unoptimised `%` of a `double` calls, and with the
