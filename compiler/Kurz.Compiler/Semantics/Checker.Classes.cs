@@ -146,7 +146,7 @@ public sealed partial class Checker
     /// <summary>
     /// K7, F1: the parameter and result types of each method. A method takes no <c>mut</c> marker, which is for values (K9, M5): one
     /// written is text no rule gives a meaning (E4), and so is <c>naked</c> before a method (R12). Two methods of one name with the same
-    /// parameters are <c>duplicate-function</c>, as two functions are (F13).
+    /// parameters are <c>duplicate-function</c>, as two functions are (F12).
     /// </summary>
     private void ResolveMethods()
     {
@@ -174,7 +174,7 @@ public sealed partial class Checker
                 {
                     if (list.Take(i).Any(earlier => SameParameters(earlier, list[i])))
                     {
-                        Report(ErrorIds.DuplicateFunction, list[i].Line, $"`{symbol.Name}` has a method `{list[i].Name}` with these parameter types already (F13)");
+                        Report(ErrorIds.DuplicateFunction, list[i].Line, $"`{symbol.Name}` has a method `{list[i].Name}` with these parameter types already (F12)");
                     }
                 }
             }

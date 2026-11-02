@@ -2950,8 +2950,12 @@ public sealed class CheckerTests
         // O10: a `void` method's call assigned to a field, by its name and through the instance
         Assert.Equal([(ErrorIds.Syntax, 6)], Errors("class C(mut int N) {\n    pub void Go() {\n    }\n\n    pub void Set() {\n        N = Go()\n    }\n}\n\nC(1).Set()"));
         Assert.Equal([(ErrorIds.Syntax, 7)], Errors("class C(mut int N) {\n    pub void Go() {\n    }\n}\n\nc = C(1)\nc.N = c.Go()"));
-        // F13: two methods with the same parameter types; F3: the end of a method reached without a `return`
+        // F12: two methods with the same parameter types; F3: the end of a method reached without a `return`
         Assert.Equal([(ErrorIds.DuplicateFunction, 3)], Errors("class C(int N) {\n    pub int Get() => N\n    pub int Get() => 1\n}\n\nprint(C(1).N)"));
+        // the message names F12, the rule that makes two methods of one name with the same parameters one too many, as a duplicate
+        // function's message does (#156, item 12)
+        Assert.EndsWith("(F12)", Check("class C(int N) {\n    pub int Get() => N\n    pub int Get() => 1\n}\n\nprint(C(1).N)").Diagnostics.Sorted.Single().Message, StringComparison.Ordinal);
+        Assert.EndsWith("(F12)", Check("int F(int a) => a\nint F(int b) => b\nprint(F(1))").Diagnostics.Sorted.Single().Message, StringComparison.Ordinal);
         Clean("class C(int N) {\n    pub int Get() => N\n    pub int Get(int k) => N + k\n}\n\nprint(C(1).Get(2))");
         Assert.Equal([(ErrorIds.MissingReturn, 2)], Errors("class C(int N) {\n    pub int Get() {\n        if N > 0 {\n            return 1\n        }\n    }\n}\n\nprint(C(1).Get())"));
         // V9: a variable of a method named as a field; V10: a member and a method the class does not have
