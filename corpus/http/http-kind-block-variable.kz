@@ -2,6 +2,6 @@
 // rules: W1
 
 if true {
-    HttpKind = 2
+    int HttpKind = 2
     print(HttpKind)
 }

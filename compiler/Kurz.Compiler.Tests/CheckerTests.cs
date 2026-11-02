@@ -2103,6 +2103,8 @@ public sealed class CheckerTests
     [Theory]
     [InlineData("data HttpError(int Code)", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
     [InlineData("enum HttpKind { Lost }", "`HttpKind` is an enum of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    [InlineData("int Same<HttpError>(HttpError x) => 1", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    [InlineData("data Box<HttpKind>(HttpKind V)", "`HttpKind` is an enum of `std/` every file sees, declared before the file's own types (W1, V9)")]
     public void A_file_s_own_declaration_of_a_type_of_the_prelude_is_redeclared_and_names_W1(string text, string message)
     {
         var error = Assert.Single(CheckSeeingStd(text).Diagnostics.Items);
@@ -2119,10 +2121,12 @@ public sealed class CheckerTests
     [InlineData("mut m = Map<string, HttpError>()\nm[\"a\"] = e\nprint(m)")]
     [InlineData("mut m = Map<HttpError, int>()\nm[e] = 1\nprint(m)")]
     [InlineData("print(Held(e))")]
+    [InlineData("print(e.Text())")]
+    [InlineData("print(e.Text() + \"!\")")]
     public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
     {
         // W2: the record gives its text, its detail alone, through a `Text()` in the body of the `data` type (A5), which the checker does
-        // not read (D16), so it takes no text of one, nor of a value that holds one
+        // not read (D16), so it takes no text of one, nor of a value that holds one, and a call of that `Text()` has the same answer
         var (diagnostics, _) = CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n");
         var refused = Assert.Single(diagnostics.Items);
         Assert.Equal((true, 4 + use.Count(c => c == '\n')), (refused.IsNotSupported, refused.Line));

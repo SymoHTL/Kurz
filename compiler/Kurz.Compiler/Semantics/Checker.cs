@@ -507,7 +507,7 @@ public sealed partial class Checker
             // a built-in name among them: `data List` could never be named (M9, T17); a built-in data type names the rule that declares it,
             // since no line of the file does
             Report(ErrorIds.Redeclared, d.Line, preludeSeen.Contains(d.Name)
-                ? $"`{d.Name}` is {(enums.ContainsKey(d.Name) ? "an enum" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)"
+                ? PreludeClash(d.Name)
                 : BuiltInTypeRules.TryGetValue(d.Name, out var rule)
                 ? $"`{d.Name}` is {(enums.ContainsKey(d.Name) ? "an enum" : "a data type")} every file sees, declared before the file's own types ({rule}, V9)"
                 : $"the name `{d.Name}` is declared already (V9)");
@@ -576,6 +576,7 @@ public sealed partial class Checker
         model.RecordDataType(d, symbol);
         foreach (var p in d.TypeParameters)
         {
+            RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
@@ -612,6 +613,23 @@ public sealed partial class Checker
                 enums[name] = e;
                 preludeSeen.Add(name);
             }
+        }
+    }
+
+    /// <summary>W1, V9: what <c>redeclared</c> says to a file's own declaration of a type of the prelude this file sees.</summary>
+    private string PreludeClash(string name) =>
+        $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)";
+
+    /// <summary>
+    /// W1, V9: a type parameter named like a type of the prelude this file sees binds the name in a scope, so it is <c>redeclared</c>
+    /// at the parameter, as the file's own type so named is (the owner, 2026-11-02), and the parameter stands for the rest of the
+    /// declaration, so that its uses report nothing more (E1).
+    /// </summary>
+    private void RefusePreludeTypeParameter(TypeParameter p)
+    {
+        if (preludeSeen.Contains(p.Name))
+        {
+            Report(ErrorIds.Redeclared, p.Line, PreludeClash(p.Name));
         }
     }
 
@@ -1173,6 +1191,7 @@ public sealed partial class Checker
         model.RecordFunction(d, symbol);
         foreach (var p in d.TypeParameters)
         {
+            RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 

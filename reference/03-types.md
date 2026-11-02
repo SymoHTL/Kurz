@@ -158,6 +158,16 @@ r = Pair(1L, [x])
 print(r)
 ```
 
+Case: [classes/static-narrowing.kz](../corpus/classes/static-narrowing.kz)
+```kurz
+class Level {
+    pub static byte Small = Wide
+    pub static int Wide = 7
+}
+
+print(Level.Small)
+```
+
 ### T8 (decided, §4) Implicit widening
 
 A value of a narrower integer type becomes a wider one without a word when the wider type holds

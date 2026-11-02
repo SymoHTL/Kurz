@@ -1,6 +1,6 @@
 // expect: error redeclared at 4
 // rules: W1
 
-HttpKind = 3
+int HttpKind = 3
 
 print(HttpKind)
