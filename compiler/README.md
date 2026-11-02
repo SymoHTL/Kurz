@@ -744,7 +744,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   hash's low bits give, then each group one group further on than the stride before, and ends at a group
   with a slot of 255; a key added takes the first slot of 255 or 128 in its probe. `Remove` marks its
   slot 255 where the slot's group of 8 still holds a 255, which ends every probe that reaches the group,
-  else 128, which a probe passes, as `hashbrown`'s `erase` does; `Clear` marks every slot 255. A map
+  else 128, which a probe passes, as `hashbrown`'s `erase` does, and finds the slot a second time only in
+  the copy, where the block was shared; `Clear` marks every slot 255. The search of a slot for a key
+  added, the test of a group for a slot of 255, the walk of a loop, of a map's text and of a block that
+  grows read a group's 8 control bytes as one word too, the walks taking the slots with an entry lowest
+  first by a mask of the bytes whose high bit is clear, as `hashbrown`'s `RawIterRange` does. A map
   grows to twice its slots where an entry would fill more than seven eighths of them, the slots marked
   128 counted, `hashbrown`'s load factor, and is built again at its size, without those slots, where its
   entries fill at most half of them, as `hashbrown`'s `reserve_rehash` does; a write, a `Remove` and a

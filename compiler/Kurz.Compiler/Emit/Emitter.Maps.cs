@@ -232,32 +232,57 @@ public sealed partial class Emitter
     private void EachEntry(string block, MapType type, Action<string, string> each)
     {
         var entry = EntryType(type);
+        var next = fn.Label("slot.next");
+        var done = fn.Label("slots.done");
+        EachSlot(block, entry, next, done, slot =>
+        {
+            var key = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
+            var value = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
+            each(key, value);
+        });
+        fn.Block(done);
+    }
+
+    /// <summary>
+    /// The walk of the slots with an entry of a map's block, of entries of the IR type <paramref name="entry"/>, in the order of
+    /// its slots (M10), as hashbrown's <c>RawIterRange</c> walks them: a group's 8 control bytes read as one word, its slots
+    /// with an entry, whose bytes have the high bit clear, marked as hashbrown's <c>match_full</c> marks them, and taken lowest
+    /// first by counting trailing zeros, each mark cleared before <paramref name="body"/> runs with the slot's address.
+    /// <paramref name="onward"/>, where the body goes on to the next slot, is started here after the body; the walk ends at
+    /// <paramref name="done"/>, which the caller starts.
+    /// </summary>
+    private void EachSlot(string block, string entry, string onward, string done, Action<string> body)
+    {
+        const string highs = "-9187201950435737472"; // 0x8080808080808080
+        module.Declare("declare i64 @llvm.cttz.i64(i64, i1)");
         var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr {block})")} to i64");
         var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr {block})");
         var slots = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr {block})");
-        var counter = fn.Alloca("i64", "slot");
-        fn.Emit($"store i64 0, ptr {counter}");
-        var check = fn.Label("slots");
-        var body = fn.Label("slot");
-        var held = fn.Label("entry");
-        var next = fn.Label("slot.next");
-        var done = fn.Label("slots.done");
+        var group = fn.Alloca("i64", "group");
+        var marks = fn.Alloca("i64", "full");
+        fn.Emit($"store i64 -8, ptr {group}");
+        fn.Emit($"store i64 0, ptr {marks}");
+        var check = fn.Label("full");
+        var load = fn.Label("group.next");
+        var read = fn.Label("group");
+        var take = fn.Label("slot");
         fn.Block(check);
-        var i = fn.Value($"load i64, ptr {counter}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {i}, {room}"), body, done);
-        fn.Block(body);
-        var mark = fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {i}")}");
-        fn.CondBranch(fn.Value($"icmp sge i8 {mark}, 0"), held, next); // 255 and 128 hold none
-        fn.Block(held);
-        var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
-        var key = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
-        var value = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
-        each(key, value);
-        fn.Branch(next);
-        fn.Block(next);
-        fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {counter}");
+        var left = fn.Value($"load i64, ptr {marks}");
+        fn.CondBranch(fn.Value($"icmp eq i64 {left}, 0"), load, take);
+        fn.Block(load);
+        var at = fn.Value($"add i64 {fn.Value($"load i64, ptr {group}")}, 8");
+        fn.Emit($"store i64 {at}, ptr {group}");
+        fn.CondBranch(fn.Value($"icmp slt i64 {at}, {room}"), read, done);
+        fn.Block(read);
+        var word = fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {at}")}");
+        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"xor i64 {word}, -1")}, {highs}")}, ptr {marks}"); // 255 and 128 hold none
         fn.Branch(check);
-        fn.Block(done);
+        fn.Block(take);
+        var i = fn.Value($"add i64 {fn.Value($"load i64, ptr {group}")}, {fn.Value($"lshr i64 {fn.Value($"call i64 @llvm.cttz.i64(i64 {left}, i1 true)")}, 3")}");
+        fn.Emit($"store i64 {fn.Value($"and i64 {left}, {fn.Value($"sub i64 {left}, 1")}")}, ptr {marks}");
+        body(fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}"));
+        fn.Block(onward);
+        fn.Branch(check);
     }
 
     /// <summary>
@@ -540,7 +565,15 @@ public sealed partial class Emitter
             fn.Block(found);
             OwnBlock(type, asked);
             var current = fn.Value("load ptr, ptr %a0");
-            var own = fn.Value($"call ptr {FindEntry(type)}(ptr {current}, {Ir(type.Key)} %a1, i64 {hash})"); // the same slot of a copy
+            var copied = fn.Label("in.copy");
+            var take = fn.Label("take");
+            var at = fn.Alloca("ptr", "own");
+            fn.Emit($"store ptr {slot}, ptr {at}");
+            fn.CondBranch(fn.Value($"icmp eq ptr {current}, {block}"), take, copied); // the block found in, where no other value held it
+            fn.Block(copied);
+            fn.Emit($"store ptr {fn.Value($"call ptr {FindEntry(type)}(ptr {current}, {Ir(type.Key)} %a1, i64 {hash})")}, ptr {at}"); // the same slot of the copy
+            fn.Block(take);
+            var own = fn.Value($"load ptr, ptr {at}");
             var value = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {own}, i32 0, i32 2")}");
             if (Counted(type.Key))
             {
@@ -662,47 +695,31 @@ public sealed partial class Emitter
 
         var entry = EntryType(type);
         var walk = fn.Label("walk");
-        var check = fn.Label("check");
-        var mark = fn.Label("slot");
         var body = fn.Label("for");
         var onward = fn.Label("onward");
         var exit = fn.Label("endfor");
         fn.CondBranch(fn.Value($"icmp eq ptr {map}, null"), exit, walk);
         fn.Block(walk);
-        var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr {map})")} to i64");
-        var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr {map})");
-        var entries = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr {map})");
-        var counter = fn.Alloca("i64", "slot");
-        fn.Emit($"store i64 0, ptr {counter}");
-        fn.Block(check);
-        var i = fn.Value($"load i64, ptr {counter}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {i}, {room}"), mark, exit);
-        fn.Block(mark);
-        var held = fn.Value($"icmp sge i8 {fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {i}")}")}, 0"); // 255 and 128 hold none
-        var full = fn.Label("entry");
-        fn.CondBranch(held, full, onward);
-        fn.Block(full);
-        var slot = fn.Value($"getelementptr {entry}, ptr {entries}, i64 {i}");
-        var k = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
-        var v = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
-        if (whole is null)
+        EachSlot(map, entry, onward, exit, slot =>
         {
-            fn.Emit($"store {Ir(type.Key)} {k}, ptr {key}");
-            fn.Emit($"store {Ir(type.Value)} {v}, ptr {value}");
-        }
-        else
-        {
-            var pair = fn.Value($"insertvalue {Ir(whole)} {fn.Value($"insertvalue {Ir(whole)} poison, {Ir(type.Key)} {k}, 0")}, {Ir(type.Value)} {v}, 1");
-            fn.Emit($"store {Ir(whole)} {pair}, ptr {slots[Model.DeclarationOf(f)]}");
-        }
-        fn.Branch(body);
-        fn.Block(body);
-        loops.Push((exit, onward, regions.Count, scopes.Count));
-        EmitBlock(f.Body);
-        loops.Pop();
-        fn.Block(onward);
-        fn.Emit($"store i64 {fn.Value($"add i64 {fn.Value($"load i64, ptr {counter}")}, 1")}, ptr {counter}");
-        fn.Branch(check);
+            var k = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
+            var v = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
+            if (whole is null)
+            {
+                fn.Emit($"store {Ir(type.Key)} {k}, ptr {key}");
+                fn.Emit($"store {Ir(type.Value)} {v}, ptr {value}");
+            }
+            else
+            {
+                var pair = fn.Value($"insertvalue {Ir(whole)} {fn.Value($"insertvalue {Ir(whole)} poison, {Ir(type.Key)} {k}, 0")}, {Ir(type.Value)} {v}, 1");
+                fn.Emit($"store {Ir(whole)} {pair}, ptr {slots[Model.DeclarationOf(f)]}");
+            }
+            fn.Branch(body);
+            fn.Block(body);
+            loops.Push((exit, onward, regions.Count, scopes.Count));
+            EmitBlock(f.Body);
+            loops.Pop();
+        });
         fn.Block(exit);
     }
 

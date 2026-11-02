@@ -3705,7 +3705,9 @@ pub byte* MapCopy(byte* block, long entry, mut long asked) {
 // insert moves the map onto SipHash-1-3 (`MapTripped`, `MapSwitched`), as .NET's `Dictionary` switches to a
 // randomized hash where one insert walks more than 100 entries of a chain (section 4, the owner, 2026-11-01,
 // "Switch, as .NET"; the bound, assumed there: a table filled to 7 slots of 8 passes full groups as a rule,
-// so that 100 slots would switch maps no key was made for).
+// so that 100 slots would switch maps no key was made for). A group's 8 control bytes are read as one word,
+// as the emitted code reads them, and its slots of 255 and of 128 are the bytes whose high bit is set, as
+// hashbrown's `match_empty_or_deleted` marks them.
 pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     long mask = long(MapRoom(block)) - 1
     byte* control = MapControl(block)
@@ -3716,13 +3718,9 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     mut byte* slot = null
     raw {
         while i < 0 {
-            mut long b = 0
-            while b < 8 && i < 0 {
-                if control[at + b] >= 128 {
-                    i = at + b
-                }
-
-                b = b + 1
+            ulong free = *Ptr<ulong>(control + at) & 0x8080808080808080UL
+            if free != 0 {
+                i = at + FirstFlag(free)
             }
 
             step = step + 8
@@ -3739,22 +3737,10 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
             // the slot of a removed entry: where its group has no slot of 255, the lookup of the key passed it, and
             // each group after it up to the first with a slot of 255, which ends the lookup, and the bound counts them
             mut long g = i / 8 * 8
-            mut bool open = false
-            while !open {
-                mut long c = 0
-                while c < 8 {
-                    if control[g + c] == 255 {
-                        open = true
-                    }
-
-                    c = c + 1
-                }
-
-                if !open {
-                    g = at
-                    step = step + 8
-                    at = (at + step) & mask
-                }
+            while !MapOpen(control + g) {
+                g = at
+                step = step + 8
+                at = (at + step) & mask
             }
         }
 
@@ -3767,6 +3753,18 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     }
 
     return slot
+}
+
+// Whether a group of 8 control bytes at `group`, an address that is a multiple of 8, holds a slot of 255,
+// which ends a probe: the bytes whose two high bits are set, as hashbrown's generic `match_empty` marks
+// them, since 128 has its second bit clear and an entry's byte its first.
+bool MapOpen(byte* group) {
+    mut ulong word = 0
+    raw {
+        word = *Ptr<ulong>(group)
+    }
+
+    return (word & (word << 1) & 0x8080808080808080UL) != 0
 }
 
 // For an entry added to a block no other value holds and that has no room left: a block with its
@@ -3804,19 +3802,24 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
     raw {
         *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
         *Ptr<int>(p + 36) = *Ptr<int>(block + 36)
-        mut long i = 0
-        while i < room {
-            if control[i] < 128 {
-                byte* old = from + i * entry
+        // the entries in the order of their slots, a group's 8 control bytes read as one word and its slots with an
+        // entry, whose bytes have the high bit clear, taken lowest first, as hashbrown's `RawIter` takes them by
+        // `match_full`; an entry's bytes moved a word at a time, since the emitted code lays out an entry from a word
+        mut long g = 0
+        while g < room {
+            mut ulong full = ~*Ptr<ulong>(control + g) & 0x8080808080808080UL
+            while full != 0 {
+                byte* old = from + (g + FirstFlag(full)) * entry
+                full = full & (full -% 1UL)
                 byte* to = MapEmpty(p, *Ptr<ulong>(old), entry)
                 mut long j = 0
                 while j < entry {
-                    to[j] = old[j]
-                    j = j + 1
+                    *Ptr<ulong>(to + j) = *Ptr<ulong>(old + j)
+                    j = j + 8
                 }
             }
 
-            i = i + 1
+            g = g + 8
         }
     }
 
@@ -3833,18 +3836,7 @@ pub void MapErase(byte* block, byte* slot, long entry) {
     mut long i = 0
     raw {
         i = (slot - MapSlots(block)) / entry
-        long group = i / 8 * 8
-        mut bool open = false
-        mut long b = 0
-        while b < 8 {
-            if control[group + b] == 255 {
-                open = true
-            }
-
-            b = b + 1
-        }
-
-        if open {
+        if MapOpen(control + i / 8 * 8) {
             control[i] = 255
             *Ptr<int>(block + 32) = *Ptr<int>(block + 32) + 1
         } else {

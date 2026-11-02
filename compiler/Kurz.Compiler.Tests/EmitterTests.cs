@@ -243,6 +243,51 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_walk_of_a_map_reads_the_control_bytes_of_a_group_as_one_word()
+    {
+        // hashbrown's `RawIterRange`: the loop over a map, in `kz.main`, and the walk of its text, in the text helper, load a group's
+        // word, mark the slots with an entry, whose bytes have the high bit clear, and take the marks lowest first by counting trailing
+        // zeros, with no load of a single control byte
+        var program = Compile("mut m = Map<int, int>()\nm[1] = 2\nfor k, v in m {\n    print(k + v)\n}\nprint(m)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        foreach (var name in new[] { "define internal void @kz.main(", "define internal %kz.str @\"text." })
+        {
+            var start = program.Ir.IndexOf(name, StringComparison.Ordinal);
+            Assert.True(start >= 0, $"no {name} in the IR");
+            var body = program.Ir[start..program.Ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+            Assert.Matches(@"= xor i64 %[^,]+, -1[,\r\n]", body); // the slots with an entry, the high bit of each byte turned around
+            Assert.Contains(", -9187201950435737472", body, StringComparison.Ordinal); // the high bit of each byte
+            Assert.Contains("call i64 @llvm.cttz.i64(", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("load i8, ptr", body, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Remove_finds_the_slot_of_its_key_again_only_in_a_block_it_copied()
+    {
+        // hashbrown's `remove_entry` finds the key's slot once: the helper of `Remove` looks the key up a second time only on the branch
+        // where the block it found the slot in was shared and was copied (M3), so that the slot of the copy is taken
+        var program = Compile("mut m = Map<long, long>()\nm[1] = 2\nprint(m.Remove(1) ?? 0)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        var lines = program.Ir.Split('\n').Select(l => l.TrimEnd('\r')).ToArray(); // the IR ends its lines in CR LF on Windows
+        var first = Array.FindIndex(lines, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains("@\"remove.", StringComparison.Ordinal));
+        Assert.True(first >= 0, "no remove helper in the IR");
+        var body = lines[first..Array.IndexOf(lines, "}", first)];
+        var finds = Enumerable.Range(0, body.Length).Where(i => body[i].Contains("call ptr @\"find.", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, finds.Count); // the lookup, and the lookup in the copy
+        var label = body.Take(finds[1]).Last(l => l.EndsWith(':') && !l.StartsWith(' '));
+        Assert.StartsWith("in.copy.", label, StringComparison.Ordinal);
+
+        // the branch into the second lookup is taken where the block the map holds after `OwnBlock` is not the block the slot was
+        // found in, and the slot found is taken where it is
+        var branch = Assert.Single(body, l => l.TrimStart().StartsWith("br i1 ", StringComparison.Ordinal) && l.Contains("label %in.copy.", StringComparison.Ordinal));
+        Assert.Matches(@"label %take\.\d+, label %in\.copy\.", branch);
+        var condition = branch.TrimStart()["br i1 ".Length..].Split(',')[0];
+        var test = Assert.Single(body, l => l.TrimStart().StartsWith(condition + " = ", StringComparison.Ordinal));
+        Assert.Matches(@"= icmp eq ptr %[^,\s]+, %[^,\s]+", test);
+    }
+
+    [Fact]
     public void The_push_of_a_list_widens_its_count_without_a_sign()
     {
         // std's ListPush reads the count as a `uint`, so that the item's offset is no sign extension and a loop of `Add`s reads the count
