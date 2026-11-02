@@ -2881,6 +2881,13 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(node + "data P(int X)\nclass Holder(mut Node? Head)\n\nh = Holder(null)\nmut p = P(0)\nif h.Head != null {\n    p.X = 1\n    print(h.Head.V)\n}\nprint(p)"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(node + "class Holder(mut Node? Head, mut List<int> Xs)\n\nh = Holder(null, [1])\nif h.Head != null {\n    h.Xs[0] = 2\n    print(h.Head.V)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(node + "class Holder(mut Node? Head, mut Map<int, int> M)\n\nh = Holder(null, Map<int, int>())\nif h.Head != null {\n    h.M[0] = 2\n    print(h.Head.V)\n}"));
+        // but a write into a list or a map that a variable holds, itself or through `data` fields, ends nothing: it runs no code of the
+        // program, and the count it lets go of, an instance's among them, frees nothing a path of strong references holds (the owner,
+        // 2026-11-02, #156)
+        Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut xs = [1]\nif h.Head != null {\n    xs[0] = 2\n    print(h.Head.V)\n}\nprint(xs)");
+        Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut m = Map<int, int>()\nif h.Head != null {\n    m[0] = 2\n    print(h.Head.V)\n}\nprint(m)");
+        Clean(node + "data P(List<int> Xs)\nclass Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut p = P([1])\nif h.Head != null {\n    p.Xs[0] = 2\n    print(h.Head.V)\n}\nprint(p)");
+        Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nn = Node(6, null)\nmut ns = [Node(5, null)]\nif h.Head != null {\n    ns[0] = n\n    print(h.Head.V)\n}\nprint(ns.Count)");
         // and the assignment of a field without `mut`, which is refused, narrows nothing, by the field's name or through the instance
         // *(assumed)*
         Assert.Equal([(ErrorIds.AssignImmutable, 5), (ErrorIds.NullableUnchecked, 6)], Errors(node + "class Holder(Node? Head)\n\nh = Holder(null)\nh.Head = Node(1, null)\nprint(h.Head.V)"));
