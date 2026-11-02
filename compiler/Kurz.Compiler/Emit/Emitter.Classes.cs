@@ -166,11 +166,6 @@ public sealed partial class Emitter
     /// </summary>
     private string ReleaseInstance(ClassSymbol symbol) => Helper($"release.class.{symbol.Name}", "void", ["ptr"], () =>
     {
-        if (released.Count == 0)
-        {
-            module.Global("@\"kz.releasing\" = internal thread_local global i1 false");
-        }
-
         var list = $"@\"pending.class.{symbol.Name}\"";
         module.Global($"{list} = internal thread_local global ptr null");
         released.Add((DropInstance(symbol), list));
@@ -230,6 +225,8 @@ public sealed partial class Emitter
     /// </summary>
     private void EmitDrain()
     {
+        // declared here, once: the first class's release builds the releases of its fields' classes before it is in `released`
+        module.Global("@\"kz.releasing\" = internal thread_local global i1 false");
         fn = new IrFunction("internal void @\"kz.drain\"()");
         (regions, scopes) = ([], []);
         var progress = fn.Alloca("i1", "progress");
