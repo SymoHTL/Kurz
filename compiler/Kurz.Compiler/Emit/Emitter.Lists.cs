@@ -753,9 +753,12 @@ public sealed partial class Emitter
     /// <c>collection</c> after the list's own, each held once more by the list, as C#'s <c>List.AddRange</c> appends them. The argument is
     /// read first and held with a count of its own while the list grows, then the list the variable holds as the argument left it, as
     /// <c>Add</c> reads its item first (M4): so <c>xs.AddRange(xs)</c>, which the checker lets through as it lets <c>Add</c>'s receiver
-    /// stand in its argument (M7), finds the block shared, copies it (M3) and appends the items of the block as it was. Room for all the
-    /// items is made at once, as Rust's <c>Vec::extend_from_slice</c> reserves it (<c>ListReserve</c>), and a block the system refuses
-    /// raises <c>allocation-failed</c> (M9).
+    /// stand in its argument (M7), appends the items the block held before the call: from the front of the block, grown, where only the
+    /// list and the argument hold it, as Rust's <c>Vec::extend_from_within</c> copies them, else from the block as it was, beside its
+    /// copy (M3) (<see cref="AddRoomBody"/>). Room for all the items is made at once, as Rust's <c>Vec::extend_from_slice</c> reserves
+    /// it: in line where the block has the room and no other value holds it (<c>ListHasRoomFor</c>), else by a helper the optimiser
+    /// keeps out of line, as <c>Add</c> makes room (<see cref="AddBody"/>); the items are copied once (<see cref="SmallCopy"/>), and a
+    /// block the system refuses raises <c>allocation-failed</c> (M9).
     /// </summary>
     private string? EmitListAddRange(CallExpression c)
     {
@@ -765,7 +768,7 @@ public sealed partial class Emitter
         string other = null!;
         InRegion(() => other = Owned(argument));
         var place = CollectionPlace(member.Target);
-        var add = Helper($"addrange.{Lower.Mangle(list)}", "void", ["ptr", "ptr"], () =>
+        var add = Helper($"addrange.{Lower.Mangle(list)}", "ptr", ["ptr", "ptr"], () =>
         {
             var size = ItemSize(list.Element);
             var count = ListCount("%a1");
@@ -773,33 +776,94 @@ public sealed partial class Emitter
             var none = fn.Label("none");
             fn.CondBranch(fn.Value($"icmp sgt i32 {count}, 0"), some, none);
             fn.Block(none);
-            fn.Return(null);
+            fn.Return("ptr %a1");
             fn.Block(some);
             var more = fn.Value($"sext i32 {count} to i64");
-            var block = fn.Value("load ptr, ptr %a0");
-            var shared = fn.Value($"call i1 {StdFunction("ListShared")}(ptr {block})");
-            var asked = fn.Alloca("i64", "asked");
-            var room = fn.Value($"call ptr {StdFunction("ListReserve")}(ptr {block}, i64 {more}, i64 {size}, ptr {asked})");
-            Refused(fn.Value($"icmp eq ptr {room}, null"), asked);
+            var source = fn.Alloca("ptr", "source");
+            fn.Emit($"store ptr %a1, ptr {source}");
+            var append = fn.Label("append");
+            var reserve = fn.Label("reserve");
+            fn.CondBranch(fn.Value($"call i1 {StdFunction("ListHasRoomFor")}(ptr {fn.Value("load ptr, ptr %a0")}, i64 {more})"), append, reserve); // room in a block no other value holds
+            fn.Block(reserve);
+            var grow = Helper($"addroom.{Lower.Mangle(list)}", "ptr", ["ptr", "i64", "ptr"], () => AddRoomBody(list.Element), "noinline", "cold");
+            fn.Emit($"store ptr {fn.Value($"call ptr {grow}(ptr %a0, i64 {more}, ptr %a1)")}, ptr {source}");
+            fn.Branch(append);
+            fn.Block(append);
+            var room = fn.Value("load ptr, ptr %a0");
+            var from = fn.Value($"load ptr, ptr {source}");
             if (Counted(list.Element))
             {
-                var copied = fn.Label("copied");
-                var held = fn.Label("held");
-                fn.CondBranch(shared, copied, held);
-                fn.Block(copied);
-                EachItem(room, list.Element, item => Retain(item, list.Element)); // the copy holds the items' blocks too
-                fn.Branch(held);
-                fn.Block(held);
-                EachItem("%a1", list.Element, item => Retain(item, list.Element)); // and the list holds the added ones
+                EachItem(from, list.Element, item => Retain(item, list.Element)); // the list holds the added items
             }
 
-            fn.Emit($"store ptr {room}, ptr %a0");
-            fn.Emit($"call void {StdFunction("ListAppend")}(ptr {room}, ptr {fn.Value($"call ptr {StdFunction("ListItems")}(ptr %a1)")}, i64 {more}, i64 {size})");
-            fn.Return(null);
+            var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {from})");
+            var bytes = fn.Value($"mul i64 {more}, {size}");
+            var small = fn.Label("small");
+            var large = fn.Label("large");
+            var done = fn.Label("appended");
+            fn.CondBranch(fn.Value($"icmp ule i64 {bytes}, {SmallCopy}"), small, large);
+            fn.Block(small);
+            module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+            var end = fn.Value($"getelementptr i8, ptr {fn.Value($"call ptr {StdFunction("ListItems")}(ptr {room})")}, i64 {fn.Value($"mul i64 {fn.Value($"sext i32 {ListCount(room)} to i64")}, {size}")}");
+            fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {end}, ptr {items}, i64 {bytes}, i1 false)"); // one copy, as Rust's `copy_nonoverlapping`
+            fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {room}, i64 {more})");
+            fn.Branch(done);
+            fn.Block(large);
+            fn.Emit($"call void {StdFunction("ListAppend")}(ptr {room}, ptr {items}, i64 {more}, i64 {size})");
+            fn.Branch(done);
+            fn.Block(done);
+            fn.Return($"ptr {from}");
         });
-        fn.Emit($"call void {add}(ptr {place}, ptr {other})");
-        Release(other, list);
+        Release(fn.Value($"call ptr {add}(ptr {place}, ptr {other})"), list); // the argument, or the block it shares with the list (AddRoomBody)
         return null;
+    }
+
+    /// <summary>
+    /// The most bytes an <c>AddRange</c> copies with the C library's <c>memcpy</c>, as Rust's <c>extend_from_slice</c> copies them;
+    /// more are copied by the library's <c>ListAppend</c>, whose loop the optimiser widens. glibc's <c>memcpy</c> turns to
+    /// <c>rep movsb</c> from 2112 bytes on a processor with fast short <c>rep movsb</c>, which measured slower than that loop for
+    /// appends of 3072 and 4000 bytes to a list that kept its room, 5.49 against 4.83 ms and 5.87 against 5.03 (#157).
+    /// </summary>
+    private const int SmallCopy = 2048;
+
+    /// <summary>
+    /// The helper that makes room for <c>%a1</c> items more in the list at the place in <c>%a0</c>, for an <c>AddRange</c> of the list
+    /// <c>%a2</c> whose block has not the room or is held by other values, and gives the block whose items it appends. Where
+    /// <c>%a2</c> is the list's own block and no value but the list and the argument holds it, <c>xs.AddRange(xs)</c>, that block grows
+    /// and its front is appended, as Rust's <c>Vec::extend_from_within</c> reserves and copies from the vector itself
+    /// (<c>ListReserveWithin</c>), and the argument's hold moves to the grown block, which the caller lets go of. Else the block is
+    /// <c>ListReserve</c>'s copy (M3), whose items' own blocks it counts, or a larger block, and the items are the argument's. A block
+    /// the system refuses ends the program with <c>allocation-failed</c>.
+    /// </summary>
+    private void AddRoomBody(KurzType element)
+    {
+        var block = fn.Value("load ptr, ptr %a0");
+        var asked = fn.Alloca("i64", "asked");
+        var within = fn.Label("within");
+        var apart = fn.Label("apart");
+        fn.CondBranch(fn.Value($"call i1 {StdFunction("ListWithin")}(ptr {block}, ptr %a2)"), within, apart);
+        fn.Block(within);
+        var grown = fn.Value($"call ptr {StdFunction("ListReserveWithin")}(ptr {block}, i64 %a1, i64 {ItemSize(element)}, ptr {asked})");
+        Refused(fn.Value($"icmp eq ptr {grown}, null"), asked);
+        fn.Emit($"store ptr {grown}, ptr %a0");
+        fn.Return($"ptr {grown}");
+        fn.Block(apart);
+        var shared = fn.Value($"call i1 {StdFunction("ListShared")}(ptr {block})");
+        var room = fn.Value($"call ptr {StdFunction("ListReserve")}(ptr {block}, i64 %a1, i64 {ItemSize(element)}, ptr {asked})");
+        Refused(fn.Value($"icmp eq ptr {room}, null"), asked);
+        if (Counted(element))
+        {
+            var copied = fn.Label("copied");
+            var held = fn.Label("held");
+            fn.CondBranch(shared, copied, held);
+            fn.Block(copied);
+            EachItem(room, element, item => Retain(item, element)); // the copy holds the items' blocks too
+            fn.Branch(held);
+            fn.Block(held);
+        }
+
+        fn.Emit($"store ptr {room}, ptr %a0");
+        fn.Return("ptr %a2");
     }
 
     /// <summary>
